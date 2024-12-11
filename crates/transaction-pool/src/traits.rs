@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
-    Transaction as _,
+    Transaction as _, Typed2718,
 };
 use alloy_eips::{
     eip2718::Encodable2718,
@@ -1267,7 +1267,8 @@ impl PoolTransaction for EthPooledTransaction {
         tx: RecoveredTx<Self::Consensus>,
     ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
         let (tx, signer) = tx.to_components();
-        let pooled = PooledTransactionsElement::try_from_broadcast(tx)
+        let pooled = tx
+            .try_into_pooled()
             .map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)?;
         Ok(RecoveredTx::from_signed_transaction(pooled, signer))
     }
@@ -1367,7 +1368,7 @@ impl PoolTransaction for EthPooledTransaction {
 
     /// Returns the transaction type
     fn tx_type(&self) -> u8 {
-        self.transaction.tx_type().into()
+        self.transaction.ty()
     }
 
     /// Returns the length of the rlp encoded object
@@ -1443,7 +1444,7 @@ impl TryFrom<RecoveredTx> for EthPooledTransaction {
 
     fn try_from(tx: RecoveredTx) -> Result<Self, Self::Error> {
         // ensure we can handle the transaction type and its format
-        match tx.tx_type() as u8 {
+        match tx.ty() {
             0..=EIP1559_TX_TYPE_ID | EIP7702_TX_TYPE_ID => {
                 // supported
             }

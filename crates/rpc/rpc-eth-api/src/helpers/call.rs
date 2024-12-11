@@ -20,9 +20,7 @@ use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_node_api::BlockBody;
 use reth_primitives_traits::SignedTransaction;
-use reth_provider::{
-    BlockIdReader, BlockReader, ChainSpecProvider, HeaderProvider, ProviderHeader,
-};
+use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider, ProviderHeader};
 use reth_revm::{
     database::StateProviderDatabase,
     db::CacheDB,
@@ -50,7 +48,7 @@ pub type SimulatedBlocksResult<N, E> = Result<Vec<SimulatedBlock<RpcBlock<N>>>, 
 
 /// Execution related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
-pub trait EthCall: EstimateCall + Call + LoadPendingBlock {
+pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthApiTypes {
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].
     fn estimate_gas_at(
         &self,
@@ -70,15 +68,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock {
         &self,
         payload: SimulatePayload,
         block: Option<BlockId>,
-    ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send
-    where
-        Self: LoadBlock<
-                Provider: BlockReader<
-                    Header = alloy_consensus::Header,
-                    Transaction = reth_primitives::TransactionSigned,
-                >,
-            > + FullEthApiTypes,
-    {
+    ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
                 return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into())
@@ -171,9 +161,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock {
                         block_env.gas_limit.to(),
                         cfg.chain_id,
                         &mut db,
+                        this.tx_resp_builder(),
                     )?;
 
                     let mut calls = calls.into_iter().peekable();
+                    let mut senders = Vec::with_capacity(transactions.len());
                     let mut results = Vec::with_capacity(calls.len());
 
                     while let Some(tx) = calls.next() {
@@ -197,18 +189,27 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock {
                             db.commit(res.state);
                         }
 
-                        results.push((env.tx.caller, res.result));
+                        senders.push(env.tx.caller);
+                        results.push(res.result);
                     }
 
+                    let (block, _) = this.assemble_block_and_receipts(
+                        &block_env,
+                        parent_hash,
+                        // state root calculation is skipped for performance reasons
+                        B256::ZERO,
+                        transactions,
+                        results.clone(),
+                    );
+
                     let block: SimulatedBlock<RpcBlock<Self::NetworkTypes>> =
-                        simulate::build_block(
+                        simulate::build_simulated_block(
+                            senders,
                             results,
-                            transactions,
-                            &block_env,
-                            parent_hash,
                             total_difficulty,
                             return_full_transactions,
                             this.tx_resp_builder(),
+                            block,
                         )?;
 
                     parent_hash = block.inner.header.hash;
@@ -245,10 +246,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock {
         bundle: Bundle,
         state_context: Option<StateContext>,
         mut state_override: Option<StateOverride>,
-    ) -> impl Future<Output = Result<Vec<EthCallResponse>, Self::Error>> + Send
-    where
-        Self: LoadBlock,
-    {
+    ) -> impl Future<Output = Result<Vec<EthCallResponse>, Self::Error>> + Send {
         async move {
             let Bundle { transactions, block_override } = bundle;
             if transactions.is_empty() {
@@ -608,7 +606,7 @@ pub trait Call:
         f: F,
     ) -> impl Future<Output = Result<Option<R>, Self::Error>> + Send
     where
-        Self: LoadBlock + LoadPendingBlock + LoadTransaction,
+        Self: LoadBlock + LoadTransaction,
         F: FnOnce(TransactionInfo, ResultAndState, StateCacheDb<'_>) -> Result<R, Self::Error>
             + Send
             + 'static,

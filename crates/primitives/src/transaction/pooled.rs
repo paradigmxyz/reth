@@ -2,15 +2,14 @@
 //! response to `GetPooledTransactions`.
 
 use super::{
-    error::TransactionConversionError, recover_signer_unchecked, signature::recover_signer,
-    TxEip7702,
+    recover_signer_unchecked, signature::recover_signer, TransactionConversionError, TxEip7702,
 };
-use crate::{BlobTransaction, RecoveredTx, Transaction, TransactionSigned, TxType};
+use crate::{BlobTransaction, RecoveredTx, Transaction, TransactionSigned};
 use alloc::vec::Vec;
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
-    SignableTransaction, Signed, TxEip4844WithSidecar,
+    SignableTransaction, Signed, TxEip4844WithSidecar, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Result, Encodable2718},
@@ -46,34 +45,6 @@ pub enum PooledTransactionsElement {
 }
 
 impl PooledTransactionsElement {
-    /// Tries to convert a [`TransactionSigned`] into a [`PooledTransactionsElement`].
-    ///
-    /// This function used as a helper to convert from a decoded p2p broadcast message to
-    /// [`PooledTransactionsElement`]. Since [`BlobTransaction`] is disallowed to be broadcasted on
-    /// p2p, return an err if `tx` is [`Transaction::Eip4844`].
-    pub fn try_from_broadcast(tx: TransactionSigned) -> Result<Self, TransactionSigned> {
-        let hash = tx.hash();
-        match tx {
-            TransactionSigned { transaction: Transaction::Legacy(tx), signature, .. } => {
-                Ok(Self::Legacy(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip2930(tx), signature, .. } => {
-                Ok(Self::Eip2930(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip1559(tx), signature, .. } => {
-                Ok(Self::Eip1559(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip7702(tx), signature, .. } => {
-                Ok(Self::Eip7702(Signed::new_unchecked(tx, signature, hash)))
-            }
-            // Not supported because missing blob sidecar
-            tx @ TransactionSigned { transaction: Transaction::Eip4844(_), .. } => Err(tx),
-            #[cfg(feature = "optimism")]
-            // Not supported because deposit transactions are never pooled
-            tx @ TransactionSigned { transaction: Transaction::Deposit(_), .. } => Err(tx),
-        }
-    }
-
     /// Converts from an EIP-4844 [`RecoveredTx`] to a
     /// [`PooledTransactionsElementEcRecovered`] with the given sidecar.
     ///
@@ -258,7 +229,7 @@ impl Encodable for PooledTransactionsElement {
 
     fn length(&self) -> usize {
         let mut payload_length = self.encode_2718_len();
-        if !self.is_legacy() {
+        if !Encodable2718::is_legacy(self) {
             payload_length += Header { list: false, payload_length }.length();
         }
 
@@ -411,6 +382,18 @@ impl Decodable2718 for PooledTransactionsElement {
     }
 }
 
+impl Typed2718 for PooledTransactionsElement {
+    fn ty(&self) -> u8 {
+        match self {
+            Self::Legacy(tx) => tx.tx().ty(),
+            Self::Eip2930(tx) => tx.tx().ty(),
+            Self::Eip1559(tx) => tx.tx().ty(),
+            Self::BlobTransaction(tx) => tx.tx().ty(),
+            Self::Eip7702(tx) => tx.tx().ty(),
+        }
+    }
+}
+
 impl alloy_consensus::Transaction for PooledTransactionsElement {
     fn chain_id(&self) -> Option<ChainId> {
         match self {
@@ -552,16 +535,6 @@ impl alloy_consensus::Transaction for PooledTransactionsElement {
         }
     }
 
-    fn ty(&self) -> u8 {
-        match self {
-            Self::Legacy(tx) => tx.tx().ty(),
-            Self::Eip2930(tx) => tx.tx().ty(),
-            Self::Eip1559(tx) => tx.tx().ty(),
-            Self::Eip7702(tx) => tx.tx().ty(),
-            Self::BlobTransaction(tx) => tx.tx().ty(),
-        }
-    }
-
     fn access_list(&self) -> Option<&AccessList> {
         match self {
             Self::Legacy(tx) => tx.tx().access_list(),
@@ -594,8 +567,6 @@ impl alloy_consensus::Transaction for PooledTransactionsElement {
 }
 
 impl SignedTransaction for PooledTransactionsElement {
-    type Type = TxType;
-
     fn tx_hash(&self) -> &TxHash {
         match self {
             Self::Legacy(tx) => tx.hash(),
@@ -650,7 +621,7 @@ impl TryFrom<TransactionSigned> for PooledTransactionsElement {
     type Error = TransactionConversionError;
 
     fn try_from(tx: TransactionSigned) -> Result<Self, Self::Error> {
-        Self::try_from_broadcast(tx).map_err(|_| TransactionConversionError::UnsupportedForP2P)
+        tx.try_into_pooled().map_err(|_| TransactionConversionError::UnsupportedForP2P)
     }
 }
 
@@ -679,7 +650,7 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
         // Attempt to create a `TransactionSigned` with arbitrary data.
         let tx_signed = TransactionSigned::arbitrary(u)?;
         // Attempt to create a `PooledTransactionsElement` with arbitrary data, handling the Result.
-        match Self::try_from_broadcast(tx_signed) {
+        match tx_signed.try_into_pooled() {
             Ok(tx) => Ok(tx),
             Err(tx) => {
                 let (tx, sig, hash) = tx.into_parts();

@@ -13,7 +13,7 @@ use reth_node_api::{
         VersionSpecificValidationError,
     },
     validate_eip7742_fields_presence, validate_version_specific_fields, EngineTypes,
-    EngineValidator,
+    EngineValidator, PayloadValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
@@ -78,12 +78,22 @@ impl OpEngineValidator {
     }
 }
 
+impl PayloadValidator for OpEngineValidator {
+    type Block = Block;
+
+    fn ensure_well_formed_payload(
+        &self,
+        payload: ExecutionPayload,
+        sidecar: ExecutionPayloadSidecar,
+    ) -> Result<SealedBlockFor<Self::Block>, PayloadError> {
+        self.inner.ensure_well_formed_payload(payload, sidecar)
+    }
+}
+
 impl<Types> EngineValidator<Types> for OpEngineValidator
 where
     Types: EngineTypes<PayloadAttributes = OpPayloadAttributes>,
 {
-    type Block = Block;
-
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
@@ -141,14 +151,6 @@ where
         }
 
         Ok(())
-    }
-
-    fn ensure_well_formed_payload(
-        &self,
-        payload: ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
-    ) -> Result<SealedBlockFor<Self::Block>, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload, sidecar)
     }
 }
 

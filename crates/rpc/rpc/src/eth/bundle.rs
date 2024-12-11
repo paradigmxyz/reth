@@ -198,7 +198,7 @@ where
                     // Verify that the given blob data, commitments, and proofs are all valid for
                     // this transaction.
                     if let PooledTransactionsElement::BlobTransaction(ref tx) = tx {
-                        tx.validate(EnvKzgSettings::Default.get()).map_err(|e| {
+                        tx.tx().validate_blob(EnvKzgSettings::Default.get()).map_err(|e| {
                             Eth::Error::from_eth_err(EthApiError::InvalidParams(e.to_string()))
                         })?;
                     }
@@ -285,10 +285,14 @@ where
 #[async_trait::async_trait]
 impl<Eth> EthCallBundleApiServer for EthBundle<Eth>
 where
-    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
+    Eth: EthTransactions<
+            Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransactionsElement>>,
+        > + LoadPendingBlock
+        + Call
+        + 'static,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
-        Self::call_bundle(self, request).await.map_err(Into::into)
+        self.call_bundle(request).await.map_err(Into::into)
     }
 }
 

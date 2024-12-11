@@ -3,12 +3,10 @@ mod set;
 mod static_file;
 mod user;
 
-use crate::PrunerError;
+use crate::{PruneLimiter, PrunerError};
 use alloy_primitives::{BlockNumber, TxNumber};
 use reth_provider::{errors::provider::ProviderResult, BlockReader, PruneCheckpointWriter};
-use reth_prune_types::{
-    PruneCheckpoint, PruneLimiter, PruneMode, PrunePurpose, PruneSegment, SegmentOutput,
-};
+use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 pub use set::SegmentSet;
 pub use static_file::{
     Headers as StaticFileHeaders, Receipts as StaticFileReceipts,

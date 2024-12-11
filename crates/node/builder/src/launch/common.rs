@@ -10,9 +10,9 @@ use crate::{
 use alloy_primitives::{BlockNumber, B256};
 use eyre::{Context, OptionExt};
 use rayon::ThreadPoolBuilder;
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
+use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
@@ -29,6 +29,7 @@ use reth_node_core::{
     args::InvalidBlockHookType,
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
+    primitives::BlockHeader,
     version::{
         BUILD_PROFILE_NAME, CARGO_PKG_VERSION, VERGEN_BUILD_TIMESTAMP, VERGEN_CARGO_FEATURES,
         VERGEN_CARGO_TARGET_TRIPLE, VERGEN_GIT_SHA,
@@ -383,12 +384,7 @@ where
     pub async fn create_provider_factory<N>(&self) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        N::Primitives: FullNodePrimitives<
-            Block = reth_primitives::Block,
-            BlockBody = reth_primitives::BlockBody,
-            Receipt = reth_primitives::Receipt,
-            BlockHeader = reth_primitives::Header,
-        >,
+        N::Primitives: FullNodePrimitives<BlockHeader = reth_primitives::Header>,
     {
         let factory = ProviderFactory::new(
             self.right().clone(),
@@ -420,10 +416,10 @@ where
                 .add_stages(DefaultStages::new(
                     factory.clone(),
                     tip_rx,
-                    Arc::new(EthBeaconConsensus::new(self.chain_spec())),
+                    Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    NoopBlockExecutorProvider::default(),
+                    NoopBlockExecutorProvider::<N::Primitives>::default(),
                     self.toml_config().stages.clone(),
                     self.prune_modes(),
                 ))
@@ -455,12 +451,7 @@ where
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        N::Primitives: FullNodePrimitives<
-            Block = reth_primitives::Block,
-            BlockBody = reth_primitives::BlockBody,
-            Receipt = reth_primitives::Receipt,
-            BlockHeader = reth_primitives::Header,
-        >,
+        N::Primitives: FullNodePrimitives<BlockHeader = reth_primitives::Header>,
     {
         let factory = self.create_provider_factory().await?;
         let ctx = LaunchContextWith {
@@ -729,7 +720,7 @@ where
     /// necessary
     pub async fn max_block<C>(&self, client: C) -> eyre::Result<Option<BlockNumber>>
     where
-        C: HeadersClient<Header = alloy_consensus::Header>,
+        C: HeadersClient<Header: BlockHeader>,
     {
         self.node_config().max_block(client, self.provider_factory().clone()).await
     }

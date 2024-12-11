@@ -23,8 +23,8 @@ alloy-consensus.workspace = true
 alloy-eips.workspace = true
 
 [dev-dependencies]
+alloy-consensus.workspace = true
 reth-storage-api.workspace = true
 rand.workspace = true
 mockall = "0.13"
 
-alloy-consensus.workspace = true

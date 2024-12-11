@@ -89,12 +89,8 @@ use reth_execution_types::ChangedAccount;
 
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use reth_primitives::RecoveredTx;
-use std::{
-    collections::{HashMap, HashSet},
-    fmt,
-    sync::Arc,
-    time::Instant,
-};
+use rustc_hash::FxHashMap;
+use std::{collections::HashSet, fmt, sync::Arc, time::Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, trace, warn};
 mod events;
@@ -216,7 +212,7 @@ where
     fn changed_senders(
         &self,
         accs: impl Iterator<Item = ChangedAccount>,
-    ) -> HashMap<SenderId, SenderInfo> {
+    ) -> FxHashMap<SenderId, SenderInfo> {
         let mut identifiers = self.identifiers.write();
         accs.into_iter()
             .map(|acc| {
@@ -295,7 +291,7 @@ where
 
     /// Returns _all_ transactions in the pool.
     pub fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).collect()
+        self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).cloned().collect()
     }
 
     /// Returns only the first `max` transactions in the pool.
@@ -303,7 +299,13 @@ where
         &self,
         max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).take(max).collect()
+        self.get_pool_data()
+            .all()
+            .transactions_iter()
+            .filter(|tx| tx.propagate)
+            .take(max)
+            .cloned()
+            .collect()
     }
 
     /// Converts the internally tracked transaction to the pooled format.
@@ -857,7 +859,12 @@ where
         &self,
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.get_pool_data().all().transactions_iter().filter(|tx| tx.origin == origin).collect()
+        self.get_pool_data()
+            .all()
+            .transactions_iter()
+            .filter(|tx| tx.origin == origin)
+            .cloned()
+            .collect()
     }
 
     /// Returns all pending transactions filted by [`TransactionOrigin`]

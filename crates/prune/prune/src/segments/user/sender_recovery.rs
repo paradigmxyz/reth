@@ -6,7 +6,7 @@ use crate::{
 use reth_db::{tables, transaction::DbTxMut};
 use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
 use reth_prune_types::{
-    PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
+    PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
 use tracing::{instrument, trace};
 
@@ -67,7 +67,7 @@ where
             // previous, so we could finish pruning its transaction senders on the next run.
             .checked_sub(if done { 0 } else { 1 });
 
-        let progress = PruneProgress::new(done, &limiter);
+        let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
             progress,
@@ -82,7 +82,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, Segment, SegmentOutput, SenderRecovery};
+    use crate::segments::{PruneInput, PruneLimiter, Segment, SegmentOutput, SenderRecovery};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -92,7 +92,7 @@ mod tests {
     use reth_db::tables;
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
-    use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneMode, PruneProgress, PruneSegment};
+    use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::ops::Sub;

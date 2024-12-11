@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction as _, TxEip1559, TxEip2930,
-    TxEip4844, TxEip4844Variant, TxEip7702, TxLegacy, TypedTransaction,
+    TxEip4844, TxEip4844Variant, TxEip7702, TxLegacy, Typed2718, TypedTransaction,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -32,12 +32,14 @@ use signature::decode_with_eip155_chain_id;
 use std::sync::{LazyLock, OnceLock};
 
 pub use compat::FillTxEnv;
-pub use error::{
-    InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
-};
 pub use meta::TransactionMeta;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
-pub use reth_primitives_traits::WithEncoded;
+pub use reth_primitives_traits::{
+    transaction::error::{
+        InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
+    },
+    WithEncoded,
+};
 pub use sidecar::BlobTransaction;
 pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
@@ -49,7 +51,6 @@ pub mod util;
 
 pub(crate) mod access_list;
 mod compat;
-mod error;
 mod meta;
 mod pooled;
 mod sidecar;
@@ -189,6 +190,20 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
         }
 
         Ok(tx)
+    }
+}
+
+impl Typed2718 for Transaction {
+    fn ty(&self) -> u8 {
+        match self {
+            Self::Legacy(tx) => tx.ty(),
+            Self::Eip2930(tx) => tx.ty(),
+            Self::Eip1559(tx) => tx.ty(),
+            Self::Eip4844(tx) => tx.ty(),
+            Self::Eip7702(tx) => tx.ty(),
+            #[cfg(feature = "optimism")]
+            Self::Deposit(tx) => tx.ty(),
+        }
     }
 }
 
@@ -710,18 +725,6 @@ impl alloy_consensus::Transaction for Transaction {
         }
     }
 
-    fn ty(&self) -> u8 {
-        match self {
-            Self::Legacy(tx) => tx.ty(),
-            Self::Eip2930(tx) => tx.ty(),
-            Self::Eip1559(tx) => tx.ty(),
-            Self::Eip4844(tx) => tx.ty(),
-            Self::Eip7702(tx) => tx.ty(),
-            #[cfg(feature = "optimism")]
-            Self::Deposit(tx) => tx.ty(),
-        }
-    }
-
     fn access_list(&self) -> Option<&AccessList> {
         match self {
             Self::Legacy(tx) => tx.access_list(),
@@ -826,6 +829,12 @@ impl PartialEq for TransactionSigned {
     }
 }
 
+impl Typed2718 for TransactionSigned {
+    fn ty(&self) -> u8 {
+        self.deref().ty()
+    }
+}
+
 // === impl TransactionSigned ===
 
 impl TransactionSigned {
@@ -844,6 +853,34 @@ impl TransactionSigned {
     /// Transaction
     pub const fn transaction(&self) -> &Transaction {
         &self.transaction
+    }
+
+    /// Tries to convert a [`TransactionSigned`] into a [`PooledTransactionsElement`].
+    ///
+    /// This function used as a helper to convert from a decoded p2p broadcast message to
+    /// [`PooledTransactionsElement`]. Since [`BlobTransaction`] is disallowed to be broadcasted on
+    /// p2p, return an err if `tx` is [`Transaction::Eip4844`].
+    pub fn try_into_pooled(self) -> Result<PooledTransactionsElement, Self> {
+        let hash = self.hash();
+        match self {
+            Self { transaction: Transaction::Legacy(tx), signature, .. } => {
+                Ok(PooledTransactionsElement::Legacy(Signed::new_unchecked(tx, signature, hash)))
+            }
+            Self { transaction: Transaction::Eip2930(tx), signature, .. } => {
+                Ok(PooledTransactionsElement::Eip2930(Signed::new_unchecked(tx, signature, hash)))
+            }
+            Self { transaction: Transaction::Eip1559(tx), signature, .. } => {
+                Ok(PooledTransactionsElement::Eip1559(Signed::new_unchecked(tx, signature, hash)))
+            }
+            Self { transaction: Transaction::Eip7702(tx), signature, .. } => {
+                Ok(PooledTransactionsElement::Eip7702(Signed::new_unchecked(tx, signature, hash)))
+            }
+            // Not supported because missing blob sidecar
+            tx @ Self { transaction: Transaction::Eip4844(_), .. } => Err(tx),
+            #[cfg(feature = "optimism")]
+            // Not supported because deposit transactions are never pooled
+            tx @ Self { transaction: Transaction::Deposit(_), .. } => Err(tx),
+        }
     }
 
     /// Transaction hash. Used to identify transaction.
@@ -994,8 +1031,6 @@ impl TransactionSigned {
 }
 
 impl SignedTransaction for TransactionSigned {
-    type Type = TxType;
-
     fn tx_hash(&self) -> &TxHash {
         self.hash.get_or_init(|| self.recalculate_hash())
     }
@@ -1174,10 +1209,6 @@ impl alloy_consensus::Transaction for TransactionSigned {
         self.deref().input()
     }
 
-    fn ty(&self) -> u8 {
-        self.deref().ty()
-    }
-
     fn access_list(&self) -> Option<&AccessList> {
         self.deref().access_list()
     }
@@ -1212,7 +1243,7 @@ impl Encodable for TransactionSigned {
 
     fn length(&self) -> usize {
         let mut payload_length = self.encode_2718_len();
-        if !self.is_legacy() {
+        if !Encodable2718::is_legacy(self) {
             payload_length += Header { list: false, payload_length }.length();
         }
 
@@ -1337,14 +1368,14 @@ impl reth_codecs::Compact for TransactionSigned {
         let tx_bits = if zstd_bit {
             let mut tmp = Vec::with_capacity(256);
             if cfg!(feature = "std") {
-                crate::compression::TRANSACTION_COMPRESSOR.with(|compressor| {
+                reth_zstd_compressors::TRANSACTION_COMPRESSOR.with(|compressor| {
                     let mut compressor = compressor.borrow_mut();
                     let tx_bits = self.transaction.to_compact(&mut tmp);
                     buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
                     tx_bits as u8
                 })
             } else {
-                let mut compressor = crate::compression::create_tx_compressor();
+                let mut compressor = reth_zstd_compressors::create_tx_compressor();
                 let tx_bits = self.transaction.to_compact(&mut tmp);
                 buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
                 tx_bits as u8
@@ -1371,7 +1402,7 @@ impl reth_codecs::Compact for TransactionSigned {
         let zstd_bit = bitflags >> 3;
         let (transaction, buf) = if zstd_bit != 0 {
             if cfg!(feature = "std") {
-                crate::compression::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                reth_zstd_compressors::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
                     let mut decompressor = decompressor.borrow_mut();
 
                     // TODO: enforce that zstd is only present at a "top" level type
@@ -1383,7 +1414,7 @@ impl reth_codecs::Compact for TransactionSigned {
                     (transaction, buf)
                 })
             } else {
-                let mut decompressor = crate::compression::create_tx_decompressor();
+                let mut decompressor = reth_zstd_compressors::create_tx_decompressor();
                 let transaction_type = (bitflags & 0b110) >> 1;
                 let (transaction, _) =
                     Transaction::from_compact(decompressor.decompress(buf), transaction_type);
@@ -1889,13 +1920,12 @@ mod tests {
     // Test vector from https://sepolia.etherscan.io/tx/0x9a22ccb0029bc8b0ddd073be1a1d923b7ae2b2ea52100bae0db4424f9107e9c0
     // Blobscan: https://sepolia.blobscan.com/tx/0x9a22ccb0029bc8b0ddd073be1a1d923b7ae2b2ea52100bae0db4424f9107e9c0
     fn test_decode_recover_sepolia_4844_tx() {
-        use crate::TxType;
         use alloy_primitives::{address, b256};
 
         // https://sepolia.etherscan.io/getRawTx?tx=0x9a22ccb0029bc8b0ddd073be1a1d923b7ae2b2ea52100bae0db4424f9107e9c0
         let raw_tx = alloy_primitives::hex::decode("0x03f9011d83aa36a7820fa28477359400852e90edd0008252089411e9ca82a3a762b4b5bd264d4173a242e7a770648080c08504a817c800f8a5a0012ec3d6f66766bedb002a190126b3549fce0047de0d4c25cffce0dc1c57921aa00152d8e24762ff22b1cfd9f8c0683786a7ca63ba49973818b3d1e9512cd2cec4a0013b98c6c83e066d5b14af2b85199e3d4fc7d1e778dd53130d180f5077e2d1c7a001148b495d6e859114e670ca54fb6e2657f0cbae5b08063605093a4b3dc9f8f1a0011ac212f13c5dff2b2c6b600a79635103d6f580a4221079951181b25c7e654901a0c8de4cced43169f9aa3d36506363b2d2c44f6c49fc1fd91ea114c86f3757077ea01e11fdd0d1934eda0492606ee0bb80a7bf8f35cc5f86ec60fe5031ba48bfd544").unwrap();
         let decoded = TransactionSigned::decode_2718(&mut raw_tx.as_slice()).unwrap();
-        assert_eq!(decoded.tx_type(), TxType::Eip4844);
+        assert!(decoded.is_eip4844());
 
         let from = decoded.recover_signer();
         assert_eq!(from, Some(address!("A83C816D4f9b2783761a22BA6FADB0eB0606D7B2")));

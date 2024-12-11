@@ -27,7 +27,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, HashMap, HashSet},
+    map::{hash_map, B256HashMap, HashMap, HashSet},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
@@ -296,7 +296,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         // Unwind storage hashes. Add changed account and storage keys to corresponding prefix
         // sets.
-        let mut storage_prefix_sets = HashMap::<B256, PrefixSet>::default();
+        let mut storage_prefix_sets = B256HashMap::<PrefixSet>::default();
         let storage_entries = self.unwind_storage_hashing(changed_storages.iter().copied())?;
         for (hashed_address, hashed_slots) in storage_entries {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
@@ -321,7 +321,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let (new_state_root, trie_updates) = StateRoot::from_tx(&self.tx)
             .with_prefix_sets(prefix_sets)
             .root_with_updates()
-            .map_err(Into::<reth_db::DatabaseError>::into)?;
+            .map_err(reth_db::DatabaseError::from)?;
 
         let parent_number = range.start().saturating_sub(1);
         let parent_state_root = self
@@ -1638,51 +1638,18 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Withdrawals
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> EvmEnvProvider<HeaderTy<N>>
     for DatabaseProvider<TX, N>
 {
-    fn fill_env_with_header<EvmConfig>(
+    fn env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
         header: &HeaderTy<N>,
         evm_config: EvmConfig,
-    ) -> ProviderResult<()>
+    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
     where
         EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
         let total_difficulty = self
             .header_td_by_number(header.number())?
             .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?;
-        evm_config.fill_cfg_and_block_env(cfg, block_env, header, total_difficulty);
-        Ok(())
-    }
-
-    fn fill_cfg_env_at<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        at: BlockHashOrNumber,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        let hash = self.convert_number(at)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        let header = self.header(&hash)?.ok_or(ProviderError::HeaderNotFound(at))?;
-        self.fill_cfg_env_with_header(cfg, &header, evm_config)
-    }
-
-    fn fill_cfg_env_with_header<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        header: &HeaderTy<N>,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        let total_difficulty = self
-            .header_td_by_number(header.number())?
-            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?;
-        evm_config.fill_cfg_env(cfg, header, total_difficulty);
-        Ok(())
+        Ok(evm_config.cfg_and_block_env(header, total_difficulty))
     }
 }
 
@@ -2343,7 +2310,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
     /// updates by the hashed address, writing in sorted order.
     fn write_storage_trie_updates(
         &self,
-        storage_tries: &HashMap<B256, StorageTrieUpdates>,
+        storage_tries: &B256HashMap<StorageTrieUpdates>,
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
         let mut storage_tries = Vec::from_iter(storage_tries);
@@ -2582,7 +2549,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
             let (state_root, trie_updates) = StateRoot::from_tx(&self.tx)
                 .with_prefix_sets(prefix_sets)
                 .root_with_updates()
-                .map_err(Into::<reth_db::DatabaseError>::into)?;
+                .map_err(reth_db::DatabaseError::from)?;
             if state_root != expected_state_root {
                 return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
                     root: GotExpected { got: state_root, expected: expected_state_root },
@@ -2893,12 +2860,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     fn append_block_bodies(
         &self,
         bodies: Vec<(BlockNumber, Option<BodyTy<N>>)>,
-        write_transactions_to: StorageLocation,
+        write_to: StorageLocation,
     ) -> ProviderResult<()> {
         let Some(from_block) = bodies.first().map(|(block, _)| *block) else { return Ok(()) };
 
         // Initialize writer if we will be writing transactions to staticfiles
-        let mut tx_static_writer = write_transactions_to
+        let mut tx_static_writer = write_to
             .static_files()
             .then(|| {
                 self.static_file_provider.get_writer(from_block, StaticFileSegment::Transactions)
@@ -2909,7 +2876,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         let mut tx_block_cursor = self.tx.cursor_write::<tables::TransactionBlocks>()?;
 
         // Initialize cursor if we will be writing transactions to database
-        let mut tx_cursor = write_transactions_to
+        let mut tx_cursor = write_to
             .database()
             .then(|| self.tx.cursor_write::<tables::Transactions<TxTy<N>>>())
             .transpose()?;
@@ -2962,7 +2929,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             );
         }
 
-        self.storage.writer().write_block_bodies(self, bodies)?;
+        self.storage.writer().write_block_bodies(self, bodies, write_to)?;
 
         Ok(())
     }
@@ -2970,7 +2937,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     fn remove_blocks_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()> {
         let mut canonical_headers_cursor = self.tx.cursor_write::<tables::CanonicalHeaders>()?;
         let mut rev_headers = canonical_headers_cursor.walk_back(None)?;
@@ -3010,7 +2977,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         self.remove::<tables::TransactionSenders>(unwind_tx_from..)?;
 
-        self.remove_bodies_above(block, remove_transactions_from)?;
+        self.remove_bodies_above(block, remove_from)?;
 
         Ok(())
     }
@@ -3018,9 +2985,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     fn remove_bodies_above(
         &self,
         block: BlockNumber,
-        remove_transactions_from: StorageLocation,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()> {
-        self.storage.writer().remove_block_bodies_above(self, block)?;
+        self.storage.writer().remove_block_bodies_above(self, block, remove_from)?;
 
         // First transaction to be removed
         let unwind_tx_from = self
@@ -3032,11 +2999,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         self.remove::<tables::BlockBodyIndices>(block + 1..)?;
         self.remove::<tables::TransactionBlocks>(unwind_tx_from..)?;
 
-        if remove_transactions_from.database() {
+        if remove_from.database() {
             self.remove::<tables::Transactions<TxTy<N>>>(unwind_tx_from..)?;
         }
 
-        if remove_transactions_from.static_files() {
+        if remove_from.static_files() {
             let static_file_tx_num = self
                 .static_file_provider
                 .get_highest_static_file_tx(StaticFileSegment::Transactions);

@@ -18,7 +18,7 @@ pub use alloy_rpc_types_engine::{
 };
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_chainspec::ChainSpec;
-use reth_engine_primitives::{EngineTypes, EngineValidator};
+use reth_engine_primitives::{EngineTypes, EngineValidator, PayloadValidator};
 use reth_payload_primitives::{
     validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
     PayloadOrAttributes, PayloadTypes,
@@ -82,12 +82,22 @@ impl EthereumEngineValidator {
     }
 }
 
+impl PayloadValidator for EthereumEngineValidator {
+    type Block = Block;
+
+    fn ensure_well_formed_payload(
+        &self,
+        payload: ExecutionPayload,
+        sidecar: ExecutionPayloadSidecar,
+    ) -> Result<SealedBlock, PayloadError> {
+        self.inner.ensure_well_formed_payload(payload, sidecar)
+    }
+}
+
 impl<Types> EngineValidator<Types> for EthereumEngineValidator
 where
     Types: EngineTypes<PayloadAttributes = EthPayloadAttributes>,
 {
-    type Block = Block;
-
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
@@ -102,13 +112,5 @@ where
         attributes: &EthPayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(self.chain_spec(), version, attributes.into())
-    }
-
-    fn ensure_well_formed_payload(
-        &self,
-        payload: ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
-    ) -> Result<SealedBlock, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload, sidecar)
     }
 }
