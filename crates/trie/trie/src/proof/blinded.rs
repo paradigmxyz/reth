@@ -29,6 +29,10 @@ impl<T, H> ProofBlindedProviderFactory<T, H> {
     ) -> Self {
         Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets }
     }
+
+    pub const fn boxed(self) -> BoxProofBlindedProviderFactory<T, H> {
+        BoxProofBlindedProviderFactory(self)
+    }
 }
 
 impl<T, H> BlindedProviderFactory for ProofBlindedProviderFactory<T, H>
@@ -54,6 +58,27 @@ where
             prefix_sets: self.prefix_sets.clone(),
             account,
         }
+    }
+}
+
+/// Boxed version of [`ProofBlindedProviderFactory`].
+#[derive(Debug)]
+pub struct BoxProofBlindedProviderFactory<T, H>(ProofBlindedProviderFactory<T, H>);
+
+impl<T, H> BlindedProviderFactory for BoxProofBlindedProviderFactory<T, H>
+where
+    T: TrieCursorFactory + Clone + Send + Sync,
+    H: HashedCursorFactory + Clone + Send + Sync,
+{
+    type AccountNodeProvider = Box<ProofBlindedAccountProvider<T, H>>;
+    type StorageNodeProvider = Box<ProofBlindedStorageProvider<T, H>>;
+
+    fn account_node_provider(&self) -> Self::AccountNodeProvider {
+        Box::new(self.0.account_node_provider())
+    }
+
+    fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider {
+        Box::new(self.0.storage_node_provider(account))
     }
 }
 
