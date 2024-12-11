@@ -46,12 +46,14 @@ use reth::{
     },
     tasks::TaskManager,
     transaction_pool::{PoolTransaction, TransactionPool},
+    version::default_extradata,
 };
 use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
     PayloadBuilder, PayloadConfig,
 };
 use reth_chainspec::{Chain, ChainSpec, ChainSpecProvider};
+use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
     validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
@@ -398,20 +400,21 @@ where
         args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         let BuildArguments { client, pool, cached_reads, config, cancel, best_payload } = args;
-        let PayloadConfig { parent_header, extra_data, attributes } = config;
+        let PayloadConfig { parent_header, attributes } = config;
 
         let chain_spec = client.chain_spec();
 
         // This reuses the default EthereumPayloadBuilder to build the payload
         // but any custom logic can be implemented here
-        reth_ethereum_payload_builder::EthereumPayloadBuilder::new(EthEvmConfig::new(
-            chain_spec.clone(),
-        ))
+        reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            EthEvmConfig::new(chain_spec.clone()),
+            EthereumBuilderConfig::new(default_extradata()),
+        )
         .try_build(BuildArguments {
             client,
             pool,
             cached_reads,
-            config: PayloadConfig { parent_header, extra_data, attributes: attributes.0 },
+            config: PayloadConfig { parent_header, attributes: attributes.0 },
             cancel,
             best_payload,
         })
