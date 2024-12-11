@@ -8,6 +8,7 @@ use reth_chainspec::ChainSpec;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
+use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
@@ -23,6 +24,7 @@ use reth_node_builder::{
     rpc::{EngineValidatorBuilder, RpcAddOns},
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
 };
+use reth_node_core::version::default_extradata;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{EthPrimitives, PooledTransactionsElement};
 use reth_provider::{CanonStateSubscriptions, EthStorage};
@@ -228,9 +230,29 @@ where
 }
 
 /// A basic ethereum payload service.
-#[derive(Debug, Default, Clone)]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
-pub struct EthereumPayloadBuilder;
+pub struct EthereumPayloadBuilder {
+    /// Payload builder configuration.
+    builder_config: EthereumBuilderConfig,
+}
+
+impl Default for EthereumPayloadBuilder {
+    fn default() -> Self {
+        Self {
+            builder_config: EthereumBuilderConfig::new(
+                default_extradata().as_bytes().to_vec().into(),
+            ),
+        }
+    }
+}
+
+impl EthereumPayloadBuilder {
+    /// Create new ethereum payload builder.
+    pub fn new(builder_config: EthereumBuilderConfig) -> Self {
+        Self { builder_config }
+    }
+}
 
 impl EthereumPayloadBuilder {
     /// A helper method initializing [`PayloadBuilderService`] with the given EVM config.
@@ -253,8 +275,10 @@ impl EthereumPayloadBuilder {
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
         >,
     {
-        let payload_builder =
-            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(evm_config);
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            evm_config,
+            self.builder_config,
+        );
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
