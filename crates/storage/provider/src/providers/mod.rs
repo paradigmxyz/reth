@@ -1,3 +1,5 @@
+use core::fmt;
+
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, BlockchainTreePendingStateProvider, CanonStateNotifications,
@@ -124,7 +126,6 @@ impl<T> TreeNodeTypes for T where T: ProviderNodeTypes + NodeTypesForTree {}
 /// This type serves as the main entry point for interacting with the blockchain and provides data
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
-#[allow(missing_debug_implementations)]
 pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// Provider type used to access the database.
     database: ProviderFactory<N>,
@@ -962,5 +963,11 @@ impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider<N> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         self.database.provider()?.basic_account(address)
+    }
+}
+
+impl<N: NodeTypesWithDB> fmt::Debug for BlockchainProvider<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BlockchainProvider").finish_non_exhaustive()
     }
 }
