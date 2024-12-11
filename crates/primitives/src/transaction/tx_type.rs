@@ -97,8 +97,6 @@ impl Typed2718 for TxType {
     }
 }
 
-impl reth_primitives_traits::TxType for TxType {}
-
 impl InMemorySize for TxType {
     /// Calculates a heuristic for the in-memory size of the [`TxType`].
     #[inline]
@@ -259,15 +257,7 @@ mod tests {
     use super::*;
     use alloy_primitives::hex;
     use reth_codecs::Compact;
-    use reth_primitives_traits::TxType as _;
     use rstest::rstest;
-
-    #[test]
-    fn is_broadcastable() {
-        assert!(TxType::Legacy.is_broadcastable_in_full());
-        assert!(TxType::Eip1559.is_broadcastable_in_full());
-        assert!(!TxType::Eip4844.is_broadcastable_in_full());
-    }
 
     #[rstest]
     #[case(U64::from(LEGACY_TX_TYPE_ID), Ok(TxType::Legacy))]

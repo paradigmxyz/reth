@@ -32,12 +32,14 @@ use signature::decode_with_eip155_chain_id;
 use std::sync::{LazyLock, OnceLock};
 
 pub use compat::FillTxEnv;
-pub use error::{
-    InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
-};
 pub use meta::TransactionMeta;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
-pub use reth_primitives_traits::WithEncoded;
+pub use reth_primitives_traits::{
+    transaction::error::{
+        InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
+    },
+    WithEncoded,
+};
 pub use sidecar::BlobTransaction;
 pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
@@ -49,7 +51,6 @@ pub mod util;
 
 pub(crate) mod access_list;
 mod compat;
-mod error;
 mod meta;
 mod pooled;
 mod sidecar;
@@ -1030,8 +1031,6 @@ impl TransactionSigned {
 }
 
 impl SignedTransaction for TransactionSigned {
-    type Type = TxType;
-
     fn tx_hash(&self) -> &TxHash {
         self.hash.get_or_init(|| self.recalculate_hash())
     }

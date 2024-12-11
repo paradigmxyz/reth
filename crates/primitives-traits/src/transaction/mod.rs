@@ -2,9 +2,10 @@
 
 pub mod execute;
 pub mod signed;
-pub mod tx_type;
 
-use crate::{InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
+pub mod error;
+
+use crate::{InMemorySize, MaybeCompact, MaybeSerde};
 use core::{fmt, hash::Hash};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
@@ -25,7 +26,6 @@ pub trait Transaction:
     + alloy_consensus::Transaction
     + InMemorySize
     + MaybeSerde
-    + MaybeArbitrary
 {
 }
 
@@ -41,6 +41,5 @@ impl<T> Transaction for T where
         + alloy_consensus::Transaction
         + InMemorySize
         + MaybeSerde
-        + MaybeArbitrary
 {
 }

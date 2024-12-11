@@ -249,7 +249,7 @@ where
 {
     type Error = P::Error;
 
-    fn blinded_node(&mut self, path: Nibbles) -> Result<Option<Bytes>, Self::Error> {
+    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<Bytes>, Self::Error> {
         let maybe_node = self.provider.blinded_node(path)?;
         if let Some(node) = &maybe_node {
             self.tx

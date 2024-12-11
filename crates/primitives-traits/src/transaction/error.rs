@@ -1,8 +1,9 @@
+//! Various error variants that can happen when working with transactions.
+
 use crate::GotExpectedBoxed;
 use alloy_primitives::U256;
 
-/// Represents error variants that can happen when trying to validate a
-/// [Transaction](crate::Transaction)
+/// Represents error variants that can happen when trying to validate a transaction.
 #[derive(Debug, Clone, Eq, PartialEq, derive_more::Display)]
 pub enum InvalidTransactionError {
     /// The sender does not have enough funds to cover the transaction fees
@@ -64,19 +65,17 @@ pub enum InvalidTransactionError {
 
 impl core::error::Error for InvalidTransactionError {}
 
-/// Represents error variants that can happen when trying to convert a transaction to
-/// [`PooledTransactionsElement`](crate::PooledTransactionsElement)
+/// Represents error variants that can happen when trying to convert a transaction to pooled
+/// transaction.
 #[derive(Debug, Clone, Eq, PartialEq, derive_more::Display, derive_more::Error)]
 pub enum TransactionConversionError {
-    /// This error variant is used when a transaction cannot be converted into a
-    /// [`PooledTransactionsElement`](crate::PooledTransactionsElement) because it is not supported
-    /// for P2P network.
+    /// This error variant is used when a transaction cannot be converted into a pooled transaction
+    /// because it is not supported for P2P network.
     #[display("Transaction is not supported for p2p")]
     UnsupportedForP2P,
 }
 
-/// Represents error variants than can happen when trying to convert a
-/// [`RecoveredTx`](crate::RecoveredTx) transaction.
+/// Represents error variants than can happen when trying to convert a recovered transaction.
 #[derive(Debug, Clone, Eq, PartialEq, derive_more::Display)]
 pub enum TryFromRecoveredTransactionError {
     /// Thrown if the transaction type is unsupported.
