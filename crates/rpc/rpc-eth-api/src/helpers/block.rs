@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::Sealable;
 use alloy_rlp::Encodable;
@@ -11,7 +10,7 @@ use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives::{SealedBlockFor, SealedBlockWithSenders};
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider, ProviderHeader, ProviderReceipt,
+    BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt,
 };
 use reth_rpc_types_compat::block::from_block;
 use revm_primitives::U256;
