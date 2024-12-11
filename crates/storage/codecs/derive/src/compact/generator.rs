@@ -55,20 +55,25 @@ pub fn generate_from_to(
     } else {
         quote! {
             #[cfg(test)]
-            #[allow(dead_code)]
-            #[test_fuzz::test_fuzz]
-            fn #fuzz(obj: #ident)  {
-                use #reth_codecs::Compact;
-                let mut buf = vec![];
-                let len = obj.clone().to_compact(&mut buf);
-                let (same_obj, buf) = #ident::from_compact(buf.as_ref(), len);
-                assert_eq!(obj, same_obj);
-            }
+            mod #test {
+                use super::*;
+                use #reth_codecs::__private::test_fuzz;
 
-            #[test]
-            #[allow(missing_docs)]
-            pub fn #test() {
-                #fuzz(#ident::default())
+                #[allow(dead_code)]
+                #[test_fuzz::test_fuzz]
+                fn #fuzz(obj: #ident)  {
+                    use #reth_codecs::Compact;
+                    let mut buf = vec![];
+                    let len = obj.clone().to_compact(&mut buf);
+                    let (same_obj, buf) = #ident::from_compact(buf.as_ref(), len);
+                    assert_eq!(obj, same_obj);
+                }
+
+                #[test]
+                #[allow(missing_docs)]
+                pub fn #test() {
+                    #fuzz(#ident::default())
+                }
             }
         }
     };

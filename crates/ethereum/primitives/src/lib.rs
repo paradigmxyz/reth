@@ -13,17 +13,3 @@ extern crate alloc;
 
 mod receipt;
 pub use receipt::*;
-
-use reth_primitives_traits::NodePrimitives;
-/// Primitive types for Ethereum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[non_exhaustive]
-pub struct EthPrimitives;
-
-impl NodePrimitives for EthPrimitives {
-    type Block = reth_primitives::Block;
-    type BlockBody = reth_primitives::BlockBody;
-    type BlockHeader = reth_primitives::Header;
-    type Receipt = Receipt;
-    type SignedTx = reth_primitives::TransactionSigned;
-}
