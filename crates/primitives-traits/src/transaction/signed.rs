@@ -105,7 +105,8 @@ impl SignedTransaction for PooledTransaction {
     }
 
     fn recover_signer_unchecked_with_buf(&self, _buf: &mut Vec<u8>) -> Option<Address> {
-        // Note:
+        // Note: we don't need unchecked here because this tx is supposed to be used for new pooled
+        // txs (post EIP-2)
         PooledTransaction::recover_signer(self).ok()
     }
 }
