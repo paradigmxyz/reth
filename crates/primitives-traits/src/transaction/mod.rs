@@ -2,7 +2,6 @@
 
 pub mod execute;
 pub mod signed;
-pub mod tx_type;
 
 use crate::{InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
 use core::{fmt, hash::Hash};
