@@ -1277,7 +1277,10 @@ impl SparseTrieUpdates {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{map::HashSet, U256};
+    use alloy_primitives::{
+        map::{B256HashSet, HashSet},
+        U256,
+    };
     use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
     use itertools::Itertools;
@@ -1320,7 +1323,7 @@ mod tests {
     /// Returns the state root and the retained proof nodes.
     fn run_hash_builder(
         state: impl IntoIterator<Item = (Nibbles, Account)> + Clone,
-        destroyed_accounts: HashSet<B256>,
+        destroyed_accounts: B256HashSet,
         proof_targets: impl IntoIterator<Item = Nibbles>,
     ) -> (B256, TrieUpdates, ProofNodes, HashMap<Nibbles, TrieMask>) {
         let mut account_rlp = Vec::new();

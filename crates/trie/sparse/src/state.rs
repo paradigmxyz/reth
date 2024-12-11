@@ -4,7 +4,7 @@ use crate::{
 };
 use alloy_primitives::{
     hex,
-    map::{B256HashMap, B256HashSet, HashMap, HashSet},
+    map::{B256HashMap, B256HashSet},
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
@@ -26,9 +26,9 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     /// Sparse account trie.
     state: SparseTrie<F::AccountNodeProvider>,
     /// Sparse storage tries.
-    storages: HashMap<B256, SparseTrie<F::StorageNodeProvider>>,
+    storages: B256HashMap<SparseTrie<F::StorageNodeProvider>>,
     /// Collection of revealed account and storage keys.
-    revealed: HashMap<B256, HashSet<B256>>,
+    revealed: B256HashMap<B256HashSet>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
@@ -427,7 +427,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{b256, Bytes, U256};
+    use alloy_primitives::{
+        b256,
+        map::{HashMap, HashSet},
+        Bytes, U256,
+    };
     use alloy_rlp::EMPTY_STRING_CODE;
     use arbitrary::Arbitrary;
     use assert_matches::assert_matches;
