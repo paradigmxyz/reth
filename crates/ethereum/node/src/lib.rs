@@ -23,5 +23,3 @@ pub use evm::{
 
 pub mod node;
 pub use node::EthereumNode;
-
-use reth_ethereum_primitives as _;

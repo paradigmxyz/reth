@@ -14,7 +14,6 @@ workspace = true
 # reth
 reth-payload-builder.workspace = true
 reth-ethereum-engine-primitives.workspace = true
-reth-ethereum-primitives.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-node-builder.workspace = true
@@ -86,5 +85,4 @@ test-utils = [
     "reth-trie-db/test-utils",
     "revm/test-utils",
     "reth-evm/test-utils",
-    "reth-ethereum-primitives/arbitrary"
 ]
