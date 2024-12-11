@@ -25,7 +25,7 @@ use revm::db::BundleState;
 /// # Warning
 ///
 /// A chain of blocks should not be empty.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Chain<N: NodePrimitives = reth_primitives::EthPrimitives> {
     /// All blocks in this chain.
@@ -41,6 +41,16 @@ pub struct Chain<N: NodePrimitives = reth_primitives::EthPrimitives> {
     /// NOTE: Currently, trie updates are present only for
     /// single-block chains that extend the canonical chain.
     trie_updates: Option<TrieUpdates>,
+}
+
+impl<N: NodePrimitives> Default for Chain<N> {
+    fn default() -> Self {
+        Self {
+            blocks: Default::default(),
+            execution_outcome: Default::default(),
+            trie_updates: Default::default(),
+        }
+    }
 }
 
 impl<N: NodePrimitives> Chain<N> {
