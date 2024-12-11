@@ -429,6 +429,7 @@ reth-zstd-compressors = { path = "crates/storage/zstd-compressors", default-feat
 revm = { version = "18.0.0", features = ["std"], default-features = false }
 revm-inspectors = "0.13.0"
 revm-primitives = { version = "14.0.0", default-features = false }
+revm-interpreter = { version = "14.0.0", default-features = false }
 
 # eth
 alloy-chains = { version = "0.1.32", default-features = false }
