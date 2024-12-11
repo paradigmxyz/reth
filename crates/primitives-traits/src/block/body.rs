@@ -1,8 +1,7 @@
 //! Block body abstraction.
 
 use crate::{
-    BlockHeader, FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde, MaybeSerdeBincodeCompat,
-    SignedTransaction,
+    BlockHeader, FullSignedTx, InMemorySize, MaybeSerde, MaybeSerdeBincodeCompat, SignedTransaction,
 };
 use alloc::{fmt, vec::Vec};
 use alloy_consensus::Transaction;
@@ -28,7 +27,6 @@ pub trait BlockBody:
     + alloy_rlp::Decodable
     + InMemorySize
     + MaybeSerde
-    + MaybeArbitrary
     + MaybeSerdeBincodeCompat
     + 'static
 {
