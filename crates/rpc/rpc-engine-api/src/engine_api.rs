@@ -797,7 +797,7 @@ where
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: Requests,
-        target_blobs_per_block: U256,
+        target_blobs_per_block: U64,
     ) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV4");
         Ok(self

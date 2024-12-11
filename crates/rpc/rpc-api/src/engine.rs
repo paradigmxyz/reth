@@ -58,8 +58,8 @@ pub trait EngineApi<Engine: EngineTypes> {
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
         execution_requests: Requests,
-        // U256 to deserialize as quantity
-        target_blobs_per_block: U256,
+        // U64 to deserialize as quantity
+        target_blobs_per_block: U64,
     ) -> RpcResult<PayloadStatus>;
 
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
