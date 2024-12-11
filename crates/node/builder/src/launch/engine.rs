@@ -27,7 +27,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_primitives::EthereumHardforks;
+use reth_primitives::{EthPrimitives, EthereumHardforks};
 use reth_provider::providers::BlockchainProvider2;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -69,7 +69,7 @@ impl EngineNodeLauncher {
 
 impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Types: EngineNodeTypes,
+    Types: EngineNodeTypes<Primitives = EthPrimitives>,
     T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types>>,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>

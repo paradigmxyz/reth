@@ -1,7 +1,7 @@
 use futures_util::StreamExt;
 use reth_network_api::{
     events::PeerEvent, test_utils::PeersHandleProvider, NetworkEvent, NetworkEventListenerProvider,
-    PeersInfo,
+    PeerRequest, PeersInfo,
 };
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_tokio_util::EventStream;
@@ -9,8 +9,8 @@ use reth_tracing::tracing::info;
 
 /// Helper for network operations
 #[derive(Debug)]
-pub struct NetworkTestContext<Network> {
-    network_events: EventStream<NetworkEvent>,
+pub struct NetworkTestContext<Network: NetworkEventListenerProvider> {
+    network_events: EventStream<NetworkEvent<PeerRequest<Network::Primitives>>>,
     network: Network,
 }
 

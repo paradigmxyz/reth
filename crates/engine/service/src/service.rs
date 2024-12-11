@@ -16,8 +16,8 @@ pub use reth_engine_tree::{
     engine::EngineApiEvent,
 };
 use reth_evm::execute::BlockExecutorProvider;
-use reth_network_p2p::EthBlockClient;
-use reth_node_types::{BlockTy, NodeTypes, NodeTypesWithEngine};
+use reth_network_p2p::BlockClient;
+use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::EthPrimitives;
 use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
@@ -42,7 +42,7 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
             <N as NodeTypes>::Primitives,
         >,
         EngineMessageStream<<N as NodeTypesWithEngine>::Engine>,
-        BasicBlockDownloader<Client>,
+        BasicBlockDownloader<Client, BlockTy<N>>,
     >,
     PipelineSync<N>,
 >;
@@ -53,7 +53,7 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 pub struct EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
-    Client: EthBlockClient + 'static,
+    Client: BlockClient<Header = HeaderTy<N>, Body = BodyTy<N>> + 'static,
     E: BlockExecutorProvider + 'static,
 {
     orchestrator: EngineServiceType<N, Client>,
@@ -63,13 +63,13 @@ where
 impl<N, Client, E> EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
-    Client: EthBlockClient + 'static,
+    Client: BlockClient<Header = HeaderTy<N>, Body = BodyTy<N>> + 'static,
     E: BlockExecutorProvider<Primitives = N::Primitives> + 'static,
 {
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
     pub fn new<V>(
-        consensus: Arc<dyn FullConsensus>,
+        consensus: Arc<dyn FullConsensus<N::Primitives>>,
         executor_factory: E,
         chain_spec: Arc<N::ChainSpec>,
         client: Client,
@@ -131,10 +131,10 @@ where
 impl<N, Client, E> Stream for EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
-    Client: EthBlockClient + 'static,
+    Client: BlockClient<Header = HeaderTy<N>, Body = BodyTy<N>> + 'static,
     E: BlockExecutorProvider + 'static,
 {
-    type Item = ChainEvent<BeaconConsensusEngineEvent>;
+    type Item = ChainEvent<BeaconConsensusEngineEvent<N::Primitives>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut orchestrator = self.project().orchestrator;

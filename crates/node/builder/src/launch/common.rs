@@ -29,6 +29,7 @@ use reth_node_core::{
     args::InvalidBlockHookType,
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
+    primitives::BlockHeader,
     version::{
         BUILD_PROFILE_NAME, CARGO_PKG_VERSION, VERGEN_BUILD_TIMESTAMP, VERGEN_CARGO_FEATURES,
         VERGEN_CARGO_TARGET_TRIPLE, VERGEN_GIT_SHA,
@@ -719,7 +720,7 @@ where
     /// necessary
     pub async fn max_block<C>(&self, client: C) -> eyre::Result<Option<BlockNumber>>
     where
-        C: HeadersClient<Header = alloy_consensus::Header>,
+        C: HeadersClient<Header: BlockHeader>,
     {
         self.node_config().max_block(client, self.provider_factory().clone()).await
     }

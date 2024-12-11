@@ -1,19 +1,20 @@
 //! State root task related functionality.
 
 use alloy_primitives::map::{HashMap, HashSet};
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_evm::system_calls::OnStateHook;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider,
 };
 use reth_trie::{
-    proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof, Nibbles,
-    TrieInput,
+    proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof,
+    MultiProofTargets, Nibbles, TrieInput,
 };
 use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
-    errors::{SparseStateTrieResult, SparseTrieError},
+    errors::{SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie,
 };
 use revm_primitives::{keccak256, EvmState, B256};
@@ -231,7 +232,7 @@ pub struct StateRootTask<Factory> {
     /// Sender for state root related messages.
     tx: Sender<StateRootMessage>,
     /// Proof targets that have been already fetched.
-    fetched_proof_targets: HashMap<B256, HashSet<B256>>,
+    fetched_proof_targets: MultiProofTargets,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// The sparse trie used for the state root calculation. If [`None`], then update is in
@@ -296,7 +297,7 @@ where
         view: ConsistentDbView<Factory>,
         input: Arc<TrieInput>,
         update: EvmState,
-        fetched_proof_targets: &mut HashMap<B256, HashSet<B256>>,
+        fetched_proof_targets: &mut MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage>,
     ) {
@@ -524,8 +525,8 @@ where
 /// account shouldn't be included.
 fn get_proof_targets(
     state_update: &HashedPostState,
-    fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
-) -> HashMap<B256, HashSet<B256>> {
+    fetched_proof_targets: &MultiProofTargets,
+) -> MultiProofTargets {
     let mut targets = HashMap::default();
 
     // first collect all new accounts (not previously fetched)
@@ -557,7 +558,7 @@ fn get_proof_targets(
 fn update_sparse_trie(
     mut trie: Box<SparseStateTrie>,
     multiproof: MultiProof,
-    targets: HashMap<B256, HashSet<B256>>,
+    targets: MultiProofTargets,
     state: HashedPostState,
 ) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
@@ -567,30 +568,45 @@ fn update_sparse_trie(
     trie.reveal_multiproof(targets, multiproof)?;
 
     // Update storage slots with new values and calculate storage roots.
-    for (address, storage) in state.storages {
-        trace!(target: "engine::root::sparse", ?address, "Updating storage");
-        let storage_trie = trie.storage_trie_mut(&address).ok_or(SparseTrieError::Blind)?;
+    let (tx, rx) = mpsc::channel();
+    state
+        .storages
+        .into_iter()
+        .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
+        .par_bridge()
+        .map(|(address, storage, storage_trie)| {
+            trace!(target: "engine::root::sparse", ?address, "Updating storage");
+            let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
 
-        if storage.wiped {
-            trace!(target: "engine::root::sparse", ?address, "Wiping storage");
-            storage_trie.wipe();
-        }
-
-        for (slot, value) in storage.storage {
-            let slot_nibbles = Nibbles::unpack(slot);
-            if value.is_zero() {
-                trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
-
-                // TODO: handle blinded node error
-                storage_trie.remove_leaf(&slot_nibbles)?;
-            } else {
-                trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
-                storage_trie
-                    .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
+            if storage.wiped {
+                trace!(target: "engine::root::sparse", ?address, "Wiping storage");
+                storage_trie.wipe()?;
             }
-        }
 
-        storage_trie.root();
+            for (slot, value) in storage.storage {
+                let slot_nibbles = Nibbles::unpack(slot);
+                if value.is_zero() {
+                    trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
+
+                    storage_trie.remove_leaf(&slot_nibbles)?;
+                } else {
+                    trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
+                    storage_trie
+                        .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
+                }
+            }
+
+            storage_trie.root();
+
+            SparseStateTrieResult::Ok((address, storage_trie))
+        })
+        .for_each_init(|| tx.clone(), |tx, result| {
+            tx.send(result).unwrap()
+        });
+    drop(tx);
+    for result in rx {
+        let (address, storage_trie) = result?;
+        trie.insert_storage_trie(address, storage_trie);
     }
 
     // Update accounts with new values

@@ -14,7 +14,7 @@ use reth_exex::ExExManagerHandle;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
-use reth_node_api::{BodyTy, HeaderTy, NodePrimitives};
+use reth_node_api::{BodyTy, HeaderTy};
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{prelude::DefaultStages, stages::ExecutionStage, Pipeline, StageSet};
 use reth_static_file::StaticFileProducer;
@@ -41,7 +41,6 @@ where
     N: ProviderNodeTypes,
     Client: BlockClient<Header = HeaderTy<N>, Body = BodyTy<N>> + 'static,
     Executor: BlockExecutorProvider<Primitives = N::Primitives>,
-    N::Primitives: NodePrimitives<BlockHeader = reth_primitives::Header>,
 {
     // building network downloaders using the fetch client
     let header_downloader = ReverseHeadersDownloaderBuilder::new(config.headers)
@@ -89,7 +88,6 @@ where
     H: HeaderDownloader<Header = HeaderTy<N>> + 'static,
     B: BodyDownloader<Header = HeaderTy<N>, Body = BodyTy<N>> + 'static,
     Executor: BlockExecutorProvider<Primitives = N::Primitives>,
-    N::Primitives: NodePrimitives<BlockHeader = reth_primitives::Header>,
 {
     let mut builder = Pipeline::<N>::builder();
 

@@ -1,6 +1,6 @@
 //! Block header data primitive.
 
-use core::fmt;
+use core::{fmt, hash::Hash};
 
 use alloy_primitives::Sealable;
 
@@ -18,6 +18,7 @@ pub trait BlockHeader:
     + Sync
     + Unpin
     + Clone
+    + Hash
     + Default
     + fmt::Debug
     + PartialEq
