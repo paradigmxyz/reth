@@ -27,7 +27,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, HashMap, HashSet},
+    map::{hash_map, B256HashMap, HashMap, HashSet},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
@@ -296,7 +296,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         // Unwind storage hashes. Add changed account and storage keys to corresponding prefix
         // sets.
-        let mut storage_prefix_sets = HashMap::<B256, PrefixSet>::default();
+        let mut storage_prefix_sets = B256HashMap::<PrefixSet>::default();
         let storage_entries = self.unwind_storage_hashing(changed_storages.iter().copied())?;
         for (hashed_address, hashed_slots) in storage_entries {
             account_prefix_set.insert(Nibbles::unpack(hashed_address));
@@ -321,7 +321,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let (new_state_root, trie_updates) = StateRoot::from_tx(&self.tx)
             .with_prefix_sets(prefix_sets)
             .root_with_updates()
-            .map_err(Into::<reth_db::DatabaseError>::into)?;
+            .map_err(reth_db::DatabaseError::from)?;
 
         let parent_number = range.start().saturating_sub(1);
         let parent_state_root = self
@@ -2310,7 +2310,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
     /// updates by the hashed address, writing in sorted order.
     fn write_storage_trie_updates(
         &self,
-        storage_tries: &HashMap<B256, StorageTrieUpdates>,
+        storage_tries: &B256HashMap<StorageTrieUpdates>,
     ) -> ProviderResult<usize> {
         let mut num_entries = 0;
         let mut storage_tries = Vec::from_iter(storage_tries);
@@ -2549,7 +2549,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
             let (state_root, trie_updates) = StateRoot::from_tx(&self.tx)
                 .with_prefix_sets(prefix_sets)
                 .root_with_updates()
-                .map_err(Into::<reth_db::DatabaseError>::into)?;
+                .map_err(reth_db::DatabaseError::from)?;
             if state_root != expected_state_root {
                 return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
                     root: GotExpected { got: state_root, expected: expected_state_root },

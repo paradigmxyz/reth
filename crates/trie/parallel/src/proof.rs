@@ -1,8 +1,5 @@
 use crate::{root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets};
-use alloy_primitives::{
-    map::{HashMap, HashSet},
-    B256,
-};
+use alloy_primitives::{map::HashMap, B256};
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_db::DatabaseError;
@@ -18,7 +15,8 @@ use reth_trie::{
     proof::StorageProof,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     walker::TrieWalker,
-    HashBuilder, MultiProof, Nibbles, TrieAccount, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    HashBuilder, MultiProof, MultiProofTargets, Nibbles, TrieAccount, TrieInput,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -73,7 +71,7 @@ where
     /// Generate a state multiproof according to specified targets.
     pub fn multiproof(
         self,
-        targets: HashMap<B256, HashSet<B256>>,
+        targets: MultiProofTargets,
     ) -> Result<MultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
@@ -108,8 +106,7 @@ where
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
             let view = self.view.clone();
-            let target_slots: HashSet<B256> =
-                targets.get(&hashed_address).cloned().unwrap_or_default();
+            let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
 
             let trie_nodes_sorted = trie_nodes_sorted.clone();
             let hashed_state_sorted = hashed_state_sorted.clone();
@@ -249,7 +246,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{keccak256, map::DefaultHashBuilder, Address, U256};
+    use alloy_primitives::{
+        keccak256,
+        map::{B256HashSet, DefaultHashBuilder},
+        Address, U256,
+    };
     use rand::Rng;
     use reth_primitives::{Account, StorageEntry};
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
@@ -300,11 +301,10 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
-        let mut targets =
-            HashMap::<B256, HashSet<B256, DefaultHashBuilder>, DefaultHashBuilder>::default();
+        let mut targets = MultiProofTargets::default();
         for (address, (_, storage)) in state.iter().take(10) {
             let hashed_address = keccak256(*address);
-            let mut target_slots = HashSet::<B256, DefaultHashBuilder>::default();
+            let mut target_slots = B256HashSet::default();
 
             for (slot, _) in storage.iter().take(5) {
                 target_slots.insert(*slot);

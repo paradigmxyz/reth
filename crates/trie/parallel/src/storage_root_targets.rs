@@ -1,11 +1,10 @@
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256HashMap, B256};
 use derive_more::{Deref, DerefMut};
 use reth_trie::prefix_set::PrefixSet;
-use std::collections::HashMap;
 
 /// Target accounts with corresponding prefix sets for storage root calculation.
 #[derive(Deref, DerefMut, Debug)]
-pub struct StorageRootTargets(HashMap<B256, PrefixSet>);
+pub struct StorageRootTargets(B256HashMap<PrefixSet>);
 
 impl StorageRootTargets {
     /// Create new storage root targets from updated post state accounts

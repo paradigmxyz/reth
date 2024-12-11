@@ -3,8 +3,7 @@ use crate::{
     HashedPostStateProvider, StateProvider, StateRootProvider,
 };
 use alloy_primitives::{
-    map::{HashMap, HashSet},
-    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+    map::B256HashMap, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
 };
 use reth_db::tables;
 use reth_db_api::{cursor::DbDupCursorRO, transaction::DbTx};
@@ -17,8 +16,8 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageMultiProof,
-    StorageRoot, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StateRoot,
+    StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
@@ -113,7 +112,7 @@ impl<Provider: DBProvider + StateCommitmentProvider> StorageRootProvider
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
         StorageProof::overlay_storage_proof(self.tx(), address, slot, hashed_storage)
-            .map_err(Into::<ProviderError>::into)
+            .map_err(ProviderError::from)
     }
 
     fn storage_multiproof(
@@ -123,7 +122,7 @@ impl<Provider: DBProvider + StateCommitmentProvider> StorageRootProvider
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         StorageProof::overlay_storage_multiproof(self.tx(), address, slots, hashed_storage)
-            .map_err(Into::<ProviderError>::into)
+            .map_err(ProviderError::from)
     }
 }
 
@@ -136,24 +135,23 @@ impl<Provider: DBProvider + StateCommitmentProvider> StateProofProvider
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        Proof::overlay_account_proof(self.tx(), input, address, slots)
-            .map_err(Into::<ProviderError>::into)
+        Proof::overlay_account_proof(self.tx(), input, address, slots).map_err(ProviderError::from)
     }
 
     fn multiproof(
         &self,
         input: TrieInput,
-        targets: HashMap<B256, HashSet<B256>>,
+        targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
-        Proof::overlay_multiproof(self.tx(), input, targets).map_err(Into::<ProviderError>::into)
+        Proof::overlay_multiproof(self.tx(), input, targets).map_err(ProviderError::from)
     }
 
     fn witness(
         &self,
         input: TrieInput,
         target: HashedPostState,
-    ) -> ProviderResult<HashMap<B256, Bytes>> {
-        TrieWitness::overlay_witness(self.tx(), input, target).map_err(Into::<ProviderError>::into)
+    ) -> ProviderResult<B256HashMap<Bytes>> {
+        TrieWitness::overlay_witness(self.tx(), input, target).map_err(ProviderError::from)
     }
 }
 

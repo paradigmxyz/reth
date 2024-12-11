@@ -1244,7 +1244,7 @@ where
                     ))
                     .with_prefix_sets(prefix_sets)
                     .root_with_updates()
-                    .map_err(Into::<BlockValidationError>::into)?;
+                    .map_err(BlockValidationError::from)?;
                 let tip = blocks.tip();
                 if state_root != tip.state_root {
                     return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
