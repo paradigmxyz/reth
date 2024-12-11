@@ -75,11 +75,12 @@ pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
     ProofCalculated {
+        /// The state update that was used to calculate the proof
+        state_update: HashedPostState,
+        /// The proof targets
         targets: MultiProofTargets,
         /// The calculated proof
         proof: MultiProof,
-        /// The state update that was used to calculate the proof
-        state_update: HashedPostState,
         /// The index of this proof in the sequence of state updates
         sequence_number: u64,
     },
@@ -338,9 +339,9 @@ where
             match result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated {
+                        state_update: hashed_state_update,
                         targets: proof_targets,
                         proof,
-                        state_update: hashed_state_update,
                         sequence_number: proof_sequence_number,
                     });
                 }
@@ -448,9 +449,9 @@ where
                         updates_finished = true;
                     }
                     StateRootMessage::ProofCalculated {
+                        state_update,
                         targets,
                         proof,
-                        state_update,
                         sequence_number,
                     } => {
                         proofs_processed += 1;
