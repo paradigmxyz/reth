@@ -196,10 +196,12 @@ where
         let (initialized_cfg, initialized_block_env) =
             self.cfg_and_block_env(&attributes, &parent).map_err(PayloadBuilderError::other)?;
 
+        let parent_gas_limit = parent.gas_limit;
         let config = PayloadConfig {
             parent_header: Arc::new(parent),
             attributes,
             extra_data: Default::default(),
+            desired_gas_limit: parent_gas_limit,
         };
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
