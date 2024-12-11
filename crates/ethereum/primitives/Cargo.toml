@@ -12,7 +12,44 @@ description = "Ethereum primitive types"
 workspace = true
 
 [dependencies]
+# reth
+reth-codecs = { workspace = true, optional = true }
+reth-primitives-traits.workspace = true
+reth-zstd-compressors = { workspace = true, optional = true }
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-rlp.workspace = true
+
+# misc
+arbitrary = { workspace = true, optional = true, features = ["derive"] }
+modular-bitfield = { workspace = true, optional = true }
+serde.workspace = true
+
+[dev-dependencies]
+test-fuzz.workspace = true
 
 [features]
 default = ["std"]
-std = []
+std = [
+	"alloy-consensus/std",
+	"alloy-primitives/std",
+	"alloy-rlp/std",
+	"reth-primitives-traits/std",
+    "reth-zstd-compressors?/std",
+	"serde/std"
+]
+reth-codec = [
+    "std",
+    "dep:reth-codecs",
+    "dep:modular-bitfield",
+    "dep:reth-zstd-compressors",
+]
+arbitrary = [
+    "dep:arbitrary",
+	"alloy-consensus/arbitrary",
+	"alloy-primitives/arbitrary",
+	"reth-codecs?/arbitrary",
+	"reth-primitives-traits/arbitrary"
+]

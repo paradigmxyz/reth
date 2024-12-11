@@ -7632,6 +7632,18 @@ dependencies = [
 [[package]]
 name = "reth-ethereum-primitives"
 version = "1.1.4"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
+ "arbitrary",
+ "modular-bitfield",
+ "reth-codecs",
+ "reth-primitives-traits",
+ "reth-zstd-compressors",
+ "serde",
+ "test-fuzz",
+]
 
 [[package]]
 name = "reth-etl"
