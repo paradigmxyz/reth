@@ -57,21 +57,18 @@ pub(crate) struct ZstdConfig {
 ///   efficient decoding.
 #[proc_macro_derive(Compact, attributes(maybe_zero, reth_codecs))]
 pub fn derive(input: TokenStream) -> TokenStream {
-    compact::derive(input, None)
+    compact::derive(parse_macro_input!(input as DeriveInput), None)
 }
 
 /// Adds `zstd` compression to derived [`Compact`].
 #[proc_macro_derive(CompactZstd, attributes(maybe_zero, reth_codecs, reth_zstd))]
 pub fn derive_zstd(input: TokenStream) -> TokenStream {
-    let derive_input = {
-        let input = input.clone();
-        parse_macro_input!(input as DeriveInput)
-    };
+    let input = parse_macro_input!(input as DeriveInput);
 
     let mut compressor = None;
     let mut decompressor = None;
 
-    for attr in derive_input.attrs {
+    for attr in &input.attrs {
         if attr.path().is_ident("reth_zstd") {
             if let Err(err) = attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("compressor") {

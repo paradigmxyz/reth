@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, Data, DeriveInput, Generics};
+use syn::{Data, DeriveInput, Generics};
 
 mod generator;
 use generator::*;
@@ -42,10 +42,10 @@ pub enum FieldTypes {
 }
 
 /// Derives the `Compact` trait and its from/to implementations.
-pub fn derive(input: TokenStream, zstd: Option<ZstdConfig>) -> TokenStream {
+pub fn derive(input: DeriveInput, zstd: Option<ZstdConfig>) -> TokenStream {
     let mut output = quote! {};
 
-    let DeriveInput { ident, data, generics, attrs, .. } = parse_macro_input!(input);
+    let DeriveInput { ident, data, generics, attrs, .. } = input;
 
     let has_lifetime = has_lifetime(&generics);
 
