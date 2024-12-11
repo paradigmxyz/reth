@@ -1717,7 +1717,7 @@ impl PooledTransactionsHashesBuilder {
             Self::Eth68(msg) => {
                 msg.hashes.push(*tx.tx_hash());
                 msg.sizes.push(tx.size);
-                msg.types.push(tx.transaction.tx_type().into());
+                msg.types.push(tx.transaction.ty());
             }
         }
     }
