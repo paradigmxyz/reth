@@ -7,12 +7,17 @@ use reth_provider::{
     StateCommitmentProvider,
 };
 use reth_trie::{
-    proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof, Nibbles,
-    TrieInput,
+    hashed_cursor::HashedPostStateCursorFactory,
+    prefix_set::TriePrefixSetsMut,
+    proof::Proof,
+    trie_cursor::InMemoryTrieCursorFactory,
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, Nibbles,
 };
-use reth_trie_db::DatabaseProof;
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
+    blinded::{BlindedProvider, BlindedProviderFactory},
     errors::{SparseStateTrieResult, SparseTrieError},
     SparseStateTrie,
 };
@@ -56,18 +61,19 @@ impl StateRootHandle {
 }
 
 /// Common configuration for state root tasks
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StateRootConfig<Factory> {
     /// View over the state in the database.
     pub consistent_view: ConsistentDbView<Factory>,
-    /// Latest trie input.
-    pub input: Arc<TrieInput>,
+    pub trie_updates: Arc<TrieUpdatesSorted>,
+    pub hashed_post_state: Arc<HashedPostStateSorted>,
+    pub prefix_sets: Arc<TriePrefixSetsMut>,
 }
 
 /// Messages used internally by the state root task
 #[derive(Debug)]
 #[allow(dead_code)]
-pub enum StateRootMessage {
+pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
@@ -82,7 +88,7 @@ pub enum StateRootMessage {
     /// State root calculation completed
     RootCalculated {
         /// The updated sparse trie
-        trie: Box<SparseStateTrie>,
+        trie: Box<SparseStateTrie<BPF>>,
         /// Time taken to calculate the root
         elapsed: Duration,
     },
@@ -158,24 +164,24 @@ impl ProofSequencer {
 
 /// A wrapper for the sender that signals completion when dropped
 #[allow(dead_code)]
-pub(crate) struct StateHookSender(Sender<StateRootMessage>);
+pub(crate) struct StateHookSender<BPF: BlindedProviderFactory>(Sender<StateRootMessage<BPF>>);
 
 #[allow(dead_code)]
-impl StateHookSender {
-    pub(crate) const fn new(inner: Sender<StateRootMessage>) -> Self {
+impl<BPF: BlindedProviderFactory> StateHookSender<BPF> {
+    pub(crate) const fn new(inner: Sender<StateRootMessage<BPF>>) -> Self {
         Self(inner)
     }
 }
 
-impl Deref for StateHookSender {
-    type Target = Sender<StateRootMessage>;
+impl<BPF: BlindedProviderFactory> Deref for StateHookSender<BPF> {
+    type Target = Sender<StateRootMessage<BPF>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl Drop for StateHookSender {
+impl<BPF: BlindedProviderFactory> Drop for StateHookSender<BPF> {
     fn drop(&mut self) {
         // Send completion signal when the sender is dropped
         let _ = self.0.send(StateRootMessage::FinishedStateUpdates);
@@ -223,24 +229,24 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 /// to the tree.
 /// Then it updates relevant leaves according to the result of the transaction.
 #[derive(Debug)]
-pub struct StateRootTask<Factory> {
+pub struct StateRootTask<Factory, BPF: BlindedProviderFactory> {
     /// Task configuration.
     config: StateRootConfig<Factory>,
     /// Receiver for state root related messages.
-    rx: Receiver<StateRootMessage>,
+    rx: Receiver<StateRootMessage<BPF>>,
     /// Sender for state root related messages.
-    tx: Sender<StateRootMessage>,
+    tx: Sender<StateRootMessage<BPF>>,
     /// Proof targets that have been already fetched.
     fetched_proof_targets: HashMap<B256, HashSet<B256>>,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// The sparse trie used for the state root calculation. If [`None`], then update is in
     /// progress.
-    sparse_trie: Option<Box<SparseStateTrie>>,
+    sparse_trie: Option<Box<SparseStateTrie<BPF>>>,
 }
 
 #[allow(dead_code)]
-impl<Factory> StateRootTask<Factory>
+impl<Factory, ABP, SBP, BPF> StateRootTask<Factory, BPF>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader>
         + StateCommitmentProvider
@@ -248,9 +254,12 @@ where
         + Send
         + Sync
         + 'static,
+    ABP: BlindedProvider<Error = SparseTrieError>,
+    SBP: BlindedProvider<Error = SparseTrieError>,
+    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP>,
 {
     /// Creates a new state root task with the unified message channel
-    pub fn new(config: StateRootConfig<Factory>) -> Self {
+    pub fn new(config: StateRootConfig<Factory>, blinded_provider: BPF) -> Self {
         let (tx, rx) = channel();
 
         Self {
@@ -259,7 +268,7 @@ where
             tx,
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
-            sparse_trie: Some(Box::new(SparseStateTrie::default().with_updates(true))),
+            sparse_trie: Some(Box::new(SparseStateTrie::new(blinded_provider).with_updates(true))),
         }
     }
 
@@ -293,12 +302,11 @@ where
     ///
     /// Returns proof targets derived from the state update.
     fn on_state_update(
-        view: ConsistentDbView<Factory>,
-        input: Arc<TrieInput>,
+        config: StateRootConfig<Factory>,
         update: EvmState,
         fetched_proof_targets: &mut HashMap<B256, HashSet<B256>>,
         proof_sequence_number: u64,
-        state_root_message_sender: Sender<StateRootMessage>,
+        state_root_message_sender: Sender<StateRootMessage<BPF>>,
     ) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
@@ -309,7 +317,7 @@ where
 
         // Dispatch proof gathering for this state update
         rayon::spawn(move || {
-            let provider = match view.provider_ro() {
+            let provider = match config.consistent_view.provider_ro() {
                 Ok(provider) => provider,
                 Err(error) => {
                     error!(target: "engine::root", ?error, "Could not get provider");
@@ -318,12 +326,17 @@ where
             };
 
             // TODO: replace with parallel proof
-            let result = Proof::overlay_multiproof(
-                provider.tx_ref(),
-                // TODO(alexey): this clone can be expensive, we should avoid it
-                input.as_ref().clone(),
-                proof_targets,
-            );
+            let result = Proof::from_tx(provider.tx_ref())
+                .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
+                    DatabaseTrieCursorFactory::new(provider.tx_ref()),
+                    &config.trie_updates,
+                ))
+                .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
+                    DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                    &config.hashed_post_state,
+                ))
+                .with_prefix_sets_mut(config.prefix_sets.as_ref().clone())
+                .multiproof(proof_targets);
             match result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated {
@@ -413,8 +426,7 @@ where
                             "Received new state update"
                         );
                         Self::on_state_update(
-                            self.config.consistent_view.clone(),
-                            self.config.input.clone(),
+                            self.config.clone(),
                             update,
                             &mut self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
@@ -554,12 +566,16 @@ fn get_proof_targets(
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
 /// time it took.
-fn update_sparse_trie(
-    mut trie: Box<SparseStateTrie>,
+fn update_sparse_trie<
+    ABP: BlindedProvider<Error = SparseTrieError>,
+    SBP: BlindedProvider<Error = SparseTrieError>,
+    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP>,
+>(
+    mut trie: Box<SparseStateTrie<BPF>>,
     multiproof: MultiProof,
     targets: HashMap<B256, HashSet<B256>>,
     state: HashedPostState,
-) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
+) -> SparseStateTrieResult<(Box<SparseStateTrie<BPF>>, Duration)> {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
 
@@ -613,7 +629,11 @@ mod tests {
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
     };
     use reth_testing_utils::generators::{self, Rng};
-    use reth_trie::{test_utils::state_root, TrieInput};
+    use reth_trie::{
+        hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
+        test_utils::state_root, trie_cursor::InMemoryTrieCursorFactory, TrieInput,
+    };
+    use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
     use revm_primitives::{
         Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot,
         HashMap, B256, KECCAK_EMPTY, U256,

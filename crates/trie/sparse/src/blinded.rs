@@ -5,7 +5,7 @@ use reth_execution_errors::SparseTrieError;
 use reth_trie_common::Nibbles;
 
 /// Factory for instantiating blinded node providers.
-pub trait BlindedProviderFactory {
+pub trait BlindedProviderFactory: Send + Sync {
     /// Type capable of fetching blinded account nodes.
     type AccountNodeProvider: BlindedProvider;
     /// Type capable of fetching blinded storage nodes.
@@ -19,7 +19,7 @@ pub trait BlindedProviderFactory {
 }
 
 /// Trie node provider for retrieving blinded nodes.
-pub trait BlindedProvider {
+pub trait BlindedProvider: Send + Sync {
     /// The error type for the provider.
     type Error: Into<SparseTrieError>;
 
