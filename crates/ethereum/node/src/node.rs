@@ -231,26 +231,21 @@ where
 
 /// A basic ethereum payload service.
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct EthereumPayloadBuilder {
     /// Payload builder configuration.
-    builder_config: EthereumBuilderConfig,
+    config: EthereumBuilderConfig,
 }
 
 impl Default for EthereumPayloadBuilder {
     fn default() -> Self {
-        Self {
-            builder_config: EthereumBuilderConfig::new(
-                default_extradata().as_bytes().to_vec().into(),
-            ),
-        }
+        Self { config: EthereumBuilderConfig::new(default_extradata().as_bytes().to_vec().into()) }
     }
 }
 
 impl EthereumPayloadBuilder {
     /// Create new ethereum payload builder.
     pub fn new(builder_config: EthereumBuilderConfig) -> Self {
-        Self { builder_config }
+        Self { config: builder_config }
     }
 }
 
@@ -275,10 +270,8 @@ impl EthereumPayloadBuilder {
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
         >,
     {
-        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
-            evm_config,
-            self.builder_config,
-        );
+        let payload_builder =
+            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(evm_config, self.config);
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
