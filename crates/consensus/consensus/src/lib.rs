@@ -453,7 +453,7 @@ pub enum ConsensusError {
     },
     /// Custom error
     // todo: remove in favour of AT Consensus::Error, so OpConsensusError can wrap ConsensusError
-    // in a variant instead
+    // in a variant instead <https://github.com/paradigmxyz/reth/issues/13237>
     #[display("custom l2 error (search for it in debug logs)")]
     Other,
 }
