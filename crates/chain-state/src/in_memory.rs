@@ -944,7 +944,7 @@ mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{map::HashSet, BlockNumber, Bytes, StorageKey, StorageValue};
+    use alloy_primitives::{map::B256HashMap, BlockNumber, Bytes, StorageKey, StorageValue};
     use rand::Rng;
     use reth_errors::ProviderResult;
     use reth_primitives::{Account, Bytecode, EthPrimitives, Receipt};
@@ -953,7 +953,8 @@ mod tests {
         StateRootProvider, StorageRootProvider,
     };
     use reth_trie::{
-        AccountProof, HashedStorage, MultiProof, StorageMultiProof, StorageProof, TrieInput,
+        AccountProof, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+        StorageProof, TrieInput,
     };
 
     fn create_mock_state(
@@ -1094,7 +1095,7 @@ mod tests {
         fn multiproof(
             &self,
             _input: TrieInput,
-            _targets: HashMap<B256, HashSet<B256>>,
+            _targets: MultiProofTargets,
         ) -> ProviderResult<MultiProof> {
             Ok(MultiProof::default())
         }
@@ -1103,7 +1104,7 @@ mod tests {
             &self,
             _input: TrieInput,
             _target: HashedPostState,
-        ) -> ProviderResult<HashMap<B256, Bytes>> {
+        ) -> ProviderResult<B256HashMap<Bytes>> {
             Ok(HashMap::default())
         }
     }

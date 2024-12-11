@@ -4,11 +4,13 @@ use crate::{
 };
 use alloy_primitives::{
     hex,
-    map::{HashMap, HashSet},
+    map::{B256HashMap, B256HashSet},
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
-use reth_execution_errors::{SparseStateTrieError, SparseStateTrieResult, SparseTrieError};
+use reth_execution_errors::{
+    SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieError, SparseTrieErrorKind,
+};
 use reth_primitives_traits::Account;
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
@@ -24,9 +26,9 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     /// Sparse account trie.
     state: SparseTrie<F::AccountNodeProvider>,
     /// Sparse storage tries.
-    storages: HashMap<B256, SparseTrie<F::StorageNodeProvider>>,
+    storages: B256HashMap<SparseTrie<F::StorageNodeProvider>>,
     /// Collection of revealed account and storage keys.
-    revealed: HashMap<B256, HashSet<B256>>,
+    revealed: B256HashMap<B256HashSet>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
@@ -204,7 +206,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_multiproof(
         &mut self,
-        targets: HashMap<B256, HashSet<B256>>,
+        targets: B256HashMap<B256HashSet>,
         multiproof: MultiProof,
     ) -> SparseStateTrieResult<()> {
         let account_subtree = multiproof.account_subtree.into_nodes_sorted();
@@ -278,13 +280,13 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         // Validate root node.
         let Some((path, node)) = proof.next() else { return Ok(None) };
         if !path.is_empty() {
-            return Err(SparseStateTrieError::InvalidRootNode { path, node })
+            return Err(SparseStateTrieErrorKind::InvalidRootNode { path, node }.into())
         }
 
         // Decode root node and perform sanity check.
         let root_node = TrieNode::decode(&mut &node[..])?;
         if matches!(root_node, TrieNode::EmptyRoot) && proof.peek().is_some() {
-            return Err(SparseStateTrieError::InvalidRootNode { path, node })
+            return Err(SparseStateTrieErrorKind::InvalidRootNode { path, node }.into())
         }
 
         Ok(Some(root_node))
@@ -364,11 +366,9 @@ where
         slot: Nibbles,
         value: Vec<u8>,
     ) -> SparseStateTrieResult<()> {
-        if let Some(storage_trie) = self.storages.get_mut(&address) {
-            Ok(storage_trie.update_leaf(slot, value)?)
-        } else {
-            Err(SparseStateTrieError::Sparse(SparseTrieError::Blind))
-        }
+        let storage_trie = self.storages.get_mut(&address).ok_or(SparseTrieErrorKind::Blind)?;
+        storage_trie.update_leaf(slot, value)?;
+        Ok(())
     }
 
     /// Update or remove trie account based on new account info. This method will either recompute
@@ -379,10 +379,10 @@ where
         let nibbles = Nibbles::unpack(address);
         let storage_root = if let Some(storage_trie) = self.storages.get_mut(&address) {
             trace!(target: "trie::sparse", ?address, "Calculating storage root to update account");
-            storage_trie.root().ok_or(SparseTrieError::Blind)?
+            storage_trie.root().ok_or(SparseTrieErrorKind::Blind)?
         } else if self.revealed.contains_key(&address) {
             trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
-            let state = self.state.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
+            let state = self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
             // The account was revealed, either...
             if let Some(value) = state.get_leaf_value(&nibbles) {
                 // ..it exists and we should take it's current storage root or...
@@ -392,7 +392,7 @@ where
                 EMPTY_ROOT_HASH
             }
         } else {
-            return Err(SparseTrieError::Blind.into())
+            return Err(SparseTrieErrorKind::Blind.into())
         };
 
         if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
@@ -418,18 +418,20 @@ where
         address: B256,
         slot: &Nibbles,
     ) -> SparseStateTrieResult<()> {
-        if let Some(storage_trie) = self.storages.get_mut(&address) {
-            Ok(storage_trie.remove_leaf(slot)?)
-        } else {
-            Err(SparseStateTrieError::Sparse(SparseTrieError::Blind))
-        }
+        let storage_trie = self.storages.get_mut(&address).ok_or(SparseTrieErrorKind::Blind)?;
+        storage_trie.remove_leaf(slot)?;
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{b256, Bytes, U256};
+    use alloy_primitives::{
+        b256,
+        map::{HashMap, HashSet},
+        Bytes, U256,
+    };
     use alloy_rlp::EMPTY_STRING_CODE;
     use arbitrary::Arbitrary;
     use assert_matches::assert_matches;
@@ -443,8 +445,8 @@ mod tests {
         let sparse = SparseStateTrie::default();
         let proof = [(Nibbles::from_nibbles([0x1]), Bytes::from([EMPTY_STRING_CODE]))];
         assert_matches!(
-            sparse.validate_root_node(&mut proof.into_iter().peekable(),),
-            Err(SparseStateTrieError::InvalidRootNode { .. })
+            sparse.validate_root_node(&mut proof.into_iter().peekable()).map_err(|e| e.into_kind()),
+            Err(SparseStateTrieErrorKind::InvalidRootNode { .. })
         );
     }
 
@@ -456,8 +458,8 @@ mod tests {
             (Nibbles::from_nibbles([0x1]), Bytes::new()),
         ];
         assert_matches!(
-            sparse.validate_root_node(&mut proof.into_iter().peekable(),),
-            Err(SparseStateTrieError::InvalidRootNode { .. })
+            sparse.validate_root_node(&mut proof.into_iter().peekable()).map_err(|e| e.into_kind()),
+            Err(SparseStateTrieErrorKind::InvalidRootNode { .. })
         );
     }
 
