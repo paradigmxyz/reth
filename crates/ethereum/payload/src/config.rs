@@ -9,7 +9,7 @@ pub struct EthereumBuilderConfig {
 
 impl EthereumBuilderConfig {
     /// Create new payload builder config.
-    pub fn new(extra_data: Bytes) -> Self {
+    pub const fn new(extra_data: Bytes) -> Self {
         Self { extra_data }
     }
 }
