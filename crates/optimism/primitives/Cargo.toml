@@ -62,9 +62,10 @@ std = [
 	"serde?/std",
 	"bytes?/std",
 	"derive_more/std",
-    "revm-primitives/std",
-    "secp256k1?/std",
-    "alloy-rlp/std",
+	"revm-primitives/std",
+	"secp256k1?/std",
+	"alloy-rlp/std",
+	"reth-zstd-compressors?/std"
 ]
 reth-codec = [
     "dep:reth-codecs",
