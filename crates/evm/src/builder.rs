@@ -45,7 +45,7 @@ where
         let mut builder =
             EvmBuilder::default().with_db(self.db).with_external_context(self.external_context);
         if let Some(env) = self.env {
-            builder = builder.with_spec_id(env.clone().spec_id());
+            builder = builder.with_spec_id(env.spec_id());
             builder = builder.with_env(env.env);
         }
 
@@ -61,7 +61,7 @@ where
         let mut builder =
             EvmBuilder::default().with_db(self.db).with_external_context(self.external_context);
         if let Some(env) = self.env {
-            builder = builder.with_spec_id(env.clone().spec_id());
+            builder = builder.with_spec_id(env.spec_id());
             builder = builder.with_env(env.env);
         }
         builder
