@@ -62,7 +62,7 @@ impl StateRootHandle {
 pub struct StateRootConfig<Factory> {
     /// View over the state in the database.
     pub consistent_view: ConsistentDbView<Factory>,
-    /// Latest trie input
+    /// Latest trie input.
     pub input: Arc<TrieInput>,
 }
 
@@ -250,9 +250,9 @@ where
         + Send
         + Sync
         + 'static,
-    ABP: BlindedProvider<Error = SparseTrieError>,
-    SBP: BlindedProvider<Error = SparseTrieError>,
-    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP>,
+    ABP: BlindedProvider<Error = SparseTrieError> + Send + Sync,
+    SBP: BlindedProvider<Error = SparseTrieError> + Send + Sync,
+    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP> + Send + Sync,
 {
     /// Creates a new state root task with the unified message channel
     pub fn new(config: StateRootConfig<Factory>, blinded_provider: BPF) -> Self {
@@ -635,7 +635,11 @@ mod tests {
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
     };
     use reth_testing_utils::generators::{self, Rng};
-    use reth_trie::{test_utils::state_root, TrieInput};
+    use reth_trie::{
+        hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
+        test_utils::state_root, trie_cursor::InMemoryTrieCursorFactory, TrieInput,
+    };
+    use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
     use revm_primitives::{
         Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot,
         HashMap, B256, KECCAK_EMPTY, U256,
@@ -752,7 +756,21 @@ mod tests {
             consistent_view: ConsistentDbView::new(factory, None),
             input: Arc::new(TrieInput::from_state(hashed_state)),
         };
-        let task = StateRootTask::new(config);
+        let provider = config.consistent_view.provider_ro().unwrap();
+        let nodes_sorted = config.input.nodes.clone().into_sorted();
+        let state_sorted = config.input.state.clone().into_sorted();
+        let blinded_provider_factory = ProofBlindedProviderFactory::new(
+            InMemoryTrieCursorFactory::new(
+                DatabaseTrieCursorFactory::new(provider.tx_ref()),
+                &nodes_sorted,
+            ),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                &state_sorted,
+            ),
+            Arc::new(config.input.prefix_sets.clone()),
+        );
+        let task = StateRootTask::new(config, blinded_provider_factory);
         let mut state_hook = task.state_hook();
         let handle = task.spawn();
 
