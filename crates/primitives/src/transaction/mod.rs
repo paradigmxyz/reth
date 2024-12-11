@@ -9,14 +9,17 @@ use alloy_consensus::{
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
+    eip4844::BlobTransactionSidecar,
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
+pub use compat::FillTxEnv;
 use core::hash::{Hash, Hasher};
 use derive_more::{AsRef, Deref};
+pub use meta::TransactionMeta;
 use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
@@ -24,25 +27,22 @@ use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
 use op_alloy_consensus::DepositTransaction;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::TxDeposit;
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_primitives_traits::{InMemorySize, SignedTransaction};
-use revm_primitives::{AuthorizationList, TxEnv};
-use serde::{Deserialize, Serialize};
-use signature::decode_with_eip155_chain_id;
-#[cfg(feature = "std")]
-use std::sync::{LazyLock, OnceLock};
-
-pub use compat::FillTxEnv;
-pub use meta::TransactionMeta;
 pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 pub use reth_primitives_traits::{
     transaction::error::{
         InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
     },
     WithEncoded,
 };
+use reth_primitives_traits::{InMemorySize, SignedTransaction};
+use revm_primitives::{AuthorizationList, TxEnv};
+use serde::{Deserialize, Serialize};
 pub use sidecar::BlobTransaction;
+use signature::decode_with_eip155_chain_id;
 pub use signature::{recover_signer, recover_signer_unchecked};
+#[cfg(feature = "std")]
+use std::sync::{LazyLock, OnceLock};
 pub use tx_type::TxType;
 
 /// Handling transaction signature operations, including signature recovery,

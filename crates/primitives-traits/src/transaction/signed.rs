@@ -101,10 +101,11 @@ impl SignedTransaction for PooledTransaction {
     }
 
     fn recover_signer(&self) -> Option<Address> {
-        todo!()
+        PooledTransaction::recover_signer(self).ok()
     }
 
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
-        todo!()
+    fn recover_signer_unchecked_with_buf(&self, _buf: &mut Vec<u8>) -> Option<Address> {
+        // Note:
+        PooledTransaction::recover_signer(self).ok()
     }
 }

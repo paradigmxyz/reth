@@ -134,6 +134,7 @@ dependencies = [
  "auto_impl",
  "c-kzg",
  "derive_more",
+ "k256",
  "rand 0.8.5",
  "serde",
  "serde_with",

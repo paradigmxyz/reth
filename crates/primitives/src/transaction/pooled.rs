@@ -1,9 +1,9 @@
 //! Defines the types for blob transactions, legacy, and other EIP-2718 transactions included in a
 //! response to `GetPooledTransactions`.
 
-use super::error::TransactionConversionError;
 use crate::RecoveredTx;
 use alloy_eips::eip4844::BlobTransactionSidecar;
+use reth_primitives_traits::transaction::error::TransactionConversionError;
 
 pub type PooledTransactionsElement = alloy_consensus::transaction::PooledTransaction;
 
