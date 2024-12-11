@@ -33,8 +33,8 @@ impl<T, H> ProofBlindedProviderFactory<T, H> {
 
 impl<T, H> BlindedProviderFactory for ProofBlindedProviderFactory<T, H>
 where
-    T: TrieCursorFactory + Clone,
-    H: HashedCursorFactory + Clone,
+    T: TrieCursorFactory + Clone + Send + Sync,
+    H: HashedCursorFactory + Clone + Send + Sync,
 {
     type AccountNodeProvider = ProofBlindedAccountProvider<T, H>;
     type StorageNodeProvider = ProofBlindedStorageProvider<T, H>;
@@ -81,8 +81,8 @@ impl<T, H> ProofBlindedAccountProvider<T, H> {
 
 impl<T, H> BlindedProvider for ProofBlindedAccountProvider<T, H>
 where
-    T: TrieCursorFactory + Clone,
-    H: HashedCursorFactory + Clone,
+    T: TrieCursorFactory + Clone + Send + Sync,
+    H: HashedCursorFactory + Clone + Send + Sync,
 {
     type Error = SparseTrieError;
 
@@ -125,8 +125,8 @@ impl<T, H> ProofBlindedStorageProvider<T, H> {
 
 impl<T, H> BlindedProvider for ProofBlindedStorageProvider<T, H>
 where
-    T: TrieCursorFactory + Clone,
-    H: HashedCursorFactory + Clone,
+    T: TrieCursorFactory + Clone + Send + Sync,
+    H: HashedCursorFactory + Clone + Send + Sync,
 {
     type Error = SparseTrieError;
 

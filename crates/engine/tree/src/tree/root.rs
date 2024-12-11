@@ -14,7 +14,8 @@ use reth_trie::{
 use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
-    errors::{SparseStateTrieResult, SparseTrieErrorKind},
+    blinded::{BlindedProvider, BlindedProviderFactory},
+    errors::{SparseStateTrieResult, SparseTrieError, SparseTrieErrorKind},
     SparseStateTrie,
 };
 use revm_primitives::{keccak256, EvmState, B256};
@@ -61,14 +62,14 @@ impl StateRootHandle {
 pub struct StateRootConfig<Factory> {
     /// View over the state in the database.
     pub consistent_view: ConsistentDbView<Factory>,
-    /// Latest trie input.
+    /// Latest trie input
     pub input: Arc<TrieInput>,
 }
 
 /// Messages used internally by the state root task
 #[derive(Debug)]
 #[allow(dead_code)]
-pub enum StateRootMessage {
+pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
@@ -83,7 +84,7 @@ pub enum StateRootMessage {
     /// State root calculation completed
     RootCalculated {
         /// The updated sparse trie
-        trie: Box<SparseStateTrie>,
+        trie: Box<SparseStateTrie<BPF>>,
         /// Time taken to calculate the root
         elapsed: Duration,
     },
@@ -159,24 +160,24 @@ impl ProofSequencer {
 
 /// A wrapper for the sender that signals completion when dropped
 #[allow(dead_code)]
-pub(crate) struct StateHookSender(Sender<StateRootMessage>);
+pub(crate) struct StateHookSender<BPF: BlindedProviderFactory>(Sender<StateRootMessage<BPF>>);
 
 #[allow(dead_code)]
-impl StateHookSender {
-    pub(crate) const fn new(inner: Sender<StateRootMessage>) -> Self {
+impl<BPF: BlindedProviderFactory> StateHookSender<BPF> {
+    pub(crate) const fn new(inner: Sender<StateRootMessage<BPF>>) -> Self {
         Self(inner)
     }
 }
 
-impl Deref for StateHookSender {
-    type Target = Sender<StateRootMessage>;
+impl<BPF: BlindedProviderFactory> Deref for StateHookSender<BPF> {
+    type Target = Sender<StateRootMessage<BPF>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl Drop for StateHookSender {
+impl<BPF: BlindedProviderFactory> Drop for StateHookSender<BPF> {
     fn drop(&mut self) {
         // Send completion signal when the sender is dropped
         let _ = self.0.send(StateRootMessage::FinishedStateUpdates);
@@ -224,24 +225,24 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 /// to the tree.
 /// Then it updates relevant leaves according to the result of the transaction.
 #[derive(Debug)]
-pub struct StateRootTask<Factory> {
+pub struct StateRootTask<Factory, BPF: BlindedProviderFactory> {
     /// Task configuration.
     config: StateRootConfig<Factory>,
     /// Receiver for state root related messages.
-    rx: Receiver<StateRootMessage>,
+    rx: Receiver<StateRootMessage<BPF>>,
     /// Sender for state root related messages.
-    tx: Sender<StateRootMessage>,
+    tx: Sender<StateRootMessage<BPF>>,
     /// Proof targets that have been already fetched.
     fetched_proof_targets: MultiProofTargets,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// The sparse trie used for the state root calculation. If [`None`], then update is in
     /// progress.
-    sparse_trie: Option<Box<SparseStateTrie>>,
+    sparse_trie: Option<Box<SparseStateTrie<BPF>>>,
 }
 
 #[allow(dead_code)]
-impl<Factory> StateRootTask<Factory>
+impl<Factory, ABP, SBP, BPF> StateRootTask<Factory, BPF>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader>
         + StateCommitmentProvider
@@ -249,9 +250,12 @@ where
         + Send
         + Sync
         + 'static,
+    ABP: BlindedProvider<Error = SparseTrieError>,
+    SBP: BlindedProvider<Error = SparseTrieError>,
+    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP>,
 {
     /// Creates a new state root task with the unified message channel
-    pub fn new(config: StateRootConfig<Factory>) -> Self {
+    pub fn new(config: StateRootConfig<Factory>, blinded_provider: BPF) -> Self {
         let (tx, rx) = channel();
 
         Self {
@@ -260,7 +264,7 @@ where
             tx,
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
-            sparse_trie: Some(Box::new(SparseStateTrie::default().with_updates(true))),
+            sparse_trie: Some(Box::new(SparseStateTrie::new(blinded_provider).with_updates(true))),
         }
     }
 
@@ -299,7 +303,7 @@ where
         update: EvmState,
         fetched_proof_targets: &mut MultiProofTargets,
         proof_sequence_number: u64,
-        state_root_message_sender: Sender<StateRootMessage>,
+        state_root_message_sender: Sender<StateRootMessage<BPF>>,
     ) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
@@ -555,12 +559,16 @@ fn get_proof_targets(
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
 /// time it took.
-fn update_sparse_trie(
-    mut trie: Box<SparseStateTrie>,
+fn update_sparse_trie<
+    ABP: BlindedProvider<Error = SparseTrieError>,
+    SBP: BlindedProvider<Error = SparseTrieError>,
+    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP>,
+>(
+    mut trie: Box<SparseStateTrie<BPF>>,
     multiproof: MultiProof,
     targets: MultiProofTargets,
     state: HashedPostState,
-) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
+) -> SparseStateTrieResult<(Box<SparseStateTrie<BPF>>, Duration)> {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
 
@@ -582,12 +590,10 @@ fn update_sparse_trie(
                 trace!(target: "engine::root::sparse", ?address, "Wiping storage");
                 storage_trie.wipe()?;
             }
-
             for (slot, value) in storage.storage {
                 let slot_nibbles = Nibbles::unpack(slot);
                 if value.is_zero() {
                     trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
-
                     storage_trie.remove_leaf(&slot_nibbles)?;
                 } else {
                     trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
