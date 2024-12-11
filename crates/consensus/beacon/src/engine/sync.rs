@@ -9,8 +9,9 @@ use alloy_primitives::{BlockNumber, B256};
 use futures::FutureExt;
 use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
-    EthBlockClient,
+    BlockClient,
 };
+use reth_node_types::{BodyTy, HeaderTy};
 use reth_primitives::{BlockBody, EthPrimitives, NodePrimitives, SealedBlock};
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
@@ -35,7 +36,7 @@ use tracing::trace;
 pub(crate) struct EngineSyncController<N, Client>
 where
     N: ProviderNodeTypes,
-    Client: EthBlockClient,
+    Client: BlockClient,
 {
     /// A downloader that can download full blocks from the network.
     full_block_client: FullBlockClient<Client>,
@@ -54,7 +55,7 @@ where
     event_sender: EventSender<BeaconConsensusEngineEvent<N::Primitives>>,
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
-    range_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock<reth_node_types::HeaderTy<N>, reth_node_types::BodyTy<N>>>>,
+    range_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlock<HeaderTy<N>, BodyTy<N>>>>,
     /// Max block after which the consensus engine would terminate the sync. Used for debugging
     /// purposes.
     max_block: Option<BlockNumber>,
@@ -65,7 +66,7 @@ where
 impl<N, Client> EngineSyncController<N, Client>
 where
     N: ProviderNodeTypes,
-    Client: EthBlockClient<reth_node_types::HeaderTy<N>, reth_node_types::BodyTy<N>> + 'static,
+    Client: BlockClient,
 {
     /// Create a new instance
     pub(crate) fn new(
@@ -92,7 +93,13 @@ where
             metrics: EngineSyncMetrics::default(),
         }
     }
+}
 
+impl<N, Client> EngineSyncController<N, Client>
+where
+    N: ProviderNodeTypes,
+    Client: BlockClient<Header = HeaderTy<N>, Body = BodyTy<N>> + 'static,
+{
     /// Sets the metrics for the active downloads
     fn update_block_download_metrics(&self) {
         self.metrics.active_block_downloads.set(self.inflight_full_block_requests.len() as f64);
@@ -317,8 +324,8 @@ where
             let mut request = self.inflight_block_range_requests.swap_remove(idx);
             if let Poll::Ready(blocks) = request.poll_unpin(cx) {
                 trace!(target: "consensus::engine", len=?blocks.len(), first=?blocks.first().map(|b| b.num_hash()), last=?blocks.last().map(|b| b.num_hash()), "Received full block range, buffering");
-                    self.range_buffered_blocks
-                        .extend(blocks.into_iter().map(OrderedSealedBlock).map(Reverse));
+                self.range_buffered_blocks
+                    .extend(blocks.into_iter().map(OrderedSealedBlock).map(Reverse));
             } else {
                 // still pending
                 self.inflight_block_range_requests.push(request);
@@ -423,7 +430,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
-    use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
+    use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient, EthBlockClient};
     use reth_primitives::{BlockBody, SealedHeader};
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
