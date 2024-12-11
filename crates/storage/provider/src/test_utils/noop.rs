@@ -10,7 +10,7 @@ use alloy_eips::{
     BlockHashOrNumber, BlockId, BlockNumberOrTag,
 };
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    map::{B256HashMap, HashMap},
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use reth_chain_state::{
@@ -27,10 +27,13 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{NodePrimitivesProvider, StateProofProvider, StorageRootProvider};
+use reth_storage_api::{
+    HashedPostStateProvider, NodePrimitivesProvider, StateProofProvider, StorageRootProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    MultiProofTargets, TrieInput,
 };
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use tokio::sync::{broadcast, watch};
@@ -284,6 +287,8 @@ impl ReceiptProvider for NoopProvider {
 impl ReceiptProviderIdExt for NoopProvider {}
 
 impl HeaderProvider for NoopProvider {
+    type Header = Header;
+
     fn header(&self, _block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         Ok(None)
     }
@@ -397,7 +402,7 @@ impl StateProofProvider for NoopProvider {
     fn multiproof(
         &self,
         _input: TrieInput,
-        _targets: HashMap<B256, HashSet<B256>>,
+        _targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         Ok(MultiProof::default())
     }
@@ -406,8 +411,14 @@ impl StateProofProvider for NoopProvider {
         &self,
         _input: TrieInput,
         _target: HashedPostState,
-    ) -> ProviderResult<HashMap<B256, Bytes>> {
+    ) -> ProviderResult<B256HashMap<Bytes>> {
         Ok(HashMap::default())
+    }
+}
+
+impl HashedPostStateProvider for NoopProvider {
+    fn hashed_post_state(&self, _bundle_state: &revm::db::BundleState) -> HashedPostState {
+        HashedPostState::default()
     }
 }
 
@@ -426,54 +437,15 @@ impl StateProvider for NoopProvider {
 }
 
 impl EvmEnvProvider for NoopProvider {
-    fn fill_env_at<EvmConfig>(
+    fn env_with_header<EvmConfig>(
         &self,
-        _cfg: &mut CfgEnvWithHandlerCfg,
-        _block_env: &mut BlockEnv,
-        _at: BlockHashOrNumber,
-        _evm_config: EvmConfig,
-    ) -> ProviderResult<()>
+        header: &Header,
+        evm_config: EvmConfig,
+    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
     where
         EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
-        Ok(())
-    }
-
-    fn fill_env_with_header<EvmConfig>(
-        &self,
-        _cfg: &mut CfgEnvWithHandlerCfg,
-        _block_env: &mut BlockEnv,
-        _header: &Header,
-        _evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        Ok(())
-    }
-
-    fn fill_cfg_env_at<EvmConfig>(
-        &self,
-        _cfg: &mut CfgEnvWithHandlerCfg,
-        _at: BlockHashOrNumber,
-        _evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        Ok(())
-    }
-
-    fn fill_cfg_env_with_header<EvmConfig>(
-        &self,
-        _cfg: &mut CfgEnvWithHandlerCfg,
-        _header: &Header,
-        _evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        Ok(())
+        Ok(evm_config.cfg_and_block_env(header, U256::MAX))
     }
 }
 
@@ -586,6 +558,8 @@ impl CanonStateSubscriptions for NoopProvider {
 }
 
 impl ForkChoiceSubscriptions for NoopProvider {
+    type Header = Header;
+
     fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
         let (_, rx) = watch::channel(None);
         ForkChoiceNotifications(rx)

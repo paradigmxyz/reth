@@ -1,3 +1,4 @@
+use reth_prune_types::{PruneInterruptReason, PruneProgress};
 use std::{
     num::NonZeroUsize,
     time::{Duration, Instant},
@@ -118,6 +119,30 @@ impl PruneLimiter {
     /// Returns `true` if any limit is reached.
     pub fn is_limit_reached(&self) -> bool {
         self.is_deleted_entries_limit_reached() || self.is_time_limit_reached()
+    }
+
+    /// Creates new [`PruneInterruptReason`] based on the limiter's state.
+    pub fn interrupt_reason(&self) -> PruneInterruptReason {
+        if self.is_time_limit_reached() {
+            PruneInterruptReason::Timeout
+        } else if self.is_deleted_entries_limit_reached() {
+            PruneInterruptReason::DeletedEntriesLimitReached
+        } else {
+            PruneInterruptReason::Unknown
+        }
+    }
+
+    /// Creates new [`PruneProgress`].
+    ///
+    /// If `done == true`, returns [`PruneProgress::Finished`], otherwise
+    /// [`PruneProgress::HasMoreData`] is returned with [`PruneInterruptReason`] according to the
+    /// limiter's state.
+    pub fn progress(&self, done: bool) -> PruneProgress {
+        if done {
+            PruneProgress::Finished
+        } else {
+            PruneProgress::HasMoreData(self.interrupt_reason())
+        }
     }
 }
 

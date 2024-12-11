@@ -5,14 +5,12 @@ use super::{
     error::TransactionConversionError, recover_signer_unchecked, signature::recover_signer,
     TxEip7702,
 };
-use crate::{
-    BlobTransaction, Transaction, TransactionSigned, TransactionSignedEcRecovered, TxType,
-};
+use crate::{BlobTransaction, RecoveredTx, Transaction, TransactionSigned, TxType};
 use alloc::vec::Vec;
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
     transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
-    SignableTransaction, Signed, TxEip4844WithSidecar,
+    SignableTransaction, Signed, TxEip4844WithSidecar, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Result, Encodable2718},
@@ -26,7 +24,6 @@ use alloy_primitives::{
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use bytes::Buf;
 use core::hash::{Hash, Hasher};
-use derive_more::{AsRef, Deref};
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::keccak256;
 use serde::{Deserialize, Serialize};
@@ -49,35 +46,7 @@ pub enum PooledTransactionsElement {
 }
 
 impl PooledTransactionsElement {
-    /// Tries to convert a [`TransactionSigned`] into a [`PooledTransactionsElement`].
-    ///
-    /// This function used as a helper to convert from a decoded p2p broadcast message to
-    /// [`PooledTransactionsElement`]. Since [`BlobTransaction`] is disallowed to be broadcasted on
-    /// p2p, return an err if `tx` is [`Transaction::Eip4844`].
-    pub fn try_from_broadcast(tx: TransactionSigned) -> Result<Self, TransactionSigned> {
-        let hash = tx.hash();
-        match tx {
-            TransactionSigned { transaction: Transaction::Legacy(tx), signature, .. } => {
-                Ok(Self::Legacy(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip2930(tx), signature, .. } => {
-                Ok(Self::Eip2930(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip1559(tx), signature, .. } => {
-                Ok(Self::Eip1559(Signed::new_unchecked(tx, signature, hash)))
-            }
-            TransactionSigned { transaction: Transaction::Eip7702(tx), signature, .. } => {
-                Ok(Self::Eip7702(Signed::new_unchecked(tx, signature, hash)))
-            }
-            // Not supported because missing blob sidecar
-            tx @ TransactionSigned { transaction: Transaction::Eip4844(_), .. } => Err(tx),
-            #[cfg(feature = "optimism")]
-            // Not supported because deposit transactions are never pooled
-            tx @ TransactionSigned { transaction: Transaction::Deposit(_), .. } => Err(tx),
-        }
-    }
-
-    /// Converts from an EIP-4844 [`TransactionSignedEcRecovered`] to a
+    /// Converts from an EIP-4844 [`RecoveredTx`] to a
     /// [`PooledTransactionsElementEcRecovered`] with the given sidecar.
     ///
     /// Returns an `Err` containing the original `TransactionSigned` if the transaction is not
@@ -151,7 +120,7 @@ impl PooledTransactionsElement {
     pub fn try_into_ecrecovered(self) -> Result<PooledTransactionsElementEcRecovered, Self> {
         match self.recover_signer() {
             None => Err(self),
-            Some(signer) => Ok(PooledTransactionsElementEcRecovered { transaction: self, signer }),
+            Some(signer) => Ok(RecoveredTx { signed_transaction: self, signer }),
         }
     }
 
@@ -167,10 +136,10 @@ impl PooledTransactionsElement {
         }
     }
 
-    /// Create [`TransactionSignedEcRecovered`] by converting this transaction into
+    /// Create [`RecoveredTx`] by converting this transaction into
     /// [`TransactionSigned`] and [`Address`] of the signer.
-    pub fn into_ecrecovered_transaction(self, signer: Address) -> TransactionSignedEcRecovered {
-        TransactionSignedEcRecovered::from_signed_transaction(self.into_transaction(), signer)
+    pub fn into_ecrecovered_transaction(self, signer: Address) -> RecoveredTx {
+        RecoveredTx::from_signed_transaction(self.into_transaction(), signer)
     }
 
     /// Returns the inner [`TransactionSigned`].
@@ -261,7 +230,7 @@ impl Encodable for PooledTransactionsElement {
 
     fn length(&self) -> usize {
         let mut payload_length = self.encode_2718_len();
-        if !self.is_legacy() {
+        if !Encodable2718::is_legacy(self) {
             payload_length += Header { list: false, payload_length }.length();
         }
 
@@ -414,6 +383,18 @@ impl Decodable2718 for PooledTransactionsElement {
     }
 }
 
+impl Typed2718 for PooledTransactionsElement {
+    fn ty(&self) -> u8 {
+        match self {
+            Self::Legacy(tx) => tx.tx().ty(),
+            Self::Eip2930(tx) => tx.tx().ty(),
+            Self::Eip1559(tx) => tx.tx().ty(),
+            Self::BlobTransaction(tx) => tx.tx().ty(),
+            Self::Eip7702(tx) => tx.tx().ty(),
+        }
+    }
+}
+
 impl alloy_consensus::Transaction for PooledTransactionsElement {
     fn chain_id(&self) -> Option<ChainId> {
         match self {
@@ -525,6 +506,16 @@ impl alloy_consensus::Transaction for PooledTransactionsElement {
         }
     }
 
+    fn is_create(&self) -> bool {
+        match self {
+            Self::Legacy(tx) => tx.tx().is_create(),
+            Self::Eip2930(tx) => tx.tx().is_create(),
+            Self::Eip1559(tx) => tx.tx().is_create(),
+            Self::Eip7702(tx) => tx.tx().is_create(),
+            Self::BlobTransaction(tx) => tx.tx().is_create(),
+        }
+    }
+
     fn value(&self) -> U256 {
         match self {
             Self::Legacy(tx) => tx.tx().value(),
@@ -542,16 +533,6 @@ impl alloy_consensus::Transaction for PooledTransactionsElement {
             Self::Eip1559(tx) => tx.tx().input(),
             Self::Eip7702(tx) => tx.tx().input(),
             Self::BlobTransaction(tx) => tx.tx().input(),
-        }
-    }
-
-    fn ty(&self) -> u8 {
-        match self {
-            Self::Legacy(tx) => tx.tx().ty(),
-            Self::Eip2930(tx) => tx.tx().ty(),
-            Self::Eip1559(tx) => tx.tx().ty(),
-            Self::Eip7702(tx) => tx.tx().ty(),
-            Self::BlobTransaction(tx) => tx.tx().ty(),
         }
     }
 
@@ -635,7 +616,7 @@ impl InMemorySize for PooledTransactionsElement {
 
 impl From<PooledTransactionsElementEcRecovered> for PooledTransactionsElement {
     fn from(recovered: PooledTransactionsElementEcRecovered) -> Self {
-        recovered.into_transaction()
+        recovered.into_signed()
     }
 }
 
@@ -643,7 +624,19 @@ impl TryFrom<TransactionSigned> for PooledTransactionsElement {
     type Error = TransactionConversionError;
 
     fn try_from(tx: TransactionSigned) -> Result<Self, Self::Error> {
-        Self::try_from_broadcast(tx).map_err(|_| TransactionConversionError::UnsupportedForP2P)
+        tx.try_into_pooled().map_err(|_| TransactionConversionError::UnsupportedForP2P)
+    }
+}
+
+impl From<PooledTransactionsElement> for TransactionSigned {
+    fn from(element: PooledTransactionsElement) -> Self {
+        match element {
+            PooledTransactionsElement::Legacy(tx) => tx.into(),
+            PooledTransactionsElement::Eip2930(tx) => tx.into(),
+            PooledTransactionsElement::Eip1559(tx) => tx.into(),
+            PooledTransactionsElement::Eip7702(tx) => tx.into(),
+            PooledTransactionsElement::BlobTransaction(blob_tx) => blob_tx.into_parts().0,
+        }
     }
 }
 
@@ -660,7 +653,7 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
         // Attempt to create a `TransactionSigned` with arbitrary data.
         let tx_signed = TransactionSigned::arbitrary(u)?;
         // Attempt to create a `PooledTransactionsElement` with arbitrary data, handling the Result.
-        match Self::try_from_broadcast(tx_signed) {
+        match tx_signed.try_into_pooled() {
             Ok(tx) => Ok(tx),
             Err(tx) => {
                 let (tx, sig, hash) = tx.into_parts();
@@ -681,89 +674,42 @@ impl<'a> arbitrary::Arbitrary<'a> for PooledTransactionsElement {
 }
 
 /// A signed pooled transaction with recovered signer.
-#[derive(Debug, Clone, PartialEq, Eq, AsRef, Deref)]
-pub struct PooledTransactionsElementEcRecovered<T = PooledTransactionsElement> {
-    /// Signer of the transaction
-    signer: Address,
-    /// Signed transaction
-    #[deref]
-    #[as_ref]
-    transaction: T,
-}
+pub type PooledTransactionsElementEcRecovered<T = PooledTransactionsElement> = RecoveredTx<T>;
 
-impl<T> PooledTransactionsElementEcRecovered<T> {
-    /// Create an instance from the given transaction and the [`Address`] of the signer.
-    pub const fn from_signed_transaction(transaction: T, signer: Address) -> Self {
-        Self { transaction, signer }
-    }
-
-    /// Signer of transaction recovered from signature
-    pub const fn signer(&self) -> Address {
-        self.signer
-    }
-
-    /// Consume the type and return the transaction
-    pub fn into_transaction(self) -> T {
-        self.transaction
-    }
-
-    /// Dissolve Self to its component
-    pub fn into_components(self) -> (T, Address) {
-        (self.transaction, self.signer)
-    }
-}
 impl PooledTransactionsElementEcRecovered {
-    /// Transform back to [`TransactionSignedEcRecovered`]
-    pub fn into_ecrecovered_transaction(self) -> TransactionSignedEcRecovered {
-        let (tx, signer) = self.into_components();
+    /// Transform back to [`RecoveredTx`]
+    pub fn into_ecrecovered_transaction(self) -> RecoveredTx {
+        let (tx, signer) = self.to_components();
         tx.into_ecrecovered_transaction(signer)
     }
 
-    /// Converts from an EIP-4844 [`TransactionSignedEcRecovered`] to a
+    /// Converts from an EIP-4844 [`RecoveredTx`] to a
     /// [`PooledTransactionsElementEcRecovered`] with the given sidecar.
     ///
     /// Returns the transaction is not an EIP-4844 transaction.
     pub fn try_from_blob_transaction(
-        tx: TransactionSignedEcRecovered,
+        tx: RecoveredTx,
         sidecar: BlobTransactionSidecar,
-    ) -> Result<Self, TransactionSignedEcRecovered> {
-        let TransactionSignedEcRecovered { signer, signed_transaction } = tx;
+    ) -> Result<Self, RecoveredTx> {
+        let RecoveredTx { signer, signed_transaction } = tx;
         let transaction =
             PooledTransactionsElement::try_from_blob_transaction(signed_transaction, sidecar)
-                .map_err(|tx| TransactionSignedEcRecovered { signer, signed_transaction: tx })?;
-        Ok(Self { transaction, signer })
+                .map_err(|tx| RecoveredTx { signer, signed_transaction: tx })?;
+        Ok(Self::from_signed_transaction(transaction, signer))
     }
 }
 
-/// Converts a `TransactionSignedEcRecovered` into a `PooledTransactionsElementEcRecovered`.
-impl TryFrom<TransactionSignedEcRecovered> for PooledTransactionsElementEcRecovered {
+/// Converts a `Recovered` into a `PooledTransactionsElementEcRecovered`.
+impl TryFrom<RecoveredTx> for PooledTransactionsElementEcRecovered {
     type Error = TransactionConversionError;
 
-    fn try_from(tx: TransactionSignedEcRecovered) -> Result<Self, Self::Error> {
+    fn try_from(tx: RecoveredTx) -> Result<Self, Self::Error> {
         match PooledTransactionsElement::try_from(tx.signed_transaction) {
             Ok(pooled_transaction) => {
-                Ok(Self { transaction: pooled_transaction, signer: tx.signer })
+                Ok(Self::from_signed_transaction(pooled_transaction, tx.signer))
             }
             Err(_) => Err(TransactionConversionError::UnsupportedForP2P),
         }
-    }
-}
-
-impl<T: Encodable2718> Encodable2718 for PooledTransactionsElementEcRecovered<T> {
-    fn type_flag(&self) -> Option<u8> {
-        self.transaction.type_flag()
-    }
-
-    fn encode_2718_len(&self) -> usize {
-        self.transaction.encode_2718_len()
-    }
-
-    fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
-        self.transaction.encode_2718(out)
-    }
-
-    fn trie_hash(&self) -> B256 {
-        self.transaction.trie_hash()
     }
 }
 

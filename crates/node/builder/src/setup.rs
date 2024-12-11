@@ -86,7 +86,7 @@ pub fn build_pipeline<N, H, B, Executor>(
 where
     N: ProviderNodeTypes,
     H: HeaderDownloader<Header = HeaderTy<N>> + 'static,
-    B: BodyDownloader<Body = BodyTy<N>> + 'static,
+    B: BodyDownloader<Header = HeaderTy<N>, Body = BodyTy<N>> + 'static,
     Executor: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     let mut builder = Pipeline::<N>::builder();

@@ -319,9 +319,9 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         Ok(Head {
             number: head,
             hash,
-            difficulty: header.difficulty,
+            difficulty: header.difficulty(),
             total_difficulty,
-            timestamp: header.timestamp,
+            timestamp: header.timestamp(),
         })
     }
 
@@ -344,7 +344,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.number)
+            return Ok(header.number())
         }
 
         Ok(self.fetch_tip_from_network(client, tip.into()).await.number())

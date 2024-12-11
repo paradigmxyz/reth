@@ -1,5 +1,6 @@
 use super::queue::BodiesRequestQueue;
 use crate::{bodies::task::TaskDownloader, metrics::BodyDownloaderMetrics};
+use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use futures::Stream;
 use futures_util::StreamExt;
@@ -34,11 +35,11 @@ use tracing::info;
 /// All blocks in a batch are fetched at the same time.
 #[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
-pub struct BodiesDownloader<B: BodiesClient, Provider> {
+pub struct BodiesDownloader<B: BodiesClient, Provider: HeaderProvider> {
     /// The bodies client
     client: Arc<B>,
     /// The consensus client
-    consensus: Arc<dyn Consensus<alloy_consensus::Header, B::Body>>,
+    consensus: Arc<dyn Consensus<Provider::Header, B::Body>>,
     /// The database handle
     provider: Provider,
     /// The maximum number of non-empty blocks per one request
@@ -56,11 +57,11 @@ pub struct BodiesDownloader<B: BodiesClient, Provider> {
     /// The latest block number returned.
     latest_queued_block_number: Option<BlockNumber>,
     /// Requests in progress
-    in_progress_queue: BodiesRequestQueue<B>,
+    in_progress_queue: BodiesRequestQueue<Provider::Header, B>,
     /// Buffered responses
-    buffered_responses: BinaryHeap<OrderedBodiesResponse<B::Body>>,
+    buffered_responses: BinaryHeap<OrderedBodiesResponse<Provider::Header, B::Body>>,
     /// Queued body responses that can be returned for insertion into the database.
-    queued_bodies: Vec<BlockResponse<B::Body>>,
+    queued_bodies: Vec<BlockResponse<Provider::Header, B::Body>>,
     /// The bodies downloader metrics.
     metrics: BodyDownloaderMetrics,
 }
@@ -68,10 +69,10 @@ pub struct BodiesDownloader<B: BodiesClient, Provider> {
 impl<B, Provider> BodiesDownloader<B, Provider>
 where
     B: BodiesClient<Body: InMemorySize> + 'static,
-    Provider: HeaderProvider + Unpin + 'static,
+    Provider: HeaderProvider<Header: BlockHeader> + Unpin + 'static,
 {
     /// Returns the next contiguous request.
-    fn next_headers_request(&self) -> DownloadResult<Option<Vec<SealedHeader>>> {
+    fn next_headers_request(&self) -> DownloadResult<Option<Vec<SealedHeader<Provider::Header>>>> {
         let start_at = match self.in_progress_queue.last_requested_block_number {
             Some(num) => num + 1,
             None => *self.download_range.start(),
@@ -96,7 +97,7 @@ where
         &self,
         range: RangeInclusive<BlockNumber>,
         max_non_empty: u64,
-    ) -> DownloadResult<Option<Vec<SealedHeader>>> {
+    ) -> DownloadResult<Option<Vec<SealedHeader<Provider::Header>>>> {
         if range.is_empty() || max_non_empty == 0 {
             return Ok(None)
         }
@@ -109,7 +110,7 @@ where
         let mut collected = 0;
         let mut non_empty_headers = 0;
         let headers = self.provider.sealed_headers_while(range.clone(), |header| {
-            let should_take = range.contains(&header.number) &&
+            let should_take = range.contains(&header.number()) &&
                 non_empty_headers < max_non_empty &&
                 collected < self.stream_batch_size;
 
@@ -192,14 +193,16 @@ where
     }
 
     /// Queues bodies and sets the latest queued block number
-    fn queue_bodies(&mut self, bodies: Vec<BlockResponse<B::Body>>) {
+    fn queue_bodies(&mut self, bodies: Vec<BlockResponse<Provider::Header, B::Body>>) {
         self.latest_queued_block_number = Some(bodies.last().expect("is not empty").block_number());
         self.queued_bodies.extend(bodies);
         self.metrics.queued_blocks.set(self.queued_bodies.len() as f64);
     }
 
     /// Removes the next response from the buffer.
-    fn pop_buffered_response(&mut self) -> Option<OrderedBodiesResponse<B::Body>> {
+    fn pop_buffered_response(
+        &mut self,
+    ) -> Option<OrderedBodiesResponse<Provider::Header, B::Body>> {
         let resp = self.buffered_responses.pop()?;
         self.metrics.buffered_responses.decrement(1.);
         self.buffered_blocks_size_bytes -= resp.size();
@@ -209,10 +212,10 @@ where
     }
 
     /// Adds a new response to the internal buffer
-    fn buffer_bodies_response(&mut self, response: Vec<BlockResponse<B::Body>>) {
+    fn buffer_bodies_response(&mut self, response: Vec<BlockResponse<Provider::Header, B::Body>>) {
         // take into account capacity
         let size = response.iter().map(BlockResponse::size).sum::<usize>() +
-            response.capacity() * mem::size_of::<BlockResponse<B::Body>>();
+            response.capacity() * mem::size_of::<BlockResponse<Provider::Header, B::Body>>();
 
         let response = OrderedBodiesResponse { resp: response, size };
         let response_len = response.len();
@@ -226,7 +229,7 @@ where
     }
 
     /// Returns a response if it's first block number matches the next expected.
-    fn try_next_buffered(&mut self) -> Option<Vec<BlockResponse<B::Body>>> {
+    fn try_next_buffered(&mut self) -> Option<Vec<BlockResponse<Provider::Header, B::Body>>> {
         if let Some(next) = self.buffered_responses.peek() {
             let expected = self.next_expected_block_number();
             let next_block_range = next.block_range();
@@ -252,7 +255,7 @@ where
 
     /// Returns the next batch of block bodies that can be returned if we have enough buffered
     /// bodies
-    fn try_split_next_batch(&mut self) -> Option<Vec<BlockResponse<B::Body>>> {
+    fn try_split_next_batch(&mut self) -> Option<Vec<BlockResponse<Provider::Header, B::Body>>> {
         if self.queued_bodies.len() >= self.stream_batch_size {
             let next_batch = self.queued_bodies.drain(..self.stream_batch_size).collect::<Vec<_>>();
             self.queued_bodies.shrink_to_fit();
@@ -284,12 +287,17 @@ where
     Self: BodyDownloader + 'static,
 {
     /// Spawns the downloader task via [`tokio::task::spawn`]
-    pub fn into_task(self) -> TaskDownloader<<Self as BodyDownloader>::Body> {
+    pub fn into_task(
+        self,
+    ) -> TaskDownloader<<Self as BodyDownloader>::Header, <Self as BodyDownloader>::Body> {
         self.into_task_with(&TokioTaskExecutor::default())
     }
 
     /// Convert the downloader into a [`TaskDownloader`] by spawning it via the given spawner.
-    pub fn into_task_with<S>(self, spawner: &S) -> TaskDownloader<<Self as BodyDownloader>::Body>
+    pub fn into_task_with<S>(
+        self,
+        spawner: &S,
+    ) -> TaskDownloader<<Self as BodyDownloader>::Header, <Self as BodyDownloader>::Body>
     where
         S: TaskSpawner,
     {
@@ -302,6 +310,7 @@ where
     B: BodiesClient<Body: Debug + InMemorySize> + 'static,
     Provider: HeaderProvider + Unpin + 'static,
 {
+    type Header = Provider::Header;
     type Body = B::Body;
 
     /// Set a new download range (exclusive).
@@ -352,7 +361,7 @@ where
     B: BodiesClient<Body: InMemorySize> + 'static,
     Provider: HeaderProvider + Unpin + 'static,
 {
-    type Item = BodyDownloaderResult<B::Body>;
+    type Item = BodyDownloaderResult<Provider::Header, B::Body>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -434,13 +443,31 @@ where
 }
 
 #[derive(Debug)]
-struct OrderedBodiesResponse<B> {
-    resp: Vec<BlockResponse<B>>,
+struct OrderedBodiesResponse<H, B> {
+    resp: Vec<BlockResponse<H, B>>,
     /// The total size of the response in bytes
     size: usize,
 }
 
-impl<B> OrderedBodiesResponse<B> {
+impl<H, B> OrderedBodiesResponse<H, B> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.resp.len()
+    }
+
+    /// Returns the size of the response in bytes
+    ///
+    /// See [`BlockResponse::size`]
+    #[inline]
+    const fn size(&self) -> usize {
+        self.size
+    }
+}
+
+impl<H, B> OrderedBodiesResponse<H, B>
+where
+    H: BlockHeader,
+{
     /// Returns the block number of the first element
     ///
     /// # Panics
@@ -456,36 +483,23 @@ impl<B> OrderedBodiesResponse<B> {
     fn block_range(&self) -> RangeInclusive<u64> {
         self.first_block_number()..=self.resp.last().expect("is not empty").block_number()
     }
-
-    #[inline]
-    fn len(&self) -> usize {
-        self.resp.len()
-    }
-
-    /// Returns the size of the response in bytes
-    ///
-    /// See [`BlockResponse::size`]
-    #[inline]
-    const fn size(&self) -> usize {
-        self.size
-    }
 }
 
-impl<B> PartialEq for OrderedBodiesResponse<B> {
+impl<H: BlockHeader, B> PartialEq for OrderedBodiesResponse<H, B> {
     fn eq(&self, other: &Self) -> bool {
         self.first_block_number() == other.first_block_number()
     }
 }
 
-impl<B> Eq for OrderedBodiesResponse<B> {}
+impl<H: BlockHeader, B> Eq for OrderedBodiesResponse<H, B> {}
 
-impl<B> PartialOrd for OrderedBodiesResponse<B> {
+impl<H: BlockHeader, B> PartialOrd for OrderedBodiesResponse<H, B> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<B> Ord for OrderedBodiesResponse<B> {
+impl<H: BlockHeader, B> Ord for OrderedBodiesResponse<H, B> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.first_block_number().cmp(&other.first_block_number()).reverse()
     }
@@ -565,7 +579,7 @@ impl BodiesDownloaderBuilder {
     pub fn build<B, Provider>(
         self,
         client: B,
-        consensus: Arc<dyn Consensus<alloy_consensus::Header, B::Body>>,
+        consensus: Arc<dyn Consensus<Provider::Header, B::Body>>,
         provider: Provider,
     ) -> BodiesDownloader<B, Provider>
     where

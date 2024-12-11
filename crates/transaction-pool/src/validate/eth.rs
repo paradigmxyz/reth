@@ -11,20 +11,19 @@ use crate::{
     EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
-use alloy_consensus::constants::{
-    EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
-    LEGACY_TX_TYPE_ID,
+use alloy_consensus::{
+    constants::{
+        EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+        LEGACY_TX_TYPE_ID,
+    },
+    BlockHeader,
 };
-use alloy_eips::eip4844::MAX_BLOBS_PER_BLOCK;
+use alloy_eips::eip4844::{env_settings::EnvKzgSettings, MAX_BLOBS_PER_BLOCK};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{InvalidTransactionError, SealedBlock};
 use reth_primitives_traits::GotExpected;
 use reth_storage_api::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
-use revm::{
-    interpreter::gas::validate_initial_tx_gas,
-    primitives::{EnvKzgSettings, SpecId},
-};
 use std::{
     marker::PhantomData,
     sync::{atomic::AtomicBool, Arc},
@@ -102,7 +101,7 @@ where
     }
 
     fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
-        self.inner.on_new_head_block(new_tip_block)
+        self.inner.on_new_head_block(new_tip_block.header())
     }
 }
 
@@ -263,7 +262,7 @@ where
 
         // Drop non-local transactions with a fee lower than the configured fee for acceptance into
         // the pool.
-        if !self.local_transactions_config.is_local(origin, transaction.sender()) &&
+        if !self.local_transactions_config.is_local(origin, transaction.sender_ref()) &&
             transaction.is_eip1559() &&
             transaction.max_priority_fee_per_gas() < self.minimum_priority_fee
         {
@@ -469,17 +468,17 @@ where
         }
     }
 
-    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+    fn on_new_head_block<T: BlockHeader>(&self, new_tip_block: &T) {
         // update all forks
-        if self.chain_spec.is_cancun_active_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_cancun_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if self.chain_spec.is_shanghai_active_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_shanghai_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if self.chain_spec.is_prague_active_at_timestamp(new_tip_block.timestamp) {
+        if self.chain_spec.is_prague_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.prague.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
@@ -804,6 +803,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     transaction: &T,
     fork_tracker: &ForkTracker,
 ) -> Result<(), InvalidPoolTransactionError> {
+    use revm_primitives::SpecId;
     let spec_id = if fork_tracker.is_prague_activated() {
         SpecId::PRAGUE
     } else if fork_tracker.is_shanghai_activated() {
@@ -812,10 +812,10 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         SpecId::MERGE
     };
 
-    let gas_after_merge = validate_initial_tx_gas(
+    let gas_after_merge = revm_interpreter::gas::validate_initial_tx_gas(
         spec_id,
         transaction.input(),
-        transaction.kind().is_create(),
+        transaction.is_create(),
         transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
         transaction.authorization_count() as u64,
     );

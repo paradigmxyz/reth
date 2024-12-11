@@ -88,6 +88,8 @@ pub struct Header {
     pub parent_beacon_block_root: Option<B256>,
     /// Requests root.
     pub requests_hash: Option<B256>,
+    /// Target blobs per block.
+    pub target_blobs_per_block: Option<U256>,
 }
 
 impl From<Header> for SealedHeader {
@@ -114,6 +116,7 @@ impl From<Header> for SealedHeader {
             excess_blob_gas: value.excess_blob_gas.map(|v| v.to::<u64>()),
             parent_beacon_block_root: value.parent_beacon_block_root,
             requests_hash: value.requests_hash,
+            target_blobs_per_block: value.target_blobs_per_block.map(|v| v.to::<u64>()),
         };
         Self::new(header, value.hash)
     }
@@ -165,10 +168,15 @@ impl State {
             };
             tx.put::<tables::PlainAccountState>(address, reth_account)?;
             tx.put::<tables::HashedAccounts>(hashed_address, reth_account)?;
+
             if let Some(code_hash) = code_hash {
                 tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.clone()))?;
             }
-            account.storage.iter().filter(|(_, v)| !v.is_zero()).try_for_each(|(k, v)| {
+
+            for (k, v) in &account.storage {
+                if v.is_zero() {
+                    continue
+                }
                 let storage_key = B256::from_slice(&k.to_be_bytes::<32>());
                 tx.put::<tables::PlainStorageState>(
                     address,
@@ -177,10 +185,9 @@ impl State {
                 tx.put::<tables::HashedStorages>(
                     hashed_address,
                     StorageEntry { key: keccak256(storage_key), value: *v },
-                )
-            })?;
+                )?;
+            }
         }
-
         Ok(())
     }
 }
@@ -212,9 +219,12 @@ impl Account {
     ///
     /// In case of a mismatch, `Err(Error::Assertion)` is returned.
     pub fn assert_db(&self, address: Address, tx: &impl DbTx) -> Result<(), Error> {
-        let account = tx.get::<tables::PlainAccountState>(address)?.ok_or_else(|| {
-            Error::Assertion(format!("Expected account ({address}) is missing from DB: {self:?}"))
-        })?;
+        let account =
+            tx.get_by_encoded_key::<tables::PlainAccountState>(&address)?.ok_or_else(|| {
+                Error::Assertion(format!(
+                    "Expected account ({address}) is missing from DB: {self:?}"
+                ))
+            })?;
 
         assert_equal(self.balance, account.balance, "Balance does not match")?;
         assert_equal(self.nonce.to(), account.nonce, "Nonce does not match")?;

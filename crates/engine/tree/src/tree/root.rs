@@ -1,21 +1,28 @@
 //! State root task related functionality.
 
 use alloy_primitives::map::{HashMap, HashSet};
+use rayon::iter::{ParallelBridge, ParallelIterator};
+use reth_evm::system_calls::OnStateHook;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
+    StateCommitmentProvider,
 };
 use reth_trie::{
-    proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof, Nibbles,
-    TrieInput,
+    proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof,
+    MultiProofTargets, Nibbles, TrieInput,
 };
 use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
-use reth_trie_sparse::{SparseStateTrie, SparseStateTrieResult, SparseTrieError};
+use reth_trie_sparse::{
+    errors::{SparseStateTrieResult, SparseTrieErrorKind},
+    SparseStateTrie,
+};
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
     collections::BTreeMap,
+    ops::Deref,
     sync::{
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, channel, Receiver, Sender},
         Arc,
     },
     time::{Duration, Instant},
@@ -31,7 +38,7 @@ pub(crate) type StateRootResult = Result<(B256, TrieUpdates), ParallelStateRootE
 /// Handle to a spawned state root task.
 #[derive(Debug)]
 #[allow(dead_code)]
-pub(crate) struct StateRootHandle {
+pub struct StateRootHandle {
     /// Channel for receiving the final result.
     rx: mpsc::Receiver<StateRootResult>,
 }
@@ -44,14 +51,14 @@ impl StateRootHandle {
     }
 
     /// Waits for the state root calculation to complete.
-    pub(crate) fn wait_for_result(self) -> StateRootResult {
+    pub fn wait_for_result(self) -> StateRootResult {
         self.rx.recv().expect("state root task was dropped without sending result")
     }
 }
 
 /// Common configuration for state root tasks
 #[derive(Debug)]
-pub(crate) struct StateRootConfig<Factory> {
+pub struct StateRootConfig<Factory> {
     /// View over the state in the database.
     pub consistent_view: ConsistentDbView<Factory>,
     /// Latest trie input.
@@ -61,7 +68,7 @@ pub(crate) struct StateRootConfig<Factory> {
 /// Messages used internally by the state root task
 #[derive(Debug)]
 #[allow(dead_code)]
-pub(crate) enum StateRootMessage {
+pub enum StateRootMessage {
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
@@ -80,6 +87,8 @@ pub(crate) enum StateRootMessage {
         /// Time taken to calculate the root
         elapsed: Duration,
     },
+    /// Signals state update stream end.
+    FinishedStateUpdates,
 }
 
 /// Handle to track proof calculation ordering
@@ -148,6 +157,64 @@ impl ProofSequencer {
     }
 }
 
+/// A wrapper for the sender that signals completion when dropped
+#[allow(dead_code)]
+pub(crate) struct StateHookSender(Sender<StateRootMessage>);
+
+#[allow(dead_code)]
+impl StateHookSender {
+    pub(crate) const fn new(inner: Sender<StateRootMessage>) -> Self {
+        Self(inner)
+    }
+}
+
+impl Deref for StateHookSender {
+    type Target = Sender<StateRootMessage>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for StateHookSender {
+    fn drop(&mut self) {
+        // Send completion signal when the sender is dropped
+        let _ = self.0.send(StateRootMessage::FinishedStateUpdates);
+    }
+}
+
+fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
+    let mut hashed_state = HashedPostState::default();
+
+    for (address, account) in update {
+        if account.is_touched() {
+            let hashed_address = keccak256(address);
+            trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
+
+            let destroyed = account.is_selfdestructed();
+            let info = if destroyed { None } else { Some(account.info.into()) };
+            hashed_state.accounts.insert(hashed_address, info);
+
+            let mut changed_storage_iter = account
+                .storage
+                .into_iter()
+                .filter_map(|(slot, value)| {
+                    value.is_changed().then(|| (keccak256(B256::from(slot)), value.present_value))
+                })
+                .peekable();
+
+            if destroyed || changed_storage_iter.peek().is_some() {
+                hashed_state.storages.insert(
+                    hashed_address,
+                    HashedStorage::from_iter(destroyed, changed_storage_iter),
+                );
+            }
+        }
+    }
+
+    hashed_state
+}
+
 /// Standalone task that receives a transaction state stream and updates relevant
 /// data structures to calculate state root.
 ///
@@ -157,7 +224,7 @@ impl ProofSequencer {
 /// to the tree.
 /// Then it updates relevant leaves according to the result of the transaction.
 #[derive(Debug)]
-pub(crate) struct StateRootTask<Factory> {
+pub struct StateRootTask<Factory> {
     /// Task configuration.
     config: StateRootConfig<Factory>,
     /// Receiver for state root related messages.
@@ -165,7 +232,7 @@ pub(crate) struct StateRootTask<Factory> {
     /// Sender for state root related messages.
     tx: Sender<StateRootMessage>,
     /// Proof targets that have been already fetched.
-    fetched_proof_targets: HashMap<B256, HashSet<B256>>,
+    fetched_proof_targets: MultiProofTargets,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// The sparse trie used for the state root calculation. If [`None`], then update is in
@@ -176,14 +243,17 @@ pub(crate) struct StateRootTask<Factory> {
 #[allow(dead_code)]
 impl<Factory> StateRootTask<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader>
+        + StateCommitmentProvider
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     /// Creates a new state root task with the unified message channel
-    pub(crate) fn new(
-        config: StateRootConfig<Factory>,
-        tx: Sender<StateRootMessage>,
-        rx: Receiver<StateRootMessage>,
-    ) -> Self {
+    pub fn new(config: StateRootConfig<Factory>) -> Self {
+        let (tx, rx) = channel();
+
         Self {
             config,
             rx,
@@ -195,7 +265,7 @@ where
     }
 
     /// Spawns the state root task and returns a handle to await its result.
-    pub(crate) fn spawn(self) -> StateRootHandle {
+    pub fn spawn(self) -> StateRootHandle {
         let (tx, rx) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("State Root Task".to_string())
@@ -209,6 +279,17 @@ where
         StateRootHandle::new(rx)
     }
 
+    /// Returns a state hook to be used to send state updates to this task.
+    pub fn state_hook(&self) -> impl OnStateHook {
+        let state_hook = StateHookSender::new(self.tx.clone());
+
+        move |state: &EvmState| {
+            if let Err(error) = state_hook.send(StateRootMessage::StateUpdate(state.clone())) {
+                error!(target: "engine::root", ?error, "Failed to send state update");
+            }
+        }
+    }
+
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
@@ -216,42 +297,18 @@ where
         view: ConsistentDbView<Factory>,
         input: Arc<TrieInput>,
         update: EvmState,
-        fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
+        fetched_proof_targets: &mut MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage>,
-    ) -> HashMap<B256, HashSet<B256>> {
-        let mut hashed_state_update = HashedPostState::default();
-        for (address, account) in update {
-            if account.is_touched() {
-                let hashed_address = keccak256(address);
-                trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
-
-                let destroyed = account.is_selfdestructed();
-                let info = if account.is_empty() { None } else { Some(account.info.into()) };
-                hashed_state_update.accounts.insert(hashed_address, info);
-
-                let mut changed_storage_iter = account
-                    .storage
-                    .into_iter()
-                    .filter_map(|(slot, value)| {
-                        value
-                            .is_changed()
-                            .then(|| (keccak256(B256::from(slot)), value.present_value))
-                    })
-                    .peekable();
-                if destroyed || changed_storage_iter.peek().is_some() {
-                    hashed_state_update.storages.insert(
-                        hashed_address,
-                        HashedStorage::from_iter(destroyed, changed_storage_iter),
-                    );
-                }
-            }
-        }
+    ) {
+        let hashed_state_update = evm_state_to_hashed_post_state(update);
 
         let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
+        for (address, slots) in &proof_targets {
+            fetched_proof_targets.entry(*address).or_default().extend(slots)
+        }
 
         // Dispatch proof gathering for this state update
-        let targets = proof_targets.clone();
         rayon::spawn(move || {
             let provider = match view.provider_ro() {
                 Ok(provider) => provider,
@@ -266,7 +323,7 @@ where
                 provider.tx_ref(),
                 // TODO(alexey): this clone can be expensive, we should avoid it
                 input.as_ref().clone(),
-                targets,
+                proof_targets,
             );
             match result {
                 Ok(proof) => {
@@ -281,8 +338,6 @@ where
                 }
             }
         });
-
-        proof_targets
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -345,6 +400,7 @@ where
         let mut updates_received = 0;
         let mut proofs_processed = 0;
         let mut roots_calculated = 0;
+        let mut updates_finished = false;
 
         loop {
             match self.rx.recv() {
@@ -357,17 +413,17 @@ where
                             total_updates = updates_received,
                             "Received new state update"
                         );
-                        let targets = Self::on_state_update(
+                        Self::on_state_update(
                             self.config.consistent_view.clone(),
                             self.config.input.clone(),
                             update,
-                            &self.fetched_proof_targets,
+                            &mut self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
                         );
-                        for (address, slots) in targets {
-                            self.fetched_proof_targets.entry(address).or_default().extend(slots)
-                        }
+                    }
+                    StateRootMessage::FinishedStateUpdates => {
+                        updates_finished = true;
                     }
                     StateRootMessage::ProofCalculated { proof, state_update, sequence_number } => {
                         proofs_processed += 1;
@@ -428,7 +484,7 @@ where
                                 std::mem::take(&mut current_state_update),
                                 std::mem::take(&mut current_multiproof),
                             );
-                        } else if all_proofs_received && no_pending {
+                        } else if all_proofs_received && no_pending && updates_finished {
                             debug!(
                                 target: "engine::root",
                                 total_updates = updates_received,
@@ -464,31 +520,37 @@ where
     }
 }
 
+/// Returns accounts only with those storages that were not already fetched, and
+/// if there are no such storages and the account itself was already fetched, the
+/// account shouldn't be included.
 fn get_proof_targets(
     state_update: &HashedPostState,
-    fetched_proof_targets: &HashMap<B256, HashSet<B256>>,
-) -> HashMap<B256, HashSet<B256>> {
-    state_update
-        .accounts
-        .keys()
-        .filter(|hashed_address| !fetched_proof_targets.contains_key(*hashed_address))
-        .map(|hashed_address| (*hashed_address, HashSet::default()))
-        .chain(state_update.storages.iter().map(|(hashed_address, storage)| {
-            let fetched_storage_proof_targets = fetched_proof_targets.get(hashed_address);
-            (
-                *hashed_address,
-                storage
-                    .storage
-                    .keys()
-                    .filter(|slot| {
-                        !fetched_storage_proof_targets
-                            .is_some_and(|targets| targets.contains(*slot))
-                    })
-                    .copied()
-                    .collect(),
-            )
-        }))
-        .collect()
+    fetched_proof_targets: &MultiProofTargets,
+) -> MultiProofTargets {
+    let mut targets = HashMap::default();
+
+    // first collect all new accounts (not previously fetched)
+    for &hashed_address in state_update.accounts.keys() {
+        if !fetched_proof_targets.contains_key(&hashed_address) {
+            targets.insert(hashed_address, HashSet::default());
+        }
+    }
+
+    // then process storage slots for all accounts in the state update
+    for (hashed_address, storage) in &state_update.storages {
+        let fetched = fetched_proof_targets.get(hashed_address);
+        let mut changed_slots = storage
+            .storage
+            .keys()
+            .filter(|slot| !fetched.is_some_and(|f| f.contains(*slot)))
+            .peekable();
+
+        if changed_slots.peek().is_some() {
+            targets.entry(*hashed_address).or_default().extend(changed_slots);
+        }
+    }
+
+    targets
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
@@ -496,7 +558,7 @@ fn get_proof_targets(
 fn update_sparse_trie(
     mut trie: Box<SparseStateTrie>,
     multiproof: MultiProof,
-    targets: HashMap<B256, HashSet<B256>>,
+    targets: MultiProofTargets,
     state: HashedPostState,
 ) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
@@ -506,30 +568,45 @@ fn update_sparse_trie(
     trie.reveal_multiproof(targets, multiproof)?;
 
     // Update storage slots with new values and calculate storage roots.
-    for (address, storage) in state.storages {
-        trace!(target: "engine::root::sparse", ?address, "Updating storage");
-        let storage_trie = trie.storage_trie_mut(&address).ok_or(SparseTrieError::Blind)?;
+    let (tx, rx) = mpsc::channel();
+    state
+        .storages
+        .into_iter()
+        .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
+        .par_bridge()
+        .map(|(address, storage, storage_trie)| {
+            trace!(target: "engine::root::sparse", ?address, "Updating storage");
+            let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
 
-        if storage.wiped {
-            trace!(target: "engine::root::sparse", ?address, "Wiping storage");
-            storage_trie.wipe();
-        }
-
-        for (slot, value) in storage.storage {
-            let slot_nibbles = Nibbles::unpack(slot);
-            if value.is_zero() {
-                trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
-
-                // TODO: handle blinded node error
-                storage_trie.remove_leaf(&slot_nibbles)?;
-            } else {
-                trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
-                storage_trie
-                    .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
+            if storage.wiped {
+                trace!(target: "engine::root::sparse", ?address, "Wiping storage");
+                storage_trie.wipe()?;
             }
-        }
 
-        storage_trie.root();
+            for (slot, value) in storage.storage {
+                let slot_nibbles = Nibbles::unpack(slot);
+                if value.is_zero() {
+                    trace!(target: "engine::root::sparse", ?address, ?slot, "Removing storage slot");
+
+                    storage_trie.remove_leaf(&slot_nibbles)?;
+                } else {
+                    trace!(target: "engine::root::sparse", ?address, ?slot, "Updating storage slot");
+                    storage_trie
+                        .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
+                }
+            }
+
+            storage_trie.root();
+
+            SparseStateTrieResult::Ok((address, storage_trie))
+        })
+        .for_each_init(|| tx.clone(), |tx, result| {
+            tx.send(result).unwrap()
+        });
+    drop(tx);
+    for result in rx {
+        let (address, storage_trie) = result?;
+        trie.insert_storage_trie(address, storage_trie);
     }
 
     // Update accounts with new values
@@ -619,7 +696,6 @@ mod tests {
         reth_tracing::init_test_tracing();
 
         let factory = create_test_provider_factory();
-        let (tx, rx) = std::sync::mpsc::channel();
 
         let state_updates = create_mock_state_updates(10, 10);
         let mut hashed_state = HashedPostState::default();
@@ -651,34 +727,9 @@ mod tests {
         }
 
         for update in &state_updates {
+            hashed_state.extend(evm_state_to_hashed_post_state(update.clone()));
+
             for (address, account) in update {
-                let hashed_address = keccak256(*address);
-
-                if account.is_touched() {
-                    let destroyed = account.is_selfdestructed();
-                    hashed_state.accounts.insert(
-                        hashed_address,
-                        if destroyed || account.is_empty() {
-                            None
-                        } else {
-                            Some(account.info.clone().into())
-                        },
-                    );
-
-                    if destroyed || !account.storage.is_empty() {
-                        let storage = account
-                            .storage
-                            .iter()
-                            .filter(|&(_slot, value)| (!destroyed && value.is_changed()))
-                            .map(|(slot, value)| {
-                                (keccak256(B256::from(*slot)), value.present_value)
-                            });
-                        hashed_state
-                            .storages
-                            .insert(hashed_address, HashedStorage::from_iter(destroyed, storage));
-                    }
-                }
-
                 let storage: HashMap<B256, U256> = account
                     .storage
                     .iter()
@@ -695,13 +746,14 @@ mod tests {
             consistent_view: ConsistentDbView::new(factory, None),
             input: Arc::new(TrieInput::from_state(hashed_state)),
         };
-        let task = StateRootTask::new(config, tx.clone(), rx);
+        let task = StateRootTask::new(config);
+        let mut state_hook = task.state_hook();
         let handle = task.spawn();
 
         for update in state_updates {
-            tx.send(StateRootMessage::StateUpdate(update)).expect("failed to send state");
+            state_hook.on_state(&update);
         }
-        drop(tx);
+        drop(state_hook);
 
         let (root_from_task, _) = handle.wait_for_result().expect("task failed");
         let root_from_base = state_root(accumulated_state);
@@ -792,5 +844,167 @@ mod tests {
         let ready = sequencer.add_proof(0, proofs[0].clone(), HashedPostState::default());
         assert_eq!(ready.len(), 5);
         assert!(!sequencer.has_pending());
+    }
+
+    fn create_get_proof_targets_state() -> HashedPostState {
+        let mut state = HashedPostState::default();
+
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+        state.accounts.insert(addr1, Some(Default::default()));
+        state.accounts.insert(addr2, Some(Default::default()));
+
+        let mut storage = HashedStorage::default();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+        storage.storage.insert(slot1, U256::ZERO);
+        storage.storage.insert(slot2, U256::from(1));
+        state.storages.insert(addr1, storage);
+
+        state
+    }
+
+    #[test]
+    fn test_get_proof_targets_new_account_targets() {
+        let state = create_get_proof_targets_state();
+        let fetched = HashMap::default();
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        // should return all accounts as targets since nothing was fetched before
+        assert_eq!(targets.len(), state.accounts.len());
+        for addr in state.accounts.keys() {
+            assert!(targets.contains_key(addr));
+        }
+    }
+
+    #[test]
+    fn test_get_proof_targets_new_storage_targets() {
+        let state = create_get_proof_targets_state();
+        let fetched = HashMap::default();
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        // verify storage slots are included for accounts with storage
+        for (addr, storage) in &state.storages {
+            assert!(targets.contains_key(addr));
+            let target_slots = &targets[addr];
+            assert_eq!(target_slots.len(), storage.storage.len());
+            for slot in storage.storage.keys() {
+                assert!(target_slots.contains(slot));
+            }
+        }
+    }
+
+    #[test]
+    fn test_get_proof_targets_filter_already_fetched_accounts() {
+        let state = create_get_proof_targets_state();
+        let mut fetched = HashMap::default();
+
+        // select an account that has no storage updates
+        let fetched_addr = state
+            .accounts
+            .keys()
+            .find(|&&addr| !state.storages.contains_key(&addr))
+            .expect("Should have an account without storage");
+
+        // mark the account as already fetched
+        fetched.insert(*fetched_addr, HashSet::default());
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        // should not include the already fetched account since it has no storage updates
+        assert!(!targets.contains_key(fetched_addr));
+        // other accounts should still be included
+        assert_eq!(targets.len(), state.accounts.len() - 1);
+    }
+
+    #[test]
+    fn test_get_proof_targets_filter_already_fetched_storage() {
+        let state = create_get_proof_targets_state();
+        let mut fetched = HashMap::default();
+
+        // mark one storage slot as already fetched
+        let (addr, storage) = state.storages.iter().next().unwrap();
+        let mut fetched_slots = HashSet::default();
+        let fetched_slot = *storage.storage.keys().next().unwrap();
+        fetched_slots.insert(fetched_slot);
+        fetched.insert(*addr, fetched_slots);
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        // should not include the already fetched storage slot
+        let target_slots = &targets[addr];
+        assert!(!target_slots.contains(&fetched_slot));
+        assert_eq!(target_slots.len(), storage.storage.len() - 1);
+    }
+
+    #[test]
+    fn test_get_proof_targets_empty_state() {
+        let state = HashedPostState::default();
+        let fetched = HashMap::default();
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn test_get_proof_targets_mixed_fetched_state() {
+        let mut state = HashedPostState::default();
+        let mut fetched = HashMap::default();
+
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+
+        state.accounts.insert(addr1, Some(Default::default()));
+        state.accounts.insert(addr2, Some(Default::default()));
+
+        let mut storage = HashedStorage::default();
+        storage.storage.insert(slot1, U256::ZERO);
+        storage.storage.insert(slot2, U256::from(1));
+        state.storages.insert(addr1, storage);
+
+        let mut fetched_slots = HashSet::default();
+        fetched_slots.insert(slot1);
+        fetched.insert(addr1, fetched_slots);
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        assert!(targets.contains_key(&addr2));
+        assert!(!targets[&addr1].contains(&slot1));
+        assert!(targets[&addr1].contains(&slot2));
+    }
+
+    #[test]
+    fn test_get_proof_targets_unmodified_account_with_storage() {
+        let mut state = HashedPostState::default();
+        let fetched = HashMap::default();
+
+        let addr = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+
+        // don't add the account to state.accounts (simulating unmodified account)
+        // but add storage updates for this account
+        let mut storage = HashedStorage::default();
+        storage.storage.insert(slot1, U256::from(1));
+        storage.storage.insert(slot2, U256::from(2));
+        state.storages.insert(addr, storage);
+
+        assert!(!state.accounts.contains_key(&addr));
+        assert!(!fetched.contains_key(&addr));
+
+        let targets = get_proof_targets(&state, &fetched);
+
+        // verify that we still get the storage slots for the unmodified account
+        assert!(targets.contains_key(&addr));
+
+        let target_slots = &targets[&addr];
+        assert_eq!(target_slots.len(), 2);
+        assert!(target_slots.contains(&slot1));
+        assert!(target_slots.contains(&slot2));
     }
 }

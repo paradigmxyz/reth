@@ -11,10 +11,8 @@ use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGenera
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
-use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
-use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, PayloadBuilder,
-};
+use reth_network::{EthNetworkPrimitives, NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
+use reth_node_api::{AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
@@ -27,22 +25,23 @@ use reth_node_builder::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
-use reth_optimism_payload_builder::builder::OpPayloadTransactions;
+use reth_optimism_payload_builder::{builder::OpPayloadTransactions, config::OpDAConfig};
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{
+    miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
-    OpEthApi,
+    OpEthApi, SequencerClient,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::BlockBody;
+use reth_primitives::{BlockBody, PooledTransactionsElement, TransactionSigned};
 use reth_provider::{
     providers::ChainStorage, BlockBodyReader, BlockBodyWriter, CanonStateSubscriptions,
-    ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput,
+    ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput, StorageLocation,
 };
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, PoolTransaction, TransactionPool,
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
@@ -57,16 +56,18 @@ impl<Provider: DBProvider<Tx: DbTxMut>> BlockBodyWriter<Provider, BlockBody> for
         &self,
         provider: &Provider,
         bodies: Vec<(u64, Option<BlockBody>)>,
+        write_to: StorageLocation,
     ) -> ProviderResult<()> {
-        self.0.write_block_bodies(provider, bodies)
+        self.0.write_block_bodies(provider, bodies, write_to)
     }
 
     fn remove_block_bodies_above(
         &self,
         provider: &Provider,
         block: alloy_primitives::BlockNumber,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()> {
-        self.0.remove_block_bodies_above(provider, block)
+        self.0.remove_block_bodies_above(provider, block, remove_from)
     }
 }
 
@@ -112,12 +113,25 @@ impl ChainStorage<OpPrimitives> for OpStorage {
 pub struct OpNode {
     /// Additional Optimism args
     pub args: RollupArgs,
+    /// Data availability configuration for the OP builder.
+    ///
+    /// Used to throttle the size of the data availability payloads (configured by the batcher via
+    /// the `miner_` api).
+    ///
+    /// By default no throttling is applied.
+    pub da_config: OpDAConfig,
 }
 
 impl OpNode {
     /// Creates a new instance of the Optimism node type.
-    pub const fn new(args: RollupArgs) -> Self {
-        Self { args }
+    pub fn new(args: RollupArgs) -> Self {
+        Self { args, da_config: OpDAConfig::default() }
+    }
+
+    /// Configure the data availability configuration for the OP builder.
+    pub fn with_da_config(mut self, da_config: OpDAConfig) -> Self {
+        self.da_config = da_config;
+        self
     }
 
     /// Returns the components for the given [`RollupArgs`].
@@ -178,12 +192,14 @@ where
         OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
-        let Self { args } = self;
-        Self::components(args.clone())
+        Self::components(self.args.clone())
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        OpAddOns::new(self.args.sequencer_http.clone())
+        Self::AddOns::builder()
+            .with_sequencer(self.args.sequencer_http.clone())
+            .with_da_config(self.da_config.clone())
+            .build()
     }
 }
 
@@ -200,26 +216,37 @@ impl NodeTypesWithEngine for OpNode {
 
 /// Add-ons w.r.t. optimism.
 #[derive(Debug)]
-pub struct OpAddOns<N: FullNodeComponents>(pub RpcAddOns<N, OpEthApi<N>, OpEngineValidatorBuilder>);
+pub struct OpAddOns<N: FullNodeComponents> {
+    /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers
+    /// and eth-api.
+    pub rpc_add_ons: RpcAddOns<N, OpEthApi<N>, OpEngineValidatorBuilder>,
+    /// Data availability configuration for the OP builder.
+    pub da_config: OpDAConfig,
+}
 
 impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> Default for OpAddOns<N> {
     fn default() -> Self {
-        Self::new(None)
+        Self::builder().build()
     }
 }
 
 impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> OpAddOns<N> {
-    /// Create a new instance with the given `sequencer_http` URL.
-    pub fn new(sequencer_http: Option<String>) -> Self {
-        Self(RpcAddOns::new(move |ctx| OpEthApi::new(ctx, sequencer_http), Default::default()))
+    /// Build a [`OpAddOns`] using [`OpAddOnsBuilder`].
+    pub fn builder() -> OpAddOnsBuilder {
+        OpAddOnsBuilder::default()
     }
 }
 
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Storage = OpStorage>,
-        PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
+        Types: NodeTypesWithEngine<
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Storage = OpStorage,
+            Engine = OpEngineTypes,
+        >,
+        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransactionsElement>>,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
@@ -229,14 +256,32 @@ where
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
+        let Self { rpc_add_ons, da_config } = self;
         // install additional OP specific rpc methods
-        let debug_ext =
-            OpDebugWitnessApi::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
+        let debug_ext = OpDebugWitnessApi::new(
+            ctx.node.provider().clone(),
+            ctx.node.evm_config().clone(),
+            Box::new(ctx.node.task_executor().clone()),
+        );
+        let miner_ext = OpMinerExtApi::new(da_config);
 
-        self.0
-            .launch_add_ons_with(ctx, move |modules| {
+        rpc_add_ons
+            .launch_add_ons_with(ctx, move |modules, auth_modules| {
                 debug!(target: "reth::cli", "Installing debug payload witness rpc endpoint");
                 modules.merge_if_module_configured(RethRpcModule::Debug, debug_ext.into_rpc())?;
+
+                // extend the miner namespace if configured in the regular http server
+                modules.merge_if_module_configured(
+                    RethRpcModule::Miner,
+                    miner_ext.clone().into_rpc(),
+                )?;
+
+                // install the miner extension in the authenticated if configured
+                if modules.module_config().contains_any(&RethRpcModule::Miner) {
+                    debug!(target: "reth::cli", "Installing miner DA rpc enddpoint");
+                    auth_modules.merge_auth_methods(miner_ext.into_rpc())?;
+                }
+
                 Ok(())
             })
             .await
@@ -246,27 +291,80 @@ where
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Storage = OpStorage>,
-        PayloadBuilder: PayloadBuilder<PayloadType = <N::Types as NodeTypesWithEngine>::Engine>,
+        Types: NodeTypesWithEngine<
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Storage = OpStorage,
+            Engine = OpEngineTypes,
+        >,
+        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransactionsElement>>,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type EthApi = OpEthApi<N>;
 
     fn hooks_mut(&mut self) -> &mut reth_node_builder::rpc::RpcHooks<N, Self::EthApi> {
-        self.0.hooks_mut()
+        self.rpc_add_ons.hooks_mut()
     }
 }
 
 impl<N> EngineValidatorAddOn<N> for OpAddOns<N>
 where
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
-    OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<
+            ChainSpec = OpChainSpec,
+            Primitives = OpPrimitives,
+            Engine = OpEngineTypes,
+        >,
+    >,
 {
     type Validator = OpEngineValidator;
 
     async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         OpEngineValidatorBuilder::default().build(ctx).await
+    }
+}
+
+/// A regular optimism evm and executor builder.
+#[derive(Debug, Default, Clone)]
+#[non_exhaustive]
+pub struct OpAddOnsBuilder {
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
+    /// network.
+    sequencer_client: Option<SequencerClient>,
+    /// Data availability configuration for the OP builder.
+    da_config: Option<OpDAConfig>,
+}
+
+impl OpAddOnsBuilder {
+    /// With a [`SequencerClient`].
+    pub fn with_sequencer(mut self, sequencer_client: Option<String>) -> Self {
+        self.sequencer_client = sequencer_client.map(SequencerClient::new);
+        self
+    }
+
+    /// Configure the data availability configuration for the OP builder.
+    pub fn with_da_config(mut self, da_config: OpDAConfig) -> Self {
+        self.da_config = Some(da_config);
+        self
+    }
+}
+
+impl OpAddOnsBuilder {
+    /// Builds an instance of [`OpAddOns`].
+    pub fn build<N>(self) -> OpAddOns<N>
+    where
+        N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
+    {
+        let Self { sequencer_client, da_config } = self;
+
+        OpAddOns {
+            rpc_add_ons: RpcAddOns::new(
+                move |ctx| OpEthApi::<N>::builder().with_sequencer(sequencer_client).build(ctx),
+                Default::default(),
+            ),
+            da_config: da_config.unwrap_or_default(),
+        }
     }
 }
 
@@ -434,8 +532,10 @@ where
                 Primitives = OpPrimitives,
             >,
         >,
-        Pool: TransactionPool + Unpin + 'static,
-        Evm: ConfigureEvm<Header = Header>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+            + Unpin
+            + 'static,
+        Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::new(evm_config)
             .with_transactions(self.best_transactions)
@@ -474,7 +574,9 @@ where
             Primitives = OpPrimitives,
         >,
     >,
-    Pool: TransactionPool + Unpin + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
+        + 'static,
     Txs: OpPayloadTransactions,
 {
     async fn spawn_payload_service(
@@ -546,8 +648,16 @@ impl OpNetworkBuilder {
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
-    Pool: TransactionPool + Unpin + 'static,
+    Pool: TransactionPool<
+            Transaction: PoolTransaction<
+                Consensus = TxTy<Node::Types>,
+                Pooled = PooledTransactionsElement,
+            >,
+        > + Unpin
+        + 'static,
 {
+    type Primitives = EthNetworkPrimitives;
+
     async fn build_network(
         self,
         ctx: &BuilderContext<Node>,
@@ -585,9 +695,12 @@ pub struct OpEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = OpChainSpec>,
+    Types: NodeTypesWithEngine<
+        ChainSpec = OpChainSpec,
+        Primitives = OpPrimitives,
+        Engine = OpEngineTypes,
+    >,
     Node: FullNodeComponents<Types = Types>,
-    OpEngineValidator: EngineValidator<Types::Engine>,
 {
     type Validator = OpEngineValidator;
 

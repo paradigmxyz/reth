@@ -94,7 +94,7 @@ pub struct Transactions<T = TransactionSigned>(
     pub Vec<T>,
 );
 
-impl Transactions {
+impl<T: SignedTransaction> Transactions<T> {
     /// Returns `true` if the list of transactions contains any blob transactions.
     pub fn has_eip4844(&self) -> bool {
         self.0.iter().any(|tx| tx.is_eip4844())

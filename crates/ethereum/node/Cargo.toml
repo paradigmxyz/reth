@@ -32,8 +32,6 @@ reth-primitives.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 reth-trie-db.workspace = true
 
-alloy-consensus.workspace = true
-
 # revm with required ethereum features
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 

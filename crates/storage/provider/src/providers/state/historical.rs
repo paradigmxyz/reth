@@ -1,11 +1,10 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    ProviderError, StateProvider, StateRootProvider,
+    HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{
-    map::{HashMap, HashSet},
-    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+    map::B256HashMap, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
 };
 use reth_db::{tables, BlockNumberList};
 use reth_db_api::{
@@ -23,12 +22,12 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedStorage, MultiProof, StateRoot, StorageMultiProof,
-    StorageRoot, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StateRoot,
+    StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
-    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
+    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness, StateCommitment,
 };
 use std::fmt::Debug;
 
@@ -136,7 +135,9 @@ impl<'b, Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
             );
         }
 
-        Ok(HashedPostState::from_reverts(self.tx(), self.block_number)?)
+        Ok(HashedPostState::from_reverts::<
+            <Provider::StateCommitment as StateCommitment>::KeyHasher,
+        >(self.tx(), self.block_number)?)
     }
 
     /// Retrieve revert hashed storage for this history provider and target address.
@@ -344,7 +345,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRoo
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
         StorageProof::overlay_storage_proof(self.tx(), address, slot, revert_storage)
-            .map_err(Into::<ProviderError>::into)
+            .map_err(ProviderError::from)
     }
 
     fn storage_multiproof(
@@ -356,7 +357,7 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StorageRoo
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
         StorageProof::overlay_storage_multiproof(self.tx(), address, slots, revert_storage)
-            .map_err(Into::<ProviderError>::into)
+            .map_err(ProviderError::from)
     }
 }
 
@@ -371,26 +372,35 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProof
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
         input.prepend(self.revert_state()?);
-        Proof::overlay_account_proof(self.tx(), input, address, slots)
-            .map_err(Into::<ProviderError>::into)
+        Proof::overlay_account_proof(self.tx(), input, address, slots).map_err(ProviderError::from)
     }
 
     fn multiproof(
         &self,
         mut input: TrieInput,
-        targets: HashMap<B256, HashSet<B256>>,
+        targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         input.prepend(self.revert_state()?);
-        Proof::overlay_multiproof(self.tx(), input, targets).map_err(Into::<ProviderError>::into)
+        Proof::overlay_multiproof(self.tx(), input, targets).map_err(ProviderError::from)
     }
 
     fn witness(
         &self,
         mut input: TrieInput,
         target: HashedPostState,
-    ) -> ProviderResult<HashMap<B256, Bytes>> {
+    ) -> ProviderResult<B256HashMap<Bytes>> {
         input.prepend(self.revert_state()?);
-        TrieWitness::overlay_witness(self.tx(), input, target).map_err(Into::<ProviderError>::into)
+        TrieWitness::overlay_witness(self.tx(), input, target).map_err(ProviderError::from)
+    }
+}
+
+impl<Provider: StateCommitmentProvider> HashedPostStateProvider
+    for HistoricalStateProviderRef<'_, Provider>
+{
+    fn hashed_post_state(&self, bundle_state: &revm::db::BundleState) -> HashedPostState {
+        HashedPostState::from_bundle_state::<
+            <Provider::StateCommitment as StateCommitment>::KeyHasher,
+        >(bundle_state.state())
     }
 }
 
@@ -431,6 +441,12 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentPr
     fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         self.tx().get::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
+}
+
+impl<Provider: StateCommitmentProvider> StateCommitmentProvider
+    for HistoricalStateProviderRef<'_, Provider>
+{
+    type StateCommitment = Provider::StateCommitment;
 }
 
 /// State provider for a given block number.
@@ -480,6 +496,12 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
             self.lowest_available_blocks,
         )
     }
+}
+
+impl<Provider: StateCommitmentProvider> StateCommitmentProvider
+    for HistoricalStateProvider<Provider>
+{
+    type StateCommitment = Provider::StateCommitment;
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]

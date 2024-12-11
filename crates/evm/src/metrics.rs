@@ -8,7 +8,7 @@ use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput};
 use reth_metrics::Metrics;
 use reth_primitives::BlockWithSenders;
-use revm_primitives::ResultAndState;
+use revm_primitives::EvmState;
 use std::time::Instant;
 
 /// Wrapper struct that combines metrics and state hook
@@ -18,13 +18,11 @@ struct MeteredStateHook {
 }
 
 impl OnStateHook for MeteredStateHook {
-    fn on_state(&mut self, result_and_state: &ResultAndState) {
+    fn on_state(&mut self, state: &EvmState) {
         // Update the metrics for the number of accounts, storage slots and bytecodes loaded
-        let accounts = result_and_state.state.keys().len();
-        let storage_slots =
-            result_and_state.state.values().map(|account| account.storage.len()).sum::<usize>();
-        let bytecodes = result_and_state
-            .state
+        let accounts = state.keys().len();
+        let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
+        let bytecodes = state
             .values()
             .filter(|account| !account.info.is_empty_code_hash())
             .collect::<Vec<_>>()
@@ -35,7 +33,7 @@ impl OnStateHook for MeteredStateHook {
         self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
 
         // Call the original state hook
-        self.inner_hook.on_state(result_and_state);
+        self.inner_hook.on_state(state);
     }
 }
 
@@ -156,14 +154,13 @@ mod tests {
     use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
     use revm::db::BundleState;
     use revm_primitives::{
-        Account, AccountInfo, AccountStatus, Bytes, EvmState, EvmStorage, EvmStorageSlot,
-        ExecutionResult, Output, SuccessReason, B256, U256,
+        Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot, B256, U256,
     };
     use std::sync::mpsc;
 
     /// A mock executor that simulates state changes
     struct MockExecutor {
-        result_and_state: ResultAndState,
+        state: EvmState,
     }
 
     impl Executor<()> for MockExecutor {
@@ -206,7 +203,7 @@ mod tests {
             F: OnStateHook + 'static,
         {
             // Call hook with our mock state
-            hook.on_state(&self.result_and_state);
+            hook.on_state(&self.state);
 
             Ok(BlockExecutionOutput {
                 state: BundleState::default(),
@@ -223,7 +220,7 @@ mod tests {
     }
 
     impl OnStateHook for ChannelStateHook {
-        fn on_state(&mut self, _result_and_state: &ResultAndState) {
+        fn on_state(&mut self, _state: &EvmState) {
             let _ = self.sender.send(self.output);
         }
     }
@@ -249,35 +246,26 @@ mod tests {
         let expected_output = 42;
         let state_hook = Box::new(ChannelStateHook { sender: tx, output: expected_output });
 
-        let result_and_state = ResultAndState {
-            result: ExecutionResult::Success {
-                reason: SuccessReason::Stop,
-                gas_used: 100,
-                output: Output::Call(Bytes::default()),
-                logs: vec![],
-                gas_refunded: 0,
-            },
-            state: {
-                let mut state = EvmState::default();
-                let storage =
-                    EvmStorage::from_iter([(U256::from(1), EvmStorageSlot::new(U256::from(2)))]);
-                state.insert(
-                    Default::default(),
-                    Account {
-                        info: AccountInfo {
-                            balance: U256::from(100),
-                            nonce: 10,
-                            code_hash: B256::random(),
-                            code: Default::default(),
-                        },
-                        storage,
-                        status: AccountStatus::Loaded,
+        let state = {
+            let mut state = EvmState::default();
+            let storage =
+                EvmStorage::from_iter([(U256::from(1), EvmStorageSlot::new(U256::from(2)))]);
+            state.insert(
+                Default::default(),
+                Account {
+                    info: AccountInfo {
+                        balance: U256::from(100),
+                        nonce: 10,
+                        code_hash: B256::random(),
+                        code: Default::default(),
                     },
-                );
-                state
-            },
+                    storage,
+                    status: AccountStatus::Loaded,
+                },
+            );
+            state
         };
-        let executor = MockExecutor { result_and_state };
+        let executor = MockExecutor { state };
         let _result = metrics.execute_metered(executor, input, state_hook).unwrap();
 
         let snapshot = snapshotter.snapshot().into_vec();
@@ -311,11 +299,9 @@ mod tests {
         let expected_output = 42;
         let state_hook = Box::new(ChannelStateHook { sender: tx, output: expected_output });
 
-        let result_and_state = ResultAndState {
-            result: ExecutionResult::Revert { gas_used: 0, output: Default::default() },
-            state: EvmState::default(),
-        };
-        let executor = MockExecutor { result_and_state };
+        let state = EvmState::default();
+
+        let executor = MockExecutor { state };
         let _result = metrics.execute_metered(executor, input, state_hook).unwrap();
 
         let actual_output = rx.try_recv().unwrap();

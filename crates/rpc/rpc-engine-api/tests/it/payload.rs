@@ -38,7 +38,7 @@ fn payload_body_roundtrip() {
         0..=99,
         BlockRangeParams { tx_count: 0..2, ..Default::default() },
     ) {
-        let unsealed = block.clone().unseal();
+        let unsealed = block.clone().unseal::<Block>();
         let payload_body: ExecutionPayloadBodyV1 = convert_to_payload_body_v1(unsealed);
 
         assert_eq!(

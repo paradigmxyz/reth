@@ -9,7 +9,7 @@ use crate::{
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives::{SealedBlock, TransactionSignedEcRecovered};
+use reth_primitives::{RecoveredTx, SealedBlock};
 use std::{fmt, future::Future, time::Instant};
 
 mod constants;
@@ -282,6 +282,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.sender()
     }
 
+    /// Returns a reference to the address of the sender
+    pub fn sender_ref(&self) -> &Address {
+        self.transaction.sender_ref()
+    }
+
     /// Returns the recipient of the transaction if it is not a CREATE transaction.
     pub fn to(&self) -> Option<Address> {
         self.transaction.to()
@@ -378,7 +383,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// Converts to this type into the consensus transaction of the pooled transaction.
     ///
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
-    pub fn to_consensus(&self) -> T::Consensus {
+    pub fn to_consensus(&self) -> RecoveredTx<T::Consensus> {
         self.transaction.clone_into_consensus()
     }
 
@@ -400,8 +405,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         let price_bump = price_bumps.price_bump(self.tx_type());
 
         // Check if the max fee per gas is underpriced.
-        if maybe_replacement.max_fee_per_gas() <= self.max_fee_per_gas() * (100 + price_bump) / 100
-        {
+        if maybe_replacement.max_fee_per_gas() < self.max_fee_per_gas() * (100 + price_bump) / 100 {
             return true
         }
 
@@ -413,7 +417,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         // Check max priority fee per gas (relevant for EIP-1559 transactions only)
         if existing_max_priority_fee_per_gas != 0 &&
             replacement_max_priority_fee_per_gas != 0 &&
-            replacement_max_priority_fee_per_gas <=
+            replacement_max_priority_fee_per_gas <
                 existing_max_priority_fee_per_gas * (100 + price_bump) / 100
         {
             return true
@@ -424,7 +428,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
             // This enforces that blob txs can only be replaced by blob txs
             let replacement_max_blob_fee_per_gas =
                 maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or_default();
-            if replacement_max_blob_fee_per_gas <=
+            if replacement_max_blob_fee_per_gas <
                 existing_max_blob_fee_per_gas * (100 + price_bump) / 100
             {
                 return true
@@ -432,15 +436,6 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         }
 
         false
-    }
-}
-
-impl<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>> ValidPoolTransaction<T> {
-    /// Converts to this type into a [`TransactionSignedEcRecovered`].
-    ///
-    /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
-    pub fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.to_consensus().into()
     }
 }
 

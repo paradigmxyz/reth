@@ -1,20 +1,19 @@
 use super::ExecutedBlock;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{
-    keccak256,
-    map::{HashMap, HashSet},
-    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+    keccak256, map::B256HashMap, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
 };
 use reth_errors::ProviderResult;
 use reth_primitives::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, StateProofProvider, StateProvider, StateRootProvider,
-    StorageRootProvider,
+    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
+    StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    StorageMultiProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, TrieInput,
 };
+use revm::db::BundleState;
 use std::sync::OnceLock;
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
@@ -200,7 +199,7 @@ macro_rules! impl_state_provider {
             fn multiproof(
                 &self,
                 mut input: TrieInput,
-                targets: HashMap<B256, HashSet<B256>>,
+                targets: MultiProofTargets,
             ) -> ProviderResult<MultiProof> {
                 let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
                 input.prepend_cached(nodes, state);
@@ -211,10 +210,16 @@ macro_rules! impl_state_provider {
                 &self,
                 mut input: TrieInput,
                 target: HashedPostState,
-            ) -> ProviderResult<HashMap<B256, Bytes>> {
+            ) -> ProviderResult<B256HashMap<Bytes>> {
                 let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
                 input.prepend_cached(nodes, state);
                 self.historical.witness(input, target)
+            }
+        }
+
+        impl $($tokens)* HashedPostStateProvider for $type {
+            fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
+                self.historical.hashed_post_state(bundle_state)
             }
         }
 

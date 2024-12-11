@@ -787,8 +787,24 @@ The `TransactionsManager.network_events` stream is the first to have all of its 
 The events received in this channel are of type `NetworkEvent`:
 
 [File: crates/net/network/src/manager.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/manager.rs)
+
 ```rust,ignore
-pub enum NetworkEvent {
+pub enum NetworkEvent<R = PeerRequest> {
+    /// Basic peer lifecycle event.
+    Peer(PeerEvent),
+    /// Session established with requests.
+    ActivePeerSession {
+        /// Session information
+        info: SessionInfo,
+        /// A request channel to the session task.
+        messages: PeerRequestSender<R>,
+    },
+}
+```
+
+and with  
+```rust,ignore
+pub enum PeerEvent {
     /// Closed the peer session.
     SessionClosed {
         /// The identifier of the peer to which a session was closed.
@@ -797,29 +813,29 @@ pub enum NetworkEvent {
         reason: Option<DisconnectReason>,
     },
     /// Established a new session with the given peer.
-    SessionEstablished {
-        /// The identifier of the peer to which a session was established.
-        peer_id: PeerId,
-        /// Capabilities the peer announced
-        capabilities: Arc<Capabilities>,
-        /// A request channel to the session task.
-        messages: PeerRequestSender,
-        /// The status of the peer to which a session was established.
-        status: Status,
-    },
+    SessionEstablished(SessionInfo),
     /// Event emitted when a new peer is added
     PeerAdded(PeerId),
     /// Event emitted when a new peer is removed
     PeerRemoved(PeerId),
 }
 ```
+[File: crates/net/network-api/src/events.rs](https://github.com/paradigmxyz/reth/blob/c46b5fc1157d12184d1dceb4dc45e26cf74b2bc6/crates/net/network-api/src/events.rs)
 
-They're handled with the `on_network_event` method, which responds to the two variants of the `NetworkEvent` enum in the following ways:
+They're handled with the `on_network_event` method, which processes session events through both `NetworkEvent::Peer(PeerEvent::SessionClosed)`, `NetworkEvent::Peer(PeerEvent::SessionEstablished)`, and `NetworkEvent::ActivePeerSession` for initializing peer connections and transaction broadcasting.
 
-**`NetworkEvent::SessionClosed`**
+Variants of the `PeerEvent` enum are defined in the following ways:
+
+**`PeerEvent::PeerAdded`**
+Adds a peer to the network node via network handle
+
+**`PeerEvent::PeerRemoved`**
 Removes the peer given by `NetworkEvent::SessionClosed.peer_id` from the `TransactionsManager.peers` map.
 
-**`NetworkEvent::SessionEstablished`**
+**`PeerEvent::SessionClosed`**
+Closes the peer session after disconnection
+
+**`PeerEvent::SessionEstablished`**
 Begins by inserting a `Peer` into `TransactionsManager.peers` by `peer_id`, which is a struct of the following form:
 
 [File: crates/net/network/src/transactions.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/transactions.rs)
@@ -840,33 +856,30 @@ After the `Peer` is added to `TransactionsManager.peers`, the hashes of all of t
 
 [File: crates/net/network/src/transactions.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/transactions.rs)
 ```rust,ignore
-fn on_network_event(&mut self, event: NetworkEvent) {
-    match event {
-        NetworkEvent::SessionClosed { peer_id, .. } => {
+fn on_network_event(&mut self, event_result: NetworkEvent) {
+    match event_result {
+        NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. }) => {
             // remove the peer
             self.peers.remove(&peer_id);
+            self.transaction_fetcher.remove_peer(&peer_id);
         }
-        NetworkEvent::SessionEstablished { peer_id, messages, .. } => {
-            // insert a new peer
-            self.peers.insert(
-                peer_id,
-                Peer {
-                    transactions: LruCache::new(
-                        NonZeroUsize::new(PEER_TRANSACTION_CACHE_LIMIT).unwrap(),
-                    ),
-                    request_tx: messages,
-                },
-            );
-
-            // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
-            // pool
-            let msg = NewPooledTransactionHashes(self.pool.pooled_transactions());
-            self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
-                peer_id,
-                msg,
-            })
+        NetworkEvent::ActivePeerSession { info, messages } => {
+            // process active peer session and broadcast available transaction from the pool
+            self.handle_peer_session(info, messages);
         }
-        _ => {}
+        NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+            let peer_id = info.peer_id;
+            // get messages from existing peer
+             let messages = match self.peers.get(&peer_id) {
+                Some(p) => p.request_tx.clone(),
+                None => {
+                    debug!(target: "net::tx", ?peer_id, "No peer request sender found");
+                    return;
+                }
+            };
+            self.handle_peer_session(info, messages);
+        }
+         _ => {}
     }
 }
 ```

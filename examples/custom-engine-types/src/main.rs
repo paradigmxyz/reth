@@ -38,14 +38,14 @@ use reth::{
     },
     network::NetworkHandle,
     payload::ExecutionPayloadValidator,
-    primitives::{Block, EthPrimitives, SealedBlockFor},
+    primitives::{Block, EthPrimitives, SealedBlockFor, TransactionSigned},
     providers::{CanonStateSubscriptions, EthStorage, StateProviderFactory},
     rpc::{
         eth::EthApi,
         types::engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError},
     },
     tasks::TaskManager,
-    transaction_pool::TransactionPool,
+    transaction_pool::{PoolTransaction, TransactionPool},
 };
 use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
@@ -55,7 +55,7 @@ use reth_chainspec::{Chain, ChainSpec, ChainSpecProvider};
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
     validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
-    FullNodeComponents, PayloadAttributes, PayloadBuilderAttributes,
+    FullNodeComponents, PayloadAttributes, PayloadBuilderAttributes, PayloadValidator,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
@@ -189,12 +189,22 @@ impl CustomEngineValidator {
     }
 }
 
+impl PayloadValidator for CustomEngineValidator {
+    type Block = Block;
+
+    fn ensure_well_formed_payload(
+        &self,
+        payload: ExecutionPayload,
+        sidecar: ExecutionPayloadSidecar,
+    ) -> Result<SealedBlockFor<Self::Block>, PayloadError> {
+        self.inner.ensure_well_formed_payload(payload, sidecar)
+    }
+}
+
 impl<T> EngineValidator<T> for CustomEngineValidator
 where
     T: EngineTypes<PayloadAttributes = CustomPayloadAttributes>,
 {
-    type Block = Block;
-
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
@@ -220,14 +230,6 @@ where
         Ok(())
     }
 
-    fn ensure_well_formed_payload(
-        &self,
-        payload: ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
-    ) -> Result<SealedBlockFor<Self::Block>, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload, sidecar)
-    }
-
     fn validate_payload_attributes_against_header(
         &self,
         _attr: &<T as PayloadTypes>::PayloadAttributes,
@@ -246,7 +248,11 @@ pub struct CustomEngineValidatorBuilder;
 impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
     N: FullNodeComponents<
-        Types: NodeTypesWithEngine<Engine = CustomEngineTypes, ChainSpec = ChainSpec>,
+        Types: NodeTypesWithEngine<
+            Engine = CustomEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+        >,
     >,
 {
     type Validator = CustomEngineValidator;
@@ -340,7 +346,9 @@ where
             Primitives = EthPrimitives,
         >,
     >,
-    Pool: TransactionPool + Unpin + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+        + Unpin
+        + 'static,
 {
     async fn spawn_payload_service(
         self,
@@ -380,7 +388,7 @@ pub struct CustomPayloadBuilder;
 impl<Pool, Client> PayloadBuilder<Pool, Client> for CustomPayloadBuilder
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
-    Pool: TransactionPool,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = CustomPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;

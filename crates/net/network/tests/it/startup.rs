@@ -11,7 +11,7 @@ use reth_network::{
     Discovery, NetworkConfigBuilder, NetworkManager,
 };
 use reth_network_api::{NetworkInfo, PeersInfo};
-use reth_provider::test_utils::NoopProvider;
+use reth_storage_api::noop::NoopProvider;
 use secp256k1::SecretKey;
 use tokio::net::TcpListener;
 

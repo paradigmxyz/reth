@@ -2,14 +2,11 @@
 //! <https://github.com/rust-lang/rust/issues/100013> in default implementation of
 //! `reth_rpc_eth_api::helpers::Call`.
 
-use alloy_primitives::{
-    map::{HashMap, HashSet},
-    Address, B256, U256,
-};
+use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
-use reth_storage_api::StateProvider;
-use reth_trie::HashedStorage;
+use reth_storage_api::{HashedPostStateProvider, StateProvider};
+use reth_trie::{HashedStorage, MultiProofTargets};
 use revm::Database;
 
 /// Helper alias type for the state's [`CacheDB`]
@@ -91,7 +88,7 @@ impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'_> {
     fn multiproof(
         &self,
         input: reth_trie::TrieInput,
-        targets: HashMap<B256, HashSet<B256>>,
+        targets: MultiProofTargets,
     ) -> ProviderResult<reth_trie::MultiProof> {
         self.0.multiproof(input, targets)
     }
@@ -100,7 +97,7 @@ impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'_> {
         &self,
         input: reth_trie::TrieInput,
         target: reth_trie::HashedPostState,
-    ) -> reth_errors::ProviderResult<alloy_primitives::map::HashMap<B256, alloy_primitives::Bytes>>
+    ) -> reth_errors::ProviderResult<alloy_primitives::map::B256HashMap<alloy_primitives::Bytes>>
     {
         self.0.witness(input, target)
     }
@@ -136,6 +133,15 @@ impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'_> {
         end: alloy_primitives::BlockNumber,
     ) -> reth_errors::ProviderResult<Vec<B256>> {
         self.0.canonical_hashes_range(start, end)
+    }
+}
+
+impl HashedPostStateProvider for StateProviderTraitObjWrapper<'_> {
+    fn hashed_post_state(
+        &self,
+        bundle_state: &revm::db::BundleState,
+    ) -> reth_trie::HashedPostState {
+        self.0.hashed_post_state(bundle_state)
     }
 }
 

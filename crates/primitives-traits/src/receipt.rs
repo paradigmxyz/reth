@@ -3,7 +3,9 @@
 use alloc::vec::Vec;
 use core::fmt;
 
-use alloy_consensus::TxReceipt;
+use alloy_consensus::{
+    Eip2718EncodableReceipt, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt, Typed2718,
+};
 use alloy_primitives::B256;
 
 use crate::{InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
@@ -22,15 +24,15 @@ pub trait Receipt:
     + Clone
     + Default
     + fmt::Debug
-    + TxReceipt
-    + alloy_rlp::Encodable
-    + alloy_rlp::Decodable
+    + TxReceipt<Log = alloy_primitives::Log>
+    + RlpEncodableReceipt
+    + RlpDecodableReceipt
+    + Eip2718EncodableReceipt
+    + Typed2718
     + MaybeSerde
     + InMemorySize
     + MaybeArbitrary
 {
-    /// Returns transaction type.
-    fn tx_type(&self) -> u8;
 }
 
 /// Extension if [`Receipt`] used in block execution.

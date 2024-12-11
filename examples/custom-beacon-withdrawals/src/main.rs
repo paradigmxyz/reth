@@ -161,7 +161,7 @@ where
         &mut self,
         _block: &BlockWithSenders,
         _total_difficulty: U256,
-    ) -> Result<ExecuteOutput, Self::Error> {
+    ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
         Ok(ExecuteOutput { receipts: vec![], gas_used: 0 })
     }
 

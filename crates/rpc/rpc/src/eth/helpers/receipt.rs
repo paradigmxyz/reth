@@ -1,7 +1,7 @@
 //! Builds an RPC receipt response w.r.t. data layout of network.
 
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
-use reth_provider::{ReceiptProvider, TransactionsProvider};
+use reth_provider::{BlockReader, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcNodeCoreExt, RpcReceipt};
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
 
@@ -13,6 +13,7 @@ where
         Provider: TransactionsProvider<Transaction = TransactionSigned>
                       + ReceiptProvider<Receipt = reth_primitives::Receipt>,
     >,
+    Provider: BlockReader,
 {
     async fn build_transaction_receipt(
         &self,

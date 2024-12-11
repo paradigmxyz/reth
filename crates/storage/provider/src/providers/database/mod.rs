@@ -3,11 +3,10 @@ use crate::{
     to_range,
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
-    EvmEnvProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    EvmEnvProvider, HashedPostStateProvider, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
+    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_consensus::Header;
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber,
@@ -19,16 +18,23 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_evm::ConfigureEvmEnv;
-use reth_node_types::{BlockTy, NodeTypesWithDB, ReceiptTy, TxTy};
+use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
     BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
     TransactionMeta,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{NodePrimitivesProvider, TryIntoHistoricalStateProvider};
+use reth_storage_api::{
+    NodePrimitivesProvider, StateCommitmentProvider, TryIntoHistoricalStateProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
+use reth_trie::HashedPostState;
+use reth_trie_db::StateCommitment;
+use revm::{
+    db::BundleState,
+    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+};
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::Path,
@@ -220,6 +226,10 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for ProviderFactory<N> {
     }
 }
 
+impl<N: NodeTypesWithDB> StateCommitmentProvider for ProviderFactory<N> {
+    type StateCommitment = N::StateCommitment;
+}
+
 impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {
     /// Returns static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
@@ -228,21 +238,24 @@ impl<N: NodeTypesWithDB> StaticFileProviderFactory for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes> HeaderSyncGapProvider for ProviderFactory<N> {
+    type Header = HeaderTy<N>;
     fn sync_gap(
         &self,
         tip: watch::Receiver<B256>,
         highest_uninterrupted_block: BlockNumber,
-    ) -> ProviderResult<HeaderSyncGap> {
+    ) -> ProviderResult<HeaderSyncGap<Self::Header>> {
         self.provider()?.sync_gap(tip, highest_uninterrupted_block)
     }
 }
 
 impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
+    type Header = HeaderTy<N>;
+
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
         self.provider()?.header(block_hash)
     }
 
-    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
             num,
@@ -270,7 +283,10 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
         )
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
+    fn headers_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<Self::Header>> {
         self.static_file_provider.get_range_with_static_file_or_database(
             StaticFileSegment::Headers,
             to_range(range),
@@ -280,7 +296,10 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
         )
     }
 
-    fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
+    fn sealed_header(
+        &self,
+        number: BlockNumber,
+    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
             number,
@@ -292,15 +311,15 @@ impl<N: ProviderNodeTypes> HeaderProvider for ProviderFactory<N> {
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedHeader>> {
+    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
         self.sealed_headers_while(range, |_| true)
     }
 
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        predicate: impl FnMut(&SealedHeader) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader>> {
+        predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
         self.static_file_provider.get_range_with_static_file_or_database(
             StaticFileSegment::Headers,
             to_range(range),
@@ -385,7 +404,7 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         self.provider()?.pending_block_and_receipts()
     }
 
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
         self.provider()?.ommers(id)
     }
 
@@ -570,55 +589,16 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for ProviderFactory<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> EvmEnvProvider for ProviderFactory<N> {
-    fn fill_env_at<EvmConfig>(
+impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for ProviderFactory<N> {
+    fn env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
-        at: BlockHashOrNumber,
+        header: &HeaderTy<N>,
         evm_config: EvmConfig,
-    ) -> ProviderResult<()>
+    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
-        self.provider()?.fill_env_at(cfg, block_env, at, evm_config)
-    }
-
-    fn fill_env_with_header<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
-        header: &Header,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        self.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
-    }
-
-    fn fill_cfg_env_at<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        at: BlockHashOrNumber,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        self.provider()?.fill_cfg_env_at(cfg, at, evm_config)
-    }
-
-    fn fill_cfg_env_with_header<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        header: &Header,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        self.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
+        self.provider()?.env_with_header(header, evm_config)
     }
 }
 
@@ -640,6 +620,14 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         self.provider()?.get_prune_checkpoints()
+    }
+}
+
+impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
+        HashedPostState::from_bundle_state::<<N::StateCommitment as StateCommitment>::KeyHasher>(
+            bundle_state.state(),
+        )
     }
 }
 
