@@ -29,6 +29,7 @@ arbitrary = { workspace = true, features = ["derive"] }
 modular-bitfield.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
+test-fuzz.workspace = true
 rand.workspace = true
 bytes.workspace = true
 

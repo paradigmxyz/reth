@@ -28,7 +28,7 @@ modular-bitfield = { workspace = true, optional = true }
 serde.workspace = true
 
 [dev-dependencies]
-reth-codecs = { workspace = true, features = ["test-utils"] }
+test-fuzz.workspace = true
 
 [features]
 default = ["std"]

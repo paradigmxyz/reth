@@ -7097,6 +7097,7 @@ dependencies = [
  "reth-codecs",
  "reth-primitives-traits",
  "serde",
+ "test-fuzz",
 ]
 
 [[package]]
@@ -7641,6 +7642,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-zstd-compressors",
  "serde",
+ "test-fuzz",
 ]
 
 [[package]]
@@ -8762,6 +8764,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "test-fuzz",
 ]
 
 [[package]]
@@ -8789,6 +8792,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "test-fuzz",
 ]
 
 [[package]]
@@ -8887,6 +8891,7 @@ dependencies = [
  "reth-codecs",
  "serde",
  "serde_json",
+ "test-fuzz",
  "thiserror 2.0.5",
  "toml",
 ]
@@ -9340,6 +9345,7 @@ dependencies = [
  "reth-codecs",
  "reth-trie-common",
  "serde",
+ "test-fuzz",
 ]
 
 [[package]]

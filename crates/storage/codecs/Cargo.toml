@@ -30,7 +30,6 @@ modular-bitfield.workspace = true
 visibility = { version = "0.1.1", optional = true}
 serde.workspace = true
 arbitrary = { workspace = true, features = ["derive"], optional = true }
-test-fuzz = { workspace = true, optional = true}
 
 [dev-dependencies]
 alloy-eips = { workspace = true, default-features = false, features = [
@@ -43,6 +42,7 @@ alloy-primitives = { workspace = true, features = [
     "rand",
 ] }
 alloy-consensus = { workspace = true, features = ["arbitrary"] }
+test-fuzz.workspace = true
 serde_json.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
@@ -73,8 +73,7 @@ test-utils = [
     "alloy",
 	"arbitrary",
     "dep:visibility",
-    "dep:arbitrary",
-    "dep:test-fuzz"
+    "dep:arbitrary"
 ]
 serde = [
 	"alloy-consensus?/serde",
