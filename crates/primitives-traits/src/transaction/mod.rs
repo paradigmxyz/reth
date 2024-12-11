@@ -3,6 +3,8 @@
 pub mod execute;
 pub mod signed;
 
+pub mod error;
+
 use crate::{InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
 use core::{fmt, hash::Hash};
 

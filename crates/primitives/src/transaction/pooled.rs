@@ -2,8 +2,7 @@
 //! response to `GetPooledTransactions`.
 
 use super::{
-    error::TransactionConversionError, recover_signer_unchecked, signature::recover_signer,
-    TxEip7702,
+    recover_signer_unchecked, signature::recover_signer, TransactionConversionError, TxEip7702,
 };
 use crate::{BlobTransaction, RecoveredTx, Transaction, TransactionSigned};
 use alloc::vec::Vec;
