@@ -6,7 +6,7 @@ use alloy_eips::{
     eip4844::BlobAndProofV1,
     eip7685::{Requests, RequestsOrHash},
 };
-use alloy_primitives::{BlockHash, BlockNumber, B256, U256, U64};
+use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
     ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
