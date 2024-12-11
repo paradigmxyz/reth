@@ -6,7 +6,7 @@ use std::sync::Arc;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
-use alloy_primitives::U256;
+use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_primitives::NodePrimitives;
 use reth_provider::{
@@ -26,9 +26,11 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 
 use crate::eth::EthTxBuilder;
+
+const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
 /// `Eth` API implementation.
 ///
@@ -270,6 +272,9 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
 
     /// Guard for getproof calls
     blocking_task_guard: BlockingTaskGuard,
+
+    /// Transaction broadcast channel
+    raw_tx_sender: broadcast::Sender<Bytes>,
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig>
@@ -304,6 +309,8 @@ where
                 .unwrap_or_default(),
         );
 
+        let (raw_tx_sender, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
+
         Self {
             provider,
             pool,
@@ -321,6 +328,7 @@ where
             fee_history_cache,
             evm_config,
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
+            raw_tx_sender,
         }
     }
 }
@@ -427,6 +435,18 @@ where
     #[inline]
     pub const fn blocking_task_guard(&self) -> &BlockingTaskGuard {
         &self.blocking_task_guard
+    }
+
+    /// Returns [`broadcast::Receiver`] of new raw transactions
+    #[inline]
+    pub fn subscribe_to_raw_transactions(&self) -> broadcast::Receiver<Bytes> {
+        self.raw_tx_sender.subscribe()
+    }
+
+    /// Broadcasts raw transaction if there are active subscribers.
+    #[inline]
+    pub fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
+        let _ = self.raw_tx_sender.send(raw_tx);
     }
 }
 
