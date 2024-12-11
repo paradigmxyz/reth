@@ -12,9 +12,7 @@ use reth_primitives_traits::InMemorySize;
 /// Receipt containing result of transaction execution.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "reth-codec", derive(reth_codecs::CompactZstd))]
-#[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests)]
-#[cfg_attr(feature = "reth-codec", reth_zstd(
+#[cfg_attr(feature = "reth-codec", derive(reth_codecs::CompactZstd), reth_codecs::add_arbitrary_tests, reth_zstd(
     compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
     decompressor = reth_zstd_compressors::RECEIPT_DECOMPRESSOR
 ))]
