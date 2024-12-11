@@ -284,21 +284,29 @@ mod tests {
                     }
                 }
             }
+
             #[cfg(test)]
-            #[allow(dead_code)]
-            #[test_fuzz::test_fuzz]
-            fn fuzz_test_test_struct(obj: TestStruct) {
-                use reth_codecs::Compact;
-                let mut buf = vec![];
-                let len = obj.clone().to_compact(&mut buf);
-                let (same_obj, buf) = TestStruct::from_compact(buf.as_ref(), len);
-                assert_eq!(obj, same_obj);
+            mod fuzz_test_struct {
+                use super::*;
+                use reth_codecs::__private::test_fuzz;
+
+                #[allow(dead_code)]
+                #[test_fuzz::test_fuzz]
+                fn fuzz_test_test_struct(obj: TestStruct) {
+                    use reth_codecs::Compact;
+                    let mut buf = vec![];
+                    let len = obj.clone().to_compact(&mut buf);
+                    let (same_obj, buf) = TestStruct::from_compact(buf.as_ref(), len);
+                    assert_eq!(obj, same_obj);
+                }
+
+                #[test]
+                #[allow(missing_docs)]
+                pub fn fuzz_test_struct() {
+                    fuzz_test_test_struct(TestStruct::default())
+                }
             }
-            #[test]
-            #[allow(missing_docs)]
-            pub fn fuzz_test_struct() {
-                fuzz_test_test_struct(TestStruct::default())
-            }
+
             impl reth_codecs::Compact for TestStruct {
                 fn to_compact<B>(&self, buf: &mut B) -> usize where B: reth_codecs::__private::bytes::BufMut + AsMut<[u8]> {
                     let mut flags = TestStructFlags::default();
