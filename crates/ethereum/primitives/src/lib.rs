@@ -26,5 +26,4 @@ impl NodePrimitives for EthPrimitives {
     type BlockHeader = reth_primitives::Header;
     type Receipt = Receipt;
     type SignedTx = reth_primitives::TransactionSigned;
-    type TxType = reth_primitives::TxType;
 }
