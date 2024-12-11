@@ -66,7 +66,6 @@ pub trait EthBlocks: LoadBlock {
 
             let block = from_block(
                 (*block).clone().unseal(),
-                Default::default(),
                 full.into(),
                 Some(block_hash),
                 self.tx_resp_builder(),
