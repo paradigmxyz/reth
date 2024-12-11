@@ -18,7 +18,7 @@ use reth_trie::{
     proof::StorageProof,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     walker::TrieWalker,
-    HashBuilder, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof, TrieAccount, TrieInput,
+    HashBuilder, MultiProof, Nibbles, StorageMultiProof, TrieAccount, TrieInput,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
