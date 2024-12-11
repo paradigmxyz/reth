@@ -10,7 +10,6 @@ use crate::{
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, TreeViewer,
     WithdrawalsProvider,
 };
-use alloy_consensus::Header;
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
@@ -162,8 +161,8 @@ impl<N: TreeNodeTypes> BlockchainProvider<N> {
         database: ProviderFactory<N>,
         tree: Arc<dyn TreeViewer<Primitives = N::Primitives>>,
         latest: SealedHeader,
-        finalized: Option<SealedHeader>,
-        safe: Option<SealedHeader>,
+        finalized: Option<SealedHeader<HeaderTy<N>>>,
+        safe: Option<SealedHeader<HeaderTy<N>>>,
     ) -> Self {
         Self { database, tree, chain_info: ChainInfoTracker::new(latest, finalized, safe) }
     }
@@ -265,13 +264,13 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
 }
 
 impl<N: TreeNodeTypes> HeaderProvider for BlockchainProvider<N> {
-    type Header = Header;
+    type Header = HeaderTy<N>;
 
-    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
         self.database.header(block_hash)
     }
 
-    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Header>> {
+    fn header_by_number(&self, num: BlockNumber) -> ProviderResult<Option<Self::Header>> {
         self.database.header_by_number(num)
     }
 
@@ -283,26 +282,32 @@ impl<N: TreeNodeTypes> HeaderProvider for BlockchainProvider<N> {
         self.database.header_td_by_number(number)
     }
 
-    fn headers_range(&self, range: impl RangeBounds<BlockNumber>) -> ProviderResult<Vec<Header>> {
+    fn headers_range(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<Self::Header>> {
         self.database.headers_range(range)
     }
 
-    fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
+    fn sealed_header(
+        &self,
+        number: BlockNumber,
+    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
         self.database.sealed_header(number)
     }
 
     fn sealed_headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedHeader>> {
+    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
         self.database.sealed_headers_range(range)
     }
 
     fn sealed_headers_while(
         &self,
         range: impl RangeBounds<BlockNumber>,
-        predicate: impl FnMut(&SealedHeader) -> bool,
-    ) -> ProviderResult<Vec<SealedHeader>> {
+        predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
         self.database.sealed_headers_while(range, predicate)
     }
 }
@@ -398,11 +403,11 @@ impl<N: TreeNodeTypes> BlockReader for BlockchainProvider<N> {
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         Ok(self.tree.pending_block_and_receipts())
     }
 
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<HeaderTy<N>>>> {
         self.database.ommers(id)
     }
 
@@ -547,7 +552,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider<N> {
 }
 
 impl<N: TreeNodeTypes> ReceiptProviderIdExt for BlockchainProvider<N> {
-    fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         match block {
             BlockId::Hash(rpc_block_hash) => {
                 let mut receipts = self.receipts_by_block(rpc_block_hash.block_hash.into())?;
@@ -598,14 +603,14 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {
     }
 }
 
-impl<N: TreeNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
+impl<N: TreeNodeTypes> EvmEnvProvider<HeaderTy<N>> for BlockchainProvider<N> {
     fn env_with_header<EvmConfig>(
         &self,
-        header: &Header,
+        header: &HeaderTy<N>,
         evm_config: EvmConfig,
     ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
     where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
+        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
         self.database.provider()?.env_with_header(header, evm_config)
     }
@@ -826,15 +831,15 @@ impl<N: TreeNodeTypes> CanonChainTracker for BlockchainProvider<N> {
         self.chain_info.last_transition_configuration_exchanged_at()
     }
 
-    fn set_canonical_head(&self, header: SealedHeader) {
+    fn set_canonical_head(&self, header: SealedHeader<Self::Header>) {
         self.chain_info.set_canonical_head(header);
     }
 
-    fn set_safe(&self, header: SealedHeader) {
+    fn set_safe(&self, header: SealedHeader<Self::Header>) {
         self.chain_info.set_safe(header);
     }
 
-    fn set_finalized(&self, header: SealedHeader) {
+    fn set_finalized(&self, header: SealedHeader<Self::Header>) {
         self.chain_info.set_finalized(header);
     }
 }
@@ -939,12 +944,12 @@ impl<N: ProviderNodeTypes> CanonStateSubscriptions for BlockchainProvider<N> {
 impl<N: TreeNodeTypes> ForkChoiceSubscriptions for BlockchainProvider<N> {
     type Header = HeaderTy<N>;
 
-    fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
+    fn subscribe_safe_block(&self) -> ForkChoiceNotifications<Self::Header> {
         let receiver = self.chain_info.subscribe_safe_block();
         ForkChoiceNotifications(receiver)
     }
 
-    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications {
+    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications<Self::Header> {
         let receiver = self.chain_info.subscribe_finalized_block();
         ForkChoiceNotifications(receiver)
     }
