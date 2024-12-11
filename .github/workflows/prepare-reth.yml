@@ -1,0 +1,66 @@
+name: Prepare Reth Image
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        required: true
+        type: string
+        description: "Docker image tag to use"
+      binary_name:
+        required: false
+        type: string
+        default: "reth"
+        description: "Binary name to build (reth or op-reth)"
+      cargo_features:
+        required: false
+        type: string
+        default: "asm-keccak"
+        description: "Cargo features to enable"
+      cargo_package:
+        required: false
+        type: string
+        description: "Optional cargo package path"
+
+jobs:
+  prepare-reth:
+    if: github.repository == 'paradigmxyz/reth'
+    timeout-minutes: 45
+    runs-on:
+      group: Reth
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir artifacts
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Build reth
+        run: |
+          CARGO_CMD="cargo build --features ${{ inputs.cargo_features }} --profile hivetests --bin ${{ inputs.binary_name }} --locked"
+          if [ -n "${{ inputs.cargo_package }}" ]; then
+            CARGO_CMD="$CARGO_CMD --manifest-path ${{ inputs.cargo_package }}"
+          fi
+          $CARGO_CMD
+          mkdir dist && cp ./target/hivetests/${{ inputs.binary_name }} ./dist/reth
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and export reth image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/assets/hive/Dockerfile
+          tags: ${{ inputs.image_tag }}
+          outputs: type=docker,dest=./artifacts/reth_image.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Upload reth image
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts
+          path: ./artifacts

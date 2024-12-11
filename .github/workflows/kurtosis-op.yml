@@ -17,38 +17,12 @@ concurrency:
 
 jobs:
   prepare-reth:
-    if: github.repository == 'paradigmxyz/reth'
-    timeout-minutes: 45
-    runs-on:
-      group: Reth
-    steps:
-      - uses: actions/checkout@v4
-      - run: mkdir artifacts
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-      - name: Build reth
-        run: |
-          cargo build --features optimism,asm-keccak --profile hivetests --bin op-reth --manifest-path crates/optimism/bin/Cargo.toml --locked
-          mkdir dist && cp ./target/hivetests/op-reth ./dist/reth
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build and export reth image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: .github/assets/hive/Dockerfile
-          tags: ghcr.io/paradigmxyz/op-reth:kurtosis-ci
-          outputs: type=docker,dest=./artifacts/reth_image.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Upload reth image
-        uses: actions/upload-artifact@v4
-        with:
-          name: artifacts
-          path: ./artifacts
+    uses: ./.github/workflows/prepare-reth.yml
+    with:
+      image_tag: ghcr.io/paradigmxyz/op-reth:kurtosis-ci
+      binary_name: op-reth
+      cargo_features: optimism,asm-keccak
+      cargo_package: crates/optimism/bin/Cargo.toml
 
   test:
     timeout-minutes: 60
