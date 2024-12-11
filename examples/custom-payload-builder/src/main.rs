@@ -18,7 +18,7 @@ use reth::{
     payload::PayloadBuilderHandle,
     providers::CanonStateSubscriptions,
     transaction_pool::{PoolTransaction, TransactionPool},
-    version::default_extradata,
+    version::default_extra_data,
 };
 use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
 use reth_chainspec::ChainSpec;
@@ -69,7 +69,7 @@ where
             payload_job_config,
             reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
                 EthEvmConfig::new(ctx.chain_spec()),
-                EthereumBuilderConfig::new(default_extradata()),
+                EthereumBuilderConfig::new(default_extra_data()),
             ),
         );
 

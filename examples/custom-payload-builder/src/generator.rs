@@ -85,7 +85,7 @@ where
         let hash = parent_block.hash();
         let header = SealedHeader::new(parent_block.header().clone(), hash);
 
-        let config = PayloadConfig::new(Arc::new(header), Bytes::default(), attributes);
+        let config = PayloadConfig::new(Arc::new(header), attributes);
         Ok(EmptyBlockPayloadJob {
             client: self.client.clone(),
             _pool: self.pool.clone(),

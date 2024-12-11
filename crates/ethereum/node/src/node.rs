@@ -24,7 +24,7 @@ use reth_node_builder::{
     rpc::{EngineValidatorBuilder, RpcAddOns},
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
 };
-use reth_node_core::version::default_extradata;
+use reth_node_core::version::default_extra_data_bytes;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{EthPrimitives, PooledTransactionsElement};
 use reth_provider::{CanonStateSubscriptions, EthStorage};
@@ -238,7 +238,7 @@ pub struct EthereumPayloadBuilder {
 
 impl Default for EthereumPayloadBuilder {
     fn default() -> Self {
-        Self { config: EthereumBuilderConfig::new(default_extradata().as_bytes().to_vec().into()) }
+        Self { config: EthereumBuilderConfig::new(default_extra_data_bytes()) }
     }
 }
 
