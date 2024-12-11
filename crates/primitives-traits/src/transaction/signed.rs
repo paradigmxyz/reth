@@ -4,8 +4,17 @@ use crate::{FillTxEnv, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
 use alloc::{fmt, vec::Vec};
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256};
+use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256, U256};
 use core::hash::Hash;
+
+/// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
+/// to EIP-2 should have an S value less than or equal to this.
+///
+/// `57896044618658097711785492504343953926418782139537452191302581570759080747168`
+pub const SECP256K1N_HALF: U256 = U256::from_be_bytes([
+    0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0x5D, 0x57, 0x6E, 0x73, 0x57, 0xA4, 0x50, 0x1D, 0xDF, 0xE9, 0x2F, 0x46, 0x68, 0x1B, 0x20, 0xA0,
+]);
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullSignedTx: SignedTransaction + FillTxEnv + MaybeCompact {}
@@ -101,12 +110,13 @@ impl SignedTransaction for PooledTransaction {
     }
 
     fn recover_signer(&self) -> Option<Address> {
-        PooledTransaction::recover_signer(self).ok()
+        if self.signature().s() > SECP256K1N_HALF {
+            return None;
+        }
+        Self::recover_signer(self).ok()
     }
 
     fn recover_signer_unchecked_with_buf(&self, _buf: &mut Vec<u8>) -> Option<Address> {
-        // Note: we don't need unchecked here because this tx is supposed to be used for new pooled
-        // txs (post EIP-2)
-        PooledTransaction::recover_signer(self).ok()
+        Self::recover_signer(self).ok()
     }
 }

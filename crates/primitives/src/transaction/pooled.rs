@@ -5,6 +5,7 @@ use crate::RecoveredTx;
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use reth_primitives_traits::transaction::error::TransactionConversionError;
 
+/// Tmp alias for the transaction type.
 pub type PooledTransactionsElement = alloy_consensus::transaction::PooledTransaction;
 
 /// A signed pooled transaction with recovered signer.
