@@ -1,7 +1,7 @@
 #![cfg_attr(docsrs, doc(cfg(feature = "c-kzg")))]
 
 use crate::{Transaction, TransactionSigned};
-use alloy_consensus::{transaction::RlpEcdsaTx, Signed, TxEip4844WithSidecar};
+use alloy_consensus::{Signed, TxEip4844WithSidecar};
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use derive_more::Deref;
 use reth_primitives_traits::InMemorySize;
@@ -47,20 +47,6 @@ impl BlobTransaction {
         let transaction = TransactionSigned::new(transaction.into(), signature, hash);
         (transaction, sidecar)
     }
-
-    /// Decodes a [`BlobTransaction`] from RLP. This expects the encoding to be:
-    /// `rlp([transaction_payload_body, blobs, commitments, proofs])`
-    ///
-    /// where `transaction_payload_body` is a list:
-    /// `[chain_id, nonce, max_priority_fee_per_gas, ..., y_parity, r, s]`
-    ///
-    /// Note: this should be used only when implementing other RLP decoding methods, and does not
-    /// represent the full RLP decoding of the `PooledTransactionsElement` type.
-    pub(crate) fn decode_inner(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let (transaction, signature, hash) =
-            TxEip4844WithSidecar::rlp_decode_signed(data)?.into_parts();
-        Ok(Self(Signed::new_unchecked(transaction, signature, hash)))
-    }
 }
 
 impl InMemorySize for BlobTransaction {
@@ -78,6 +64,7 @@ mod tests {
     use super::*;
     use crate::{kzg::Blob, PooledTransactionsElement};
     use alloc::vec::Vec;
+    use alloy_consensus::Typed2718;
     use alloy_eips::{
         eip2718::{Decodable2718, Encodable2718},
         eip4844::Bytes48,

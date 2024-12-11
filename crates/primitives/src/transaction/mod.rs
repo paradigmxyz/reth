@@ -2,20 +2,27 @@
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction as _, TxEip1559, TxEip2930,
-    TxEip4844, TxEip4844Variant, TxEip7702, TxLegacy, Typed2718, TypedTransaction,
+    transaction::{PooledTransaction, RlpEcdsaTx},
+    SignableTransaction, Signed, Transaction as _, TxEip1559, TxEip2930, TxEip4844,
+    TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxLegacy, Typed2718, TypedTransaction,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
+    eip4844::BlobTransactionSidecar,
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
+pub use compat::FillTxEnv;
 use core::hash::{Hash, Hasher};
 use derive_more::{AsRef, Deref};
+pub use error::{
+    InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
+};
+pub use meta::TransactionMeta;
 use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
@@ -23,23 +30,17 @@ use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
 use op_alloy_consensus::DepositTransaction;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::TxDeposit;
+pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+pub use reth_primitives_traits::WithEncoded;
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
+pub use sidecar::BlobTransaction;
 use signature::decode_with_eip155_chain_id;
+pub use signature::{recover_signer, recover_signer_unchecked};
 #[cfg(feature = "std")]
 use std::sync::{LazyLock, OnceLock};
-
-pub use compat::FillTxEnv;
-pub use error::{
-    InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
-};
-pub use meta::TransactionMeta;
-pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
-pub use reth_primitives_traits::WithEncoded;
-pub use sidecar::BlobTransaction;
-pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
 
 /// Handling transaction signature operations, including signature recovery,
@@ -882,6 +883,32 @@ impl TransactionSigned {
         }
     }
 
+    /// Converts from an EIP-4844 [`RecoveredTx`] to a
+    /// [`PooledTransactionsElementEcRecovered`] with the given sidecar.
+    ///
+    /// Returns an `Err` containing the original `TransactionSigned` if the transaction is not
+    /// EIP-4844.
+    pub fn try_into_pooled_4844(
+        self,
+        sidecar: BlobTransactionSidecar,
+    ) -> Result<PooledTransactionsElement, Self> {
+        let hash = self.hash();
+        Ok(match self {
+            // If the transaction is an EIP-4844 transaction...
+            Self { transaction: Transaction::Eip4844(tx), signature, .. } => {
+                // Construct a `PooledTransactionsElement::BlobTransaction` with provided sidecar.
+                PooledTransactionsElement::Eip4844(Signed::new_unchecked(
+                    TxEip4844WithSidecar { tx, sidecar },
+                    signature,
+                    hash,
+                ))
+            }
+            // If the transaction is not EIP-4844, return an error with the original
+            // transaction.
+            _ => return Err(self),
+        })
+    }
+
     /// Transaction hash. Used to identify transaction.
     pub fn hash(&self) -> TxHash {
         *self.tx_hash()
@@ -1229,6 +1256,26 @@ impl From<RecoveredTx> for TransactionSigned {
     }
 }
 
+impl TryFrom<TransactionSigned> for PooledTransaction {
+    type Error = TransactionConversionError;
+
+    fn try_from(tx: TransactionSigned) -> Result<Self, Self::Error> {
+        tx.try_into_pooled().map_err(|_| TransactionConversionError::UnsupportedForP2P)
+    }
+}
+
+impl From<PooledTransaction> for TransactionSigned {
+    fn from(tx: PooledTransaction) -> Self {
+        match tx {
+            PooledTransaction::Legacy(signed) => signed.into(),
+            PooledTransaction::Eip2930(signed) => signed.into(),
+            PooledTransaction::Eip1559(signed) => signed.into(),
+            PooledTransaction::Eip4844(signed) => signed.into(),
+            PooledTransaction::Eip7702(signed) => signed.into(),
+        }
+    }
+}
+
 impl Encodable for TransactionSigned {
     /// This encodes the transaction _with_ the signature, and an rlp header.
     ///
@@ -1450,6 +1497,13 @@ impl From<Signed<Transaction>> for TransactionSigned {
     fn from(value: Signed<Transaction>) -> Self {
         let (tx, sig, hash) = value.into_parts();
         Self::new(tx, sig, hash)
+    }
+}
+
+impl From<Signed<TxEip4844WithSidecar>> for TransactionSigned {
+    fn from(value: Signed<TxEip4844WithSidecar>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new(tx.tx.into(), sig, hash)
     }
 }
 
