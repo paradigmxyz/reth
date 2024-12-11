@@ -137,7 +137,6 @@ impl TestBlockBuilder {
             number,
             parent_hash,
             gas_used: transactions.len() as u64 * MIN_TRANSACTION_GAS,
-            gas_limit: self.chain_spec.max_gas_limit,
             mix_hash: B256::random(),
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
             transactions_root: calculate_transaction_root(

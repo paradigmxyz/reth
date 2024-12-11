@@ -264,15 +264,11 @@ mod tests {
                     checkpoint: StageCheckpoint::new(BlockNumber::from(pipeline_done_after)),
                     done: true,
                 })]))
-                .build(chain_spec.clone());
+                .build(chain_spec);
 
             let pipeline_sync = PipelineSync::new(pipeline, Box::<TokioTaskExecutor>::default());
             let client = TestFullBlockClient::default();
-            let header = Header {
-                base_fee_per_gas: Some(7),
-                gas_limit: chain_spec.max_gas_limit,
-                ..Default::default()
-            };
+            let header = Header { base_fee_per_gas: Some(7), ..Default::default() };
             let header = SealedHeader::seal(header);
             insert_headers_into_client(&client, header, 0..total_blocks);
 
