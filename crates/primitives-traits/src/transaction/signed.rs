@@ -1,6 +1,6 @@
 //! API of a signed transaction.
 
-use crate::{FillTxEnv, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde, TxType};
+use crate::{FillTxEnv, InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
 use alloc::{fmt, vec::Vec};
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature, TxHash, B256};
@@ -31,19 +31,21 @@ pub trait SignedTransaction:
     + MaybeArbitrary
     + InMemorySize
 {
-    /// Transaction envelope type ID.
-    type Type: TxType;
-
-    /// Returns the transaction type.
-    fn tx_type(&self) -> Self::Type {
-        Self::Type::try_from(self.ty()).expect("should decode tx type id")
-    }
-
     /// Returns reference to transaction hash.
     fn tx_hash(&self) -> &TxHash;
 
     /// Returns reference to signature.
     fn signature(&self) -> &PrimitiveSignature;
+
+    /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
+    /// network.
+    ///
+    /// Some transactions are not broadcastable as objects and only allowed to be broadcasted as
+    /// hashes, e.g. because they missing context (e.g. blob sidecar).
+    fn is_broadcastable_in_full(&self) -> bool {
+        // EIP-4844 transactions are not broadcastable in full, only hashes are allowed.
+        !self.is_eip4844()
+    }
 
     /// Recover signer from signature and hash.
     ///

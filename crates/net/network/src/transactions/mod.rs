@@ -50,7 +50,7 @@ use reth_network_p2p::{
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
 use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, TransactionSigned};
-use reth_primitives_traits::{SignedTransaction, TxType};
+use reth_primitives_traits::SignedTransaction;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
     error::{PoolError, PoolResult},
@@ -1641,7 +1641,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
     ///
     /// If the transaction is unsuitable for broadcast or would exceed the softlimit, it is appended
     /// to list of pooled transactions, (e.g. 4844 transactions).
-    /// See also [`TxType::is_broadcastable_in_full`].
+    /// See also [`SignedTransaction::is_broadcastable_in_full`].
     fn push(&mut self, transaction: &PropagateTransaction<T>) {
         // Do not send full 4844 transaction hashes to peers.
         //
@@ -1651,7 +1651,7 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
         //  via `GetPooledTransactions`.
         //
         // From: <https://eips.ethereum.org/EIPS/eip-4844#networking>
-        if !transaction.transaction.tx_type().is_broadcastable_in_full() {
+        if !transaction.transaction.is_broadcastable_in_full() {
             self.pooled.push(transaction);
             return
         }
