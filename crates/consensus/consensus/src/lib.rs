@@ -451,6 +451,11 @@ pub enum ConsensusError {
         /// The block's timestamp.
         timestamp: u64,
     },
+    /// Custom error
+    // todo: remove in favour of AT Consensus::Error, so OpConsensusError can wrap ConsensusError
+    // in a variant instead <https://github.com/paradigmxyz/reth/issues/13237>
+    #[display("custom l2 error (search for it in debug logs)")]
+    Other,
 }
 
 impl ConsensusError {

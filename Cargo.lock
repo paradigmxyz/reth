@@ -8426,6 +8426,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-trie",
+ "derive_more",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
@@ -8433,6 +8434,8 @@ dependencies = [
  "reth-optimism-forks",
  "reth-optimism-primitives",
  "reth-primitives",
+ "reth-storage-api",
+ "reth-storage-errors",
  "reth-trie-common",
  "tracing",
 ]
