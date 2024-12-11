@@ -306,9 +306,7 @@ where
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
         let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
-        for (address, slots) in &*proof_targets {
-            fetched_proof_targets.entry(*address).or_default().extend(slots)
-        }
+        fetched_proof_targets.extend_ref(&proof_targets);
 
         // Dispatch proof gathering for this state update
         rayon::spawn(move || {
