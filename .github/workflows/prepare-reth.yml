@@ -28,8 +28,6 @@ jobs:
     timeout-minutes: 45
     runs-on:
       group: Reth
-    outputs:
-      artifact_path: ${{ steps.upload.outputs.artifact_path }}
     steps:
       - uses: actions/checkout@v4
       - run: mkdir artifacts
