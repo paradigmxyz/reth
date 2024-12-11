@@ -190,7 +190,7 @@ where
             }
 
             if this.range.peek().is_none() {
-                // only terminate the stream if there are blocks to process
+                // only terminate the stream if there are no more blocks to process
                 return Poll::Ready(None);
             }
         }
