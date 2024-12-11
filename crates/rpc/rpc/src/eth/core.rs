@@ -27,7 +27,6 @@ use reth_tasks::{
     TaskSpawner, TokioTaskExecutor,
 };
 use tokio::sync::{broadcast, Mutex};
-use tracing::trace;
 
 use crate::eth::EthTxBuilder;
 
