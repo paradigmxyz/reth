@@ -1,3 +1,5 @@
+#![allow(clippy::needless_lifetimes)]
+
 use super::ExecutedBlock;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{
