@@ -136,11 +136,7 @@ where
                     .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().cloned()))
                     .with_branch_node_hash_masks(self.collect_branch_node_hash_masks)
                     .storage_multiproof(target_slots)
-                    .map_err(|e| {
-                        ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                            DatabaseError::Other(e.to_string()),
-                        ))
-                    })
+                    .map_err(|e| ParallelStateRootError::Other(e.to_string()))
                 })();
                 if let Err(err) = tx.send(result) {
                     error!(target: "trie::parallel", ?hashed_address, err_content = ?err.0,  "Failed to send proof result");
