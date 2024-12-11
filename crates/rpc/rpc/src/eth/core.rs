@@ -447,9 +447,7 @@ where
     /// Broadcasts raw transaction if there are active subscribers.
     #[inline]
     pub fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
-        if self.raw_tx_sender.send(raw_tx).is_err() {
-            trace!("no receivers for raw transaction");
-        }
+        let _ = self.raw_tx_sender.send(raw_tx);
     }
 }
 

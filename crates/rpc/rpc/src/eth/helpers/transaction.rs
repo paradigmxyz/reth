@@ -26,6 +26,10 @@ where
     /// Returns the hash of the transaction.
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let recovered = recover_raw_transaction(&tx)?;
+
+        // broadcast raw transaction to subscribers if there is any.
+        self.broadcast_raw_transaction(tx);
+
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
         // submit the transaction to the pool with a `Local` origin
@@ -34,9 +38,6 @@ where
             .add_transaction(TransactionOrigin::Local, pool_transaction)
             .await
             .map_err(Self::Error::from_eth_err)?;
-
-        // broadcast raw transaction to subscribers if there is any.
-        self.broadcast_raw_transaction(tx);
 
         Ok(hash)
     }
