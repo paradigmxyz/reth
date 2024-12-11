@@ -30,8 +30,8 @@ pub struct MemoryOverlayStateProviderRef<'a, N: NodePrimitives = reth_primitives
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
-#[allow(missing_debug_implementations)]
-pub type MemoryOverlayStateProvider<N: reth_primitives::EthPrimitives> = MemoryOverlayStateProviderRef<'static,N>;
+#[allow(missing_debug_implementations, type_alias_bounds)]
+pub type MemoryOverlayStateProvider<N: NodePrimitives> = MemoryOverlayStateProviderRef<'static,N>;
 
 impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     /// Create new memory overlay state provider.
@@ -185,18 +185,19 @@ impl<'a, N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef
     fn multiproof(
         &self,
         mut input: TrieInput,
-        targets: HashMap<B256, HashSet<B256>>,
+        targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
         input.prepend_cached(nodes, state);
         self.historical.multiproof(input, targets)
     }
 
+
     fn witness(
         &self,
         mut input: TrieInput,
         target: HashedPostState,
-    ) -> ProviderResult<HashMap<B256, Bytes>> {
+    ) -> ProviderResult<B256HashMap<Bytes>> {
         let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
         input.prepend_cached(nodes, state);
         self.historical.witness(input, target)
