@@ -9634,7 +9634,6 @@ dependencies = [
  "alloy-rlp",
  "arbitrary",
  "assert_matches",
- "auto_impl",
  "criterion",
  "itertools 0.13.0",
  "pretty_assertions",

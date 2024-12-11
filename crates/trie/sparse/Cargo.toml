@@ -23,7 +23,6 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 # misc
-auto_impl.workspace = true
 smallvec = { workspace = true, features = ["const_new"] }
 thiserror.workspace = true
 
