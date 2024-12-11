@@ -4,7 +4,7 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     Bytes, B256,
 };
-use reth_execution_errors::SparseTrieError;
+use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
 use reth_trie_common::{prefix_set::TriePrefixSetsMut, Nibbles};
 use reth_trie_sparse::blinded::{pad_path_to_key, BlindedProvider, BlindedProviderFactory};
 use std::sync::Arc;
@@ -92,7 +92,7 @@ where
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.as_ref().clone())
                 .multiproof(targets)
-                .map_err(|error| SparseTrieError::Other(Box::new(error)))?;
+                .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
 
         Ok(proof.account_subtree.into_inner().remove(&path))
     }
@@ -141,7 +141,7 @@ where
         )
         .with_prefix_set_mut(storage_prefix_set)
         .storage_multiproof(targets)
-        .map_err(|error| SparseTrieError::Other(Box::new(error)))?;
+        .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
 
         Ok(proof.subtree.into_inner().remove(&path))
     }

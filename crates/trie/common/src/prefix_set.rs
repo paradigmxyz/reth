@@ -1,8 +1,5 @@
 use crate::Nibbles;
-use alloy_primitives::{
-    map::{HashMap, HashSet},
-    B256,
-};
+use alloy_primitives::map::{B256HashMap, B256HashSet};
 use std::sync::Arc;
 
 /// Collection of mutable prefix sets.
@@ -12,9 +9,9 @@ pub struct TriePrefixSetsMut {
     pub account_prefix_set: PrefixSetMut,
     /// A map containing storage changes with the hashed address as key and a set of storage key
     /// prefixes as the value.
-    pub storage_prefix_sets: HashMap<B256, PrefixSetMut>,
+    pub storage_prefix_sets: B256HashMap<PrefixSetMut>,
     /// A set of hashed addresses of destroyed accounts.
-    pub destroyed_accounts: HashSet<B256>,
+    pub destroyed_accounts: B256HashSet,
 }
 
 impl TriePrefixSetsMut {
@@ -50,9 +47,9 @@ pub struct TriePrefixSets {
     pub account_prefix_set: PrefixSet,
     /// A map containing storage changes with the hashed address as key and a set of storage key
     /// prefixes as the value.
-    pub storage_prefix_sets: HashMap<B256, PrefixSet>,
+    pub storage_prefix_sets: B256HashMap<PrefixSet>,
     /// A set of hashed addresses of destroyed accounts.
-    pub destroyed_accounts: HashSet<B256>,
+    pub destroyed_accounts: B256HashSet,
 }
 
 /// A container for efficiently storing and checking for the presence of key prefixes.
@@ -146,9 +143,9 @@ impl PrefixSetMut {
         if self.all {
             PrefixSet { index: 0, all: true, keys: Arc::new(Vec::new()) }
         } else {
-            self.keys.sort();
+            self.keys.sort_unstable();
             self.keys.dedup();
-            // we need to shrink in both the sorted and non-sorted cases because deduping may have
+            // We need to shrink in both the sorted and non-sorted cases because deduping may have
             // occurred either on `freeze`, or during `contains`.
             self.keys.shrink_to_fit();
             PrefixSet { index: 0, all: false, keys: Arc::new(self.keys) }

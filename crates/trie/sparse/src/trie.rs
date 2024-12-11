@@ -5,7 +5,7 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::Decodable;
-use reth_execution_errors::{SparseTrieError, SparseTrieResult};
+use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, SparseTrieResult};
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
@@ -106,7 +106,7 @@ impl<P> SparseTrie<P> {
 
     /// Wipe the trie, removing all values and nodes, and replacing the root with an empty node.
     pub fn wipe(&mut self) -> SparseTrieResult<()> {
-        let revealed = self.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
+        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.wipe();
         Ok(())
     }
@@ -129,14 +129,14 @@ where
 {
     /// Update the leaf node.
     pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
-        let revealed = self.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
+        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.update_leaf(path, value)?;
         Ok(())
     }
 
     /// Remove the leaf node.
     pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
-        let revealed = self.as_revealed_mut().ok_or(SparseTrieError::Blind)?;
+        let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.remove_leaf(path)?;
         Ok(())
     }
@@ -313,10 +313,11 @@ impl<P> RevealedSparseTrie<P> {
                         SparseNode::Branch { .. } | SparseNode::Extension { .. } => {}
                         // All other node types can't be handled.
                         node @ (SparseNode::Empty | SparseNode::Leaf { .. }) => {
-                            return Err(SparseTrieError::Reveal {
+                            return Err(SparseTrieErrorKind::Reveal {
                                 path: entry.key().clone(),
                                 node: Box::new(node.clone()),
-                            })
+                            }
+                            .into())
                         }
                     },
                     Entry::Vacant(entry) => {
@@ -337,10 +338,11 @@ impl<P> RevealedSparseTrie<P> {
                     SparseNode::Extension { .. } | SparseNode::Branch { .. } => {}
                     // All other node types can't be handled.
                     node @ (SparseNode::Empty | SparseNode::Leaf { .. }) => {
-                        return Err(SparseTrieError::Reveal {
+                        return Err(SparseTrieErrorKind::Reveal {
                             path: entry.key().clone(),
                             node: Box::new(node.clone()),
-                        })
+                        }
+                        .into())
                     }
                 },
                 Entry::Vacant(entry) => {
@@ -364,10 +366,11 @@ impl<P> RevealedSparseTrie<P> {
                     node @ (SparseNode::Empty |
                     SparseNode::Extension { .. } |
                     SparseNode::Branch { .. }) => {
-                        return Err(SparseTrieError::Reveal {
+                        return Err(SparseTrieErrorKind::Reveal {
                             path: entry.key().clone(),
                             node: Box::new(node.clone()),
-                        })
+                        }
+                        .into())
                     }
                 },
                 Entry::Vacant(entry) => {
@@ -389,10 +392,11 @@ impl<P> RevealedSparseTrie<P> {
                 Entry::Occupied(entry) => match entry.get() {
                     // Hash node with a different hash can't be handled.
                     SparseNode::Hash(previous_hash) if previous_hash != &hash => {
-                        return Err(SparseTrieError::Reveal {
+                        return Err(SparseTrieErrorKind::Reveal {
                             path: entry.key().clone(),
                             node: Box::new(SparseNode::Hash(hash)),
-                        })
+                        }
+                        .into())
                     }
                     _ => {}
                 },
@@ -413,9 +417,9 @@ impl<P> RevealedSparseTrie<P> {
 
         while let Some(node) = self.nodes.remove(&current) {
             match &node {
-                SparseNode::Empty => return Err(SparseTrieError::Blind),
-                SparseNode::Hash(hash) => {
-                    return Err(SparseTrieError::BlindedNode { path: current, hash: *hash })
+                SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
+                &SparseNode::Hash(hash) => {
+                    return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
                 }
                 SparseNode::Leaf { key: _key, .. } => {
                     // Leaf node is always the one that we're deleting, and no other leaf nodes can
@@ -603,13 +607,13 @@ impl<P> RevealedSparseTrie<P> {
                 }
                 SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), false, SparseNodeType::Hash),
                 SparseNode::Leaf { key, hash } => {
-                    self.rlp_buf.clear();
                     let mut path = path.clone();
                     path.extend_from_slice_unchecked(key);
                     if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                         (RlpNode::word_rlp(&hash), false, SparseNodeType::Leaf)
                     } else {
                         let value = self.values.get(&path).unwrap();
+                        self.rlp_buf.clear();
                         let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.rlp_buf);
                         *hash = rlp_node.as_hash();
                         (rlp_node, true, SparseNodeType::Leaf)
@@ -825,8 +829,8 @@ where
                     *node = SparseNode::new_leaf(path);
                     break
                 }
-                SparseNode::Hash(hash) => {
-                    return Err(SparseTrieError::BlindedNode { path: current, hash: *hash })
+                &mut SparseNode::Hash(hash) => {
+                    return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
                 }
                 SparseNode::Leaf { key: current_key, .. } => {
                     current.extend_from_slice_unchecked(current_key);
@@ -844,6 +848,7 @@ where
                     *node = SparseNode::new_ext(new_ext_key);
 
                     // create a branch node and corresponding leaves
+                    self.nodes.reserve(3);
                     self.nodes.insert(
                         current.slice(..common),
                         SparseNode::new_split_branch(current[common], path[common]),
@@ -887,6 +892,7 @@ where
 
                         // create state mask for new branch node
                         // NOTE: this might overwrite the current extension node
+                        self.nodes.reserve(3);
                         let branch = SparseNode::new_split_branch(current[common], path[common]);
                         self.nodes.insert(current.slice(..common), branch);
 
@@ -922,9 +928,9 @@ where
     /// Remove leaf node from the trie.
     pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
         if self.values.remove(path).is_none() {
-            if let Some(SparseNode::Hash(hash)) = self.nodes.get(path) {
+            if let Some(&SparseNode::Hash(hash)) = self.nodes.get(path) {
                 // Leaf is present in the trie, but it's blinded.
-                return Err(SparseTrieError::BlindedNode { path: path.clone(), hash: *hash })
+                return Err(SparseTrieErrorKind::BlindedNode { path: path.clone(), hash }.into())
             }
 
             // Leaf is not present in the trie.
@@ -962,9 +968,9 @@ where
             let removed_path = removed_node.path;
 
             let new_node = match &removed_node.node {
-                SparseNode::Empty => return Err(SparseTrieError::Blind),
-                SparseNode::Hash(hash) => {
-                    return Err(SparseTrieError::BlindedNode { path: removed_path, hash: *hash })
+                SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
+                &SparseNode::Hash(hash) => {
+                    return Err(SparseTrieErrorKind::BlindedNode { path: removed_path, hash }.into())
                 }
                 SparseNode::Leaf { .. } => {
                     unreachable!("we already popped the leaf node")
@@ -973,12 +979,11 @@ where
                     // If the node is an extension node, we need to look at its child to see if we
                     // need to merge them.
                     match &child.node {
-                        SparseNode::Empty => return Err(SparseTrieError::Blind),
-                        SparseNode::Hash(hash) => {
-                            return Err(SparseTrieError::BlindedNode {
-                                path: child.path,
-                                hash: *hash,
-                            })
+                        SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
+                        &SparseNode::Hash(hash) => {
+                            return Err(
+                                SparseTrieErrorKind::BlindedNode { path: child.path, hash }.into()
+                            )
                         }
                         // For a leaf node, we collapse the extension node into a leaf node,
                         // extending the key. While it's impossible to encounter an extension node
@@ -1041,12 +1046,13 @@ where
 
                         let mut delete_child = false;
                         let new_node = match child {
-                            SparseNode::Empty => return Err(SparseTrieError::Blind),
-                            SparseNode::Hash(hash) => {
-                                return Err(SparseTrieError::BlindedNode {
+                            SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
+                            &SparseNode::Hash(hash) => {
+                                return Err(SparseTrieErrorKind::BlindedNode {
                                     path: child_path,
-                                    hash: *hash,
-                                })
+                                    hash,
+                                }
+                                .into())
                             }
                             // If the only child is a leaf node, we downgrade the branch node into a
                             // leaf node, prepending the nibble to the key, and delete the old
@@ -1273,7 +1279,10 @@ impl SparseTrieUpdates {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{map::HashSet, U256};
+    use alloy_primitives::{
+        map::{B256HashSet, HashSet},
+        U256,
+    };
     use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
     use itertools::Itertools;
@@ -1316,7 +1325,7 @@ mod tests {
     /// Returns the state root and the retained proof nodes.
     fn run_hash_builder(
         state: impl IntoIterator<Item = (Nibbles, Account)> + Clone,
-        destroyed_accounts: HashSet<B256>,
+        destroyed_accounts: B256HashSet,
         proof_targets: impl IntoIterator<Item = Nibbles>,
     ) -> (B256, TrieUpdates, ProofNodes, HashMap<Nibbles, TrieMask>) {
         let mut account_rlp = Vec::new();
@@ -1866,8 +1875,8 @@ mod tests {
 
         // Removing a blinded leaf should result in an error
         assert_matches!(
-            sparse.remove_leaf(&Nibbles::from_nibbles([0x0])),
-            Err(SparseTrieError::BlindedNode { path, hash }) if path == Nibbles::from_nibbles([0x0]) && hash == B256::repeat_byte(1)
+            sparse.remove_leaf(&Nibbles::from_nibbles([0x0])).map_err(|e| e.into_kind()),
+            Err(SparseTrieErrorKind::BlindedNode { path, hash }) if path == Nibbles::from_nibbles([0x0]) && hash == B256::repeat_byte(1)
         );
     }
 

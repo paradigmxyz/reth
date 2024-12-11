@@ -8,7 +8,7 @@ use crate::{
 };
 use alloy_primitives::{
     keccak256,
-    map::{HashMap, HashSet},
+    map::{B256HashMap, B256HashSet, HashMap, HashSet},
     Address, B256,
 };
 use alloy_rlp::{BufMut, Encodable};
@@ -103,7 +103,7 @@ where
     /// Generate a state multiproof according to specified targets.
     pub fn multiproof(
         mut self,
-        mut targets: HashMap<B256, HashSet<B256>>,
+        mut targets: B256HashMap<B256HashSet>,
     ) -> Result<MultiProof, StateProofError> {
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
@@ -121,7 +121,7 @@ where
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
-        let mut storages: HashMap<_, _> =
+        let mut storages: B256HashMap<_> =
             targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
@@ -263,7 +263,7 @@ where
     /// Generate storage proof.
     pub fn storage_multiproof(
         mut self,
-        targets: HashSet<B256>,
+        targets: B256HashSet,
     ) -> Result<StorageMultiProof, StateProofError> {
         let mut hashed_storage_cursor =
             self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;

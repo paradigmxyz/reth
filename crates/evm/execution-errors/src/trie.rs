@@ -67,7 +67,38 @@ pub type SparseStateTrieResult<Ok> = Result<Ok, SparseStateTrieError>;
 
 /// Error encountered in `SparseStateTrie`.
 #[derive(Error, Debug)]
-pub enum SparseStateTrieError {
+#[error(transparent)]
+pub struct SparseStateTrieError(#[from] Box<SparseStateTrieErrorKind>);
+
+impl<T: Into<SparseStateTrieErrorKind>> From<T> for SparseStateTrieError {
+    #[cold]
+    fn from(value: T) -> Self {
+        Self(Box::new(value.into()))
+    }
+}
+
+impl From<SparseTrieError> for SparseStateTrieErrorKind {
+    #[cold]
+    fn from(value: SparseTrieError) -> Self {
+        Self::Sparse(*value.0)
+    }
+}
+
+impl SparseStateTrieError {
+    /// Returns the error kind.
+    pub const fn kind(&self) -> &SparseStateTrieErrorKind {
+        &self.0
+    }
+
+    /// Consumes the error and returns the error kind.
+    pub fn into_kind(self) -> SparseStateTrieErrorKind {
+        *self.0
+    }
+}
+
+/// Error encountered in `SparseStateTrie`.
+#[derive(Error, Debug)]
+pub enum SparseStateTrieErrorKind {
     /// Encountered invalid root node.
     #[error("invalid root node at {path:?}: {node:?}")]
     InvalidRootNode {
@@ -78,7 +109,7 @@ pub enum SparseStateTrieError {
     },
     /// Sparse trie error.
     #[error(transparent)]
-    Sparse(#[from] SparseTrieError),
+    Sparse(#[from] SparseTrieErrorKind),
     /// RLP error.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
@@ -89,7 +120,31 @@ pub type SparseTrieResult<Ok> = Result<Ok, SparseTrieError>;
 
 /// Error encountered in `SparseTrie`.
 #[derive(Error, Debug)]
-pub enum SparseTrieError {
+#[error(transparent)]
+pub struct SparseTrieError(#[from] Box<SparseTrieErrorKind>);
+
+impl<T: Into<SparseTrieErrorKind>> From<T> for SparseTrieError {
+    #[cold]
+    fn from(value: T) -> Self {
+        Self(Box::new(value.into()))
+    }
+}
+
+impl SparseTrieError {
+    /// Returns the error kind.
+    pub const fn kind(&self) -> &SparseTrieErrorKind {
+        &self.0
+    }
+
+    /// Consumes the error and returns the error kind.
+    pub fn into_kind(self) -> SparseTrieErrorKind {
+        *self.0
+    }
+}
+
+/// [`SparseTrieError`] kind.
+#[derive(Error, Debug)]
+pub enum SparseTrieErrorKind {
     /// Sparse trie is still blind. Thrown on attempt to update it.
     #[error("sparse trie is blind")]
     Blind,
@@ -132,6 +187,12 @@ pub enum TrieWitnessError {
     /// Missing account.
     #[error("missing account {_0}")]
     MissingAccount(B256),
+}
+
+impl From<SparseStateTrieErrorKind> for TrieWitnessError {
+    fn from(error: SparseStateTrieErrorKind) -> Self {
+        Self::Sparse(error.into())
+    }
 }
 
 impl From<TrieWitnessError> for ProviderError {

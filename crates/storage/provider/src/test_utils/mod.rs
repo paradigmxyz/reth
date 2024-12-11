@@ -80,7 +80,7 @@ pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
 
     let (root, updates) = StateRoot::from_tx(provider.tx_ref())
         .root_with_updates()
-        .map_err(Into::<reth_db::DatabaseError>::into)?;
+        .map_err(reth_db::DatabaseError::from)?;
     provider.write_trie_updates(&updates).unwrap();
 
     provider.commit()?;
