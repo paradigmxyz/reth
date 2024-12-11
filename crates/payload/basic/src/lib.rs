@@ -10,7 +10,7 @@
 
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
-use alloy_eips::{eip4895::Withdrawals, merge::SLOT_DURATION};
+use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT, eip4895::Withdrawals, merge::SLOT_DURATION};
 use alloy_primitives::{Bytes, B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
@@ -20,7 +20,7 @@ use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJo
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
 use reth_primitives::{proofs, SealedHeader};
-use reth_primitives_traits::constants::RETH_CLIENT_VERSION;
+use reth_primitives_traits::constants::{GAS_LIMIT_BOUND_DIVISOR, RETH_CLIENT_VERSION};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
@@ -166,6 +166,7 @@ where
         let config = PayloadConfig::new(
             Arc::new(parent_header.clone()),
             self.config.extradata.clone(),
+            self.config.gas_limit,
             attributes,
         );
 
@@ -253,6 +254,8 @@ impl PayloadTaskGuard {
 pub struct BasicPayloadJobGeneratorConfig {
     /// Data to include in the block's extra data field.
     extradata: Bytes,
+    /// Desired block gas limit.
+    gas_limit: u64,
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
     /// The deadline for when the payload builder job should resolve.
@@ -296,12 +299,21 @@ impl BasicPayloadJobGeneratorConfig {
         self.extradata = extradata;
         self
     }
+
+    /// Sets the desired block gas limit.
+    ///
+    /// Defaults to [`ETHEREUM_BLOCK_GAS_LIMIT`].
+    pub fn gas_limit(mut self, gas_limit: u64) -> Self {
+        self.gas_limit = gas_limit;
+        self
+    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
         Self {
             extradata: alloy_rlp::encode(RETH_CLIENT_VERSION.as_bytes()).into(),
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             interval: Duration::from_secs(1),
             // 12s slot time
             deadline: SLOT_DURATION,
@@ -715,6 +727,8 @@ pub struct PayloadConfig<Attributes> {
     pub parent_header: Arc<SealedHeader>,
     /// Block extra data.
     pub extra_data: Bytes,
+    /// Desired block gas limit.
+    pub desired_gas_limit: u64,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
 }
@@ -723,6 +737,19 @@ impl<Attributes> PayloadConfig<Attributes> {
     /// Returns an owned instance of the [`PayloadConfig`]'s `extra_data` bytes.
     pub fn extra_data(&self) -> Bytes {
         self.extra_data.clone()
+    }
+
+    /// Returns the desired block gas limit.
+    ///
+    /// The desired gas limit might violate the increase/decrease limit
+    /// per block as specified by consensus, so we need to clamp it in the
+    /// right direction.
+    pub fn gas_limit(&self) -> u64 {
+        let parent_gas_limit = self.parent_header.gas_limit;
+        let delta = parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR;
+        let min_gas_limit = parent_gas_limit + delta - 1;
+        let max_gas_limit = parent_gas_limit - delta + 1;
+        parent_gas_limit.clamp(min_gas_limit, max_gas_limit)
     }
 }
 
@@ -734,9 +761,10 @@ where
     pub const fn new(
         parent_header: Arc<SealedHeader>,
         extra_data: Bytes,
+        gas_limit: u64,
         attributes: Attributes,
     ) -> Self {
-        Self { parent_header, extra_data, attributes }
+        Self { parent_header, extra_data, desired_gas_limit: gas_limit, attributes }
     }
 
     /// Returns the payload id.

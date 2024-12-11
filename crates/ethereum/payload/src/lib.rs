@@ -83,6 +83,7 @@ where
             timestamp: config.attributes.timestamp(),
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
             prev_randao: config.attributes.prev_randao(),
+            gas_limit: config.desired_gas_limit,
         };
         self.evm_config.next_cfg_and_block_env(parent, next_attributes)
     }
@@ -167,7 +168,7 @@ where
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
         State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
-    let PayloadConfig { parent_header, extra_data, attributes } = config;
+    let PayloadConfig { parent_header, extra_data, attributes, .. } = config;
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;

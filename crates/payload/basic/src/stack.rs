@@ -205,6 +205,7 @@ where
                         config: PayloadConfig {
                             parent_header: args.config.parent_header.clone(),
                             extra_data: args.config.extra_data.clone(),
+                            desired_gas_limit: args.config.desired_gas_limit,
                             attributes: left_attr.clone(),
                         },
                         cancel: args.cancel.clone(),
@@ -227,6 +228,7 @@ where
                     config: PayloadConfig {
                         parent_header: args.config.parent_header.clone(),
                         extra_data: args.config.extra_data.clone(),
+                        desired_gas_limit: args.config.desired_gas_limit,
                         attributes: right_attr.clone(),
                     },
                     cancel: args.cancel.clone(),
@@ -252,9 +254,10 @@ where
         match config.attributes {
             Either::Left(left_attr) => {
                 let left_config = PayloadConfig {
-                    attributes: left_attr,
                     parent_header: config.parent_header.clone(),
                     extra_data: config.extra_data.clone(),
+                    desired_gas_limit: config.desired_gas_limit,
+                    attributes: left_attr,
                 };
                 self.left.build_empty_payload(client, left_config).map(Either::Left)
             }
@@ -262,6 +265,7 @@ where
                 let right_config = PayloadConfig {
                     parent_header: config.parent_header.clone(),
                     extra_data: config.extra_data.clone(),
+                    desired_gas_limit: config.desired_gas_limit,
                     attributes: right_attr,
                 };
                 self.right.build_empty_payload(client, right_config).map(Either::Right)

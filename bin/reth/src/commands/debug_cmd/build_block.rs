@@ -1,6 +1,7 @@
 //! Command for debugging block building.
 use alloy_consensus::TxEip4844;
 use alloy_eips::{
+    eip1559::ETHEREUM_BLOCK_GAS_LIMIT,
     eip2718::Encodable2718,
     eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
 };
@@ -229,6 +230,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let payload_config = PayloadConfig::new(
             Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
             Bytes::default(),
+            ETHEREUM_BLOCK_GAS_LIMIT,
             reth_payload_builder::EthPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 payload_attrs,
