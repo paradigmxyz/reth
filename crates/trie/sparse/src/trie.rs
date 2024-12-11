@@ -607,13 +607,13 @@ impl<P> RevealedSparseTrie<P> {
                 }
                 SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), false, SparseNodeType::Hash),
                 SparseNode::Leaf { key, hash } => {
-                    self.rlp_buf.clear();
                     let mut path = path.clone();
                     path.extend_from_slice_unchecked(key);
                     if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                         (RlpNode::word_rlp(&hash), false, SparseNodeType::Leaf)
                     } else {
                         let value = self.values.get(&path).unwrap();
+                        self.rlp_buf.clear();
                         let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.rlp_buf);
                         *hash = rlp_node.as_hash();
                         (rlp_node, true, SparseNodeType::Leaf)
@@ -848,6 +848,7 @@ where
                     *node = SparseNode::new_ext(new_ext_key);
 
                     // create a branch node and corresponding leaves
+                    self.nodes.reserve(3);
                     self.nodes.insert(
                         current.slice(..common),
                         SparseNode::new_split_branch(current[common], path[common]),
@@ -891,6 +892,7 @@ where
 
                         // create state mask for new branch node
                         // NOTE: this might overwrite the current extension node
+                        self.nodes.reserve(3);
                         let branch = SparseNode::new_split_branch(current[common], path[common]);
                         self.nodes.insert(current.slice(..common), branch);
 
