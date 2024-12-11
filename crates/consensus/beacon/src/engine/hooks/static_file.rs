@@ -36,7 +36,11 @@ where
     Provider: StaticFileProviderFactory
         + DatabaseProviderFactory<
             Provider: StaticFileProviderFactory<
-                Primitives: NodePrimitives<SignedTx: Value + Compact, BlockHeader: Value + Compact>,
+                Primitives: NodePrimitives<
+                    SignedTx: Value + Compact,
+                    BlockHeader: Value + Compact,
+                    Receipt: Value + Compact,
+                >,
             > + StageCheckpointReader
                           + BlockReader
                           + ChainStateBlockReader,
@@ -152,7 +156,11 @@ where
     Provider: StaticFileProviderFactory
         + DatabaseProviderFactory<
             Provider: StaticFileProviderFactory<
-                Primitives: NodePrimitives<SignedTx: Value + Compact, BlockHeader: Value + Compact>,
+                Primitives: NodePrimitives<
+                    SignedTx: Value + Compact,
+                    BlockHeader: Value + Compact,
+                    Receipt: Value + Compact,
+                >,
             > + StageCheckpointReader
                           + BlockReader
                           + ChainStateBlockReader,
