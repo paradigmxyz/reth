@@ -321,6 +321,7 @@ mod tests {
     use super::*;
     use crate::test_utils::insert_headers_into_client;
     use alloy_consensus::Header;
+    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
     use assert_matches::assert_matches;
     use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -346,7 +347,7 @@ mod tests {
             let client = TestFullBlockClient::default();
             let header = Header {
                 base_fee_per_gas: Some(7),
-                gas_limit: chain_spec.max_gas_limit,
+                gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
                 ..Default::default()
             };
             let header = SealedHeader::seal(header);

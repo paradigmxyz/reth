@@ -317,10 +317,6 @@ impl EthChainSpec for OpChainSpec {
         self.inner.genesis()
     }
 
-    fn max_gas_limit(&self) -> u64 {
-        self.inner.max_gas_limit()
-    }
-
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         self.inner.bootnodes()
     }
@@ -1079,7 +1075,6 @@ mod tests {
                 paris_block_and_final_difficulty: Some((0, U256::from(0))),
                 hardforks,
                 base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
-                max_gas_limit: crate::constants::BASE_SEPOLIA_MAX_GAS_LIMIT,
                 prune_delete_limit: 10000,
                 ..Default::default()
             },
