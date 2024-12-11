@@ -13,7 +13,6 @@ use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::debug;
 use std::{
-    iter::Peekable,
     ops::RangeInclusive,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -53,7 +52,7 @@ pub struct StreamBackfillJob<E, P, T> {
     executor: E,
     provider: P,
     prune_modes: PruneModes,
-    range: Peekable<RangeInclusive<BlockNumber>>,
+    range: RangeInclusive<BlockNumber>,
     tasks: BackfillTasks<T>,
     parallelism: usize,
     batch_size: usize,
@@ -189,7 +188,7 @@ where
                 return Poll::Ready(res);
             }
 
-            if this.range.peek().is_none() {
+            if this.range.is_empty() {
                 // only terminate the stream if there are no more blocks to process
                 return Poll::Ready(None);
             }
@@ -203,7 +202,7 @@ impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, Single
             executor: job.executor,
             provider: job.provider,
             prune_modes: PruneModes::default(),
-            range: job.range.peekable(),
+            range: job.range,
             tasks: FuturesOrdered::new(),
             parallelism: job.stream_parallelism,
             batch_size: 1,
@@ -222,7 +221,7 @@ where
             executor: job.executor,
             provider: job.provider,
             prune_modes: job.prune_modes,
-            range: job.range.peekable(),
+            range: job.range,
             tasks: FuturesOrdered::new(),
             parallelism: job.stream_parallelism,
             batch_size,
