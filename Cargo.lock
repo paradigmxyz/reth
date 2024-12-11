@@ -8579,6 +8579,7 @@ dependencies = [
  "arbitrary",
  "bytes",
  "derive_more",
+ "modular-bitfield",
  "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
@@ -8586,10 +8587,12 @@ dependencies = [
  "reth-codecs",
  "reth-primitives",
  "reth-primitives-traits",
+ "reth-zstd-compressors",
  "revm-primitives",
  "rstest",
  "secp256k1",
  "serde",
+ "test-fuzz",
 ]
 
 [[package]]

@@ -40,7 +40,7 @@ use std::sync::OnceLock;
 #[derive(Debug, Clone, Eq, AsRef, Deref)]
 pub struct OpTransactionSigned {
     /// Transaction hash
-    #[serde(skip)]
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub hash: OnceLock<TxHash>,
     /// The transaction signature values
     pub signature: Signature,
