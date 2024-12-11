@@ -11,7 +11,7 @@ use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_node_types::NodePrimitives;
 use reth_primitives::{
     static_file::{SegmentHeader, SegmentRangeInclusive},
-    Receipt, StaticFileSegment,
+    StaticFileSegment,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
@@ -615,7 +615,8 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     pub fn append_receipts<I, R>(&mut self, receipts: I) -> ProviderResult<Option<TxNumber>>
     where
         I: Iterator<Item = Result<(TxNumber, R), ProviderError>>,
-        R: Borrow<Receipt>,
+        R: Borrow<N::Receipt>,
+        N::Receipt: Compact,
     {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
 
