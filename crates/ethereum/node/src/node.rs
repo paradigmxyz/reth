@@ -244,8 +244,8 @@ impl Default for EthereumPayloadBuilder {
 
 impl EthereumPayloadBuilder {
     /// Create new ethereum payload builder.
-    pub fn new(builder_config: EthereumBuilderConfig) -> Self {
-        Self { config: builder_config }
+    pub const fn new(config: EthereumBuilderConfig) -> Self {
+        Self { config }
     }
 }
 
