@@ -1,5 +1,8 @@
 use crate::{root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets};
-use alloy_primitives::{map::HashMap, B256};
+use alloy_primitives::{
+    map::{B256HashMap, HashMap},
+    B256,
+};
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_db::DatabaseError;
@@ -15,7 +18,7 @@ use reth_trie::{
     proof::StorageProof,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     walker::TrieWalker,
-    HashBuilder, MultiProof, MultiProofTargets, Nibbles, TrieAccount, TrieInput,
+    HashBuilder, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof, TrieAccount, TrieInput,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
@@ -101,7 +104,8 @@ where
         // Pre-calculate storage roots for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-generating storage proofs");
-        let mut storage_proofs = HashMap::with_capacity(storage_root_targets.len());
+        let mut storage_proofs =
+            B256HashMap::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
@@ -165,7 +169,10 @@ where
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_hash_masks);
 
-        let mut storages = HashMap::default();
+        // Initialize all storage multiproofs as empty.
+        // Storage multiproofs for non empty tries will be overwritten if necessary.
+        let mut storages: B256HashMap<_> =
+            targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(
             walker,
