@@ -40,7 +40,7 @@ pub trait NetworkPrimitives:
         + 'static;
 }
 
-/// Primitive types used by Ethereum network.
+/// Network primitive types used by Ethereum networks.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct EthNetworkPrimitives;
