@@ -19,7 +19,6 @@ pub trait Receipt:
     + Sync
     + Unpin
     + Clone
-    + Default
     + fmt::Debug
     + TxReceipt<Log = alloy_primitives::Log>
     + RlpEncodableReceipt
