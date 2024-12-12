@@ -74,16 +74,7 @@ pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
-    ProofCalculated {
-        /// The state update that was used to calculate the proof
-        state_update: HashedPostState,
-        /// The proof targets
-        targets: MultiProofTargets,
-        /// The calculated proof
-        proof: MultiProof,
-        /// The index of this proof in the sequence of state updates
-        sequence_number: u64,
-    },
+    ProofCalculated(Box<ProofCalculated>),
     /// State root calculation completed
     RootCalculated {
         /// The updated sparse trie
@@ -93,6 +84,19 @@ pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     },
     /// Signals state update stream end.
     FinishedStateUpdates,
+}
+
+/// Message about completion of proof calculation for a specific state update
+#[derive(Debug)]
+pub struct ProofCalculated {
+    /// The state update that was used to calculate the proof
+    state_update: HashedPostState,
+    /// The proof targets
+    targets: MultiProofTargets,
+    /// The calculated proof
+    proof: MultiProof,
+    /// The index of this proof in the sequence of state updates
+    sequence_number: u64,
 }
 
 /// Handle to track proof calculation ordering
@@ -338,12 +342,14 @@ where
             );
             match result {
                 Ok(proof) => {
-                    let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated {
-                        state_update: hashed_state_update,
-                        targets: proof_targets,
-                        proof,
-                        sequence_number: proof_sequence_number,
-                    });
+                    let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
+                        Box::new(ProofCalculated {
+                            state_update: hashed_state_update,
+                            targets: proof_targets,
+                            proof,
+                            sequence_number: proof_sequence_number,
+                        }),
+                    ));
                 }
                 Err(e) => {
                     error!(target: "engine::root", error = ?e, "Could not calculate multiproof");
@@ -448,28 +454,27 @@ where
                     StateRootMessage::FinishedStateUpdates => {
                         updates_finished = true;
                     }
-                    StateRootMessage::ProofCalculated {
-                        state_update,
-                        targets,
-                        proof,
-                        sequence_number,
-                    } => {
+                    StateRootMessage::ProofCalculated(proof_calculated) => {
                         proofs_processed += 1;
                         trace!(
                             target: "engine::root",
-                            sequence = sequence_number,
+                            sequence = proof_calculated.sequence_number,
                             total_proofs = proofs_processed,
                             "Processing calculated proof"
                         );
 
-                        trace!(target: "engine::root", ?proof, "Proof calculated");
+                        trace!(target: "engine::root", proof = ?proof_calculated.proof, "Proof calculated");
 
                         if let Some((
                             combined_state_update,
                             combined_proof_targets,
                             combined_proof,
-                        )) = self.on_proof(sequence_number, state_update, targets, proof)
-                        {
+                        )) = self.on_proof(
+                            proof_calculated.sequence_number,
+                            proof_calculated.state_update,
+                            proof_calculated.targets,
+                            proof_calculated.proof,
+                        ) {
                             if self.sparse_trie.is_none() {
                                 current_state_update.extend(combined_state_update);
                                 current_proof_targets.extend(combined_proof_targets);
