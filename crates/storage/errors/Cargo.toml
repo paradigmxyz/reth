@@ -23,6 +23,7 @@ alloy-rlp.workspace = true
 
 # misc
 derive_more.workspace = true
+thiserror.workspace = true
 
 [features]
 default = ["std"]

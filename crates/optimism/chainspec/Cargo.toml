@@ -35,6 +35,7 @@ op-alloy-rpc-types.workspace = true
 serde_json.workspace = true
 
 # misc
+thiserror.workspace = true
 derive_more.workspace = true
 once_cell.workspace = true
 

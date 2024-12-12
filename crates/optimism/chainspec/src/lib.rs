@@ -244,25 +244,18 @@ impl OpChainSpec {
     }
 }
 
-#[derive(Clone, Debug, Display, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, thiserror::Error)]
 /// Error type for decoding Holocene 1559 parameters
 pub enum DecodeError {
-    #[display("Insufficient data to decode")]
+    #[error("Insufficient data to decode")]
     /// Insufficient data to decode
     InsufficientData,
-    #[display("Invalid denominator parameter")]
+    #[error("Invalid denominator parameter")]
     /// Invalid denominator parameter
     InvalidDenominator,
-    #[display("Invalid elasticity parameter")]
+    #[error("Invalid elasticity parameter")]
     /// Invalid elasticity parameter
     InvalidElasticity,
-}
-
-impl core::error::Error for DecodeError {
-    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        // None of the errors have sub-errors
-        None
-    }
 }
 
 /// Extracts the Holcene 1599 parameters from the encoded form:
