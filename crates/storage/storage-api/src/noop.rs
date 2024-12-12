@@ -1,12 +1,12 @@
 //! Various noop implementations for traits.
 
 use crate::{
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    BlockSource, ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
-    OmmersProvider, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
-    StageCheckpointReader, StateProofProvider, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, StorageRootProvider, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+    AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
+    BlockReader, BlockReaderIdExt, BlockSource, ChangeSetReader, HashedPostStateProvider,
+    HeaderProvider, NodePrimitivesProvider, OmmersProvider, PruneCheckpointReader, ReceiptProvider,
+    ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider, StateProvider,
+    StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
@@ -182,10 +182,6 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
     fn pending_block_and_receipts(
         &self,
     ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
-        Ok(None)
-    }
-
-    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
 
@@ -574,4 +570,10 @@ impl<C: Send + Sync, N: NodePrimitives> PruneCheckpointReader for NoopProvider<C
 
 impl<C: Send + Sync, N: NodePrimitives> NodePrimitivesProvider for NoopProvider<C, N> {
     type Primitives = N;
+}
+
+impl<C: Send + Sync, N: Send + Sync> BlockBodyIndicesProvider for NoopProvider<C, N> {
+    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        Ok(None)
+    }
 }
