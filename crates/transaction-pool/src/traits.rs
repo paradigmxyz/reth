@@ -31,11 +31,11 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     future::Future,
+    hash::Hash,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
 };
-use std::hash::Hash;
 use tokio::sync::mpsc::Receiver;
 
 /// The `PeerId` type.
@@ -741,6 +741,9 @@ impl CanonicalStateUpdate<'_> {
     /// Returns the number of the tip block.
     pub fn number(&self) -> u64 {
         self.new_tip.number
+    }
+    pub fn hash(&self) -> B256 {
+        self.new_tip.mix_hash
     }
 
     /// Timestamp of the latest chain update
