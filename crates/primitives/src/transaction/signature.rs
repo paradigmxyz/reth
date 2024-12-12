@@ -1,30 +1,4 @@
-use alloy_consensus::transaction::from_eip155_value;
-use alloy_primitives::{PrimitiveSignature as Signature, U256};
-use alloy_rlp::Decodable;
-
 pub use reth_primitives_traits::crypto::secp256k1::{recover_signer, recover_signer_unchecked};
-
-pub(crate) fn decode_with_eip155_chain_id(
-    buf: &mut &[u8],
-) -> alloy_rlp::Result<(Signature, Option<u64>)> {
-    let v = Decodable::decode(buf)?;
-    let r: U256 = Decodable::decode(buf)?;
-    let s: U256 = Decodable::decode(buf)?;
-
-    let Some((parity, chain_id)) = from_eip155_value(v) else {
-        // pre bedrock system transactions were sent from the zero address as legacy
-        // transactions with an empty signature
-        //
-        // NOTE: this is very hacky and only relevant for op-mainnet pre bedrock
-        #[cfg(feature = "optimism")]
-        if v == 0 && r.is_zero() && s.is_zero() {
-            return Ok((Signature::new(r, s, false), None))
-        }
-        return Err(alloy_rlp::Error::Custom("invalid parity for legacy transaction"))
-    };
-
-    Ok((Signature::new(r, s, parity), chain_id))
-}
 
 #[cfg(test)]
 mod tests {
