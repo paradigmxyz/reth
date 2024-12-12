@@ -37,7 +37,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{CanonChainTracker, OmmersProvider};
+use reth_storage_api::{BlockBodyIndicesProvider, CanonChainTracker, OmmersProvider};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -402,13 +402,6 @@ impl<N: TreeNodeTypes> BlockReader for BlockchainProvider<N> {
         Ok(self.tree.pending_block_and_receipts())
     }
 
-    fn block_body_indices(
-        &self,
-        number: BlockNumber,
-    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.database.block_body_indices(number)
-    }
-
     /// Returns the block with senders with matching number or hash from database.
     ///
     /// **NOTE: If [`TransactionVariant::NoHash`] is provided then the transactions have invalid
@@ -583,6 +576,15 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider<N> {
 impl<N: TreeNodeTypes> OmmersProvider for BlockchainProvider<N> {
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
         self.database.ommers(id)
+    }
+}
+
+impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider<N> {
+    fn block_body_indices(
+        &self,
+        number: BlockNumber,
+    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        self.database.block_body_indices(number)
     }
 }
 

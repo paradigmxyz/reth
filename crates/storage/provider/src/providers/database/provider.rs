@@ -60,8 +60,8 @@ use reth_primitives_traits::{Block as _, BlockBody as _, SignedTransaction};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyReader, NodePrimitivesProvider, OmmersProvider, StateProvider, StorageChangeSetReader,
-    TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, BlockBodyReader, NodePrimitivesProvider, OmmersProvider,
+    StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
@@ -1222,10 +1222,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         Ok(None)
     }
 
-    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
-    }
-
     /// Returns the block with senders with matching number or hash from database.
     ///
     /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
@@ -1634,6 +1630,14 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> OmmersProvider for DatabasePro
         }
 
         Ok(None)
+    }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockBodyIndicesProvider
+    for DatabaseProvider<TX, N>
+{
+    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
     }
 }
 

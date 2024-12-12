@@ -1,10 +1,9 @@
 use crate::{
-    BlockNumReader, HeaderProvider, OmmersProvider, ReceiptProvider, ReceiptProviderIdExt,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    BlockBodyIndicesProvider, BlockNumReader, HeaderProvider, OmmersProvider, ReceiptProvider,
+    ReceiptProviderIdExt, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
-use reth_db_models::StoredBlockBodyIndices;
 use reth_primitives::{BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeInclusive;
@@ -50,6 +49,7 @@ pub type ProviderBlock<P> = <P as BlockReader>::Block;
 pub trait BlockReader:
     BlockNumReader
     + HeaderProvider
+    + BlockBodyIndicesProvider
     + TransactionsProvider
     + ReceiptProvider
     + WithdrawalsProvider
@@ -112,11 +112,6 @@ pub trait BlockReader:
     fn block_by_number(&self, num: u64) -> ProviderResult<Option<Self::Block>> {
         self.block(num.into())
     }
-
-    /// Returns the block body indices with matching number from database.
-    ///
-    /// Returns `None` if block is not found.
-    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>>;
 
     /// Returns the block with senders with matching number or hash from database.
     ///
@@ -192,9 +187,6 @@ impl<T: BlockReader> BlockReader for std::sync::Arc<T> {
     fn block_by_number(&self, num: u64) -> ProviderResult<Option<Self::Block>> {
         T::block_by_number(self, num)
     }
-    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        T::block_body_indices(self, num)
-    }
     fn block_with_senders(
         &self,
         id: BlockHashOrNumber,
@@ -257,9 +249,6 @@ impl<T: BlockReader> BlockReader for &T {
     }
     fn block_by_number(&self, num: u64) -> ProviderResult<Option<Self::Block>> {
         T::block_by_number(self, num)
-    }
-    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        T::block_body_indices(self, num)
     }
     fn block_with_senders(
         &self,

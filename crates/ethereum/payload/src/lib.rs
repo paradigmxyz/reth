@@ -20,7 +20,7 @@ use reth_basic_payload_builder::{
     PayloadConfig,
 };
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_errors::RethError;
 use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
@@ -33,7 +33,6 @@ use reth_primitives::{
     Block, BlockBody, BlockExt, EthereumHardforks, InvalidTransactionError, Receipt,
     TransactionSigned,
 };
-use reth_provider::{ChainSpecProvider, StateProviderFactory};
 use reth_revm::database::StateProviderDatabase;
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, noop::NoopTransactionPool, BestTransactions,
@@ -52,6 +51,7 @@ use tracing::{debug, trace, warn};
 
 mod config;
 pub use config::*;
+use reth_storage_api::StateProviderFactory;
 
 type BestTransactionsIter<Pool> = Box<
     dyn BestTransactions<Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>,
