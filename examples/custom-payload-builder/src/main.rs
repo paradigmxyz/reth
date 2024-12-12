@@ -11,7 +11,6 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
 use generator::EmptyBlockPayloadJobGenerator;
 use reth::{
     builder::{components::PayloadServiceBuilder, node::FullNodeTypes, BuilderContext},
@@ -70,7 +69,7 @@ where
             payload_job_config,
             reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
                 EthEvmConfig::new(ctx.chain_spec()),
-                EthereumBuilderConfig::new(default_extra_data_bytes(), ETHEREUM_BLOCK_GAS_LIMIT),
+                EthereumBuilderConfig::new(default_extra_data_bytes()),
             ),
         );
 

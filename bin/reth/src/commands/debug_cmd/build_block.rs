@@ -1,7 +1,6 @@
 //! Command for debugging block building.
 use alloy_consensus::TxEip4844;
 use alloy_eips::{
-    eip1559::ETHEREUM_BLOCK_GAS_LIMIT,
     eip2718::Encodable2718,
     eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
 };
@@ -248,7 +247,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             EthEvmConfig::new(provider_factory.chain_spec()),
-            EthereumBuilderConfig::new(Default::default(), ETHEREUM_BLOCK_GAS_LIMIT),
+            EthereumBuilderConfig::new(Default::default()),
         );
 
         match payload_builder.try_build(args)? {
