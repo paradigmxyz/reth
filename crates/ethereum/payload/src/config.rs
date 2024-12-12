@@ -18,7 +18,7 @@ impl EthereumBuilderConfig {
     }
 
     /// Set desired gas limit.
-    pub fn with_gas_limit(desired_gas_limit: u64) -> Self {
+    pub fn with_gas_limit(mut self, desired_gas_limit: u64) -> Self {
         self.desired_gas_limit = desired_gas_limit;
         self
     }
