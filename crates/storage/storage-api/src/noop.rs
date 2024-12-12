@@ -526,58 +526,6 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
     }
 }
 
-// impl EvmEnvProvider for NoopProvider {
-//     fn fill_env_at<EvmConfig>(
-//         &self,
-//         _cfg: &mut CfgEnvWithHandlerCfg,
-//         _block_env: &mut BlockEnv,
-//         _at: BlockHashOrNumber,
-//         _evm_config: EvmConfig,
-//     ) -> ProviderResult<()>
-//     where
-//         EvmConfig: ConfigureEvmEnv<Header = Header>,
-//     {
-//         Ok(())
-//     }
-//
-//     fn fill_env_with_header<EvmConfig>(
-//         &self,
-//         _cfg: &mut CfgEnvWithHandlerCfg,
-//         _block_env: &mut BlockEnv,
-//         _header: &Header,
-//         _evm_config: EvmConfig,
-//     ) -> ProviderResult<()>
-//     where
-//         EvmConfig: ConfigureEvmEnv<Header = Header>,
-//     {
-//         Ok(())
-//     }
-//
-//     fn fill_cfg_env_at<EvmConfig>(
-//         &self,
-//         _cfg: &mut CfgEnvWithHandlerCfg,
-//         _at: BlockHashOrNumber,
-//         _evm_config: EvmConfig,
-//     ) -> ProviderResult<()>
-//     where
-//         EvmConfig: ConfigureEvmEnv<Header = Header>,
-//     {
-//         Ok(())
-//     }
-//
-//     fn fill_cfg_env_with_header<EvmConfig>(
-//         &self,
-//         _cfg: &mut CfgEnvWithHandlerCfg,
-//         _header: &Header,
-//         _evm_config: EvmConfig,
-//     ) -> ProviderResult<()>
-//     where
-//         EvmConfig: ConfigureEvmEnv<Header = Header>,
-//     {
-//         Ok(())
-//     }
-// }
-
 impl<C: Send + Sync, N: NodePrimitives> StageCheckpointReader for NoopProvider<C, N> {
     fn get_stage_checkpoint(&self, _id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         Ok(None)
