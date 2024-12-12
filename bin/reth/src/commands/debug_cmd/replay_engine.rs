@@ -1,4 +1,5 @@
 use crate::args::NetworkArgs;
+use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
@@ -124,7 +125,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         // Set up payload builder
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             EthEvmConfig::new(provider_factory.chain_spec()),
-            EthereumBuilderConfig::new(Default::default()),
+            EthereumBuilderConfig::new(Default::default(), ETHEREUM_BLOCK_GAS_LIMIT),
         );
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(

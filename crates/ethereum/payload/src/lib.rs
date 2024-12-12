@@ -88,6 +88,7 @@ where
             timestamp: config.attributes.timestamp(),
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
             prev_randao: config.attributes.prev_randao(),
+            gas_limit: self.builder_config.gas_limit(parent.gas_limit),
         };
         self.evm_config.next_cfg_and_block_env(parent, next_attributes)
     }
