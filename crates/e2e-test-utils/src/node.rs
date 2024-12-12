@@ -20,7 +20,7 @@ use reth_provider::{
 };
 use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
 use reth_stages_types::StageId;
-use std::{marker::PhantomData, pin::Pin};
+use std::{marker::PhantomData, pin::Pin, sync::Arc};
 use tokio_stream::StreamExt;
 use url::Url;
 
@@ -61,10 +61,14 @@ where
     /// Creates a new test node
     pub async fn new(
         node: FullNode<Node, AddOns>,
-        attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes + 'static,
+        attributes_generator: impl Fn(Arc<<Node::Types as NodeTypes>::ChainSpec>, u64) -> Engine::PayloadBuilderAttributes
+            + 'static,
     ) -> eyre::Result<Self> {
         let builder = node.payload_builder.clone();
+        let chain_spec = node.chain_spec();
 
+        let attributes_generator =
+            move |timestamp| attributes_generator(chain_spec.clone(), timestamp);
         Ok(Self {
             inner: node.clone(),
             payload: PayloadTestContext::new(builder, attributes_generator).await?,
@@ -132,7 +136,11 @@ where
         // wait for the payload builder to have finished building
         self.payload.wait_for_built_payload(eth_attr.payload_id()).await;
         // trigger resolve payload via engine api
-        self.engine_api.get_payload_v3_value(eth_attr.payload_id()).await?;
+        if self.inner.chain_spec().is_prague_active_at_timestamp(eth_attr.timestamp()) {
+            self.engine_api.get_payload_v4_value(eth_attr.payload_id()).await?;
+        } else {
+            self.engine_api.get_payload_v3_value(eth_attr.payload_id()).await?;
+        }
         // ensure we're also receiving the built payload as event
         Ok((self.payload.expect_built_payload().await?, eth_attr))
     }

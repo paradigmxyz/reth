@@ -205,6 +205,10 @@ pub struct EthPayloadBuilderAttributes {
     pub withdrawals: Withdrawals,
     /// Root of the parent beacon block
     pub parent_beacon_block_root: Option<B256>,
+    /// Target blobs per block for the generated payload
+    pub target_blobs_per_block: Option<u64>,
+    /// Max blobs per block for the generated payload
+    pub max_blobs_per_block: Option<u64>,
 }
 
 // === impl EthPayloadBuilderAttributes ===
@@ -229,6 +233,8 @@ impl EthPayloadBuilderAttributes {
             prev_randao: attributes.prev_randao,
             withdrawals: attributes.withdrawals.unwrap_or_default().into(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
+            target_blobs_per_block: attributes.target_blobs_per_block,
+            max_blobs_per_block: attributes.max_blobs_per_block,
         }
     }
 }
@@ -274,6 +280,10 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
 
     fn withdrawals(&self) -> &Withdrawals {
         &self.withdrawals
+    }
+
+    fn target_blobs_per_block(&self) -> Option<u64> {
+        self.target_blobs_per_block
     }
 }
 

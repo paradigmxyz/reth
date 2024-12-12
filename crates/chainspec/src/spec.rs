@@ -11,7 +11,7 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::{
-    eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
+    eip1559::INITIAL_BASE_FEE, eip4844, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
     eip7685::EMPTY_REQUESTS_HASH,
 };
 use alloy_genesis::Genesis;
@@ -280,6 +280,9 @@ impl ChainSpec {
         let requests_hash = self
             .is_prague_active_at_timestamp(self.genesis.timestamp)
             .then_some(EMPTY_REQUESTS_HASH);
+        let target_blobs_per_block = self
+            .is_prague_active_at_timestamp(self.genesis.timestamp)
+            .then_some(eip4844::TARGET_BLOBS_PER_BLOCK);
 
         Header {
             gas_limit: self.genesis.gas_limit,
@@ -296,6 +299,7 @@ impl ChainSpec {
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),
             requests_hash,
+            target_blobs_per_block,
             ..Default::default()
         }
     }
