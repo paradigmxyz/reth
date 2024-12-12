@@ -248,12 +248,13 @@ where
 
         // Checks for gas limit
         let transaction_gas_limit = transaction.gas_limit();
-        if transaction_gas_limit > self.block_gas_limit.load(std::sync::atomic::Ordering::Relaxed) {
+        let block_gas_limit = self.max_gas_limit();
+        if transaction_gas_limit > block_gas_limit {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::ExceedsGasLimit(
                     transaction_gas_limit,
-                    self.block_gas_limit.load(std::sync::atomic::Ordering::Relaxed),
+                    block_gas_limit,
                 ),
             )
         }
@@ -488,10 +489,11 @@ where
             self.fork_tracker.prague.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if new_tip_block.gas_limit() > 0 {
-            self.block_gas_limit
-                .store(new_tip_block.gas_limit(), std::sync::atomic::Ordering::Relaxed);
-        }
+        self.block_gas_limit.store(new_tip_block.gas_limit(), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn max_gas_limit(&self) -> u64 {
+        self.block_gas_limit.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
