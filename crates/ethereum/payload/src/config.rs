@@ -18,7 +18,7 @@ impl EthereumBuilderConfig {
     }
 
     /// Set desired gas limit.
-    pub fn with_gas_limit(mut self, desired_gas_limit: u64) -> Self {
+    pub const fn with_gas_limit(mut self, desired_gas_limit: u64) -> Self {
         self.desired_gas_limit = desired_gas_limit;
         self
     }
@@ -40,8 +40,8 @@ impl EthereumBuilderConfig {
 /// Calculate the gas limit for the next block based on parent and desired gas limits.
 /// Ref: <https://github.com/ethereum/go-ethereum/blob/88cbfab332c96edfbe99d161d9df6a40721bd786/core/block_validator.go#L166>
 pub fn calculate_block_gas_limit(parent_gas_limit: u64, desired_gas_limit: u64) -> u64 {
-    let delta = parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR;
-    let min_gas_limit = parent_gas_limit + delta - 1;
-    let max_gas_limit = parent_gas_limit - delta + 1;
+    let delta = parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR - 1;
+    let min_gas_limit = parent_gas_limit + delta;
+    let max_gas_limit = parent_gas_limit - delta;
     desired_gas_limit.clamp(min_gas_limit, max_gas_limit)
 }
