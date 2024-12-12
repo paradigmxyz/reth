@@ -18,6 +18,9 @@ pub mod transaction;
 
 pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType, OpTransaction};
 
+mod receipt;
+pub use receipt::OpReceipt;
+
 /// Optimism primitive types.
 pub type OpPrimitives = reth_primitives::EthPrimitives;
 
