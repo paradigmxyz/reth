@@ -48,8 +48,11 @@ std = [
 	"alloy-primitives/std",
 	"alloy-rlp/std",
 	"reth-primitives-traits/std",
-    "reth-zstd-compressors?/std",
-	"serde/std"
+	"reth-zstd-compressors?/std",
+	"serde/std",
+	"alloy-eips/std",
+	"derive_more/std",
+	"secp256k1?/std"
 ]
 reth-codec = [
     "std",
@@ -58,11 +61,12 @@ reth-codec = [
     "dep:reth-zstd-compressors",
 ]
 arbitrary = [
-    "dep:arbitrary",
-    "dep:rand",
-    "dep:secp256k1",
+	"dep:arbitrary",
+	"dep:rand",
+	"dep:secp256k1",
 	"alloy-consensus/arbitrary",
 	"alloy-primitives/arbitrary",
 	"reth-codecs?/arbitrary",
-	"reth-primitives-traits/arbitrary"
+	"reth-primitives-traits/arbitrary",
+	"alloy-eips/arbitrary"
 ]
