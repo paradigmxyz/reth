@@ -167,7 +167,6 @@ impl std::fmt::Debug for InsertBlockError {
 }
 
 #[derive(thiserror::Error, Debug)]
-
 #[error("Failed to insert block (hash={}, number={}, parent_hash={}): {kind}", 
         .block.hash(),
         .block.number,

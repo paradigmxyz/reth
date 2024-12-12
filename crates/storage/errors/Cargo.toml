@@ -32,5 +32,6 @@ std = [
 	"alloy-primitives/std",
 	"alloy-rlp/std",
 	"derive_more/std",
-	"reth-primitives-traits/std"
+	"reth-primitives-traits/std",
+	"thiserror/std"
 ]

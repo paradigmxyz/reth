@@ -65,12 +65,13 @@ std = [
 	"alloy-genesis/std",
 	"alloy-primitives/std",
 	"revm-primitives/std",
-    "reth-primitives-traits/std",
+	"reth-primitives-traits/std",
 	"revm/std",
 	"reth-optimism-primitives/std",
 	"reth-ethereum-forks/std",
 	"derive_more/std",
-	"reth-optimism-forks/std"
+	"reth-optimism-forks/std",
+	"thiserror/std"
 ]
 optimism = [
 	"reth-primitives/optimism",
