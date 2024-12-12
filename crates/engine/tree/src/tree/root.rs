@@ -326,7 +326,7 @@ where
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
         let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
-        fetched_proof_targets.extend_ref(&proof_targets);
+        extend_multi_proof_targets_ref(fetched_proof_targets, &proof_targets);
 
         // Dispatch proof gathering for this state update
         scope.spawn(move |_| {
@@ -379,12 +379,16 @@ where
             None
         } else {
             // Merge all ready proofs and state updates
-            ready_proofs.into_iter().reduce(|mut acc, (state_update, targets, proof)| {
-                acc.0.extend(state_update);
-                acc.1.extend(targets);
-                acc.2.extend(proof);
-                acc
-            })
+            ready_proofs.into_iter().reduce(
+                |(mut acc_state_update, mut acc_targets, mut acc_proof),
+                 (state_update, targets, proof)| {
+                    acc_state_update.extend(state_update);
+                    extend_multi_proof_targets(&mut acc_targets, targets);
+                    acc_proof.extend(proof);
+
+                    (acc_state_update, acc_targets, acc_proof)
+                },
+            )
         }
     }
 
@@ -483,7 +487,10 @@ where
                         ) {
                             if self.sparse_trie.is_none() {
                                 current_state_update.extend(combined_state_update);
-                                current_proof_targets.extend(combined_proof_targets);
+                                extend_multi_proof_targets(
+                                    &mut current_proof_targets,
+                                    combined_proof_targets,
+                                );
                                 current_multiproof.extend(combined_proof);
                             } else {
                                 self.spawn_root_calculation(
@@ -681,6 +688,18 @@ fn update_sparse_trie<
     let elapsed = started_at.elapsed();
 
     Ok((trie, elapsed))
+}
+
+fn extend_multi_proof_targets(targets: &mut MultiProofTargets, other: MultiProofTargets) {
+    for (address, slots) in other {
+        targets.entry(address).or_default().extend(slots);
+    }
+}
+
+fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {
+    for (address, slots) in other {
+        targets.entry(*address).or_default().extend(slots);
+    }
 }
 
 #[cfg(test)]
