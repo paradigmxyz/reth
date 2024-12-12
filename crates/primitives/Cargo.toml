@@ -37,15 +37,15 @@ op-alloy-consensus = { workspace = true, features = [
 	"serde",
 ], optional = true }
 
+# for eip-4844
+c-kzg = { workspace = true, features = ["serde"], optional = true }
+
 # crypto
 secp256k1 = { workspace = true, features = [
 	"global-context",
 	"recovery",
 	"rand",
 ], optional = true }
-k256.workspace = true
-# for eip-4844
-c-kzg = { workspace = true, features = ["serde"], optional = true }
 
 # misc
 bytes.workspace = true
@@ -73,6 +73,12 @@ alloy-eips = { workspace = true, features = ["arbitrary"] }
 alloy-genesis.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
+secp256k1 = { workspace = true, features = [
+	"global-context",
+	"recovery",
+	"rand",
+] }
+
 assert_matches.workspace = true
 bincode.workspace = true
 proptest-arbitrary-interop.workspace = true
@@ -98,10 +104,8 @@ std = [
 	"alloy-genesis/std",
 	"alloy-primitives/std",
 	"alloy-serde?/std",
-	"k256/std",
 	"once_cell/std",
 	"revm-primitives/std",
-	"secp256k1?/std",
 	"serde/std",
 	"alloy-trie/std",
 	"serde_with?/std",
@@ -109,7 +113,8 @@ std = [
 	"reth-ethereum-forks/std",
 	"bytes/std",
 	"derive_more/std",
-	"reth-zstd-compressors?/std"
+	"reth-zstd-compressors?/std",
+	"secp256k1?/std"
 ]
 reth-codec = [
 	"dep:reth-codecs",
@@ -126,7 +131,6 @@ arbitrary = [
 	"reth-ethereum-forks/arbitrary",
 	"reth-primitives-traits/arbitrary",
 	"revm-primitives/arbitrary",
-	"secp256k1",
 	"reth-chainspec/arbitrary",
 	"alloy-consensus/arbitrary",
 	"alloy-primitives/arbitrary",
@@ -136,9 +140,12 @@ arbitrary = [
 	"op-alloy-rpc-types?/arbitrary",
 	"reth-codecs?/arbitrary",
 	"alloy-trie/arbitrary",
-	"reth-trie-common/arbitrary"
+	"reth-trie-common/arbitrary",
+	"dep:secp256k1"
 ]
-secp256k1 = ["dep:secp256k1"]
+secp256k1 = [
+	"reth-primitives-traits/secp256k1",
+]
 c-kzg = [
 	"dep:c-kzg",
 	"alloy-consensus/kzg",
