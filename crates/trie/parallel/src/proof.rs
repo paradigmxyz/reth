@@ -152,20 +152,17 @@ where
             )
             .try_fold(B256HashMap::default, |mut acc, result| {
                 let (hashed_address, result) = result?;
-
-                acc.insert(hashed_address, result);
+                acc.insert(hashed_address, result?);
                 ProviderResult::Ok(acc)
             })
-            .reduce(
+            .try_reduce(
                 || {
-                    Ok(B256HashMap::with_capacity_and_hasher(
+                    B256HashMap::with_capacity_and_hasher(
                         storage_root_targets_len,
                         Default::default(),
-                    ))
+                    )
                 },
-                |m1, m2| {
-                    let mut m1 = m1?;
-                    let m2 = m2?;
+                |mut m1, m2| {
                     m1.extend(m2);
                     Ok(m1)
                 },
@@ -217,7 +214,7 @@ where
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     let storage_multiproof = match storage_proofs.remove(&hashed_address) {
-                        Some(result) => result?,
+                        Some(result) => result,
                         // Since we do not store all intermediate nodes in the database, there might
                         // be a possibility of re-adding a non-modified leaf to the hash builder.
                         None => {
