@@ -29,6 +29,7 @@ pub use dev::OP_DEV;
 #[cfg(not(feature = "std"))]
 pub(crate) use once_cell::sync::Lazy as LazyLock;
 pub use op::OP_MAINNET;
+use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
@@ -201,8 +202,8 @@ impl OpChainSpec {
         &self,
         parent: &Header,
         timestamp: u64,
-    ) -> Result<u64, DecodeError> {
-        let (denominator, elasticity) = decode_holocene_1559_params(&parent.extra_data)?;
+    ) -> Result<u64, EIP1559ParamError> {
+        let (denominator, elasticity) = decode_holocene_extra_data(&parent.extra_data)?;
         let base_fee = if elasticity == 0 && denominator == 0 {
             parent
                 .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
@@ -221,13 +222,11 @@ impl OpChainSpec {
         &self,
         parent: &Header,
         timestamp: u64,
-    ) -> Result<U256, DecodeError> {
+    ) -> Result<U256, EIP1559ParamError> {
         // > if Holocene is active in parent_header.timestamp, then the parameters from
         // > parent_header.extraData are used.
-        let is_holocene_activated = self.inner.is_fork_active_at_timestamp(
-            reth_optimism_forks::OpHardfork::Holocene,
-            parent.timestamp,
-        );
+        let is_holocene_activated =
+            self.inner.is_fork_active_at_timestamp(OpHardfork::Holocene, parent.timestamp);
 
         // If we are in the Holocene, we need to use the base fee params
         // from the parent block's extra data.
@@ -242,40 +241,6 @@ impl OpChainSpec {
             ))
         }
     }
-}
-
-#[derive(Clone, Debug, Display, Eq, PartialEq)]
-/// Error type for decoding Holocene 1559 parameters
-pub enum DecodeError {
-    #[display("Insufficient data to decode")]
-    /// Insufficient data to decode
-    InsufficientData,
-    #[display("Invalid denominator parameter")]
-    /// Invalid denominator parameter
-    InvalidDenominator,
-    #[display("Invalid elasticity parameter")]
-    /// Invalid elasticity parameter
-    InvalidElasticity,
-}
-
-impl core::error::Error for DecodeError {
-    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        // None of the errors have sub-errors
-        None
-    }
-}
-
-/// Extracts the Holcene 1599 parameters from the encoded form:
-/// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
-pub fn decode_holocene_1559_params(extra_data: &[u8]) -> Result<(u32, u32), DecodeError> {
-    if extra_data.len() < 9 {
-        return Err(DecodeError::InsufficientData);
-    }
-    let denominator: [u8; 4] =
-        extra_data[1..5].try_into().map_err(|_| DecodeError::InvalidDenominator)?;
-    let elasticity: [u8; 4] =
-        extra_data[5..9].try_into().map_err(|_| DecodeError::InvalidElasticity)?;
-    Ok((u32::from_be_bytes(denominator), u32::from_be_bytes(elasticity)))
 }
 
 impl EthChainSpec for OpChainSpec {
