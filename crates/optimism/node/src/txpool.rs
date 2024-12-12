@@ -2,6 +2,8 @@
 use alloy_eips::eip2718::Encodable2718;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpec;
+use reth_node_api::BlockBody;
+use reth_node_core::primitives::BlockHeader;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_primitives::{
     Block, GotExpected, InvalidTransactionError, SealedBlock, TransactionSigned,
@@ -215,7 +217,11 @@ where
         self.validate_all(transactions)
     }
 
-    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+    fn on_new_head_block<H, B>(&self, new_tip_block: &SealedBlock<H, B>)
+    where
+        H: BlockHeader,
+        B: BlockBody,
+    {
         self.inner.on_new_head_block(new_tip_block);
         self.update_l1_block_info(&new_tip_block.clone().unseal());
     }
