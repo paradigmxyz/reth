@@ -1210,10 +1210,12 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
 
         let mut cost = gas_cost.saturating_add(transaction.value());
 
-        if let Some(blob_tx) = transaction.as_eip4844() {
+        if let (Some(blob_gas_used), Some(max_fee_per_blob_gas)) =
+            (transaction.blob_gas_used(), transaction.max_fee_per_blob_gas())
+        {
             // Add max blob cost using saturating math to avoid overflow
             cost = cost.saturating_add(U256::from(
-                blob_tx.max_fee_per_blob_gas.saturating_mul(blob_tx.blob_gas() as u128),
+                max_fee_per_blob_gas.saturating_mul(blob_gas_used as u128),
             ));
 
             // because the blob sidecar is not included in this transaction variant, mark it as
@@ -1225,7 +1227,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
     }
 
     /// Return the reference to the underlying transaction.
-    pub const fn transaction(&self) -> &RecoveredTx {
+    pub const fn transaction(&self) -> &RecoveredTx<T> {
         &self.transaction
     }
 }
