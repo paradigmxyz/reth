@@ -15,8 +15,9 @@ extern crate alloc;
 use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::{Address, U256};
+use op_alloy_consensus::EIP1559ParamError;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
-use reth_optimism_chainspec::{DecodeError, OpChainSpec};
+use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::{transaction::FillTxEnv, Head, TransactionSigned};
 use reth_revm::{
     inspector_handle_register,
@@ -58,7 +59,7 @@ impl OpEvmConfig {
 impl ConfigureEvmEnv for OpEvmConfig {
     type Header = Header;
     type Transaction = TransactionSigned;
-    type Error = DecodeError;
+    type Error = EIP1559ParamError;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         transaction.fill_tx_env(tx_env, sender);
