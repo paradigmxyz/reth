@@ -1,4 +1,3 @@
-use alloc::vec::Vec;
 use alloy_consensus::{
     Eip2718EncodableReceipt, Eip658Value, Receipt, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, Typed2718,
@@ -28,46 +27,46 @@ pub enum OpReceipt {
 
 impl OpReceipt {
     /// Returns [`OpTxType`] of the receipt.
-    pub fn tx_type(&self) -> OpTxType {
+    pub const fn tx_type(&self) -> OpTxType {
         match self {
-            OpReceipt::Legacy(_) => OpTxType::Legacy,
-            OpReceipt::Eip2930(_) => OpTxType::Eip2930,
-            OpReceipt::Eip1559(_) => OpTxType::Eip1559,
-            OpReceipt::Eip7702(_) => OpTxType::Eip7702,
-            OpReceipt::Deposit(_) => OpTxType::Deposit,
+            Self::Legacy(_) => OpTxType::Legacy,
+            Self::Eip2930(_) => OpTxType::Eip2930,
+            Self::Eip1559(_) => OpTxType::Eip1559,
+            Self::Eip7702(_) => OpTxType::Eip7702,
+            Self::Deposit(_) => OpTxType::Deposit,
         }
     }
 
     /// Returns inner [`Receipt`],
-    pub fn as_receipt(&self) -> &Receipt {
+    pub const fn as_receipt(&self) -> &Receipt {
         match self {
-            OpReceipt::Legacy(receipt) => receipt,
-            OpReceipt::Eip2930(receipt) => receipt,
-            OpReceipt::Eip1559(receipt) => receipt,
-            OpReceipt::Eip7702(receipt) => receipt,
-            OpReceipt::Deposit(receipt) => &receipt.inner,
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => receipt,
+            Self::Deposit(receipt) => &receipt.inner,
         }
     }
 
     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encoded_fields_length(&self, bloom: &Bloom) -> usize {
         match self {
-            OpReceipt::Legacy(receipt) => receipt.rlp_encoded_fields_length_with_bloom(bloom),
-            OpReceipt::Eip2930(receipt) => receipt.rlp_encoded_fields_length_with_bloom(bloom),
-            OpReceipt::Eip1559(receipt) => receipt.rlp_encoded_fields_length_with_bloom(bloom),
-            OpReceipt::Eip7702(receipt) => receipt.rlp_encoded_fields_length_with_bloom(bloom),
-            OpReceipt::Deposit(receipt) => receipt.rlp_encoded_fields_length_with_bloom(bloom),
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => receipt.rlp_encoded_fields_length_with_bloom(bloom),
+            Self::Deposit(receipt) => receipt.rlp_encoded_fields_length_with_bloom(bloom),
         }
     }
 
     /// RLP-encodes receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encode_fields(&self, bloom: &Bloom, out: &mut dyn BufMut) {
         match self {
-            OpReceipt::Legacy(receipt) => receipt.rlp_encode_fields_with_bloom(bloom, out),
-            OpReceipt::Eip2930(receipt) => receipt.rlp_encode_fields_with_bloom(bloom, out),
-            OpReceipt::Eip1559(receipt) => receipt.rlp_encode_fields_with_bloom(bloom, out),
-            OpReceipt::Eip7702(receipt) => receipt.rlp_encode_fields_with_bloom(bloom, out),
-            OpReceipt::Deposit(receipt) => receipt.rlp_encode_fields_with_bloom(bloom, out),
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => receipt.rlp_encode_fields_with_bloom(bloom, out),
+            Self::Deposit(receipt) => receipt.rlp_encode_fields_with_bloom(bloom, out),
         }
     }
 
@@ -178,53 +177,23 @@ impl TxReceipt for OpReceipt {
     type Log = Log;
 
     fn status_or_post_state(&self) -> Eip658Value {
-        match self {
-            OpReceipt::Legacy(receipt) => receipt.status_or_post_state(),
-            OpReceipt::Eip2930(receipt) => receipt.status_or_post_state(),
-            OpReceipt::Eip1559(receipt) => receipt.status_or_post_state(),
-            OpReceipt::Eip7702(receipt) => receipt.status_or_post_state(),
-            OpReceipt::Deposit(receipt) => receipt.status_or_post_state(),
-        }
+        self.as_receipt().status_or_post_state()
     }
 
     fn status(&self) -> bool {
-        match self {
-            OpReceipt::Legacy(receipt) => receipt.status(),
-            OpReceipt::Eip2930(receipt) => receipt.status(),
-            OpReceipt::Eip1559(receipt) => receipt.status(),
-            OpReceipt::Eip7702(receipt) => receipt.status(),
-            OpReceipt::Deposit(receipt) => receipt.status(),
-        }
+        self.as_receipt().status()
     }
 
     fn bloom(&self) -> Bloom {
-        match self {
-            OpReceipt::Legacy(receipt) => receipt.bloom(),
-            OpReceipt::Eip2930(receipt) => receipt.bloom(),
-            OpReceipt::Eip1559(receipt) => receipt.bloom(),
-            OpReceipt::Eip7702(receipt) => receipt.bloom(),
-            OpReceipt::Deposit(receipt) => receipt.bloom(),
-        }
+        self.as_receipt().bloom()
     }
 
     fn cumulative_gas_used(&self) -> u128 {
-        match self {
-            OpReceipt::Legacy(receipt) => receipt.cumulative_gas_used(),
-            OpReceipt::Eip2930(receipt) => receipt.cumulative_gas_used(),
-            OpReceipt::Eip1559(receipt) => receipt.cumulative_gas_used(),
-            OpReceipt::Eip7702(receipt) => receipt.cumulative_gas_used(),
-            OpReceipt::Deposit(receipt) => receipt.cumulative_gas_used(),
-        }
+        self.as_receipt().cumulative_gas_used()
     }
 
     fn logs(&self) -> &[Log] {
-        match self {
-            OpReceipt::Legacy(receipt) => receipt.logs(),
-            OpReceipt::Eip2930(receipt) => receipt.logs(),
-            OpReceipt::Eip1559(receipt) => receipt.logs(),
-            OpReceipt::Eip7702(receipt) => receipt.logs(),
-            OpReceipt::Deposit(receipt) => receipt.logs(),
-        }
+        self.as_receipt().logs()
     }
 }
 
@@ -236,13 +205,7 @@ impl Typed2718 for OpReceipt {
 
 impl InMemorySize for OpReceipt {
     fn size(&self) -> usize {
-        match self {
-            OpReceipt::Legacy(receipt) => receipt.size(),
-            OpReceipt::Eip2930(receipt) => receipt.size(),
-            OpReceipt::Eip1559(receipt) => receipt.size(),
-            OpReceipt::Eip7702(receipt) => receipt.size(),
-            OpReceipt::Deposit(receipt) => receipt.size(),
-        }
+        self.as_receipt().size()
     }
 }
 
@@ -299,6 +262,7 @@ mod compact {
                 deposit_nonce,
                 deposit_receipt_version,
             } = receipt;
+
             let inner = Receipt {
                 status: success.into(),
                 cumulative_gas_used: cumulative_gas_used as u128,
@@ -306,11 +270,11 @@ mod compact {
             };
 
             match tx_type {
-                OpTxType::Legacy => OpReceipt::Legacy(inner),
-                OpTxType::Eip2930 => OpReceipt::Eip2930(inner),
-                OpTxType::Eip1559 => OpReceipt::Eip1559(inner),
-                OpTxType::Eip7702 => OpReceipt::Eip7702(inner),
-                OpTxType::Deposit => OpReceipt::Deposit(OpDepositReceipt {
+                OpTxType::Legacy => Self::Legacy(inner),
+                OpTxType::Eip2930 => Self::Eip2930(inner),
+                OpTxType::Eip1559 => Self::Eip1559(inner),
+                OpTxType::Eip7702 => Self::Eip7702(inner),
+                OpTxType::Deposit => Self::Deposit(OpDepositReceipt {
                     inner,
                     deposit_nonce,
                     deposit_receipt_version,
