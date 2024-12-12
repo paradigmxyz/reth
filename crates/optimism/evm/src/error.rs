@@ -23,8 +23,8 @@ pub enum OpBlockExecutionError {
     AccountLoadFailed(alloy_primitives::Address),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum BlockExecutionError {
-    #[error("other error: {0}")]
-    Other(#[from] OpBlockExecutionError),
+impl From<OpBlockExecutionError> for BlockExecutionError {
+    fn from(err: OpBlockExecutionError) -> Self {
+        Self::other(err)
+    }
 }
