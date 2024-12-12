@@ -48,7 +48,6 @@ reth-codecs = { workspace = true, features = ["test-utils", "op"] }
 rstest.workspace = true
 arbitrary.workspace = true
 proptest.workspace = true
-test-fuzz.workspace = true
 
 [features]
 default = ["std"]

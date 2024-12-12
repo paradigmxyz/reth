@@ -8592,7 +8592,6 @@ dependencies = [
  "rstest",
  "secp256k1",
  "serde",
- "test-fuzz",
 ]
 
 [[package]]
