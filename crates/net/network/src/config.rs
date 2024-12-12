@@ -148,7 +148,7 @@ where
 impl<C, N> NetworkConfig<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader<Block = N::Block, Receipt = reth_primitives::Receipt, Header = N::BlockHeader>
+    C: BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
         + HeaderProvider
         + Clone
         + Unpin
