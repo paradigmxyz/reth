@@ -11,7 +11,7 @@ use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGenera
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
-use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
+use reth_network::{EthNetworkPrimitives, NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
 use reth_node_api::{AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
     components::{
@@ -36,7 +36,7 @@ use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{BlockBody, PooledTransactionsElement, TransactionSigned};
 use reth_provider::{
     providers::ChainStorage, BlockBodyReader, BlockBodyWriter, CanonStateSubscriptions,
-    ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput,
+    ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput, StorageLocation,
 };
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -56,16 +56,18 @@ impl<Provider: DBProvider<Tx: DbTxMut>> BlockBodyWriter<Provider, BlockBody> for
         &self,
         provider: &Provider,
         bodies: Vec<(u64, Option<BlockBody>)>,
+        write_to: StorageLocation,
     ) -> ProviderResult<()> {
-        self.0.write_block_bodies(provider, bodies)
+        self.0.write_block_bodies(provider, bodies, write_to)
     }
 
     fn remove_block_bodies_above(
         &self,
         provider: &Provider,
         block: alloy_primitives::BlockNumber,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()> {
-        self.0.remove_block_bodies_above(provider, block)
+        self.0.remove_block_bodies_above(provider, block, remove_from)
     }
 }
 
@@ -654,6 +656,8 @@ where
         > + Unpin
         + 'static,
 {
+    type Primitives = EthNetworkPrimitives;
+
     async fn build_network(
         self,
         ctx: &BuilderContext<Node>,

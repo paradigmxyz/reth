@@ -415,7 +415,7 @@ where
 
             // Compute or add new fields
             transactions_root: proofs::calculate_transaction_root(&transactions),
-            receipts_root: outcome.receipts_root_slow(reorg_target.header.number).unwrap(),
+            receipts_root: outcome.ethereum_receipts_root(reorg_target.header.number).unwrap(),
             logs_bloom: outcome.block_logs_bloom(reorg_target.header.number).unwrap(),
             gas_used: cumulative_gas_used,
             blob_gas_used: blob_gas_used.map(Into::into),

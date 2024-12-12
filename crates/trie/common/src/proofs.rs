@@ -4,7 +4,7 @@ use crate::{Nibbles, TrieAccount};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, HashMap},
+    map::{hash_map, B256HashMap, B256HashSet, HashMap},
     Address, Bytes, B256, U256,
 };
 use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
@@ -16,6 +16,9 @@ use alloy_trie::{
 use itertools::Itertools;
 use reth_primitives_traits::Account;
 
+/// Proof targets map.
+pub type MultiProofTargets = B256HashMap<B256HashSet>;
+
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
 /// in the paths of target accounts.
@@ -26,7 +29,7 @@ pub struct MultiProof {
     /// The hash masks of the branch nodes in the account proof.
     pub branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
     /// Storage trie multiproofs.
-    pub storages: HashMap<B256, StorageMultiProof>,
+    pub storages: B256HashMap<StorageMultiProof>,
 }
 
 impl MultiProof {

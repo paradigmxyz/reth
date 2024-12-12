@@ -171,7 +171,7 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
                 (
                     address,
                     (
-                        Into::<Account>::into(info),
+                        Account::from(info),
                         storage_root_unhashed(
                             account
                                 .storage

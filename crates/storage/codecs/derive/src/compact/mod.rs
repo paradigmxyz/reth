@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
-use syn::{parse_macro_input, Data, DeriveInput, Generics};
+use syn::{Data, DeriveInput, Generics};
 
 mod generator;
 use generator::*;
@@ -14,6 +14,8 @@ use flags::*;
 
 mod structs;
 use structs::*;
+
+use crate::ZstdConfig;
 
 // Helper Alias type
 type IsCompact = bool;
@@ -40,16 +42,16 @@ pub enum FieldTypes {
 }
 
 /// Derives the `Compact` trait and its from/to implementations.
-pub fn derive(input: TokenStream, is_zstd: bool) -> TokenStream {
+pub fn derive(input: DeriveInput, zstd: Option<ZstdConfig>) -> TokenStream {
     let mut output = quote! {};
 
-    let DeriveInput { ident, data, generics, attrs, .. } = parse_macro_input!(input);
+    let DeriveInput { ident, data, generics, attrs, .. } = input;
 
     let has_lifetime = has_lifetime(&generics);
 
     let fields = get_fields(&data);
-    output.extend(generate_flag_struct(&ident, &attrs, has_lifetime, &fields, is_zstd));
-    output.extend(generate_from_to(&ident, &attrs, has_lifetime, &fields, is_zstd));
+    output.extend(generate_flag_struct(&ident, &attrs, has_lifetime, &fields, zstd.is_some()));
+    output.extend(generate_from_to(&ident, &attrs, has_lifetime, &fields, zstd));
     output.into()
 }
 
@@ -236,7 +238,7 @@ mod tests {
         let DeriveInput { ident, data, attrs, .. } = parse2(f_struct).unwrap();
         let fields = get_fields(&data);
         output.extend(generate_flag_struct(&ident, &attrs, false, &fields, false));
-        output.extend(generate_from_to(&ident, &attrs, false, &fields, false));
+        output.extend(generate_from_to(&ident, &attrs, false, &fields, None));
 
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {
@@ -298,10 +300,10 @@ mod tests {
                 fuzz_test_test_struct(TestStruct::default())
             }
             impl reth_codecs::Compact for TestStruct {
-                fn to_compact<B>(&self, buf: &mut B) -> usize where B: bytes::BufMut + AsMut<[u8]> {
+                fn to_compact<B>(&self, buf: &mut B) -> usize where B: reth_codecs::__private::bytes::BufMut + AsMut<[u8]> {
                     let mut flags = TestStructFlags::default();
                     let mut total_length = 0;
-                    let mut buffer = bytes::BytesMut::new();
+                    let mut buffer = reth_codecs::__private::bytes::BytesMut::new();
                     let f_u64_len = self.f_u64.to_compact(&mut buffer);
                     flags.set_f_u64_len(f_u64_len as u8);
                     let f_u256_len = self.f_u256.to_compact(&mut buffer);

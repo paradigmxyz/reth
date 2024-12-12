@@ -127,7 +127,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
             }
             #[cfg(feature = "optimism")]
             AnyTxEnvelope::Unknown(alloy_network::UnknownTxEnvelope { hash, inner }) => {
-                use alloy_consensus::Transaction as _;
+                use alloy_consensus::{Transaction as _, Typed2718};
 
                 if inner.ty() == crate::TxType::Deposit {
                     let fields: op_alloy_rpc_types::OpTransactionFields = inner

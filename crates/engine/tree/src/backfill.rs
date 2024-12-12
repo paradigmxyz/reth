@@ -231,6 +231,7 @@ mod tests {
     use super::*;
     use crate::test_utils::{insert_headers_into_client, TestPipelineBuilder};
     use alloy_consensus::Header;
+    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use futures::poll;
@@ -264,13 +265,13 @@ mod tests {
                     checkpoint: StageCheckpoint::new(BlockNumber::from(pipeline_done_after)),
                     done: true,
                 })]))
-                .build(chain_spec.clone());
+                .build(chain_spec);
 
             let pipeline_sync = PipelineSync::new(pipeline, Box::<TokioTaskExecutor>::default());
             let client = TestFullBlockClient::default();
             let header = Header {
                 base_fee_per_gas: Some(7),
-                gas_limit: chain_spec.max_gas_limit,
+                gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
                 ..Default::default()
             };
             let header = SealedHeader::seal(header);

@@ -1,15 +1,12 @@
 //! Chain specification for the Optimism Mainnet network.
 
+use crate::{LazyLock, OpChainSpec};
 use alloc::{sync::Arc, vec};
-
 use alloy_chains::Chain;
-use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
 use alloy_primitives::{b256, U256};
 use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_ethereum_forks::EthereumHardfork;
 use reth_optimism_forks::OpHardfork;
-
-use crate::{LazyLock, OpChainSpec};
 
 /// The Optimism Mainnet spec
 pub static OP_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
@@ -32,7 +29,6 @@ pub static OP_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
                 ]
                 .into(),
             ),
-            max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             prune_delete_limit: 10000,
             ..Default::default()
         },
