@@ -662,11 +662,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 >,
             > + Unpin
             + 'static,
-        Node::Provider: BlockReader<
-            Receipt = reth_primitives::Receipt,
-            Block = N::Block,
-            Header = N::BlockHeader,
-        >,
+        Node::Provider:
+            BlockReader<Receipt = N::Receipt, Block = N::Block, Header = N::BlockHeader>,
     {
         self.start_network_with(builder, pool, Default::default())
     }
@@ -692,11 +689,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 >,
             > + Unpin
             + 'static,
-        Node::Provider: BlockReader<
-            Receipt = reth_primitives::Receipt,
-            Block = N::Block,
-            Header = N::BlockHeader,
-        >,
+        Node::Provider:
+            BlockReader<Receipt = N::Receipt, Block = N::Block, Header = N::BlockHeader>,
     {
         let (handle, network, txpool, eth) = builder
             .transactions(pool, tx_config)
