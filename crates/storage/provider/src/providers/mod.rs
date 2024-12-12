@@ -34,7 +34,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::CanonChainTracker;
+use reth_storage_api::{CanonChainTracker, OmmersProvider};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -394,10 +394,6 @@ impl<N: TreeNodeTypes> BlockReader for BlockchainProvider<N> {
         Ok(self.tree.pending_block_and_receipts())
     }
 
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
-        self.database.ommers(id)
-    }
-
     fn block_body_indices(
         &self,
         number: BlockNumber,
@@ -573,6 +569,12 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider<N> {
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         self.database.latest_withdrawal()
+    }
+}
+
+impl<N: TreeNodeTypes> OmmersProvider for BlockchainProvider<N> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+        self.database.ommers(id)
     }
 }
 

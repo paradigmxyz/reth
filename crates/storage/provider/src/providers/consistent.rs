@@ -28,7 +28,8 @@ use reth_primitives_traits::BlockBody;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DatabaseProviderFactory, NodePrimitivesProvider, StateProvider, StorageChangeSetReader,
+    DatabaseProviderFactory, NodePrimitivesProvider, OmmersProvider, StateProvider,
+    StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use revm::{
@@ -840,20 +841,6 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<HeaderTy<N>>>> {
-        self.get_in_memory_or_storage_by_block(
-            id,
-            |db_provider| db_provider.ommers(id),
-            |block_state| {
-                if self.chain_spec().final_paris_total_difficulty(block_state.number()).is_some() {
-                    return Ok(Some(Vec::new()))
-                }
-
-                Ok(block_state.block_ref().block().body.ommers().map(|o| o.to_vec()))
-            },
-        )
-    }
-
     fn block_body_indices(
         &self,
         number: BlockNumber,
@@ -1211,6 +1198,22 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ConsistentProvider<N> {
                     .withdrawals()
                     .cloned()
                     .and_then(|mut w| w.pop()))
+            },
+        )
+    }
+}
+
+impl<N: ProviderNodeTypes> OmmersProvider for ConsistentProvider<N> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<HeaderTy<N>>>> {
+        self.get_in_memory_or_storage_by_block(
+            id,
+            |db_provider| db_provider.ommers(id),
+            |block_state| {
+                if self.chain_spec().final_paris_total_difficulty(block_state.number()).is_some() {
+                    return Ok(Some(Vec::new()))
+                }
+
+                Ok(block_state.block_ref().block().body.ommers().map(|o| o.to_vec()))
             },
         )
     }
