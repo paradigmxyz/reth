@@ -1,7 +1,7 @@
 //! Crypto utilities.
 
-use alloy_primitives::U256;
 use crate::transaction::signature::Signature;
+use alloy_primitives::U256;
 
 /// The order of the secp256k1 curve, divided by two. Signatures that should be checked according
 /// to EIP-2 should have an S value less than or equal to this.
@@ -28,13 +28,12 @@ pub mod secp256k1 {
 #[allow(unused)]
 mod impl_secp256k1 {
     use super::*;
-    use alloy_primitives::Address;
     pub(crate) use ::secp256k1::Error;
     use ::secp256k1::{
         ecdsa::{RecoverableSignature, RecoveryId},
         Message, PublicKey, SecretKey, SECP256K1,
     };
-    use alloy_primitives::{keccak256, B256, U256};
+    use alloy_primitives::{keccak256, Address, B256, U256};
 
     /// Recovers the address of the sender using secp256k1 pubkey recovery.
     ///
@@ -78,8 +77,7 @@ mod impl_secp256k1 {
 #[cfg_attr(feature = "secp256k1", allow(unused, unreachable_pub))]
 mod impl_k256 {
     use super::*;
-    use alloy_primitives::Address;
-    use alloy_primitives::{keccak256, B256};
+    use alloy_primitives::{keccak256, Address, B256};
     pub(crate) use k256::ecdsa::Error;
     use k256::ecdsa::{RecoveryId, SigningKey, VerifyingKey};
 
@@ -188,7 +186,7 @@ mod tests {
             B256::from_slice(&secp256k1_secret.secret_bytes()[..]),
             hash,
         )
-            .expect("secp256k1 sign");
+        .expect("secp256k1 sign");
         let k256_signature =
             impl_k256::sign_message(B256::from_slice(&k256_secret.to_bytes()[..]), hash)
                 .expect("k256 sign");
