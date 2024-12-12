@@ -429,8 +429,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         peers: &HashMap<PeerId, PeerMetadata<N>>,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
     ) {
-        let init_capacity_req = approx_capacity_get_pooled_transactions_req_eth68(&self.info);
-        let mut hashes_to_request = RequestTxHashes::with_capacity(init_capacity_req / 2);
+        let mut hashes_to_request = RequestTxHashes::with_capacity(DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST);
         let mut search_durations = TxFetcherSearchDurations::default();
 
         // budget to look for an idle peer before giving up
