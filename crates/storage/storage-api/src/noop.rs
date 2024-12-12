@@ -3,9 +3,10 @@
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    OmmersProvider, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProofProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRootProvider, StorageRootProvider, TransactionVariant,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
@@ -181,10 +182,6 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
     fn pending_block_and_receipts(
         &self,
     ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
-        Ok(None)
-    }
-
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
         Ok(None)
     }
 
@@ -604,6 +601,12 @@ impl<C: Send + Sync, N: NodePrimitives> WithdrawalsProvider for NoopProvider<C, 
         Ok(None)
     }
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
+        Ok(None)
+    }
+}
+
+impl<C: Send + Sync, N: NodePrimitives> OmmersProvider for NoopProvider<C, N> {
+    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
         Ok(None)
     }
 }

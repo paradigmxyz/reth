@@ -35,7 +35,8 @@ use reth_primitives_traits::BlockBody as _;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DBProvider, NodePrimitivesProvider, StateCommitmentProvider, StorageChangeSetReader,
+    DBProvider, NodePrimitivesProvider, OmmersProvider, StateCommitmentProvider,
+    StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
@@ -314,10 +315,6 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        self.consistent_provider()?.ommers(id)
-    }
-
     fn block_body_indices(
         &self,
         number: BlockNumber,
@@ -475,6 +472,12 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         self.consistent_provider()?.latest_withdrawal()
+    }
+}
+
+impl<N: ProviderNodeTypes> OmmersProvider for BlockchainProvider2<N> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+        self.consistent_provider()?.ommers(id)
     }
 }
 
@@ -815,7 +818,7 @@ mod tests {
     use reth_primitives_traits::{BlockBody as _, SignedTransaction};
     use reth_storage_api::{
         BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
-        ChangeSetReader, DatabaseProviderFactory, HeaderProvider, ReceiptProvider,
+        ChangeSetReader, DatabaseProviderFactory, HeaderProvider, OmmersProvider, ReceiptProvider,
         ReceiptProviderIdExt, StateProviderFactory, TransactionVariant, TransactionsProvider,
         WithdrawalsProvider,
     };
