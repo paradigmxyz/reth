@@ -1,8 +1,8 @@
-use crate::transaction::util::secp256k1;
 use alloy_consensus::transaction::from_eip155_value;
-use alloy_primitives::{Address, PrimitiveSignature as Signature, B256, U256};
+use alloy_primitives::{PrimitiveSignature as Signature, U256};
 use alloy_rlp::Decodable;
-use reth_primitives_traits::crypto::SECP256K1N_HALF;
+
+pub use reth_primitives_traits::crypto::secp256k1::{recover_signer, recover_signer_unchecked};
 
 pub(crate) fn decode_with_eip155_chain_id(
     buf: &mut &[u8],
@@ -26,43 +26,10 @@ pub(crate) fn decode_with_eip155_chain_id(
     Ok((Signature::new(r, s, parity), chain_id))
 }
 
-/// Recover signer from message hash, _without ensuring that the signature has a low `s`
-/// value_.
-///
-/// Using this for signature validation will succeed, even if the signature is malleable or not
-/// compliant with EIP-2. This is provided for compatibility with old signatures which have
-/// large `s` values.
-pub fn recover_signer_unchecked(signature: &Signature, hash: B256) -> Option<Address> {
-    let mut sig: [u8; 65] = [0; 65];
-
-    sig[0..32].copy_from_slice(&signature.r().to_be_bytes::<32>());
-    sig[32..64].copy_from_slice(&signature.s().to_be_bytes::<32>());
-    sig[64] = signature.v() as u8;
-
-    // NOTE: we are removing error from underlying crypto library as it will restrain primitive
-    // errors and we care only if recovery is passing or not.
-    secp256k1::recover_signer_unchecked(&sig, &hash.0).ok()
-}
-
-/// Recover signer address from message hash. This ensures that the signature S value is
-/// greater than `secp256k1n / 2`, as specified in
-/// [EIP-2](https://eips.ethereum.org/EIPS/eip-2).
-///
-/// If the S value is too large, then this will return `None`
-pub fn recover_signer(signature: &Signature, hash: B256) -> Option<Address> {
-    if signature.s() > SECP256K1N_HALF {
-        return None
-    }
-
-    recover_signer_unchecked(signature, hash)
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::transaction::signature::{
-        recover_signer, recover_signer_unchecked, SECP256K1N_HALF,
-    };
-    use alloy_eips::eip2718::Decodable2718;
+    use crate::transaction::signature::{recover_signer, recover_signer_unchecked};
+    use alloy_eips::{eip2718::Decodable2718, eip7702::constants::SECP256K1N_HALF};
     use alloy_primitives::{hex, Address, PrimitiveSignature as Signature, B256, U256};
     use reth_primitives_traits::SignedTransaction;
     use std::str::FromStr;
