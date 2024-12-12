@@ -975,6 +975,5 @@ mod tests {
                 &mut dest,
             );
         }
-        std::hint::black_box(());
     }
 }

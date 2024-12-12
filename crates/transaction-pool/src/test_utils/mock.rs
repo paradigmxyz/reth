@@ -936,7 +936,7 @@ impl TryFrom<RecoveredTx> for MockTransaction {
                 size,
                 cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
             }),
-            _ => unreachable!("Invalid transaction type"),
+            tx => unreachable!("Invalid transaction type: {}", tx.tx_type()),
         }
     }
 }

@@ -1,6 +1,6 @@
 #![allow(missing_docs, unreachable_pub)]
 use criterion::{
-    black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use proptest::{
     prelude::*,
@@ -11,7 +11,7 @@ use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     Nibbles,
 };
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, hint::black_box};
 
 /// Abstraction for aggregating nibbles and freezing it to a type
 /// that can be later used for benching.
