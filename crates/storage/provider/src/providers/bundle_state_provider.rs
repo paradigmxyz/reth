@@ -1,16 +1,13 @@
 use crate::{
     AccountReader, BlockHashReader, ExecutionDataProvider, StateProvider, StateRootProvider,
 };
-use alloy_primitives::{
-    map::{HashMap, HashSet},
-    Address, BlockNumber, Bytes, B256,
-};
+use alloy_primitives::{map::B256HashMap, Address, BlockNumber, Bytes, B256};
 use reth_primitives::{Account, Bytecode};
 use reth_storage_api::{HashedPostStateProvider, StateProofProvider, StorageRootProvider};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    StorageMultiProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, TrieInput,
 };
 
 /// A state provider that resolves to data from either a wrapped [`crate::ExecutionOutcome`]
@@ -169,7 +166,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
     fn multiproof(
         &self,
         mut input: reth_trie::TrieInput,
-        targets: HashMap<B256, HashSet<B256>>,
+        targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         input.prepend(self.hashed_post_state(bundle_state));
@@ -180,7 +177,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
         &self,
         mut input: TrieInput,
         target: HashedPostState,
-    ) -> ProviderResult<HashMap<B256, Bytes>> {
+    ) -> ProviderResult<B256HashMap<Bytes>> {
         let bundle_state = self.block_execution_data_provider.execution_outcome().state();
         input.prepend(self.hashed_post_state(bundle_state));
         self.state_provider.witness(input, target)

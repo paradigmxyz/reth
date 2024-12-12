@@ -59,7 +59,7 @@ impl Default for SenderRecoveryStage {
 impl<Provider> Stage<Provider> for SenderRecoveryStage
 where
     Provider: DBProvider<Tx: DbTxMut>
-        + BlockReader<Header = reth_primitives::Header>
+        + BlockReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + StatsReader
         + PruneCheckpointReader,
@@ -146,8 +146,7 @@ fn recover_range<Provider, CURSOR>(
     senders_cursor: &mut CURSOR,
 ) -> Result<(), StageError>
 where
-    Provider:
-        DBProvider + HeaderProvider<Header = reth_primitives::Header> + StaticFileProviderFactory,
+    Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Sending batch for processing");
@@ -192,7 +191,7 @@ where
                                 })?;
 
                             Err(StageError::Block {
-                                block: Box::new(sealed_header),
+                                block: Box::new(sealed_header.block_with_parent()),
                                 error: BlockErrorKind::Validation(
                                     ConsensusError::TransactionSignerRecoveryError,
                                 ),
@@ -377,8 +376,8 @@ mod tests {
     use reth_primitives::{SealedBlock, TransactionSigned};
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::{
-        providers::StaticFileWriter, DatabaseProviderFactory, PruneCheckpointWriter,
-        StaticFileProviderFactory, TransactionsProvider,
+        providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
+        PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_api::StageUnitCheckpoint;

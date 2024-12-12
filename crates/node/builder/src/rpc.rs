@@ -10,7 +10,7 @@ use std::{
 use alloy_rpc_types::engine::ClientVersionV1;
 use futures::TryFutureExt;
 use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, NodePrimitives, NodeTypes,
+    AddOnsContext, BlockTy, EngineValidator, FullNodeComponents, NodeAddOns, NodeTypes,
     NodeTypesWithEngine,
 };
 use reth_node_core::{
@@ -18,7 +18,7 @@ use reth_node_core::{
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::PayloadStore;
-use reth_primitives::EthPrimitives;
+use reth_primitives::{EthPrimitives, PooledTransactionsElement};
 use reth_provider::providers::ProviderNodeTypes;
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
@@ -33,6 +33,8 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use std::sync::Arc;
 
 use crate::EthApiBuilderCtx;
 
@@ -403,13 +405,7 @@ where
 impl<N, EthApi, EV> RpcAddOns<N, EthApi, EV>
 where
     N: FullNodeComponents<
-        Types: ProviderNodeTypes<
-            Primitives: NodePrimitives<
-                Block = reth_primitives::Block,
-                BlockHeader = reth_primitives::Header,
-                BlockBody = reth_primitives::BlockBody,
-            >,
-        >,
+        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransactionsElement>>,
     >,
     EthApi: EthApiTypes
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
@@ -449,7 +445,7 @@ where
             Box::new(node.task_executor().clone()),
             client,
             EngineCapabilities::default(),
-            engine_validator,
+            engine_validator.clone(),
         );
         info!(target: "reth::cli", "Engine API handler initialized");
 
@@ -466,7 +462,12 @@ where
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server(module_config, engine_api, eth_api_builder);
+            .build_with_auth_server(
+                module_config,
+                engine_api,
+                eth_api_builder,
+                Arc::new(engine_validator),
+            );
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
@@ -533,7 +534,10 @@ where
 
 impl<N, EthApi, EV> NodeAddOns<N> for RpcAddOns<N, EthApi, EV>
 where
-    N: FullNodeComponents<Types: ProviderNodeTypes<Primitives = EthPrimitives>>,
+    N: FullNodeComponents<
+        Types: ProviderNodeTypes<Primitives = EthPrimitives>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransactionsElement>>,
+    >,
     EthApi: EthApiTypes
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
         + AddDevSigners
@@ -588,7 +592,8 @@ impl<N: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> EthApi
 /// Helper trait that provides the validator for the engine API
 pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
     /// The Validator type to use for the engine API.
-    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine>;
+    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine, Block = BlockTy<Node::Types>>
+        + Clone;
 
     /// Creates the engine validator for an engine API based node.
     fn engine_validator(
@@ -613,7 +618,8 @@ where
 /// A type that knows how to build the engine validator.
 pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The consensus implementation to build.
-    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine>;
+    type Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine, Block = BlockTy<Node::Types>>
+        + Clone;
 
     /// Creates the engine validator.
     fn build(
@@ -625,8 +631,10 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
 impl<Node, F, Fut, Validator> EngineValidatorBuilder<Node> for F
 where
     Node: FullNodeComponents,
-    Validator:
-        EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine> + Clone + Unpin + 'static,
+    Validator: EngineValidator<<Node::Types as NodeTypesWithEngine>::Engine, Block = BlockTy<Node::Types>>
+        + Clone
+        + Unpin
+        + 'static,
     F: FnOnce(&AddOnsContext<'_, Node>) -> Fut + Send + Sync + Clone,
     Fut: Future<Output = eyre::Result<Validator>> + Send,
 {

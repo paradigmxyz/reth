@@ -6,17 +6,17 @@ use std::{
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
 use alloy_primitives::B256;
 use futures::{Future, FutureExt};
-use reth_primitives::BlockBody;
+use reth_primitives_traits::BlockBody;
 
 /// The bodies future type
-pub type BodiesFut<B = BlockBody> =
+pub type BodiesFut<B = reth_primitives::BlockBody> =
     Pin<Box<dyn Future<Output = PeerRequestResult<Vec<B>>> + Send + Sync>>;
 
 /// A client capable of downloading block bodies.
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BodiesClient: DownloadClient {
     /// The body type this client fetches.
-    type Body: Send + Sync + Unpin + 'static;
+    type Body: BlockBody;
     /// The output of the request future for querying block bodies.
     type Output: Future<Output = PeerRequestResult<Vec<Self::Body>>> + Sync + Send + Unpin;
 

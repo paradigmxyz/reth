@@ -6,14 +6,14 @@ use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGenera
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_ethereum_engine_primitives::{
-    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes, EthereumEngineValidator,
+    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
+use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
-use reth_network::{NetworkHandle, PeersInfo};
+use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, HeaderTy, NodeTypesWithDB,
-    TxTy,
+    AddOnsContext, ConfigureEvm, FullNodeComponents, HeaderTy, NodeTypesWithDB, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -24,6 +24,7 @@ use reth_node_builder::{
     rpc::{EngineValidatorBuilder, RpcAddOns},
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
 };
+use reth_node_core::version::default_extra_data_bytes;
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_primitives::{EthPrimitives, PooledTransactionsElement};
 use reth_provider::{CanonStateSubscriptions, EthStorage};
@@ -36,6 +37,8 @@ use reth_transaction_pool::{
 use reth_trie_db::MerklePatriciaTrie;
 
 use crate::{EthEngineTypes, EthEvmConfig};
+
+pub use reth_ethereum_engine_primitives::EthereumEngineValidator;
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -227,9 +230,24 @@ where
 }
 
 /// A basic ethereum payload service.
-#[derive(Debug, Default, Clone)]
-#[non_exhaustive]
-pub struct EthereumPayloadBuilder;
+#[derive(Clone, Debug)]
+pub struct EthereumPayloadBuilder {
+    /// Payload builder configuration.
+    config: EthereumBuilderConfig,
+}
+
+impl Default for EthereumPayloadBuilder {
+    fn default() -> Self {
+        Self { config: EthereumBuilderConfig::new(default_extra_data_bytes()) }
+    }
+}
+
+impl EthereumPayloadBuilder {
+    /// Create new ethereum payload builder.
+    pub const fn new(config: EthereumBuilderConfig) -> Self {
+        Self { config }
+    }
+}
 
 impl EthereumPayloadBuilder {
     /// A helper method initializing [`PayloadBuilderService`] with the given EVM config.
@@ -253,7 +271,7 @@ impl EthereumPayloadBuilder {
         >,
     {
         let payload_builder =
-            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(evm_config);
+            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(evm_config, self.config);
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
@@ -317,6 +335,8 @@ where
         > + Unpin
         + 'static,
 {
+    type Primitives = EthNetworkPrimitives;
+
     async fn build_network(
         self,
         ctx: &BuilderContext<Node>,
@@ -353,9 +373,12 @@ pub struct EthereumEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for EthereumEngineValidatorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<
+        ChainSpec = ChainSpec,
+        Engine = EthEngineTypes,
+        Primitives = EthPrimitives,
+    >,
     Node: FullNodeComponents<Types = Types>,
-    EthereumEngineValidator: EngineValidator<Types::Engine>,
 {
     type Validator = EthereumEngineValidator;
 

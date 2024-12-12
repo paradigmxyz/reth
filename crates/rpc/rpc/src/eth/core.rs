@@ -6,7 +6,7 @@ use std::sync::Arc;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
-use alloy_primitives::U256;
+use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_primitives::NodePrimitives;
 use reth_provider::{
@@ -26,9 +26,11 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 
 use crate::eth::EthTxBuilder;
+
+const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
 /// `Eth` API implementation.
 ///
@@ -270,6 +272,9 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
 
     /// Guard for getproof calls
     blocking_task_guard: BlockingTaskGuard,
+
+    /// Transaction broadcast channel
+    raw_tx_sender: broadcast::Sender<Bytes>,
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig>
@@ -304,6 +309,8 @@ where
                 .unwrap_or_default(),
         );
 
+        let (raw_tx_sender, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
+
         Self {
             provider,
             pool,
@@ -321,6 +328,7 @@ where
             fee_history_cache,
             evm_config,
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
+            raw_tx_sender,
         }
     }
 }
@@ -428,16 +436,29 @@ where
     pub const fn blocking_task_guard(&self) -> &BlockingTaskGuard {
         &self.blocking_task_guard
     }
+
+    /// Returns [`broadcast::Receiver`] of new raw transactions
+    #[inline]
+    pub fn subscribe_to_raw_transactions(&self) -> broadcast::Receiver<Bytes> {
+        self.raw_tx_sender.subscribe()
+    }
+
+    /// Broadcasts raw transaction if there are active subscribers.
+    #[inline]
+    pub fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
+        let _ = self.raw_tx_sender.send(raw_tx);
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::EthApi;
     use alloy_consensus::Header;
     use alloy_eips::BlockNumberOrTag;
     use alloy_primitives::{PrimitiveSignature as Signature, B256, U64};
     use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
-    use reth_chainspec::{BaseFeeParams, ChainSpec, EthChainSpec};
+    use reth_chainspec::{BaseFeeParams, ChainSpec};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{Block, BlockBody, TransactionSigned};
@@ -447,7 +468,7 @@ mod tests {
     };
     use reth_rpc_eth_api::EthApiServer;
     use reth_rpc_eth_types::{
-        EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
+        EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle,
     };
     use reth_rpc_server_types::constants::{
         DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
@@ -455,8 +476,6 @@ mod tests {
     use reth_tasks::pool::BlockingTaskPool;
     use reth_testing_utils::{generators, generators::Rng};
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-
-    use crate::EthApi;
 
     fn build_test_eth_api<
         P: BlockReaderIdExt<
@@ -477,14 +496,13 @@ mod tests {
         let cache = EthStateCache::spawn(provider.clone(), Default::default());
         let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
 
-        let gas_cap = provider.chain_spec().max_gas_limit();
         EthApi::new(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
             cache.clone(),
             GasPriceOracle::new(provider, Default::default(), cache),
-            gas_cap,
+            GasCap::default(),
             DEFAULT_MAX_SIMULATE_BLOCKS,
             DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),

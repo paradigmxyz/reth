@@ -16,7 +16,7 @@ use reth_evm::{
     ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes,
 };
 use reth_primitives::{BlockExt, InvalidTransactionError, SealedBlockWithSenders};
-use reth_primitives_traits::receipt::ReceiptExt;
+use reth_primitives_traits::Receipt;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderBlock, ProviderError,
     ProviderHeader, ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
@@ -47,7 +47,7 @@ pub trait LoadPendingBlock:
             HeaderResponse = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
         >,
     > + RpcNodeCore<
-        Provider: BlockReaderIdExt<Receipt: ReceiptExt>
+        Provider: BlockReaderIdExt<Receipt: Receipt>
                       + EvmEnvProvider<ProviderHeader<Self::Provider>>
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
