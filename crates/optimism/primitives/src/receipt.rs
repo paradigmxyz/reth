@@ -18,7 +18,6 @@ use reth_primitives_traits::InMemorySize;
 ))]
 pub struct OpReceipt {
     /// Receipt type.
-    #[cfg_attr(feature = "serde", serde(with = "tx_type_serde"))]
     pub tx_type: OpTxType,
     /// If transaction is executed successfully.
     ///
@@ -242,28 +241,5 @@ impl arbitrary::Arbitrary<'_> for OpReceipt {
             deposit_nonce,
             deposit_receipt_version,
         })
-    }
-}
-
-/// TODO: Remove once <https://github.com/alloy-rs/op-alloy/pull/317> is released.
-#[cfg(feature = "serde")]
-mod tx_type_serde {
-    use super::*;
-    use alloy_primitives::{U64, U8};
-    use serde::{Deserialize, Serialize};
-
-    pub(crate) fn serialize<S>(tx_type: &OpTxType, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let value: U8 = (*tx_type).into();
-        value.serialize(serializer)
-    }
-
-    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<OpTxType, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        U64::deserialize(deserializer)?.try_into().map_err(serde::de::Error::custom)
     }
 }
