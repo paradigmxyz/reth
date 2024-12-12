@@ -7636,13 +7636,20 @@ name = "reth-ethereum-primitives"
 version = "1.1.4"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
  "arbitrary",
+ "derive_more",
  "modular-bitfield",
+ "once_cell",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.8.5",
  "reth-codecs",
  "reth-primitives-traits",
  "reth-zstd-compressors",
+ "secp256k1",
  "serde",
  "test-fuzz",
 ]
