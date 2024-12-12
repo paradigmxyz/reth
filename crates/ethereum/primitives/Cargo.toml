@@ -53,7 +53,8 @@ std = [
 	"serde/std",
 	"alloy-eips/std",
 	"derive_more/std",
-	"secp256k1?/std"
+	"secp256k1?/std",
+	"once_cell/std"
 ]
 reth-codec = [
     "std",
