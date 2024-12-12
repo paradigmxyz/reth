@@ -59,12 +59,31 @@ impl StateRootHandle {
 }
 
 /// Common configuration for state root tasks
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct StateRootConfig<Factory> {
     /// View over the state in the database.
     pub consistent_view: ConsistentDbView<Factory>,
-    /// Latest trie input.
-    pub input: Arc<TrieInput>,
+    /// The sorted collection of cached in-memory intermediate trie nodes that
+    /// can be reused for computation.
+    pub nodes_sorted: Arc<TrieUpdatesSorted>,
+    /// The sorted in-memory overlay hashed state.
+    pub state_sorted: Arc<HashedPostStateSorted>,
+    /// The collection of prefix sets for the computation. Since the prefix sets _always_
+    /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
+    /// if we have cached nodes for them.
+    pub prefix_sets: Arc<TriePrefixSetsMut>,
+}
+
+impl<Factory> StateRootConfig<Factory> {
+    /// Creates a new state root config from the consistent view and the trie input.
+    pub fn new_from_input(consistent_view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
+        Self {
+            consistent_view,
+            nodes_sorted: Arc::new(input.nodes.into_sorted()),
+            state_sorted: Arc::new(input.state.into_sorted()),
+            prefix_sets: Arc::new(input.prefix_sets),
+        }
+    }
 }
 
 /// Messages used internally by the state root task
@@ -299,8 +318,7 @@ where
     ///
     /// Returns proof targets derived from the state update.
     fn on_state_update(
-        view: ConsistentDbView<Factory>,
-        input: Arc<TrieInput>,
+        config: StateRootConfig<Factory>,
         update: EvmState,
         fetched_proof_targets: &mut HashMap<B256, HashSet<B256>>,
         proof_sequence_number: u64,
@@ -321,7 +339,13 @@ where
             "Spawning proof task"
         );
         rayon::spawn(move || {
-            let result = ParallelProof::new(view, input.clone()).multiproof(proof_targets);
+            let result = ParallelProof::new(
+                config.consistent_view.clone(),
+                config.nodes_sorted.clone(),
+                config.state_sorted.clone(),
+                config.prefix_sets.clone(),
+            )
+            .multiproof(proof_targets);
 
             match result {
                 Ok(proof) => {
@@ -373,9 +397,9 @@ where
         // TODO(alexey): store proof targets in `ProofSequecner` to avoid recomputing them
         let targets = get_proof_targets(&state, &HashMap::default());
         let provider_ro = self.config.consistent_view.provider_ro();
-        let nodes_sorted = self.config.input.nodes.clone().into_sorted();
-        let state_sorted = self.config.input.state.clone().into_sorted();
-        let prefix_sets = self.config.input.prefix_sets.clone();
+        let nodes_sorted = self.config.nodes_sorted.clone();
+        let state_sorted = self.config.state_sorted.clone();
+        let prefix_sets = self.config.prefix_sets.clone();
 
         let tx = self.tx.clone();
         rayon::spawn(move || {
@@ -430,8 +454,7 @@ where
                             "Received new state update"
                         );
                         Self::on_state_update(
-                            self.config.consistent_view.clone(),
-                            self.config.input.clone(),
+                            self.config.clone(),
                             state,
                             &mut self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
@@ -580,9 +603,9 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
     targets: HashMap<B256, HashSet<B256>>,
     state: HashedPostState,
     provider: Factory::Provider,
-    input_nodes_sorted: TrieUpdatesSorted,
-    input_state_sorted: HashedPostStateSorted,
-    prefix_sets: TriePrefixSetsMut,
+    input_nodes_sorted: Arc<TrieUpdatesSorted>,
+    input_state_sorted: Arc<HashedPostStateSorted>,
+    prefix_sets: Arc<TriePrefixSetsMut>,
 ) -> SparseStateTrieResult<(Box<SparseStateTrie>, Duration)> {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
@@ -681,7 +704,7 @@ fn update_sparse_trie<Factory: DatabaseProviderFactory>(
                     &input_state_sorted,
                 ),
             )
-            .with_prefix_sets_mut(prefix_sets.clone())
+            .with_prefix_sets_mut((*prefix_sets).clone())
             .multiproof(targets)
             .unwrap();
 
