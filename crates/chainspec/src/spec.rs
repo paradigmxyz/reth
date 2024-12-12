@@ -439,9 +439,18 @@ impl ChainSpec {
         ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
 
-    /// Compute the [`ForkId`] for the given [`Head`] following eip-6122 spec
+    /// Compute the [`ForkId`] for the given [`Head`] following eip-6122 spec.
+    ///
+    /// Note: In case there are multiple hardforks activated at the same block or timestamp, only
+    /// the first gets applied.
     pub fn fork_id(&self, head: &Head) -> ForkId {
         let mut forkhash = ForkHash::from(self.genesis_hash());
+
+        // this tracks the last applied block or timestamp fork. This is necessary for optimism,
+        // because for the optimism hardforks both the optimism and the corresponding ethereum
+        // hardfork can be configured in `ChainHardforks` if it enables ethereum equivalent
+        // functionality (e.g. additional header,body fields) This is set to 0 so that all
+        // block based hardforks are skipped in the following loop
         let mut current_applied = 0;
 
         // handle all block forks before handling timestamp based forks. see: https://eips.ethereum.org/EIPS/eip-6122
@@ -452,6 +461,7 @@ impl ChainSpec {
             ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if cond.active_at_head(head) {
+                    // skip duplicated hardforks: hardforks enabled at genesis block
                     if block != current_applied {
                         forkhash += block;
                         current_applied = block;
@@ -468,10 +478,12 @@ impl ChainSpec {
         //
         // this filter ensures that no block-based forks are returned
         for timestamp in self.hardforks.forks_iter().filter_map(|(_, cond)| {
+            // ensure we only get timestamp forks activated __after__ the genesis block
             cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
         }) {
             let cond = ForkCondition::Timestamp(timestamp);
             if cond.active_at_head(head) {
+                // skip duplicated hardfork activated at the same timestamp
                 if timestamp != current_applied {
                     forkhash += timestamp;
                     current_applied = timestamp;
