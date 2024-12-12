@@ -11,7 +11,7 @@
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
 use alloy_eips::{eip4895::Withdrawals, merge::SLOT_DURATION};
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_primitives::{B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chainspec::EthereumHardforks;
@@ -20,7 +20,6 @@ use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJo
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
 use reth_primitives::{proofs, SealedHeader};
-use reth_primitives_traits::constants::RETH_CLIENT_VERSION;
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
@@ -247,8 +246,6 @@ impl PayloadTaskGuard {
 /// Settings for the [`BasicPayloadJobGenerator`].
 #[derive(Debug, Clone)]
 pub struct BasicPayloadJobGeneratorConfig {
-    /// Data to include in the block's extra data field.
-    extradata: Bytes,
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
     /// The deadline for when the payload builder job should resolve.
@@ -284,20 +281,11 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_payload_tasks = max_payload_tasks;
         self
     }
-
-    /// Sets the data to include in the block's extra data field.
-    ///
-    /// Defaults to the current client version: `rlp(RETH_CLIENT_VERSION)`.
-    pub fn extradata(mut self, extradata: Bytes) -> Self {
-        self.extradata = extradata;
-        self
-    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
         Self {
-            extradata: alloy_rlp::encode(RETH_CLIENT_VERSION.as_bytes()).into(),
             interval: Duration::from_secs(1),
             // 12s slot time
             deadline: SLOT_DURATION,

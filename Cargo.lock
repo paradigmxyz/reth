@@ -6560,7 +6560,6 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
- "alloy-rlp",
  "futures-core",
  "futures-util",
  "metrics",
