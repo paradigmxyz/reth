@@ -2,6 +2,7 @@
 
 pub mod execute;
 pub mod signed;
+pub mod signature;
 
 pub mod error;
 
