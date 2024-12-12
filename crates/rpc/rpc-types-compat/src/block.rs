@@ -132,6 +132,7 @@ fn from_block_with_transactions<T, B: BlockTrait>(
     let (header, _) = block.split();
     let header = Header::from_consensus(
         Sealed::new_unchecked(header, block_hash),
+        None,
         Some(U256::from(block_length)),
     );
 
