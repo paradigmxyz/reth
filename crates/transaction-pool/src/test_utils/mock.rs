@@ -8,13 +8,17 @@ use crate::{
     ValidPoolTransaction,
 };
 use alloy_consensus::{
-    constants::{EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, LEGACY_TX_TYPE_ID},
-    TxEip1559, TxEip2930, TxEip4844, TxLegacy,
+    constants::{
+        EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
+        LEGACY_TX_TYPE_ID,
+    },
+    TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy, Typed2718,
 };
 use alloy_eips::{
     eip1559::MIN_PROTOCOL_BASE_FEE,
     eip2930::AccessList,
     eip4844::{BlobTransactionSidecar, BlobTransactionValidationError, DATA_GAS_PER_BLOB},
+    eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
     Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
@@ -56,7 +60,8 @@ macro_rules! set_value {
             MockTransaction::Legacy { ref mut $field, .. } |
             MockTransaction::Eip1559 { ref mut $field, .. } |
             MockTransaction::Eip4844 { ref mut $field, .. } |
-            MockTransaction::Eip2930 { ref mut $field, .. } => {
+            MockTransaction::Eip2930 { ref mut $field, .. } |
+            MockTransaction::Eip7702 { ref mut $field, .. } => {
                 *$field = new_value;
             }
         }
@@ -72,7 +77,8 @@ macro_rules! get_value {
             MockTransaction::Legacy { $field, .. } |
             MockTransaction::Eip1559 { $field, .. } |
             MockTransaction::Eip4844 { $field, .. } |
-            MockTransaction::Eip2930 { $field, .. } => $field,
+            MockTransaction::Eip2930 { $field, .. } |
+            MockTransaction::Eip7702 { $field, .. } => $field,
         }
     };
 }
@@ -218,6 +224,37 @@ pub enum MockTransaction {
         /// The cost of the transaction, returned in the implementation of [`PoolTransaction`].
         cost: U256,
     },
+    /// EIP-7702 transaction type.
+    Eip7702 {
+        /// The chain id of the transaction.
+        chain_id: ChainId,
+        /// The hash of the transaction.
+        hash: B256,
+        /// The sender's address.
+        sender: Address,
+        /// The transaction nonce.
+        nonce: u64,
+        /// The maximum fee per gas for the transaction.
+        max_fee_per_gas: u128,
+        /// The maximum priority fee per gas for the transaction.
+        max_priority_fee_per_gas: u128,
+        /// The gas limit for the transaction.
+        gas_limit: u64,
+        /// The transaction's destination.
+        to: Address,
+        /// The value of the transaction.
+        value: U256,
+        /// The access list associated with the transaction.
+        access_list: AccessList,
+        /// The authorization list associated with the transaction.
+        authorization_list: Vec<SignedAuthorization>,
+        /// The transaction input data.
+        input: Bytes,
+        /// The size of the transaction, returned in the implementation of [`PoolTransaction`].
+        size: usize,
+        /// The cost of the transaction, returned in the implementation of [`PoolTransaction`].
+        cost: U256,
+    },
 }
 
 // === impl MockTransaction ===
@@ -287,6 +324,26 @@ impl MockTransaction {
         }
     }
 
+    /// Returns a new EIP7702 transaction with random address and hash and empty values
+    pub fn eip7702() -> Self {
+        Self::Eip7702 {
+            chain_id: 1,
+            hash: B256::random(),
+            sender: Address::random(),
+            nonce: 0,
+            max_fee_per_gas: MIN_PROTOCOL_BASE_FEE as u128,
+            max_priority_fee_per_gas: MIN_PROTOCOL_BASE_FEE as u128,
+            gas_limit: 0,
+            to: Address::random(),
+            value: Default::default(),
+            input: Bytes::new(),
+            access_list: Default::default(),
+            authorization_list: vec![],
+            size: Default::default(),
+            cost: U256::ZERO,
+        }
+    }
+
     /// Returns a new EIP4844 transaction with random address and hash and empty values
     pub fn eip4844() -> Self {
         Self::Eip4844 {
@@ -332,6 +389,7 @@ impl MockTransaction {
             TxType::Eip2930 => Self::eip2930(),
             TxType::Eip1559 => Self::eip1559(),
             TxType::Eip4844 => Self::eip4844(),
+            TxType::Eip7702 => Self::eip7702(),
 
             _ => unreachable!("Invalid transaction type"),
         }
@@ -371,14 +429,17 @@ impl MockTransaction {
     pub const fn get_priority_fee(&self) -> Option<u128> {
         match self {
             Self::Eip1559 { max_priority_fee_per_gas, .. } |
-            Self::Eip4844 { max_priority_fee_per_gas, .. } => Some(*max_priority_fee_per_gas),
+            Self::Eip4844 { max_priority_fee_per_gas, .. } |
+            Self::Eip7702 { max_priority_fee_per_gas, .. } => Some(*max_priority_fee_per_gas),
             _ => None,
         }
     }
 
     /// Sets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub fn set_max_fee(&mut self, val: u128) -> &mut Self {
-        if let Self::Eip1559 { max_fee_per_gas, .. } | Self::Eip4844 { max_fee_per_gas, .. } = self
+        if let Self::Eip1559 { max_fee_per_gas, .. } |
+        Self::Eip4844 { max_fee_per_gas, .. } |
+        Self::Eip7702 { max_fee_per_gas, .. } = self
         {
             *max_fee_per_gas = val;
         }
@@ -394,9 +455,9 @@ impl MockTransaction {
     /// Gets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub const fn get_max_fee(&self) -> Option<u128> {
         match self {
-            Self::Eip1559 { max_fee_per_gas, .. } | Self::Eip4844 { max_fee_per_gas, .. } => {
-                Some(*max_fee_per_gas)
-            }
+            Self::Eip1559 { max_fee_per_gas, .. } |
+            Self::Eip4844 { max_fee_per_gas, .. } |
+            Self::Eip7702 { max_fee_per_gas, .. } => Some(*max_fee_per_gas),
             _ => None,
         }
     }
@@ -407,7 +468,8 @@ impl MockTransaction {
             Self::Legacy { .. } => {}
             Self::Eip1559 { access_list: accesslist, .. } |
             Self::Eip4844 { access_list: accesslist, .. } |
-            Self::Eip2930 { access_list: accesslist, .. } => {
+            Self::Eip2930 { access_list: accesslist, .. } |
+            Self::Eip7702 { access_list: accesslist, .. } => {
                 *accesslist = list;
             }
         }
@@ -421,7 +483,8 @@ impl MockTransaction {
                 *gas_price = val;
             }
             Self::Eip1559 { max_fee_per_gas, max_priority_fee_per_gas, .. } |
-            Self::Eip4844 { max_fee_per_gas, max_priority_fee_per_gas, .. } => {
+            Self::Eip4844 { max_fee_per_gas, max_priority_fee_per_gas, .. } |
+            Self::Eip7702 { max_fee_per_gas, max_priority_fee_per_gas, .. } => {
                 *max_fee_per_gas = val;
                 *max_priority_fee_per_gas = val;
             }
@@ -436,7 +499,8 @@ impl MockTransaction {
                 *gas_price = val;
             }
             Self::Eip1559 { ref mut max_fee_per_gas, ref mut max_priority_fee_per_gas, .. } |
-            Self::Eip4844 { ref mut max_fee_per_gas, ref mut max_priority_fee_per_gas, .. } => {
+            Self::Eip4844 { ref mut max_fee_per_gas, ref mut max_priority_fee_per_gas, .. } |
+            Self::Eip7702 { ref mut max_fee_per_gas, ref mut max_priority_fee_per_gas, .. } => {
                 *max_fee_per_gas = val;
                 *max_priority_fee_per_gas = val;
             }
@@ -448,9 +512,9 @@ impl MockTransaction {
     pub const fn get_gas_price(&self) -> u128 {
         match self {
             Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => *gas_price,
-            Self::Eip1559 { max_fee_per_gas, .. } | Self::Eip4844 { max_fee_per_gas, .. } => {
-                *max_fee_per_gas
-            }
+            Self::Eip1559 { max_fee_per_gas, .. } |
+            Self::Eip4844 { max_fee_per_gas, .. } |
+            Self::Eip7702 { max_fee_per_gas, .. } => *max_fee_per_gas,
         }
     }
 
@@ -553,6 +617,7 @@ impl MockTransaction {
             Self::Eip1559 { .. } => EIP1559_TX_TYPE_ID,
             Self::Eip4844 { .. } => EIP4844_TX_TYPE_ID,
             Self::Eip2930 { .. } => EIP2930_TX_TYPE_ID,
+            Self::Eip7702 { .. } => EIP7702_TX_TYPE_ID,
         }
     }
 
@@ -576,6 +641,11 @@ impl MockTransaction {
         matches!(self, Self::Eip2930 { .. })
     }
 
+    /// Checks if the transaction is of the EIP-2930 type.
+    pub const fn is_eip7702(&self) -> bool {
+        matches!(self, Self::Eip7702 { .. })
+    }
+
     fn update_cost(&mut self) {
         match self {
             Self::Legacy { cost, gas_limit, gas_price, value, .. } |
@@ -583,7 +653,8 @@ impl MockTransaction {
                 *cost = U256::from(*gas_limit) * U256::from(*gas_price) + *value
             }
             Self::Eip1559 { cost, gas_limit, max_fee_per_gas, value, .. } |
-            Self::Eip4844 { cost, gas_limit, max_fee_per_gas, value, .. } => {
+            Self::Eip4844 { cost, gas_limit, max_fee_per_gas, value, .. } |
+            Self::Eip7702 { cost, gas_limit, max_fee_per_gas, value, .. } => {
                 *cost = U256::from(*gas_limit) * U256::from(*max_fee_per_gas) + *value
             }
         };
@@ -645,7 +716,8 @@ impl PoolTransaction for MockTransaction {
             Self::Legacy { cost, .. } |
             Self::Eip2930 { cost, .. } |
             Self::Eip1559 { cost, .. } |
-            Self::Eip4844 { cost, .. } => cost,
+            Self::Eip4844 { cost, .. } |
+            Self::Eip7702 { cost, .. } => cost,
         }
     }
 
@@ -656,9 +728,9 @@ impl PoolTransaction for MockTransaction {
     fn max_fee_per_gas(&self) -> u128 {
         match self {
             Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => *gas_price,
-            Self::Eip1559 { max_fee_per_gas, .. } | Self::Eip4844 { max_fee_per_gas, .. } => {
-                *max_fee_per_gas
-            }
+            Self::Eip1559 { max_fee_per_gas, .. } |
+            Self::Eip4844 { max_fee_per_gas, .. } |
+            Self::Eip7702 { max_fee_per_gas, .. } => *max_fee_per_gas,
         }
     }
 
@@ -667,7 +739,8 @@ impl PoolTransaction for MockTransaction {
             Self::Legacy { .. } => None,
             Self::Eip1559 { access_list: accesslist, .. } |
             Self::Eip4844 { access_list: accesslist, .. } |
-            Self::Eip2930 { access_list: accesslist, .. } => Some(accesslist),
+            Self::Eip2930 { access_list: accesslist, .. } |
+            Self::Eip7702 { access_list: accesslist, .. } => Some(accesslist),
         }
     }
 
@@ -675,7 +748,8 @@ impl PoolTransaction for MockTransaction {
         match self {
             Self::Legacy { .. } | Self::Eip2930 { .. } => None,
             Self::Eip1559 { max_priority_fee_per_gas, .. } |
-            Self::Eip4844 { max_priority_fee_per_gas, .. } => Some(*max_priority_fee_per_gas),
+            Self::Eip4844 { max_priority_fee_per_gas, .. } |
+            Self::Eip7702 { max_priority_fee_per_gas, .. } => Some(*max_priority_fee_per_gas),
         }
     }
 
@@ -717,7 +791,8 @@ impl PoolTransaction for MockTransaction {
         match self {
             Self::Legacy { gas_price, .. } | Self::Eip2930 { gas_price, .. } => *gas_price,
             Self::Eip1559 { max_priority_fee_per_gas, .. } |
-            Self::Eip4844 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
+            Self::Eip4844 { max_priority_fee_per_gas, .. } |
+            Self::Eip7702 { max_priority_fee_per_gas, .. } => *max_priority_fee_per_gas,
         }
     }
 
@@ -725,7 +800,7 @@ impl PoolTransaction for MockTransaction {
     fn kind(&self) -> TxKind {
         match self {
             Self::Legacy { to, .. } | Self::Eip1559 { to, .. } | Self::Eip2930 { to, .. } => *to,
-            Self::Eip4844 { to, .. } => TxKind::Call(*to),
+            Self::Eip4844 { to, .. } | Self::Eip7702 { to, .. } => TxKind::Call(*to),
         }
     }
 
@@ -735,7 +810,7 @@ impl PoolTransaction for MockTransaction {
             Self::Legacy { to, .. } | Self::Eip1559 { to, .. } | Self::Eip2930 { to, .. } => {
                 to.is_create()
             }
-            Self::Eip4844 { .. } => false,
+            Self::Eip4844 { .. } | Self::Eip7702 { .. } => false,
         }
     }
 
@@ -756,6 +831,7 @@ impl PoolTransaction for MockTransaction {
             Self::Eip1559 { .. } => TxType::Eip1559.into(),
             Self::Eip4844 { .. } => TxType::Eip4844.into(),
             Self::Eip2930 { .. } => TxType::Eip2930.into(),
+            Self::Eip7702 { .. } => TxType::Eip7702.into(),
         }
     }
 
@@ -770,7 +846,8 @@ impl PoolTransaction for MockTransaction {
             Self::Legacy { chain_id, .. } => *chain_id,
             Self::Eip1559 { chain_id, .. } |
             Self::Eip4844 { chain_id, .. } |
-            Self::Eip2930 { chain_id, .. } => Some(*chain_id),
+            Self::Eip2930 { chain_id, .. } |
+            Self::Eip7702 { chain_id, .. } => Some(*chain_id),
         }
     }
 }
@@ -936,7 +1013,34 @@ impl TryFrom<RecoveredTx> for MockTransaction {
                 size,
                 cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
             }),
-            _ => unreachable!("Invalid transaction type"),
+            Transaction::Eip7702(TxEip7702 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value,
+                access_list,
+                authorization_list,
+                input,
+            }) => Ok(Self::Eip7702 {
+                chain_id,
+                hash,
+                sender,
+                nonce,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                gas_limit,
+                to,
+                value,
+                input,
+                access_list,
+                authorization_list,
+                size,
+                cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
+            }),
+            tx => Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(tx.ty())),
         }
     }
 }
@@ -1037,6 +1141,30 @@ impl From<MockTransaction> for Transaction {
                 access_list,
                 blob_versioned_hashes: sidecar.versioned_hashes().collect(),
                 max_fee_per_blob_gas,
+                input,
+            }),
+            MockTransaction::Eip7702 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value,
+                access_list,
+                input,
+                authorization_list,
+                ..
+            } => Self::Eip7702(TxEip7702 {
+                chain_id,
+                nonce,
+                gas_limit,
+                max_fee_per_gas,
+                max_priority_fee_per_gas,
+                to,
+                value,
+                access_list,
+                authorization_list,
                 input,
             }),
         }
