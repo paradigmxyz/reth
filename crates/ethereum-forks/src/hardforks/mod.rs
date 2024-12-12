@@ -87,7 +87,6 @@ impl ChainHardforks {
     pub fn fork_block<H: Hardfork>(&self, fork: H) -> Option<u64> {
         match self.fork(fork) {
             ForkCondition::Block(block) => Some(block),
-            ForkCondition::TTD { fork_block, .. } => fork_block,
             ForkCondition::Timestamp(ts) => Some(ts),
             ForkCondition::Never => None,
         }

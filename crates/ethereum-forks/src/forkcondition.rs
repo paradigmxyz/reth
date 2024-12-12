@@ -1,4 +1,5 @@
-use crate::Head;
+use crate::{EthereumHardfork, Head};
+use alloy_chains::Chain;
 use alloy_primitives::{BlockNumber, U256};
 
 /// The condition at which a fork is activated.
@@ -7,18 +8,6 @@ use alloy_primitives::{BlockNumber, U256};
 pub enum ForkCondition {
     /// The fork is activated after a certain block.
     Block(BlockNumber),
-    /// The fork is activated after a total difficulty has been reached.
-    TTD {
-        /// The block number at which TTD is reached, if it is known.
-        ///
-        /// This should **NOT** be set unless you want this block advertised as [EIP-2124][eip2124]
-        /// `FORK_NEXT`. This is currently only the case for Sepolia and Holesky.
-        ///
-        /// [eip2124]: https://eips.ethereum.org/EIPS/eip-2124
-        fork_block: Option<BlockNumber>,
-        /// The total difficulty after which the fork is activated.
-        total_difficulty: U256,
-    },
     /// The fork is activated after a specific timestamp.
     Timestamp(u64),
     /// The fork is never activated
@@ -38,8 +27,7 @@ impl ForkCondition {
     ///
     /// For timestamp conditions, this will always return false.
     pub const fn active_at_block(&self, current_block: BlockNumber) -> bool {
-        matches!(self, Self::Block(block)
-        | Self::TTD { fork_block: Some(block), .. } if current_block >= *block)
+        matches!(self, Self::Block(block) if current_block >= *block)
     }
 
     /// Checks if the given block is the first block that satisfies the fork condition.
@@ -58,9 +46,8 @@ impl ForkCondition {
     /// `58_750_000_000_000_000_000_000`)
     ///
     /// This will return false for any condition that is not TTD-based.
-    pub fn active_at_ttd(&self, ttd: U256, difficulty: U256) -> bool {
-        matches!(self, Self::TTD { total_difficulty, .. }
-            if ttd.saturating_sub(difficulty) >= *total_difficulty)
+    pub fn active_at_ttd(&self, chain: Chain) -> bool {
+        matches!(self, Self::Block(block) if block >= EthereumHardfork::Paris.activation_block(chain))
     }
 
     /// Checks whether the fork condition is satisfied at the given timestamp.
@@ -85,9 +72,7 @@ impl ForkCondition {
     /// - The condition is satisfied by the timestamp;
     /// - or the condition is satisfied by the total difficulty
     pub fn active_at_head(&self, head: &Head) -> bool {
-        self.active_at_block(head.number) ||
-            self.active_at_timestamp(head.timestamp) ||
-            self.active_at_ttd(head.total_difficulty, head.difficulty)
+        self.active_at_block(head.number) || self.active_at_timestamp(head.timestamp)
     }
 
     /// Get the total terminal difficulty for this fork condition.

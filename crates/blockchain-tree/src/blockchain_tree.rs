@@ -397,13 +397,15 @@ where
             .header_td(&block.parent_hash)?
             .ok_or_else(|| BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash })?;
 
+        let chain = self.externals.provider_factory.chain_spec().chain();
+
         // Pass the parent total difficulty to short-circuit unnecessary calculations.
         if !self
             .externals
             .provider_factory
             .chain_spec()
             .fork(EthereumHardfork::Paris)
-            .active_at_ttd(parent_td, U256::ZERO)
+            .active_at_ttd(chain)
         {
             return Err(BlockExecutionError::Validation(BlockValidationError::BlockPreMerge {
                 hash: block.hash(),
@@ -1028,21 +1030,12 @@ where
         durations_recorder.record_relative(MakeCanonicalAction::FindCanonicalHeader);
         if let Some(header) = canonical_header {
             info!(target: "blockchain_tree", %block_hash, "Block is already canonical, ignoring.");
-            // TODO: this could be fetched from the chainspec first
-            let td =
-                self.externals.provider_factory.provider()?.header_td(&block_hash)?.ok_or_else(
-                    || {
-                        CanonicalError::from(BlockValidationError::MissingTotalDifficulty {
-                            hash: block_hash,
-                        })
-                    },
-                )?;
             if !self
                 .externals
                 .provider_factory
                 .chain_spec()
                 .fork(EthereumHardfork::Paris)
-                .active_at_ttd(td, U256::ZERO)
+                .active_at_ttd(chain)
             {
                 return Err(CanonicalError::from(BlockValidationError::BlockPreMerge {
                     hash: block_hash,

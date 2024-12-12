@@ -349,13 +349,7 @@ impl EthereumHardfork {
             (Self::London, ForkCondition::Block(12965000)),
             (Self::ArrowGlacier, ForkCondition::Block(13773000)),
             (Self::GrayGlacier, ForkCondition::Block(15050000)),
-            (
-                Self::Paris,
-                ForkCondition::TTD {
-                    fork_block: None,
-                    total_difficulty: uint!(58_750_000_000_000_000_000_000_U256),
-                },
-            ),
+            (Self::Paris, ForkCondition::Block(15537394)),
             (Self::Shanghai, ForkCondition::Timestamp(1681338455)),
             (Self::Cancun, ForkCondition::Timestamp(1710338135)),
         ]
@@ -376,13 +370,7 @@ impl EthereumHardfork {
             (Self::MuirGlacier, ForkCondition::Block(0)),
             (Self::Berlin, ForkCondition::Block(0)),
             (Self::London, ForkCondition::Block(0)),
-            (
-                Self::Paris,
-                ForkCondition::TTD {
-                    fork_block: Some(1735371),
-                    total_difficulty: uint!(17_000_000_000_000_000_U256),
-                },
-            ),
+            (Self::Paris, ForkCondition::Block(1735371)),
             (Self::Shanghai, ForkCondition::Timestamp(1677557088)),
             (Self::Cancun, ForkCondition::Timestamp(1706655072)),
         ]
@@ -403,7 +391,7 @@ impl EthereumHardfork {
             (Self::MuirGlacier, ForkCondition::Block(0)),
             (Self::Berlin, ForkCondition::Block(0)),
             (Self::London, ForkCondition::Block(0)),
-            (Self::Paris, ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO }),
+            (Self::Paris, ForkCondition::Block(0)),
             (Self::Shanghai, ForkCondition::Timestamp(1696000704)),
             (Self::Cancun, ForkCondition::Timestamp(1707305664)),
         ]

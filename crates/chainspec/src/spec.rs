@@ -1669,19 +1669,20 @@ Post-merge hard forks (timestamp based):
     fn check_terminal_ttd() {
         let chainspec = ChainSpecBuilder::mainnet().build();
 
+        // TODO: fix
         // Check that Paris is not active on terminal PoW block #15537393.
         let terminal_block_ttd = U256::from(58750003716598352816469_u128);
         let terminal_block_difficulty = U256::from(11055787484078698_u128);
         assert!(!chainspec
             .fork(EthereumHardfork::Paris)
-            .active_at_ttd(terminal_block_ttd, terminal_block_difficulty));
+            .active_at_ttd(chain));
 
         // Check that Paris is active on first PoS block #15537394.
         let first_pos_block_ttd = U256::from(58750003716598352816469_u128);
         let first_pos_difficulty = U256::ZERO;
         assert!(chainspec
             .fork(EthereumHardfork::Paris)
-            .active_at_ttd(first_pos_block_ttd, first_pos_difficulty));
+            .active_at_ttd(chain));
     }
 
     #[test]
@@ -2164,7 +2165,7 @@ Post-merge hard forks (timestamp based):
     fn holesky_paris_activated_at_genesis() {
         assert!(HOLESKY
             .fork(EthereumHardfork::Paris)
-            .active_at_ttd(HOLESKY.genesis.difficulty, HOLESKY.genesis.difficulty));
+            .active_at_ttd(HOLESKY));
     }
 
     #[test]
