@@ -12,8 +12,6 @@ use derive_more::{DerefMut, From, IntoIterator};
 use serde::{Deserialize, Serialize};
 
 use crate::TxType;
-#[cfg(feature = "reth-codec")]
-use reth_zstd_compressors::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
 
 /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
 pub use reth_primitives_traits::receipt::gas_spent_by_transactions;
