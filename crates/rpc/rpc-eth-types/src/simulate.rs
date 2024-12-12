@@ -12,7 +12,7 @@ use reth_primitives_traits::{block::BlockTx, BlockBody as _, SignedTransaction};
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use revm::Database;
-use revm_primitives::{Address, Bytes, ExecutionResult, TxKind, U256};
+use revm_primitives::{Address, Bytes, ExecutionResult, TxKind};
 
 use crate::{
     error::{api::FromEthApiError, ToRpcError},
@@ -138,7 +138,6 @@ where
 pub fn build_simulated_block<T, B>(
     senders: Vec<Address>,
     results: Vec<ExecutionResult>,
-    total_difficulty: U256,
     full_transactions: bool,
     tx_resp_builder: &T,
     block: B,
@@ -209,6 +208,6 @@ where
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = from_block(block, total_difficulty, txs_kind, None, tx_resp_builder)?;
+    let block = from_block(block, txs_kind, None, tx_resp_builder)?;
     Ok(SimulatedBlock { inner: block, calls })
 }
