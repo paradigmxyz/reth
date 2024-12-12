@@ -123,7 +123,7 @@ mod impl_k256 {
     ///
     /// This does not ensure that the `s` value in the signature is low, and _just_ wraps the
     /// underlying secp256k1 library.
-    pub fn recover_signer_unchecked(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {
+    pub(crate) fn recover_signer_unchecked(sig: &[u8; 65], msg: &[u8; 32]) -> Result<Address, Error> {
         let mut signature = k256::ecdsa::Signature::from_slice(&sig[0..64])?;
         let mut recid = sig[64];
 
