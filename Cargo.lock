@@ -7678,6 +7678,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-revm",
+ "reth-storage-api",
  "reth-storage-errors",
  "revm",
  "revm-primitives",
