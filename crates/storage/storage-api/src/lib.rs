@@ -76,3 +76,6 @@ pub use legacy::*;
 
 mod primitives;
 pub use primitives::*;
+
+mod block_indices;
+pub use block_indices::*;
