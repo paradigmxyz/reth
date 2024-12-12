@@ -1,12 +1,8 @@
-Here is the improved version in English:  
-
----
-
 # Reth  
 
 [![CI status](https://github.com/paradigmxyz/reth/workflows/unit/badge.svg)][gh-ci]  
 [![cargo-deny status](https://github.com/paradigmxyz/reth/workflows/deny/badge.svg)][gh-deny]  
-[![Telegram Chat][tg-badge]][tg-url]  
+[!Telegram Chat
 
 **A modular, contributor-friendly, and blazing-fast implementation of the Ethereum protocol**  
 
