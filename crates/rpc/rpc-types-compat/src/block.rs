@@ -18,7 +18,6 @@ use crate::{transaction::from_recovered_with_block_context, TransactionCompat};
 #[expect(clippy::type_complexity)]
 pub fn from_block<T, B>(
     block: BlockWithSenders<B>,
-    total_difficulty: U256,
     kind: BlockTransactionsKind,
     block_hash: Option<B256>,
     tx_resp_builder: &T,
@@ -29,11 +28,9 @@ where
 {
     match kind {
         BlockTransactionsKind::Hashes => {
-            Ok(from_block_with_tx_hashes::<T::Transaction, B>(block, total_difficulty, block_hash))
+            Ok(from_block_with_tx_hashes::<T::Transaction, B>(block, block_hash))
         }
-        BlockTransactionsKind::Full => {
-            from_block_full::<T, B>(block, total_difficulty, block_hash, tx_resp_builder)
-        }
+        BlockTransactionsKind::Full => from_block_full::<T, B>(block, block_hash, tx_resp_builder),
     }
 }
 
@@ -44,7 +41,6 @@ where
 /// block: [`BlockTransactions::Hashes`]
 pub fn from_block_with_tx_hashes<T, B>(
     block: BlockWithSenders<B>,
-    total_difficulty: U256,
     block_hash: Option<B256>,
 ) -> Block<T, Header<B::Header>>
 where
@@ -57,7 +53,6 @@ where
         block.length(),
         block_hash,
         block.block,
-        total_difficulty,
         BlockTransactions::Hashes(transactions),
     )
 }
@@ -70,7 +65,6 @@ where
 #[expect(clippy::type_complexity)]
 pub fn from_block_full<T, B>(
     block: BlockWithSenders<B>,
-    total_difficulty: U256,
     block_hash: Option<B256>,
     tx_resp_builder: &T,
 ) -> Result<Block<T::Transaction, Header<B::Header>>, T::Error>
@@ -112,7 +106,6 @@ where
         block_length,
         block_hash,
         block.block,
-        total_difficulty,
         BlockTransactions::Full(transactions),
     ))
 }
@@ -122,7 +115,6 @@ fn from_block_with_transactions<T, B: BlockTrait>(
     block_length: usize,
     block_hash: B256,
     block: B,
-    total_difficulty: U256,
     transactions: BlockTransactions<T>,
 ) -> Block<T, Header<B::Header>> {
     let withdrawals = block
@@ -140,7 +132,7 @@ fn from_block_with_transactions<T, B: BlockTrait>(
     let (header, _) = block.split();
     let header = Header::from_consensus(
         Sealed::new_unchecked(header, block_hash),
-        Some(total_difficulty),
+        None,
         Some(U256::from(block_length)),
     );
 

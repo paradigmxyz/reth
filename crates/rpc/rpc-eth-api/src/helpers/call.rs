@@ -20,7 +20,7 @@ use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_node_api::BlockBody;
 use reth_primitives_traits::SignedTransaction;
-use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider, ProviderHeader};
+use reth_provider::{BlockIdReader, ChainSpecProvider, ProviderHeader};
 use reth_revm::{
     database::StateProviderDatabase,
     db::CacheDB,
@@ -95,10 +95,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let base_block =
                 self.block_with_senders(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
             let mut parent_hash = base_block.header.hash();
-            let total_difficulty = RpcNodeCore::provider(self)
-                .header_td_by_number(block_env.number.to())
-                .map_err(Self::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(block))?;
 
             // Only enforce base fee if validation is enabled
             cfg.disable_base_fee = !validation;
@@ -206,7 +202,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         simulate::build_simulated_block(
                             senders,
                             results,
-                            total_difficulty,
                             return_full_transactions,
                             this.tx_resp_builder(),
                             block,
