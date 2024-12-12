@@ -16,7 +16,7 @@ extern crate alloc;
 pub mod bedrock;
 pub mod transaction;
 
-pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType, OpTransaction};
+pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType};
 
 mod receipt;
 pub use receipt::OpReceipt;
