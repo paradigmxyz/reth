@@ -19,7 +19,7 @@ pub enum DatabaseError {
     #[error("failed to create a table: {_0}")]
     CreateTable(DatabaseErrorInfo),
     /// Failed to write a value into a table.
-    #[error("Failed to write a value into a table: {_0}")]
+    #[error(transparent)]
     Write(Box<DatabaseWriteError>),
     /// Failed to read a value from a table.
     #[error("failed to read a value from a database table: {_0}")]
