@@ -14,8 +14,7 @@ pub const SECP256K1N_HALF: U256 = U256::from_be_bytes([
 
 /// Secp256k1 utility functions.
 pub mod secp256k1 {
-    use super::SECP256K1N_HALF;
-    use alloy_primitives::PrimitiveSignature as Signature;
+    use super::*;
     use revm_primitives::{Address, B256};
 
     #[cfg(not(feature = "secp256k1"))]
