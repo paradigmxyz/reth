@@ -16,7 +16,6 @@ use reth_provider::{
     BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::{debug, trace};
 
@@ -79,7 +78,7 @@ where
         );
 
         #[cfg(not(feature = "scroll"))]
-        let db = StateProviderDatabase::new(
+        let db = reth_revm::database::StateProviderDatabase::new(
             self.provider.history_by_block_number(self.range.start().saturating_sub(1))?,
         );
         #[cfg(feature = "scroll")]
@@ -213,9 +212,13 @@ where
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
 
         // Configure the executor to use the previous block's state.
-        let executor = self.executor.executor(StateProviderDatabase::new(
-            self.provider.history_by_block_number(block_number.saturating_sub(1))?,
-        ));
+        let provider = self.provider.history_by_block_number(block_number.saturating_sub(1))?;
+        // TODO(scroll): remove once issue #76 is completed.
+        #[cfg(feature = "scroll")]
+        let db = reth_scroll_storage::ScrollStateProviderDatabase::new(provider);
+        #[cfg(not(feature = "scroll"))]
+        let db = reth_revm::database::StateProviderDatabase::new(provider);
+        let executor = self.executor.executor(db);
 
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body().transactions().len(), "Executing block");
 

@@ -23,6 +23,9 @@ jobs:
           - type: optimism
             args: --bin op-reth --workspace --lib --examples --tests --benches --locked
             features: "optimism asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+          - type: scroll
+            args: --bin scroll-reth --workspace --lib --examples --tests --benches --locked
+            features: "scroll asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
           - type: book
             args: --manifest-path book/sources/Cargo.toml --workspace --bins
             features: ""
@@ -85,7 +88,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - run: cargo hack check --workspace --exclude op-reth
+      - run: cargo hack check --workspace --exclude op-reth --exclude scroll-reth
       - run: cargo check -p op-reth --features "optimism"
 
   msrv:
@@ -152,13 +155,14 @@ jobs:
         with:
           cache-on-failure: true
       - uses: taiki-e/install-action@cargo-udeps
-        # due to the scroll feature flag, we need to exclude some crates that were annotated with
-        # #![cfg(not(feature = "scroll))].
+        # due to the scroll and optimism feature flag, we need to exclude some crates that were annotated with
+        # #![cfg(not(feature = "scroll))] or #![cfg(not(feature = "optimism"))].
       - run: |
           cargo udeps --workspace --lib --examples --tests --benches --all-features --locked \
             --exclude "reth-optimism-*" --exclude op-reth --exclude "example-*" --exclude reth \
             --exclude reth-e2e-test-utils --exclude reth-ethereum-payload-builder --exclude reth-exex-test-utils \
-            --exclude reth-node-ethereum --exclude reth-scroll-evm
+            --exclude reth-node-ethereum --exclude scroll-reth --exclude reth-scroll-cli --exclude reth-scroll-evm \
+            --exclude reth-scroll-node
 
   book:
     name: book

@@ -58,4 +58,4 @@ optimism = [
     "reth-provider/optimism",
     "revm-primitives/optimism",
 ]
-scroll = ["reth-scroll-storage"]
+scroll = ["reth-scroll-storage/scroll"]

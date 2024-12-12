@@ -8,7 +8,7 @@ use alloy_primitives::U256;
 use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
 use reth_scroll_forks::DEV_HARDFORKS;
 
-use crate::{LazyLock, ScrollChainSpec};
+use crate::{LazyLock, ScrollChainConfig, ScrollChainSpec};
 
 /// Scroll dev testnet specification
 ///
@@ -26,6 +26,7 @@ pub static SCROLL_DEV: LazyLock<Arc<ScrollChainSpec>> = LazyLock::new(|| {
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             ..Default::default()
         },
+        config: ScrollChainConfig::dev(),
     }
     .into()
 });

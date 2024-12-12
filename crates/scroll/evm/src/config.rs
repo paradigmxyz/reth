@@ -1,8 +1,8 @@
-use reth_chainspec::Head;
+use reth_chainspec::{ChainSpecProvider, Head};
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_primitives::{transaction::FillTxEnv, TransactionSigned};
 use reth_revm::{inspector_handle_register, Database, Evm, GetInspector, TxEnv};
-use reth_scroll_chainspec::{ScrollChainConfig, ScrollChainSpec};
+use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_forks::ScrollHardfork;
 use revm::{
     precompile::{Address, Bytes},
@@ -18,14 +18,12 @@ use std::{convert::Infallible, sync::Arc};
 pub struct ScrollEvmConfig {
     /// The chain spec for Scroll.
     chain_spec: Arc<ScrollChainSpec>,
-    /// Additional Scroll configuration.
-    scroll_config: ScrollChainConfig,
 }
 
 impl ScrollEvmConfig {
     /// Returns a new instance of [`ScrollEvmConfig`].
-    pub const fn new(chain_spec: Arc<ScrollChainSpec>, scroll_config: ScrollChainConfig) -> Self {
-        Self { chain_spec, scroll_config }
+    pub const fn new(chain_spec: Arc<ScrollChainSpec>) -> Self {
+        Self { chain_spec }
     }
 
     /// Returns the spec id at the given head.
@@ -106,7 +104,7 @@ impl ConfigureEvmEnv for ScrollEvmConfig {
     fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, after_merge: bool) {
         block_env.number = U256::from(header.number);
 
-        if let Some(vault_address) = self.scroll_config.fee_vault_address {
+        if let Some(vault_address) = self.chain_spec.config.fee_vault_address {
             block_env.coinbase = vault_address;
         } else {
             block_env.coinbase = header.beneficiary;
@@ -139,7 +137,7 @@ impl ConfigureEvmEnv for ScrollEvmConfig {
             ..Default::default()
         });
 
-        let coinbase = if let Some(vault_address) = self.scroll_config.fee_vault_address {
+        let coinbase = if let Some(vault_address) = self.chain_spec.config.fee_vault_address {
             vault_address
         } else {
             attributes.suggested_fee_recipient
@@ -167,19 +165,26 @@ impl ConfigureEvmEnv for ScrollEvmConfig {
     }
 }
 
+impl ChainSpecProvider for ScrollEvmConfig {
+    type ChainSpec = ScrollChainSpec;
+
+    fn chain_spec(&self) -> Arc<Self::ChainSpec> {
+        self.chain_spec.clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloy_consensus::Header;
     use reth_chainspec::NamedChain::Scroll;
-    use reth_scroll_chainspec::ScrollChainSpecBuilder;
+    use reth_scroll_chainspec::{ScrollChainConfig, ScrollChainSpecBuilder};
     use revm::primitives::{SpecId, B256};
 
     #[test]
     fn test_spec_at_head() {
         let config = ScrollEvmConfig::new(
-            ScrollChainSpecBuilder::scroll_mainnet().build().into(),
-            ScrollChainConfig::default(),
+            ScrollChainSpecBuilder::scroll_mainnet().build(ScrollChainConfig::mainnet()).into(),
         );
 
         // prepare all fork heads
@@ -196,8 +201,7 @@ mod tests {
     #[test]
     fn test_fill_cfg_env() {
         let config = ScrollEvmConfig::new(
-            ScrollChainSpecBuilder::scroll_mainnet().build().into(),
-            ScrollChainConfig::default(),
+            ScrollChainSpecBuilder::scroll_mainnet().build(ScrollChainConfig::mainnet()).into(),
         );
 
         // curie
@@ -243,8 +247,7 @@ mod tests {
     #[test]
     fn test_fill_block_env() {
         let config = ScrollEvmConfig::new(
-            ScrollChainSpecBuilder::scroll_mainnet().build().into(),
-            ScrollChainConfig::mainnet(),
+            ScrollChainSpecBuilder::scroll_mainnet().build(ScrollChainConfig::mainnet()).into(),
         );
         let mut block_env = BlockEnv::default();
 
@@ -265,7 +268,7 @@ mod tests {
         // verify block env correctly updated
         let expected = BlockEnv {
             number: U256::from(header.number),
-            coinbase: config.scroll_config.fee_vault_address.unwrap(),
+            coinbase: config.chain_spec.config.fee_vault_address.unwrap(),
             timestamp: U256::from(header.timestamp),
             prevrandao: Some(header.mix_hash),
             difficulty: U256::ZERO,
@@ -279,8 +282,7 @@ mod tests {
     #[test]
     fn test_next_cfg_and_block_env() -> eyre::Result<()> {
         let config = ScrollEvmConfig::new(
-            ScrollChainSpecBuilder::scroll_mainnet().build().into(),
-            ScrollChainConfig::mainnet(),
+            ScrollChainSpecBuilder::scroll_mainnet().build(ScrollChainConfig::mainnet()).into(),
         );
 
         // pre curie header
@@ -312,7 +314,7 @@ mod tests {
         // verify block env
         let expected = BlockEnv {
             number: U256::from(header.number + 1),
-            coinbase: config.scroll_config.fee_vault_address.unwrap(),
+            coinbase: config.chain_spec.config.fee_vault_address.unwrap(),
             timestamp: U256::from(attributes.timestamp),
             prevrandao: Some(attributes.prev_randao),
             difficulty: U256::ZERO,
@@ -320,7 +322,6 @@ mod tests {
             basefee: U256::ZERO,
             gas_limit: U256::from(header.gas_limit),
             blob_excess_gas_and_price: None,
-            ..Default::default()
         };
         assert_eq!(block_env, expected);
 

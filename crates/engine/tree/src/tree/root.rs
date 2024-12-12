@@ -232,7 +232,13 @@ where
                 let hashed_address = keccak256(address);
 
                 let destroyed = account.is_selfdestructed();
-                let info = if account.is_empty() { None } else { Some(account.info.into()) };
+                let info = if account.is_empty() {
+                    None
+                } else {
+                    // TODO (scroll): once we transition to the sdk pattern, a solution
+                    // needs to be found for this.
+                    Some(reth_primitives::Account::from_account_info(account.info))
+                };
                 hashed_state_update.accounts.insert(hashed_address, info);
 
                 let mut changed_storage_iter = account

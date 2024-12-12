@@ -1,7 +1,8 @@
 //! Scroll types for genesis data.
 
-use crate::constants::{
-    SCROLL_FEE_VAULT_ADDRESS, SCROLL_MAINNET_L1_CONFIG, SCROLL_SEPOLIA_L1_CONFIG,
+use crate::{
+    constants::{SCROLL_FEE_VAULT_ADDRESS, SCROLL_MAINNET_L1_CONFIG, SCROLL_SEPOLIA_L1_CONFIG},
+    SCROLL_DEV_L1_CONFIG,
 };
 use alloy_primitives::Address;
 use alloy_serde::OtherFields;
@@ -120,12 +121,18 @@ impl ScrollChainConfig {
             l1_config: SCROLL_MAINNET_L1_CONFIG,
         }
     }
+
     /// Returns the [`ScrollChainConfig`] for Scroll Sepolia.
     pub const fn sepolia() -> Self {
         Self {
             fee_vault_address: Some(SCROLL_FEE_VAULT_ADDRESS),
             l1_config: SCROLL_SEPOLIA_L1_CONFIG,
         }
+    }
+
+    /// Returns the [`ScrollChainConfig`] for Scroll dev.
+    pub const fn dev() -> Self {
+        Self { fee_vault_address: Some(SCROLL_FEE_VAULT_ADDRESS), l1_config: SCROLL_DEV_L1_CONFIG }
     }
 }
 

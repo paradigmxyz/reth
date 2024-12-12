@@ -7,7 +7,7 @@ use alloy_primitives::b256;
 use reth_chainspec::{once_cell_set, ChainSpec};
 use reth_scroll_forks::ScrollHardfork;
 
-use crate::{LazyLock, ScrollChainSpec};
+use crate::{LazyLock, ScrollChainConfig, ScrollChainSpec};
 
 /// The Scroll Mainnet spec
 pub static SCROLL_MAINNET: LazyLock<Arc<ScrollChainSpec>> = LazyLock::new(|| {
@@ -23,6 +23,7 @@ pub static SCROLL_MAINNET: LazyLock<Arc<ScrollChainSpec>> = LazyLock::new(|| {
             hardforks: ScrollHardfork::scroll_mainnet(),
             ..Default::default()
         },
+        config: ScrollChainConfig::mainnet(),
     }
     .into()
 });

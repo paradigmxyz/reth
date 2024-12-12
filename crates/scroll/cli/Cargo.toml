@@ -1,0 +1,48 @@
+[package]
+name = "reth-scroll-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-db.workspace = true
+reth-cli.workspace = true
+reth-cli-commands.workspace = true
+reth-cli-runner.workspace = true
+reth-node-builder.workspace = true
+reth-node-core.workspace = true
+reth-node-metrics.workspace = true
+reth-tracing.workspace = true
+
+# scroll
+reth-scroll-chainspec.workspace = true
+reth-scroll-evm.workspace = true
+reth-scroll-node.workspace = true
+
+# misc
+eyre.workspace = true
+clap.workspace = true
+tracing.workspace = true
+
+[features]
+optimism = [
+	"reth-db/optimism",
+	"reth-node-core/optimism",
+	"reth-scroll-evm/optimism",
+	"reth-scroll-node/optimism"
+]
+scroll = [
+	"reth-db/scroll",
+	"reth-node-builder/scroll",
+	"reth-node-core/scroll",
+	"reth-scroll-evm/scroll",
+	"reth-scroll-node/scroll"
+]

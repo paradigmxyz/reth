@@ -81,6 +81,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use reth_revm as _;
+#[cfg(feature = "scroll")]
+use reth_scroll_primitives as _;
 
 #[allow(missing_docs)]
 #[cfg(any(test, feature = "test-utils"))]

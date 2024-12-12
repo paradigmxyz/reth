@@ -12,6 +12,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+#[cfg(feature = "scroll")]
+use reth_scroll_primitives as _;
+
 /// Various provider traits.
 mod traits;
 pub use traits::*;

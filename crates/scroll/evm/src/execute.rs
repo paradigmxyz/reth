@@ -7,8 +7,8 @@ use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_evm::{
     execute::{
-        BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory,
-        BlockValidationError, ExecuteOutput, ProviderError,
+        BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
+        BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput, ProviderError,
     },
     ConfigureEvm, ConfigureEvmEnv,
 };
@@ -17,7 +17,7 @@ use reth_primitives::{
     TxType,
 };
 use reth_revm::primitives::{CfgEnvWithHandlerCfg, U256};
-use reth_scroll_chainspec::{ScrollChainConfig, ScrollChainSpec};
+use reth_scroll_chainspec::{ChainSpecProvider, ScrollChainSpec};
 use reth_scroll_consensus::apply_curie_hard_fork;
 use reth_scroll_execution::FinalizeExecution;
 use reth_scroll_forks::{ScrollHardfork, ScrollHardforks};
@@ -34,8 +34,6 @@ use std::{
 /// The Scroll block execution strategy.
 #[derive(Debug)]
 pub struct ScrollExecutionStrategy<DB, EvmConfig> {
-    /// Chain specification.
-    chain_spec: Arc<ScrollChainSpec>,
     /// Evm configuration.
     evm_config: EvmConfig,
     /// Current state for the execution.
@@ -44,12 +42,8 @@ pub struct ScrollExecutionStrategy<DB, EvmConfig> {
 
 impl<DB, EvmConfig> ScrollExecutionStrategy<DB, EvmConfig> {
     /// Returns an instance of [`ScrollExecutionStrategy`].
-    pub const fn new(
-        chain_spec: Arc<ScrollChainSpec>,
-        evm_config: EvmConfig,
-        state: State<DB>,
-    ) -> Self {
-        Self { chain_spec, evm_config, state }
+    pub const fn new(evm_config: EvmConfig, state: State<DB>) -> Self {
+        Self { evm_config, state }
     }
 }
 
@@ -75,7 +69,7 @@ impl<DB, EvmConfig> BlockExecutionStrategy<DB> for ScrollExecutionStrategy<DB, E
 where
     DB: Database<Error: Into<ProviderError> + Display>,
     State<DB>: FinalizeExecution<Output = BundleState>,
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header> + ChainSpecProvider<ChainSpec = ScrollChainSpec>,
 {
     type Error = BlockExecutionError;
 
@@ -84,7 +78,12 @@ where
         block: &BlockWithSenders,
         _total_difficulty: U256,
     ) -> Result<(), Self::Error> {
-        if self.chain_spec.fork(ScrollHardfork::Curie).transitions_at_block(block.number) {
+        if self
+            .evm_config
+            .chain_spec()
+            .fork(ScrollHardfork::Curie)
+            .transitions_at_block(block.number)
+        {
             if let Err(err) = apply_curie_hard_fork(&mut self.state) {
                 tracing::debug!(%err, "failed to apply curie hardfork");
                 return Err(ForkError::Curie(err.to_string()).into());
@@ -104,6 +103,7 @@ where
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.transactions.len());
+        let chain_spec = self.evm_config.chain_spec();
 
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit and the gas utilized in this block prior,
@@ -119,13 +119,13 @@ where
 
             // verify the transaction type is accepted by the current fork.
             match transaction.tx_type() {
-                TxType::Eip2930 if !self.chain_spec.is_curie_active_at_block(block.number) => {
+                TxType::Eip2930 if !chain_spec.is_curie_active_at_block(block.number) => {
                     return Err(ConsensusError::InvalidTransaction(
                         InvalidTransactionError::Eip2930Disabled,
                     )
                     .into())
                 }
-                TxType::Eip1559 if !self.chain_spec.is_curie_active_at_block(block.number) => {
+                TxType::Eip1559 if !chain_spec.is_curie_active_at_block(block.number) => {
                     return Err(ConsensusError::InvalidTransaction(
                         InvalidTransactionError::Eip1559Disabled,
                     )
@@ -224,7 +224,7 @@ where
         }
 
         // verify the receipts logs bloom and root
-        if self.chain_spec.is_byzantium_active_at_block(block.header.number) {
+        if self.evm_config.chain_spec().is_byzantium_active_at_block(block.header.number) {
             if let Err(error) = reth_ethereum_consensus::verify_receipts(
                 block.header.receipts_root,
                 block.header.logs_bloom,
@@ -248,23 +248,26 @@ where
 /// The factory for a [`ScrollExecutionStrategy`].
 #[derive(Clone, Debug)]
 pub struct ScrollExecutionStrategyFactory<EvmConfig = ScrollEvmConfig> {
-    /// The chain specification for the [`ScrollExecutionStrategy`].
-    chain_spec: Arc<ScrollChainSpec>,
     /// The Evm configuration for the [`ScrollExecutionStrategy`].
     evm_config: EvmConfig,
 }
 
 impl ScrollExecutionStrategyFactory {
     /// Returns a new instance of the [`ScrollExecutionStrategyFactory`].
-    pub fn new(chain_spec: Arc<ScrollChainSpec>, scroll_config: ScrollChainConfig) -> Self {
-        let evm_config = ScrollEvmConfig::new(chain_spec.clone(), scroll_config);
-        Self { chain_spec, evm_config }
+    pub const fn new(chain_spec: Arc<ScrollChainSpec>) -> Self {
+        let evm_config = ScrollEvmConfig::new(chain_spec);
+        Self { evm_config }
+    }
+
+    /// Returns the EVM configuration for the strategy factory.
+    pub fn evm_config(&self) -> ScrollEvmConfig {
+        self.evm_config.clone()
     }
 }
 
 impl<EvmConfig> BlockExecutionStrategyFactory for ScrollExecutionStrategyFactory<EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm<Header = Header> + ChainSpecProvider<ChainSpec = ScrollChainSpec>,
 {
     /// Associated strategy type.
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>>
@@ -280,7 +283,21 @@ where
     {
         let state =
             State::builder().with_database(db).without_state_clear().with_bundle_update().build();
-        ScrollExecutionStrategy::new(self.chain_spec.clone(), self.evm_config.clone(), state)
+        ScrollExecutionStrategy::new(self.evm_config.clone(), state)
+    }
+}
+
+/// Helper type with backwards compatible methods to obtain Scroll executor
+/// providers.
+#[derive(Debug)]
+pub struct ScrollExecutorProvider;
+
+impl ScrollExecutorProvider {
+    /// Creates a new default scroll executor provider.
+    pub const fn scroll(
+        chain_spec: Arc<ScrollChainSpec>,
+    ) -> BasicBlockExecutorProvider<ScrollExecutionStrategyFactory> {
+        BasicBlockExecutorProvider::new(ScrollExecutionStrategyFactory::new(chain_spec))
     }
 }
 
@@ -292,7 +309,7 @@ mod tests {
     use reth_evm::execute::ExecuteOutput;
     use reth_primitives::{Block, BlockBody, BlockWithSenders, Receipt, TransactionSigned, TxType};
     use reth_primitives_traits::transaction::signed::SignedTransaction;
-    use reth_scroll_chainspec::ScrollChainSpecBuilder;
+    use reth_scroll_chainspec::{ScrollChainConfig, ScrollChainSpecBuilder};
     use reth_scroll_consensus::{
         BLOB_SCALAR_SLOT, COMMIT_SCALAR_SLOT, CURIE_L1_GAS_PRICE_ORACLE_BYTECODE,
         CURIE_L1_GAS_PRICE_ORACLE_STORAGE, IS_CURIE_SLOT, L1_BASE_FEE_SLOT, L1_BLOB_BASE_FEE_SLOT,
@@ -311,9 +328,9 @@ mod tests {
     const CURIE_BLOCK_NUMBER: u64 = 7096837;
 
     fn strategy() -> ScrollExecutionStrategy<EmptyDBTyped<ProviderError>, ScrollEvmConfig> {
-        let chain_spec = Arc::new(ScrollChainSpecBuilder::scroll_mainnet().build());
-        let config = ScrollChainConfig::mainnet();
-        let factory = ScrollExecutionStrategyFactory::new(chain_spec, config);
+        let chain_spec =
+            Arc::new(ScrollChainSpecBuilder::scroll_mainnet().build(ScrollChainConfig::mainnet()));
+        let factory = ScrollExecutionStrategyFactory::new(chain_spec);
         let db = EmptyDBTyped::<ProviderError>::new();
 
         factory.create_strategy(db)
@@ -382,25 +399,26 @@ mod tests {
         let block = block(block_number, vec![transaction]);
 
         // determine l1 gas oracle storage
-        let l1_gas_oracle_storage = if strategy.chain_spec.is_curie_active_at_block(block_number) {
-            vec![
-                (L1_BASE_FEE_SLOT, U256::from(1000)),
-                (OVER_HEAD_SLOT, U256::from(1000)),
-                (SCALAR_SLOT, U256::from(1000)),
-                (L1_BLOB_BASE_FEE_SLOT, U256::from(10000)),
-                (COMMIT_SCALAR_SLOT, U256::from(1000)),
-                (BLOB_SCALAR_SLOT, U256::from(10000)),
-                (IS_CURIE_SLOT, U256::from(1)),
-            ]
-        } else {
-            vec![
-                (L1_BASE_FEE_SLOT, U256::from(1000)),
-                (OVER_HEAD_SLOT, U256::from(1000)),
-                (SCALAR_SLOT, U256::from(1000)),
-            ]
-        }
-        .into_iter()
-        .collect();
+        let l1_gas_oracle_storage =
+            if strategy.evm_config.chain_spec().is_curie_active_at_block(block_number) {
+                vec![
+                    (L1_BASE_FEE_SLOT, U256::from(1000)),
+                    (OVER_HEAD_SLOT, U256::from(1000)),
+                    (SCALAR_SLOT, U256::from(1000)),
+                    (L1_BLOB_BASE_FEE_SLOT, U256::from(10000)),
+                    (COMMIT_SCALAR_SLOT, U256::from(1000)),
+                    (BLOB_SCALAR_SLOT, U256::from(10000)),
+                    (IS_CURIE_SLOT, U256::from(1)),
+                ]
+            } else {
+                vec![
+                    (L1_BASE_FEE_SLOT, U256::from(1000)),
+                    (OVER_HEAD_SLOT, U256::from(1000)),
+                    (SCALAR_SLOT, U256::from(1000)),
+                ]
+            }
+            .into_iter()
+            .collect();
 
         // load accounts in state
         strategy.state.insert_account_with_storage(

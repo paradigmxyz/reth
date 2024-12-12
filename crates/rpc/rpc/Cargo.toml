@@ -115,4 +115,7 @@ scroll = [
     "reth-evm-ethereum/scroll",
     "reth-rpc-eth-api/scroll",
     "reth-scroll-storage/scroll",
+    "reth-chainspec/scroll",
+    "revm-primitives/scroll",
+    "revm/scroll",
 ]

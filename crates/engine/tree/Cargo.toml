@@ -37,6 +37,9 @@ reth-trie-parallel.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie.workspace = true
 
+# scroll
+reth-scroll-storage = { workspace = true, optional = true }
+
 # alloy
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
@@ -117,4 +120,7 @@ test-utils = [
     "reth-prune-types?/test-utils",
     "reth-trie-db/test-utils",
 ]
-scroll = ["reth-scroll-primitives"]
+scroll = [
+    "reth-scroll-primitives",
+    "reth-scroll-storage/scroll"
+]

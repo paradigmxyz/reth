@@ -7434,6 +7434,7 @@ dependencies = [
  "reth-revm",
  "reth-rpc-types-compat",
  "reth-scroll-primitives",
+ "reth-scroll-storage",
  "reth-stages",
  "reth-stages-api",
  "reth-static-file",
@@ -9284,6 +9285,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-scroll-cli"
+version = "1.1.2"
+dependencies = [
+ "clap",
+ "eyre",
+ "reth-cli",
+ "reth-cli-commands",
+ "reth-cli-runner",
+ "reth-db",
+ "reth-node-builder",
+ "reth-node-core",
+ "reth-node-metrics",
+ "reth-scroll-chainspec",
+ "reth-scroll-evm",
+ "reth-scroll-node",
+ "reth-tracing",
+ "tracing",
+]
+
+[[package]]
 name = "reth-scroll-consensus"
 version = "1.1.2"
 dependencies = [
@@ -9334,6 +9355,33 @@ dependencies = [
  "once_cell",
  "reth-ethereum-forks",
  "serde",
+]
+
+[[package]]
+name = "reth-scroll-node"
+version = "1.1.2"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "eyre",
+ "reth-consensus",
+ "reth-db",
+ "reth-ethereum-engine-primitives",
+ "reth-ethereum-forks",
+ "reth-evm",
+ "reth-network",
+ "reth-node-builder",
+ "reth-node-types",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-provider",
+ "reth-rpc",
+ "reth-scroll-chainspec",
+ "reth-scroll-evm",
+ "reth-scroll-state-commitment",
+ "reth-tracing",
+ "reth-transaction-pool",
+ "tokio",
 ]
 
 [[package]]
@@ -10325,6 +10373,18 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "scroll-reth"
+version = "1.1.2"
+dependencies = [
+ "clap",
+ "reth-cli-util",
+ "reth-node-builder",
+ "reth-provider",
+ "reth-scroll-cli",
+ "reth-scroll-node",
+]
 
 [[package]]
 name = "sdd"

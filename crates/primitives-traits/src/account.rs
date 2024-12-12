@@ -74,15 +74,15 @@ impl Account {
             nonce: info.nonce,
             bytecode_hash: (info.code_hash != KECCAK_EMPTY).then_some(info.code_hash),
             #[cfg(feature = "scroll")]
-            account_extension: Some(
-                info.code
-                    .map(|code| {
-                        reth_scroll_primitives::AccountExtension::from_bytecode(
-                            &code.original_byte_slice(),
-                        )
-                    })
-                    .unwrap_or(reth_scroll_primitives::AccountExtension::empty()),
-            ),
+            account_extension: Some(reth_scroll_primitives::AccountExtension {
+                code_size: (info.poseidon_code_hash !=
+                    reth_scroll_primitives::poseidon::POSEIDON_EMPTY)
+                    .then_some(info.code_size as u64)
+                    .unwrap_or_default(),
+                poseidon_code_hash: (info.poseidon_code_hash !=
+                    reth_scroll_primitives::poseidon::POSEIDON_EMPTY)
+                    .then_some(info.poseidon_code_hash),
+            }),
         }
     }
 }

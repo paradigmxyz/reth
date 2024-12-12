@@ -44,7 +44,6 @@ use reth_provider::{
     HashedPostStateProvider, ProviderError, StateCommitmentProvider, StateProviderBox,
     StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
@@ -2203,7 +2202,12 @@ where
         }
 
         trace!(target: "engine::tree", block=?block.num_hash(), "Executing block");
-        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
+        // TODO(scroll): remove once issue #76 is completed.
+        #[cfg(feature = "scroll")]
+        let db = reth_scroll_storage::ScrollStateProviderDatabase::new(&state_provider);
+        #[cfg(not(feature = "scroll"))]
+        let db = reth_revm::database::StateProviderDatabase::new(&state_provider);
+        let executor = self.executor_provider.executor(db);
 
         let block_number = block.number;
         let block_hash = block.hash();

@@ -8,9 +8,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
-// Don't use the crate if `scroll` feature is used.
-#![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
-#![cfg(not(feature = "scroll"))]
 
 use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::MAX_DATA_GAS_PER_BLOCK, eip7685::Requests, merge::BEACON_NONCE};
@@ -381,7 +378,10 @@ where
 
     let requests_hash = requests.as_ref().map(|requests| requests.requests_hash());
     let execution_outcome = ExecutionOutcome::new(
-        db.take_bundle(),
+        // TODO(scroll): allow the information loss of the Scroll account fields for the Ethereum
+        // payload builder. Remove once we transition to the `ScrollPayloadBuilder`.
+        #[allow(clippy::useless_conversion)]
+        db.take_bundle().into(),
         vec![receipts].into(),
         block_number,
         vec![requests.clone().unwrap_or_default()],

@@ -45,3 +45,22 @@ pub const SCROLL_SEPOLIA_L1_CONFIG: L1Config = L1Config {
     scroll_chain_address: SCROLL_SEPOLIA_L1_PROXY_ADDRESS,
     num_l1_messages_per_block: SCROLL_SEPOLIA_MAX_L1_MESSAGES,
 };
+
+/// The L1 message queue address for Scroll dev.
+pub const SCROLL_DEV_L1_MESSAGE_QUEUE_ADDRESS: Address =
+    address!("0000000000000000000000000000000000000000");
+
+/// The L1 proxy address for Scroll dev.
+pub const SCROLL_DEV_L1_PROXY_ADDRESS: Address =
+    address!("0000000000000000000000000000000000000000");
+
+/// The maximum allowed l1 messages per block for Scroll dev.
+pub const SCROLL_DEV_MAX_L1_MESSAGES: u64 = 10;
+
+/// The L1 configuration for Scroll dev.
+pub const SCROLL_DEV_L1_CONFIG: L1Config = L1Config {
+    l1_chain_id: alloy_chains::NamedChain::Goerli as u64,
+    l1_message_queue_address: SCROLL_DEV_L1_MESSAGE_QUEUE_ADDRESS,
+    scroll_chain_address: SCROLL_DEV_L1_PROXY_ADDRESS,
+    num_l1_messages_per_block: SCROLL_DEV_MAX_L1_MESSAGES,
+};
