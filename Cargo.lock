@@ -2982,7 +2982,6 @@ name = "example-custom-payload-builder"
 version = "0.0.0"
 dependencies = [
  "alloy-eips",
- "alloy-primitives",
  "eyre",
  "futures-util",
  "reth",
