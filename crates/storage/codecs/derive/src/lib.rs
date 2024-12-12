@@ -20,6 +20,12 @@ use syn::{
 mod arbitrary;
 mod compact;
 
+#[derive(Clone)]
+pub(crate) struct ZstdConfig {
+    compressor: syn::Path,
+    decompressor: syn::Path,
+}
+
 /// Derives the `Compact` trait for custom structs, optimizing serialization with a possible
 /// bitflag struct.
 ///
@@ -51,15 +57,46 @@ mod compact;
 ///   efficient decoding.
 #[proc_macro_derive(Compact, attributes(maybe_zero, reth_codecs))]
 pub fn derive(input: TokenStream) -> TokenStream {
-    let is_zstd = false;
-    compact::derive(input, is_zstd)
+    compact::derive(parse_macro_input!(input as DeriveInput), None)
 }
 
 /// Adds `zstd` compression to derived [`Compact`].
-#[proc_macro_derive(CompactZstd, attributes(maybe_zero, reth_codecs))]
+#[proc_macro_derive(CompactZstd, attributes(maybe_zero, reth_codecs, reth_zstd))]
 pub fn derive_zstd(input: TokenStream) -> TokenStream {
-    let is_zstd = true;
-    compact::derive(input, is_zstd)
+    let input = parse_macro_input!(input as DeriveInput);
+
+    let mut compressor = None;
+    let mut decompressor = None;
+
+    for attr in &input.attrs {
+        if attr.path().is_ident("reth_zstd") {
+            if let Err(err) = attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("compressor") {
+                    let value = meta.value()?;
+                    let path: syn::Path = value.parse()?;
+                    compressor = Some(path);
+                } else if meta.path.is_ident("decompressor") {
+                    let value = meta.value()?;
+                    let path: syn::Path = value.parse()?;
+                    decompressor = Some(path);
+                } else {
+                    return Err(meta.error("unsupported attribute"))
+                }
+                Ok(())
+            }) {
+                return err.to_compile_error().into()
+            }
+        }
+    }
+
+    let (Some(compressor), Some(decompressor)) = (compressor, decompressor) else {
+        return quote! {
+            compile_error!("missing compressor or decompressor attribute");
+        }
+        .into()
+    };
+
+    compact::derive(input, Some(ZstdConfig { compressor, decompressor }))
 }
 
 /// Generates tests for given type.

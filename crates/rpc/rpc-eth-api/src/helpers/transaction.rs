@@ -17,10 +17,7 @@ use reth_provider::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
 };
-use reth_rpc_eth_types::{
-    utils::{binary_search, recover_raw_transaction},
-    EthApiError, SignError, TransactionSource,
-};
+use reth_rpc_eth_types::{utils::binary_search, EthApiError, SignError, TransactionSource};
 use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
@@ -60,6 +57,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Singer access in default (L1) trait method implementations.
     #[expect(clippy::type_complexity)]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>>;
+
+    /// Decodes and recovers the transaction and submits it to the pool.
+    ///
+    /// Returns the hash of the transaction.
+    fn send_raw_transaction(
+        &self,
+        tx: Bytes,
+    ) -> impl Future<Output = Result<B256, Self::Error>> + Send;
 
     /// Returns the transaction by hash.
     ///
@@ -330,29 +335,6 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
 
             Ok(None)
-        }
-    }
-
-    /// Decodes and recovers the transaction and submits it to the pool.
-    ///
-    /// Returns the hash of the transaction.
-    fn send_raw_transaction(
-        &self,
-        tx: Bytes,
-    ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
-        async move {
-            let recovered = recover_raw_transaction(&tx)?;
-            let pool_transaction =
-                <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
-
-            // submit the transaction to the pool with a `Local` origin
-            let hash = self
-                .pool()
-                .add_transaction(TransactionOrigin::Local, pool_transaction)
-                .await
-                .map_err(Self::Error::from_eth_err)?;
-
-            Ok(hash)
         }
     }
 

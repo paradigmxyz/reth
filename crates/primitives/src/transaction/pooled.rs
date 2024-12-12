@@ -2,10 +2,9 @@
 //! response to `GetPooledTransactions`.
 
 use super::{
-    error::TransactionConversionError, recover_signer_unchecked, signature::recover_signer,
-    TxEip7702,
+    recover_signer_unchecked, signature::recover_signer, TransactionConversionError, TxEip7702,
 };
-use crate::{BlobTransaction, RecoveredTx, Transaction, TransactionSigned, TxType};
+use crate::{BlobTransaction, RecoveredTx, Transaction, TransactionSigned};
 use alloc::vec::Vec;
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
@@ -568,8 +567,6 @@ impl alloy_consensus::Transaction for PooledTransactionsElement {
 }
 
 impl SignedTransaction for PooledTransactionsElement {
-    type Type = TxType;
-
     fn tx_hash(&self) -> &TxHash {
         match self {
             Self::Legacy(tx) => tx.hash(),

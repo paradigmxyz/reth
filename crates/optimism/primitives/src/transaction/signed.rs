@@ -54,7 +54,7 @@ impl OpTransactionSigned {
     /// Calculates hash of given transaction and signature and returns new instance.
     pub fn new(transaction: OpTypedTransaction, signature: Signature) -> Self {
         let signed_tx = Self::new_unhashed(transaction, signature);
-        if !matches!(signed_tx.tx_type(), OpTxType::Deposit) {
+        if signed_tx.ty() != OpTxType::Deposit {
             signed_tx.hash.get_or_init(|| signed_tx.recalculate_hash());
         }
 
@@ -70,8 +70,6 @@ impl OpTransactionSigned {
 }
 
 impl SignedTransaction for OpTransactionSigned {
-    type Type = OpTxType;
-
     fn tx_hash(&self) -> &TxHash {
         self.hash.get_or_init(|| self.recalculate_hash())
     }
@@ -246,9 +244,10 @@ impl alloy_rlp::Decodable for OpTransactionSigned {
 
 impl Encodable2718 for OpTransactionSigned {
     fn type_flag(&self) -> Option<u8> {
-        match self.tx_type() {
-            op_alloy_consensus::OpTxType::Legacy => None,
-            tx_type => Some(tx_type as u8),
+        if Typed2718::is_legacy(self) {
+            None
+        } else {
+            Some(self.ty())
         }
     }
 

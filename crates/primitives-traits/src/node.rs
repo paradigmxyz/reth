@@ -1,6 +1,6 @@
 use crate::{
     Block, BlockBody, BlockHeader, FullBlock, FullBlockBody, FullBlockHeader, FullReceipt,
-    FullSignedTx, FullTxType, Receipt, SignedTransaction, TxType,
+    FullSignedTx, Receipt, SignedTransaction,
 };
 use core::fmt;
 
@@ -15,9 +15,7 @@ pub trait NodePrimitives:
     /// Block body primitive.
     type BlockBody: BlockBody<Transaction = Self::SignedTx, OmmerHeader = Self::BlockHeader>;
     /// Signed version of the transaction type.
-    type SignedTx: SignedTransaction<Type = Self::TxType> + 'static;
-    /// Transaction envelope type ID.
-    type TxType: TxType + 'static;
+    type SignedTx: SignedTransaction + 'static;
     /// A receipt.
     type Receipt: Receipt;
 }
@@ -29,7 +27,6 @@ where
             BlockHeader: FullBlockHeader,
             BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
             SignedTx: FullSignedTx,
-            TxType: FullTxType,
             Receipt: FullReceipt,
         > + Send
         + Sync
@@ -49,7 +46,6 @@ impl<T> FullNodePrimitives for T where
             BlockHeader: FullBlockHeader,
             BlockBody: FullBlockBody<Transaction = Self::SignedTx>,
             SignedTx: FullSignedTx,
-            TxType: FullTxType,
             Receipt: FullReceipt,
         > + Send
         + Sync

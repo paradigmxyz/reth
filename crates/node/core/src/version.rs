@@ -1,4 +1,5 @@
 //! Version information for reth.
+use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::ClientCode;
 use reth_db::ClientVersion;
 
@@ -114,7 +115,7 @@ pub(crate) const P2P_CLIENT_VERSION: &str = const_format::concatcp!(
     env!("VERGEN_CARGO_TARGET_TRIPLE")
 );
 
-/// The default extradata used for payload building.
+/// The default extra data used for payload building.
 ///
 /// - The latest version from Cargo.toml
 /// - The OS identifier
@@ -124,8 +125,14 @@ pub(crate) const P2P_CLIENT_VERSION: &str = const_format::concatcp!(
 /// ```text
 /// reth/v{major}.{minor}.{patch}/{OS}
 /// ```
-pub fn default_extradata() -> String {
+pub fn default_extra_data() -> String {
     format!("reth/v{}/{}", env!("CARGO_PKG_VERSION"), std::env::consts::OS)
+}
+
+/// The default extra data in bytes.
+/// See [`default_extra_data`].
+pub fn default_extra_data_bytes() -> Bytes {
+    Bytes::from(default_extra_data().as_bytes().to_vec())
 }
 
 /// The default client version accessing the database.
@@ -143,7 +150,7 @@ mod tests {
 
     #[test]
     fn assert_extradata_less_32bytes() {
-        let extradata = default_extradata();
+        let extradata = default_extra_data();
         assert!(extradata.len() <= 32, "extradata must be less than 32 bytes: {extradata}")
     }
 }

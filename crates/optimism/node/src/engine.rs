@@ -212,7 +212,6 @@ mod test {
                     .paris_block_and_final_difficulty,
                 hardforks,
                 base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
-                max_gas_limit: BASE_SEPOLIA.inner.max_gas_limit,
                 prune_delete_limit: 10000,
                 ..Default::default()
             },
