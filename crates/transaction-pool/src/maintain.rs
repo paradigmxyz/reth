@@ -78,7 +78,11 @@ pub fn maintain_transaction_pool_future<N, Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) -> BoxFuture<'static, ()>
 where
-    N: NodePrimitives<SignedTx = TransactionSigned>,
+    N: NodePrimitives<
+        BlockHeader = reth_primitives::Header,
+        BlockBody = reth_primitives::BlockBody,
+        SignedTx = TransactionSigned,
+    >,
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = TransactionSigned>> + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
@@ -100,7 +104,11 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     task_spawner: Tasks,
     config: MaintainPoolConfig,
 ) where
-    N: NodePrimitives<SignedTx = TransactionSigned>,
+    N: NodePrimitives<
+        BlockHeader = reth_primitives::Header,
+        BlockBody = reth_primitives::BlockBody,
+        SignedTx = TransactionSigned,
+    >,
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = TransactionSigned>> + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
