@@ -175,6 +175,7 @@ where
             timestamp: attributes.timestamp(),
             suggested_fee_recipient: attributes.suggested_fee_recipient(),
             prev_randao: attributes.prev_randao(),
+            gas_limit: attributes.gas_limit.unwrap_or(parent.gas_limit),
         };
         self.evm_config.next_cfg_and_block_env(parent, next_attributes)
     }
