@@ -123,7 +123,7 @@ impl HashedPostState {
         for (hashed_address, account) in &self.accounts {
             // TODO(scroll): replace with key abstraction
             #[cfg(feature = "scroll")]
-            let nibbles = Nibbles::unpack_and_truncate_bits(hashed_address);
+            let nibbles = Nibbles::unpack_bits(hashed_address);
             #[cfg(not(feature = "scroll"))]
             let nibbles = Nibbles::unpack(hashed_address);
             account_prefix_set.insert(nibbles);
@@ -139,7 +139,7 @@ impl HashedPostState {
         for (hashed_address, hashed_storage) in &self.storages {
             // TODO(scroll): replace this with abstraction.
             #[cfg(feature = "scroll")]
-            let nibbles = Nibbles::unpack_and_truncate_bits(hashed_address);
+            let nibbles = Nibbles::unpack_bits(hashed_address);
             #[cfg(not(feature = "scroll"))]
             let nibbles = Nibbles::unpack(hashed_address);
             account_prefix_set.insert(nibbles);
@@ -268,7 +268,7 @@ impl HashedStorage {
             for hashed_slot in self.storage.keys() {
                 // TODO(scroll): replace this with key abstraction.
                 #[cfg(feature = "scroll")]
-                let nibbles = Nibbles::unpack_and_truncate_bits(hashed_slot);
+                let nibbles = Nibbles::unpack_bits(hashed_slot);
                 #[cfg(not(feature = "scroll"))]
                 let nibbles = Nibbles::unpack(hashed_slot);
                 prefix_set.insert(nibbles);

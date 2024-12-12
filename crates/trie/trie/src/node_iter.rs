@@ -113,7 +113,7 @@ where
                     #[cfg(not(feature = "scroll"))]
                     let cmp = key < &Nibbles::unpack(hashed_key);
                     #[cfg(feature = "scroll")]
-                    let cmp = key < &Nibbles::unpack_and_truncate_bits(hashed_key);
+                    let cmp = key < &Nibbles::unpack_bits(hashed_key);
                     cmp
                 }) {
                     self.current_walker_key_checked = false;

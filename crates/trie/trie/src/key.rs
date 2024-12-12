@@ -3,10 +3,10 @@ use smallvec::SmallVec;
 use crate::Nibbles;
 
 /// The maximum number of bits a key can contain.
-pub const MAX_BITS: usize = 248;
+pub const MAX_BITS: usize = 254;
 
 /// The maximum number of bytes a key can contain.
-const MAX_BYTES: usize = 31;
+const MAX_BYTES: usize = 32;
 
 // TODO(scroll): Refactor this into a trait that is more generic and can be used by any
 // implementation that requires converting between nibbles and bits. Better yet we should use a
@@ -17,8 +17,8 @@ pub trait BitsCompatibility: Sized {
     /// Unpacks the bits from the provided bytes such that there is a byte for each bit in the
     /// input. The representation is big-endian with respect to the input.
     ///
-    /// We truncate the Nibbles such that we only have [`MAX_BITS`] (248) bits.
-    fn unpack_and_truncate_bits<T: AsRef<[u8]>>(data: T) -> Self;
+    /// We truncate the Nibbles such that we only have [`MAX_BITS`] (bn254 field size) bits.
+    fn unpack_bits<T: AsRef<[u8]>>(data: T) -> Self;
 
     /// Pack the bits into a byte representation.
     fn pack_bits(&self) -> SmallVec<[u8; 32]>;
@@ -32,16 +32,14 @@ pub trait BitsCompatibility: Sized {
 }
 
 impl BitsCompatibility for Nibbles {
-    fn unpack_and_truncate_bits<T: AsRef<[u8]>>(data: T) -> Self {
+    fn unpack_bits<T: AsRef<[u8]>>(data: T) -> Self {
         let data = data.as_ref();
-        let unpacked_len = core::cmp::min(data.len() * 8, MAX_BITS);
-        let mut bits = Vec::with_capacity(unpacked_len);
-
-        for byte in data.iter().take(MAX_BYTES) {
-            for i in (0..8).rev() {
-                bits.push(byte >> i & 1);
-            }
-        }
+        let bits = data
+            .iter()
+            .take(MAX_BYTES)
+            .flat_map(|&byte| (0..8).rev().map(move |i| (byte >> i) & 1))
+            .take(MAX_BITS)
+            .collect();
 
         Self::from_vec_unchecked(bits)
     }

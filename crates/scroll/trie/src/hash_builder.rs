@@ -468,7 +468,7 @@ mod test {
 
     #[test]
     fn test_convert_to_bit_representation() {
-        let nibbles = Nibbles::unpack_and_truncate_bits(vec![7, 8]);
+        let nibbles = Nibbles::unpack_bits(vec![7, 8]);
         let expected = [0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0];
         assert_eq!(nibbles.as_slice(), expected);
     }
@@ -478,8 +478,8 @@ mod test {
         // 64 byte nibble
         let hex = hex!("0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f01020304");
         assert_eq!(hex.len(), 64);
-        let nibbles = Nibbles::unpack_and_truncate_bits(hex);
-        assert_eq!(nibbles.len(), 248);
+        let nibbles = Nibbles::unpack_bits(hex);
+        assert_eq!(nibbles.len(), 254);
     }
 
     #[test]

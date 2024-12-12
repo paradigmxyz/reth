@@ -233,10 +233,8 @@ where
 
                     let account = ScrollTrieAccount::from((account, storage_root));
                     let account_hash = PoseidonValueHasher::hash_account(account);
-                    hash_builder.add_leaf(
-                        Nibbles::unpack_and_truncate_bits(hashed_address),
-                        account_hash.as_slice(),
-                    );
+                    hash_builder
+                        .add_leaf(Nibbles::unpack_bits(hashed_address), account_hash.as_slice());
 
                     // Decide if we need to return intermediate progress.
                     let total_updates_len = updated_storage_nodes +
@@ -433,10 +431,7 @@ where
                 TrieElement::Leaf(hashed_slot, value) => {
                     let hashed_value = PoseidonValueHasher::hash_storage(value);
                     tracker.inc_leaf();
-                    hash_builder.add_leaf(
-                        Nibbles::unpack_and_truncate_bits(hashed_slot),
-                        hashed_value.as_ref(),
-                    );
+                    hash_builder.add_leaf(Nibbles::unpack_bits(hashed_slot), hashed_value.as_ref());
                 }
             }
         }
