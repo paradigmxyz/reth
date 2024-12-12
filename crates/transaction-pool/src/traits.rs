@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
-    Transaction as _,
+    Transaction as _, Typed2718,
 };
 use alloy_eips::{
     eip2718::Encodable2718,
@@ -1179,9 +1179,9 @@ pub trait EthPoolTransaction: PoolTransaction {
 /// This type is essentially a wrapper around [`RecoveredTx`] with additional
 /// fields derived from the transaction that are frequently used by the pools for ordering.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EthPooledTransaction<T = RecoveredTx> {
+pub struct EthPooledTransaction<T = TransactionSigned> {
     /// `EcRecovered` transaction, the consensus format.
-    pub(crate) transaction: T,
+    pub(crate) transaction: RecoveredTx<T>,
 
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
@@ -1197,23 +1197,25 @@ pub struct EthPooledTransaction<T = RecoveredTx> {
     pub(crate) blob_sidecar: EthBlobTransactionSidecar,
 }
 
-impl EthPooledTransaction {
+impl<T: SignedTransaction> EthPooledTransaction<T> {
     /// Create new instance of [Self].
     ///
     /// Caution: In case of blob transactions, this does marks the blob sidecar as
     /// [`EthBlobTransactionSidecar::Missing`]
-    pub fn new(transaction: RecoveredTx, encoded_length: usize) -> Self {
+    pub fn new(transaction: RecoveredTx<T>, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
 
-        let gas_cost = U256::from(transaction.transaction.max_fee_per_gas())
-            .saturating_mul(U256::from(transaction.transaction.gas_limit()));
+        let gas_cost = U256::from(transaction.max_fee_per_gas())
+            .saturating_mul(U256::from(transaction.gas_limit()));
 
         let mut cost = gas_cost.saturating_add(transaction.value());
 
-        if let Some(blob_tx) = transaction.as_eip4844() {
+        if let (Some(blob_gas_used), Some(max_fee_per_blob_gas)) =
+            (transaction.blob_gas_used(), transaction.max_fee_per_blob_gas())
+        {
             // Add max blob cost using saturating math to avoid overflow
             cost = cost.saturating_add(U256::from(
-                blob_tx.max_fee_per_blob_gas.saturating_mul(blob_tx.blob_gas() as u128),
+                max_fee_per_blob_gas.saturating_mul(blob_gas_used as u128),
             ));
 
             // because the blob sidecar is not included in this transaction variant, mark it as
@@ -1225,7 +1227,7 @@ impl EthPooledTransaction {
     }
 
     /// Return the reference to the underlying transaction.
-    pub const fn transaction(&self) -> &RecoveredTx {
+    pub const fn transaction(&self) -> &RecoveredTx<T> {
         &self.transaction
     }
 }
@@ -1368,7 +1370,7 @@ impl PoolTransaction for EthPooledTransaction {
 
     /// Returns the transaction type
     fn tx_type(&self) -> u8 {
-        self.transaction.tx_type().into()
+        self.transaction.ty()
     }
 
     /// Returns the length of the rlp encoded object
@@ -1444,7 +1446,7 @@ impl TryFrom<RecoveredTx> for EthPooledTransaction {
 
     fn try_from(tx: RecoveredTx) -> Result<Self, Self::Error> {
         // ensure we can handle the transaction type and its format
-        match tx.tx_type() as u8 {
+        match tx.ty() {
             0..=EIP1559_TX_TYPE_ID | EIP7702_TX_TYPE_ID => {
                 // supported
             }

@@ -5,19 +5,36 @@ use crate::{
         BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionInput,
         BlockExecutionOutput, BlockExecutionStrategy, BlockExecutorProvider, Executor,
     },
+    provider::EvmEnvProvider,
     system_calls::OnStateHook,
+    ConfigureEvmEnv,
 };
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{BlockNumber, U256};
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{BlockWithSenders, EthPrimitives, NodePrimitives, Receipt, Receipts};
 use reth_prune_types::PruneModes;
-use reth_storage_errors::provider::ProviderError;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::State;
-use revm_primitives::db::Database;
+use revm_primitives::{db::Database, BlockEnv, CfgEnvWithHandlerCfg};
 use std::{fmt::Display, sync::Arc};
+
+impl<C: Send + Sync, N: NodePrimitives> EvmEnvProvider<N::BlockHeader>
+    for reth_storage_api::noop::NoopProvider<C, N>
+{
+    fn env_with_header<EvmConfig>(
+        &self,
+        header: &N::BlockHeader,
+        evm_config: EvmConfig,
+    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
+    where
+        EvmConfig: ConfigureEvmEnv<Header = N::BlockHeader>,
+    {
+        Ok(evm_config.cfg_and_block_env(header, U256::MAX))
+    }
+}
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]

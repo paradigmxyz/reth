@@ -285,10 +285,14 @@ where
 #[async_trait::async_trait]
 impl<Eth> EthCallBundleApiServer for EthBundle<Eth>
 where
-    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
+    Eth: EthTransactions<
+            Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransactionsElement>>,
+        > + LoadPendingBlock
+        + Call
+        + 'static,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
-        Self::call_bundle(self, request).await.map_err(Into::into)
+        self.call_bundle(request).await.map_err(Into::into)
     }
 }
 

@@ -26,10 +26,11 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{EthPrimitives, Head, SealedBlock, SealedHeader};
+use reth_primitives::{Head, SealedBlock, SealedHeader};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
-    ChainSpecProvider, ProviderError, StageCheckpointReader,
+    providers::{ProviderNodeTypes, TreeNodeTypes},
+    BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
+    StageCheckpointReader,
 };
 use reth_stages_api::{ControlFlow, Pipeline, PipelineTarget, StageId};
 use reth_tasks::TaskSpawner;
@@ -84,15 +85,9 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// Helper trait expressing requirements for node types to be used in engine.
-pub trait EngineNodeTypes:
-    ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine
-{
-}
+pub trait EngineNodeTypes: ProviderNodeTypes + NodeTypesWithEngine {}
 
-impl<T> EngineNodeTypes for T where
-    T: ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine
-{
-}
+impl<T> EngineNodeTypes for T where T: ProviderNodeTypes + NodeTypesWithEngine {}
 
 /// Represents a pending forkchoice update.
 ///
@@ -232,7 +227,7 @@ where
 
 impl<N, BT, Client> BeaconConsensusEngine<N, BT, Client>
 where
-    N: EngineNodeTypes,
+    N: TreeNodeTypes,
     BT: BlockchainTreeEngine
         + BlockReader<Block = BlockTy<N>, Header = HeaderTy<N>>
         + BlockIdReader
@@ -1801,7 +1796,7 @@ where
 /// receiver and forwarding them to the blockchain tree.
 impl<N, BT, Client> Future for BeaconConsensusEngine<N, BT, Client>
 where
-    N: EngineNodeTypes,
+    N: TreeNodeTypes,
     Client: EthBlockClient + 'static,
     BT: BlockchainTreeEngine
         + BlockReader<Block = BlockTy<N>, Header = HeaderTy<N>>

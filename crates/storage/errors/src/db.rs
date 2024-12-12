@@ -64,7 +64,7 @@ impl core::error::Error for DatabaseError {
 #[display("{message} ({code})")]
 pub struct DatabaseErrorInfo {
     /// Human-readable error message.
-    pub message: String,
+    pub message: Box<str>,
     /// Error code.
     pub code: i32,
 }
@@ -75,7 +75,7 @@ where
 {
     #[inline]
     fn from(error: E) -> Self {
-        Self { message: error.to_string(), code: error.into() }
+        Self { message: error.to_string().into(), code: error.into() }
     }
 }
 

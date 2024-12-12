@@ -15,7 +15,7 @@ pub type BodyDownloaderResult<H, B> = DownloadResult<Vec<BlockResponse<H, B>>>;
 pub trait BodyDownloader:
     Send + Sync + Stream<Item = BodyDownloaderResult<Self::Header, Self::Body>> + Unpin
 {
-    /// The type of header that can be returned in a blck
+    /// The type of header that is being used
     type Header: Debug + Send + Sync + Unpin + 'static;
 
     /// The type of the body that is being downloaded.
