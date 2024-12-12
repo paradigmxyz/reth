@@ -13,6 +13,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
+use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::OnceCell as OnceLock;
 use reth_primitives_traits::{
