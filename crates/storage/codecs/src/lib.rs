@@ -25,7 +25,10 @@ use serde as _;
 use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, U256};
 use bytes::{Buf, BufMut};
 
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::{
+    borrow::{Cow, ToOwned},
+    vec::Vec,
+};
 
 #[cfg(feature = "test-utils")]
 pub mod alloy;
