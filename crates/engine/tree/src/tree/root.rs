@@ -3,6 +3,7 @@
 use alloy_primitives::map::HashSet;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_evm::system_calls::OnStateHook;
+use reth_execution_errors::StateProofError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider,
@@ -15,7 +16,7 @@ use reth_trie_db::DatabaseProof;
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
-    errors::{SparseStateTrieResult, SparseTrieError, SparseTrieErrorKind},
+    errors::{SparseStateTrieError, SparseStateTrieResult, SparseTrieError, SparseTrieErrorKind},
     SparseStateTrie,
 };
 use revm_primitives::{keccak256, EvmState, B256};
@@ -75,6 +76,8 @@ pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
     ProofCalculated(Box<ProofCalculated>),
+    /// Error during proof calculation
+    ProofCalculationError(StateProofError),
     /// State root calculation completed
     RootCalculated {
         /// The updated sparse trie
@@ -82,6 +85,8 @@ pub enum StateRootMessage<BPF: BlindedProviderFactory> {
         /// Time taken to calculate the root
         elapsed: Duration,
     },
+    /// Error during state root calculation
+    RootCalculationError(SparseStateTrieError),
     /// Signals state update stream end.
     FinishedStateUpdates,
 }
@@ -352,7 +357,8 @@ where
                     ));
                 }
                 Err(e) => {
-                    error!(target: "engine::root", error = ?e, "Could not calculate multiproof");
+                    let _ =
+                        state_root_message_sender.send(StateRootMessage::ProofCalculationError(e));
                 }
             }
         });
@@ -415,7 +421,7 @@ where
                     let _ = tx.send(StateRootMessage::RootCalculated { trie, elapsed });
                 }
                 Err(e) => {
-                    error!(target: "engine::root", error = ?e, "Could not calculate state root");
+                    let _ = tx.send(StateRootMessage::RootCalculationError(e));
                 }
             }
         });
@@ -546,6 +552,16 @@ where
                                 .expect("sparse trie should have updates retention enabled");
                             return Ok((root, trie_updates));
                         }
+                    }
+                    StateRootMessage::ProofCalculationError(e) => {
+                        return Err(ParallelStateRootError::Other(format!(
+                            "could not calculate multiproof: {e:?}"
+                        )))
+                    }
+                    StateRootMessage::RootCalculationError(e) => {
+                        return Err(ParallelStateRootError::Other(format!(
+                            "could not calculate state root: {e:?}"
+                        )))
                     }
                 },
                 Err(_) => {

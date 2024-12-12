@@ -3,7 +3,7 @@
 use alloy_consensus::constants::EIP7702_TX_TYPE_ID;
 use crate::Compact;
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
-use op_alloy_consensus::{OpTxType, TxDeposit as AlloyTxDeposit};
+use op_alloy_consensus::{OpTxType, OpTypedTransaction, TxDeposit as AlloyTxDeposit, DEPOSIT_TX_TYPE_ID};
 use reth_codecs_derive::add_arbitrary_tests;
 use crate::txtype::{COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930, COMPACT_IDENTIFIER_LEGACY};
 
@@ -113,5 +113,61 @@ impl crate::Compact for OpTxType {
             },
             buf,
         )
+    }
+}
+
+impl Compact for OpTypedTransaction {
+    fn to_compact<B>(&self, out: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        match self {
+            Self::Legacy(tx) => tx.to_compact(out),
+            Self::Eip2930(tx) => tx.to_compact(out),
+            Self::Eip1559(tx) => tx.to_compact(out),
+            Self::Eip7702(tx) => tx.to_compact(out),
+            Self::Deposit(tx) => tx.to_compact(out),
+        }
+    }
+
+    fn from_compact(mut buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
+        match identifier {
+            COMPACT_IDENTIFIER_LEGACY => {
+                let (tx, buf) = Compact::from_compact(buf, buf.len());
+                (Self::Legacy(tx), buf)
+            }
+            COMPACT_IDENTIFIER_EIP2930 => {
+                let (tx, buf) = Compact::from_compact(buf, buf.len());
+                (Self::Eip2930(tx), buf)
+            }
+            COMPACT_IDENTIFIER_EIP1559 => {
+                let (tx, buf) = Compact::from_compact(buf, buf.len());
+                (Self::Eip1559(tx), buf)
+            }
+            COMPACT_EXTENDED_IDENTIFIER_FLAG => {
+                // An identifier of 3 indicates that the transaction type did not fit into
+                // the backwards compatible 2 bit identifier, their transaction types are
+                // larger than 2 bits (eg. 4844 and Deposit Transactions). In this case,
+                // we need to read the concrete transaction type from the buffer by
+                // reading the full 8 bits (single byte) and match on this transaction type.
+                let identifier = buf.get_u8();
+                match identifier {
+                    EIP7702_TX_TYPE_ID => {
+                        let (tx, buf) = Compact::from_compact(buf, buf.len());
+                        (Self::Eip7702(tx), buf)
+                    }
+                    DEPOSIT_TX_TYPE_ID => {
+                        let (tx, buf) = Compact::from_compact(buf, buf.len());
+                        (Self::Deposit(tx), buf)
+                    }
+                    _ => unreachable!(
+                        "Junk data in database: unknown Transaction variant: {identifier}"
+                    ),
+                }
+            }
+            _ => unreachable!("Junk data in database: unknown Transaction variant: {identifier}"),
+        }
     }
 }

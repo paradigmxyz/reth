@@ -25,7 +25,10 @@ use serde as _;
 use alloy_primitives::{Address, Bloom, Bytes, FixedBytes, U256};
 use bytes::{Buf, BufMut};
 
-use alloc::vec::Vec;
+use alloc::{
+    borrow::{Cow, ToOwned},
+    vec::Vec,
+};
 
 #[cfg(feature = "test-utils")]
 pub mod alloy;
@@ -340,6 +343,32 @@ where
 
         let (element, buf) = T::from_compact(buf, len);
         (Some(element), buf)
+    }
+}
+
+impl<T: Compact + ToOwned<Owned = T>> Compact for Cow<'_, T> {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        self.as_ref().to_compact(buf)
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (element, buf) = T::from_compact(buf, len);
+        (Cow::Owned(element), buf)
+    }
+
+    fn specialized_to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        self.as_ref().specialized_to_compact(buf)
+    }
+
+    fn specialized_from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let (element, buf) = T::specialized_from_compact(buf, len);
+        (Cow::Owned(element), buf)
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::{cli::config::PayloadBuilderConfig, version::default_extradata};
+use crate::{cli::config::PayloadBuilderConfig, version::default_extra_data};
 use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
 use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT, merge::SLOT_DURATION};
 use clap::{
@@ -13,7 +13,7 @@ use std::{borrow::Cow, ffi::OsStr, time::Duration};
 #[command(next_help_heading = "Builder")]
 pub struct PayloadBuilderArgs {
     /// Block extra data set by the payload builder.
-    #[arg(long = "builder.extradata", value_parser = ExtradataValueParser::default(), default_value_t = default_extradata())]
+    #[arg(long = "builder.extradata", value_parser = ExtradataValueParser::default(), default_value_t = default_extra_data())]
     pub extradata: String,
 
     /// Target gas ceiling for built blocks.
@@ -40,7 +40,7 @@ pub struct PayloadBuilderArgs {
 impl Default for PayloadBuilderArgs {
     fn default() -> Self {
         Self {
-            extradata: default_extradata(),
+            extradata: default_extra_data(),
             max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             interval: Duration::from_secs(1),
             deadline: SLOT_DURATION,
@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn test_default_extradata() {
-        let extradata = default_extradata();
+        let extradata = default_extra_data();
         let args = CommandParser::<PayloadBuilderArgs>::parse_from([
             "reth",
             "--builder.extradata",

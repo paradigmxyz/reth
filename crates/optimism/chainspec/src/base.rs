@@ -29,8 +29,6 @@ pub static BASE_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
                 ]
                 .into(),
             ),
-            max_gas_limit: crate::constants::BASE_MAINNET_MAX_GAS_LIMIT,
-            prune_delete_limit: 10000,
             ..Default::default()
         },
     }
