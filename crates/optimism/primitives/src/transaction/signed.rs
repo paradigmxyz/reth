@@ -1,6 +1,6 @@
 //! A signed Optimism transaction.
 
-use crate::{OpTransaction, OpTxType};
+use crate::OpTxType;
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Transaction, TxEip1559, TxEip2930, TxEip7702,
@@ -47,7 +47,7 @@ pub struct OpTransactionSigned {
     /// Raw transaction info
     #[deref]
     #[as_ref]
-    pub transaction: OpTransaction,
+    pub transaction: OpTypedTransaction,
 }
 
 impl OpTransactionSigned {
@@ -65,7 +65,7 @@ impl OpTransactionSigned {
     ///
     /// Note: this only calculates the hash on the first [`TransactionSigned::hash`] call.
     pub fn new_unhashed(transaction: OpTypedTransaction, signature: Signature) -> Self {
-        Self { hash: Default::default(), signature, transaction: OpTransaction::new(transaction) }
+        Self { hash: Default::default(), signature, transaction }
     }
 }
 
@@ -81,7 +81,7 @@ impl SignedTransaction for OpTransactionSigned {
     fn recover_signer(&self) -> Option<Address> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
-        if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = *self.transaction {
+        if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = self.transaction {
             return Some(from)
         }
 
@@ -90,27 +90,17 @@ impl SignedTransaction for OpTransactionSigned {
         recover_signer(signature, signature_hash)
     }
 
-    fn recover_signer_unchecked(&self) -> Option<Address> {
-        // Optimism's Deposit transaction does not have a signature. Directly return the
-        // `from` address.
-        if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = *self.transaction {
-            return Some(from)
-        }
-
-        let Self { transaction, signature, .. } = self;
-        let signature_hash = signature_hash(transaction);
-        recover_signer_unchecked(signature, signature_hash)
-    }
-
     fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
-        // Optimism's Deposit transaction does not have a signature. Directly return the
-        // `from` address.
-        if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = *self.transaction {
-            return Some(from)
-        }
-        self.encode_for_signing(buf);
-        let signature_hash = keccak256(buf);
-        recover_signer_unchecked(&self.signature, signature_hash)
+        match &self.transaction {
+            // Optimism's Deposit transaction does not have a signature. Directly return the
+            // `from` address.
+            OpTypedTransaction::Deposit(tx) => return Some(tx.from),
+            OpTypedTransaction::Legacy(tx) => tx.encode_for_signing(buf),
+            OpTypedTransaction::Eip2930(tx) => tx.encode_for_signing(buf),
+            OpTypedTransaction::Eip1559(tx) => tx.encode_for_signing(buf),
+            OpTypedTransaction::Eip7702(tx) => tx.encode_for_signing(buf),
+        };
+        recover_signer_unchecked(&self.signature, keccak256(buf))
     }
 
     fn recalculate_hash(&self) -> B256 {
@@ -123,7 +113,7 @@ impl FillTxEnv for OpTransactionSigned {
         let envelope = self.encoded_2718();
 
         tx_env.caller = sender;
-        match self.transaction.deref() {
+        match &self.transaction {
             OpTypedTransaction::Legacy(tx) => {
                 tx_env.gas_limit = tx.gas_limit;
                 tx_env.gas_price = U256::from(tx.gas_price);
@@ -252,7 +242,7 @@ impl Encodable2718 for OpTransactionSigned {
     }
 
     fn encode_2718_len(&self) -> usize {
-        match self.transaction.deref() {
+        match &self.transaction {
             OpTypedTransaction::Legacy(legacy_tx) => {
                 legacy_tx.eip2718_encoded_length(&self.signature)
             }
@@ -272,7 +262,7 @@ impl Encodable2718 for OpTransactionSigned {
     fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
         let Self { transaction, signature, .. } = self;
 
-        match transaction.deref() {
+        match &transaction {
             OpTypedTransaction::Legacy(legacy_tx) => {
                 // do nothing w/ with_header
                 legacy_tx.eip2718_encode(signature, out)
@@ -405,16 +395,6 @@ impl Transaction for OpTransactionSigned {
 impl Typed2718 for OpTransactionSigned {
     fn ty(&self) -> u8 {
         self.deref().ty()
-    }
-}
-
-impl Default for OpTransactionSigned {
-    fn default() -> Self {
-        Self {
-            hash: Default::default(),
-            signature: Signature::test_signature(),
-            transaction: OpTransaction::new(OpTypedTransaction::Legacy(Default::default())),
-        }
     }
 }
 
