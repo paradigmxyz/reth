@@ -4,7 +4,7 @@ use crate::OpTxType;
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Transaction, TxEip1559, TxEip2930, TxEip7702,
-    Typed2718,
+    TxLegacy, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -25,10 +25,7 @@ use once_cell::sync::OnceCell as OnceLock;
 use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
-use reth_primitives::{
-    transaction::{recover_signer, recover_signer_unchecked},
-    TransactionSigned,
-};
+use reth_primitives::transaction::{recover_signer, recover_signer_unchecked};
 use reth_primitives_traits::{FillTxEnv, InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, OptimismFields, TxEnv};
 #[cfg(feature = "std")]
@@ -321,10 +318,8 @@ impl Decodable2718 for OpTransactionSigned {
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        let (transaction, hash, signature) =
-            TransactionSigned::decode_rlp_legacy_transaction_tuple(buf)?;
+        let (transaction, signature) = TxLegacy::rlp_decode_with_signature(buf)?;
         let signed_tx = Self::new_unhashed(OpTypedTransaction::Legacy(transaction), signature);
-        signed_tx.hash.get_or_init(|| hash);
 
         Ok(signed_tx)
     }
