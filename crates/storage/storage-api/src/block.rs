@@ -1,6 +1,6 @@
 use crate::{
-    BlockNumReader, HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, TransactionVariant,
-    TransactionsProvider, WithdrawalsProvider,
+    BlockNumReader, HeaderProvider, OmmersProvider, ReceiptProvider, ReceiptProviderIdExt,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
@@ -53,6 +53,7 @@ pub trait BlockReader:
     + TransactionsProvider
     + ReceiptProvider
     + WithdrawalsProvider
+    + OmmersProvider
     + Send
     + Sync
 {
@@ -97,11 +98,6 @@ pub trait BlockReader:
     fn pending_block_and_receipts(
         &self,
     ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>>;
-
-    /// Returns the ommers/uncle headers of the given block from the database.
-    ///
-    /// Returns `None` if block is not found.
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>>;
 
     /// Returns the block with matching hash from the database.
     ///
@@ -190,9 +186,6 @@ impl<T: BlockReader> BlockReader for std::sync::Arc<T> {
     ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         T::pending_block_and_receipts(self)
     }
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        T::ommers(self, id)
-    }
     fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Self::Block>> {
         T::block_by_hash(self, hash)
     }
@@ -258,9 +251,6 @@ impl<T: BlockReader> BlockReader for &T {
         &self,
     ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
         T::pending_block_and_receipts(self)
-    }
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        T::ommers(self, id)
     }
     fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Self::Block>> {
         T::block_by_hash(self, hash)

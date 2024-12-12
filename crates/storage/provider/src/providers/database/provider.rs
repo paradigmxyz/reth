@@ -60,7 +60,7 @@ use reth_primitives_traits::{Block as _, BlockBody as _, SignedTransaction};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyReader, NodePrimitivesProvider, StateProvider, StorageChangeSetReader,
+    BlockBodyReader, NodePrimitivesProvider, OmmersProvider, StateProvider, StorageChangeSetReader,
     TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -1222,26 +1222,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         Ok(None)
     }
 
-    /// Returns the ommers for the block with matching id from the database.
-    ///
-    /// If the block is not found, this returns `None`.
-    /// If the block exists, but doesn't contain ommers, this returns `None`.
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        if let Some(number) = self.convert_hash_or_number(id)? {
-            // If the Paris (Merge) hardfork block is known and block is after it, return empty
-            // ommers.
-            if self.chain_spec.final_paris_total_difficulty(number).is_some() {
-                return Ok(Some(Vec::new()))
-            }
-
-            let ommers =
-                self.tx.get::<tables::BlockOmmers<Self::Header>>(number)?.map(|o| o.ommers);
-            return Ok(ommers)
-        }
-
-        Ok(None)
-    }
-
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
     }
@@ -1632,6 +1612,28 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Withdrawals
         let latest_block_withdrawal = self.tx.cursor_read::<tables::BlockWithdrawals>()?.last()?;
         Ok(latest_block_withdrawal
             .and_then(|(_, mut block_withdrawal)| block_withdrawal.withdrawals.pop()))
+    }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> OmmersProvider for DatabaseProvider<TX, N> {
+    /// Returns the ommers for the block with matching id from the database.
+    ///
+    /// If the block is not found, this returns `None`.
+    /// If the block exists, but doesn't contain ommers, this returns `None`.
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+        if let Some(number) = self.convert_hash_or_number(id)? {
+            // If the Paris (Merge) hardfork block is known and block is after it, return empty
+            // ommers.
+            if self.chain_spec.final_paris_total_difficulty(number).is_some() {
+                return Ok(Some(Vec::new()))
+            }
+
+            let ommers =
+                self.tx.get::<tables::BlockOmmers<Self::Header>>(number)?.map(|o| o.ommers);
+            return Ok(ommers)
+        }
+
+        Ok(None)
     }
 }
 

@@ -3,9 +3,10 @@
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider,
-    StorageRootProvider, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    OmmersProvider, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProofProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRootProvider, StorageRootProvider, TransactionVariant,
+    TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
@@ -181,10 +182,6 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
     fn pending_block_and_receipts(
         &self,
     ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
-        Ok(None)
-    }
-
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
         Ok(None)
     }
 
@@ -529,58 +526,6 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
     }
 }
 
-// impl EvmEnvProvider for NoopProvider {
-//     fn fill_env_at<EvmConfig>(
-//         &self,
-//         _cfg: &mut CfgEnvWithHandlerCfg,
-//         _block_env: &mut BlockEnv,
-//         _at: BlockHashOrNumber,
-//         _evm_config: EvmConfig,
-//     ) -> ProviderResult<()>
-//     where
-//         EvmConfig: ConfigureEvmEnv<Header = Header>,
-//     {
-//         Ok(())
-//     }
-//
-//     fn fill_env_with_header<EvmConfig>(
-//         &self,
-//         _cfg: &mut CfgEnvWithHandlerCfg,
-//         _block_env: &mut BlockEnv,
-//         _header: &Header,
-//         _evm_config: EvmConfig,
-//     ) -> ProviderResult<()>
-//     where
-//         EvmConfig: ConfigureEvmEnv<Header = Header>,
-//     {
-//         Ok(())
-//     }
-//
-//     fn fill_cfg_env_at<EvmConfig>(
-//         &self,
-//         _cfg: &mut CfgEnvWithHandlerCfg,
-//         _at: BlockHashOrNumber,
-//         _evm_config: EvmConfig,
-//     ) -> ProviderResult<()>
-//     where
-//         EvmConfig: ConfigureEvmEnv<Header = Header>,
-//     {
-//         Ok(())
-//     }
-//
-//     fn fill_cfg_env_with_header<EvmConfig>(
-//         &self,
-//         _cfg: &mut CfgEnvWithHandlerCfg,
-//         _header: &Header,
-//         _evm_config: EvmConfig,
-//     ) -> ProviderResult<()>
-//     where
-//         EvmConfig: ConfigureEvmEnv<Header = Header>,
-//     {
-//         Ok(())
-//     }
-// }
-
 impl<C: Send + Sync, N: NodePrimitives> StageCheckpointReader for NoopProvider<C, N> {
     fn get_stage_checkpoint(&self, _id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         Ok(None)
@@ -604,6 +549,12 @@ impl<C: Send + Sync, N: NodePrimitives> WithdrawalsProvider for NoopProvider<C, 
         Ok(None)
     }
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
+        Ok(None)
+    }
+}
+
+impl<C: Send + Sync, N: NodePrimitives> OmmersProvider for NoopProvider<C, N> {
+    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
         Ok(None)
     }
 }

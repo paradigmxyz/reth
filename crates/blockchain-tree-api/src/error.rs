@@ -166,40 +166,15 @@ impl std::fmt::Debug for InsertBlockError {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to insert block (hash={}, number={}, parent_hash={}): {kind}", 
+        .block.hash(),
+        .block.number,
+        .block.parent_hash)]
 struct InsertBlockErrorData {
     block: SealedBlock,
+    #[source]
     kind: InsertBlockErrorKind,
-}
-
-impl std::fmt::Display for InsertBlockErrorData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Failed to insert block (hash={}, number={}, parent_hash={}): {}",
-            self.block.hash(),
-            self.block.number,
-            self.block.parent_hash,
-            self.kind
-        )
-    }
-}
-
-impl std::fmt::Debug for InsertBlockErrorData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InsertBlockError")
-            .field("error", &self.kind)
-            .field("hash", &self.block.hash())
-            .field("number", &self.block.number)
-            .field("parent_hash", &self.block.parent_hash)
-            .field("num_txs", &self.block.body.transactions.len())
-            .finish_non_exhaustive()
-    }
-}
-
-impl core::error::Error for InsertBlockErrorData {
-    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        Some(&self.kind)
-    }
 }
 
 impl InsertBlockErrorData {

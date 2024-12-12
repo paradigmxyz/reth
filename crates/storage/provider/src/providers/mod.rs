@@ -1,3 +1,5 @@
+use core::fmt;
+
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, BlockchainTreePendingStateProvider, CanonStateNotifications,
@@ -35,7 +37,7 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::CanonChainTracker;
+use reth_storage_api::{CanonChainTracker, OmmersProvider};
 use reth_storage_errors::provider::ProviderResult;
 use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
@@ -124,7 +126,6 @@ impl<T> TreeNodeTypes for T where T: ProviderNodeTypes + NodeTypesForTree {}
 /// This type serves as the main entry point for interacting with the blockchain and provides data
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
-#[allow(missing_debug_implementations)]
 pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// Provider type used to access the database.
     database: ProviderFactory<N>,
@@ -401,10 +402,6 @@ impl<N: TreeNodeTypes> BlockReader for BlockchainProvider<N> {
         Ok(self.tree.pending_block_and_receipts())
     }
 
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
-        self.database.ommers(id)
-    }
-
     fn block_body_indices(
         &self,
         number: BlockNumber,
@@ -580,6 +577,12 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider<N> {
 
     fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         self.database.latest_withdrawal()
+    }
+}
+
+impl<N: TreeNodeTypes> OmmersProvider for BlockchainProvider<N> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+        self.database.ommers(id)
     }
 }
 
@@ -962,5 +965,11 @@ impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider<N> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         self.database.provider()?.basic_account(address)
+    }
+}
+
+impl<N: NodeTypesWithDB> fmt::Debug for BlockchainProvider<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BlockchainProvider").finish_non_exhaustive()
     }
 }

@@ -50,21 +50,26 @@ use revm::{
 use std::sync::Arc;
 use tracing::{debug, trace, warn};
 
+mod config;
+pub use config::*;
+
 type BestTransactionsIter<Pool> = Box<
     dyn BestTransactions<Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>,
 >;
 
 /// Ethereum payload builder
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EthereumPayloadBuilder<EvmConfig = EthEvmConfig> {
     /// The type responsible for creating the evm.
     evm_config: EvmConfig,
+    /// Payload builder configuration.
+    builder_config: EthereumBuilderConfig,
 }
 
 impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
     /// `EthereumPayloadBuilder` constructor.
-    pub const fn new(evm_config: EvmConfig) -> Self {
-        Self { evm_config }
+    pub const fn new(evm_config: EvmConfig, builder_config: EthereumBuilderConfig) -> Self {
+        Self { evm_config, builder_config }
     }
 }
 
@@ -107,9 +112,14 @@ where
             .map_err(PayloadBuilderError::other)?;
 
         let pool = args.pool.clone();
-        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env, |attributes| {
-            pool.best_transactions_with_attributes(attributes)
-        })
+        default_ethereum_payload(
+            self.evm_config.clone(),
+            self.builder_config.clone(),
+            args,
+            cfg_env,
+            block_env,
+            |attributes| pool.best_transactions_with_attributes(attributes),
+        )
     }
 
     fn build_empty_payload(
@@ -133,9 +143,14 @@ where
 
         let pool = args.pool.clone();
 
-        default_ethereum_payload(self.evm_config.clone(), args, cfg_env, block_env, |attributes| {
-            pool.best_transactions_with_attributes(attributes)
-        })?
+        default_ethereum_payload(
+            self.evm_config.clone(),
+            self.builder_config.clone(),
+            args,
+            cfg_env,
+            block_env,
+            |attributes| pool.best_transactions_with_attributes(attributes),
+        )?
         .into_payload()
         .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
@@ -149,6 +164,7 @@ where
 #[inline]
 pub fn default_ethereum_payload<EvmConfig, Pool, Client, F>(
     evm_config: EvmConfig,
+    builder_config: EthereumBuilderConfig,
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     initialized_cfg: CfgEnvWithHandlerCfg,
     initialized_block_env: BlockEnv,
@@ -167,7 +183,7 @@ where
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
         State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
-    let PayloadConfig { parent_header, extra_data, attributes } = config;
+    let PayloadConfig { parent_header, attributes } = config;
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
@@ -470,7 +486,7 @@ where
         gas_limit: block_gas_limit,
         difficulty: U256::ZERO,
         gas_used: cumulative_gas_used,
-        extra_data,
+        extra_data: builder_config.extra_data,
         parent_beacon_block_root: attributes.parent_beacon_block_root,
         blob_gas_used: blob_gas_used.map(Into::into),
         excess_blob_gas: excess_blob_gas.map(Into::into),
