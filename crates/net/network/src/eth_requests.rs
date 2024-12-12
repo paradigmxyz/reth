@@ -266,7 +266,6 @@ where
         if maybe_more_incoming_requests {
             // make sure we're woken up again
             cx.waker().wake_by_ref();
-            return Poll::Pending
         }
 
         Poll::Pending

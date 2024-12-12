@@ -167,13 +167,14 @@ impl std::fmt::Debug for InsertBlockError {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to insert block (hash={}, number={}, parent_hash={}): {}",
-            self.block.hash(),
-            self.block.number,
-            self.block.parent_hash,
-            self.kind)]
+
+#[error("Failed to insert block (hash={}, number={}, parent_hash={}): {kind}", 
+        .block.hash(),
+        .block.number,
+        .block.parent_hash)]
 struct InsertBlockErrorData {
     block: SealedBlock,
+    #[source]
     kind: InsertBlockErrorKind,
 }
 

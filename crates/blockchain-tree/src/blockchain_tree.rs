@@ -1376,7 +1376,10 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::{Header, TxEip1559, EMPTY_ROOT_HASH};
-    use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip4895::Withdrawals};
+    use alloy_eips::{
+        eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, INITIAL_BASE_FEE},
+        eip4895::Withdrawals,
+    };
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, B256};
     use assert_matches::assert_matches;
@@ -1618,7 +1621,7 @@ mod tests {
                 number,
                 parent_hash: parent.unwrap_or_default(),
                 gas_used: body.len() as u64 * MIN_TRANSACTION_GAS,
-                gas_limit: chain_spec.max_gas_limit,
+                gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
                 mix_hash: B256::random(),
                 base_fee_per_gas: Some(INITIAL_BASE_FEE),
                 transactions_root,

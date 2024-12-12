@@ -11,7 +11,7 @@
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
 use alloy_eips::{eip4895::Withdrawals, merge::SLOT_DURATION};
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_primitives::{B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chainspec::EthereumHardforks;
@@ -20,7 +20,6 @@ use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJo
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
 use reth_primitives::{proofs, SealedHeader};
-use reth_primitives_traits::constants::RETH_CLIENT_VERSION;
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
@@ -163,11 +162,7 @@ where
                 .ok_or_else(|| PayloadBuilderError::MissingParentHeader(attributes.parent()))?
         };
 
-        let config = PayloadConfig::new(
-            Arc::new(parent_header.clone()),
-            self.config.extradata.clone(),
-            attributes,
-        );
+        let config = PayloadConfig::new(Arc::new(parent_header.clone()), attributes);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
@@ -251,8 +246,6 @@ impl PayloadTaskGuard {
 /// Settings for the [`BasicPayloadJobGenerator`].
 #[derive(Debug, Clone)]
 pub struct BasicPayloadJobGeneratorConfig {
-    /// Data to include in the block's extra data field.
-    extradata: Bytes,
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
     /// The deadline for when the payload builder job should resolve.
@@ -288,20 +281,11 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_payload_tasks = max_payload_tasks;
         self
     }
-
-    /// Sets the data to include in the block's extra data field.
-    ///
-    /// Defaults to the current client version: `rlp(RETH_CLIENT_VERSION)`.
-    pub fn extradata(mut self, extradata: Bytes) -> Self {
-        self.extradata = extradata;
-        self
-    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
         Self {
-            extradata: alloy_rlp::encode(RETH_CLIENT_VERSION.as_bytes()).into(),
             interval: Duration::from_secs(1),
             // 12s slot time
             deadline: SLOT_DURATION,
@@ -713,17 +697,8 @@ impl Drop for Cancelled {
 pub struct PayloadConfig<Attributes> {
     /// The parent header.
     pub parent_header: Arc<SealedHeader>,
-    /// Block extra data.
-    pub extra_data: Bytes,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
-}
-
-impl<Attributes> PayloadConfig<Attributes> {
-    /// Returns an owned instance of the [`PayloadConfig`]'s `extra_data` bytes.
-    pub fn extra_data(&self) -> Bytes {
-        self.extra_data.clone()
-    }
 }
 
 impl<Attributes> PayloadConfig<Attributes>
@@ -731,12 +706,8 @@ where
     Attributes: PayloadBuilderAttributes,
 {
     /// Create new payload config.
-    pub const fn new(
-        parent_header: Arc<SealedHeader>,
-        extra_data: Bytes,
-        attributes: Attributes,
-    ) -> Self {
-        Self { parent_header, extra_data, attributes }
+    pub const fn new(parent_header: Arc<SealedHeader>, attributes: Attributes) -> Self {
+        Self { parent_header, attributes }
     }
 
     /// Returns the payload id.

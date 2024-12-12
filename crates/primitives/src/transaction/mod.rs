@@ -27,7 +27,6 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
-use signature::decode_with_eip155_chain_id;
 #[cfg(feature = "std")]
 use std::sync::{LazyLock, OnceLock};
 
@@ -966,68 +965,6 @@ impl TransactionSigned {
         let hash = self.hash();
         (self.transaction, self.signature, hash)
     }
-
-    /// Decodes legacy transaction from the data buffer into a tuple.
-    ///
-    /// This expects `rlp(legacy_tx)`
-    ///
-    /// Refer to the docs for [`Self::decode_rlp_legacy_transaction`] for details on the exact
-    /// format expected.
-    pub fn decode_rlp_legacy_transaction_tuple(
-        data: &mut &[u8],
-    ) -> alloy_rlp::Result<(TxLegacy, TxHash, Signature)> {
-        // keep this around, so we can use it to calculate the hash
-        let original_encoding = *data;
-
-        let header = Header::decode(data)?;
-        let remaining_len = data.len();
-
-        let transaction_payload_len = header.payload_length;
-
-        if transaction_payload_len > remaining_len {
-            return Err(RlpError::InputTooShort)
-        }
-
-        let mut transaction = TxLegacy {
-            nonce: Decodable::decode(data)?,
-            gas_price: Decodable::decode(data)?,
-            gas_limit: Decodable::decode(data)?,
-            to: Decodable::decode(data)?,
-            value: Decodable::decode(data)?,
-            input: Decodable::decode(data)?,
-            chain_id: None,
-        };
-        let (signature, extracted_id) = decode_with_eip155_chain_id(data)?;
-        transaction.chain_id = extracted_id;
-
-        // check the new length, compared to the original length and the header length
-        let decoded = remaining_len - data.len();
-        if decoded != transaction_payload_len {
-            return Err(RlpError::UnexpectedLength)
-        }
-
-        let tx_length = header.payload_length + header.length();
-        let hash = keccak256(&original_encoding[..tx_length]);
-        Ok((transaction, hash, signature))
-    }
-
-    /// Decodes legacy transaction from the data buffer.
-    ///
-    /// This should be used _only_ be used in general transaction decoding methods, which have
-    /// already ensured that the input is a legacy transaction with the following format:
-    /// `rlp(legacy_tx)`
-    ///
-    /// Legacy transactions are encoded as lists, so the input should start with a RLP list header.
-    ///
-    /// This expects `rlp(legacy_tx)`
-    // TODO: make buf advancement semantics consistent with `decode_enveloped_typed_transaction`,
-    // so decoding methods do not need to manually advance the buffer
-    pub fn decode_rlp_legacy_transaction(data: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let (transaction, hash, signature) = Self::decode_rlp_legacy_transaction_tuple(data)?;
-        let signed =
-            Self { transaction: Transaction::Legacy(transaction), hash: hash.into(), signature };
-        Ok(signed)
-    }
 }
 
 impl SignedTransaction for TransactionSigned {
@@ -1322,20 +1259,36 @@ impl Decodable2718 for TransactionSigned {
         match ty.try_into().map_err(|_| Eip2718Error::UnexpectedType(ty))? {
             TxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
             TxType::Eip2930 => {
-                let (tx, signature, hash) = TxEip2930::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: Transaction::Eip2930(tx), signature, hash: hash.into() })
+                let (tx, signature) = TxEip2930::rlp_decode_with_signature(buf)?;
+                Ok(Self {
+                    transaction: Transaction::Eip2930(tx),
+                    signature,
+                    hash: Default::default(),
+                })
             }
             TxType::Eip1559 => {
-                let (tx, signature, hash) = TxEip1559::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: Transaction::Eip1559(tx), signature, hash: hash.into() })
+                let (tx, signature) = TxEip1559::rlp_decode_with_signature(buf)?;
+                Ok(Self {
+                    transaction: Transaction::Eip1559(tx),
+                    signature,
+                    hash: Default::default(),
+                })
             }
             TxType::Eip7702 => {
-                let (tx, signature, hash) = TxEip7702::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: Transaction::Eip7702(tx), signature, hash: hash.into() })
+                let (tx, signature) = TxEip7702::rlp_decode_with_signature(buf)?;
+                Ok(Self {
+                    transaction: Transaction::Eip7702(tx),
+                    signature,
+                    hash: Default::default(),
+                })
             }
             TxType::Eip4844 => {
-                let (tx, signature, hash) = TxEip4844::rlp_decode_signed(buf)?.into_parts();
-                Ok(Self { transaction: Transaction::Eip4844(tx), signature, hash: hash.into() })
+                let (tx, signature) = TxEip4844::rlp_decode_with_signature(buf)?;
+                Ok(Self {
+                    transaction: Transaction::Eip4844(tx),
+                    signature,
+                    hash: Default::default(),
+                })
             }
             #[cfg(feature = "optimism")]
             TxType::Deposit => Ok(Self::new_unhashed(
@@ -1346,7 +1299,8 @@ impl Decodable2718 for TransactionSigned {
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self::decode_rlp_legacy_transaction(buf)?)
+        let (tx, signature) = TxLegacy::rlp_decode_with_signature(buf)?;
+        Ok(Self { transaction: Transaction::Legacy(tx), signature, hash: Default::default() })
     }
 }
 
@@ -2177,7 +2131,7 @@ mod tests {
     #[test]
     fn recover_legacy_singer() {
         let data = hex!("f9015482078b8505d21dba0083022ef1947a250d5630b4cf539739df2c5dacb4c659f2488d880c46549a521b13d8b8e47ff36ab50000000000000000000000000000000000000000000066ab5a608bd00a23f2fe000000000000000000000000000000000000000000000000000000000000008000000000000000000000000048c04ed5691981c42154c6167398f95e8f38a7ff00000000000000000000000000000000000000000000000000000000632ceac70000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc20000000000000000000000006c6ee5e31d828de241282b9606c8e98ea48526e225a0c9077369501641a92ef7399ff81c21639ed4fd8fc69cb793cfa1dbfab342e10aa0615facb2f1bcf3274a354cfe384a38d0cc008a11c2dd23a69111bc6930ba27a8");
-        let tx = TransactionSigned::decode_rlp_legacy_transaction(&mut data.as_slice()).unwrap();
+        let tx = TransactionSigned::fallback_decode(&mut data.as_slice()).unwrap();
         assert!(tx.is_legacy());
         let sender = tx.recover_signer().unwrap();
         assert_eq!(sender, address!("a12e1462d0ceD572f396F58B6E2D03894cD7C8a4"));

@@ -18,7 +18,10 @@ use alloy_consensus::{
     },
     BlockHeader,
 };
-use alloy_eips::eip4844::{env_settings::EnvKzgSettings, MAX_BLOBS_PER_BLOCK};
+use alloy_eips::{
+    eip1559::ETHEREUM_BLOCK_GAS_LIMIT,
+    eip4844::{env_settings::EnvKzgSettings, MAX_BLOBS_PER_BLOCK},
+};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{InvalidTransactionError, SealedBlock};
 use reth_primitives_traits::GotExpected;
@@ -26,7 +29,10 @@ use reth_storage_api::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{
+        atomic::{AtomicBool, AtomicU64},
+        Arc,
+    },
 };
 use tokio::sync::Mutex;
 
@@ -39,8 +45,8 @@ pub struct EthTransactionValidator<Client, T> {
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     /// Returns the configured chain spec
-    pub fn chain_spec(&self) -> Arc<ChainSpec> {
-        self.inner.chain_spec.clone()
+    pub fn chain_spec(&self) -> &Arc<ChainSpec> {
+        &self.inner.chain_spec
     }
 
     /// Returns the configured client
@@ -138,7 +144,7 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     /// Fork indicator whether we are using EIP-7702 type transactions.
     eip7702: bool,
     /// The current max gas limit
-    block_gas_limit: u64,
+    block_gas_limit: AtomicU64,
     /// Minimum priority fee to enforce for acceptance into the pool.
     minimum_priority_fee: Option<u128>,
     /// Stores the setup and parameters needed for validating KZG proofs.
@@ -242,12 +248,13 @@ where
 
         // Checks for gas limit
         let transaction_gas_limit = transaction.gas_limit();
-        if transaction_gas_limit > self.block_gas_limit {
+        let block_gas_limit = self.max_gas_limit();
+        if transaction_gas_limit > block_gas_limit {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidPoolTransactionError::ExceedsGasLimit(
                     transaction_gas_limit,
-                    self.block_gas_limit,
+                    block_gas_limit,
                 ),
             )
         }
@@ -481,11 +488,17 @@ where
         if self.chain_spec.is_prague_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.prague.store(true, std::sync::atomic::Ordering::Relaxed);
         }
+
+        self.block_gas_limit.store(new_tip_block.gas_limit(), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn max_gas_limit(&self) -> u64 {
+        self.block_gas_limit.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
 /// A builder for [`TransactionValidationTaskExecutor`]
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct EthTransactionValidatorBuilder {
     chain_spec: Arc<ChainSpec>,
     /// Fork indicator whether we are in the Shanghai stage.
@@ -503,7 +516,7 @@ pub struct EthTransactionValidatorBuilder {
     /// Whether using EIP-7702 type transactions is allowed
     eip7702: bool,
     /// The current max gas limit
-    block_gas_limit: u64,
+    block_gas_limit: AtomicU64,
     /// Minimum priority fee to enforce for acceptance into the pool.
     minimum_priority_fee: Option<u128>,
     /// Determines how many additional tasks to spawn
@@ -530,7 +543,7 @@ impl EthTransactionValidatorBuilder {
     ///  - EIP-4844
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self {
-            block_gas_limit: chain_spec.max_gas_limit,
+            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT.into(),
             chain_spec,
             minimum_priority_fee: None,
             additional_tasks: 1,
@@ -667,8 +680,8 @@ impl EthTransactionValidatorBuilder {
     /// Sets the block gas limit
     ///
     /// Transactions with a gas limit greater than this will be rejected.
-    pub const fn set_block_gas_limit(mut self, block_gas_limit: u64) -> Self {
-        self.block_gas_limit = block_gas_limit;
+    pub fn set_block_gas_limit(self, block_gas_limit: u64) -> Self {
+        self.block_gas_limit.store(block_gas_limit, std::sync::atomic::Ordering::Relaxed);
         self
     }
 

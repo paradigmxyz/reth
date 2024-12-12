@@ -1,6 +1,7 @@
 //! Transaction abstraction
 
 pub mod execute;
+pub mod signature;
 pub mod signed;
 
 pub mod error;

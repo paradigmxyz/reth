@@ -22,6 +22,7 @@ use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, Environ
 use reth_cli_runner::CliContext;
 use reth_consensus::{Consensus, FullConsensus};
 use reth_errors::RethResult;
+use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
@@ -228,7 +229,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         };
         let payload_config = PayloadConfig::new(
             Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
-            Bytes::default(),
             reth_payload_builder::EthPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 payload_attrs,
@@ -247,6 +247,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             EthEvmConfig::new(provider_factory.chain_spec()),
+            EthereumBuilderConfig::new(Default::default()),
         );
 
         match payload_builder.try_build(args)? {

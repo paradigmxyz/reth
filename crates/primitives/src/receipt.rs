@@ -21,7 +21,6 @@ pub use reth_primitives_traits::receipt::gas_spent_by_transactions;
     Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
 )]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::CompactZstd))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_zstd(
     compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
     decompressor = reth_zstd_compressors::RECEIPT_DECOMPRESSOR

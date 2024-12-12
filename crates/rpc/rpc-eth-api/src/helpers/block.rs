@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::Sealable;
 use alloy_rlp::Encodable;
@@ -11,7 +10,7 @@ use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives::{SealedBlockFor, SealedBlockWithSenders};
 use reth_provider::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider, ProviderHeader, ProviderReceipt,
+    BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt,
 };
 use reth_rpc_types_compat::block::from_block;
 use revm_primitives::U256;
@@ -64,20 +63,9 @@ pub trait EthBlocks: LoadBlock {
         async move {
             let Some(block) = self.block_with_senders(block_id).await? else { return Ok(None) };
             let block_hash = block.hash();
-            let mut total_difficulty = self
-                .provider()
-                .header_td_by_number(block.number())
-                .map_err(Self::Error::from_eth_err)?;
-            if total_difficulty.is_none() {
-                // if we failed to find td after we successfully loaded the block, try again using
-                // the hash this only matters if the chain is currently transitioning the merge block and there's a reorg: <https://github.com/paradigmxyz/reth/issues/10941>
-                total_difficulty =
-                    self.provider().header_td(&block.hash()).map_err(Self::Error::from_eth_err)?;
-            }
 
             let block = from_block(
                 (*block).clone().unseal(),
-                total_difficulty.unwrap_or_default(),
                 full.into(),
                 Some(block_hash),
                 self.tx_resp_builder(),
