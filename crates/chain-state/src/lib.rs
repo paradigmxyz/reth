@@ -11,6 +11,8 @@
 mod in_memory;
 pub use in_memory::*;
 
+mod noop;
+
 mod chain_info;
 pub use chain_info::ChainInfoTracker;
 
