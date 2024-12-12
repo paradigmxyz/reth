@@ -5,7 +5,7 @@ use crate::{
     error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
-use alloy_consensus::{Header, Transaction, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{constants::EMPTY_WITHDRAWALS, Header, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -20,6 +20,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
+use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::PayloadTransactions;
@@ -29,7 +30,7 @@ use reth_primitives::{
 };
 use reth_provider::{
     HashedPostStateProvider, ProviderError, StateProofProvider, StateProviderFactory,
-    StateRootProvider,
+    StateRootProvider, StorageRootProvider,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_transaction_pool::{
@@ -291,14 +292,15 @@ where
     Txs: OpPayloadTransactions,
 {
     /// Executes the payload and returns the outcome.
-    pub fn execute<EvmConfig, DB>(
+    pub fn execute<EvmConfig, DB, P>(
         self,
         state: &mut State<DB>,
         ctx: &OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<BuildOutcomeKind<ExecutedPayload>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error = ProviderError> + AsRef<P>,
+        P: StorageRootProvider,
     {
         let Self { pool, best } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
@@ -326,13 +328,26 @@ where
             }
         }
 
-        let withdrawals_root = ctx.commit_withdrawals(state)?;
+        debug_assert!(ctx.attributes().payload_attributes.withdrawals.is_empty());
 
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
         // and 4788 contract call
         state.merge_transitions(BundleRetention::Reverts);
 
-        Ok(BuildOutcomeKind::Better { payload: ExecutedPayload { info, withdrawals_root } })
+        // withdrawals root field in block header is used for storage root of L2 predeploy
+        // `l2tol1-message-passer`
+        let withdrawals_root = Some(if ctx.is_isthmus_active() {
+            state
+                .database
+                .as_ref()
+                .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, Default::default())?
+        } else {
+            EMPTY_WITHDRAWALS
+        });
+
+        let payload = ExecutedPayload { info, withdrawals_root };
+
+        Ok(BuildOutcomeKind::Better { payload })
     }
 
     /// Builds the payload on top of the state.
@@ -344,7 +359,7 @@ where
     where
         EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
         DB: Database<Error = ProviderError> + AsRef<P>,
-        P: StateRootProvider + HashedPostStateProvider,
+        P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
     {
         let ExecutedPayload { info, withdrawals_root } = match self.execute(&mut state, &ctx)? {
             BuildOutcomeKind::Better { payload } | BuildOutcomeKind::Freeze(payload) => payload,
@@ -470,7 +485,7 @@ where
     where
         EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
         DB: Database<Error = ProviderError> + AsRef<P>,
-        P: StateProofProvider,
+        P: StateProofProvider + StorageRootProvider,
     {
         let _ = self.execute(state, ctx)?;
         let ExecutionWitnessRecord { hashed_state, codes, keys } =
@@ -660,6 +675,11 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
     /// Returns true if holocene is active for the payload.
     pub fn is_holocene_active(&self) -> bool {
         self.chain_spec.is_holocene_active_at_timestamp(self.attributes().timestamp())
+    }
+
+    /// Returns true if isthmus is active for the payload.
+    pub fn is_isthmus_active(&self) -> bool {
+        self.chain_spec.is_isthmus_active_at_timestamp(self.attributes().timestamp())
     }
 
     /// Returns true if the fees are higher than the previous payload.
