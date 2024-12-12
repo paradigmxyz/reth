@@ -200,14 +200,8 @@ where
             if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
-                let receipt = receipts_by_block
-                    .into_iter()
-                    .map(|receipt| {
-                        // TODO: use `into_with_bloom` on new alloy release
-                        let bloom = receipt.bloom();
-                        ReceiptWithBloom::new(receipt, bloom)
-                    })
-                    .collect::<Vec<_>>();
+                let receipt =
+                    receipts_by_block.into_iter().map(ReceiptWithBloom::from).collect::<Vec<_>>();
 
                 total_bytes += receipt.length();
                 receipts.push(receipt);
