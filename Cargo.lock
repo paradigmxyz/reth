@@ -7406,6 +7406,7 @@ dependencies = [
  "reth-errors",
  "reth-ethereum-engine-primitives",
  "reth-evm",
+ "reth-execution-errors",
  "reth-exex-types",
  "reth-metrics",
  "reth-network-p2p",
