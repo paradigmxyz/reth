@@ -90,6 +90,18 @@ impl SignedTransaction for OpTransactionSigned {
         recover_signer(signature, signature_hash)
     }
 
+    fn recover_signer_unchecked(&self) -> Option<Address> {
+        // Optimism's Deposit transaction does not have a signature. Directly return the
+        // `from` address.
+        if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = &self.transaction {
+            return Some(*from)
+        }
+
+        let Self { transaction, signature, .. } = self;
+        let signature_hash = signature_hash(transaction);
+        recover_signer_unchecked(signature, signature_hash)
+    }
+
     fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
         match &self.transaction {
             // Optimism's Deposit transaction does not have a signature. Directly return the
@@ -443,7 +455,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
 }
 
 /// Calculates the signing hash for the transaction.
-pub fn signature_hash(tx: &OpTypedTransaction) -> B256 {
+fn signature_hash(tx: &OpTypedTransaction) -> B256 {
     match tx {
         OpTypedTransaction::Legacy(tx) => tx.signature_hash(),
         OpTypedTransaction::Eip2930(tx) => tx.signature_hash(),
