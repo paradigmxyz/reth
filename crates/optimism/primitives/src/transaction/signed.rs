@@ -60,7 +60,7 @@ impl OpTransactionSigned {
 
     /// Creates a new signed transaction from the given transaction and signature without the hash.
     ///
-    /// Note: this only calculates the hash on the first [`TransactionSigned::hash`] call.
+    /// Note: this only calculates the hash on the first [`OpTransactionSigned::hash`] call.
     pub fn new_unhashed(transaction: OpTypedTransaction, signature: Signature) -> Self {
         Self { hash: Default::default(), signature, transaction }
     }
@@ -219,7 +219,6 @@ impl InMemorySize for OpTransactionSigned {
 }
 
 impl alloy_rlp::Encodable for OpTransactionSigned {
-    /// See [`alloy_rlp::Encodable`] impl for [`TransactionSigned`].
     fn encode(&self, out: &mut dyn alloy_rlp::bytes::BufMut) {
         self.network_encode(out);
     }
@@ -235,7 +234,6 @@ impl alloy_rlp::Encodable for OpTransactionSigned {
 }
 
 impl alloy_rlp::Decodable for OpTransactionSigned {
-    /// See [`alloy_rlp::Decodable`] impl for [`TransactionSigned`].
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Self::network_decode(buf).map_err(Into::into)
     }
