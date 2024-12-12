@@ -28,8 +28,8 @@ use reth_primitives::{
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    HashedPostStateProvider, NodePrimitivesProvider, OmmersProvider, StateProofProvider,
-    StorageRootProvider,
+    BlockBodyIndicesProvider, HashedPostStateProvider, NodePrimitivesProvider, OmmersProvider,
+    StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -119,10 +119,6 @@ impl BlockReader for NoopProvider {
     }
 
     fn pending_block_and_receipts(&self) -> ProviderResult<Option<(SealedBlock, Vec<Receipt>)>> {
-        Ok(None)
-    }
-
-    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
 
@@ -527,6 +523,12 @@ impl WithdrawalsProvider for NoopProvider {
 
 impl OmmersProvider for NoopProvider {
     fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+        Ok(None)
+    }
+}
+
+impl BlockBodyIndicesProvider for NoopProvider {
+    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
 }

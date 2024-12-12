@@ -26,7 +26,8 @@ use reth_primitives::{
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    NodePrimitivesProvider, OmmersProvider, StateCommitmentProvider, TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, NodePrimitivesProvider, OmmersProvider, StateCommitmentProvider,
+    TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
@@ -404,13 +405,6 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         self.provider()?.pending_block_and_receipts()
     }
 
-    fn block_body_indices(
-        &self,
-        number: BlockNumber,
-    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.provider()?.block_body_indices(number)
-    }
-
     fn block_with_senders(
         &self,
         id: BlockHashOrNumber,
@@ -575,6 +569,15 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
 impl<N: ProviderNodeTypes> OmmersProvider for ProviderFactory<N> {
     fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
         self.provider()?.ommers(id)
+    }
+}
+
+impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ProviderFactory<N> {
+    fn block_body_indices(
+        &self,
+        number: BlockNumber,
+    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        self.provider()?.block_body_indices(number)
     }
 }
 
