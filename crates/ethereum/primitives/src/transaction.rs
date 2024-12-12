@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844,
     TxEip7702, TxLegacy, TxType, Typed2718,
@@ -10,7 +11,6 @@ use alloy_eips::{
 use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
-
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
 #[cfg(not(feature = "std"))]

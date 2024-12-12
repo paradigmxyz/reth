@@ -27,6 +27,7 @@ alloy-rlp.workspace = true
 arbitrary = { workspace = true, optional = true, features = ["derive"] }
 derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
+once_cell.workspace = true
 rand = { workspace = true, optional = true }
 secp256k1 = { workspace = true, optional = true, features = ["rand"] }
 serde.workspace = true
