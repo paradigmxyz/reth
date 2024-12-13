@@ -385,7 +385,7 @@ where
         let CanonicalStateUpdate {
             new_tip, changed_accounts, mined_transactions, update_kind, ..
         } = update;
-        self.validator.on_new_head_block(new_tip);
+        self.validator.on_new_head_block(&(new_tip.header(), new_tip.body.clone()));
 
         let changed_senders = self.changed_senders(changed_accounts.into_iter());
 

@@ -23,8 +23,8 @@ use alloy_eips::{
     eip4844::{env_settings::EnvKzgSettings, MAX_BLOBS_PER_BLOCK},
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_primitives::{InvalidTransactionError, SealedBlock};
-use reth_primitives_traits::GotExpected;
+use reth_primitives::InvalidTransactionError;
+use reth_primitives_traits::{BlockBody, GotExpected};
 use reth_storage_api::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -106,8 +106,8 @@ where
         self.validate_all(transactions)
     }
 
-    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
-        self.inner.on_new_head_block(new_tip_block.header())
+    fn on_new_head_block<H: BlockHeader, T: BlockBody>(&self, new_tip_block: &(H, T)) {
+        self.inner.on_new_head_block(&new_tip_block.0)
     }
 }
 

@@ -6,10 +6,12 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
     PriceBumpConfig,
 };
+use alloy_consensus::BlockHeader;
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives::{RecoveredTx, SealedBlock};
+use reth_primitives::RecoveredTx;
+use reth_primitives_traits::BlockBody;
 use std::{fmt, future::Future, time::Instant};
 
 mod constants;
@@ -206,7 +208,7 @@ pub trait TransactionValidator: Send + Sync {
     /// Invoked when the head block changes.
     ///
     /// This can be used to update fork specific values (timestamp).
-    fn on_new_head_block(&self, _new_tip_block: &SealedBlock) {}
+    fn on_new_head_block<H: BlockHeader, T: BlockBody>(&self, _new_tip_block: &(H, T)) {}
 }
 
 impl<A, B> TransactionValidator for Either<A, B>
@@ -237,7 +239,7 @@ where
         }
     }
 
-    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+    fn on_new_head_block<H: BlockHeader, T: BlockBody>(&self, new_tip_block: &(H, T)) {
         match self {
             Self::Left(v) => v.on_new_head_block(new_tip_block),
             Self::Right(v) => v.on_new_head_block(new_tip_block),

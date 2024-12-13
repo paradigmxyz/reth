@@ -6,9 +6,10 @@ use crate::{
     EthTransactionValidator, PoolTransaction, TransactionOrigin, TransactionValidationOutcome,
     TransactionValidator,
 };
+use alloy_consensus::BlockHeader;
 use futures_util::{lock::Mutex, StreamExt};
 use reth_chainspec::ChainSpec;
-use reth_primitives::SealedBlock;
+use reth_primitives_traits::BlockBody;
 use reth_tasks::TaskSpawner;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::{
@@ -205,7 +206,7 @@ where
         }
     }
 
-    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+    fn on_new_head_block<H: BlockHeader, T: BlockBody>(&self, new_tip_block: &(H, T)) {
         self.validator.on_new_head_block(new_tip_block)
     }
 }
