@@ -55,6 +55,8 @@ async fn main() {
     // The network configuration
     let mut net_cfg = NetworkConfig::builder(secret_key)
         .listener_addr(local_addr)
+        // we need to explicitly set the network mode to PoW to allow block propagation, see docs
+        .with_pow()
         .build_with_noop_provider(bsc_chain_spec())
         .set_discovery_v4(
             Discv4ConfigBuilder::default()
