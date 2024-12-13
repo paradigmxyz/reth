@@ -1,13 +1,10 @@
 //! Helpers for testing.
 
 use crate::{
-    execute::{
+    env::EvmEnv, execute::{
         BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionInput,
         BlockExecutionOutput, BlockExecutionStrategy, BlockExecutorProvider, Executor,
-    },
-    provider::EvmEnvProvider,
-    system_calls::OnStateHook,
-    ConfigureEvmEnv,
+    }, provider::EvmEnvProvider, system_calls::OnStateHook, ConfigureEvmEnv
 };
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockNumber, U256};
@@ -18,7 +15,7 @@ use reth_primitives::{BlockWithSenders, EthPrimitives, NodePrimitives, Receipt, 
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::State;
-use revm_primitives::{db::Database, BlockEnv, CfgEnvWithHandlerCfg};
+use revm_primitives::db::Database;
 use std::{fmt::Display, sync::Arc};
 
 impl<C: Send + Sync, N: NodePrimitives> EvmEnvProvider<N::BlockHeader>
@@ -28,7 +25,7 @@ impl<C: Send + Sync, N: NodePrimitives> EvmEnvProvider<N::BlockHeader>
         &self,
         header: &N::BlockHeader,
         evm_config: EvmConfig,
-    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
+    ) -> ProviderResult<EvmEnv>
     where
         EvmConfig: ConfigureEvmEnv<Header = N::BlockHeader>,
     {
