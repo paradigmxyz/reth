@@ -298,11 +298,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         Ok(())
     }
 
-    /// Calculates the hashes of the nodes below the provided level.
-    pub fn calculate_below_level(&mut self, level: usize) {
-        self.state.calculate_below_level(level);
-    }
-
     /// Returns storage sparse trie root if the trie has been revealed.
     pub fn storage_root(&mut self, account: B256) -> Option<B256> {
         self.storages.get_mut(&account).and_then(|trie| trie.root())
@@ -343,7 +338,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 }
 impl<F> SparseStateTrie<F>
 where
-    F: BlindedProviderFactory,
+    F: BlindedProviderFactory + Send + Sync,
     SparseTrieError: From<<F::AccountNodeProvider as BlindedProvider>::Error>
         + From<<F::StorageNodeProvider as BlindedProvider>::Error>,
 {
@@ -437,6 +432,11 @@ where
         } else {
             Err(SparseStateTrieError::Sparse(SparseTrieError::Blind))
         }
+    }
+
+    /// Calculates the hashes of the nodes below the provided level.
+    pub fn calculate_below_level(&mut self, level: usize) {
+        self.state.calculate_below_level(level);
     }
 }
 
