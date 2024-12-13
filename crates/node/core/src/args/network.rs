@@ -29,7 +29,8 @@ use reth_network::{
         TransactionFetcherConfig, TransactionsManagerConfig,
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
-    }, HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives, SessionsConfig
+    },
+    HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives, SessionsConfig,
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
@@ -413,8 +414,8 @@ impl DiscoveryArgs {
         rlpx_tcp_socket: SocketAddr,
         boot_nodes: impl IntoIterator<Item = NodeRecord>,
     ) -> NetworkConfigBuilder<N>
-        where
-            N: NetworkPrimitives,
+    where
+        N: NetworkPrimitives,
     {
         if self.disable_discovery || self.disable_dns_discovery {
             network_config_builder = network_config_builder.disable_dns_discovery();

@@ -8,6 +8,8 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_evm::execute::BlockExecutorProvider;
+use reth_network::NetworkPrimitives;
+use reth_node_api::{BlockTy, BodyTy, HeaderTy, ReceiptTy};
 
 pub mod drop;
 pub mod dump;
@@ -41,14 +43,20 @@ pub enum Subcommands<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `stage` command
-    pub async fn execute<N, E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
+    pub async fn execute<N, E, F, P>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider<Primitives = N::Primitives>,
         F: FnOnce(Arc<C::ChainSpec>) -> E,
+        P: NetworkPrimitives<
+            BlockHeader = HeaderTy<N>,
+            BlockBody = BodyTy<N>,
+            Block = BlockTy<N>,
+            Receipt = ReceiptTy<N>,
+        >,
     {
         match self.command {
-            Subcommands::Run(command) => command.execute::<N, _, _>(ctx, executor).await,
+            Subcommands::Run(command) => command.execute::<N, _, _, P>(ctx, executor).await,
             Subcommands::Drop(command) => command.execute::<N>().await,
             Subcommands::Dump(command) => command.execute::<N, _, _>(executor).await,
             Subcommands::Unwind(command) => command.execute::<N>().await,

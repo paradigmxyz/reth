@@ -11,7 +11,7 @@ use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGenera
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
-use reth_network::{NetworkPrimitives, NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
+use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
     components::{
@@ -733,6 +733,6 @@ impl NetworkPrimitives for OpNetworkPrimitives {
     type BlockBody = reth_primitives::BlockBody;
     type Block = reth_primitives::Block;
     type BroadcastedTransaction = reth_primitives::TransactionSigned;
-    type PooledTransaction = reth_primitives::PooledTransactionsElement;
+    type PooledTransaction = reth_primitives::PooledTransaction;
     type Receipt = reth_primitives::Receipt;
 }

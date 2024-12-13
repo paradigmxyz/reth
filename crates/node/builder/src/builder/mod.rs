@@ -749,8 +749,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
 impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext<Node> {
     /// Creates the [`NetworkBuilder`] for the node.
     pub async fn network_builder<N>(&self) -> eyre::Result<NetworkBuilder<(), (), N>>
-        where
-            N: NetworkPrimitives,
+    where
+        N: NetworkPrimitives,
     {
         let network_config = self.network_config()?;
         let builder = NetworkManager::builder(network_config).await?;
@@ -759,8 +759,8 @@ impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext
 
     /// Returns the default network config for the node.
     pub fn network_config<N>(&self) -> eyre::Result<NetworkConfig<Node::Provider, N>>
-        where
-            N: NetworkPrimitives,
+    where
+        N: NetworkPrimitives,
     {
         let network_builder = self.network_config_builder();
         Ok(self.build_network_config(network_builder?))
@@ -768,8 +768,8 @@ impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext
 
     /// Get the [`NetworkConfigBuilder`].
     pub fn network_config_builder<N>(&self) -> eyre::Result<NetworkConfigBuilder<N>>
-        where
-            N: NetworkPrimitives,
+    where
+        N: NetworkPrimitives,
     {
         let secret_key = self.network_secret(&self.config().datadir())?;
         let default_peers_path = self.config().datadir().known_peers();

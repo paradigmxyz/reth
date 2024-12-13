@@ -21,7 +21,7 @@ pub mod engine;
 pub use engine::OpEngineTypes;
 
 pub mod node;
-pub use node::OpNode;
+pub use node::{OpNetworkPrimitives, OpNode};
 
 pub mod txpool;
 

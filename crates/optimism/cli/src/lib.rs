@@ -52,7 +52,7 @@ use reth_node_core::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use reth_optimism_evm::OpExecutorProvider;
-use reth_optimism_node::OpNode;
+use reth_optimism_node::{OpNetworkPrimitives, OpNode};
 use reth_tracing::FileWorkerGuard;
 use tracing::info;
 
@@ -164,9 +164,12 @@ where
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<OpNode>()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<OpNode, _, _>(ctx, OpExecutorProvider::optimism)
+                command
+                    .execute::<OpNode, _, _, OpNetworkPrimitives>(ctx, OpExecutorProvider::optimism)
             }),
-            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::P2P(command) => {
+                runner.run_until_ctrl_c(command.execute::<OpNetworkPrimitives>())
+            }
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Recover(command) => {
                 runner.run_command_until_exit(|ctx| command.execute::<OpNode>(ctx))
