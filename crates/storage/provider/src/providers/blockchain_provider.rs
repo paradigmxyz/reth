@@ -2577,7 +2577,7 @@ mod tests {
                             .unseal::<reth_primitives::Block>()
                             .with_recovered_senders()
                             .unwrap()
-                            .seal(block.hash())
+                            .seal_unchecked(block.hash())
                     )
                 ),
                 (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
@@ -2593,7 +2593,7 @@ mod tests {
                             .unseal::<reth_primitives::Block>()
                             .with_recovered_senders()
                             .unwrap()
-                            .seal(block.hash())
+                            .seal_unchecked(block.hash())
                     )
                 ),
                 (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)

@@ -187,7 +187,7 @@ impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
     #[inline]
-    pub fn seal(self, hash: B256) -> SealedBlockWithSenders<B> {
+    pub fn seal_unchecked(self, hash: B256) -> SealedBlockWithSenders<B> {
         let Self { block, senders } = self;
         SealedBlockWithSenders::<B> { block: block.seal(hash), senders }
     }
