@@ -90,13 +90,6 @@ pub use reth_engine_primitives::InvalidBlockHook;
 
 pub mod root;
 
-struct StateHookContext<P> {
-    provider_ro: P,
-    nodes_sorted: TrieUpdatesSorted,
-    state_sorted: HashedPostStateSorted,
-    prefix_sets: Arc<TriePrefixSetsMut>,
-}
-
 /// Keeps track of the state of the tree.
 ///
 /// ## Invariants
@@ -480,6 +473,15 @@ pub enum TreeAction {
         /// The sync target head hash
         sync_target_head: B256,
     },
+}
+
+/// Context used to keep alive the required values when returning a state hook
+/// from a scoped thread.
+struct StateHookContext<P> {
+    provider_ro: P,
+    nodes_sorted: TrieUpdatesSorted,
+    state_sorted: HashedPostStateSorted,
+    prefix_sets: Arc<TriePrefixSetsMut>,
 }
 
 /// The engine API tree handler implementation.
@@ -2263,9 +2265,12 @@ where
                 let state_sorted = input.state.clone().into_sorted();
                 let prefix_sets = Arc::new(input.prefix_sets.clone());
 
+                // context will hold the values that need to be kept alive
                 let context =
                     StateHookContext { provider_ro, nodes_sorted, state_sorted, prefix_sets };
 
+                // it is ok to leak here because we are in a scoped thread, the
+                // memory will be freed when the thread completes
                 let context = Box::leak(Box::new(context));
 
                 let blinded_provider_factory = ProofBlindedProviderFactory::new(
