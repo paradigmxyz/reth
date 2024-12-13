@@ -556,7 +556,7 @@ mod tests {
         };
 
         // Single withdrawal
-        let block = create_block_with_withdrawals(&[1]);
+        let block: SealedBlock = create_block_with_withdrawals(&[1]);
         assert_eq!(validate_block_pre_execution(&block, &chain_spec), Ok(()));
 
         // Multiple increasing withdrawals
