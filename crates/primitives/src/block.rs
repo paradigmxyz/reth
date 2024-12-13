@@ -11,8 +11,7 @@ use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
 use reth_primitives_traits::{
-    serde_bincode_compat::SerdeBincodeCompat, BlockBody as _, InMemorySize, SignedTransaction,
-    Transaction,
+    BlockBody as _, InMemorySize, MaybeSerdeBincodeCompat, SignedTransaction, Transaction,
 };
 use serde::{Deserialize, Serialize};
 
@@ -37,7 +36,7 @@ impl<T> Default for Block<T> {
 
 impl<T> reth_primitives_traits::Block for Block<T>
 where
-    T: SignedTransaction + Encodable + Decodable + SerdeBincodeCompat,
+    T: SignedTransaction + Encodable + Decodable + MaybeSerdeBincodeCompat,
 {
     type Header = Header;
     type Body = BlockBody<T>;
@@ -662,7 +661,7 @@ impl<T: InMemorySize> InMemorySize for BlockBody<T> {
 
 impl<T> reth_primitives_traits::BlockBody for BlockBody<T>
 where
-    T: SignedTransaction + SerdeBincodeCompat,
+    T: SignedTransaction + MaybeSerdeBincodeCompat,
 {
     type Transaction = T;
     type OmmerHeader = Header;
