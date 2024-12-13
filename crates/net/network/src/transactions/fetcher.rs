@@ -222,13 +222,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
 
         let idle_peer = loop {
-            if let Some(ref mut bud) = budget {
-                *bud = bud.saturating_sub(1);
-                if *bud == 0 {
-                    return None
-                }
-            }
-
             let &hash = hashes_pending_fetch_iter.next()?;
 
             let idle_peer = self.get_idle_peer_for(hash, peers);
@@ -236,6 +229,13 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             if idle_peer.is_some() {
                 hashes_to_request.insert(hash);
                 break idle_peer.copied()
+            }
+
+            if let Some(ref mut bud) = budget {
+                *bud = bud.saturating_sub(1);
+                if *bud == 0 {
+                    return None
+                }
             }
         };
         let hash = hashes_to_request.iter().next()?;
@@ -743,14 +743,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         // try to fill request by checking if any other hashes pending fetch (in lru order) are
         // also seen by peer
         for hash in self.hashes_pending_fetch.iter() {
-            // Early exit if there's no budget
-            if let Some(ref mut bud) = budget_fill_request {
-                *bud = bud.saturating_sub(1);
-                if *bud == 0 {
-                    return
-                }
-            }
-
             // 1. Check if a hash pending fetch is seen by peer.
             if !seen_hashes.contains(hash) {
                 continue
@@ -777,6 +769,13 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     DEFAULT_SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST_ON_FETCH_PENDING_HASHES
             {
                 break
+            }
+
+            if let Some(ref mut bud) = budget_fill_request {
+                *bud = bud.saturating_sub(1);
+                if *bud == 0 {
+                    return
+                }
             }
         }
 
