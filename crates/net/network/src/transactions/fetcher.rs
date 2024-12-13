@@ -49,7 +49,7 @@ use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
-use reth_primitives::PooledTransactionsElement;
+use reth_primitives::PooledTransaction;
 use reth_primitives_traits::SignedTransaction;
 use schnellru::ByLength;
 #[cfg(debug_assertions)]
@@ -1084,7 +1084,7 @@ impl TxFetchMetadata {
 
 /// Represents possible events from fetching transactions.
 #[derive(Debug)]
-pub enum FetchEvent<T = PooledTransactionsElement> {
+pub enum FetchEvent<T = PooledTransaction> {
     /// Triggered when transactions are successfully fetched.
     TransactionsFetched {
         /// The ID of the peer from which transactions were fetched.
@@ -1108,7 +1108,7 @@ pub enum FetchEvent<T = PooledTransactionsElement> {
 
 /// An inflight request for [`PooledTransactions`] from a peer.
 #[derive(Debug)]
-pub struct GetPooledTxRequest<T = PooledTransactionsElement> {
+pub struct GetPooledTxRequest<T = PooledTransaction> {
     peer_id: PeerId,
     /// Transaction hashes that were requested, for cleanup purposes
     requested_hashes: RequestTxHashes,
@@ -1118,7 +1118,7 @@ pub struct GetPooledTxRequest<T = PooledTransactionsElement> {
 /// Upon reception of a response, a [`GetPooledTxRequest`] is deconstructed to form a
 /// [`GetPooledTxResponse`].
 #[derive(Debug)]
-pub struct GetPooledTxResponse<T = PooledTransactionsElement> {
+pub struct GetPooledTxResponse<T = PooledTransaction> {
     peer_id: PeerId,
     /// Transaction hashes that were requested, for cleanup purposes, since peer may only return a
     /// subset of requested hashes.
@@ -1131,7 +1131,7 @@ pub struct GetPooledTxResponse<T = PooledTransactionsElement> {
 #[must_use = "futures do nothing unless polled"]
 #[pin_project::pin_project]
 #[derive(Debug)]
-pub struct GetPooledTxRequestFut<T = PooledTransactionsElement> {
+pub struct GetPooledTxRequestFut<T = PooledTransaction> {
     #[pin]
     inner: Option<GetPooledTxRequest<T>>,
 }
@@ -1517,10 +1517,10 @@ mod test {
     #[test]
     fn verify_response_hashes() {
         let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598daa");
-        let signed_tx_1: PooledTransactionsElement =
+        let signed_tx_1: PooledTransaction =
             TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
         let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76");
-        let signed_tx_2: PooledTransactionsElement =
+        let signed_tx_2: PooledTransaction =
             TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
 
         // only tx 1 is requested
