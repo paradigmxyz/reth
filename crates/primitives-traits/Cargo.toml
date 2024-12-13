@@ -52,6 +52,11 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 alloy-primitives = { workspace = true, features = ["arbitrary"] }
 alloy-consensus = { workspace = true, features = ["arbitrary"] }
 
+secp256k1 = { workspace = true, features = [
+	"recovery",
+	"global-context",
+	"rand"
+] }
 bincode.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
@@ -92,6 +97,8 @@ arbitrary = [
 	"alloy-eips/arbitrary",
 	"revm-primitives/arbitrary",
 	"reth-codecs?/arbitrary",
+	"secp256k1?/global-context",
+	"secp256k1?/rand",
 	"op-alloy-consensus?/arbitrary"
 ]
 serde-bincode-compat = [
