@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
-    Transaction as _, Typed2718,
+    BlockHeader, Transaction as _, Typed2718,
 };
 use alloy_eips::{
     eip2718::Encodable2718,
@@ -24,7 +24,7 @@ use reth_primitives::{
     PooledTransaction, PooledTransactionsElementEcRecovered, RecoveredTx, SealedBlock, Transaction,
     TransactionSigned,
 };
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -517,7 +517,10 @@ pub trait TransactionPoolExt: TransactionPool {
     /// sidecar must not be removed from the blob store. Only after a blob transaction is
     /// finalized, its sidecar is removed from the blob store. This ensures that in case of a reorg,
     /// the sidecar is still available.
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>);
+    fn on_canonical_state_change<H, B>(&self, update: CanonicalStateUpdate<'_, H, B>)
+    where
+        H: reth_primitives_traits::BlockHeader,
+        B: BlockBody;
 
     /// Updates the accounts in the pool
     fn update_accounts(&self, accounts: Vec<ChangedAccount>);
@@ -717,9 +720,9 @@ pub enum PoolUpdateKind {
 ///
 /// This is used to update the pool state accordingly.
 #[derive(Clone, Debug)]
-pub struct CanonicalStateUpdate<'a> {
+pub struct CanonicalStateUpdate<'a, H, B> {
     /// Hash of the tip block.
-    pub new_tip: &'a SealedBlock,
+    pub new_tip: &'a SealedBlock<H, B>,
     /// EIP-1559 Base fee of the _next_ (pending) block
     ///
     /// The base fee of a block depends on the utilization of the last block and its base fee.
@@ -736,10 +739,13 @@ pub struct CanonicalStateUpdate<'a> {
     pub update_kind: PoolUpdateKind,
 }
 
-impl CanonicalStateUpdate<'_> {
+impl<H, B> CanonicalStateUpdate<'_, H, B>
+where
+    H: BlockHeader,
+{
     /// Returns the number of the tip block.
     pub fn number(&self) -> u64 {
-        self.new_tip.number
+        self.new_tip.number()
     }
 
     /// Returns the hash of the tip block.
@@ -749,13 +755,13 @@ impl CanonicalStateUpdate<'_> {
 
     /// Timestamp of the latest chain update
     pub fn timestamp(&self) -> u64 {
-        self.new_tip.timestamp
+        self.new_tip.timestamp()
     }
 
     /// Returns the block info for the tip block.
     pub fn block_info(&self) -> BlockInfo {
         BlockInfo {
-            block_gas_limit: self.new_tip.gas_limit,
+            block_gas_limit: self.new_tip.gas_limit(),
             last_seen_block_hash: self.hash(),
             last_seen_block_number: self.number(),
             pending_basefee: self.pending_block_base_fee,
@@ -764,7 +770,10 @@ impl CanonicalStateUpdate<'_> {
     }
 }
 
-impl fmt::Display for CanonicalStateUpdate<'_> {
+impl<H, B> fmt::Display for CanonicalStateUpdate<'_, H, B>
+where
+    H: BlockHeader,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CanonicalStateUpdate")
             .field("hash", &self.hash())
