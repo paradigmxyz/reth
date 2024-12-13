@@ -48,6 +48,12 @@ pub fn prefix_set_lookups(c: &mut Criterion) {
     let mut group = c.benchmark_group("Prefix Set Lookups");
 
     for size in [10, 100, 1_000, 10_000] {
+        // Too slow.
+        #[allow(unexpected_cfgs)]
+        if cfg!(codspeed) && size > 1_000 {
+            continue;
+        }
+
         let test_data = generate_test_data(size);
 
         use implementations::*;
