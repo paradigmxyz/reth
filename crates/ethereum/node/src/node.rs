@@ -1,13 +1,12 @@
 //! Ethereum Node types config.
 
-use std::sync::Arc;
-
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
+use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
@@ -33,6 +32,7 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
+use std::sync::Arc;
 
 use crate::{EthEngineTypes, EthEvmConfig};
 
@@ -228,7 +228,7 @@ where
 }
 
 /// A basic ethereum payload service.
-#[derive(Debug, Default, Clone)]
+#[derive(Clone, Default, Debug)]
 #[non_exhaustive]
 pub struct EthereumPayloadBuilder;
 
@@ -253,15 +253,16 @@ impl EthereumPayloadBuilder {
             PayloadBuilderAttributes = EthPayloadBuilderAttributes,
         >,
     {
-        let payload_builder =
-            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(evm_config);
         let conf = ctx.payload_builder_config();
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            evm_config,
+            EthereumBuilderConfig::new(conf.extradata_bytes()).with_gas_limit(conf.gas_limit()),
+        );
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
             .interval(conf.interval())
             .deadline(conf.deadline())
-            .max_payload_tasks(conf.max_payload_tasks())
-            .extradata(conf.extradata_bytes());
+            .max_payload_tasks(conf.max_payload_tasks());
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             ctx.provider().clone(),

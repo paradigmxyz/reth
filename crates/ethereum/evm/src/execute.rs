@@ -6,7 +6,7 @@ use crate::{
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
-use alloy_eips::eip7685::Requests;
+use alloy_eips::{eip6110, eip7685::Requests};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_consensus::ConsensusError;
@@ -246,7 +246,7 @@ where
             let mut requests = Requests::default();
 
             if !deposit_requests.is_empty() {
-                requests.push_request(core::iter::once(0).chain(deposit_requests).collect());
+                requests.push_request_with_type(eip6110::DEPOSIT_REQUEST_TYPE, deposit_requests);
             }
 
             requests.extend(self.system_caller.apply_post_execution_changes(&mut evm)?);

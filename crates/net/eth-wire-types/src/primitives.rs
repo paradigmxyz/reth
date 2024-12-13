@@ -1,5 +1,6 @@
 //! Abstraction over primitive types in network messages.
 
+use alloy_consensus::{RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_rlp::{Decodable, Encodable};
 use reth_primitives_traits::{Block, BlockBody, BlockHeader, SignedTransaction};
 use std::fmt::Debug;
@@ -30,15 +31,12 @@ pub trait NetworkPrimitives:
     type PooledTransaction: SignedTransaction + TryFrom<Self::BroadcastedTransaction> + 'static;
 
     /// The transaction type which peers return in `GetReceipts` messages.
-    type Receipt: Encodable
+    type Receipt: TxReceipt
+        + RlpEncodableReceipt
+        + RlpDecodableReceipt
+        + Encodable
         + Decodable
-        + Send
-        + Sync
         + Unpin
-        + Clone
-        + Debug
-        + PartialEq
-        + Eq
         + 'static;
 }
 

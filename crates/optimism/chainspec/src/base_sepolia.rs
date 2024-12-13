@@ -29,7 +29,6 @@ pub static BASE_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
                 ]
                 .into(),
             ),
-            max_gas_limit: crate::constants::BASE_SEPOLIA_MAX_GAS_LIMIT,
             prune_delete_limit: 10000,
             ..Default::default()
         },

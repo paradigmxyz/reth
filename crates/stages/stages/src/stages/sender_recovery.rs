@@ -376,8 +376,8 @@ mod tests {
     use reth_primitives::{SealedBlock, TransactionSigned};
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::{
-        providers::StaticFileWriter, DatabaseProviderFactory, PruneCheckpointWriter,
-        StaticFileProviderFactory, TransactionsProvider,
+        providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
+        PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_api::StageUnitCheckpoint;

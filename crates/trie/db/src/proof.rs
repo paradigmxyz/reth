@@ -1,16 +1,13 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use alloy_primitives::{
-    keccak256,
-    map::{B256HashMap, B256HashSet, HashMap},
-    Address, B256,
-};
+use alloy_primitives::{keccak256, map::HashMap, Address, B256};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StateProofError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
-    AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, StorageMultiProof, TrieInput,
+    AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
+    StorageMultiProof, TrieInput,
 };
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
@@ -30,7 +27,7 @@ pub trait DatabaseProof<'a, TX> {
     fn overlay_multiproof(
         tx: &'a TX,
         input: TrieInput,
-        targets: B256HashMap<B256HashSet>,
+        targets: MultiProofTargets,
     ) -> Result<MultiProof, StateProofError>;
 }
 
@@ -66,7 +63,7 @@ impl<'a, TX: DbTx> DatabaseProof<'a, TX>
     fn overlay_multiproof(
         tx: &'a TX,
         input: TrieInput,
-        targets: B256HashMap<B256HashSet>,
+        targets: MultiProofTargets,
     ) -> Result<MultiProof, StateProofError> {
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();

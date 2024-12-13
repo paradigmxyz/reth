@@ -51,8 +51,7 @@ impl TryFrom<RecoveredTx> for PooledTransactionsElementEcRecovered {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::TransactionSigned;
-    use alloy_consensus::Transaction as _;
+    use alloy_consensus::{transaction::RlpEcdsaTx, Transaction as _, TxLegacy};
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{address, hex};
     use alloy_rlp::Decodable;
@@ -131,7 +130,7 @@ mod tests {
         // this is a legacy tx so we can attempt the same test with
         // decode_rlp_legacy_transaction_tuple
         let input_rlp = &mut &data[..];
-        let res = TransactionSigned::decode_rlp_legacy_transaction_tuple(input_rlp);
+        let res = TxLegacy::rlp_decode_signed(input_rlp);
         assert_matches!(res, Ok(_tx));
         assert!(input_rlp.is_empty());
 

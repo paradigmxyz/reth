@@ -22,11 +22,11 @@ use reth_consensus_common::validation::{
     validate_header_base_fee, validate_header_extradata, validate_header_gas,
 };
 use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt, SealedBlock, SealedHeader};
-use reth_primitives_traits::{constants::MINIMUM_GAS_LIMIT, BlockBody};
+use reth_primitives_traits::{
+    constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
+    BlockBody,
+};
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
-
-/// The bound divisor of the gas limit, used in update calculations.
-pub const GAS_LIMIT_BOUND_DIVISOR: u64 = 1024;
 
 mod validation;
 pub use validation::validate_block_post_execution;

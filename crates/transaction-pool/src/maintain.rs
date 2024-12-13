@@ -7,7 +7,7 @@ use crate::{
     traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction, PoolUpdateKind,
 };
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, Typed2718};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use alloy_rlp::Encodable;
@@ -22,7 +22,7 @@ use reth_fs_util::FsPathError;
 use reth_primitives::{
     transaction::SignedTransactionIntoRecoveredExt, SealedHeader, TransactionSigned,
 };
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -70,7 +70,7 @@ impl LocalTransactionBackupConfig {
 }
 
 /// Returns a spawnable future for maintaining the state of the transaction pool.
-pub fn maintain_transaction_pool_future<Client, P, St, Tasks>(
+pub fn maintain_transaction_pool_future<N, Client, P, St, Tasks>(
     client: Client,
     pool: P,
     events: St,
@@ -78,9 +78,14 @@ pub fn maintain_transaction_pool_future<Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) -> BoxFuture<'static, ()>
 where
+    N: NodePrimitives<
+        BlockHeader = reth_primitives::Header,
+        BlockBody = reth_primitives::BlockBody,
+        SignedTx = TransactionSigned,
+    >,
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = TransactionSigned>> + 'static,
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
     async move {
@@ -92,16 +97,21 @@ where
 /// Maintains the state of the transaction pool by handling new blocks and reorgs.
 ///
 /// This listens for any new blocks and reorgs and updates the transaction pool's state accordingly
-pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
+pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     client: Client,
     pool: P,
     mut events: St,
     task_spawner: Tasks,
     config: MaintainPoolConfig,
 ) where
+    N: NodePrimitives<
+        BlockHeader = reth_primitives::Header,
+        BlockBody = reth_primitives::BlockBody,
+        SignedTx = TransactionSigned,
+    >,
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = TransactionSigned>> + 'static,
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
     let metrics = MaintainPoolMetrics::default();
@@ -261,8 +271,8 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let old_first = old_blocks.first();
 
                 // check if the reorg is not canonical with the pool's block
-                if !(old_first.parent_hash == pool_info.last_seen_block_hash ||
-                    new_first.parent_hash == pool_info.last_seen_block_hash)
+                if !(old_first.parent_hash() == pool_info.last_seen_block_hash ||
+                    new_first.parent_hash() == pool_info.last_seen_block_hash)
                 {
                     // the new block points to a higher block than the oldest block in the old chain
                     maintained_state = MaintainedPoolState::Drifted;
@@ -273,7 +283,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // fees for the next block: `new_tip+1`
                 let pending_block_base_fee = new_tip
                     .next_block_base_fee(
-                        chain_spec.base_fee_params_at_timestamp(new_tip.timestamp + 12),
+                        chain_spec.base_fee_params_at_timestamp(new_tip.timestamp() + 12),
                     )
                     .unwrap_or_default();
                 let pending_block_blob_fee = new_tip.next_block_blob_fee();
@@ -376,7 +386,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 // fees for the next block: `tip+1`
                 let pending_block_base_fee = tip
                     .next_block_base_fee(
-                        chain_spec.base_fee_params_at_timestamp(tip.timestamp + 12),
+                        chain_spec.base_fee_params_at_timestamp(tip.timestamp() + 12),
                     )
                     .unwrap_or_default();
                 let pending_block_blob_fee = tip.next_block_blob_fee();
@@ -384,22 +394,22 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let first_block = blocks.first();
                 trace!(
                     target: "txpool",
-                    first = first_block.number,
-                    tip = tip.number,
+                    first = first_block.number(),
+                    tip = tip.number(),
                     pool_block = pool_info.last_seen_block_number,
                     "update pool on new commit"
                 );
 
                 // check if the depth is too large and should be skipped, this could happen after
                 // initial sync or long re-sync
-                let depth = tip.number.abs_diff(pool_info.last_seen_block_number);
+                let depth = tip.number().abs_diff(pool_info.last_seen_block_number);
                 if depth > max_update_depth {
                     maintained_state = MaintainedPoolState::Drifted;
                     debug!(target: "txpool", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
-                        block_gas_limit: tip.gas_limit,
+                        block_gas_limit: tip.gas_limit(),
                         last_seen_block_hash: tip.hash(),
-                        last_seen_block_number: tip.number,
+                        last_seen_block_number: tip.number(),
                         pending_basefee: pending_block_base_fee,
                         pending_blob_fee: pending_block_blob_fee,
                     };
@@ -421,7 +431,7 @@ pub async fn maintain_transaction_pool<Client, P, St, Tasks>(
                 let mined_transactions = blocks.transaction_hashes().collect();
 
                 // check if the range of the commit is canonical with the pool's block
-                if first_block.parent_hash != pool_info.last_seen_block_hash {
+                if first_block.parent_hash() != pool_info.last_seen_block_hash {
                     // we received a new canonical chain commit but the commit is not canonical with
                     // the pool's block, this could happen after initial sync or
                     // long re-sync

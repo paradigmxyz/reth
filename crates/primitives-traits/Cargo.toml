@@ -26,6 +26,12 @@ revm-primitives.workspace = true
 # op
 op-alloy-consensus = { workspace = true, optional = true }
 
+# crypto
+secp256k1 = { workspace = true, features = [
+	"recovery",
+], optional = true }
+k256.workspace = true
+
 # misc
 byteorder = { workspace = true, optional = true }
 bytes.workspace = true
@@ -67,8 +73,11 @@ std = [
 	"serde_with?/std",
 	"alloy-rlp/std",
 	"bytes/std",
-	"derive_more/std"
+	"derive_more/std",
+	"k256/std",
+	"secp256k1?/std"
 ]
+secp256k1 = ["dep:secp256k1"]
 test-utils = [
 	"arbitrary",
 	"reth-codecs?/test-utils"
@@ -102,7 +111,9 @@ serde = [
 	"reth-codecs?/serde",
 	"revm-primitives/serde",
 	"revm-primitives/serde",
-	"op-alloy-consensus?/serde"
+	"op-alloy-consensus?/serde",
+	"k256/serde",
+	"secp256k1?/serde"
 ]
 reth-codec = [
 	"dep:reth-codecs",

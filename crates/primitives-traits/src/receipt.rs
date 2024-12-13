@@ -1,6 +1,6 @@
 //! Receipt abstraction
 
-use crate::{InMemorySize, MaybeArbitrary, MaybeCompact, MaybeSerde};
+use crate::{InMemorySize, MaybeCompact, MaybeSerde};
 use alloc::vec::Vec;
 use alloy_consensus::{
     Eip2718EncodableReceipt, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt, Typed2718,
@@ -19,7 +19,6 @@ pub trait Receipt:
     + Sync
     + Unpin
     + Clone
-    + Default
     + fmt::Debug
     + TxReceipt<Log = alloy_primitives::Log>
     + RlpEncodableReceipt
@@ -28,7 +27,6 @@ pub trait Receipt:
     + Typed2718
     + MaybeSerde
     + InMemorySize
-    + MaybeArbitrary
 {
 }
 

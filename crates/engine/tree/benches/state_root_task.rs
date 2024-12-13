@@ -13,7 +13,11 @@ use reth_provider::{
     HashingWriter, ProviderFactory,
 };
 use reth_testing_utils::generators::{self, Rng};
-use reth_trie::TrieInput;
+use reth_trie::{
+    hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
+    trie_cursor::InMemoryTrieCursorFactory, TrieInput,
+};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use revm_primitives::{
     Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot, HashMap,
     B256, KECCAK_EMPTY, U256,
@@ -139,20 +143,38 @@ fn bench_state_root(c: &mut Criterion) {
                             consistent_view: ConsistentDbView::new(factory, None),
                             input: trie_input,
                         };
+                        let provider = config.consistent_view.provider_ro().unwrap();
+                        let nodes_sorted = config.input.nodes.clone().into_sorted();
+                        let state_sorted = config.input.state.clone().into_sorted();
+                        let prefix_sets = Arc::new(config.input.prefix_sets.clone());
 
-                        (config, state_updates)
+                        (config, state_updates, provider, nodes_sorted, state_sorted, prefix_sets)
                     },
-                    |(config, state_updates)| {
-                        let task = StateRootTask::new(config);
-                        let mut hook = task.state_hook();
-                        let handle = task.spawn();
+                    |(config, state_updates, provider, nodes_sorted, state_sorted, prefix_sets)| {
+                        let blinded_provider_factory = ProofBlindedProviderFactory::new(
+                            InMemoryTrieCursorFactory::new(
+                                DatabaseTrieCursorFactory::new(provider.tx_ref()),
+                                &nodes_sorted,
+                            ),
+                            HashedPostStateCursorFactory::new(
+                                DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                                &state_sorted,
+                            ),
+                            prefix_sets,
+                        );
 
-                        for update in state_updates {
-                            hook.on_state(&update)
-                        }
-                        drop(hook);
+                        black_box(std::thread::scope(|scope| {
+                            let task = StateRootTask::new(config, blinded_provider_factory);
+                            let mut hook = task.state_hook();
+                            let handle = task.spawn(scope);
 
-                        black_box(handle.wait_for_result().expect("task failed"));
+                            for update in state_updates {
+                                hook.on_state(&update)
+                            }
+                            drop(hook);
+
+                            handle.wait_for_result().expect("task failed")
+                        }));
                     },
                 )
             },

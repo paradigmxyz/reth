@@ -21,6 +21,7 @@ reth-consensus.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-evm.workspace = true
+reth-execution-errors.workspace = true
 reth-network-p2p.workspace = true
 reth-payload-builder-primitives.workspace = true
 reth-payload-builder.workspace = true

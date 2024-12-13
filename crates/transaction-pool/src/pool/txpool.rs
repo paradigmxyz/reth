@@ -39,11 +39,47 @@ use std::{
 use tracing::trace;
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
+// TODO: Inlined diagram due to a bug in aquamarine library, should become an include when it's
+// fixed. See https://github.com/mersinvald/aquamarine/issues/50
+// include_mmd!("docs/mermaid/txpool.mmd")
 /// A pool that manages transactions.
 ///
 /// This pool maintains the state of all transactions and stores them accordingly.
 ///
-/// `include_mmd!("docs/mermaid/txpool.mmd`")
+/// ```mermaid
+/// graph TB
+///   subgraph TxPool
+///     direction TB
+///     pool[(All Transactions)]
+///     subgraph Subpools
+///         direction TB
+///         B3[(Queued)]
+///         B1[(Pending)]
+///         B2[(Basefee)]
+///         B4[(Blob)]
+///     end
+///   end
+///   discard([discard])
+///   production([Block Production])
+///   new([New Block])
+///   A[Incoming Tx] --> B[Validation] -->|ins
+///   pool --> |if ready + blobfee too low| B4
+///   pool --> |if ready| B1
+///   pool --> |if ready + basfee too low| B2
+///   pool --> |nonce gap or lack of funds| B3
+///   pool --> |update| pool
+///   B1 --> |best| production
+///   B2 --> |worst| discard
+///   B3 --> |worst| discard
+///   B4 --> |worst| discard
+///   B1 --> |increased blob fee| B4
+///   B4 --> |decreased blob fee| B1
+///   B1 --> |increased base fee| B2
+///   B2 --> |decreased base fee| B1
+///   B3 --> |promote| B1
+///   B3 --> |promote| B2
+///   new --> |apply state changes| pool
+/// ```
 pub struct TxPool<T: TransactionOrdering> {
     /// Contains the currently known information about the senders.
     sender_info: FxHashMap<SenderId, SenderInfo>,

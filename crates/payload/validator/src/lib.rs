@@ -144,7 +144,7 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
                 return Err(PayloadError::PostCancunWithoutCancunFields)
             }
         } else {
-            if sealed_block.has_blob_transactions() {
+            if sealed_block.has_eip4844_transactions() {
                 // cancun not active but blob transactions present
                 return Err(PayloadError::PreCancunBlockWithBlobTransactions)
             }

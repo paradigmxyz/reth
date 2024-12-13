@@ -427,6 +427,7 @@ impl<N: ProviderNodeTypes> PipelineState<N> {
 mod tests {
     use super::*;
     use alloy_consensus::Header;
+    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
@@ -633,7 +634,7 @@ mod tests {
         let client = TestFullBlockClient::default();
         let header = Header {
             base_fee_per_gas: Some(7),
-            gas_limit: chain_spec.max_gas_limit,
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             ..Default::default()
         };
         let header = SealedHeader::seal(header);

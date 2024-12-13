@@ -32,7 +32,7 @@ impl ChangedAccount {
 ///
 /// The `ExecutionOutcome` structure aggregates the state changes over an arbitrary number of
 /// blocks, capturing the resulting state, receipts, and requests following the execution.
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ExecutionOutcome<T = reth_primitives::Receipt> {
     /// Bundle state with reverts.
@@ -52,6 +52,17 @@ pub struct ExecutionOutcome<T = reth_primitives::Receipt> {
     /// A transaction may have zero or more requests, so the length of the inner vector is not
     /// guaranteed to be the same as the number of transactions.
     pub requests: Vec<Requests>,
+}
+
+impl<T> Default for ExecutionOutcome<T> {
+    fn default() -> Self {
+        Self {
+            bundle: Default::default(),
+            receipts: Default::default(),
+            first_block: Default::default(),
+            requests: Default::default(),
+        }
+    }
 }
 
 /// Type used to initialize revms bundle state.
