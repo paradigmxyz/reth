@@ -1,10 +1,14 @@
 //! Helpers for testing.
 
 use crate::{
-    env::EvmEnv, execute::{
+    env::EvmEnv,
+    execute::{
         BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionInput,
         BlockExecutionOutput, BlockExecutionStrategy, BlockExecutorProvider, Executor,
-    }, provider::EvmEnvProvider, system_calls::OnStateHook, ConfigureEvmEnv
+    },
+    provider::EvmEnvProvider,
+    system_calls::OnStateHook,
+    ConfigureEvmEnv,
 };
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockNumber, U256};
