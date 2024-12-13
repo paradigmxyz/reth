@@ -24,7 +24,7 @@ use alloy_eips::{
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{InvalidTransactionError, SealedBlock};
-use reth_primitives_traits::GotExpected;
+use reth_primitives_traits::{BlockBody, GotExpected};
 use reth_storage_api::{AccountReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -45,8 +45,8 @@ pub struct EthTransactionValidator<Client, T> {
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     /// Returns the configured chain spec
-    pub fn chain_spec(&self) -> Arc<ChainSpec> {
-        self.inner.chain_spec.clone()
+    pub fn chain_spec(&self) -> &Arc<ChainSpec> {
+        &self.inner.chain_spec
     }
 
     /// Returns the configured client
@@ -106,7 +106,11 @@ where
         self.validate_all(transactions)
     }
 
-    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+    fn on_new_head_block<H, B>(&self, new_tip_block: &SealedBlock<H, B>)
+    where
+        H: reth_primitives_traits::BlockHeader,
+        B: BlockBody,
+    {
         self.inner.on_new_head_block(new_tip_block.header())
     }
 }
@@ -850,7 +854,9 @@ mod tests {
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
     use reth_chainspec::MAINNET;
-    use reth_primitives::PooledTransactionsElement;
+    use reth_primitives::{
+        transaction::SignedTransactionIntoRecoveredExt, PooledTransactionsElement,
+    };
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {

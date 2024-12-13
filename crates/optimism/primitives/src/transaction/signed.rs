@@ -4,7 +4,7 @@ use crate::OpTxType;
 use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Transaction, TxEip1559, TxEip2930, TxEip7702,
-    Typed2718,
+    TxLegacy, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -25,10 +25,7 @@ use once_cell::sync::OnceCell as OnceLock;
 use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
-use reth_primitives::{
-    transaction::{recover_signer, recover_signer_unchecked},
-    TransactionSigned,
-};
+use reth_primitives::transaction::{recover_signer, recover_signer_unchecked};
 use reth_primitives_traits::{FillTxEnv, InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, OptimismFields, TxEnv};
 #[cfg(feature = "std")]
@@ -63,7 +60,7 @@ impl OpTransactionSigned {
 
     /// Creates a new signed transaction from the given transaction and signature without the hash.
     ///
-    /// Note: this only calculates the hash on the first [`TransactionSigned::hash`] call.
+    /// Note: this only calculates the hash on the first [`OpTransactionSigned::hash`] call.
     pub fn new_unhashed(transaction: OpTypedTransaction, signature: Signature) -> Self {
         Self { hash: Default::default(), signature, transaction }
     }
@@ -222,7 +219,6 @@ impl InMemorySize for OpTransactionSigned {
 }
 
 impl alloy_rlp::Encodable for OpTransactionSigned {
-    /// See [`alloy_rlp::Encodable`] impl for [`TransactionSigned`].
     fn encode(&self, out: &mut dyn alloy_rlp::bytes::BufMut) {
         self.network_encode(out);
     }
@@ -238,7 +234,6 @@ impl alloy_rlp::Encodable for OpTransactionSigned {
 }
 
 impl alloy_rlp::Decodable for OpTransactionSigned {
-    /// See [`alloy_rlp::Decodable`] impl for [`TransactionSigned`].
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Self::network_decode(buf).map_err(Into::into)
     }
@@ -321,10 +316,8 @@ impl Decodable2718 for OpTransactionSigned {
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        let (transaction, hash, signature) =
-            TransactionSigned::decode_rlp_legacy_transaction_tuple(buf)?;
+        let (transaction, signature) = TxLegacy::rlp_decode_with_signature(buf)?;
         let signed_tx = Self::new_unhashed(OpTypedTransaction::Legacy(transaction), signature);
-        signed_tx.hash.get_or_init(|| hash);
 
         Ok(signed_tx)
     }

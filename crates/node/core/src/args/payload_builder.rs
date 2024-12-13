@@ -16,9 +16,9 @@ pub struct PayloadBuilderArgs {
     #[arg(long = "builder.extradata", value_parser = ExtradataValueParser::default(), default_value_t = default_extra_data())]
     pub extradata: String,
 
-    /// Target gas ceiling for built blocks.
-    #[arg(long = "builder.gaslimit", default_value = "30000000", value_name = "GAS_LIMIT")]
-    pub max_gas_limit: u64,
+    /// Target gas limit for built blocks.
+    #[arg(long = "builder.gaslimit", default_value_t = ETHEREUM_BLOCK_GAS_LIMIT, value_name = "GAS_LIMIT")]
+    pub gas_limit: u64,
 
     /// The interval at which the job should build a new payload after the last.
     ///
@@ -41,7 +41,7 @@ impl Default for PayloadBuilderArgs {
     fn default() -> Self {
         Self {
             extradata: default_extra_data(),
-            max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             interval: Duration::from_secs(1),
             deadline: SLOT_DURATION,
             max_payload_tasks: 3,
@@ -62,8 +62,8 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
         self.deadline
     }
 
-    fn max_gas_limit(&self) -> u64 {
-        self.max_gas_limit
+    fn gas_limit(&self) -> u64 {
+        self.gas_limit
     }
 
     fn max_payload_tasks(&self) -> usize {
@@ -129,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn test_default_extradata() {
+    fn test_default_extra_data() {
         let extradata = default_extra_data();
         let args = CommandParser::<PayloadBuilderArgs>::parse_from([
             "reth",
