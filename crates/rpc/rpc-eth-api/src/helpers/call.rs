@@ -94,7 +94,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             let base_block =
                 self.block_with_senders(block).await?.ok_or(EthApiError::HeaderNotFound(block))?;
-            let mut parent_hash = base_block.header.hash();
+            let mut parent_hash = base_block.hash();
 
             // Only enforce base fee if validation is enabled
             cfg.disable_base_fee = !validation;

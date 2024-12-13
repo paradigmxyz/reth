@@ -1762,18 +1762,18 @@ where
                 target: "engine::tree",
                 ?block,
                 "Failed to validate total difficulty for block {}: {e}",
-                block.header.hash()
+                block.hash()
             );
             return Err(e)
         }
 
         if let Err(e) = self.consensus.validate_header(block) {
-            error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.header.hash());
+            error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
 
         if let Err(e) = self.consensus.validate_block_pre_execution(block) {
-            error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.header.hash());
+            error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
 
@@ -2210,7 +2210,7 @@ where
             ))
         })?;
         if let Err(e) = self.consensus.validate_header_against_parent(&block, &parent_block) {
-            warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.header.hash());
+            warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
             return Err(e.into())
         }
 

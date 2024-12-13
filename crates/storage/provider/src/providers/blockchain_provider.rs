@@ -1535,7 +1535,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
@@ -1544,7 +1544,7 @@ mod tests {
         assert_eq!(provider.block_by_id(block_hash.into()).unwrap(), Some(database_block.unseal()));
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
             Some(in_memory_block.clone().unseal())
@@ -1628,7 +1628,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert_eq!(
             provider.header_by_id(block_number.into()).unwrap(),
@@ -1649,7 +1649,7 @@ mod tests {
         );
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
 
         assert_eq!(
             provider.header_by_id(block_number.into()).unwrap(),
@@ -1686,7 +1686,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
@@ -1698,7 +1698,7 @@ mod tests {
         );
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
@@ -1726,7 +1726,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert!(!receipts.get(database_block.number as usize).unwrap().is_empty());
         assert!(!provider
@@ -1744,7 +1744,7 @@ mod tests {
         );
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
 
         assert_eq!(
             provider.receipts_by_block_id(block_number.into())?.unwrap(),
