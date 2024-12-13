@@ -6,7 +6,7 @@ use crate::{
     tree::metrics::EngineApiMetrics,
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::BlockNumHash;
+use alloy_eips::{eip7685::Requests, BlockNumHash};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256, U256,
@@ -31,7 +31,10 @@ use reth_engine_primitives::{
     EngineValidator, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::{
+    execute::{BlockExecutionOutput, BlockExecutorProvider},
+    system_calls::OnStateHook,
+};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::PayloadBuilderAttributes;
@@ -41,17 +44,23 @@ use reth_primitives::{
 };
 use reth_primitives_traits::Block;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, ExecutionOutcome,
-    HashedPostStateProvider, ProviderError, StateCommitmentProvider, StateProviderBox,
-    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
+    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
+    StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, db::BundleState};
 use reth_stages_api::ControlFlow;
 use reth_trie::{
-    updates::{StorageTrieUpdates, TrieUpdates},
-    Nibbles, TrieInput,
+    hashed_cursor::HashedPostStateCursorFactory,
+    prefix_set::TriePrefixSetsMut,
+    proof::ProofBlindedProviderFactory,
+    trie_cursor::InMemoryTrieCursorFactory,
+    updates::{StorageTrieUpdates, TrieUpdates, TrieUpdatesSorted},
+    HashedPostState, HashedPostStateSorted, Nibbles, TrieInput,
 };
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use revm_primitives::EvmState;
 use root::{StateRootConfig, StateRootTask};
 use std::{
     cmp::Ordering,
@@ -80,6 +89,13 @@ pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::InvalidBlockHook;
 
 pub mod root;
+
+struct StateHookContext<P> {
+    provider_ro: P,
+    nodes_sorted: TrieUpdatesSorted,
+    state_sorted: HashedPostStateSorted,
+    prefix_sets: Arc<TriePrefixSetsMut>,
+}
 
 /// Keeps track of the state of the tree.
 ///
@@ -2227,116 +2243,148 @@ where
 
         let exec_time = Instant::now();
 
-        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+        let persistence_not_in_progress = !self.persistence_state.in_progress();
 
-        let input = self
-            .compute_trie_input(consistent_view.clone(), block.header().parent_hash())
-            .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
-        let state_root_config = StateRootConfig { consistent_view, input: Arc::new(input) };
-        let state_root_task = StateRootTask::new(state_root_config);
-        let state_hook = state_root_task.state_hook();
-        let state_root_handle = state_root_task.spawn();
+        let state_root_result = match std::thread::scope(|scope| {
+            let (state_root_handle, state_hook) = if persistence_not_in_progress {
+                let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
-        let output = self.metrics.executor.execute_metered(
-            executor,
-            (&block, U256::MAX).into(),
-            Box::new(state_hook),
-        )?;
+                let input = Arc::new(
+                    self.compute_trie_input(consistent_view.clone(), block.header().parent_hash())
+                        .unwrap(),
+                );
+                let state_root_config = StateRootConfig {
+                    consistent_view: consistent_view.clone(),
+                    input: input.clone(),
+                };
 
-        trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
+                let provider_ro = consistent_view.provider_ro()?;
+                let nodes_sorted = input.nodes.clone().into_sorted();
+                let state_sorted = input.state.clone().into_sorted();
+                let prefix_sets = Arc::new(input.prefix_sets.clone());
 
-        if let Err(err) = self.consensus.validate_block_post_execution(
-            &block,
-            PostExecutionInput::new(&output.receipts, &output.requests),
-        ) {
-            // call post-block hook
-            self.invalid_block_hook.on_invalid_block(
-                &parent_block,
-                &block.seal_slow(),
-                &output,
-                None,
-            );
-            return Err(err.into())
-        }
+                let context =
+                    StateHookContext { provider_ro, nodes_sorted, state_sorted, prefix_sets };
 
-        let hashed_state = self.provider.hashed_post_state(&output.state);
+                let context = Box::leak(Box::new(context));
 
-        trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
-        let root_time = Instant::now();
-        let mut state_root_result = None;
+                let blinded_provider_factory = ProofBlindedProviderFactory::new(
+                    InMemoryTrieCursorFactory::new(
+                        DatabaseTrieCursorFactory::new(context.provider_ro.tx_ref()),
+                        &context.nodes_sorted,
+                    ),
+                    HashedPostStateCursorFactory::new(
+                        DatabaseHashedCursorFactory::new(context.provider_ro.tx_ref()),
+                        &context.state_sorted,
+                    ),
+                    context.prefix_sets.clone(),
+                );
 
-        // We attempt to compute state root in parallel if we are currently not persisting anything
-        // to database. This is safe, because the database state cannot change until we
-        // finish parallel computation. It is important that nothing is being persisted as
-        // we are computing in parallel, because we initialize a different database transaction
-        // per thread and it might end up with a different view of the database.
-        let persistence_in_progress = self.persistence_state.in_progress();
-        if !persistence_in_progress {
-            let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-            let mut input = self
-                .compute_trie_input(consistent_view.clone(), block.header().parent_hash())
-                .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
-            // Extend with block we are validating root for.
-            input.append_ref(&hashed_state);
+                let state_root_task =
+                    StateRootTask::new(state_root_config, blinded_provider_factory);
+                let state_hook = state_root_task.state_hook();
+                (Some(state_root_task.spawn(scope)), Box::new(state_hook) as Box<dyn OnStateHook>)
+            } else {
+                (None, Box::new(|_state: &EvmState| {}) as Box<dyn OnStateHook>)
+            };
 
-            state_root_result = match self.compute_state_root_parallel(consistent_view, input) {
-                Ok((state_root, trie_output)) => Some((state_root, trie_output)),
-                Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
-                    debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
-                    None
-                }
-                Err(error) => return Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
+            let output = self.metrics.executor.execute_metered(
+                executor,
+                (&block, U256::MAX).into(),
+                state_hook,
+            )?;
+
+            trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
+
+            if let Err(err) = self.consensus.validate_block_post_execution(
+                &block,
+                PostExecutionInput::new(&output.receipts, &output.requests),
+            ) {
+                // call post-block hook
+                self.invalid_block_hook.on_invalid_block(
+                    &parent_block,
+                    &block.clone().seal_slow(),
+                    &output,
+                    None,
+                );
+                return Err(err.into())
             }
-        } else {
-            None
-        };
 
-        let (state_root, trie_output) = if let Some(result) = state_root_result {
-            match state_root_handle.wait_for_result() {
-                Ok(state_root_task_result) => {
-                    info!(target: "engine::tree", block=?sealed_block.num_hash(), state_root_task_result=?state_root_task_result.0,  regular_state_root_result = ?result.0);
-                    let task_trie_updates = &state_root_task_result.1;
-                    let regular_trie_updates = &result.1;
-                    let diff = compare_trie_updates(task_trie_updates, regular_trie_updates);
-                    if diff.has_differences() {
-                        for path in diff.account_nodes_with_different_values {
-                            let task_entry = task_trie_updates.account_nodes.get(&path);
-                            let regular_entry = regular_trie_updates.account_nodes.get(&path);
-                            if task_entry != regular_entry {
-                                debug!(target: "engine::tree", ?path, ?task_entry, ?regular_entry, "Difference in account node updates");
-                            }
+            let hashed_state = self.provider.hashed_post_state(&output.state);
+
+            trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
+            let root_time = Instant::now();
+
+            // We attempt to compute state root in parallel if we are currently not persisting
+            // anything to database. This is safe, because the database state cannot
+            // change until we finish parallel computation. It is important that nothing
+            // is being persisted as we are computing in parallel, because we initialize
+            // a different database transaction per thread and it might end up with a
+            // different view of the database.
+            if persistence_not_in_progress {
+                if let Some(state_root_handle) = state_root_handle {
+                    match state_root_handle.wait_for_result() {
+                        Ok((task_state_root, _task_trie_updates)) => {
+                            info!(
+                                target: "engine::tree",
+                                block = ?sealed_block.num_hash(),
+                                ?task_state_root,
+                                "State root task finished"
+                            );
                         }
-                        for address in diff.storage_tries_with_differences.keys() {
-                            let task = task_trie_updates.storage_tries.get(address);
-                            let regular = regular_trie_updates.storage_tries.get(address);
-                            for path in task
-                                .map_or_else(HashSet::new, |tries| {
-                                    tries.storage_nodes.keys().collect()
-                                })
-                                .union(&regular.map_or_else(HashSet::new, |tries| {
-                                    tries.storage_nodes.keys().collect()
-                                }))
-                            {
-                                let task_entry = task.map(|tries| tries.storage_nodes.get(*path));
-                                let regular_entry =
-                                    regular.map(|tries| tries.storage_nodes.get(*path));
-                                if task_entry != regular_entry {
-                                    debug!(target: "engine::tree", ?address, ?path, ?task_entry, ?regular_entry, "Difference in storage trie updates");
-                                }
-                            }
+                        Err(error) => {
+                            info!(target: "engine::tree", ?error, "Failed to wait for state root task
+             result");
                         }
-                    } else {
-                        debug!(target: "engine::tree", block=?sealed_block.num_hash(), "TrieUpdates match exactly");
                     }
                 }
-                Err(e) => {
-                    info!(target: "engine::tree", error=?e, "on state root task wait_for_result")
+
+                match self.compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
+                {
+                    Ok(result) => {
+                        info!(
+                            target: "engine::tree",
+                            block = ?sealed_block.num_hash(),
+                            regular_state_root = ?result.0,
+                            "Regular root task finished"
+                        );
+                        Ok(Some((result.0, result.1, hashed_state, output, root_time)))
+                    }
+                    Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
+                        debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
+                        Ok(None)
+                    }
+                    Err(error) => return Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
                 }
+            } else {
+                Ok(None)
             }
+        }) {
+            Ok(Some(res)) => Some(res),
+            Ok(None) => None,
+            Err(e) => return Err(e),
+        };
+
+        let (state_root, trie_output, hashed_state, output, root_time) = if let Some(result) =
+            state_root_result
+        {
             result
         } else {
             debug!(target: "engine::tree", block=?sealed_block.num_hash(), ?persistence_not_in_progress, "Failed to compute state root in parallel");
-            state_provider.state_root_with_updates(hashed_state.clone())?
+            let (root, updates) =
+                state_provider.state_root_with_updates(HashedPostState::default())?;
+            (
+                root,
+                updates,
+                HashedPostState::default(),
+                BlockExecutionOutput {
+                    state: BundleState::default(),
+                    gas_used: 0,
+                    receipts: vec![],
+                    requests: Requests::default(),
+                },
+                Instant::now(),
+            )
         };
 
         if state_root != block.header().state_root() {
@@ -2424,9 +2472,15 @@ where
     /// should be used instead.
     fn compute_state_root_parallel(
         &self,
-        consistent_view: ConsistentDbView<P>,
-        input: TrieInput,
+        parent_hash: B256,
+        hashed_state: &HashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
+        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+
+        let mut input = self.compute_trie_input(consistent_view.clone(), parent_hash)?;
+        // Extend with block we are validating root for.
+        input.append_ref(hashed_state);
+
         ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
 
