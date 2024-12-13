@@ -11,8 +11,7 @@
 
 use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{
-    eip4844::MAX_DATA_GAS_PER_BLOCK, eip7002::WITHDRAWAL_REQUEST_TYPE,
-    eip7251::CONSOLIDATION_REQUEST_TYPE, eip7685::Requests, merge::BEACON_NONCE,
+    eip4844::MAX_DATA_GAS_PER_BLOCK, eip6110, eip7685::Requests, merge::BEACON_NONCE,
 };
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
@@ -357,11 +356,11 @@ where
         executed_txs.push(tx.into_signed());
     }
 
-    // Release db
-    drop(evm);
-
     // check if we have a better block
     if !is_better_payload(best_payload.as_ref(), total_fees) {
+        // Release db
+        drop(evm);
+
         // can skip building the block
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
@@ -370,45 +369,26 @@ where
     let requests = if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
         let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter().flatten())
             .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
-        let withdrawal_requests = system_caller
-            .post_block_withdrawal_requests_contract_call(
-                &mut db,
-                &initialized_cfg,
-                &initialized_block_env,
-            )
-            .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
-        let consolidation_requests = system_caller
-            .post_block_consolidation_requests_contract_call(
-                &mut db,
-                &initialized_cfg,
-                &initialized_block_env,
-            )
-            .map_err(|err| PayloadBuilderError::Internal(err.into()))?;
 
         let mut requests = Requests::default();
 
         if !deposit_requests.is_empty() {
-            requests.push_request(core::iter::once(0).chain(deposit_requests).collect());
+            requests.push_request_with_type(eip6110::DEPOSIT_REQUEST_TYPE, deposit_requests);
         }
 
-        if !withdrawal_requests.is_empty() {
-            requests.push_request(
-                core::iter::once(WITHDRAWAL_REQUEST_TYPE).chain(withdrawal_requests).collect(),
-            );
-        }
-
-        if !consolidation_requests.is_empty() {
-            requests.push_request(
-                core::iter::once(CONSOLIDATION_REQUEST_TYPE)
-                    .chain(consolidation_requests)
-                    .collect(),
-            );
-        }
+        requests.extend(
+            system_caller
+                .apply_post_execution_changes(&mut evm)
+                .map_err(|err| PayloadBuilderError::Internal(err.into()))?,
+        );
 
         Some(requests)
     } else {
         None
     };
+
+    // Release db
+    drop(evm);
 
     let withdrawals_root =
         commit_withdrawals(&mut db, &chain_spec, attributes.timestamp, &attributes.withdrawals)?;
