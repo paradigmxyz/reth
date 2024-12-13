@@ -38,7 +38,6 @@ pub use reth_primitives_traits::{
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
-pub use sidecar::BlobTransaction;
 pub use signature::{recover_signer, recover_signer_unchecked};
 #[cfg(feature = "std")]
 use std::sync::{LazyLock, OnceLock};
@@ -53,7 +52,6 @@ pub(crate) mod access_list;
 mod compat;
 mod meta;
 mod pooled;
-mod sidecar;
 mod tx_type;
 
 #[cfg(any(test, feature = "reth-codec"))]
