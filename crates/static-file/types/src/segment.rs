@@ -47,7 +47,7 @@ impl StaticFileSegment {
             Self::Headers => "headers",
             Self::Transactions => "transactions",
             Self::Receipts => "receipts",
-            Self::BlockMeta => "blockmeta",
+            Self::BlockMeta => "bmeta",
         }
     }
 
