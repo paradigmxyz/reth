@@ -560,8 +560,7 @@ mod tests {
                 HashMap::from_iter([
                     (address_1, HashSet::from_iter([slot_1, slot_2])),
                     (address_2, HashSet::from_iter([slot_1, slot_2])),
-                ])
-                .into(),
+                ]),
                 MultiProof {
                     account_subtree: proof_nodes,
                     branch_node_hash_masks: HashMap::from_iter([(

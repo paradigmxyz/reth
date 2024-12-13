@@ -94,10 +94,10 @@ where
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError> {
         Ok(self
-            .multiproof(
-                HashMap::from_iter([(keccak256(address), slots.iter().map(keccak256).collect())])
-                    .into(),
-            )?
+            .multiproof(HashMap::from_iter([(
+                keccak256(address),
+                slots.iter().map(keccak256).collect(),
+            )]))?
             .account_proof(address, slots)?)
     }
 
