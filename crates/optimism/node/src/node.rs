@@ -139,7 +139,7 @@ impl OpNode {
 
     /// Returns the components for the given [`RollupArgs`].
     pub fn components<Node>(
-        args: RollupArgs,
+        &self,
     ) -> ComponentsBuilder<
         Node,
         OpPoolBuilder,
@@ -157,11 +157,14 @@ impl OpNode {
             >,
         >,
     {
-        let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
+        let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } =
+            self.args;
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(OpPoolBuilder::default())
-            .payload(OpPayloadBuilder::new(compute_pending_block, OpDAConfig::default()))
+            .payload(
+                OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
+            )
             .network(OpNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
@@ -195,7 +198,7 @@ where
         OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
-        Self::components(self.args.clone())
+        Self::components(self)
     }
 
     fn add_ons(&self) -> Self::AddOns {
@@ -504,8 +507,14 @@ pub struct OpPayloadBuilder<Txs = ()> {
 
 impl OpPayloadBuilder {
     /// Create a new instance with the given `compute_pending_block` flag and data availability config.
-    pub const fn new(compute_pending_block: bool, da_config: OpDAConfig) -> Self {
-        Self { compute_pending_block, best_transactions: (), da_config }
+    pub fn new(compute_pending_block: bool) -> Self {
+        Self { compute_pending_block, best_transactions: (), da_config: OpDAConfig::default() }
+    }
+
+    /// Configure the data availability configuration for the OP payload builder.
+    pub fn with_da_config(mut self, da_config: OpDAConfig) -> Self {
+        self.da_config = da_config;
+        self
     }
 }
 

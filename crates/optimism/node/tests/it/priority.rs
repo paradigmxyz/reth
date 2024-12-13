@@ -24,7 +24,7 @@ use reth_optimism_node::{
     utils::optimism_payload_attributes,
     OpEngineTypes, OpNode,
 };
-use reth_optimism_payload_builder::{builder::OpPayloadTransactions, config::OpDAConfig};
+use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_primitives::OpPrimitives;
 use reth_payload_util::{PayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed};
 use reth_primitives::{RecoveredTx, SealedBlock, Transaction, TransactionSigned};
@@ -108,7 +108,7 @@ where
         .node_types::<Node>()
         .pool(OpPoolBuilder::default())
         .payload(
-            OpPayloadBuilder::new(compute_pending_block, OpDAConfig::default())
+            OpPayloadBuilder::new(compute_pending_block)
                 .with_transactions(CustomTxPriority { chain_id }),
         )
         .network(OpNetworkBuilder { disable_txpool_gossip, disable_discovery_v4: !discovery_v4 })
