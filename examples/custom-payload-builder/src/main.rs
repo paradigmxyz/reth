@@ -18,7 +18,6 @@ use reth::{
     payload::PayloadBuilderHandle,
     providers::CanonStateSubscriptions,
     transaction_pool::{PoolTransaction, TransactionPool},
-    version::default_extra_data_bytes,
 };
 use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
 use reth_chainspec::ChainSpec;
@@ -59,8 +58,7 @@ where
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
             .interval(conf.interval())
             .deadline(conf.deadline())
-            .max_payload_tasks(conf.max_payload_tasks())
-            .extradata(conf.extradata_bytes());
+            .max_payload_tasks(conf.max_payload_tasks());
 
         let payload_generator = EmptyBlockPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
@@ -69,7 +67,7 @@ where
             payload_job_config,
             reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
                 EthEvmConfig::new(ctx.chain_spec()),
-                EthereumBuilderConfig::new(default_extra_data_bytes()),
+                EthereumBuilderConfig::new(conf.extradata_bytes()),
             ),
         );
 

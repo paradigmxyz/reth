@@ -116,6 +116,7 @@ pub trait LoadPendingBlock:
                     timestamp: latest.timestamp() + 12,
                     suggested_fee_recipient: latest.beneficiary(),
                     prev_randao: B256::random(),
+                    gas_limit: latest.gas_limit(),
                 },
             )
             .map_err(RethError::other)

@@ -28,8 +28,8 @@ use reth_primitives_traits::BlockBody;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DatabaseProviderFactory, NodePrimitivesProvider, OmmersProvider, StateProvider,
-    StorageChangeSetReader,
+    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, OmmersProvider,
+    StateProvider, StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use revm::{
@@ -841,40 +841,6 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
-    fn block_body_indices(
-        &self,
-        number: BlockNumber,
-    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.get_in_memory_or_storage_by_block(
-            number.into(),
-            |db_provider| db_provider.block_body_indices(number),
-            |block_state| {
-                // Find the last block indices on database
-                let last_storage_block_number = block_state.anchor().number;
-                let mut stored_indices = self
-                    .storage_provider
-                    .block_body_indices(last_storage_block_number)?
-                    .ok_or(ProviderError::BlockBodyIndicesNotFound(last_storage_block_number))?;
-
-                // Prepare our block indices
-                stored_indices.first_tx_num = stored_indices.next_tx_num();
-                stored_indices.tx_count = 0;
-
-                // Iterate from the lowest block in memory until our target block
-                for state in block_state.chain().collect::<Vec<_>>().into_iter().rev() {
-                    let block_tx_count = state.block_ref().block.body.transactions().len() as u64;
-                    if state.block_ref().block().number() == number {
-                        stored_indices.tx_count = block_tx_count;
-                    } else {
-                        stored_indices.first_tx_num += block_tx_count;
-                    }
-                }
-
-                Ok(Some(stored_indices))
-            },
-        )
-    }
-
     /// Returns the block with senders with matching number or hash from database.
     ///
     /// **NOTE: If [`TransactionVariant::NoHash`] is provided then the transactions have invalid
@@ -1214,6 +1180,42 @@ impl<N: ProviderNodeTypes> OmmersProvider for ConsistentProvider<N> {
                 }
 
                 Ok(block_state.block_ref().block().body.ommers().map(|o| o.to_vec()))
+            },
+        )
+    }
+}
+
+impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ConsistentProvider<N> {
+    fn block_body_indices(
+        &self,
+        number: BlockNumber,
+    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        self.get_in_memory_or_storage_by_block(
+            number.into(),
+            |db_provider| db_provider.block_body_indices(number),
+            |block_state| {
+                // Find the last block indices on database
+                let last_storage_block_number = block_state.anchor().number;
+                let mut stored_indices = self
+                    .storage_provider
+                    .block_body_indices(last_storage_block_number)?
+                    .ok_or(ProviderError::BlockBodyIndicesNotFound(last_storage_block_number))?;
+
+                // Prepare our block indices
+                stored_indices.first_tx_num = stored_indices.next_tx_num();
+                stored_indices.tx_count = 0;
+
+                // Iterate from the lowest block in memory until our target block
+                for state in block_state.chain().collect::<Vec<_>>().into_iter().rev() {
+                    let block_tx_count = state.block_ref().block.body.transactions().len() as u64;
+                    if state.block_ref().block().number() == number {
+                        stored_indices.tx_count = block_tx_count;
+                    } else {
+                        stored_indices.first_tx_num += block_tx_count;
+                    }
+                }
+
+                Ok(Some(stored_indices))
             },
         )
     }

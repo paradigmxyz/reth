@@ -353,6 +353,7 @@ impl From<SegmentRangeInclusive> for RangeInclusive<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use strum::IntoEnumIterator;
 
     #[test]
     fn test_filename() {
@@ -401,5 +402,12 @@ mod tests {
 
         assert_eq!(StaticFileSegment::parse_filename("static_file_headers_2"), None);
         assert_eq!(StaticFileSegment::parse_filename("static_file_headers_"), None);
+
+        // roundtrip test
+        let dummy_range = SegmentRangeInclusive::new(123, 1230);
+        for segment in StaticFileSegment::iter() {
+            let filename = segment.filename(&dummy_range);
+            assert_eq!(Some((segment, dummy_range)), StaticFileSegment::parse_filename(&filename));
+        }
     }
 }

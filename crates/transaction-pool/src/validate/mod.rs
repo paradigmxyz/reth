@@ -243,7 +243,11 @@ where
         }
     }
 
-    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+    fn on_new_head_block<H, Body>(&self, new_tip_block: &SealedBlock<H, Body>)
+    where
+        H: BlockHeader,
+        Body: BlockBody,
+    {
         match self {
             Self::Left(v) => v.on_new_head_block(new_tip_block),
             Self::Right(v) => v.on_new_head_block(new_tip_block),

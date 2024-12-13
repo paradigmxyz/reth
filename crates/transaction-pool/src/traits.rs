@@ -1238,9 +1238,11 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
         let encoded_length = tx.encode_2718_len();
         let (tx, signer) = tx.to_components();
         match tx {
-            PooledTransactionsElement::BlobTransaction(tx) => {
+            PooledTransactionsElement::Eip4844(tx) => {
                 // include the blob sidecar
+                let (tx, sig, hash) = tx.into_parts();
                 let (tx, blob) = tx.into_parts();
+                let tx = TransactionSigned::new(tx.into(), sig, hash);
                 let tx = RecoveredTx::from_signed_transaction(tx, signer);
                 let mut pooled = Self::new(tx, encoded_length);
                 pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
@@ -1248,7 +1250,8 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
             }
             tx => {
                 // no blob sidecar
-                Self::new(tx.into_ecrecovered_transaction(signer), encoded_length)
+                let tx = RecoveredTx::from_signed_transaction(tx.into(), signer);
+                Self::new(tx, encoded_length)
             }
         }
     }
@@ -1416,7 +1419,7 @@ impl EthPoolTransaction for EthPooledTransaction {
         sidecar: BlobTransactionSidecar,
     ) -> Option<Self> {
         let (tx, signer) = tx.to_components();
-        PooledTransactionsElement::try_from_blob_transaction(tx, sidecar)
+        tx.try_into_pooled_eip4844(sidecar)
             .ok()
             .map(|tx| tx.with_signer(signer))
             .map(Self::from_pooled)

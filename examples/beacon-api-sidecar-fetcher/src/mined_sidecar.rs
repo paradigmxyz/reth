@@ -1,12 +1,14 @@
 use crate::BeaconSidecarConfig;
-use alloy_consensus::Transaction as _;
+use alloy_consensus::{
+    transaction::PooledTransaction, Signed, Transaction as _, TxEip4844WithSidecar,
+};
 use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
-    primitives::{BlobTransaction, SealedBlockWithSenders},
+    primitives::SealedBlockWithSenders,
     providers::CanonStateNotification,
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
@@ -28,7 +30,7 @@ pub struct BlockMetadata {
 
 #[derive(Debug, Clone)]
 pub struct MinedBlob {
-    pub transaction: BlobTransaction,
+    pub transaction: Signed<TxEip4844WithSidecar>,
     pub block_metadata: BlockMetadata,
 }
 
@@ -114,19 +116,21 @@ where
             Ok(blobs) => {
                 actions_to_queue.reserve_exact(txs.len());
                 for ((tx, _), sidecar) in txs.iter().zip(blobs.into_iter()) {
-                    let transaction =
-                        BlobTransaction::try_from_signed(tx.clone(), Arc::unwrap_or_clone(sidecar))
-                            .expect("should not fail to convert blob tx if it is already eip4844");
-
-                    let block_metadata = BlockMetadata {
-                        block_hash: block.hash(),
-                        block_number: block.number,
-                        gas_used: block.gas_used,
-                    };
-                    actions_to_queue.push(BlobTransactionEvent::Mined(MinedBlob {
-                        transaction,
-                        block_metadata,
-                    }));
+                    if let PooledTransaction::Eip4844(transaction) = tx
+                        .clone()
+                        .try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
+                        .expect("should not fail to convert blob tx if it is already eip4844")
+                    {
+                        let block_metadata = BlockMetadata {
+                            block_hash: block.hash(),
+                            block_number: block.number,
+                            gas_used: block.gas_used,
+                        };
+                        actions_to_queue.push(BlobTransactionEvent::Mined(MinedBlob {
+                            transaction,
+                            block_metadata,
+                        }));
+                    }
                 }
             }
             Err(_err) => {
@@ -268,15 +272,21 @@ async fn fetch_blobs_for_block(
     let sidecars: Vec<BlobTransactionEvent> = txs
         .iter()
         .filter_map(|(tx, blob_len)| {
-            sidecar_iterator.next_sidecar(*blob_len).map(|sidecar| {
-                let transaction = BlobTransaction::try_from_signed(tx.clone(), sidecar)
-                    .expect("should not fail to convert blob tx if it is already eip4844");
-                let block_metadata = BlockMetadata {
-                    block_hash: block.hash(),
-                    block_number: block.number,
-                    gas_used: block.gas_used,
-                };
-                BlobTransactionEvent::Mined(MinedBlob { transaction, block_metadata })
+            sidecar_iterator.next_sidecar(*blob_len).and_then(|sidecar| {
+                if let PooledTransaction::Eip4844(transaction) = tx
+                    .clone()
+                    .try_into_pooled_eip4844(sidecar)
+                    .expect("should not fail to convert blob tx if it is already eip4844")
+                {
+                    let block_metadata = BlockMetadata {
+                        block_hash: block.hash(),
+                        block_number: block.number,
+                        gas_used: block.gas_used,
+                    };
+                    Some(BlobTransactionEvent::Mined(MinedBlob { transaction, block_metadata }))
+                } else {
+                    None
+                }
             })
         })
         .collect();

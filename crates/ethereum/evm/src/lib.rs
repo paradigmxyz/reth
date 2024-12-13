@@ -154,7 +154,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
             self.chain_spec.base_fee_params_at_timestamp(attributes.timestamp),
         );
 
-        let mut gas_limit = U256::from(parent.gas_limit);
+        let mut gas_limit = U256::from(attributes.gas_limit);
 
         // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
         // elasticity multiplier to get the new gas limit.

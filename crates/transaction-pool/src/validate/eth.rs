@@ -45,8 +45,8 @@ pub struct EthTransactionValidator<Client, T> {
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     /// Returns the configured chain spec
-    pub fn chain_spec(&self) -> Arc<ChainSpec> {
-        self.inner.chain_spec.clone()
+    pub fn chain_spec(&self) -> &Arc<ChainSpec> {
+        &self.inner.chain_spec
     }
 
     /// Returns the configured client
@@ -854,7 +854,9 @@ mod tests {
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
     use reth_chainspec::MAINNET;
-    use reth_primitives::PooledTransactionsElement;
+    use reth_primitives::{
+        transaction::SignedTransactionIntoRecoveredExt, PooledTransactionsElement,
+    };
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn get_transaction() -> EthPooledTransaction {

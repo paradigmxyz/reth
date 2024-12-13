@@ -698,21 +698,17 @@ where
         if let Err(e) =
             self.externals.consensus.validate_header_with_total_difficulty(block, U256::MAX)
         {
-            error!(
-                ?block,
-                "Failed to validate total difficulty for block {}: {e}",
-                block.header.hash()
-            );
+            error!(?block, "Failed to validate total difficulty for block {}: {e}", block.hash());
             return Err(e);
         }
 
         if let Err(e) = self.externals.consensus.validate_header(block) {
-            error!(?block, "Failed to validate header {}: {e}", block.header.hash());
+            error!(?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e);
         }
 
         if let Err(e) = self.externals.consensus.validate_block_pre_execution(block) {
-            error!(?block, "Failed to validate block {}: {e}", block.header.hash());
+            error!(?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e);
         }
 

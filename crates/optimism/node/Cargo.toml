@@ -16,6 +16,7 @@ reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-engine-local.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-util.workspace = true
 reth-payload-validator.workspace = true
