@@ -15,7 +15,7 @@ use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
@@ -124,9 +124,10 @@ where
         Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     {
-        let (initialized_cfg, initialized_block_env) = self
+        let evm_env = self
             .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
         let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
 
@@ -134,8 +135,8 @@ where
             evm_config: self.evm_config.clone(),
             chain_spec: client.chain_spec(),
             config,
-            initialized_cfg,
-            initialized_block_env,
+            initialized_cfg: cfg_env_with_handler_cfg,
+            initialized_block_env: block_env,
             cancel,
             best_payload,
         };
@@ -164,13 +165,13 @@ impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs>
 where
     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 {
-    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
+    /// Returns the configured [`EvmEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
     pub fn cfg_and_block_env(
         &self,
         attributes: &OpPayloadBuilderAttributes,
         parent: &Header,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
+    ) -> Result<EvmEnv, EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: attributes.timestamp(),
             suggested_fee_recipient: attributes.suggested_fee_recipient(),
@@ -193,16 +194,17 @@ where
         let attributes = OpPayloadBuilderAttributes::try_new(parent.hash(), attributes, 3)
             .map_err(PayloadBuilderError::other)?;
 
-        let (initialized_cfg, initialized_block_env) =
+        let evm_env =
             self.cfg_and_block_env(&attributes, &parent).map_err(PayloadBuilderError::other)?;
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
         let config = PayloadConfig { parent_header: Arc::new(parent), attributes };
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
             chain_spec: client.chain_spec(),
             config,
-            initialized_cfg,
-            initialized_block_env,
+            initialized_cfg: cfg_env_with_handler_cfg,
+            initialized_block_env: block_env,
             cancel: Default::default(),
             best_payload: Default::default(),
         };
