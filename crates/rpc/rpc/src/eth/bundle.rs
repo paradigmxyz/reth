@@ -98,16 +98,7 @@ where
 
         // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob
         // transactions.
-        if transactions
-            .iter()
-            .filter_map(|(tx, _)| {
-                if let PooledTransactionsElement::BlobTransaction(tx) = tx {
-                    Some(tx.tx().tx().blob_gas())
-                } else {
-                    None
-                }
-            })
-            .sum::<u64>() >
+        if transactions.iter().filter_map(|(tx, _)| tx.blob_gas_used()).sum::<u64>() >
             MAX_BLOB_GAS_PER_BLOCK
         {
             return Err(EthApiError::InvalidParams(
@@ -197,7 +188,7 @@ where
                 while let Some((tx, signer)) = transactions.next() {
                     // Verify that the given blob data, commitments, and proofs are all valid for
                     // this transaction.
-                    if let PooledTransactionsElement::BlobTransaction(ref tx) = tx {
+                    if let PooledTransactionsElement::Eip4844(ref tx) = tx {
                         tx.tx().validate_blob(EnvKzgSettings::Default.get()).map_err(|e| {
                             Eth::Error::from_eth_err(EthApiError::InvalidParams(e.to_string()))
                         })?;

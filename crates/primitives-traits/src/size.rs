@@ -1,4 +1,7 @@
-use alloy_consensus::{Header, TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy, TxType};
+use alloy_consensus::{
+    transaction::PooledTransaction, Header, TxEip1559, TxEip2930, TxEip4844, TxEip4844WithSidecar,
+    TxEip7702, TxLegacy, TxType,
+};
 use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
 use revm_primitives::Log;
 
@@ -45,7 +48,15 @@ macro_rules! impl_in_mem_size {
     };
 }
 
-impl_in_mem_size!(Header, TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844);
+impl_in_mem_size!(
+    Header,
+    TxLegacy,
+    TxEip2930,
+    TxEip1559,
+    TxEip7702,
+    TxEip4844,
+    TxEip4844WithSidecar
+);
 
 #[cfg(feature = "op")]
 impl_in_mem_size_size_of!(op_alloy_consensus::OpTxType);
@@ -56,6 +67,18 @@ impl InMemorySize for alloy_consensus::Receipt {
         core::mem::size_of_val(status) +
             core::mem::size_of_val(cumulative_gas_used) +
             logs.capacity() * core::mem::size_of::<Log>()
+    }
+}
+
+impl InMemorySize for PooledTransaction {
+    fn size(&self) -> usize {
+        match self {
+            Self::Legacy(tx) => tx.size(),
+            Self::Eip2930(tx) => tx.size(),
+            Self::Eip1559(tx) => tx.size(),
+            Self::Eip4844(tx) => tx.size(),
+            Self::Eip7702(tx) => tx.size(),
+        }
     }
 }
 
