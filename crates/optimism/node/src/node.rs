@@ -25,7 +25,10 @@ use reth_node_builder::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
-use reth_optimism_payload_builder::{builder::OpPayloadTransactions, config::OpDAConfig};
+use reth_optimism_payload_builder::{
+    builder::OpPayloadTransactions,
+    config::{OpBuilderConfig, OpDAConfig},
+};
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{
     miner::{MinerApiExtServer, OpMinerExtApi},
@@ -136,7 +139,7 @@ impl OpNode {
 
     /// Returns the components for the given [`RollupArgs`].
     pub fn components<Node>(
-        args: RollupArgs,
+        &self,
     ) -> ComponentsBuilder<
         Node,
         OpPoolBuilder,
@@ -154,11 +157,14 @@ impl OpNode {
             >,
         >,
     {
-        let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } = args;
+        let RollupArgs { disable_txpool_gossip, compute_pending_block, discovery_v4, .. } =
+            self.args;
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(OpPoolBuilder::default())
-            .payload(OpPayloadBuilder::new(compute_pending_block))
+            .payload(
+                OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
+            )
             .network(OpNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
@@ -192,7 +198,7 @@ where
         OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
-        Self::components(self.args.clone())
+        Self::components(self)
     }
 
     fn add_ons(&self) -> Self::AddOns {
@@ -494,12 +500,22 @@ pub struct OpPayloadBuilder<Txs = ()> {
     /// The type responsible for yielding the best transactions for the payload if mempool
     /// transactions are allowed.
     pub best_transactions: Txs,
+    /// This data availability configuration specifies constraints for the payload builder
+    /// when assembling payloads
+    pub da_config: OpDAConfig,
 }
 
 impl OpPayloadBuilder {
-    /// Create a new instance with the given `compute_pending_block` flag.
-    pub const fn new(compute_pending_block: bool) -> Self {
-        Self { compute_pending_block, best_transactions: () }
+    /// Create a new instance with the given `compute_pending_block` flag and data availability
+    /// config.
+    pub fn new(compute_pending_block: bool) -> Self {
+        Self { compute_pending_block, best_transactions: (), da_config: OpDAConfig::default() }
+    }
+
+    /// Configure the data availability configuration for the OP payload builder.
+    pub fn with_da_config(mut self, da_config: OpDAConfig) -> Self {
+        self.da_config = da_config;
+        self
     }
 }
 
@@ -513,8 +529,8 @@ where
         self,
         best_transactions: T,
     ) -> OpPayloadBuilder<T> {
-        let Self { compute_pending_block, .. } = self;
-        OpPayloadBuilder { compute_pending_block, best_transactions }
+        let Self { compute_pending_block, da_config, .. } = self;
+        OpPayloadBuilder { compute_pending_block, best_transactions, da_config }
     }
 
     /// A helper method to initialize [`PayloadBuilderService`] with the given EVM config.
@@ -537,9 +553,12 @@ where
             + 'static,
         Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     {
-        let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::new(evm_config)
-            .with_transactions(self.best_transactions)
-            .set_compute_pending_block(self.compute_pending_block);
+        let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
+            evm_config,
+            OpBuilderConfig { da_config: self.da_config },
+        )
+        .with_transactions(self.best_transactions)
+        .set_compute_pending_block(self.compute_pending_block);
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()

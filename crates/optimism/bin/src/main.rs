@@ -32,10 +32,12 @@ fn main() {
                     let engine_tree_config = TreeConfig::default()
                         .with_persistence_threshold(rollup_args.persistence_threshold)
                         .with_memory_block_buffer_target(rollup_args.memory_block_buffer_target);
+
+                    let op_node = OpNode::new(rollup_args.clone());
                     let handle = builder
                         .with_types_and_provider::<OpNode, BlockchainProvider2<_>>()
-                        .with_components(OpNode::components(rollup_args.clone()))
-                        .with_add_ons(OpNode::new(rollup_args).add_ons())
+                        .with_components(op_node.components())
+                        .with_add_ons(op_node.add_ons())
                         .launch_with_fn(|builder| {
                             let launcher = EngineNodeLauncher::new(
                                 builder.task_executor().clone(),
