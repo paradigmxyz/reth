@@ -6,7 +6,7 @@ use crate::{
     tree::metrics::EngineApiMetrics,
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::{eip7685::Requests, BlockNumHash};
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256, U256,
@@ -31,10 +31,7 @@ use reth_engine_primitives::{
     EngineValidator, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::{
-    execute::{BlockExecutionOutput, BlockExecutorProvider},
-    system_calls::OnStateHook,
-};
+use reth_evm::{execute::BlockExecutorProvider, system_calls::OnStateHook};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::PayloadBuilderAttributes;
@@ -48,7 +45,7 @@ use reth_provider::{
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
-use reth_revm::{database::StateProviderDatabase, db::BundleState};
+use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
@@ -2353,43 +2350,35 @@ where
                             regular_state_root = ?result.0,
                             "Regular root task finished"
                         );
-                        Ok(Some((result.0, result.1, hashed_state, output, root_time)))
+                        Ok((Some((result.0, result.1)), hashed_state, output, root_time))
                     }
                     Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
                         debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
-                        Ok(None)
+                        Ok((None, hashed_state, output, root_time))
                     }
                     Err(error) => Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
                 }
             } else {
-                Ok(None)
+                Ok((None, hashed_state, output, root_time))
             }
         }) {
-            Ok(Some(res)) => Some(res),
-            Ok(None) => None,
+            Ok((Some(res), hashed_state, output, root_time)) => {
+                (Some(res), hashed_state, output, root_time)
+            }
+            Ok((None, hashed_state, output, root_time)) => (None, hashed_state, output, root_time),
             Err(e) => return Err(e),
         };
 
-        let (state_root, trie_output, hashed_state, output, root_time) = if let Some(result) =
-            state_root_result
-        {
-            result
-        } else {
-            debug!(target: "engine::tree", block=?sealed_block.num_hash(), ?persistence_not_in_progress, "Failed to compute state root in parallel");
-            let (root, updates) =
-                state_provider.state_root_with_updates(HashedPostState::default())?;
-            (
-                root,
-                updates,
-                HashedPostState::default(),
-                BlockExecutionOutput {
-                    state: BundleState::default(),
-                    gas_used: 0,
-                    receipts: vec![],
-                    requests: Requests::default(),
-                },
-                Instant::now(),
-            )
+        let (state_root, trie_output, hashed_state, output, root_time) = match state_root_result {
+            (Some(res), hashed_state, output, root_time) => {
+                (res.0, res.1, hashed_state, output, root_time)
+            }
+            (None, hashed_state, output, root_time) => {
+                debug!(target: "engine::tree", block=?sealed_block.num_hash(), ?persistence_not_in_progress, "Failed to compute state root in parallel");
+                let (root, updates) =
+                    state_provider.state_root_with_updates(hashed_state.clone())?;
+                (root, updates, hashed_state, output, root_time)
+            }
         };
 
         if state_root != block.header().state_root() {
