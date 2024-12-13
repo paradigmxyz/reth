@@ -225,7 +225,7 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The request for receipts.
         request: GetReceipts,
         /// The channel to send the response for receipts.
-        response: oneshot::Sender<RequestResult<Receipts>>,
+        response: oneshot::Sender<RequestResult<Receipts<N::Receipt>>>,
     },
 }
 

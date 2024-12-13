@@ -18,16 +18,28 @@ reth-primitives-traits.workspace = true
 reth-zstd-compressors = { workspace = true, optional = true }
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
-alloy-consensus.workspace = true
+alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-rlp.workspace = true
 
 # misc
 arbitrary = { workspace = true, optional = true, features = ["derive"] }
+derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
+once_cell.workspace = true
+rand = { workspace = true, optional = true }
+secp256k1 = { workspace = true, optional = true, features = ["rand"] }
 serde.workspace = true
 
 [dev-dependencies]
+arbitrary.workspace = true
+proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
+rand.workspace = true
+reth-codecs.workspace = true
+reth-zstd-compressors.workspace = true
+secp256k1.workspace = true
 test-fuzz.workspace = true
 
 [features]
@@ -37,8 +49,12 @@ std = [
 	"alloy-primitives/std",
 	"alloy-rlp/std",
 	"reth-primitives-traits/std",
-    "reth-zstd-compressors?/std",
-	"serde/std"
+	"reth-zstd-compressors?/std",
+	"serde/std",
+	"alloy-eips/std",
+	"derive_more/std",
+	"secp256k1?/std",
+	"once_cell/std"
 ]
 reth-codec = [
     "std",
@@ -47,9 +63,12 @@ reth-codec = [
     "dep:reth-zstd-compressors",
 ]
 arbitrary = [
-    "dep:arbitrary",
+	"dep:arbitrary",
+	"dep:rand",
+	"dep:secp256k1",
 	"alloy-consensus/arbitrary",
 	"alloy-primitives/arbitrary",
 	"reth-codecs?/arbitrary",
-	"reth-primitives-traits/arbitrary"
+	"reth-primitives-traits/arbitrary",
+	"alloy-eips/arbitrary"
 ]
