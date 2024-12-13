@@ -266,6 +266,17 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Configures the network to use proof-of-work.
+    ///
+    /// This effectively allows block propagation in the `eth` sub-protocol, which has been
+    /// soft-deprecated with ethereum `PoS` after the merge. Even if block propagation is
+    /// technically allowed, according to the eth protocol, it is not expected to be used in `PoS`
+    /// networks and peers are supposed to terminate the connection if they receive a `NewBlock`
+    /// message.
+    pub const fn with_pow(self) -> Self {
+        self.network_mode(NetworkMode::Work)
+    }
+
     /// Sets the highest synced block.
     ///
     /// This is used to construct the appropriate [`ForkFilter`] and [`Status`] message.
