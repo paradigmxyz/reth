@@ -25,7 +25,10 @@ use reth_node_builder::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
-use reth_optimism_payload_builder::{builder::OpPayloadTransactions, config::OpDAConfig};
+use reth_optimism_payload_builder::{
+    builder::OpPayloadTransactions,
+    config::{OpBuilderConfig, OpDAConfig},
+};
 use reth_optimism_primitives::OpPrimitives;
 use reth_optimism_rpc::{
     miner::{MinerApiExtServer, OpMinerExtApi},
@@ -158,7 +161,7 @@ impl OpNode {
         ComponentsBuilder::default()
             .node_types::<Node>()
             .pool(OpPoolBuilder::default())
-            .payload(OpPayloadBuilder::new(compute_pending_block))
+            .payload(OpPayloadBuilder::new(compute_pending_block, OpDAConfig::default()))
             .network(OpNetworkBuilder {
                 disable_txpool_gossip,
                 disable_discovery_v4: !discovery_v4,
@@ -494,12 +497,15 @@ pub struct OpPayloadBuilder<Txs = ()> {
     /// The type responsible for yielding the best transactions for the payload if mempool
     /// transactions are allowed.
     pub best_transactions: Txs,
+    /// This data availability configuration specifies constraints for the payload builder
+    /// when assembling payloads
+    pub da_config: OpDAConfig,
 }
 
 impl OpPayloadBuilder {
-    /// Create a new instance with the given `compute_pending_block` flag.
-    pub const fn new(compute_pending_block: bool) -> Self {
-        Self { compute_pending_block, best_transactions: () }
+    /// Create a new instance with the given `compute_pending_block` flag and data availability config.
+    pub const fn new(compute_pending_block: bool, da_config: OpDAConfig) -> Self {
+        Self { compute_pending_block, best_transactions: (), da_config }
     }
 }
 
@@ -513,8 +519,8 @@ where
         self,
         best_transactions: T,
     ) -> OpPayloadBuilder<T> {
-        let Self { compute_pending_block, .. } = self;
-        OpPayloadBuilder { compute_pending_block, best_transactions }
+        let Self { compute_pending_block, da_config, .. } = self;
+        OpPayloadBuilder { compute_pending_block, best_transactions, da_config }
     }
 
     /// A helper method to initialize [`PayloadBuilderService`] with the given EVM config.
@@ -537,9 +543,12 @@ where
             + 'static,
         Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
     {
-        let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::new(evm_config)
-            .with_transactions(self.best_transactions)
-            .set_compute_pending_block(self.compute_pending_block);
+        let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
+            evm_config,
+            OpBuilderConfig { da_config: self.da_config },
+        )
+        .with_transactions(self.best_transactions)
+        .set_compute_pending_block(self.compute_pending_block);
         let conf = ctx.payload_builder_config();
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
