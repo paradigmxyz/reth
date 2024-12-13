@@ -7,11 +7,7 @@ use crate::{
     TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
-use alloy_eips::{
-    eip2718::Encodable2718,
-    eip4895::{Withdrawal, Withdrawals},
-    BlockHashOrNumber,
-};
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
 use reth_db::{
@@ -23,7 +19,7 @@ use reth_db::{
     table::{Decompress, Value},
 };
 use reth_node_types::{FullNodePrimitives, NodePrimitives};
-use reth_primitives::{transaction::recover_signers, SealedHeader};
+use reth_primitives::SealedHeader;
 use reth_primitives_traits::SignedTransaction;
 use reth_storage_api::{BlockBodyIndicesProvider, OmmersProvider, WithdrawalsProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
@@ -369,11 +365,6 @@ impl<N: NodePrimitives> WithdrawalsProvider for StaticFileJarProvider<'_, N> {
             return Ok(self.cursor()?.get_one::<WithdrawalsMask>(num.into())?.map(|s| s.withdrawals))
         }
         // Only accepts block number queries
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
 }

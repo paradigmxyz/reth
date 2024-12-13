@@ -59,20 +59,19 @@ impl HighestStaticFiles {
         }
     }
 
+    /// Returns an iterator over all static file segments
+    fn iter(&self) -> impl Iterator<Item = Option<BlockNumber>> {
+        [self.headers, self.transactions, self.receipts, self.block_meta].into_iter()
+    }
+
     /// Returns the minimum block of all segments.
     pub fn min_block_num(&self) -> Option<u64> {
-        [self.headers, self.transactions, self.receipts, self.block_meta]
-            .iter()
-            .filter_map(|&option| option)
-            .min()
+        self.iter().flatten().min()
     }
 
     /// Returns the maximum block of all segments.
     pub fn max_block_num(&self) -> Option<u64> {
-        [self.headers, self.transactions, self.receipts, self.block_meta]
-            .iter()
-            .filter_map(|&option| option)
-            .max()
+        self.iter().flatten().max()
     }
 }
 

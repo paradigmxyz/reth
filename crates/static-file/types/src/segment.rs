@@ -3,7 +3,7 @@ use alloy_primitives::TxNumber;
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use std::{ops::RangeInclusive, str::FromStr};
-use strum::{AsRefStr, EnumIter, EnumString};
+use strum::{AsRefStr, EnumString};
 
 #[derive(
     Debug,
@@ -17,7 +17,6 @@ use strum::{AsRefStr, EnumIter, EnumString};
     Deserialize,
     Serialize,
     EnumString,
-    EnumIter,
     AsRefStr,
     Display,
 )]
@@ -34,7 +33,7 @@ pub enum StaticFileSegment {
     #[strum(serialize = "receipts")]
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
-    #[strum(serialize = "bmeta")]
+    #[strum(serialize = "blockmeta")]
     /// Static File segment responsible for the `BlockBodyIndices`, `BlockOmmers`,
     /// `BlockWithdrawals` tables.
     BlockMeta,
@@ -49,6 +48,13 @@ impl StaticFileSegment {
             Self::Receipts => "receipts",
             Self::BlockMeta => "blockmeta",
         }
+    }
+
+    /// Returns an iterator over all segments.
+    pub fn iter() -> impl Iterator<Item = Self> {
+        // The order of segments is significant and must be maintained to ensure correctness. For
+        // example, Transactions require BlockBodyIndices from Blockmeta to be sound.
+        [Self::Headers, Self::BlockMeta, Self::Transactions, Self::Receipts].into_iter()
     }
 
     /// Returns the default configuration of the segment.
@@ -361,7 +367,6 @@ mod tests {
     use super::*;
     use alloy_primitives::hex;
     use reth_nippy_jar::NippyJar;
-    use strum::IntoEnumIterator;
 
     #[test]
     fn test_filename() {

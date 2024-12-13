@@ -48,7 +48,6 @@ use std::{
     path::{Path, PathBuf},
     sync::{mpsc, Arc},
 };
-use strum::IntoEnumIterator;
 use tracing::{info, trace, warn};
 
 /// Alias type for a map that can be queried for block ranges from a transaction
@@ -682,6 +681,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         for segment in StaticFileSegment::iter() {
+            // Not integrated yet
+            if segment.is_block_meta() {
+                continue
+            }
+
             if has_receipt_pruning && segment.is_receipts() {
                 // Pruned nodes (including full node) do not store receipts as static files.
                 continue
@@ -780,7 +784,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     .ensure_invariants::<_, tables::BlockBodyIndices>(
                         provider,
                         segment,
-                        highest_tx,
+                        highest_block,
                         highest_block,
                     )?,
             } {
@@ -832,34 +836,39 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     where
         Provider: DBProvider + BlockReader + StageCheckpointReader,
     {
-        let highest_static_file_entry = highest_static_file_entry.unwrap_or_default();
-        let highest_static_file_block = highest_static_file_block.unwrap_or_default();
         let mut db_cursor = provider.tx_ref().cursor_read::<T>()?;
 
         if let Some((db_first_entry, _)) = db_cursor.first()? {
-            // If there is a gap between the entry found in static file and
-            // database, then we have most likely lost static file data and need to unwind so we can
-            // load it again
-            if !(db_first_entry <= highest_static_file_entry ||
-                highest_static_file_entry + 1 == db_first_entry)
+            if let (Some(highest_entry), Some(highest_block)) =
+                (highest_static_file_entry, highest_static_file_block)
             {
-                info!(
-                    target: "reth::providers::static_file",
-                    ?db_first_entry,
-                    ?highest_static_file_entry,
-                    unwind_target = highest_static_file_block,
-                    ?segment,
-                    "Setting unwind target."
-                );
-                return Ok(Some(highest_static_file_block))
+                // If there is a gap between the entry found in static file and
+                // database, then we have most likely lost static file data and need to unwind so we
+                // can load it again
+                if !(db_first_entry <= highest_entry || highest_entry + 1 == db_first_entry) {
+                    info!(
+                        target: "reth::providers::static_file",
+                        ?db_first_entry,
+                        ?highest_entry,
+                        unwind_target = highest_block,
+                        ?segment,
+                        "Setting unwind target."
+                    );
+                    return Ok(Some(highest_block))
+                }
             }
 
             if let Some((db_last_entry, _)) = db_cursor.last()? {
-                if db_last_entry > highest_static_file_entry {
+                if highest_static_file_entry
+                    .is_none_or(|highest_entry| db_last_entry > highest_entry)
+                {
                     return Ok(None)
                 }
             }
         }
+
+        let highest_static_file_entry = highest_static_file_entry.unwrap_or_default();
+        let highest_static_file_block = highest_static_file_block.unwrap_or_default();
 
         // If static file entry is ahead of the database entries, then ensure the checkpoint block
         // number matches.
@@ -900,6 +909,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 // TODO(joshie): is_block_meta
                 writer.prune_headers(highest_static_file_block - checkpoint_block_number)?;
             } else if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
+                // todo joshie: is querying block_body_indices a potential issue once bbi is moved
+                // to sf as well
                 let number = highest_static_file_entry - block.last_tx_num();
                 if segment.is_receipts() {
                     writer.prune_receipts(number, checkpoint_block_number)?;
