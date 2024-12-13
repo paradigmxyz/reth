@@ -856,7 +856,7 @@ impl TransactionSigned {
     /// Tries to convert a [`TransactionSigned`] into a [`PooledTransactionsElement`].
     ///
     /// This function used as a helper to convert from a decoded p2p broadcast message to
-    /// [`PooledTransactionsElement`]. Since [`BlobTransaction`] is disallowed to be broadcasted on
+    /// [`PooledTransactionsElement`]. Since EIP4844 variants are disallowed to be broadcasted on
     /// p2p, return an err if `tx` is [`Transaction::Eip4844`].
     pub fn try_into_pooled(self) -> Result<PooledTransactionsElement, Self> {
         let hash = self.hash();
