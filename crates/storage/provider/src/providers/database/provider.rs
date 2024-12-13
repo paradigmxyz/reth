@@ -66,8 +66,9 @@ use reth_storage_api::{
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets},
+    unpack_nibbles,
     updates::{StorageTrieUpdates, TrieUpdates},
-    HashedPostStateSorted, KeyHasher, Nibbles, StoredNibbles,
+    HashedPostStateSorted, KeyHasher, StoredNibbles,
 };
 use reth_trie_db::{DatabaseStorageTrieCursor, StateCommitment};
 use revm::{
@@ -278,7 +279,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut account_prefix_set = PrefixSetMut::with_capacity(hashed_addresses.len());
         let mut destroyed_accounts = HashSet::default();
         for (hashed_address, account) in hashed_addresses {
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            account_prefix_set.insert(unpack_nibbles(hashed_address));
             if account.is_none() {
                 destroyed_accounts.insert(hashed_address);
             }
@@ -299,10 +300,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut storage_prefix_sets = HashMap::<B256, PrefixSet>::default();
         let storage_entries = self.unwind_storage_hashing(changed_storages.iter().copied())?;
         for (hashed_address, hashed_slots) in storage_entries {
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            account_prefix_set.insert(unpack_nibbles(hashed_address));
             let mut storage_prefix_set = PrefixSetMut::with_capacity(hashed_slots.len());
             for slot in hashed_slots {
-                storage_prefix_set.insert(Nibbles::unpack(slot));
+                storage_prefix_set.insert(unpack_nibbles(slot));
             }
             storage_prefix_sets.insert(hashed_address, storage_prefix_set.freeze());
         }
@@ -2551,12 +2552,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
             let storages = self.plain_state_storages(lists)?;
             let storage_entries = self.insert_storage_for_hashing(storages)?;
             for (hashed_address, hashed_slots) in storage_entries {
-                account_prefix_set.insert(Nibbles::unpack(hashed_address));
+                account_prefix_set.insert(unpack_nibbles(hashed_address));
                 for slot in hashed_slots {
                     storage_prefix_sets
                         .entry(hashed_address)
                         .or_default()
-                        .insert(Nibbles::unpack(slot));
+                        .insert(unpack_nibbles(slot));
                 }
             }
         }
@@ -2568,7 +2569,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
             let accounts = self.basic_accounts(lists)?;
             let hashed_addresses = self.insert_account_for_hashing(accounts)?;
             for (hashed_address, account) in hashed_addresses {
-                account_prefix_set.insert(Nibbles::unpack(hashed_address));
+                account_prefix_set.insert(unpack_nibbles(hashed_address));
                 if account.is_none() {
                     destroyed_accounts.insert(hashed_address);
                 }

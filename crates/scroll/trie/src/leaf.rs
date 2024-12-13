@@ -1,7 +1,7 @@
 use super::LEAF_NODE_DOMAIN;
 use alloy_primitives::B256;
 use reth_scroll_primitives::poseidon::{hash_with_domain, Fr, PrimeField};
-use reth_trie::{key::BitsCompatibility, LeafNodeRef};
+use reth_trie::{BitsCompatibility, LeafNodeRef};
 
 /// A trait used to hash the leaf node.
 pub(crate) trait HashLeaf {

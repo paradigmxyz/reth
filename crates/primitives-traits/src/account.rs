@@ -25,7 +25,7 @@ pub mod compact_ids {
 
 /// An Ethereum account.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
@@ -45,6 +45,18 @@ pub struct Account {
     /// details.
     #[cfg(feature = "scroll")]
     pub account_extension: Option<reth_scroll_primitives::AccountExtension>,
+}
+
+impl Default for Account {
+    fn default() -> Self {
+        Self {
+            nonce: 0,
+            balance: U256::ZERO,
+            bytecode_hash: None,
+            #[cfg(feature = "scroll")]
+            account_extension: Some(Default::default()),
+        }
+    }
 }
 
 impl Account {

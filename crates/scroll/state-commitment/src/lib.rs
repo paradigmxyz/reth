@@ -7,7 +7,7 @@ mod commitment;
 pub use commitment::BinaryMerklePatriciaTrie;
 
 mod root;
-pub use root::{StateRoot, StorageRoot};
+pub use root::*;
 
 mod key;
 pub use key::PoseidonKeyHasher;

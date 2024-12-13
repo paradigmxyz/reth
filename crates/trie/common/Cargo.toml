@@ -30,10 +30,12 @@ bytes.workspace = true
 derive_more.workspace = true
 itertools.workspace = true
 nybbles = { workspace = true, features = ["rlp"] }
+smallvec = { version = "1.0", default-features = false, features = [
+    "const_new",
+] }
 
 # `serde` feature
 serde = { workspace = true, optional = true }
-
 serde_with = { workspace = true, optional = true }
 
 # `test-utils` feature
@@ -62,6 +64,7 @@ serde = [
     "dep:serde",
     "bytes/serde",
     "nybbles/serde",
+    "smallvec/serde",
     "alloy-primitives/serde",
     "alloy-consensus/serde",
     "alloy-trie/serde",
@@ -91,6 +94,7 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-primitives/arbitrary",
     "nybbles/arbitrary",
+    "smallvec/arbitrary",
     "revm-primitives/arbitrary",
     "reth-codecs/arbitrary",
 	"reth-scroll-primitives?/arbitrary"

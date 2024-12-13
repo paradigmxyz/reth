@@ -464,7 +464,7 @@ mod test {
     use alloc::collections::BTreeMap;
     use hex_literal::hex;
     use reth_scroll_primitives::poseidon::{hash_with_domain, Fr, PrimeField};
-    use reth_trie::key::BitsCompatibility;
+    use reth_trie::BitsCompatibility;
 
     #[test]
     fn test_convert_to_bit_representation() {

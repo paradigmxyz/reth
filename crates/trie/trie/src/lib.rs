@@ -13,9 +13,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-/// A module for working with trie keys.
-pub mod key;
-
 /// The implementation of forward-only in-memory cursor.
 pub mod forward_cursor;
 

@@ -10,7 +10,7 @@ use reth_db_api::{
 use reth_primitives::StorageEntry;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
-    KeyHasher, Nibbles,
+    unpack_nibbles, KeyHasher,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -51,7 +51,7 @@ impl<TX: DbTx, KH: KeyHasher> PrefixSetLoader<'_, TX, KH> {
         for account_entry in account_changeset_cursor.walk_range(range.clone())? {
             let (_, AccountBeforeTx { address, .. }) = account_entry?;
             let hashed_address = KH::hash_key(address);
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            account_prefix_set.insert(unpack_nibbles(hashed_address));
 
             if account_hashed_state_cursor.seek_exact(hashed_address)?.is_none() {
                 destroyed_accounts.insert(hashed_address);
@@ -65,11 +65,11 @@ impl<TX: DbTx, KH: KeyHasher> PrefixSetLoader<'_, TX, KH> {
         for storage_entry in storage_cursor.walk_range(storage_range)? {
             let (BlockNumberAddress((_, address)), StorageEntry { key, .. }) = storage_entry?;
             let hashed_address = KH::hash_key(address);
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            account_prefix_set.insert(unpack_nibbles(hashed_address));
             storage_prefix_sets
                 .entry(hashed_address)
                 .or_default()
-                .insert(Nibbles::unpack(KH::hash_key(key)));
+                .insert(unpack_nibbles(KH::hash_key(key)));
         }
 
         Ok(TriePrefixSets {

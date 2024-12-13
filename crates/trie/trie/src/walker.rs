@@ -5,12 +5,13 @@ use crate::{
 };
 use alloy_primitives::{map::HashSet, B256};
 use reth_storage_errors::db::DatabaseError;
+use reth_trie_common::pack_nibbles;
 
 #[cfg(feature = "metrics")]
 use crate::metrics::WalkerMetrics;
 
 #[cfg(feature = "scroll")]
-use crate::key::BitsCompatibility;
+use crate::BitsCompatibility;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
 /// It allows moving through the trie in a depth-first manner, skipping certain branches
@@ -110,11 +111,7 @@ impl<C> TrieWalker<C> {
                     let key = key.increment_bit().map(|inc| inc.pack_bits());
                     key
                 } else {
-                    #[cfg(feature = "scroll")]
-                    let key = Some(key.pack_bits());
-                    #[cfg(not(feature = "scroll"))]
-                    let key = Some(key.pack());
-                    key
+                    Some(pack_nibbles(key))
                 }
             })
             .map(|mut key| {

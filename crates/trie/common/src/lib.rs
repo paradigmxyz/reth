@@ -19,7 +19,7 @@ mod account;
 pub use account::TrieAccount;
 
 mod key;
-pub use key::{KeccakKeyHasher, KeyHasher};
+pub use key::{pack_nibbles, unpack_nibbles, BitsCompatibility, KeccakKeyHasher, KeyHasher};
 
 mod nibbles;
 pub use nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey};

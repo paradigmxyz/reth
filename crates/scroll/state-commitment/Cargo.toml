@@ -38,6 +38,7 @@ zktrie = { git = "https://github.com/scroll-tech/zktrie.git", rev = "309160464c1
 
 # misc
 tracing.workspace = true
+itertools.workspace = true
 
 [dev-dependencies]
 reth-db-api.workspace = true

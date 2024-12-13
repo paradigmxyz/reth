@@ -9,23 +9,22 @@ use reth_db::{
     transaction::DbTxMut,
 };
 use reth_primitives::{Account, StorageEntry};
-use reth_provider::test_utils::create_test_provider_factory;
-use reth_scroll_state_commitment::{
-    test_utils::{b256_clear_last_byte, b256_reverse_bits, u256_clear_msb},
-    PoseidonKeyHasher, StateRoot, StorageRoot,
-};
+use reth_provider::{test_utils::create_test_provider_factory, StorageTrieWriter, TrieWriter};
+use reth_scroll_state_commitment::{test_utils::*, PoseidonKeyHasher, StateRoot, StorageRoot};
 
-use reth_scroll_state_commitment::test_utils::b256_clear_first_byte;
+use reth_scroll_state_commitment::state_root_unsorted;
 use reth_trie::{
-    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState, HashedStorage,
-    KeyHasher,
+    prefix_set::{PrefixSetMut, TriePrefixSets},
+    trie_cursor::InMemoryTrieCursorFactory,
+    updates::TrieUpdates,
+    BitsCompatibility, HashedPostState, HashedStorage, KeyHasher, Nibbles,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory};
 use std::collections::BTreeMap;
 
 proptest! {
     #![proptest_config(ProptestConfig {
-        cases: 6, ..ProptestConfig::default()
+        cases: 12, ..ProptestConfig::default()
     })]
 
     #[test]
@@ -167,6 +166,79 @@ proptest! {
             storage.append(&mut storage_update);
             let expected_root = reth_scroll_state_commitment::test_utils::storage_root(storage.clone());
             assert_eq!(expected_root, storage_root);
+        }
+    }
+
+    #[test]
+    fn fuzz_state_root_incremental_database(account_changes: [BTreeMap<B256, U256>; 5]) {
+        let factory = create_test_provider_factory();
+        let tx = factory.provider_rw().unwrap();
+        let mut hashed_account_cursor = tx.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
+
+        let mut state = BTreeMap::default();
+        for accounts in account_changes {
+            let should_generate_changeset = !state.is_empty();
+            let mut changes = PrefixSetMut::default();
+            let accounts = accounts.into_iter().map(|(hashed_address, balance)| {
+                let balance = u256_clear_msb(balance);
+                let hashed_address = b256_clear_last_byte(hashed_address);
+                (hashed_address, balance)
+            }).collect::<BTreeMap<_, _>>();
+
+            for (hashed_address, balance) in accounts.clone() {
+                hashed_account_cursor.upsert(hashed_address, Account { balance, ..Default::default() }).unwrap();
+                if should_generate_changeset {
+                    changes.insert(Nibbles::unpack_bits(hashed_address));
+                }
+            }
+
+            let (state_root, trie_updates) = StateRoot::from_tx(tx.tx_ref())
+                .with_prefix_sets(TriePrefixSets { account_prefix_set: changes.freeze(), ..Default::default() })
+                .root_with_updates()
+                .unwrap();
+
+            state.append(&mut accounts.clone());
+            let expected_root = state_root_unsorted(
+                state.iter().map(|(&key, &balance)| (key, (Account { balance, ..Default::default() }, B256::default())))
+            );
+            assert_eq!(expected_root, state_root);
+            tx.write_trie_updates(&trie_updates).unwrap();
+        }
+    }
+
+    #[test]
+    fn incremental_storage_root_database(address: Address, storage_changes: [BTreeMap<B256, U256>; 5]) {
+        let hashed_address = PoseidonKeyHasher::hash_key(address);
+        let factory = create_test_provider_factory();
+        let tx = factory.provider_rw().unwrap();
+        let mut hashed_storage_cursor = tx.tx_ref().cursor_write::<tables::HashedStorages>().unwrap();
+
+        let mut storage = BTreeMap::default();
+        for change_set in storage_changes {
+            let should_generate_changeset =  !storage.is_empty();
+            let mut changes = PrefixSetMut::default();
+            let change_set = change_set.into_iter().map(|(slot, value)| {
+                let slot = b256_clear_last_byte(slot);
+                (slot, value)
+            }).collect::<BTreeMap<_, _>>();
+
+            for (hashed_slot, value) in change_set.clone() {
+                hashed_storage_cursor.upsert(hashed_address, StorageEntry { key: hashed_slot, value }).unwrap();
+                if should_generate_changeset {
+                    changes.insert(Nibbles::unpack_bits(hashed_slot));
+                }
+            }
+
+            let (storage_root, _, trie_updates) = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address)
+                .with_prefix_set(changes.freeze())
+                .root_with_updates()
+                .unwrap();
+
+            storage.append(&mut change_set.clone());
+            let expected_root = reth_scroll_state_commitment::storage_root_unsorted(storage.clone());
+            assert_eq!(expected_root, storage_root);
+
+            tx.write_individual_storage_trie_updates(hashed_address, &trie_updates).unwrap();
         }
     }
 }

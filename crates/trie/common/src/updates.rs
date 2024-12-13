@@ -229,7 +229,7 @@ impl StorageTrieUpdates {
 /// This also sorts the set before serializing.
 #[cfg(any(test, feature = "serde"))]
 mod serde_nibbles_set {
-    use crate::Nibbles;
+    use crate::{pack_nibbles, unpack_nibbles, Nibbles};
     use alloy_primitives::map::HashSet;
     use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
@@ -237,8 +237,10 @@ mod serde_nibbles_set {
     where
         S: Serializer,
     {
-        let mut storage_nodes =
-            map.iter().map(|elem| alloy_primitives::hex::encode(elem.pack())).collect::<Vec<_>>();
+        let mut storage_nodes = map
+            .iter()
+            .map(|elem| alloy_primitives::hex::encode(pack_nibbles(elem)))
+            .collect::<Vec<_>>();
         storage_nodes.sort_unstable();
         storage_nodes.serialize(serializer)
     }
@@ -250,7 +252,7 @@ mod serde_nibbles_set {
         Vec::<String>::deserialize(deserializer)?
             .into_iter()
             .map(|node| {
-                Ok(Nibbles::unpack(
+                Ok(unpack_nibbles(
                     alloy_primitives::hex::decode(node)
                         .map_err(|err| D::Error::custom(err.to_string()))?,
                 ))
@@ -265,7 +267,7 @@ mod serde_nibbles_set {
 /// This also sorts the map's keys before encoding and serializing.
 #[cfg(any(test, feature = "serde"))]
 mod serde_nibbles_map {
-    use crate::Nibbles;
+    use crate::{pack_nibbles, unpack_nibbles, Nibbles};
     use alloy_primitives::{hex, map::HashMap};
     use serde::{
         de::{Error, MapAccess, Visitor},
@@ -287,7 +289,7 @@ mod serde_nibbles_map {
         storage_nodes.sort_unstable_by_key(|node| node.0);
         for (k, v) in storage_nodes {
             // pack, then hex encode the Nibbles
-            let packed = alloy_primitives::hex::encode(k.pack());
+            let packed = alloy_primitives::hex::encode(pack_nibbles(k));
             map_serializer.serialize_entry(&packed, &v)?;
         }
         map_serializer.end()
@@ -325,7 +327,7 @@ mod serde_nibbles_map {
                     let decoded_key =
                         hex::decode(&key).map_err(|err| Error::custom(err.to_string()))?;
 
-                    let nibbles = Nibbles::unpack(&decoded_key);
+                    let nibbles = unpack_nibbles(&decoded_key);
 
                     result.insert(nibbles, value);
                 }
