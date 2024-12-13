@@ -1,5 +1,5 @@
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 use std::time::Instant;
 
 /// A type that can track updates related to fork choice updates.
