@@ -1637,6 +1637,7 @@ pub mod serde_bincode_compat {
         TxEip4844,
     };
     use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+    use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -1776,6 +1777,10 @@ pub mod serde_bincode_compat {
         {
             TransactionSigned::deserialize(deserializer).map(Into::into)
         }
+    }
+
+    impl SerdeBincodeCompat for super::TransactionSigned {
+        type BincodeRepr<'a> = TransactionSigned<'a>;
     }
 
     #[cfg(test)]
