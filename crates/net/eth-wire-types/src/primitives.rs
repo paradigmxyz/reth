@@ -50,6 +50,6 @@ impl NetworkPrimitives for EthNetworkPrimitives {
     type BlockBody = reth_primitives::BlockBody;
     type Block = reth_primitives::Block;
     type BroadcastedTransaction = reth_primitives::TransactionSigned;
-    type PooledTransaction = reth_primitives::PooledTransactionsElement;
+    type PooledTransaction = reth_primitives::PooledTransaction;
     type Receipt = reth_primitives::Receipt;
 }

@@ -36,7 +36,7 @@ use reth_optimism_rpc::{
     OpEthApi, SequencerClient,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{BlockBody, PooledTransactionsElement, TransactionSigned};
+use reth_primitives::{BlockBody, PooledTransaction, TransactionSigned};
 use reth_provider::{
     providers::ChainStorage, BlockBodyReader, BlockBodyWriter, CanonStateSubscriptions,
     ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput, StorageLocation,
@@ -252,7 +252,7 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransactionsElement>>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
@@ -303,7 +303,7 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransactionsElement>>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
@@ -666,10 +666,7 @@ impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = TxTy<Node::Types>,
-                Pooled = PooledTransactionsElement,
-            >,
+            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTransaction>,
         > + Unpin
         + 'static,
 {

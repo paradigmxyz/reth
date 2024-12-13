@@ -21,8 +21,8 @@ use reth_execution_types::ChangedAccount;
 use reth_primitives::{
     kzg::KzgSettings,
     transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, RecoveredTx, SealedBlock,
-    Transaction, TransactionSigned,
+    PooledTransaction, PooledTransactionsElementEcRecovered, RecoveredTx, SealedBlock, Transaction,
+    TransactionSigned,
 };
 use reth_primitives_traits::SignedTransaction;
 #[cfg(feature = "serde")]
@@ -224,7 +224,7 @@ pub trait TransactionPool: Send + Sync + Clone {
         max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns converted [PooledTransactionsElement] for the given transaction hashes.
+    /// Returns converted [PooledTransaction] for the given transaction hashes.
     ///
     /// This adheres to the expected behavior of
     /// [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
@@ -1238,7 +1238,7 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
         let encoded_length = tx.encode_2718_len();
         let (tx, signer) = tx.to_components();
         match tx {
-            PooledTransactionsElement::Eip4844(tx) => {
+            PooledTransaction::Eip4844(tx) => {
                 // include the blob sidecar
                 let (tx, sig, hash) = tx.into_parts();
                 let (tx, blob) = tx.into_parts();
@@ -1262,7 +1262,7 @@ impl PoolTransaction for EthPooledTransaction {
 
     type Consensus = TransactionSigned;
 
-    type Pooled = PooledTransactionsElement;
+    type Pooled = PooledTransaction;
 
     fn clone_into_consensus(&self) -> RecoveredTx<Self::Consensus> {
         self.transaction().clone()

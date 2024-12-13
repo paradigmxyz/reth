@@ -6,7 +6,7 @@ use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTra
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::PooledTransactionsElement;
+use reth_primitives::PooledTransaction;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;
@@ -47,8 +47,8 @@ where
     Eth: EthTransactions<
             Pool: TransactionPool<
                 Transaction: PoolTransaction<
-                    Consensus: From<PooledTransactionsElement>,
-                    Pooled = PooledTransactionsElement,
+                    Consensus: From<PooledTransaction>,
+                    Pooled = PooledTransaction,
                 >,
             >,
         > + LoadPendingBlock
@@ -188,7 +188,7 @@ where
                 while let Some((tx, signer)) = transactions.next() {
                     // Verify that the given blob data, commitments, and proofs are all valid for
                     // this transaction.
-                    if let PooledTransactionsElement::Eip4844(ref tx) = tx {
+                    if let PooledTransaction::Eip4844(ref tx) = tx {
                         tx.tx().validate_blob(EnvKzgSettings::Default.get()).map_err(|e| {
                             Eth::Error::from_eth_err(EthApiError::InvalidParams(e.to_string()))
                         })?;
@@ -277,7 +277,7 @@ where
 impl<Eth> EthCallBundleApiServer for EthBundle<Eth>
 where
     Eth: EthTransactions<
-            Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransactionsElement>>,
+            Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
         > + LoadPendingBlock
         + Call
         + 'static,

@@ -30,7 +30,7 @@ use rand::{
 };
 use reth_primitives::{
     transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, RecoveredTx, Transaction,
+    PooledTransaction, PooledTransactionsElementEcRecovered, RecoveredTx, Transaction,
     TransactionSigned, TxType,
 };
 use reth_primitives_traits::InMemorySize;
@@ -666,7 +666,7 @@ impl PoolTransaction for MockTransaction {
 
     type Consensus = TransactionSigned;
 
-    type Pooled = PooledTransactionsElement;
+    type Pooled = PooledTransaction;
 
     fn try_from_consensus(
         tx: RecoveredTx<Self::Consensus>,
