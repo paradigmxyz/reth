@@ -3222,7 +3222,7 @@ mod tests {
     async fn test_holesky_payload() {
         let s = include_str!("../../test-data/holesky/1.rlp");
         let data = Bytes::from_str(s).unwrap();
-        let block = Block::decode(&mut data.as_ref()).unwrap();
+        let block: Block = Block::decode(&mut data.as_ref()).unwrap();
         let sealed = block.seal_slow();
         let payload = block_to_payload_v1(sealed);
 
