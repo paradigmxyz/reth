@@ -1,9 +1,8 @@
 //! Provider trait for populating the EVM environment.
 
-use crate::ConfigureEvmEnv;
+use crate::{env::EvmEnv, ConfigureEvmEnv};
 use alloy_consensus::Header;
 use reth_storage_errors::provider::ProviderResult;
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 
 /// A provider type that knows chain specific information required to configure a
 /// [`CfgEnvWithHandlerCfg`].
@@ -18,7 +17,7 @@ pub trait EvmEnvProvider<H = Header>: Send + Sync {
         &self,
         header: &H,
         evm_config: EvmConfig,
-    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
+    ) -> ProviderResult<EvmEnv>
     where
         EvmConfig: ConfigureEvmEnv<Header = H>;
 }

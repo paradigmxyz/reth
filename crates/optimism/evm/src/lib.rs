@@ -165,15 +165,15 @@ impl ConfigureEvmEnv for OpEvmConfig {
             blob_excess_gas_and_price,
         };
 
-        let cfg_with_handler_cfg;
+        let cfg_env_with_handler_cfg;
         {
-            cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
                 cfg_env: cfg,
                 handler_cfg: HandlerCfg { spec_id, is_optimism: true },
             };
         }
 
-        Ok((cfg_with_handler_cfg, block_env))
+        Ok((cfg_env_with_handler_cfg, block_env))
     }
 }
 

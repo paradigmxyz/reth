@@ -23,7 +23,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use reth_chainspec::{ChainSpec, Head};
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_primitives::{transaction::FillTxEnv, TransactionSigned};
 use revm_primitives::{
     AnalysisKind, BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, SpecId, TxEnv,
@@ -136,7 +136,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error> {
+    ) -> Result<EvmEnv, Self::Error> {
         // configure evm env based on parent block
         let cfg = CfgEnv::default().with_chain_id(self.chain_spec.chain().id());
 
@@ -184,7 +184,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
             blob_excess_gas_and_price,
         };
 
-        Ok((CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env))
+        Ok((CfgEnvWithHandlerCfg::new_with_spec_id(cfg, spec_id), block_env).into())
     }
 }
 
@@ -201,7 +201,7 @@ mod tests {
     use alloy_genesis::Genesis;
     use alloy_primitives::{B256, U256};
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
-    use reth_evm::execute::ProviderError;
+    use reth_evm::{env::EvmEnv, execute::ProviderError};
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
@@ -231,12 +231,13 @@ mod tests {
 
         // Use the `EthEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
-        let (cfg_env, _) = EthEvmConfig::new(Arc::new(chain_spec.clone()))
-            .cfg_and_block_env(&header, total_difficulty);
+        let EvmEnv { cfg_env_with_handler_cfg, .. } =
+            EthEvmConfig::new(Arc::new(chain_spec.clone()))
+                .cfg_and_block_env(&header, total_difficulty);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
-        assert_eq!(cfg_env.chain_id, chain_spec.chain().id());
+        assert_eq!(cfg_env_with_handler_cfg.chain_id, chain_spec.chain().id());
     }
 
     #[test]
