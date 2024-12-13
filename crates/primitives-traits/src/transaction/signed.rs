@@ -1,8 +1,11 @@
 //! API of a signed transaction.
 
-use crate::{FillTxEnv, InMemorySize, MaybeCompact, MaybeSerde};
+use crate::{
+    crypto::secp256k1::{recover_signer, recover_signer_unchecked},
+    FillTxEnv, InMemorySize, MaybeCompact, MaybeSerde,
+};
 use alloc::{fmt, vec::Vec};
-use alloy_consensus::transaction::PooledTransaction;
+use alloy_consensus::{transaction::PooledTransaction, SignableTransaction};
 use alloy_eips::eip2718::{Decodable2718, Encodable2718};
 use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, TxHash, B256, U256};
 use core::hash::Hash;
@@ -109,13 +112,19 @@ impl SignedTransaction for PooledTransaction {
     }
 
     fn recover_signer(&self) -> Option<Address> {
-        if self.signature().s() > SECP256K1N_HALF {
-            return None;
-        }
-        Self::recover_signer(self).ok()
+        let signature_hash = self.signature_hash();
+        recover_signer(self.signature(), signature_hash)
     }
 
-    fn recover_signer_unchecked_with_buf(&self, _buf: &mut Vec<u8>) -> Option<Address> {
-        Self::recover_signer(self).ok()
+    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+        match self {
+            Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
+            Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
+            Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
+            Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
+            Self::Eip4844(tx) => tx.tx().encode_for_signing(buf),
+        }
+        let signature_hash = keccak256(buf);
+        recover_signer_unchecked(self.signature(), signature_hash)
     }
 }

@@ -888,7 +888,7 @@ impl TransactionSigned {
     ///
     /// Returns an `Err` containing the original `TransactionSigned` if the transaction is not
     /// EIP-4844.
-    pub fn try_into_pooled_4844(
+    pub fn try_into_pooled_eip4844(
         self,
         sidecar: BlobTransactionSidecar,
     ) -> Result<PooledTransactionsElement, Self> {

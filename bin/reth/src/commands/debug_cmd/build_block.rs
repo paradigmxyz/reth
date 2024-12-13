@@ -29,8 +29,7 @@ use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_primitives::{
-    BlobTransaction, BlockExt, PooledTransactionsElement, SealedBlockFor, SealedBlockWithSenders,
-    SealedHeader, Transaction, TransactionSigned,
+    BlockExt, SealedBlockFor, SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
 };
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -190,14 +189,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     let sidecar: BlobTransactionSidecar =
                         blobs_bundle.pop_sidecar(blob_versioned_hashes.len());
 
-                    // first construct the tx, calculating the length of the tx with sidecar before
-                    // insertion
-                    let tx = BlobTransaction::try_from_signed(
-                        transaction.as_ref().clone(),
-                        sidecar.clone(),
-                    )
-                    .expect("should not fail to convert blob tx if it is already eip4844");
-                    let pooled = PooledTransactionsElement::BlobTransaction(tx);
+                    let pooled = transaction
+                        .clone()
+                        .into_signed()
+                        .try_into_pooled_eip4844(sidecar.clone())
+                        .expect("should not fail to convert blob tx if it is already eip4844");
                     let encoded_length = pooled.encode_2718_len();
 
                     // insert the blob into the store

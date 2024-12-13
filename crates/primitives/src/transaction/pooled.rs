@@ -28,7 +28,7 @@ impl PooledTransactionsElementEcRecovered {
     ) -> Result<Self, RecoveredTx> {
         let RecoveredTx { signer, signed_transaction } = tx;
         let transaction = signed_transaction
-            .try_into_pooled_4844(sidecar)
+            .try_into_pooled_eip4844(sidecar)
             .map_err(|tx| RecoveredTx { signer, signed_transaction: tx })?;
         Ok(Self::from_signed_transaction(transaction, signer))
     }

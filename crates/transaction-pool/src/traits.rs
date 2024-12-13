@@ -1419,7 +1419,7 @@ impl EthPoolTransaction for EthPooledTransaction {
         sidecar: BlobTransactionSidecar,
     ) -> Option<Self> {
         let (tx, signer) = tx.to_components();
-        PooledTransactionsElement::try_from_blob_transaction(tx, sidecar)
+        tx.try_into_pooled_eip4844(sidecar)
             .ok()
             .map(|tx| tx.with_signer(signer))
             .map(Self::from_pooled)
