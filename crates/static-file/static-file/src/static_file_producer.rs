@@ -433,7 +433,7 @@ mod tests {
                         headers: Some(1),
                         receipts: Some(1),
                         transactions: Some(1),
-                        block_meta: Some(1),
+                        block_meta: None,
                     })
                     .expect("get static file targets");
                 assert_matches!(locked_producer.run(targets.clone()), Ok(_));
