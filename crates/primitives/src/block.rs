@@ -10,25 +10,36 @@ use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
-use reth_primitives_traits::{BlockBody as _, InMemorySize, SignedTransaction, Transaction};
+use reth_primitives_traits::{
+    BlockBody as _, InMemorySize, MaybeSerdeBincodeCompat, SignedTransaction, Transaction,
+};
 use serde::{Deserialize, Serialize};
 
 /// Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 25))]
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Deref)]
-pub struct Block {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref)]
+pub struct Block<T = TransactionSigned> {
     /// Block header.
     #[deref]
     pub header: Header,
     /// Block body.
-    pub body: BlockBody,
+    pub body: BlockBody<T>,
 }
 
-impl reth_primitives_traits::Block for Block {
+impl<T> Default for Block<T> {
+    fn default() -> Self {
+        Self { header: Default::default(), body: Default::default() }
+    }
+}
+
+impl<T> reth_primitives_traits::Block for Block<T>
+where
+    T: SignedTransaction + Encodable + Decodable + MaybeSerdeBincodeCompat,
+{
     type Header = Header;
-    type Body = BlockBody;
+    type Body = BlockBody<T>;
 
     fn new(header: Self::Header, body: Self::Body) -> Self {
         Self { header, body }
@@ -47,7 +58,7 @@ impl reth_primitives_traits::Block for Block {
     }
 }
 
-impl InMemorySize for Block {
+impl<T: InMemorySize> InMemorySize for Block<T> {
     /// Calculates a heuristic for the in-memory size of the [`Block`].
     #[inline]
     fn size(&self) -> usize {
@@ -62,24 +73,24 @@ mod block_rlp {
 
     #[derive(RlpDecodable)]
     #[rlp(trailing)]
-    struct Helper<H> {
+    struct Helper<H, T> {
         header: H,
-        transactions: Vec<TransactionSigned>,
+        transactions: Vec<T>,
         ommers: Vec<Header>,
         withdrawals: Option<Withdrawals>,
     }
 
     #[derive(RlpEncodable)]
     #[rlp(trailing)]
-    struct HelperRef<'a, H> {
+    struct HelperRef<'a, H, T = TransactionSigned> {
         header: &'a H,
-        transactions: &'a Vec<TransactionSigned>,
+        transactions: &'a Vec<T>,
         ommers: &'a Vec<Header>,
         withdrawals: Option<&'a Withdrawals>,
     }
 
-    impl<'a> From<&'a Block> for HelperRef<'a, Header> {
-        fn from(block: &'a Block) -> Self {
+    impl<'a, T> From<&'a Block<T>> for HelperRef<'a, Header, T> {
+        fn from(block: &'a Block<T>) -> Self {
             let Block { header, body: BlockBody { transactions, ommers, withdrawals } } = block;
             Self { header, transactions, ommers, withdrawals: withdrawals.as_ref() }
         }
@@ -93,7 +104,7 @@ mod block_rlp {
         }
     }
 
-    impl Decodable for Block {
+    impl<T: Decodable> Decodable for Block<T> {
         fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
             let Helper { header, transactions, ommers, withdrawals } = Helper::decode(b)?;
             Ok(Self { header, body: BlockBody { transactions, ommers, withdrawals } })
@@ -107,26 +118,26 @@ mod block_rlp {
         }
     }
 
-    impl Encodable for Block {
+    impl<T: Encodable> Encodable for Block<T> {
         fn encode(&self, out: &mut dyn bytes::BufMut) {
-            let helper: HelperRef<'_, _> = self.into();
+            let helper: HelperRef<'_, _, _> = self.into();
             helper.encode(out)
         }
 
         fn length(&self) -> usize {
-            let helper: HelperRef<'_, _> = self.into();
+            let helper: HelperRef<'_, _, _> = self.into();
             helper.length()
         }
     }
 
     impl Encodable for SealedBlock {
         fn encode(&self, out: &mut dyn bytes::BufMut) {
-            let helper: HelperRef<'_, _> = self.into();
+            let helper: HelperRef<'_, _, _> = self.into();
             helper.encode(out)
         }
 
         fn length(&self) -> usize {
-            let helper: HelperRef<'_, _> = self.into();
+            let helper: HelperRef<'_, _, _> = self.into();
             helper.length()
         }
     }
@@ -231,7 +242,6 @@ impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 32))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
 pub struct SealedBlock<H = Header, B = BlockBody> {
     /// Locked block header.
@@ -560,9 +570,7 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 10))]
-#[derive(
-    Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize, RlpEncodable, RlpDecodable,
-)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
 #[rlp(trailing)]
 pub struct BlockBody<T = TransactionSigned> {
     /// Transactions in the block
@@ -571,6 +579,16 @@ pub struct BlockBody<T = TransactionSigned> {
     pub ommers: Vec<Header>,
     /// Withdrawals in the block.
     pub withdrawals: Option<Withdrawals>,
+}
+
+impl<T> Default for BlockBody<T> {
+    fn default() -> Self {
+        Self {
+            transactions: Default::default(),
+            ommers: Default::default(),
+            withdrawals: Default::default(),
+        }
+    }
 }
 
 impl BlockBody {
@@ -641,8 +659,11 @@ impl<T: InMemorySize> InMemorySize for BlockBody<T> {
     }
 }
 
-impl reth_primitives_traits::BlockBody for BlockBody {
-    type Transaction = TransactionSigned;
+impl<T> reth_primitives_traits::BlockBody for BlockBody<T>
+where
+    T: SignedTransaction + MaybeSerdeBincodeCompat,
+{
+    type Transaction = T;
     type OmmerHeader = Header;
 
     fn transactions(&self) -> &[Self::Transaction] {
@@ -704,8 +725,6 @@ pub(super) mod serde_bincode_compat {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
-    use crate::transaction::serde_bincode_compat::TransactionSigned;
-
     /// Bincode-compatible [`super::BlockBody`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
@@ -721,15 +740,16 @@ pub(super) mod serde_bincode_compat {
     ///     body: BlockBody,
     /// }
     /// ```
-    #[derive(Debug, Serialize, Deserialize)]
-    pub struct BlockBody<'a> {
-        transactions: Vec<TransactionSigned<'a>>,
+    #[derive(derive_more::Debug, Serialize, Deserialize)]
+    #[debug(bound())]
+    pub struct BlockBody<'a, T: SerdeBincodeCompat = super::TransactionSigned> {
+        transactions: Vec<T::BincodeRepr<'a>>,
         ommers: Vec<Header<'a>>,
         withdrawals: Cow<'a, Option<Withdrawals>>,
     }
 
-    impl<'a> From<&'a super::BlockBody> for BlockBody<'a> {
-        fn from(value: &'a super::BlockBody) -> Self {
+    impl<'a, T: SerdeBincodeCompat> From<&'a super::BlockBody<T>> for BlockBody<'a, T> {
+        fn from(value: &'a super::BlockBody<T>) -> Self {
             Self {
                 transactions: value.transactions.iter().map(Into::into).collect(),
                 ommers: value.ommers.iter().map(Into::into).collect(),
@@ -738,8 +758,8 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> From<BlockBody<'a>> for super::BlockBody {
-        fn from(value: BlockBody<'a>) -> Self {
+    impl<'a, T: SerdeBincodeCompat> From<BlockBody<'a, T>> for super::BlockBody<T> {
+        fn from(value: BlockBody<'a, T>) -> Self {
             Self {
                 transactions: value.transactions.into_iter().map(Into::into).collect(),
                 ommers: value.ommers.into_iter().map(Into::into).collect(),
@@ -766,8 +786,8 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl SerdeBincodeCompat for super::BlockBody {
-        type BincodeRepr<'a> = BlockBody<'a>;
+    impl<T: SerdeBincodeCompat> SerdeBincodeCompat for super::BlockBody<T> {
+        type BincodeRepr<'a> = BlockBody<'a, T>;
     }
 
     /// Bincode-compatible [`super::SealedBlock`] serde implementation.
@@ -1128,7 +1148,7 @@ mod tests {
     fn encode_decode_raw_block() {
         let bytes = hex!("f90288f90218a0fe21bb173f43067a9f90cfc59bbb6830a7a2929b5de4a61f372a9db28e87f9aea01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347940000000000000000000000000000000000000000a061effbbcca94f0d3e02e5bd22e986ad57142acabf0cb3d129a6ad8d0f8752e94a0d911c25e97e27898680d242b7780b6faef30995c355a2d5de92e6b9a7212ad3aa0056b23fbba480696b65fe5a59b8f2148a1299103c4f57df839233af2cf4ca2d2b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008003834c4b408252081e80a00000000000000000000000000000000000000000000000000000000000000000880000000000000000842806be9da056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421f869f86702842806be9e82520894658bdf435d810c91414ec09147daa6db624063798203e880820a95a040ce7918eeb045ebf8c8b1887ca139d076bda00fa828a07881d442a72626c42da0156576a68e456e295e4c9cf67cf9f53151f329438916e0f24fc69d6bbb7fbacfc0c0");
         let bytes_buf = &mut bytes.as_ref();
-        let block = Block::decode(bytes_buf).unwrap();
+        let block: Block = Block::decode(bytes_buf).unwrap();
         let mut encoded_buf = Vec::with_capacity(bytes.len());
         block.encode(&mut encoded_buf);
         assert_eq!(bytes[..], encoded_buf);
