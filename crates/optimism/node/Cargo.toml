@@ -16,6 +16,7 @@ reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-engine-local.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-util.workspace = true
 reth-payload-validator.workspace = true
@@ -110,25 +111,26 @@ js-tracer = [
 	"reth-node-builder/js-tracer"
 ]
 test-utils = [
-    "reth-tasks",
-    "reth-e2e-test-utils",
-    "alloy-genesis",
-    "tokio",
-    "reth-node-builder/test-utils",
-    "reth-chainspec/test-utils",
-    "reth-consensus/test-utils",
-    "reth-evm/test-utils",
-    "reth-network/test-utils",
-    "reth-payload-builder/test-utils",
-    "reth-primitives/test-utils",
-    "reth-revm/test-utils",
-    "reth-db/test-utils",
-    "reth-provider/test-utils",
-    "reth-transaction-pool/test-utils",
-    "reth-trie-db/test-utils",
-    "revm/test-utils",
-    "reth-optimism-node/test-utils",
-    "reth-optimism-primitives/arbitrary",
+	"reth-tasks",
+	"reth-e2e-test-utils",
+	"alloy-genesis",
+	"tokio",
+	"reth-node-builder/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-consensus/test-utils",
+	"reth-evm/test-utils",
+	"reth-network/test-utils",
+	"reth-payload-builder/test-utils",
+	"reth-primitives/test-utils",
+	"reth-revm/test-utils",
+	"reth-db/test-utils",
+	"reth-provider/test-utils",
+	"reth-transaction-pool/test-utils",
+	"reth-trie-db/test-utils",
+	"revm/test-utils",
+	"reth-optimism-node/test-utils",
+	"reth-optimism-primitives/arbitrary",
+	"reth-primitives-traits/test-utils"
 ]
 reth-codec = [
     "reth-primitives/reth-codec",

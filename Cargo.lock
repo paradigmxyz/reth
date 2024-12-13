@@ -8530,6 +8530,7 @@ dependencies = [
  "reth-payload-util",
  "reth-payload-validator",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
  "reth-rpc-server-types",
