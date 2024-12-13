@@ -1,10 +1,11 @@
 //! Transaction types.
 
 use alloc::vec::Vec;
+pub use alloy_consensus::transaction::PooledTransaction;
 use alloy_consensus::{
-    transaction::{PooledTransaction, RlpEcdsaTx},
-    SignableTransaction, Signed, Transaction as _, TxEip1559, TxEip2930, TxEip4844,
-    TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxLegacy, Typed2718, TypedTransaction,
+    transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction as _, TxEip1559, TxEip2930,
+    TxEip4844, TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxLegacy, Typed2718,
+    TypedTransaction,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -27,7 +28,7 @@ use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
 use op_alloy_consensus::DepositTransaction;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::TxDeposit;
-pub use pooled::{PooledTransactionsElement, PooledTransactionsElementEcRecovered};
+pub use pooled::PooledTransactionsElementEcRecovered;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 pub use reth_primitives_traits::{
     transaction::error::{
@@ -853,25 +854,25 @@ impl TransactionSigned {
         &self.transaction
     }
 
-    /// Tries to convert a [`TransactionSigned`] into a [`PooledTransactionsElement`].
+    /// Tries to convert a [`TransactionSigned`] into a [`PooledTransaction`].
     ///
     /// This function used as a helper to convert from a decoded p2p broadcast message to
-    /// [`PooledTransactionsElement`]. Since EIP4844 variants are disallowed to be broadcasted on
+    /// [`PooledTransaction`]. Since EIP4844 variants are disallowed to be broadcasted on
     /// p2p, return an err if `tx` is [`Transaction::Eip4844`].
-    pub fn try_into_pooled(self) -> Result<PooledTransactionsElement, Self> {
+    pub fn try_into_pooled(self) -> Result<PooledTransaction, Self> {
         let hash = self.hash();
         match self {
             Self { transaction: Transaction::Legacy(tx), signature, .. } => {
-                Ok(PooledTransactionsElement::Legacy(Signed::new_unchecked(tx, signature, hash)))
+                Ok(PooledTransaction::Legacy(Signed::new_unchecked(tx, signature, hash)))
             }
             Self { transaction: Transaction::Eip2930(tx), signature, .. } => {
-                Ok(PooledTransactionsElement::Eip2930(Signed::new_unchecked(tx, signature, hash)))
+                Ok(PooledTransaction::Eip2930(Signed::new_unchecked(tx, signature, hash)))
             }
             Self { transaction: Transaction::Eip1559(tx), signature, .. } => {
-                Ok(PooledTransactionsElement::Eip1559(Signed::new_unchecked(tx, signature, hash)))
+                Ok(PooledTransaction::Eip1559(Signed::new_unchecked(tx, signature, hash)))
             }
             Self { transaction: Transaction::Eip7702(tx), signature, .. } => {
-                Ok(PooledTransactionsElement::Eip7702(Signed::new_unchecked(tx, signature, hash)))
+                Ok(PooledTransaction::Eip7702(Signed::new_unchecked(tx, signature, hash)))
             }
             // Not supported because missing blob sidecar
             tx @ Self { transaction: Transaction::Eip4844(_), .. } => Err(tx),
@@ -889,13 +890,13 @@ impl TransactionSigned {
     pub fn try_into_pooled_eip4844(
         self,
         sidecar: BlobTransactionSidecar,
-    ) -> Result<PooledTransactionsElement, Self> {
+    ) -> Result<PooledTransaction, Self> {
         let hash = self.hash();
         Ok(match self {
             // If the transaction is an EIP-4844 transaction...
             Self { transaction: Transaction::Eip4844(tx), signature, .. } => {
                 // Construct a pooled eip488 tx with the provided sidecar.
-                PooledTransactionsElement::Eip4844(Signed::new_unchecked(
+                PooledTransaction::Eip4844(Signed::new_unchecked(
                     TxEip4844WithSidecar { tx, sidecar },
                     signature,
                     hash,
@@ -1251,7 +1252,7 @@ impl Decodable for TransactionSigned {
     /// This cannot be used for decoding EIP-4844 transactions in p2p `PooledTransactions`, since
     /// the EIP-4844 variant of [`TransactionSigned`] does not include the blob sidecar.
     ///
-    /// For a method suitable for decoding pooled transactions, see [`PooledTransactionsElement`].
+    /// For a method suitable for decoding pooled transactions, see [`PooledTransaction`].
     ///
     /// CAUTION: Due to a quirk in [`Header::decode`], this method will succeed even if a typed
     /// transaction is encoded in this format, and does not start with a RLP header:
