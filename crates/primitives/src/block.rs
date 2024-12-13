@@ -255,6 +255,11 @@ impl<H, B> SealedBlock<H, B> {
         self.header.hash()
     }
 
+    /// Returns reference to block body.
+    pub const fn body(&self) -> &B {
+        &self.body
+    }
+
     /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
     #[inline]
     pub fn split_header_body(self) -> (SealedHeader<H>, B) {
@@ -326,12 +331,6 @@ where
     H: reth_primitives_traits::BlockHeader,
     B: reth_primitives_traits::BlockBody,
 {
-    /// Splits the sealed block into underlying components
-    #[inline]
-    pub fn split(self) -> (SealedHeader<H>, B) {
-        (self.header, self.body)
-    }
-
     /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
     pub fn senders(&self) -> Option<Vec<Address>>
     where
@@ -496,7 +495,7 @@ impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
     #[inline]
     pub fn unseal(self) -> BlockWithSenders<B> {
         let (block, senders) = self.into_components();
-        let (header, body) = block.split();
+        let (header, body) = block.split_header_body();
         let header = header.unseal();
         BlockWithSenders::new_unchecked(B::new(header, body), senders)
     }
