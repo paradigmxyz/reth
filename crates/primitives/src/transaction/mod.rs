@@ -894,7 +894,7 @@ impl TransactionSigned {
         Ok(match self {
             // If the transaction is an EIP-4844 transaction...
             Self { transaction: Transaction::Eip4844(tx), signature, .. } => {
-                // Construct a `PooledTransactionsElement::BlobTransaction` with provided sidecar.
+                // Construct a pooled eip488 tx with the provided sidecar.
                 PooledTransactionsElement::Eip4844(Signed::new_unchecked(
                     TxEip4844WithSidecar { tx, sidecar },
                     signature,
