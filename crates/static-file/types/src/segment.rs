@@ -353,6 +353,8 @@ impl From<SegmentRangeInclusive> for RangeInclusive<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::hex;
+    use reth_nippy_jar::NippyJar;
     use strum::IntoEnumIterator;
 
     #[test]
@@ -408,6 +410,51 @@ mod tests {
         for segment in StaticFileSegment::iter() {
             let filename = segment.filename(&dummy_range);
             assert_eq!(Some((segment, dummy_range)), StaticFileSegment::parse_filename(&filename));
+        }
+    }
+
+    #[test]
+    fn test_segment_config_backwards() {
+        let headers = hex!("010000000000000000000000000000001fa10700000000000100000000000000001fa10700000000000000000000030000000000000020a107000000000001010000004a02000000000000");
+        let transactions = hex!("010000000000000000000000000000001fa10700000000000100000000000000001fa107000000000001000000000000000034a107000000000001000000010000000000000035a1070000000000004010000000000000");
+        let receipts = hex!("010000000000000000000000000000001fa10700000000000100000000000000000000000000000000000200000001000000000000000000000000000000000000000000000000");
+
+        {
+            let headers = NippyJar::<SegmentHeader>::load_from_reader(&headers[..]).unwrap();
+            assert_eq!(
+                &SegmentHeader {
+                    expected_block_range: SegmentRangeInclusive::new(0, 499999),
+                    block_range: Some(SegmentRangeInclusive::new(0, 499999)),
+                    tx_range: None,
+                    segment: StaticFileSegment::Headers,
+                },
+                headers.user_header()
+            );
+        }
+        {
+            let transactions =
+                NippyJar::<SegmentHeader>::load_from_reader(&transactions[..]).unwrap();
+            assert_eq!(
+                &SegmentHeader {
+                    expected_block_range: SegmentRangeInclusive::new(0, 499999),
+                    block_range: Some(SegmentRangeInclusive::new(0, 499999)),
+                    tx_range: Some(SegmentRangeInclusive::new(0, 500020)),
+                    segment: StaticFileSegment::Transactions,
+                },
+                transactions.user_header()
+            );
+        }
+        {
+            let receipts = NippyJar::<SegmentHeader>::load_from_reader(&receipts[..]).unwrap();
+            assert_eq!(
+                &SegmentHeader {
+                    expected_block_range: SegmentRangeInclusive::new(0, 499999),
+                    block_range: Some(SegmentRangeInclusive::new(0, 0)),
+                    tx_range: None,
+                    segment: StaticFileSegment::Receipts,
+                },
+                receipts.user_header()
+            );
         }
     }
 }
