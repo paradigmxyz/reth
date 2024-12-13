@@ -506,7 +506,8 @@ pub struct OpPayloadBuilder<Txs = ()> {
 }
 
 impl OpPayloadBuilder {
-    /// Create a new instance with the given `compute_pending_block` flag and data availability config.
+    /// Create a new instance with the given `compute_pending_block` flag and data availability
+    /// config.
     pub fn new(compute_pending_block: bool) -> Self {
         Self { compute_pending_block, best_transactions: (), da_config: OpDAConfig::default() }
     }
