@@ -655,7 +655,7 @@ impl<T: InMemorySize> InMemorySize for BlockBody<T> {
 
 impl<T> reth_primitives_traits::BlockBody for BlockBody<T>
 where
-    T: SignedTransaction + MaybeSerdeBincodeCompat,
+    T: SignedTransaction,
 {
     type Transaction = T;
     type OmmerHeader = Header;
@@ -715,7 +715,10 @@ pub(super) mod serde_bincode_compat {
     use alloy_consensus::serde_bincode_compat::Header;
     use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::Address;
-    use reth_primitives_traits::serde_bincode_compat::{SealedHeader, SerdeBincodeCompat};
+    use reth_primitives_traits::{
+        serde_bincode_compat::{SealedHeader, SerdeBincodeCompat},
+        Block,
+    };
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -868,7 +871,7 @@ pub(super) mod serde_bincode_compat {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct SealedBlockWithSenders<'a, B = super::Block>
     where
-        B: reth_primitives_traits::Block,
+        B: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
     {
         block: SealedBlock<'a, B::Header, B::Body>,
         senders: Cow<'a, Vec<Address>>,
@@ -876,7 +879,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<'a, B> From<&'a super::SealedBlockWithSenders<B>> for SealedBlockWithSenders<'a, B>
     where
-        B: reth_primitives_traits::Block,
+        B: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
     {
         fn from(value: &'a super::SealedBlockWithSenders<B>) -> Self {
             Self { block: SealedBlock::from(&value.block), senders: Cow::Borrowed(&value.senders) }
@@ -885,7 +888,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<'a, B> From<SealedBlockWithSenders<'a, B>> for super::SealedBlockWithSenders<B>
     where
-        B: reth_primitives_traits::Block,
+        B: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
     {
         fn from(value: SealedBlockWithSenders<'a, B>) -> Self {
             Self { block: value.block.into(), senders: value.senders.into_owned() }
