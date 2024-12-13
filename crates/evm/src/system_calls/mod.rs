@@ -134,19 +134,13 @@ where
         // Collect all EIP-7685 requests
         let withdrawal_requests = self.apply_withdrawal_requests_contract_call(evm)?;
         if !withdrawal_requests.is_empty() {
-            requests.push_request(
-                core::iter::once(WITHDRAWAL_REQUEST_TYPE).chain(withdrawal_requests).collect(),
-            );
+            requests.push_request_with_type(WITHDRAWAL_REQUEST_TYPE, withdrawal_requests);
         }
 
         // Collect all EIP-7251 requests
         let consolidation_requests = self.apply_consolidation_requests_contract_call(evm)?;
         if !consolidation_requests.is_empty() {
-            requests.push_request(
-                core::iter::once(CONSOLIDATION_REQUEST_TYPE)
-                    .chain(consolidation_requests)
-                    .collect(),
-            );
+            requests.push_request_with_type(CONSOLIDATION_REQUEST_TYPE, consolidation_requests);
         }
 
         Ok(requests)
