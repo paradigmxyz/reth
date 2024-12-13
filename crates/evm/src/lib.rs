@@ -26,6 +26,7 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, Sp
 
 pub mod builder;
 pub mod either;
+/// EVM environment configuration.
 pub mod env;
 pub mod execute;
 use env::EvmEnv;
