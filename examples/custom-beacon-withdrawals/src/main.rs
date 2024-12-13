@@ -20,9 +20,12 @@ use reth::{
     },
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_evm::execute::{
-    BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
-    InternalBlockExecutionError,
+use reth_evm::{
+    env::EvmEnv,
+    execute::{
+        BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
+        InternalBlockExecutionError,
+    },
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
@@ -131,8 +134,9 @@ where
         header: &alloy_consensus::Header,
         total_difficulty: U256,
     ) -> EnvWithHandlerCfg {
-        let (cfg, block_env) = self.evm_config.cfg_and_block_env(header, total_difficulty);
-        EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
+        let evm_env = self.evm_config.cfg_and_block_env(header, total_difficulty);
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
+        EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, Default::default())
     }
 }
 
