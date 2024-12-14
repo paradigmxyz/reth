@@ -181,6 +181,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     }
 
     /// Returns `true` if peer is idle with respect to `self.inflight_requests`.
+    #[inline]
     pub fn is_idle(&self, peer_id: &PeerId) -> bool {
         let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
         if *inflight_count < self.info.max_inflight_requests_per_peer {
@@ -193,13 +194,13 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     pub fn get_idle_peer_for(
         &self,
         hash: TxHash,
-        is_session_active: impl Fn(&PeerId) -> bool,
+        peers: &HashMap<PeerId, PeerMetadata<N>>,
     ) -> Option<&PeerId> {
         let TxFetchMetadata { fallback_peers, .. } =
             self.hashes_fetch_inflight_and_pending_fetch.peek(&hash)?;
 
         for peer_id in fallback_peers.iter() {
-            if self.is_idle(peer_id) && is_session_active(peer_id) {
+            if self.is_idle(peer_id) && peers.contains_key(peer_id) {
                 return Some(peer_id)
             }
         }
@@ -215,7 +216,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     pub fn find_any_idle_fallback_peer_for_any_pending_hash(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
-        is_session_active: impl Fn(&PeerId) -> bool,
+        peers: &HashMap<PeerId, PeerMetadata<N>>,
         mut budget: Option<usize>, // search fallback peers for max `budget` lru pending hashes
     ) -> Option<PeerId> {
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
@@ -223,7 +224,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let idle_peer = loop {
             let &hash = hashes_pending_fetch_iter.next()?;
 
-            let idle_peer = self.get_idle_peer_for(hash, &is_session_active);
+            let idle_peer = self.get_idle_peer_for(hash, peers);
 
             if idle_peer.is_some() {
                 hashes_to_request.insert(hash);
@@ -381,8 +382,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     /// [`TransactionFetcher::try_buffer_hashes_for_retry`]. Hashes that have been re-requested
     /// [`DEFAULT_MAX_RETRIES`], are dropped.
     pub fn buffer_hashes(&mut self, hashes: RequestTxHashes, fallback_peer: Option<PeerId>) {
-        let mut max_retried_and_evicted_hashes = vec![];
-
         for hash in hashes {
             // hash could have been evicted from bounded lru map
             if self.hashes_fetch_inflight_and_pending_fetch.peek(&hash).is_none() {
@@ -406,18 +405,19 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         "retry limit for `GetPooledTransactions` requests reached for hash, dropping hash"
                     );
 
-                    max_retried_and_evicted_hashes.push(hash);
+                    self.hashes_fetch_inflight_and_pending_fetch.remove(&hash);
+                    self.hashes_pending_fetch.remove(&hash);
                     continue
                 }
                 *retries += 1;
             }
+
             if let (_, Some(evicted_hash)) = self.hashes_pending_fetch.insert_and_get_evicted(hash)
             {
-                max_retried_and_evicted_hashes.push(evicted_hash);
+                self.hashes_fetch_inflight_and_pending_fetch.remove(&evicted_hash);
+                self.hashes_pending_fetch.remove(&evicted_hash);
             }
         }
-
-        self.remove_hashes_from_transaction_fetcher(max_retried_and_evicted_hashes);
     }
 
     /// Tries to request hashes pending fetch.
@@ -429,9 +429,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         peers: &HashMap<PeerId, PeerMetadata<N>>,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
     ) {
-        let mut hashes_to_request = RequestTxHashes::default();
-        let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
-
+        let mut hashes_to_request = RequestTxHashes::with_capacity(
+            DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
+        );
         let mut search_durations = TxFetcherSearchDurations::default();
 
         // budget to look for an idle peer before giving up
@@ -442,7 +442,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             {
                 let Some(peer_id) = self.find_any_idle_fallback_peer_for_any_pending_hash(
                     &mut hashes_to_request,
-                    is_session_active,
+                    peers,
                     budget_find_idle_fallback_peer,
                 ) else {
                     // no peers are idle or budget is depleted
