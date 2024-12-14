@@ -131,7 +131,10 @@ where
             )
         }
 
-        let outcome = self.inner.validate_one(origin, transaction);
+        let outcome = match self.inner.client().latest() {
+            Ok(state) => self.inner.validate_with_state(origin, transaction, &state),
+            Err(err) => TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err)),
+        };
 
         if !self.requires_l1_data_gas_fee() {
             // no need to check L1 gas fee
@@ -148,7 +151,7 @@ where
         {
             let l1_block_info = self.block_info.l1_block_info.read().clone();
 
-            let mut encoded = Vec::with_capacity(valid_tx.transaction().encoded_length());
+            let mut encoded = Vec::<u8>::with_capacity(valid_tx.transaction().encoded_length());
             let tx = valid_tx.transaction().clone_into_consensus();
             tx.encode_2718(&mut encoded);
 

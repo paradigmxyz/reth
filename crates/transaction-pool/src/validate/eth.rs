@@ -178,7 +178,7 @@ where
     Tx: EthPoolTransaction,
 {
     /// Validates a single transaction with a provided state provider.
-    fn validate_with_state<S>(
+    pub(crate) fn validate_with_state<S>(
         &self,
         origin: TransactionOrigin,
         mut transaction: Tx,
