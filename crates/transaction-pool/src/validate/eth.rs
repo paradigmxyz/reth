@@ -60,27 +60,29 @@ where
     Client: StateProviderFactory,
     Tx: EthPoolTransaction,
 {
-    /// Validates a single transaction.
-    ///
-    /// See also [`TransactionValidator::validate_transaction`]
-    pub fn validate_one(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
-    ) -> TransactionValidationOutcome<Tx> {
-        self.inner.validate_one(origin, transaction)
-    }
-
-    /// Validates all given transactions.
+    /// Validates all given transactions using a single state provider.
     ///
     /// Returns all outcomes for the given transactions in the same order.
-    ///
-    /// See also [`Self::validate_one`]
     pub fn validate_all(
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+        // Get the latest state provider once for all transactions
+        match self.inner.client.latest() {
+            Ok(state_provider) => transactions
+                .into_iter()
+                .map(|(origin, tx)| self.inner.validate_with_state(origin, tx, &state_provider))
+                .collect(),
+            Err(err) => {
+                // If we can't get the state provider, return errors for all transactions
+                transactions
+                    .into_iter()
+                    .map(|(_, tx)| {
+                        TransactionValidationOutcome::Error(*tx.hash(), Box::new(err.clone()))
+                    })
+                    .collect()
+            }
+        }
     }
 }
 
@@ -96,7 +98,7 @@ where
         origin: TransactionOrigin,
         transaction: Self::Transaction,
     ) -> TransactionValidationOutcome<Self::Transaction> {
-        self.validate_one(origin, transaction)
+        self.inner.validate_one(origin, transaction)
     }
 
     async fn validate_transactions(
@@ -175,12 +177,16 @@ where
     Client: StateProviderFactory,
     Tx: EthPoolTransaction,
 {
-    /// Validates a single transaction.
-    fn validate_one(
+    /// Validates a single transaction with a provided state provider.
+    fn validate_with_state<S>(
         &self,
         origin: TransactionOrigin,
         mut transaction: Tx,
-    ) -> TransactionValidationOutcome<Tx> {
+        state: &S,
+    ) -> TransactionValidationOutcome<Tx>
+    where
+        S: AccountReader + reth_storage_api::StateProvider,
+    {
         // Checks for tx_type
         match transaction.tx_type() {
             LEGACY_TX_TYPE_ID => {
@@ -349,11 +355,7 @@ where
             }
         }
 
-        let account = match self
-            .client
-            .latest()
-            .and_then(|state| state.basic_account(transaction.sender()))
-        {
+        let account = match state.basic_account(transaction.sender()) {
             Ok(account) => account.unwrap_or_default(),
             Err(err) => {
                 return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
@@ -368,11 +370,7 @@ where
         // transactions.
         if account.has_bytecode() {
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
-                match self
-                    .client
-                    .latest()
-                    .and_then(|state| state.bytecode_by_hash(account.get_bytecode_hash()))
-                {
+                match state.bytecode_by_hash(account.get_bytecode_hash()) {
                     Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
                     Err(err) => {
                         return TransactionValidationOutcome::Error(
@@ -476,6 +474,20 @@ where
                 }
                 TransactionOrigin::Private => false,
             },
+        }
+    }
+
+    /// Validates a single transaction.
+    ///
+    /// See also [`TransactionValidator::validate_transaction`]
+    fn validate_one(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        match self.client.latest() {
+            Ok(state) => self.validate_with_state(origin, transaction, &state),
+            Err(err) => TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err)),
         }
     }
 
@@ -889,7 +901,8 @@ mod tests {
         let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
             .build(provider, blob_store.clone());
 
-        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
+        let outcome =
+            validator.inner.validate_one(TransactionOrigin::External, transaction.clone());
 
         assert!(outcome.is_valid());
 
@@ -918,7 +931,8 @@ mod tests {
             .set_block_gas_limit(1_000_000) // tx gas limit is 1_015_288
             .build(provider, blob_store.clone());
 
-        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
+        let outcome =
+            validator.inner.validate_one(TransactionOrigin::External, transaction.clone());
 
         assert!(outcome.is_invalid());
 
@@ -935,5 +949,29 @@ mod tests {
         ));
         let tx = pool.get(transaction.hash());
         assert!(tx.is_none());
+    }
+
+    /// Tests that batch validation correctly reuses the same state provider
+    #[tokio::test]
+    async fn test_batch_validation_with_single_state() {
+        let provider = MockEthProvider::default();
+        let transactions = vec![get_transaction(), get_transaction()];
+
+        // Add test accounts to provider
+        for tx in &transactions {
+            provider.add_account(tx.sender(), ExtendedAccount::new(tx.nonce(), U256::MAX));
+        }
+
+        let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
+            .build(provider, InMemoryBlobStore::default());
+
+        let results = validator.validate_all(
+            transactions.into_iter().map(|tx| (TransactionOrigin::External, tx)).collect(),
+        );
+
+        // Verify all transactions were validated successfully
+        for result in results {
+            assert!(result.is_valid());
+        }
     }
 }
