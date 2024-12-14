@@ -3,7 +3,6 @@
 #![cfg_attr(feature = "disable-lock", allow(dead_code))]
 
 use reth_storage_errors::lockfile::StorageLockError;
-use reth_tracing::tracing::error;
 use std::{
     path::{Path, PathBuf},
     process,
@@ -47,7 +46,7 @@ impl StorageLock {
         let file_path = path.join(LOCKFILE_NAME);
         if let Some(process_lock) = ProcessUID::parse(&file_path)? {
             if process_lock.pid != (process::id() as usize) && process_lock.is_active() {
-                error!(
+                reth_tracing::tracing::error!(
                     target: "reth::db::lockfile",
                     path = ?file_path,
                     pid = process_lock.pid,
@@ -64,12 +63,14 @@ impl StorageLock {
 
 impl Drop for StorageLock {
     fn drop(&mut self) {
+        // The lockfile is not created in disable-lock mode, so we don't need to delete it.
+        #[cfg(not(feature = "disable-lock"))]
         if Arc::strong_count(&self.0) == 1 && self.0.file_path.exists() {
             // TODO: should only happen during tests that the file does not exist: tempdir is
             // getting dropped first. However, tempdir shouldn't be dropped
             // before any of the storage providers.
             if let Err(err) = reth_fs_util::remove_file(&self.0.file_path) {
-                error!(%err, "Failed to delete lock file");
+                reth_tracing::tracing::error!(%err, "Failed to delete lock file");
             }
         }
     }
