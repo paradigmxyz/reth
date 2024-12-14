@@ -17,7 +17,7 @@ use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStatePro
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::models::BlockNumberAddress;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives::{
@@ -32,10 +32,7 @@ use reth_storage_api::{
     StateProvider, StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
-use revm::{
-    db::states::PlainStorageRevert,
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-};
+use revm::db::states::PlainStorageRevert;
 use std::{
     collections::{hash_map, HashMap},
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
@@ -1240,7 +1237,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for ConsistentProvider<N>
         &self,
         header: &HeaderTy<N>,
         evm_config: EvmConfig,
-    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
+    ) -> ProviderResult<EvmEnv>
     where
         EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {

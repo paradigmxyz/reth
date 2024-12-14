@@ -6,6 +6,7 @@ use alloy_primitives::U256;
 use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest, BlockId};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
+use reth_evm::env::EvmEnv;
 use reth_provider::StateProvider;
 use reth_revm::{
     database::StateProviderDatabase,
@@ -259,13 +260,14 @@ pub trait EstimateCall: Call {
         Self: LoadPendingBlock,
     {
         async move {
-            let (cfg, block_env, at) = self.evm_env_at(at).await?;
+            let (evm_env, at) = self.evm_env_at(at).await?;
+            let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
             self.spawn_blocking_io(move |this| {
                 let state = this.state_at_block_id(at)?;
                 EstimateCall::estimate_gas_with(
                     &this,
-                    cfg,
+                    cfg_env_with_handler_cfg,
                     block_env,
                     request,
                     state,

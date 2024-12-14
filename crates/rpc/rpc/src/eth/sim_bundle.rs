@@ -10,7 +10,7 @@ use alloy_rpc_types_mev::{
 };
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv};
 use reth_provider::{ChainSpecProvider, HeaderProvider, ProviderTx};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::MevSimApiServer;
@@ -245,7 +245,8 @@ where
         let flattened_bundle = self.parse_and_flatten_bundle(&request)?;
 
         let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
-        let (cfg, mut block_env, current_block) = self.eth_api().evm_env_at(block_id).await?;
+        let (evm_env, current_block) = self.eth_api().evm_env_at(block_id).await?;
+        let EvmEnv { cfg_env_with_handler_cfg, mut block_env } = evm_env;
 
         let parent_header = RpcNodeCore::provider(&self.inner.eth_api)
             .header_by_number(block_env.number.saturating_to::<u64>())
@@ -273,7 +274,7 @@ where
 
         if let Some(base_fee) = base_fee {
             block_env.basefee = U256::from(base_fee);
-        } else if cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON) {
+        } else if cfg_env_with_handler_cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON) {
             if let Some(base_fee) = parent_header.next_block_base_fee(
                 RpcNodeCore::provider(&self.inner.eth_api)
                     .chain_spec()
@@ -293,7 +294,11 @@ where
                 let current_block_number = current_block.as_u64().unwrap();
                 let coinbase = block_env.coinbase;
                 let basefee = block_env.basefee;
-                let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, TxEnv::default());
+                let env = EnvWithHandlerCfg::new_with_cfg_env(
+                    cfg_env_with_handler_cfg,
+                    block_env,
+                    TxEnv::default(),
+                );
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let initial_coinbase_balance = DatabaseRef::basic_ref(&db, coinbase)
