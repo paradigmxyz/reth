@@ -23,8 +23,8 @@ use reth_evm::{
 use reth_primitives::{BlockExt, NodePrimitives, ReceiptWithBloom, SealedBlockWithSenders};
 use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
 use reth_provider::{
-    BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, ProviderBlock,
-    ReceiptProviderIdExt, StateProofProvider, TransactionVariant,
+    BlockIdReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
+    ProviderBlock, ReceiptProviderIdExt, StateProofProvider, TransactionVariant,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
@@ -162,8 +162,11 @@ where
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
 
-        let evm_env = self.eth_api().evm_env_for_raw_block(block.header()).await?;
-        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
+        // Note: we assume the block has a valid height
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = self
+            .provider()
+            .env_with_header(block.header(), self.eth_api().evm_config().clone())
+            .map_err(Eth::Error::from_eth_err)?;
 
         // Depending on EIP-2 we need to recover the transactions differently
         let senders =
