@@ -582,7 +582,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 TxFetchMetadata{retries: 0, fallback_peers: LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32), tx_encoded_length: None}
             ).is_none() {
 
-                debug!(target: "net::tx",
+                trace!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
                     %hash,
                     ?msg_version,
@@ -642,7 +642,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
 
         let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
-            debug!(target: "net::tx",
+            trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 hashes=?*new_announced_hashes,
                 conn_eth_version=%conn_eth_version,
