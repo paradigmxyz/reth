@@ -16,11 +16,11 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_eth_wire::NetPrimitivesFor;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_network::{BlockDownloaderProvider, NetworkPrimitives};
+use reth_network::BlockDownloaderProvider;
 use reth_network_p2p::HeadersClient;
-use reth_node_api::{BlockTy, BodyTy, HeaderTy, ReceiptTy};
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
     version::{
@@ -110,12 +110,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider<Primitives = N::Primitives>,
         F: FnOnce(Arc<C::ChainSpec>) -> E,
-        P: NetworkPrimitives<
-            BlockHeader = HeaderTy<N>,
-            BlockBody = BodyTy<N>,
-            Block = BlockTy<N>,
-            Receipt = ReceiptTy<N>,
-        >,
+        P: NetPrimitivesFor<N::Primitives>,
     {
         // Raise the fd limit of the process.
         // Does not do anything on windows.

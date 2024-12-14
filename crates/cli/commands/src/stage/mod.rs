@@ -7,9 +7,8 @@ use clap::{Parser, Subcommand};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
+use reth_eth_wire::NetPrimitivesFor;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_network::NetworkPrimitives;
-use reth_node_api::{BlockTy, BodyTy, HeaderTy, ReceiptTy};
 
 pub mod drop;
 pub mod dump;
@@ -48,12 +47,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider<Primitives = N::Primitives>,
         F: FnOnce(Arc<C::ChainSpec>) -> E,
-        P: NetworkPrimitives<
-            BlockHeader = HeaderTy<N>,
-            BlockBody = BodyTy<N>,
-            Block = BlockTy<N>,
-            Receipt = ReceiptTy<N>,
-        >,
+        P: NetPrimitivesFor<N::Primitives>,
     {
         match self.command {
             Subcommands::Run(command) => command.execute::<N, _, _, P>(ctx, executor).await,
