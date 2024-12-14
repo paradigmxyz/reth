@@ -116,9 +116,6 @@ where
     /// Validates a single transaction.
     ///
     /// See also [`TransactionValidator::validate_transaction`]
-    ///
-    /// This behaves the same as [`EthTransactionValidator::validate_one`], but in addition, ensures
-    /// that the account has enough balance to cover the L1 gas cost.
     pub fn validate_one(
         &self,
         origin: TransactionOrigin,
