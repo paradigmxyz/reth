@@ -84,6 +84,19 @@ where
             }
         }
     }
+
+    /// Validates a transaction with a provided state.
+    pub fn validate_with_state<S>(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+        state: &S,
+    ) -> TransactionValidationOutcome<Tx>
+    where
+        S: AccountReader + reth_storage_api::StateProvider,
+    {
+        self.inner.validate_with_state(origin, transaction, state)
+    }
 }
 
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>

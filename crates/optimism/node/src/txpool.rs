@@ -151,7 +151,9 @@ where
         {
             let l1_block_info = self.block_info.l1_block_info.read().clone();
 
-            let mut encoded = Vec::<u8>::with_capacity(valid_tx.transaction().encoded_length());
+            let mut encoded = Vec::<u8>::with_capacity(
+                valid_tx.transaction().encoded_length::<TransactionSigned>(),
+            );
             let tx = valid_tx.transaction().clone_into_consensus();
             tx.encode_2718(&mut encoded);
 
