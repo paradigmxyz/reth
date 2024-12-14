@@ -8733,6 +8733,7 @@ dependencies = [
  "alloy-rpc-types",
  "reth-chainspec",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-rpc-types-compat",
 ]
 
