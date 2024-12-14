@@ -105,6 +105,18 @@ impl InMemorySize for op_alloy_consensus::OpTypedTransaction {
     }
 }
 
+#[cfg(feature = "op")]
+impl InMemorySize for op_alloy_consensus::OpPooledTransaction {
+    fn size(&self) -> usize {
+        match self {
+            Self::Legacy(tx) => tx.size(),
+            Self::Eip2930(tx) => tx.size(),
+            Self::Eip1559(tx) => tx.size(),
+            Self::Eip7702(tx) => tx.size(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
