@@ -8126,6 +8126,7 @@ dependencies = [
  "eyre",
  "reth-beacon-consensus",
  "reth-consensus",
+ "reth-db-api",
  "reth-engine-primitives",
  "reth-evm",
  "reth-network-api",

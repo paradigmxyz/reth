@@ -10,9 +10,7 @@ use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
-use reth_node_api::{
-    AddOnsContext, ConfigureEvm, FullNodeComponents, HeaderTy, NodeTypesWithDB, TxTy,
-};
+use reth_node_api::{AddOnsContext, ConfigureEvm, FullNodeComponents, HeaderTy, TxTy};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
@@ -94,16 +92,9 @@ pub type EthereumAddOns<N> = RpcAddOns<
     EthereumEngineValidatorBuilder,
 >;
 
-impl<Types, N> Node<N> for EthereumNode
+impl<N> Node<N> for EthereumNode
 where
-    Types: NodeTypesWithDB
-        + NodeTypesWithEngine<
-            Engine = EthEngineTypes,
-            ChainSpec = ChainSpec,
-            Primitives = EthPrimitives,
-            Storage = EthStorage,
-        >,
-    N: FullNodeTypes<Types = Types>,
+    N: FullNodeTypes<Types = Self>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,

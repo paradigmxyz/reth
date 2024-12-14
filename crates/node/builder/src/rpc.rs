@@ -19,7 +19,7 @@ use reth_node_core::{
 };
 use reth_payload_builder::PayloadStore;
 use reth_primitives::{EthPrimitives, PooledTransaction};
-use reth_provider::providers::ProviderNodeTypes;
+use reth_provider::providers::NodeTypesForProvider;
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
     EthApi,
@@ -535,7 +535,7 @@ where
 impl<N, EthApi, EV> NodeAddOns<N> for RpcAddOns<N, EthApi, EV>
 where
     N: FullNodeComponents<
-        Types: ProviderNodeTypes<Primitives = EthPrimitives>,
+        Types: NodeTypesForProvider<Primitives = EthPrimitives>,
         Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
     >,
     EthApi: EthApiTypes
