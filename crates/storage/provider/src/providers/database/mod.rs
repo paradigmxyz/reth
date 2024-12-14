@@ -17,7 +17,7 @@ use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
     BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
@@ -32,10 +32,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
 use reth_trie_db::StateCommitment;
-use revm::{
-    db::BundleState,
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-};
+use revm::db::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::Path,
@@ -599,7 +596,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for ProviderFactory<N> {
         &self,
         header: &HeaderTy<N>,
         evm_config: EvmConfig,
-    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
+    ) -> ProviderResult<EvmEnv>
     where
         EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {

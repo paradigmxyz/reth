@@ -5,7 +5,7 @@ use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::PooledTransaction;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{ChainSpecProvider, HeaderProvider};
@@ -109,7 +109,8 @@ where
 
         let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
-        let (cfg, mut block_env, at) = self.eth_api().evm_env_at(block_id).await?;
+        let (evm_env, at) = self.eth_api().evm_env_at(block_id).await?;
+        let EvmEnv { cfg_env_with_handler_cfg, mut block_env } = evm_env;
 
         if let Some(coinbase) = coinbase {
             block_env.coinbase = coinbase;
@@ -140,7 +141,7 @@ where
 
         if let Some(base_fee) = base_fee {
             block_env.basefee = U256::from(base_fee);
-        } else if cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON) {
+        } else if cfg_env_with_handler_cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON) {
             let parent_block = block_env.number.saturating_to::<u64>();
             // here we need to fetch the _next_ block's basefee based on the parent block <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2130>
             let parent = RpcNodeCore::provider(self.eth_api())
@@ -166,7 +167,11 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let coinbase = block_env.coinbase;
                 let basefee = Some(block_env.basefee.to::<u64>());
-                let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, TxEnv::default());
+                let env = EnvWithHandlerCfg::new_with_cfg_env(
+                    cfg_env_with_handler_cfg,
+                    block_env,
+                    TxEnv::default(),
+                );
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let initial_coinbase = db

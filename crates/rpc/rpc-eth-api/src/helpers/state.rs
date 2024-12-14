@@ -10,14 +10,14 @@ use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_provider::{
     BlockIdReader, BlockNumReader, ChainSpecProvider, EvmEnvProvider as _, ProviderHeader,
     StateProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
+use revm_primitives::SpecId;
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
@@ -214,7 +214,7 @@ pub trait LoadState:
     fn evm_env_at(
         &self,
         at: BlockId,
-    ) -> impl Future<Output = Result<(CfgEnvWithHandlerCfg, BlockEnv, BlockId), Self::Error>> + Send
+    ) -> impl Future<Output = Result<(EvmEnv, BlockId), Self::Error>> + Send
     where
         Self: LoadPendingBlock + SpawnBlocking,
     {
@@ -222,7 +222,7 @@ pub trait LoadState:
             if at.is_pending() {
                 let PendingBlockEnv { cfg, block_env, origin } =
                     self.pending_block_env_and_cfg()?;
-                Ok((cfg, block_env, origin.state_block_id()))
+                Ok(((cfg, block_env).into(), origin.state_block_id()))
             } else {
                 // Use cached values if there is no pending block
                 let block_hash = RpcNodeCore::provider(self)
@@ -233,11 +233,11 @@ pub trait LoadState:
                 let header =
                     self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
                 let evm_config = self.evm_config().clone();
-                let (cfg, block_env) = self
+                let evm_env = self
                     .provider()
                     .env_with_header(&header, evm_config)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok((cfg, block_env, block_hash.into()))
+                Ok((evm_env, block_hash.into()))
             }
         }
     }
@@ -248,18 +248,19 @@ pub trait LoadState:
     fn evm_env_for_raw_block(
         &self,
         header: &ProviderHeader<Self::Provider>,
-    ) -> impl Future<Output = Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error>> + Send
+    ) -> impl Future<Output = Result<EvmEnv, Self::Error>> + Send
     where
         Self: LoadPendingBlock + SpawnBlocking,
     {
         async move {
             // get the parent config first
-            let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash().into()).await?;
+            let (evm_env, _) = self.evm_env_at(header.parent_hash().into()).await?;
+            let EvmEnv { cfg_env_with_handler_cfg, mut block_env } = evm_env;
 
-            let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
+            let after_merge = cfg_env_with_handler_cfg.handler_cfg.spec_id >= SpecId::MERGE;
             self.evm_config().fill_block_env(&mut block_env, header, after_merge);
 
-            Ok((cfg, block_env))
+            Ok((cfg_env_with_handler_cfg, block_env).into())
         }
     }
 

@@ -8,7 +8,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::SealedBlockWithSenders;
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
@@ -195,7 +195,8 @@ pub trait Trace:
             };
             let (tx, tx_info) = transaction.split();
 
-            let (cfg, block_env, _) = self.evm_env_at(block.hash().into()).await?;
+            let (evm_env, _) = self.evm_env_at(block.hash().into()).await?;
+            let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
@@ -206,19 +207,24 @@ pub trait Trace:
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
                 let block_txs = block.transactions_with_sender();
 
-                this.apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
+                this.apply_pre_execution_changes(
+                    &block,
+                    &mut db,
+                    &cfg_env_with_handler_cfg,
+                    &block_env,
+                )?;
 
                 // replay all transactions prior to the targeted transaction
                 this.replay_transactions_until(
                     &mut db,
-                    cfg.clone(),
+                    cfg_env_with_handler_cfg.clone(),
                     block_env.clone(),
                     block_txs,
                     *tx.tx_hash(),
                 )?;
 
                 let env = EnvWithHandlerCfg::new_with_cfg_env(
-                    cfg,
+                    cfg_env_with_handler_cfg,
                     block_env,
                     RpcNodeCore::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
                 );
@@ -308,8 +314,9 @@ pub trait Trace:
                 self.block_with_senders(block_id).await
             };
 
-            let ((cfg, block_env, _), block) =
-                futures::try_join!(self.evm_env_at(block_id), block)?;
+            let ((evm_env, _), block) = futures::try_join!(self.evm_env_at(block_id), block)?;
+
+            let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
             let Some(block) = block else { return Ok(None) };
 
@@ -333,7 +340,12 @@ pub trait Trace:
                 let mut db =
                     CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
 
-                this.apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
+                this.apply_pre_execution_changes(
+                    &block,
+                    &mut db,
+                    &cfg_env_with_handler_cfg,
+                    &block_env,
+                )?;
 
                 // prepare transactions, we do everything upfront to reduce time spent with open
                 // state
@@ -362,8 +374,11 @@ pub trait Trace:
                     .peekable();
 
                 while let Some((tx_info, tx)) = transactions.next() {
-                    let env =
-                        EnvWithHandlerCfg::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
+                    let env = EnvWithHandlerCfg::new_with_cfg_env(
+                        cfg_env_with_handler_cfg.clone(),
+                        block_env.clone(),
+                        tx,
+                    );
 
                     let mut inspector = inspector_setup();
                     let (res, _) =

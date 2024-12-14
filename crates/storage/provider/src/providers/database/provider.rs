@@ -47,7 +47,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
@@ -70,9 +70,8 @@ use reth_trie::{
     HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor};
-use revm::{
-    db::states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+use revm::db::states::{
+    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
 use std::{
     cmp::Ordering,
@@ -1648,7 +1647,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> EvmEnvProvider<HeaderTy<N>>
         &self,
         header: &HeaderTy<N>,
         evm_config: EvmConfig,
-    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
+    ) -> ProviderResult<EvmEnv>
     where
         EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
