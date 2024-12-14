@@ -512,10 +512,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         is_session_active: impl Fn(PeerId) -> bool,
         client_version: &str,
     ) {
-        #[cfg(not(debug_assertions))]
         let mut previously_unseen_hashes_count = 0;
-        #[cfg(debug_assertions)]
-        let mut previously_unseen_hashes = Vec::with_capacity(new_announced_hashes.len() / 4);
 
         let msg_version = new_announced_hashes.msg_version();
 
@@ -523,7 +520,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         new_announced_hashes.retain(|hash, metadata| {
 
             // occupied entry
-
             if let Some(TxFetchMetadata{ref mut fallback_peers, tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
                 // update size metadata if available
                 if let Some((_ty, size)) = metadata {
@@ -571,12 +567,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 return false
             }
 
-            #[cfg(not(debug_assertions))]
-            {
-                previously_unseen_hashes_count += 1;
-            }
-            #[cfg(debug_assertions)]
-            previously_unseen_hashes.push(*hash);
+            previously_unseen_hashes_count += 1;
 
             if self.hashes_fetch_inflight_and_pending_fetch.get_or_insert(*hash, ||
                 TxFetchMetadata{retries: 0, fallback_peers: LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32), tx_encoded_length: None}
@@ -595,22 +586,11 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             true
         });
 
-        #[cfg(not(debug_assertions))]
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
             previously_unseen_hashes_count=previously_unseen_hashes_count,
             msg_version=?msg_version,
             client_version=%client_version,
-            "received previously unseen hashes in announcement from peer"
-        );
-
-        #[cfg(debug_assertions)]
-        trace!(target: "net::tx",
-            peer_id=format!("{peer_id:#}"),
-            ?msg_version,
-            %client_version,
-            previously_unseen_hashes_len=previously_unseen_hashes.len(),
-            ?previously_unseen_hashes,
             "received previously unseen hashes in announcement from peer"
         );
     }
