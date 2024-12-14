@@ -16,7 +16,7 @@ mod constants;
 pub use constants::*;
 
 mod account;
-pub use account::TrieAccount;
+pub use account::{from_account_info_to_trie_account, from_account_to_trie_account};
 
 mod key;
 pub use key::{KeccakKeyHasher, KeyHasher};
@@ -56,4 +56,6 @@ pub mod serde_bincode_compat {
 }
 
 /// Re-export
-pub use alloy_trie::{nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, EMPTY_ROOT_HASH};
+pub use alloy_trie::{
+    nodes::*, proof, BranchNodeCompact, HashBuilder, TrieAccount, TrieMask, EMPTY_ROOT_HASH,
+};

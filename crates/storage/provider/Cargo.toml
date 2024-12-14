@@ -28,6 +28,7 @@ reth-db-api.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
+reth-trie-common = { workspace = true, optional = true }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
@@ -119,6 +120,7 @@ test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
     "reth-trie/test-utils",
+    "reth-trie-common",
     "reth-chain-state/test-utils",
     "reth-ethereum-engine-primitives",
     "reth-chainspec/test-utils",

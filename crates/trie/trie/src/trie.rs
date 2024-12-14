@@ -7,12 +7,13 @@ use crate::{
     trie_cursor::TrieCursorFactory,
     updates::{StorageTrieUpdates, TrieUpdates},
     walker::TrieWalker,
-    HashBuilder, Nibbles, TrieAccount, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::{StateRootError, StorageRootError};
+use reth_trie_common::from_account_to_trie_account;
 use tracing::trace;
 
 #[cfg(feature = "metrics")]
@@ -224,7 +225,7 @@ where
                     };
 
                     account_rlp.clear();
-                    let account = TrieAccount::from((account, storage_root));
+                    let account = from_account_to_trie_account(account, storage_root);
                     account.encode(&mut account_rlp as &mut dyn BufMut);
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 

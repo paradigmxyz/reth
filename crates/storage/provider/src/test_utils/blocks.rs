@@ -16,6 +16,7 @@ use reth_primitives::{
     TransactionSigned, TxType,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
+use reth_trie_common::from_account_to_trie_account;
 use revm::{db::BundleState, primitives::AccountInfo};
 use std::{str::FromStr, sync::LazyLock};
 
@@ -170,7 +171,7 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
             account.info.as_ref().map(|info| {
                 (
                     address,
-                    (
+                    from_account_to_trie_account(
                         Account::from(info),
                         storage_root_unhashed(
                             account

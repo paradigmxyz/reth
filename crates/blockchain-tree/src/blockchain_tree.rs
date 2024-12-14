@@ -1402,6 +1402,7 @@ mod tests {
     use reth_revm::primitives::AccountInfo;
     use reth_stages_api::StageCheckpoint;
     use reth_trie::{root::state_root_unhashed, StateRoot};
+    use reth_trie_common::from_account_info_to_trie_account;
     use std::collections::HashMap;
 
     fn setup_externals(
@@ -1624,7 +1625,7 @@ mod tests {
                 receipts_root,
                 state_root: state_root_unhashed(HashMap::from([(
                     signer,
-                    (
+                    from_account_info_to_trie_account(
                         AccountInfo {
                             balance: initial_signer_balance -
                                 (single_tx_cost * U256::from(num_of_signer_txs)),

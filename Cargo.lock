@@ -6702,6 +6702,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-testing-utils",
  "reth-trie",
+ "reth-trie-common",
  "reth-trie-db",
  "reth-trie-parallel",
  "tokio",
@@ -6746,6 +6747,7 @@ dependencies = [
  "reth-storage-api",
  "reth-testing-utils",
  "reth-trie",
+ "reth-trie-common",
  "revm",
  "tokio",
  "tokio-stream",
@@ -8852,6 +8854,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-testing-utils",
  "reth-trie",
+ "reth-trie-common",
  "reth-trie-db",
  "revm",
  "strum",
@@ -9570,7 +9573,6 @@ name = "reth-trie-common"
 version = "1.1.4"
 dependencies = [
  "alloy-consensus",
- "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-eth",
