@@ -9393,6 +9393,7 @@ dependencies = [
  "alloy-primitives",
  "clap",
  "derive_more",
+ "reth-nippy-jar",
  "serde",
  "strum",
 ]
