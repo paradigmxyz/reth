@@ -754,9 +754,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             }
 
             if let Some(ref mut bud) = budget_fill_request {
-                *bud = bud.saturating_sub(1);
+                *bud -= 1;
                 if *bud == 0 {
-                    return
+                    break
                 }
             }
         }
