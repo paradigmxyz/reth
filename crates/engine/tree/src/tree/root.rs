@@ -35,8 +35,18 @@ use tracing::{debug, error, trace};
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
+/// Outcome of the state root computation, including the state root itself with
+/// the trie updates and the total time spent.
+#[derive(Debug)]
+pub struct StateRootComputeOutcome {
+    /// The computed state root and trie updates
+    pub state_root: (B256, TrieUpdates),
+    /// The total time spent calculating the state root
+    pub total_time: Duration,
+}
+
 /// Result of the state root calculation
-pub(crate) type StateRootResult = Result<(B256, TrieUpdates), ParallelStateRootError>;
+pub(crate) type StateRootResult = Result<StateRootComputeOutcome, ParallelStateRootError>;
 
 /// Handle to a spawned state root task.
 #[derive(Debug)]
@@ -252,6 +262,8 @@ pub struct StateRootTask<Factory, BPF: BlindedProviderFactory> {
     /// The sparse trie used for the state root calculation. If [`None`], then update is in
     /// progress.
     sparse_trie: Option<Box<SparseStateTrie<BPF>>>,
+    /// Timestamp when the first state update was received
+    start_time: Option<Instant>,
 }
 
 #[allow(dead_code)]
@@ -281,6 +293,7 @@ where
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
             sparse_trie: Some(Box::new(SparseStateTrie::new(blinded_provider).with_updates(true))),
+            start_time: None,
         }
     }
 
@@ -444,6 +457,11 @@ where
             match self.rx.recv() {
                 Ok(message) => match message {
                     StateRootMessage::StateUpdate(update) => {
+                        if updates_received == 0 {
+                            self.start_time = Some(Instant::now());
+                            debug!(target: "engine::root", "Started state root calculation");
+                        }
+
                         updates_received += 1;
                         trace!(
                             target: "engine::root",
@@ -549,6 +567,13 @@ where
                                 roots_calculated,
                                 "All proofs processed, ending calculation"
                             );
+                            let total_time =
+                                self.start_time.expect("start time should be set").elapsed();
+                            debug!(
+                                target: "engine::root",
+                                ?total_time,
+                                "Total time spent calculating state root"
+                            );
                             let mut trie = self
                                 .sparse_trie
                                 .take()
@@ -557,7 +582,10 @@ where
                             let trie_updates = trie
                                 .take_trie_updates()
                                 .expect("sparse trie should have updates retention enabled");
-                            return Ok((root, trie_updates));
+                            return Ok(StateRootComputeOutcome {
+                                state_root: (root, trie_updates),
+                                total_time,
+                            });
                         }
                     }
                     StateRootMessage::ProofCalculationError(e) => {
@@ -856,7 +884,8 @@ mod tests {
             drop(state_hook);
 
             handle.wait_for_result().expect("task failed")
-        });
+        })
+        .state_root;
         let root_from_base = state_root(accumulated_state);
 
         assert_eq!(

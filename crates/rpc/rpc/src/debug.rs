@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
+    env::EvmEnv,
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
 };
@@ -161,7 +162,8 @@ where
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
 
-        let (cfg, block_env) = self.eth_api().evm_env_for_raw_block(block.header()).await?;
+        let evm_env = self.eth_api().evm_env_for_raw_block(block.header()).await?;
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
         // Depending on EIP-2 we need to recover the transactions differently
         let senders =
@@ -191,7 +193,7 @@ where
 
         self.trace_block(
             Arc::new(block.with_senders_unchecked(senders).seal_slow()),
-            cfg,
+            cfg_env_with_handler_cfg,
             block_env,
             opts,
         )
@@ -210,14 +212,15 @@ where
             .map_err(Eth::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        let ((cfg, block_env, _), block) = futures::try_join!(
+        let ((evm_env, _), block) = futures::try_join!(
             self.eth_api().evm_env_at(block_hash.into()),
             self.eth_api().block_with_senders(block_hash.into()),
         )?;
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
         let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        self.trace_block(block, cfg, block_env, opts).await
+        self.trace_block(block, cfg_env_with_handler_cfg, block_env, opts).await
     }
 
     /// Trace the transaction according to the provided options.
@@ -232,7 +235,8 @@ where
             None => return Err(EthApiError::TransactionNotFound.into()),
             Some(res) => res,
         };
-        let (cfg, block_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
@@ -249,12 +253,17 @@ where
 
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-                this.eth_api().apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
+                this.eth_api().apply_pre_execution_changes(
+                    &block,
+                    &mut db,
+                    &cfg_env_with_handler_cfg,
+                    &block_env,
+                )?;
 
                 // replay all transactions prior to the targeted transaction
                 let index = this.eth_api().replay_transactions_until(
                     &mut db,
-                    cfg.clone(),
+                    cfg_env_with_handler_cfg.clone(),
                     block_env.clone(),
                     block_txs,
                     *tx.tx_hash(),
@@ -262,11 +271,11 @@ where
 
                 let env = EnvWithHandlerCfg {
                     env: Env::boxed(
-                        cfg.cfg_env.clone(),
+                        cfg_env_with_handler_cfg.cfg_env.clone(),
                         block_env,
                         this.eth_api().evm_config().tx_env(tx.as_signed(), tx.signer()),
                     ),
-                    handler_cfg: cfg.handler_cfg,
+                    handler_cfg: cfg_env_with_handler_cfg.handler_cfg,
                 };
 
                 this.trace_transaction(
@@ -440,7 +449,7 @@ where
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
 
-                    let (_, _, at) = self.eth_api().evm_env_at(at).await?;
+                    let (_, at) = self.eth_api().evm_env_at(at).await?;
 
                     let res = self
                         .eth_api()
@@ -502,10 +511,11 @@ where
         let transaction_index = transaction_index.unwrap_or_default();
 
         let target_block = block_number.unwrap_or_default();
-        let ((cfg, mut block_env, _), block) = futures::try_join!(
+        let ((evm_env, _), block) = futures::try_join!(
             self.eth_api().evm_env_at(target_block),
             self.eth_api().block_with_senders(target_block),
         )?;
+        let EvmEnv { cfg_env_with_handler_cfg, mut block_env } = evm_env;
 
         let opts = opts.unwrap_or_default();
         let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
@@ -543,11 +553,11 @@ where
                     for (signer, tx) in transactions {
                         let env = EnvWithHandlerCfg {
                             env: Env::boxed(
-                                cfg.cfg_env.clone(),
+                                cfg_env_with_handler_cfg.cfg_env.clone(),
                                 block_env.clone(),
                                 this.eth_api().evm_config().tx_env(tx, *signer),
                             ),
-                            handler_cfg: cfg.handler_cfg,
+                            handler_cfg: cfg_env_with_handler_cfg.handler_cfg,
                         };
                         let (res, _) = this.eth_api().transact(&mut db, env)?;
                         db.commit(res.state);
@@ -570,7 +580,7 @@ where
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
                         let env = this.eth_api().prepare_call_env(
-                            cfg.clone(),
+                            cfg_env_with_handler_cfg.clone(),
                             block_env.clone(),
                             tx,
                             &mut db,

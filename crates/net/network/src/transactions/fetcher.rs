@@ -49,7 +49,7 @@ use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
-use reth_primitives::PooledTransactionsElement;
+use reth_primitives::PooledTransaction;
 use reth_primitives_traits::SignedTransaction;
 use schnellru::ByLength;
 #[cfg(debug_assertions)]
@@ -181,6 +181,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     }
 
     /// Returns `true` if peer is idle with respect to `self.inflight_requests`.
+    #[inline]
     pub fn is_idle(&self, peer_id: &PeerId) -> bool {
         let Some(inflight_count) = self.active_peers.peek(peer_id) else { return true };
         if *inflight_count < self.info.max_inflight_requests_per_peer {
@@ -193,13 +194,13 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     pub fn get_idle_peer_for(
         &self,
         hash: TxHash,
-        is_session_active: impl Fn(&PeerId) -> bool,
+        peers: &HashMap<PeerId, PeerMetadata<N>>,
     ) -> Option<&PeerId> {
         let TxFetchMetadata { fallback_peers, .. } =
             self.hashes_fetch_inflight_and_pending_fetch.peek(&hash)?;
 
         for peer_id in fallback_peers.iter() {
-            if self.is_idle(peer_id) && is_session_active(peer_id) {
+            if self.is_idle(peer_id) && peers.contains_key(peer_id) {
                 return Some(peer_id)
             }
         }
@@ -215,7 +216,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     pub fn find_any_idle_fallback_peer_for_any_pending_hash(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
-        is_session_active: impl Fn(&PeerId) -> bool,
+        peers: &HashMap<PeerId, PeerMetadata<N>>,
         mut budget: Option<usize>, // search fallback peers for max `budget` lru pending hashes
     ) -> Option<PeerId> {
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
@@ -223,7 +224,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let idle_peer = loop {
             let &hash = hashes_pending_fetch_iter.next()?;
 
-            let idle_peer = self.get_idle_peer_for(hash, &is_session_active);
+            let idle_peer = self.get_idle_peer_for(hash, peers);
 
             if idle_peer.is_some() {
                 hashes_to_request.insert(hash);
@@ -381,8 +382,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     /// [`TransactionFetcher::try_buffer_hashes_for_retry`]. Hashes that have been re-requested
     /// [`DEFAULT_MAX_RETRIES`], are dropped.
     pub fn buffer_hashes(&mut self, hashes: RequestTxHashes, fallback_peer: Option<PeerId>) {
-        let mut max_retried_and_evicted_hashes = vec![];
-
         for hash in hashes {
             // hash could have been evicted from bounded lru map
             if self.hashes_fetch_inflight_and_pending_fetch.peek(&hash).is_none() {
@@ -406,18 +405,19 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         "retry limit for `GetPooledTransactions` requests reached for hash, dropping hash"
                     );
 
-                    max_retried_and_evicted_hashes.push(hash);
+                    self.hashes_fetch_inflight_and_pending_fetch.remove(&hash);
+                    self.hashes_pending_fetch.remove(&hash);
                     continue
                 }
                 *retries += 1;
             }
+
             if let (_, Some(evicted_hash)) = self.hashes_pending_fetch.insert_and_get_evicted(hash)
             {
-                max_retried_and_evicted_hashes.push(evicted_hash);
+                self.hashes_fetch_inflight_and_pending_fetch.remove(&evicted_hash);
+                self.hashes_pending_fetch.remove(&evicted_hash);
             }
         }
-
-        self.remove_hashes_from_transaction_fetcher(max_retried_and_evicted_hashes);
     }
 
     /// Tries to request hashes pending fetch.
@@ -429,9 +429,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         peers: &HashMap<PeerId, PeerMetadata<N>>,
         has_capacity_wrt_pending_pool_imports: impl Fn(usize) -> bool,
     ) {
-        let mut hashes_to_request = RequestTxHashes::default();
-        let is_session_active = |peer_id: &PeerId| peers.contains_key(peer_id);
-
+        let mut hashes_to_request = RequestTxHashes::with_capacity(
+            DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST,
+        );
         let mut search_durations = TxFetcherSearchDurations::default();
 
         // budget to look for an idle peer before giving up
@@ -442,7 +442,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             {
                 let Some(peer_id) = self.find_any_idle_fallback_peer_for_any_pending_hash(
                     &mut hashes_to_request,
-                    is_session_active,
+                    peers,
                     budget_find_idle_fallback_peer,
                 ) else {
                     // no peers are idle or budget is depleted
@@ -512,10 +512,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         is_session_active: impl Fn(PeerId) -> bool,
         client_version: &str,
     ) {
-        #[cfg(not(debug_assertions))]
         let mut previously_unseen_hashes_count = 0;
-        #[cfg(debug_assertions)]
-        let mut previously_unseen_hashes = Vec::with_capacity(new_announced_hashes.len() / 4);
 
         let msg_version = new_announced_hashes.msg_version();
 
@@ -523,7 +520,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         new_announced_hashes.retain(|hash, metadata| {
 
             // occupied entry
-
             if let Some(TxFetchMetadata{ref mut fallback_peers, tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
                 // update size metadata if available
                 if let Some((_ty, size)) = metadata {
@@ -571,18 +567,13 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 return false
             }
 
-            #[cfg(not(debug_assertions))]
-            {
-                previously_unseen_hashes_count += 1;
-            }
-            #[cfg(debug_assertions)]
-            previously_unseen_hashes.push(*hash);
+            previously_unseen_hashes_count += 1;
 
             if self.hashes_fetch_inflight_and_pending_fetch.get_or_insert(*hash, ||
                 TxFetchMetadata{retries: 0, fallback_peers: LruCache::new(DEFAULT_MAX_COUNT_FALLBACK_PEERS as u32), tx_encoded_length: None}
             ).is_none() {
 
-                debug!(target: "net::tx",
+                trace!(target: "net::tx",
                     peer_id=format!("{peer_id:#}"),
                     %hash,
                     ?msg_version,
@@ -595,22 +586,11 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             true
         });
 
-        #[cfg(not(debug_assertions))]
         trace!(target: "net::tx",
             peer_id=format!("{peer_id:#}"),
             previously_unseen_hashes_count=previously_unseen_hashes_count,
             msg_version=?msg_version,
             client_version=%client_version,
-            "received previously unseen hashes in announcement from peer"
-        );
-
-        #[cfg(debug_assertions)]
-        trace!(target: "net::tx",
-            peer_id=format!("{peer_id:#}"),
-            ?msg_version,
-            %client_version,
-            previously_unseen_hashes_len=previously_unseen_hashes.len(),
-            ?previously_unseen_hashes,
             "received previously unseen hashes in announcement from peer"
         );
     }
@@ -642,7 +622,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
 
         let Some(inflight_count) = self.active_peers.get_or_insert(peer_id, || 0) else {
-            debug!(target: "net::tx",
+            trace!(target: "net::tx",
                 peer_id=format!("{peer_id:#}"),
                 hashes=?*new_announced_hashes,
                 conn_eth_version=%conn_eth_version,
@@ -774,9 +754,9 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             }
 
             if let Some(ref mut bud) = budget_fill_request {
-                *bud = bud.saturating_sub(1);
+                *bud -= 1;
                 if *bud == 0 {
-                    return
+                    break
                 }
             }
         }
@@ -1084,7 +1064,7 @@ impl TxFetchMetadata {
 
 /// Represents possible events from fetching transactions.
 #[derive(Debug)]
-pub enum FetchEvent<T = PooledTransactionsElement> {
+pub enum FetchEvent<T = PooledTransaction> {
     /// Triggered when transactions are successfully fetched.
     TransactionsFetched {
         /// The ID of the peer from which transactions were fetched.
@@ -1108,7 +1088,7 @@ pub enum FetchEvent<T = PooledTransactionsElement> {
 
 /// An inflight request for [`PooledTransactions`] from a peer.
 #[derive(Debug)]
-pub struct GetPooledTxRequest<T = PooledTransactionsElement> {
+pub struct GetPooledTxRequest<T = PooledTransaction> {
     peer_id: PeerId,
     /// Transaction hashes that were requested, for cleanup purposes
     requested_hashes: RequestTxHashes,
@@ -1118,7 +1098,7 @@ pub struct GetPooledTxRequest<T = PooledTransactionsElement> {
 /// Upon reception of a response, a [`GetPooledTxRequest`] is deconstructed to form a
 /// [`GetPooledTxResponse`].
 #[derive(Debug)]
-pub struct GetPooledTxResponse<T = PooledTransactionsElement> {
+pub struct GetPooledTxResponse<T = PooledTransaction> {
     peer_id: PeerId,
     /// Transaction hashes that were requested, for cleanup purposes, since peer may only return a
     /// subset of requested hashes.
@@ -1131,7 +1111,7 @@ pub struct GetPooledTxResponse<T = PooledTransactionsElement> {
 #[must_use = "futures do nothing unless polled"]
 #[pin_project::pin_project]
 #[derive(Debug)]
-pub struct GetPooledTxRequestFut<T = PooledTransactionsElement> {
+pub struct GetPooledTxRequestFut<T = PooledTransaction> {
     #[pin]
     inner: Option<GetPooledTxRequest<T>>,
 }
@@ -1517,10 +1497,10 @@ mod test {
     #[test]
     fn verify_response_hashes() {
         let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598daa");
-        let signed_tx_1: PooledTransactionsElement =
+        let signed_tx_1: PooledTransaction =
             TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
         let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76");
-        let signed_tx_2: PooledTransactionsElement =
+        let signed_tx_2: PooledTransaction =
             TransactionSigned::decode(&mut &input[..]).unwrap().try_into().unwrap();
 
         // only tx 1 is requested

@@ -107,7 +107,8 @@ fn payload_validation() {
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
         *tx = Bytes::new();
     });
-    let payload_with_invalid_txs = try_payload_v1_to_block(payload_with_invalid_txs);
+    let payload_with_invalid_txs =
+        try_payload_v1_to_block::<TransactionSigned>(payload_with_invalid_txs);
     assert_matches!(payload_with_invalid_txs, Err(PayloadError::Decode(RlpError::InputTooShort)));
 
     // Non empty ommers

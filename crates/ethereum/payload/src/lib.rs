@@ -21,7 +21,7 @@ use reth_basic_payload_builder::{
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_errors::RethError;
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
@@ -82,7 +82,7 @@ where
         &self,
         config: &PayloadConfig<EthPayloadBuilderAttributes>,
         parent: &Header,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), EvmConfig::Error> {
+    ) -> Result<EvmEnv, EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: config.attributes.timestamp(),
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
@@ -107,7 +107,7 @@ where
         &self,
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
-        let (cfg_env, block_env) = self
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = self
             .cfg_and_block_env(&args.config, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
@@ -116,7 +116,7 @@ where
             self.evm_config.clone(),
             self.builder_config.clone(),
             args,
-            cfg_env,
+            cfg_env_with_handler_cfg,
             block_env,
             |attributes| pool.best_transactions_with_attributes(attributes),
         )
@@ -137,7 +137,7 @@ where
             None,
         );
 
-        let (cfg_env, block_env) = self
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = self
             .cfg_and_block_env(&args.config, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
@@ -147,7 +147,7 @@ where
             self.evm_config.clone(),
             self.builder_config.clone(),
             args,
-            cfg_env,
+            cfg_env_with_handler_cfg,
             block_env,
             |attributes| pool.best_transactions_with_attributes(attributes),
         )?

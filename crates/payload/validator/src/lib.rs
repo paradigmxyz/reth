@@ -12,7 +12,8 @@ use alloy_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadSidecar, MaybeCancunPayloadFields, PayloadError,
 };
 use reth_chainspec::EthereumHardforks;
-use reth_primitives::{BlockExt, SealedBlock};
+use reth_primitives::{BlockBody, BlockExt, Header, SealedBlock};
+use reth_primitives_traits::SignedTransaction;
 use reth_rpc_types_compat::engine::payload::try_into_block;
 use std::sync::Arc;
 
@@ -59,9 +60,9 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
     ///
     /// Ensures that the number of blob versioned hashes matches the number hashes included in the
     /// _separate_ `block_versioned_hashes` of the cancun payload fields.
-    fn ensure_matching_blob_versioned_hashes(
+    fn ensure_matching_blob_versioned_hashes<T: SignedTransaction>(
         &self,
-        sealed_block: &SealedBlock,
+        sealed_block: &SealedBlock<Header, BlockBody<T>>,
         cancun_fields: &MaybeCancunPayloadFields,
     ) -> Result<(), PayloadError> {
         let num_blob_versioned_hashes = sealed_block.blob_versioned_hashes_iter().count();
@@ -112,11 +113,11 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
     ///
     /// This validates versioned hashes according to the Engine API Cancun spec:
     /// <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification>
-    pub fn ensure_well_formed_payload(
+    pub fn ensure_well_formed_payload<T: SignedTransaction>(
         &self,
         payload: ExecutionPayload,
         sidecar: ExecutionPayloadSidecar,
-    ) -> Result<SealedBlock, PayloadError> {
+    ) -> Result<SealedBlock<Header, BlockBody<T>>, PayloadError> {
         let expected_hash = payload.block_hash();
 
         // First parse the block
@@ -144,7 +145,7 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
                 return Err(PayloadError::PostCancunWithoutCancunFields)
             }
         } else {
-            if sealed_block.has_eip4844_transactions() {
+            if sealed_block.body.has_eip4844_transactions() {
                 // cancun not active but blob transactions present
                 return Err(PayloadError::PreCancunBlockWithBlobTransactions)
             }
@@ -169,7 +170,7 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         }
 
         if !self.is_prague_active_at_timestamp(sealed_block.timestamp) &&
-            sealed_block.has_eip7702_transactions()
+            sealed_block.body.has_eip7702_transactions()
         {
             return Err(PayloadError::PrePragueBlockWithEip7702Transactions)
         }

@@ -167,7 +167,7 @@ mod tests {
         let blocks_per_file = 10; // Number of headers per file
         let files_per_range = 3; // Number of files per range (data/conf/offset files)
         let file_set_count = 3; // Number of sets of files to create
-        let initial_file_count = files_per_range * file_set_count + 1; // Includes lockfile
+        let initial_file_count = files_per_range * file_set_count;
         let tip = blocks_per_file * file_set_count - 1; // Initial highest block (29 in this case)
 
         // [ Headers Creation and Commit ]
@@ -218,7 +218,7 @@ mod tests {
 
             // Validate the number of files remaining in the directory
             assert_eyre(
-                fs::read_dir(static_dir)?.count(),
+                count_files_without_lockfile(static_dir)?,
                 expected_file_count as usize,
                 "file count mismatch",
             )?;
@@ -252,16 +252,16 @@ mod tests {
             {
                 (
                     tmp_tip,
-                    Some(0),             // Only genesis block remains
-                    files_per_range + 1, // The file set with block 0 should remain
+                    Some(0),         // Only genesis block remains
+                    files_per_range, // The file set with block 0 should remain
                 )
             },
             // Case 4: Pruning the genesis header (should not delete the file set with block 0)
             {
                 (
                     1,
-                    None,                // No blocks left
-                    files_per_range + 1, // The file set with block 0 remains
+                    None,            // No blocks left
+                    files_per_range, // The file set with block 0 remains
                 )
             },
         ];
@@ -274,7 +274,7 @@ mod tests {
 
             assert_eq!(sf_rw.get_highest_static_file_block(StaticFileSegment::Headers), Some(tip));
             assert_eq!(
-                fs::read_dir(static_dir.as_ref()).unwrap().count(),
+                count_files_without_lockfile(static_dir.as_ref()).unwrap(),
                 initial_file_count as usize
             );
 
@@ -411,7 +411,7 @@ mod tests {
         let blocks_per_file = 10; // Number of blocks per file
         let files_per_range = 3; // Number of files per range (data/conf/offset files)
         let file_set_count = 3; // Number of sets of files to create
-        let initial_file_count = files_per_range * file_set_count + 1; // Includes lockfile
+        let initial_file_count = files_per_range * file_set_count;
 
         #[allow(clippy::too_many_arguments)]
         fn prune_and_validate(
@@ -462,7 +462,7 @@ mod tests {
 
             // Ensure the file count has reduced as expected
             assert_eyre(
-                fs::read_dir(static_dir)?.count(),
+                count_files_without_lockfile(static_dir)?,
                 expected_file_count as usize,
                 "file count mismatch",
             )?;
@@ -513,7 +513,7 @@ mod tests {
                     0,
                     blocks_per_file - 1,
                     Some(highest_tx - 1),
-                    files_per_range + 1, // includes lockfile
+                    files_per_range,
                     vec![(highest_tx - 1, SegmentRangeInclusive::new(0, 9))],
                 ),
                 // Case 2: Prune most txs up to block 1.
@@ -521,11 +521,11 @@ mod tests {
                     highest_tx - 1,
                     1,
                     Some(0),
-                    files_per_range + 1,
+                    files_per_range,
                     vec![(0, SegmentRangeInclusive::new(0, 1))],
                 ),
                 // Case 3: Prune remaining tx and ensure that file is not deleted.
-                (1, 0, None, files_per_range + 1, vec![]),
+                (1, 0, None, files_per_range, vec![]),
             ];
 
             // Loop through test cases
@@ -548,5 +548,18 @@ mod tests {
                 .unwrap();
             }
         }
+    }
+
+    /// Returns the number of files in the provided path, excluding ".lock" files.
+    fn count_files_without_lockfile(path: impl AsRef<Path>) -> eyre::Result<usize> {
+        let is_lockfile = |entry: &fs::DirEntry| {
+            entry.path().file_name().map(|name| name == "lock").unwrap_or(false)
+        };
+        let count = fs::read_dir(path)?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| !is_lockfile(entry))
+            .count();
+
+        Ok(count)
     }
 }
