@@ -1,7 +1,6 @@
 use crate::{BlockNumReader, DatabaseProviderFactory, HeaderProvider};
 use alloy_primitives::B256;
 use reth_errors::ProviderError;
-use reth_primitives::GotExpected;
 use reth_storage_api::{BlockReader, DBProvider, StateCommitmentProvider};
 use reth_storage_errors::provider::ProviderResult;
 
@@ -70,29 +69,12 @@ where
         // Create a new provider.
         let provider_ro = self.factory.database_provider_ro()?;
 
-        // Check that the latest stored header number matches the number
-        // that consistent view was initialized with.
-        // The mismatch can happen if a new block was appended while
-        // the view was being used.
-        // We compare block hashes instead of block numbers to account for reorgs.
-        let last_num = provider_ro.last_block_number()?;
-        let tip = provider_ro.sealed_header(last_num)?.map(|h| h.hash());
-        if self.tip != tip {
-            return Err(ConsistentViewError::Inconsistent {
-                tip: GotExpected { got: tip, expected: self.tip },
+        // Check that the currently stored tip is included on-disk.
+        // This means that the database has moved, but the view was not reorged.
+        if let Some(tip) = self.tip {
+            if provider_ro.block_by_hash(tip)?.is_none() {
+                return Err(ConsistentViewError::Reorged { block: tip }.into())
             }
-            .into())
-        }
-
-        // Check that the best block number is the same as the latest stored header.
-        // This ensures that the consistent view cannot be used for initializing new providers
-        // if the node fell back to the staged sync.
-        let best_block_number = provider_ro.best_block_number()?;
-        if last_num != best_block_number {
-            return Err(ConsistentViewError::Syncing {
-                best_block: GotExpected { got: best_block_number, expected: last_num },
-            }
-            .into())
         }
 
         Ok(provider_ro)
