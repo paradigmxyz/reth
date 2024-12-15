@@ -578,9 +578,8 @@ impl<P> RevealedSparseTrie<P> {
 
     fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
         let mut buffers = RlpNodeBuffers::new_with_path(path);
-        let (root, node_updates, trie_updates) =
-            self.rlp_node(prefix_set, &mut buffers, &mut Vec::new());
-        self.apply_updates(node_updates, trie_updates);
+        let (root, updates) = self.rlp_node(prefix_set, &mut buffers, &mut Vec::new());
+        self.apply_rlp_node_updates(updates);
         root
     }
 
@@ -589,13 +588,8 @@ impl<P> RevealedSparseTrie<P> {
         prefix_set: &mut PrefixSet,
         buffers: &mut RlpNodeBuffers,
         rlp_buf: &mut Vec<u8>,
-    ) -> (
-        RlpNode,
-        HashMap<Nibbles, (Option<B256>, Option<bool>)>,
-        HashMap<Nibbles, BranchNodeCompact>,
-    ) {
-        let mut node_updates = HashMap::default();
-        let mut trie_updates = HashMap::default();
+    ) -> (RlpNode, RlpNodeUpdates) {
+        let mut rlp_node_updates = RlpNodeUpdates::default();
 
         'main: while let Some((path, mut is_in_prefix_set)) = buffers.path_stack.pop() {
             // Check if the path is in the prefix set.
@@ -603,6 +597,8 @@ impl<P> RevealedSparseTrie<P> {
             // the cached value.
             let mut prefix_set_contains =
                 |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
+
+            let mut rlp_node_update = RlpNodeUpdate::default();
 
             let (rlp_node, calculated, node_type) = match self.nodes.get(&path).unwrap() {
                 SparseNode::Empty => {
@@ -618,7 +614,7 @@ impl<P> RevealedSparseTrie<P> {
                         let value = self.values.get(&path).unwrap();
                         rlp_buf.clear();
                         let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
-                        node_updates.insert(path.clone(), (rlp_node.as_hash(), None));
+                        rlp_node_update.hash = rlp_node.as_hash();
                         (rlp_node, true, SparseNodeType::Leaf)
                     }
                 }
@@ -635,7 +631,7 @@ impl<P> RevealedSparseTrie<P> {
                         let (_, child, _, node_type) = buffers.rlp_node_stack.pop().unwrap();
                         rlp_buf.clear();
                         let rlp_node = ExtensionNodeRef::new(key, &child).rlp(rlp_buf);
-                        node_updates.insert(path.clone(), (rlp_node.as_hash(), None));
+                        rlp_node_update.hash = rlp_node.as_hash();
 
                         (
                             rlp_node,
@@ -784,7 +780,7 @@ impl<P> RevealedSparseTrie<P> {
                                 hashes,
                                 hash.filter(|_| path.len() == 0),
                             );
-                            trie_updates.insert(path.clone(), branch_node);
+                            rlp_node_update.branch_node = Some(branch_node);
                         }
 
                         store_in_db_trie
@@ -792,8 +788,8 @@ impl<P> RevealedSparseTrie<P> {
                         false
                     };
 
-                    node_updates
-                        .insert(path.clone(), (rlp_node.as_hash(), Some(store_in_db_trie_value)));
+                    rlp_node_update.hash = rlp_node.as_hash();
+                    rlp_node_update.store_in_db_trie = Some(store_in_db_trie_value);
 
                     (
                         rlp_node,
@@ -802,36 +798,33 @@ impl<P> RevealedSparseTrie<P> {
                     )
                 }
             };
+            rlp_node_updates.insert(path.clone(), rlp_node_update);
             buffers.rlp_node_stack.push((path, rlp_node, calculated, node_type));
         }
 
         debug_assert_eq!(buffers.rlp_node_stack.len(), 1);
-        (buffers.rlp_node_stack.pop().unwrap().1, node_updates, trie_updates)
+        (buffers.rlp_node_stack.pop().unwrap().1, rlp_node_updates)
     }
 
-    fn apply_updates(
-        &mut self,
-        node_updates: HashMap<Nibbles, (Option<B256>, Option<bool>)>,
-        trie_updates: HashMap<Nibbles, BranchNodeCompact>,
-    ) {
-        for (path, (new_hash, new_store_in_db_trie)) in node_updates {
+    fn apply_rlp_node_updates(&mut self, rlp_node_updates: RlpNodeUpdates) {
+        for (path, update) in rlp_node_updates {
             if let Some(node) = self.nodes.get_mut(&path) {
                 match node {
                     SparseNode::Leaf { hash, .. } | SparseNode::Extension { hash, .. } => {
-                        *hash = new_hash
+                        *hash = update.hash
                     }
                     SparseNode::Branch { hash, store_in_db_trie, .. } => {
-                        *hash = new_hash;
-                        *store_in_db_trie = new_store_in_db_trie
+                        *hash = update.hash;
+                        *store_in_db_trie = update.store_in_db_trie
                     }
                     SparseNode::Empty | SparseNode::Hash(_) => unreachable!(),
                 }
             }
-        }
 
-        if let Some(updates) = self.updates.as_mut() {
-            for (path, branch_node) in trie_updates {
-                updates.updated_nodes.insert(path, branch_node);
+            if let Some(branch_node) = update.branch_node {
+                if let Some(updates) = self.updates.as_mut() {
+                    updates.updated_nodes.insert(path, branch_node);
+                }
             }
         }
     }
@@ -1153,23 +1146,33 @@ where
                 || (prefix_set.clone(), RlpNodeBuffers::default(), Vec::new()),
                 |(prefix_set, buffers, rlp_node), target| {
                     buffers.path_stack.push((target, Some(true)));
-                    let (_, node_updates, trie_updates) =
-                        self.rlp_node(prefix_set, buffers, rlp_node);
-                    (node_updates, trie_updates)
+                    let (_, updates) = self.rlp_node(prefix_set, buffers, rlp_node);
+                    updates
                 },
             )
             .for_each_init(
                 || tx.clone(),
-                |tx, (node_updates, trie_updates)| {
-                    tx.send((node_updates, trie_updates)).unwrap();
+                |tx, updates| {
+                    tx.send(updates).unwrap();
                 },
             );
         drop(tx);
 
-        for (node_updates, trie_updates) in rx {
-            self.apply_updates(node_updates, trie_updates);
+        for updates in rx {
+            self.apply_rlp_node_updates(updates);
         }
     }
+}
+
+/// Updates that [`RevealedSparseTrie::rlp_node`] produced.
+type RlpNodeUpdates = HashMap<Nibbles, RlpNodeUpdate>;
+
+/// An update that [`RevealedSparseTrie::rlp_node`] produced after processing one node.
+#[derive(Debug, Default)]
+struct RlpNodeUpdate {
+    hash: Option<B256>,
+    store_in_db_trie: Option<bool>,
+    branch_node: Option<BranchNodeCompact>,
 }
 
 /// Enum representing sparse trie node type.
