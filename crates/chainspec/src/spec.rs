@@ -609,6 +609,7 @@ impl From<Genesis> for ChainSpec {
                 hardforks.push((
                     EthereumHardfork::Paris.boxed(),
                     ForkCondition::TTD {
+                        activation_block_number: genesis.config.merge_netsplit_block.expect("Merge netsplit block is required"),
                         total_difficulty: ttd,
                         fork_block: genesis.config.merge_netsplit_block,
                     },
@@ -765,10 +766,10 @@ impl ChainSpecBuilder {
     /// Enable the Paris hardfork at the given TTD.
     ///
     /// Does not set the merge netsplit block.
-    pub fn paris_at_ttd(self, ttd: U256) -> Self {
+    pub fn paris_at_ttd(self, ttd: U256, activation_block_number: BlockNumber) -> Self {
         self.with_fork(
             EthereumHardfork::Paris,
-            ForkCondition::TTD { total_difficulty: ttd, fork_block: None },
+            ForkCondition::TTD { activation_block_number, total_difficulty: ttd, fork_block: None },
         )
     }
 
@@ -846,7 +847,7 @@ impl ChainSpecBuilder {
         self = self.london_activated();
         self.hardforks.insert(
             EthereumHardfork::Paris,
-            ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+            ForkCondition::TTD { activation_block_number: 0, total_difficulty: U256::ZERO, fork_block: None },
         );
         self
     }
@@ -888,7 +889,7 @@ impl ChainSpecBuilder {
     pub fn build(self) -> ChainSpec {
         let paris_block_and_final_difficulty = {
             self.hardforks.get(EthereumHardfork::Paris).and_then(|cond| {
-                if let ForkCondition::TTD { fork_block, total_difficulty } = cond {
+                if let ForkCondition::TTD {  total_difficulty, fork_block, .. } = cond {
                     fork_block.map(|fork_block| (fork_block, total_difficulty))
                 } else {
                     None
@@ -1133,6 +1134,7 @@ Post-merge hard forks (timestamp based):
             .with_fork(
                 EthereumHardfork::Paris,
                 ForkCondition::TTD {
+                    activation_block_number: 101,
                     fork_block: Some(101),
                     total_difficulty: U256::from(10_790_000),
                 },
@@ -1166,6 +1168,7 @@ Post-merge hard forks (timestamp based):
         // Fork::ConditionTTD test case without a new chain spec to demonstrate ChainSpec::satisfy
         // is independent of ChainSpec for this(these - including ForkCondition::Block) match arm(s)
         let fork_cond_ttd_no_new_spec = fork_cond_block_only_case.satisfy(ForkCondition::TTD {
+            activation_block_number: 101,
             fork_block: None,
             total_difficulty: U256::from(10_790_000),
         });
@@ -1669,20 +1672,15 @@ Post-merge hard forks (timestamp based):
     fn check_terminal_ttd() {
         let chainspec = ChainSpecBuilder::mainnet().build();
 
-        // TODO: fix
         // Check that Paris is not active on terminal PoW block #15537393.
-        let terminal_block_ttd = U256::from(58750003716598352816469_u128);
-        let terminal_block_difficulty = U256::from(11055787484078698_u128);
         assert!(!chainspec
             .fork(EthereumHardfork::Paris)
-            .active_at_ttd(chain));
+            .active_at_ttd(15537393));
 
         // Check that Paris is active on first PoS block #15537394.
-        let first_pos_block_ttd = U256::from(58750003716598352816469_u128);
-        let first_pos_difficulty = U256::ZERO;
         assert!(chainspec
-            .fork(EthereumHardfork::Paris)
-            .active_at_ttd(chain));
+            .fork(EthereumHardfork::Paris)      
+            .active_at_ttd(15537394));
     }
 
     #[test]
@@ -2165,7 +2163,7 @@ Post-merge hard forks (timestamp based):
     fn holesky_paris_activated_at_genesis() {
         assert!(HOLESKY
             .fork(EthereumHardfork::Paris)
-            .active_at_ttd(HOLESKY));
+            .active_at_ttd(0));
     }
 
     #[test]

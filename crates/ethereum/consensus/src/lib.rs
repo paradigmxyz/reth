@@ -209,7 +209,7 @@ where
         let is_post_merge = self
             .chain_spec
             .fork(EthereumHardfork::Paris)
-            .active_at_ttd(self.chain_spec.chain());
+            .active_at_ttd(header.number());
 
         if is_post_merge {
             // TODO: add `is_zero_difficulty` to `alloy_consensus::BlockHeader` trait

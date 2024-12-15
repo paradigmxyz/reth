@@ -393,19 +393,12 @@ where
         let provider = self.externals.provider_factory.provider()?;
 
         // Validate that the block is post merge
-        let parent_td = provider
-            .header_td(&block.parent_hash)?
-            .ok_or_else(|| BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash })?;
-
-        let chain = self.externals.provider_factory.chain_spec().chain();
-
-        // Pass the parent total difficulty to short-circuit unnecessary calculations.
         if !self
             .externals
             .provider_factory
             .chain_spec()
             .fork(EthereumHardfork::Paris)
-            .active_at_ttd(chain)
+            .active_at_ttd(block.number)
         {
             return Err(BlockExecutionError::Validation(BlockValidationError::BlockPreMerge {
                 hash: block.hash(),
@@ -1035,7 +1028,7 @@ where
                 .provider_factory
                 .chain_spec()
                 .fork(EthereumHardfork::Paris)
-                .active_at_ttd(chain)
+                .active_at_ttd(header.number)
             {
                 return Err(CanonicalError::from(BlockValidationError::BlockPreMerge {
                     hash: block_hash,
