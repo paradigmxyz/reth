@@ -37,23 +37,23 @@ use tracing::{debug, error, trace};
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
 /// Result of the state root calculation
-pub(crate) type StateRootResult = Result<(B256, TrieUpdates), ParallelStateRootError>;
+pub(crate) type StateRootResult = Result<(B256, TrieUpdates, Duration), ParallelStateRootError>;
 
 /// Handle to a spawned state root task.
 #[derive(Debug)]
 pub(crate) struct StateRootHandle {
     /// Channel for receiving the final result.
-    rx: mpsc::Receiver<(StateRootResult, Instant)>,
+    rx: mpsc::Receiver<StateRootResult>,
 }
 
 impl StateRootHandle {
     /// Creates a new handle from a receiver.
-    pub(crate) const fn new(rx: mpsc::Receiver<(StateRootResult, Instant)>) -> Self {
+    pub(crate) const fn new(rx: mpsc::Receiver<StateRootResult>) -> Self {
         Self { rx }
     }
 
     /// Waits for the state root calculation to complete.
-    pub(crate) fn wait_for_result(self) -> (StateRootResult, Instant) {
+    pub(crate) fn wait_for_result(self) -> StateRootResult {
         self.rx.recv().expect("state root task was dropped without sending result")
     }
 }
@@ -296,7 +296,7 @@ where
             .spawn(move || {
                 debug!(target: "engine::tree", "Starting state root task");
                 let result = self.run();
-                let _ = tx.send((result, Instant::now()));
+                let _ = tx.send(result);
             })
             .expect("failed to spawn state root thread");
 
@@ -441,11 +441,14 @@ where
         let mut proofs_processed = 0;
         let mut roots_calculated = 0;
         let mut updates_finished = false;
+        let mut last_state_update_received = None;
 
         loop {
             match self.rx.recv() {
                 Ok(message) => match message {
                     StateRootMessage::StateUpdate(state) => {
+                        last_state_update_received = Some(Instant::now());
+
                         updates_received += 1;
                         trace!(
                             target: "engine::root",
@@ -538,7 +541,11 @@ where
                             let trie_updates = trie
                                 .take_trie_updates()
                                 .expect("sparse trie should have updates retention enabled");
-                            return Ok((root, trie_updates));
+                            return Ok((
+                                root,
+                                trie_updates,
+                                last_state_update_received.unwrap().elapsed(),
+                            ));
                         }
                     }
                 },
@@ -853,7 +860,7 @@ mod tests {
         }
         drop(state_hook);
 
-        let (root_from_task, _) = handle.wait_for_result().0.expect("task failed");
+        let (root_from_task, _) = handle.wait_for_result().expect("task failed");
         let root_from_base = state_root(accumulated_state);
 
         assert_eq!(

@@ -2298,8 +2298,7 @@ where
         )) = state_root_result
         {
             match state_root_handle.wait_for_result() {
-                (Ok((task_state_root, task_trie_updates)), task_finished_at) => {
-                    let state_root_task_elapsed = task_finished_at - state_root_task_start;
+                Ok((task_state_root, task_trie_updates, state_root_task_elapsed)) => {
                     info!(
                         target: "engine::tree",
                         block = ?sealed_block.num_hash(),
@@ -2366,7 +2365,7 @@ where
                         (task_state_root, task_trie_updates)
                     }
                 }
-                (Err(e), _) => {
+                Err(e) => {
                     info!(target: "engine::tree", error=?e, "on state root task wait_for_result");
 
                     (regular_state_root, regular_trie_updates)
