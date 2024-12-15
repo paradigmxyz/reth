@@ -152,7 +152,7 @@ where
                     .map_err(|e| ParallelStateRootError::Other(e.to_string()))
                 })();
                 if let Err(err) = tx.send(result) {
-                    error!(target: "trie::parallel", ?hashed_address, err_content = ?err.0,  "Failed to send proof result");
+                    debug!(target: "trie::parallel", ?hashed_address, err_content = ?err.0,  "Failed to send proof result");
                 }
             });
             storage_proofs.insert(hashed_address, rx);
