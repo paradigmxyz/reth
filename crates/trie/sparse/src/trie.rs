@@ -798,7 +798,11 @@ impl<P> RevealedSparseTrie<P> {
                     )
                 }
             };
-            rlp_node_updates.insert(path.clone(), rlp_node_update);
+
+            if !rlp_node_update.is_empty() {
+                rlp_node_updates.insert(path.clone(), rlp_node_update);
+            }
+
             buffers.rlp_node_stack.push((path, rlp_node, calculated, node_type));
         }
 
@@ -1173,6 +1177,12 @@ struct RlpNodeUpdate {
     hash: Option<B256>,
     store_in_db_trie: Option<bool>,
     branch_node: Option<BranchNodeCompact>,
+}
+
+impl RlpNodeUpdate {
+    const fn is_empty(&self) -> bool {
+        self.hash.is_none() && self.store_in_db_trie.is_none() && self.branch_node.is_none()
+    }
 }
 
 /// Enum representing sparse trie node type.
