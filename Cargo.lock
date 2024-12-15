@@ -8365,6 +8365,7 @@ dependencies = [
  "reth-optimism-forks",
  "reth-primitives-traits",
  "serde_json",
+ "thiserror 2.0.5",
 ]
 
 [[package]]
@@ -8464,6 +8465,7 @@ dependencies = [
  "reth-revm",
  "revm",
  "revm-primitives",
+ "thiserror 2.0.5",
  "tracing",
 ]
 
@@ -8793,6 +8795,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "test-fuzz",
+ "thiserror 2.0.5",
 ]
 
 [[package]]
@@ -9418,6 +9421,7 @@ dependencies = [
  "reth-fs-util",
  "reth-primitives-traits",
  "reth-static-file-types",
+ "thiserror 2.0.5",
 ]
 
 [[package]]

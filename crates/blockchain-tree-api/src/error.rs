@@ -7,7 +7,7 @@ use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
 use reth_primitives::{SealedBlock, SealedBlockFor};
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, BlockBody};
 pub use reth_storage_errors::provider::ProviderError;
 
 /// Various error cases that can occur when a block violates tree assumptions.
@@ -187,7 +187,7 @@ impl InsertBlockErrorData {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error)]
 #[error("Failed to insert block (hash={}, number={}, parent_hash={}): {}",
     .block.hash(),
     .block.number(),
@@ -197,6 +197,18 @@ struct InsertBlockErrorDataTwo<B: Block> {
     block: SealedBlockFor<B>,
     #[source]
     kind: InsertBlockErrorKindTwo,
+}
+
+impl<B: Block> std::fmt::Debug for InsertBlockErrorDataTwo<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InsertBlockError")
+            .field("error", &self.kind)
+            .field("hash", &self.block.hash())
+            .field("number", &self.block.number())
+            .field("parent_hash", &self.block.parent_hash())
+            .field("num_txs", &self.block.body.transactions().len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl<B: Block> InsertBlockErrorDataTwo<B> {

@@ -17,34 +17,27 @@ pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
-
     /// RLP error.
     #[error(transparent)]
     Rlp(alloy_rlp::Error),
     /// Filesystem path error.
     #[error("{0}")]
     FsPathError(String),
-
     /// Nippy jar error.
     #[error("nippy jar error: {0}")]
     NippyJar(String),
-
     /// Trie witness error.
     #[error("trie witness error: {0}")]
     TrieWitnessError(String),
-
     /// Error when recovering the sender for a transaction
     #[error("failed to recover sender for transaction")]
     SenderRecoveryError,
-
     /// The header number was not found for the given block hash.
     #[error("block hash {0} does not exist in Headers table")]
     BlockHashNotFound(BlockHash),
-
     /// A block body is missing.
     #[error("block meta not found for block #{0}")]
     BlockBodyIndicesNotFound(BlockNumber),
-
     /// The transition ID was found for the given address and storage key, but the changeset was
     /// not found.
     #[error("storage change set for address {address} and key {storage_key} at block #{block_number} does not exist")]
@@ -54,9 +47,10 @@ pub enum ProviderError {
         /// The account address.
         address: Address,
         /// The storage key.
+        // NOTE: This is a Box only because otherwise this variant is 16 bytes larger than the
+        // second largest (which uses `BlockHashOrNumber`).
         storage_key: Box<B256>,
     },
-
     /// The block number was found for the given address, but the changeset was not found.
     #[error("account change set for address {address} at block #{block_number} does not exist")]
     AccountChangesetNotFound {
@@ -65,112 +59,85 @@ pub enum ProviderError {
         /// The account address.
         address: Address,
     },
-
     /// The total difficulty for a block is missing.
     #[error("total difficulty not found for block #{0}")]
     TotalDifficultyNotFound(BlockNumber),
-
     /// When required header related data was not found but was required.
     #[error("no header found for {0:?}")]
     HeaderNotFound(BlockHashOrNumber),
-
     /// The specific transaction identified by hash or id is missing.
     #[error("no transaction found for {0:?}")]
     TransactionNotFound(HashOrNumber),
-
     /// The specific receipt for a transaction identified by hash or id is missing
     #[error("no receipt found for {0:?}")]
     ReceiptNotFound(HashOrNumber),
-
     /// Unable to find the best block.
     #[error("best block does not exist")]
     BestBlockNotFound,
-
     /// Unable to find the finalized block.
     #[error("finalized block does not exist")]
     FinalizedBlockNotFound,
-
     /// Unable to find the safe block.
     #[error("safe block does not exist")]
     SafeBlockNotFound,
-
     /// Thrown when the cache service task dropped.
     #[error("cache service task stopped")]
     CacheServiceUnavailable,
-
     /// Thrown when we failed to lookup a block for the pending state.
     #[error("unknown block {0}")]
     UnknownBlockHash(B256),
-
     /// Thrown when we were unable to find a state for a block hash.
     #[error("no state found for block {0}")]
     StateForHashNotFound(B256),
-
     /// Thrown when we were unable to find a state for a block number.
     #[error("no state found for block number {0}")]
     StateForNumberNotFound(u64),
-
     /// Unable to find the block number for a given transaction index.
     #[error("unable to find the block number for a given transaction index")]
     BlockNumberForTransactionIndexNotFound,
-
     /// Root mismatch.
     #[error("merkle trie {0}")]
     StateRootMismatch(Box<RootMismatch>),
-
     /// Root mismatch during unwind
     #[error("unwind merkle trie {0}")]
     UnwindStateRootMismatch(Box<RootMismatch>),
-
     /// State is not available for the given block number because it is pruned.
     #[error("state at block #{0} is pruned")]
     StateAtBlockPruned(BlockNumber),
-
     /// Provider does not support this particular request.
     #[error("this provider does not support this request")]
     UnsupportedProvider,
-
     /// Static File is not found at specified path.
     #[cfg(feature = "std")]
     #[error("not able to find {0} static file at {1:?}")]
     MissingStaticFilePath(StaticFileSegment, PathBuf),
-
     /// Static File is not found for requested block.
     #[error("not able to find {0} static file for block number {1}")]
     MissingStaticFileBlock(StaticFileSegment, BlockNumber),
-
     /// Static File is not found for requested transaction.
     #[error("unable to find {0} static file for transaction id {1}")]
     MissingStaticFileTx(StaticFileSegment, TxNumber),
-
     /// Static File is finalized and cannot be written to.
     #[error("unable to write block #{1} to finalized static file {0}")]
     FinalizedStaticFile(StaticFileSegment, BlockNumber),
-
     /// Trying to insert data from an unexpected block number.
     #[error("trying to append data to {0} as block #{1} but expected block #{2}")]
     UnexpectedStaticFileBlockNumber(StaticFileSegment, BlockNumber, BlockNumber),
-
     /// Trying to insert data from an unexpected block number.
     #[error("trying to append row to {0} at index #{1} but expected index #{2}")]
     UnexpectedStaticFileTxNumber(StaticFileSegment, TxNumber, TxNumber),
-
     /// Static File Provider was initialized as read-only.
     #[error("cannot get a writer on a read-only environment.")]
     ReadOnlyStaticFileAccess,
-
     /// Consistent view error.
     #[error("failed to initialize consistent view: {0}")]
     ConsistentView(Box<ConsistentViewError>),
-
     /// Storage lock error.
     #[error(transparent)]
     StorageLockError(#[from] StorageLockError),
-
     /// Storage writer error.
     #[error(transparent)]
     UnifiedStorageWriterError(#[from] UnifiedStorageWriterError),
-
     /// Received invalid output from configured storage implementation.
     #[error("received invalid output from storage")]
     InvalidStorageOutput,
