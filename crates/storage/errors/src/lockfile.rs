@@ -1,4 +1,4 @@
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use reth_fs_util::FsPathError;
 
 /// Storage lock error.

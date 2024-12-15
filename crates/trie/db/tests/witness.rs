@@ -39,7 +39,9 @@ fn includes_empty_node_preimage() {
 
     let state_root = StateRoot::from_tx(provider.tx_ref()).root().unwrap();
     let multiproof = Proof::from_tx(provider.tx_ref())
-        .multiproof(HashMap::from_iter([(hashed_address, HashSet::from_iter([hashed_slot]))]))
+        .multiproof(
+            HashMap::from_iter([(hashed_address, HashSet::from_iter([hashed_slot]))]).into(),
+        )
         .unwrap();
 
     let witness = TrieWitness::from_tx(provider.tx_ref())
@@ -77,7 +79,9 @@ fn includes_nodes_for_destroyed_storage_nodes() {
 
     let state_root = StateRoot::from_tx(provider.tx_ref()).root().unwrap();
     let multiproof = Proof::from_tx(provider.tx_ref())
-        .multiproof(HashMap::from_iter([(hashed_address, HashSet::from_iter([hashed_slot]))]))
+        .multiproof(
+            HashMap::from_iter([(hashed_address, HashSet::from_iter([hashed_slot]))]).into(),
+        )
         .unwrap();
 
     let witness =
@@ -122,10 +126,13 @@ fn correctly_decodes_branch_node_values() {
 
     let state_root = StateRoot::from_tx(provider.tx_ref()).root().unwrap();
     let multiproof = Proof::from_tx(provider.tx_ref())
-        .multiproof(HashMap::from_iter([(
-            hashed_address,
-            HashSet::from_iter([hashed_slot1, hashed_slot2]),
-        )]))
+        .multiproof(
+            HashMap::from_iter([(
+                hashed_address,
+                HashSet::from_iter([hashed_slot1, hashed_slot2]),
+            )])
+            .into(),
+        )
         .unwrap();
 
     let witness = TrieWitness::from_tx(provider.tx_ref())

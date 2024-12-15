@@ -8,7 +8,7 @@ use crate::{BlobTransaction, RecoveredTx, Transaction, TransactionSigned};
 use alloc::vec::Vec;
 use alloy_consensus::{
     constants::EIP4844_TX_TYPE_ID,
-    transaction::{TxEip1559, TxEip2930, TxEip4844, TxLegacy},
+    transaction::{RlpEcdsaTx, TxEip1559, TxEip2930, TxEip4844, TxLegacy},
     SignableTransaction, Signed, TxEip4844WithSidecar, Typed2718,
 };
 use alloy_eips::{
@@ -374,11 +374,7 @@ impl Decodable2718 for PooledTransactionsElement {
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        // decode as legacy transaction
-        let (transaction, hash, signature) =
-            TransactionSigned::decode_rlp_legacy_transaction_tuple(buf)?;
-
-        Ok(Self::Legacy(Signed::new_unchecked(transaction, signature, hash)))
+        Ok(Self::Legacy(TxLegacy::rlp_decode_signed(buf)?))
     }
 }
 
@@ -793,7 +789,7 @@ mod tests {
         // this is a legacy tx so we can attempt the same test with
         // decode_rlp_legacy_transaction_tuple
         let input_rlp = &mut &data[..];
-        let res = TransactionSigned::decode_rlp_legacy_transaction_tuple(input_rlp);
+        let res = TxLegacy::rlp_decode_signed(input_rlp);
         assert_matches!(res, Ok(_tx));
         assert!(input_rlp.is_empty());
 

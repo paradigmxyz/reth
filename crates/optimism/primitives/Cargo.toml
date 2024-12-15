@@ -16,6 +16,7 @@ workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits = { workspace = true, features = ["op"] }
 reth-codecs = { workspace = true, optional = true, features = ["op"] }
+reth-zstd-compressors = { workspace = true, optional = true }
 
 # ethereum
 alloy-primitives.workspace = true
@@ -30,6 +31,7 @@ op-alloy-consensus.workspace = true
 
 # codec
 bytes = { workspace = true, optional = true }
+modular-bitfield = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 # misc
@@ -59,9 +61,10 @@ std = [
 	"serde?/std",
 	"bytes?/std",
 	"derive_more/std",
-    "revm-primitives/std",
-    "secp256k1?/std",
-    "alloy-rlp/std",
+	"revm-primitives/std",
+	"secp256k1?/std",
+	"alloy-rlp/std",
+	"reth-zstd-compressors?/std"
 ]
 reth-codec = [
     "dep:reth-codecs",
@@ -74,6 +77,8 @@ reth-codec = [
     "reth-codecs?/op",
     "reth-primitives/reth-codec",
     "dep:bytes",
+    "dep:modular-bitfield",
+    "dep:reth-zstd-compressors"
 ]
 serde = [
     "dep:serde",

@@ -33,8 +33,8 @@ impl<T, H> ProofBlindedProviderFactory<T, H> {
 
 impl<T, H> BlindedProviderFactory for ProofBlindedProviderFactory<T, H>
 where
-    T: TrieCursorFactory + Clone,
-    H: HashedCursorFactory + Clone,
+    T: TrieCursorFactory + Clone + Send + Sync,
+    H: HashedCursorFactory + Clone + Send + Sync,
 {
     type AccountNodeProvider = ProofBlindedAccountProvider<T, H>;
     type StorageNodeProvider = ProofBlindedStorageProvider<T, H>;
@@ -81,8 +81,8 @@ impl<T, H> ProofBlindedAccountProvider<T, H> {
 
 impl<T, H> BlindedProvider for ProofBlindedAccountProvider<T, H>
 where
-    T: TrieCursorFactory + Clone,
-    H: HashedCursorFactory + Clone,
+    T: TrieCursorFactory + Clone + Send + Sync,
+    H: HashedCursorFactory + Clone + Send + Sync,
 {
     type Error = SparseTrieError;
 
@@ -91,7 +91,7 @@ where
         let proof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.as_ref().clone())
-                .multiproof(targets)
+                .multiproof(targets.into())
                 .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
 
         Ok(proof.account_subtree.into_inner().remove(path))
@@ -125,8 +125,8 @@ impl<T, H> ProofBlindedStorageProvider<T, H> {
 
 impl<T, H> BlindedProvider for ProofBlindedStorageProvider<T, H>
 where
-    T: TrieCursorFactory + Clone,
-    H: HashedCursorFactory + Clone,
+    T: TrieCursorFactory + Clone + Send + Sync,
+    H: HashedCursorFactory + Clone + Send + Sync,
 {
     type Error = SparseTrieError;
 

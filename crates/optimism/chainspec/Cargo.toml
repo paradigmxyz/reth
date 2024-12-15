@@ -30,6 +30,7 @@ alloy-eips.workspace = true
 
 # op
 op-alloy-rpc-types.workspace = true
+op-alloy-consensus.workspace = true
 
 # io
 serde_json.workspace = true
@@ -59,5 +60,6 @@ std = [
 	"alloy-consensus/std",
 	"once_cell/std",
 	"derive_more/std",
-	"reth-network-peers/std"
+	"reth-network-peers/std",
+	"thiserror/std"
 ]

@@ -175,6 +175,7 @@ where
             timestamp: attributes.timestamp(),
             suggested_fee_recipient: attributes.suggested_fee_recipient(),
             prev_randao: attributes.prev_randao(),
+            gas_limit: attributes.gas_limit.unwrap_or(parent.gas_limit),
         };
         self.evm_config.next_cfg_and_block_env(parent, next_attributes)
     }
@@ -195,11 +196,7 @@ where
         let (initialized_cfg, initialized_block_env) =
             self.cfg_and_block_env(&attributes, &parent).map_err(PayloadBuilderError::other)?;
 
-        let config = PayloadConfig {
-            parent_header: Arc::new(parent),
-            attributes,
-            extra_data: Default::default(),
-        };
+        let config = PayloadConfig { parent_header: Arc::new(parent), attributes };
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
             chain_spec: client.chain_spec(),
@@ -621,7 +618,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
 
     /// Returns the extra data for the block.
     ///
-    /// After holocene this extracts the extradata from the paylpad
+    /// After holocene this extracts the extra data from the payload
     pub fn extra_data(&self) -> Result<Bytes, PayloadBuilderError> {
         if self.is_holocene_active() {
             self.attributes()
@@ -632,7 +629,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
                 )
                 .map_err(PayloadBuilderError::other)
         } else {
-            Ok(self.config.extra_data.clone())
+            Ok(Default::default())
         }
     }
 

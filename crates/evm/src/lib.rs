@@ -231,6 +231,8 @@ pub struct NextBlockEnvAttributes {
     pub suggested_fee_recipient: Address,
     /// The randomness value for the next block.
     pub prev_randao: B256,
+    /// Block gas limit.
+    pub gas_limit: u64,
 }
 
 /// Function hook that allows to modify a transaction environment.
