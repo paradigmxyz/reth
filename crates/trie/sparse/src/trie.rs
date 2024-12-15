@@ -1,6 +1,6 @@
 use crate::blinded::{BlindedProvider, DefaultBlindedProvider};
 use alloy_primitives::{
-    hex, keccak256,
+    keccak256,
     map::{Entry, HashMap, HashSet},
     B256,
 };
@@ -165,8 +165,6 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     prefix_set: PrefixSetMut,
     /// Retained trie updates.
     updates: Option<SparseTrieUpdates>,
-    /// Reusable buffer for RLP encoding of nodes.
-    rlp_buf: Vec<u8>,
 }
 
 impl<P> fmt::Debug for RevealedSparseTrie<P> {
@@ -177,7 +175,6 @@ impl<P> fmt::Debug for RevealedSparseTrie<P> {
             .field("values", &self.values)
             .field("prefix_set", &self.prefix_set)
             .field("updates", &self.updates)
-            .field("rlp_buf", &hex::encode(&self.rlp_buf))
             .finish_non_exhaustive()
     }
 }
@@ -191,7 +188,6 @@ impl Default for RevealedSparseTrie {
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             updates: None,
-            rlp_buf: Vec::new(),
         }
     }
 }
@@ -209,7 +205,6 @@ impl RevealedSparseTrie {
             branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
-            rlp_buf: Vec::new(),
             updates: None,
         }
         .with_updates(retain_updates);
@@ -232,7 +227,6 @@ impl<P> RevealedSparseTrie<P> {
             branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
-            rlp_buf: Vec::new(),
             updates: None,
         }
         .with_updates(retain_updates);
@@ -249,7 +243,6 @@ impl<P> RevealedSparseTrie<P> {
             values: self.values,
             prefix_set: self.prefix_set,
             updates: self.updates,
-            rlp_buf: self.rlp_buf,
         }
     }
 
