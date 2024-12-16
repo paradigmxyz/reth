@@ -2,7 +2,7 @@
 //! RPC methods.
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
-use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, EIP1186AccountProofResponse};
@@ -10,14 +10,13 @@ use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
-use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
+use reth_evm::env::EvmEnv;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, ChainSpecProvider, EvmEnvProvider as _, ProviderHeader,
-    StateProvider, StateProviderBox, StateProviderFactory,
+    BlockIdReader, BlockNumReader, ChainSpecProvider, EvmEnvProvider as _, StateProvider,
+    StateProviderBox, StateProviderFactory,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::SpecId;
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
@@ -232,35 +231,12 @@ pub trait LoadState:
 
                 let header =
                     self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
-                let evm_config = self.evm_config().clone();
                 let evm_env = self
                     .provider()
-                    .env_with_header(&header, evm_config)
+                    .env_with_header(&header, self.evm_config().clone())
                     .map_err(Self::Error::from_eth_err)?;
                 Ok((evm_env, block_hash.into()))
             }
-        }
-    }
-
-    /// Returns the revm evm env for the raw block header
-    ///
-    /// This is used for tracing raw blocks
-    fn evm_env_for_raw_block(
-        &self,
-        header: &ProviderHeader<Self::Provider>,
-    ) -> impl Future<Output = Result<EvmEnv, Self::Error>> + Send
-    where
-        Self: LoadPendingBlock + SpawnBlocking,
-    {
-        async move {
-            // get the parent config first
-            let (evm_env, _) = self.evm_env_at(header.parent_hash().into()).await?;
-            let EvmEnv { cfg_env_with_handler_cfg, mut block_env } = evm_env;
-
-            let after_merge = cfg_env_with_handler_cfg.handler_cfg.spec_id >= SpecId::MERGE;
-            self.evm_config().fill_block_env(&mut block_env, header, after_merge);
-
-            Ok((cfg_env_with_handler_cfg, block_env).into())
         }
     }
 
