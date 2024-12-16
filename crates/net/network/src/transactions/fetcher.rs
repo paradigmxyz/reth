@@ -191,16 +191,12 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     }
 
     /// Returns any idle peer for the given hash.
-    pub fn get_idle_peer_for(
-        &self,
-        hash: TxHash,
-        peers: &HashMap<PeerId, PeerMetadata<N>>,
-    ) -> Option<&PeerId> {
+    pub fn get_idle_peer_for(&self, hash: TxHash) -> Option<&PeerId> {
         let TxFetchMetadata { fallback_peers, .. } =
             self.hashes_fetch_inflight_and_pending_fetch.peek(&hash)?;
 
         for peer_id in fallback_peers.iter() {
-            if self.is_idle(peer_id) && peers.contains_key(peer_id) {
+            if self.is_idle(peer_id) {
                 return Some(peer_id)
             }
         }
@@ -216,7 +212,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     pub fn find_any_idle_fallback_peer_for_any_pending_hash(
         &mut self,
         hashes_to_request: &mut RequestTxHashes,
-        peers: &HashMap<PeerId, PeerMetadata<N>>,
         mut budget: Option<usize>, // search fallback peers for max `budget` lru pending hashes
     ) -> Option<PeerId> {
         let mut hashes_pending_fetch_iter = self.hashes_pending_fetch.iter();
@@ -224,7 +219,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         let idle_peer = loop {
             let &hash = hashes_pending_fetch_iter.next()?;
 
-            let idle_peer = self.get_idle_peer_for(hash, peers);
+            let idle_peer = self.get_idle_peer_for(hash);
 
             if idle_peer.is_some() {
                 hashes_to_request.insert(hash);
@@ -442,7 +437,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             {
                 let Some(peer_id) = self.find_any_idle_fallback_peer_for_any_pending_hash(
                     &mut hashes_to_request,
-                    peers,
                     budget_find_idle_fallback_peer,
                 ) else {
                     // no peers are idle or budget is depleted
