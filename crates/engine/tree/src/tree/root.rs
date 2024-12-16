@@ -43,6 +43,8 @@ pub struct StateRootComputeOutcome {
     pub state_root: (B256, TrieUpdates),
     /// The total time spent calculating the state root
     pub total_time: Duration,
+    /// The time spent calculating the state root since the last state update
+    pub time_from_last_update: Duration,
 }
 
 /// Result of the state root calculation
@@ -262,8 +264,6 @@ pub struct StateRootTask<Factory, BPF: BlindedProviderFactory> {
     /// The sparse trie used for the state root calculation. If [`None`], then update is in
     /// progress.
     sparse_trie: Option<Box<SparseStateTrie<BPF>>>,
-    /// Timestamp when the first state update was received
-    start_time: Option<Instant>,
 }
 
 #[allow(dead_code)]
@@ -293,7 +293,6 @@ where
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
             sparse_trie: Some(Box::new(SparseStateTrie::new(blinded_provider).with_updates(true))),
-            start_time: None,
         }
     }
 
@@ -448,22 +447,30 @@ where
         let mut current_state_update = HashedPostState::default();
         let mut current_proof_targets = MultiProofTargets::default();
         let mut current_multiproof = MultiProof::default();
+
         let mut updates_received = 0;
         let mut proofs_processed = 0;
         let mut roots_calculated = 0;
+
         let mut updates_finished = false;
+
+        // Timestamp when the first state update was received
+        let mut first_update_time = None;
+        // Timestamp when the last state update was received
+        let mut last_update_time = None;
 
         loop {
             match self.rx.recv() {
                 Ok(message) => match message {
                     StateRootMessage::StateUpdate(update) => {
                         if updates_received == 0 {
-                            self.start_time = Some(Instant::now());
+                            first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
                         }
+                        last_update_time = Some(Instant::now());
 
                         updates_received += 1;
-                        trace!(
+                        debug!(
                             target: "engine::root",
                             len = update.len(),
                             total_updates = updates_received,
@@ -485,14 +492,12 @@ where
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
                         proofs_processed += 1;
-                        trace!(
+                        debug!(
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
                             total_proofs = proofs_processed,
                             "Processing calculated proof"
                         );
-
-                        trace!(target: "engine::root", proof = ?proof_calculated.proof, "Proof calculated");
 
                         if let Some((
                             combined_state_update,
@@ -523,7 +528,7 @@ where
                     }
                     StateRootMessage::RootCalculated { trie, elapsed } => {
                         roots_calculated += 1;
-                        trace!(
+                        debug!(
                             target: "engine::root",
                             ?elapsed,
                             roots_calculated,
@@ -549,7 +554,7 @@ where
 
                         // only spawn new calculation if we have accumulated new proofs
                         if has_new_proofs {
-                            trace!(
+                            debug!(
                                 target: "engine::root",
                                 account_proofs = current_multiproof.account_subtree.len(),
                                 storage_proofs = current_multiproof.storages.len(),
@@ -562,20 +567,21 @@ where
                                 std::mem::take(&mut current_multiproof),
                             );
                         } else if all_proofs_received && no_pending && updates_finished {
+                            let total_time = first_update_time
+                                .expect("first update time should be set")
+                                .elapsed();
+                            let time_from_last_update =
+                                last_update_time.expect("last update time should be set").elapsed();
                             debug!(
                                 target: "engine::root",
                                 total_updates = updates_received,
                                 total_proofs = proofs_processed,
                                 roots_calculated,
+                                ?total_time,
+                                ?time_from_last_update,
                                 "All proofs processed, ending calculation"
                             );
-                            let total_time =
-                                self.start_time.expect("start time should be set").elapsed();
-                            debug!(
-                                target: "engine::root",
-                                ?total_time,
-                                "Total time spent calculating state root"
-                            );
+
                             let mut trie = self
                                 .sparse_trie
                                 .take()
@@ -584,9 +590,11 @@ where
                             let trie_updates = trie
                                 .take_trie_updates()
                                 .expect("sparse trie should have updates retention enabled");
+
                             return Ok(StateRootComputeOutcome {
                                 state_root: (root, trie_updates),
                                 total_time,
+                                time_from_last_update,
                             });
                         }
                     }
