@@ -7,7 +7,7 @@ use revm_primitives::{
     Account, AccountInfo, AccountStatus, Address, EvmState, EvmStorage, EvmStorageSlot, HashMap,
     B256, U256,
 };
-use std::thread;
+use std::{hint::black_box, thread};
 
 /// Creates a mock state with the specified number of accounts for benchmarking
 fn create_bench_state(num_accounts: usize) -> EvmState {
@@ -47,7 +47,7 @@ impl StdStateRootTask {
 
     fn run(self) {
         while let Ok(state) = self.rx.recv() {
-            criterion::black_box(state);
+            black_box(state);
         }
     }
 }
@@ -64,7 +64,7 @@ impl CrossbeamStateRootTask {
 
     fn run(self) {
         while let Ok(state) = self.rx.recv() {
-            criterion::black_box(state);
+            black_box(state);
         }
     }
 }

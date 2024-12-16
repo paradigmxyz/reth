@@ -1,4 +1,4 @@
-#![allow(missing_docs, non_snake_case, unreachable_pub)]
+#![allow(missing_docs, non_snake_case, unreachable_pub, unexpected_cfgs, unused)]
 
 use iai_callgrind::{
     library_benchmark, library_benchmark_group, LibraryBenchmarkConfig, RegressionConfig,
@@ -88,6 +88,7 @@ macro_rules! impl_iai_callgrind {
     };
 }
 
+#[cfg(not(codspeed))]
 impl_iai_callgrind!(
     CanonicalHeaders,
     HeaderTerminalDifficulties,
@@ -100,3 +101,6 @@ impl_iai_callgrind!(
     PlainStorageState,
     PlainAccountState
 );
+
+#[cfg(codspeed)]
+fn main() {}

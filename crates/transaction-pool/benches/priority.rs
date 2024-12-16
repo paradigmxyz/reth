@@ -1,9 +1,10 @@
 #![allow(missing_docs)]
 use criterion::{
-    black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_transaction_pool::{blob_tx_priority, fee_delta};
+use std::hint::black_box;
 
 fn generate_test_data_fee_delta() -> (u128, u128) {
     let config = ProptestConfig::default();

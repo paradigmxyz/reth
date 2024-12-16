@@ -88,6 +88,12 @@ where
 // Helper for generating testdata for the benchmarks.
 // Returns the path to the database file.
 pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
+    // This is way too slow.
+    #[allow(unexpected_cfgs)]
+    if cfg!(codspeed) {
+        std::process::exit(0);
+    }
+
     let txs_range = 100..150;
 
     // number of storage changes per transition

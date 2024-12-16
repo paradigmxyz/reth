@@ -1,11 +1,11 @@
 #![allow(missing_docs, unreachable_pub)]
 mod utils;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use rand::{prelude::SliceRandom, SeedableRng};
 use rand_xorshift::XorShiftRng;
 use reth_libmdbx::{ffi::*, ObjectLength, WriteFlags};
-use std::ptr;
+use std::{hint::black_box, ptr};
 use utils::*;
 
 fn bench_get_rand(c: &mut Criterion) {

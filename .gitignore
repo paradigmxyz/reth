@@ -19,7 +19,7 @@ target/
 testdata/micro/db
 
 # Generated data for stage benchmarks
-crates/stages/testdata
+crates/stages/stages/testdata
 
 # Prometheus data dir
 data/

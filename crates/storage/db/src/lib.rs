@@ -60,15 +60,15 @@ pub mod test_utils {
     use tempfile::TempDir;
 
     /// Error during database open
-    pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
+    pub const ERROR_DB_OPEN: &str = "could not open the database file";
     /// Error during database creation
-    pub const ERROR_DB_CREATION: &str = "Not able to create the database file.";
+    pub const ERROR_DB_CREATION: &str = "could not create the database file";
     /// Error during database creation
-    pub const ERROR_STATIC_FILES_CREATION: &str = "Not able to create the static file path.";
+    pub const ERROR_STATIC_FILES_CREATION: &str = "could not create the static file path";
     /// Error during table creation
-    pub const ERROR_TABLE_CREATION: &str = "Not able to create tables in the database.";
+    pub const ERROR_TABLE_CREATION: &str = "could not create tables in the database";
     /// Error during tempdir creation
-    pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
+    pub const ERROR_TEMPDIR: &str = "could not create a temporary directory";
 
     /// A database will delete the db dir when dropped.
     pub struct TempDatabase<DB> {

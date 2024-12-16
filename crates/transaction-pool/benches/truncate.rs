@@ -161,7 +161,7 @@ fn truncate_pending(
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |mut txpool| {
             txpool.truncate_pool(SubPoolLimit::default());
-            std::hint::black_box(());
+            txpool
         });
     });
 }
@@ -195,7 +195,7 @@ fn truncate_queued(
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |mut txpool| {
             txpool.truncate_pool(SubPoolLimit::default());
-            std::hint::black_box(());
+            txpool
         });
     });
 }
@@ -229,7 +229,7 @@ fn truncate_basefee(
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |mut txpool| {
             txpool.truncate_pool(SubPoolLimit::default());
-            std::hint::black_box(());
+            txpool
         });
     });
 }

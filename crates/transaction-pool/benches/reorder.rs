@@ -75,19 +75,17 @@ fn txpool_reordering_bench<T: BenchTxPool>(
     );
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |(mut txpool, new_txs)| {
-            {
-                // Reorder with new base fee
-                let bigger_base_fee = base_fee.saturating_add(10);
-                txpool.reorder(bigger_base_fee);
+            // Reorder with new base fee
+            let bigger_base_fee = base_fee.saturating_add(10);
+            txpool.reorder(bigger_base_fee);
 
-                // Reorder with new base fee after adding transactions.
-                for new_tx in new_txs {
-                    txpool.add_transaction(new_tx);
-                }
-                let smaller_base_fee = base_fee.saturating_sub(10);
-                txpool.reorder(smaller_base_fee)
-            };
-            std::hint::black_box(());
+            // Reorder with new base fee after adding transactions.
+            for new_tx in new_txs {
+                txpool.add_transaction(new_tx);
+            }
+            let smaller_base_fee = base_fee.saturating_sub(10);
+            txpool.reorder(smaller_base_fee);
+            txpool
         });
     });
 }

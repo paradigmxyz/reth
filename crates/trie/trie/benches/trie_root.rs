@@ -1,10 +1,11 @@
 #![allow(missing_docs, unreachable_pub)]
 use alloy_primitives::B256;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
 use reth_primitives::{Receipt, ReceiptWithBloom};
 use reth_trie::triehash::KeccakHasher;
+use std::hint::black_box;
 
 /// Benchmarks different implementations of the root calculation.
 pub fn trie_root_benchmark(c: &mut Criterion) {

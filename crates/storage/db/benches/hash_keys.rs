@@ -3,7 +3,7 @@
 use std::{collections::HashSet, path::Path, sync::Arc};
 
 use criterion::{
-    black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
 use proptest::{
@@ -20,6 +20,7 @@ use reth_db_api::{
     transaction::DbTxMut,
 };
 use reth_fs_util as fs;
+use std::hint::black_box;
 
 mod utils;
 use utils::*;
@@ -46,6 +47,12 @@ pub fn hash_keys(c: &mut Criterion) {
     group.sample_size(10);
 
     for size in [10_000, 100_000, 1_000_000] {
+        // Too slow.
+        #[allow(unexpected_cfgs)]
+        if cfg!(codspeed) && size > 10_000 {
+            continue;
+        }
+
         measure_table_insertion::<TransactionHashNumbers>(&mut group, size);
     }
 }
