@@ -508,7 +508,7 @@ TxPool:
           [default: 200]
 
 Builder:
-      --builder.extradata <EXTRADATA>
+      --builder.extradata <EXTRA_DATA>
           Block extra data set by the payload builder
 
           [default: reth/<VERSION>/<OS>]
