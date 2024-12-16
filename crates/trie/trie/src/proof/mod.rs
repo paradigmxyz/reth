@@ -15,7 +15,6 @@ use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, MultiProofTargets, StorageMultiProof,
-    TrieAccount,
 };
 
 mod blinded;
@@ -150,7 +149,7 @@ where
 
                     // Encode account
                     account_rlp.clear();
-                    let account = TrieAccount::from((account, storage_multiproof.root));
+                    let account = account.into_trie_account(storage_multiproof.root);
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);

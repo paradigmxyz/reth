@@ -170,16 +170,13 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
             account.info.as_ref().map(|info| {
                 (
                     address,
-                    (
-                        Account::from(info),
-                        storage_root_unhashed(
-                            account
-                                .storage
-                                .iter()
-                                .filter(|(_, value)| !value.present_value.is_zero())
-                                .map(|(slot, value)| ((*slot).into(), value.present_value)),
-                        ),
-                    ),
+                    Account::from(info).into_trie_account(storage_root_unhashed(
+                        account
+                            .storage
+                            .iter()
+                            .filter(|(_, value)| !value.present_value.is_zero())
+                            .map(|(slot, value)| ((*slot).into(), value.present_value)),
+                    )),
                 )
             })
         },

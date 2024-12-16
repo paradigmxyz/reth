@@ -1,6 +1,7 @@
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
+use alloy_trie::TrieAccount;
 use derive_more::Deref;
 use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, BytecodeDecodeError};
 
@@ -56,6 +57,17 @@ impl Account {
     /// In case of no bytecode, returns [`KECCAK_EMPTY`].
     pub fn get_bytecode_hash(&self) -> B256 {
         self.bytecode_hash.unwrap_or(KECCAK_EMPTY)
+    }
+
+    /// Converts the account into a trie account with the given storage root.
+    pub fn into_trie_account(self, storage_root: B256) -> TrieAccount {
+        let Self { nonce, balance, bytecode_hash } = self;
+        TrieAccount {
+            nonce,
+            balance,
+            storage_root,
+            code_hash: bytecode_hash.unwrap_or(KECCAK_EMPTY),
+        }
     }
 }
 

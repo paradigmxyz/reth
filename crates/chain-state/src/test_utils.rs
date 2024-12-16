@@ -20,6 +20,7 @@ use reth_primitives::{
     BlockBody, EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredTx, SealedBlock,
     SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
 };
+use reth_primitives_traits::Account;
 use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};
@@ -150,14 +151,12 @@ impl TestBlockBuilder {
             beneficiary: Address::random(),
             state_root: state_root_unhashed(HashMap::from([(
                 self.signer,
-                (
-                    AccountInfo {
-                        balance: initial_signer_balance - signer_balance_decrease,
-                        nonce: num_txs,
-                        ..Default::default()
-                    },
-                    EMPTY_ROOT_HASH,
-                ),
+                Account {
+                    balance: initial_signer_balance - signer_balance_decrease,
+                    nonce: num_txs,
+                    ..Default::default()
+                }
+                .into_trie_account(EMPTY_ROOT_HASH),
             )])),
             // use the number as the timestamp so it is monotonically increasing
             timestamp: number +
