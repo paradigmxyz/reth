@@ -19,7 +19,7 @@ use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
     validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
     validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
-    validate_header_base_fee, validate_header_extradata, validate_header_gas,
+    validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
 use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt, SealedBlock, SealedHeader};
 use reth_primitives_traits::{
@@ -234,8 +234,8 @@ where
             // Block validation with respect to the parent should ensure that the block timestamp
             // is greater than its parent timestamp.
 
-            // validate header extradata for all networks post merge
-            validate_header_extradata(header)?;
+            // validate header extra data for all networks post merge
+            validate_header_extra_data(header)?;
 
             // mixHash is used instead of difficulty inside EVM
             // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
@@ -256,7 +256,7 @@ where
                 })
             }
 
-            validate_header_extradata(header)?;
+            validate_header_extra_data(header)?;
         }
 
         Ok(())

@@ -193,7 +193,7 @@ pub struct OpChainSpec {
 }
 
 impl OpChainSpec {
-    /// Extracts the Holcene 1599 parameters from the encoded extradata from the parent header.
+    /// Extracts the Holocene 1599 parameters from the encoded extra data from the parent header.
     ///
     /// Caution: Caller must ensure that holocene is active in the parent header.
     ///
