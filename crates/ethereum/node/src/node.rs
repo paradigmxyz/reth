@@ -256,7 +256,7 @@ impl EthereumPayloadBuilder {
         let conf = ctx.payload_builder_config();
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             evm_config,
-            EthereumBuilderConfig::new(conf.extradata_bytes()).with_gas_limit(conf.gas_limit()),
+            EthereumBuilderConfig::new(conf.extra_data_bytes()).with_gas_limit(conf.gas_limit()),
         );
 
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()

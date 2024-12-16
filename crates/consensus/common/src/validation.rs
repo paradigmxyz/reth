@@ -213,15 +213,15 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(header: &H) -> Result<(),
     Ok(())
 }
 
-/// Validates the header's extradata according to the beacon consensus rules.
+/// Validates the header's extra data according to the beacon consensus rules.
 ///
 /// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
 /// This must be 32 bytes or fewer; formally Hx.
 #[inline]
-pub fn validate_header_extradata<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
-    let extradata_len = header.extra_data().len();
-    if extradata_len > MAXIMUM_EXTRA_DATA_SIZE {
-        Err(ConsensusError::ExtraDataExceedsMax { len: extradata_len })
+pub fn validate_header_extra_data<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
+    let extra_data_len = header.extra_data().len();
+    if extra_data_len > MAXIMUM_EXTRA_DATA_SIZE {
+        Err(ConsensusError::ExtraDataExceedsMax { len: extra_data_len })
     } else {
         Ok(())
     }

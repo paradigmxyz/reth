@@ -149,8 +149,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn assert_extradata_less_32bytes() {
-        let extradata = default_extra_data();
-        assert!(extradata.len() <= 32, "extradata must be less than 32 bytes: {extradata}")
+    fn assert_extra_data_less_32bytes() {
+        let extra_data = default_extra_data();
+        assert!(extra_data.len() <= 32, "extra data must be less than 32 bytes: {extra_data}")
     }
 }
