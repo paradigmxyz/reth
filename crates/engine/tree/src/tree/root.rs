@@ -465,6 +465,7 @@ where
                         );
                     }
                     StateRootMessage::FinishedStateUpdates => {
+                        trace!(target: "engine::root", "Finished state updates");
                         updates_finished = true;
                     }
                     StateRootMessage::ProofCalculated { proof, state_update, sequence_number } => {
@@ -510,6 +511,7 @@ where
                             has_new_proofs,
                             all_proofs_received,
                             no_pending,
+                            ?updates_finished,
                             "State check"
                         );
 
