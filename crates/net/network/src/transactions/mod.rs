@@ -602,7 +602,6 @@ where
             &mut valid_announcement_data,
             |hash| bad_imports.contains(hash),
             &peer_id,
-            |peer_id| self.peers.contains_key(&peer_id),
             &client,
         );
 

@@ -509,7 +509,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         new_announced_hashes: &mut ValidAnnouncementData,
         is_tx_bad_import: impl Fn(&TxHash) -> bool,
         peer_id: &PeerId,
-        is_session_active: impl Fn(PeerId) -> bool,
         client_version: &str,
     ) {
         let mut previously_unseen_hashes_count = 0;
@@ -520,7 +519,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         new_announced_hashes.retain(|hash, metadata| {
 
             // occupied entry
-            if let Some(TxFetchMetadata{ref mut fallback_peers, tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
+            if let Some(TxFetchMetadata{ tx_encoded_length: ref mut previously_seen_size, ..}) = self.hashes_fetch_inflight_and_pending_fetch.peek_mut(hash) {
                 // update size metadata if available
                 if let Some((_ty, size)) = metadata {
                     if let Some(prev_size) = previously_seen_size {
@@ -543,19 +542,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 // hash has been seen but is not inflight
                 if self.hashes_pending_fetch.remove(hash) {
                     return true
-                }
-                // hash has been seen and is in flight. store peer as fallback peer.
-                //
-                // remove any ended sessions, so that in case of a full cache, alive peers aren't
-                // removed in favour of lru dead peers
-                let mut ended_sessions = vec![];
-                for &peer_id in fallback_peers.iter() {
-                    if is_session_active(peer_id) {
-                        ended_sessions.push(peer_id);
-                    }
-                }
-                for peer_id in ended_sessions {
-                    fallback_peers.remove(&peer_id);
                 }
 
                 return false
