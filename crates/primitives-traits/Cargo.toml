@@ -21,6 +21,7 @@ alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-trie.workspace = true
 revm-primitives.workspace = true
 
 # op
@@ -80,7 +81,8 @@ std = [
 	"bytes/std",
 	"derive_more/std",
 	"k256/std",
-	"secp256k1?/std"
+	"secp256k1?/std",
+	"alloy-trie/std"
 ]
 secp256k1 = ["dep:secp256k1"]
 test-utils = [
@@ -99,7 +101,8 @@ arbitrary = [
 	"reth-codecs?/arbitrary",
 	"secp256k1?/global-context",
 	"secp256k1?/rand",
-	"op-alloy-consensus?/arbitrary"
+	"op-alloy-consensus?/arbitrary",
+	"alloy-trie/arbitrary"
 ]
 serde-bincode-compat = [
 	"serde",
@@ -120,7 +123,8 @@ serde = [
 	"revm-primitives/serde",
 	"op-alloy-consensus?/serde",
 	"k256/serde",
-	"secp256k1?/serde"
+	"secp256k1?/serde",
+	"alloy-trie/serde"
 ]
 reth-codec = [
 	"dep:reth-codecs",
