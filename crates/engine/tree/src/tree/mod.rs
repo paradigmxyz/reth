@@ -58,7 +58,7 @@ use reth_trie::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::EvmState;
-use root::{StateRootConfig, StateRootTask};
+use root::{StateRootComputeOutcome, StateRootConfig, StateRootTask};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -2326,7 +2326,10 @@ where
             if persistence_not_in_progress {
                 if let Some(state_root_handle) = state_root_handle {
                     match state_root_handle.wait_for_result() {
-                        Ok((task_state_root, _task_trie_updates)) => {
+                        Ok(StateRootComputeOutcome {
+                            state_root: (task_state_root, _task_trie_updates),
+                            ..
+                        }) => {
                             info!(
                                 target: "engine::tree",
                                 block = ?sealed_block.num_hash(),
