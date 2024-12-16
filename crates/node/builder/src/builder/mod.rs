@@ -50,10 +50,8 @@ pub use states::*;
 
 /// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.
-pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<
-    NodeTypesWithDBAdapter<Types, DB>,
-    BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>,
->;
+pub type RethFullAdapter<DB, Types> =
+    FullNodeTypesAdapter<Types, DB, BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>>;
 
 #[allow(clippy::doc_markdown)]
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -252,7 +250,7 @@ where
     /// Configures the types of the node and the provider type that will be used by the node.
     pub fn with_types_and_provider<T, P>(
         self,
-    ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<NodeTypesWithDBAdapter<T, DB>, P>>
+    ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>
     where
         T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
@@ -313,9 +311,7 @@ where
     /// Configures the types of the node and the provider type that will be used by the node.
     pub fn with_types_and_provider<T, P>(
         self,
-    ) -> WithLaunchContext<
-        NodeBuilderWithTypes<FullNodeTypesAdapter<NodeTypesWithDBAdapter<T, DB>, P>>,
-    >
+    ) -> WithLaunchContext<NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>>
     where
         T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
