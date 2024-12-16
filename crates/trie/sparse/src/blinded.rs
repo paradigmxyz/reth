@@ -7,9 +7,9 @@ use reth_trie_common::Nibbles;
 /// Factory for instantiating blinded node providers.
 pub trait BlindedProviderFactory {
     /// Type capable of fetching blinded account nodes.
-    type AccountNodeProvider: BlindedProvider + Send + Sync;
+    type AccountNodeProvider: BlindedProvider;
     /// Type capable of fetching blinded storage nodes.
-    type StorageNodeProvider: BlindedProvider + Send + Sync;
+    type StorageNodeProvider: BlindedProvider;
 
     /// Returns blinded account node provider.
     fn account_node_provider(&self) -> Self::AccountNodeProvider;
