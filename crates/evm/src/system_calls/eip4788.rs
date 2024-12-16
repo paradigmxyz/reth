@@ -75,8 +75,8 @@ where
         }
     };
 
-    res.state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
-    res.state.remove(&evm.block().coinbase);
+    // res.state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
+    // res.state.remove(&evm.block().coinbase);
 
     // re-set the previous env
     evm.context.evm.env = previous_env;
