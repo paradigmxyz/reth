@@ -7391,6 +7391,7 @@ dependencies = [
  "assert_matches",
  "criterion",
  "crossbeam-channel",
+ "derive_more",
  "futures",
  "metrics",
  "rand 0.8.5",
