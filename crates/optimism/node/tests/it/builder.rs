@@ -12,11 +12,12 @@ fn test_basic_setup() {
     let config = NodeConfig::new(BASE_MAINNET.clone());
     let db = create_test_rw_db();
     let args = RollupArgs::default();
+    let op_node = OpNode::new(args);
     let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types::<OpNode>()
-        .with_components(OpNode::components(args.clone()))
-        .with_add_ons(OpNode::new(args).add_ons())
+        .with_components(op_node.components())
+        .with_add_ons(op_node.add_ons())
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();
             Ok(())

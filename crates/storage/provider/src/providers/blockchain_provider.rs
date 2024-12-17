@@ -23,7 +23,7 @@ use reth_chain_state::{
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::{models::BlockNumberAddress, transaction::DbTx, Database};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
@@ -502,7 +502,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for BlockchainProvider2<N
         &self,
         header: &HeaderTy<N>,
         evm_config: EvmConfig,
-    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
+    ) -> ProviderResult<EvmEnv>
     where
         EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
@@ -1535,7 +1535,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
@@ -1544,7 +1544,7 @@ mod tests {
         assert_eq!(provider.block_by_id(block_hash.into()).unwrap(), Some(database_block.unseal()));
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
             Some(in_memory_block.clone().unseal())
@@ -1628,7 +1628,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert_eq!(
             provider.header_by_id(block_number.into()).unwrap(),
@@ -1649,7 +1649,7 @@ mod tests {
         );
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
 
         assert_eq!(
             provider.header_by_id(block_number.into()).unwrap(),
@@ -1686,7 +1686,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
@@ -1698,7 +1698,7 @@ mod tests {
         );
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
@@ -1726,7 +1726,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert!(!receipts.get(database_block.number as usize).unwrap().is_empty());
         assert!(!provider
@@ -1744,7 +1744,7 @@ mod tests {
         );
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
 
         assert_eq!(
             provider.receipts_by_block_id(block_number.into())?.unwrap(),
@@ -2577,7 +2577,7 @@ mod tests {
                             .unseal::<reth_primitives::Block>()
                             .with_recovered_senders()
                             .unwrap()
-                            .seal(block.hash())
+                            .seal_unchecked(block.hash())
                     )
                 ),
                 (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
@@ -2593,7 +2593,7 @@ mod tests {
                             .unseal::<reth_primitives::Block>()
                             .with_recovered_senders()
                             .unwrap()
-                            .seal(block.hash())
+                            .seal_unchecked(block.hash())
                     )
                 ),
                 (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)

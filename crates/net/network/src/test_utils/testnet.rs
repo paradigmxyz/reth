@@ -20,7 +20,7 @@ use reth_network_api::{
     NetworkEvent, NetworkEventListenerProvider, NetworkInfo, Peers,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{PooledTransactionsElement, TransactionSigned};
+use reth_primitives::{PooledTransaction, TransactionSigned};
 use reth_storage_api::{
     noop::NoopProvider, BlockReader, BlockReaderIdExt, HeaderProvider, StateProviderFactory,
 };
@@ -229,10 +229,7 @@ where
         + Unpin
         + 'static,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = TransactionSigned,
-                Pooled = PooledTransactionsElement,
-            >,
+            Transaction: PoolTransaction<Consensus = TransactionSigned, Pooled = PooledTransaction>,
         > + Unpin
         + 'static,
 {
@@ -300,10 +297,7 @@ where
         + Unpin
         + 'static,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = TransactionSigned,
-                Pooled = PooledTransactionsElement,
-            >,
+            Transaction: PoolTransaction<Consensus = TransactionSigned, Pooled = PooledTransaction>,
         > + Unpin
         + 'static,
 {
@@ -537,10 +531,7 @@ where
         + Unpin
         + 'static,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = TransactionSigned,
-                Pooled = PooledTransactionsElement,
-            >,
+            Transaction: PoolTransaction<Consensus = TransactionSigned, Pooled = PooledTransaction>,
         > + Unpin
         + 'static,
 {

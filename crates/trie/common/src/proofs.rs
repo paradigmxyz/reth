@@ -13,29 +13,11 @@ use alloy_trie::{
     proof::{verify_proof, ProofNodes, ProofVerificationError},
     TrieMask, EMPTY_ROOT_HASH,
 };
-use derive_more::derive::{Deref, DerefMut, From, Into, IntoIterator};
 use itertools::Itertools;
 use reth_primitives_traits::Account;
 
 /// Proof targets map.
-#[derive(Debug, Default, Clone, Deref, DerefMut, From, Into, IntoIterator)]
-pub struct MultiProofTargets(B256HashMap<B256HashSet>);
-
-impl MultiProofTargets {
-    /// Extends the proof targets map with another one.
-    pub fn extend(&mut self, other: Self) {
-        for (address, slots) in other.0 {
-            self.0.entry(address).or_default().extend(slots);
-        }
-    }
-
-    /// Extends the proof targets map with another one by reference.
-    pub fn extend_ref(&mut self, other: &Self) {
-        for (address, slots) in &other.0 {
-            self.0.entry(*address).or_default().extend(slots);
-        }
-    }
-}
+pub type MultiProofTargets = B256HashMap<B256HashSet>;
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
@@ -276,10 +258,9 @@ impl AccountProof {
         let expected = if self.info.is_none() && self.storage_root == EMPTY_ROOT_HASH {
             None
         } else {
-            Some(alloy_rlp::encode(TrieAccount::from((
-                self.info.unwrap_or_default(),
-                self.storage_root,
-            ))))
+            Some(alloy_rlp::encode(
+                self.info.unwrap_or_default().into_trie_account(self.storage_root),
+            ))
         };
         let nibbles = Nibbles::unpack(keccak256(self.address));
         verify_proof(root, nibbles, expected, &self.proof)

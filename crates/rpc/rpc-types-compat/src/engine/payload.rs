@@ -7,6 +7,7 @@ use alloy_eips::{
     eip4895::Withdrawals,
 };
 use alloy_primitives::{B256, U256};
+use alloy_rlp::BufMut;
 use alloy_rpc_types_engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
     ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV2,
@@ -14,12 +15,14 @@ use alloy_rpc_types_engine::{
 };
 use reth_primitives::{
     proofs::{self},
-    Block, BlockBody, BlockExt, SealedBlock, TransactionSigned,
+    Block, BlockBody, BlockExt, SealedBlock,
 };
 use reth_primitives_traits::BlockBody as _;
 
 /// Converts [`ExecutionPayloadV1`] to [`Block`]
-pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, PayloadError> {
+pub fn try_payload_v1_to_block<T: Decodable2718>(
+    payload: ExecutionPayloadV1,
+) -> Result<Block<T>, PayloadError> {
     if payload.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
         return Err(PayloadError::ExtraData(payload.extra_data))
     }
@@ -34,7 +37,7 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
         .map(|tx| {
             let mut buf = tx.as_ref();
 
-            let tx = TransactionSigned::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
+            let tx = T::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
 
             if !buf.is_empty() {
                 return Err(alloy_rlp::Error::UnexpectedLength);
@@ -43,7 +46,12 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
             Ok(tx)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let transactions_root = proofs::calculate_transaction_root(&transactions);
+
+    // Reuse the encoded bytes for root calculation
+    let transactions_root =
+        proofs::ordered_trie_root_with_encoder(&payload.transactions, |item, buf| {
+            buf.put_slice(item)
+        });
 
     let header = Header {
         parent_hash: payload.parent_hash,
@@ -84,7 +92,9 @@ pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, Pay
 }
 
 /// Converts [`ExecutionPayloadV2`] to [`Block`]
-pub fn try_payload_v2_to_block(payload: ExecutionPayloadV2) -> Result<Block, PayloadError> {
+pub fn try_payload_v2_to_block<T: Decodable2718>(
+    payload: ExecutionPayloadV2,
+) -> Result<Block<T>, PayloadError> {
     // this performs the same conversion as the underlying V1 payload, but calculates the
     // withdrawals root and adds withdrawals
     let mut base_sealed_block = try_payload_v1_to_block(payload.payload_inner)?;
@@ -95,7 +105,9 @@ pub fn try_payload_v2_to_block(payload: ExecutionPayloadV2) -> Result<Block, Pay
 }
 
 /// Converts [`ExecutionPayloadV3`] to [`Block`]
-pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, PayloadError> {
+pub fn try_payload_v3_to_block<T: Decodable2718>(
+    payload: ExecutionPayloadV3,
+) -> Result<Block<T>, PayloadError> {
     // this performs the same conversion as the underlying V2 payload, but inserts the blob gas
     // used and excess blob gas
     let mut base_block = try_payload_v2_to_block(payload.payload_inner)?;
@@ -107,11 +119,10 @@ pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, Pay
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayload`]
-pub fn block_to_payload(value: SealedBlock) -> ExecutionPayload {
-    if value.header.requests_hash.is_some() {
-        // block with requests root: V3
-        ExecutionPayload::V3(block_to_payload_v3(value))
-    } else if value.header.parent_beacon_block_root.is_some() {
+pub fn block_to_payload<T: Encodable2718>(
+    value: SealedBlock<Header, BlockBody<T>>,
+) -> ExecutionPayload {
+    if value.header.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
         ExecutionPayload::V3(block_to_payload_v3(value))
     } else if value.body.withdrawals.is_some() {
@@ -124,8 +135,11 @@ pub fn block_to_payload(value: SealedBlock) -> ExecutionPayload {
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV1`]
-pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
-    let transactions = value.encoded_2718_transactions();
+pub fn block_to_payload_v1<T: Encodable2718>(
+    value: SealedBlock<Header, BlockBody<T>>,
+) -> ExecutionPayloadV1 {
+    let transactions =
+        value.body.transactions.iter().map(|tx| tx.encoded_2718().into()).collect::<Vec<_>>();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,
         fee_recipient: value.beneficiary,
@@ -145,55 +159,23 @@ pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV2`]
-pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
-    let transactions = value.encoded_2718_transactions();
-
+pub fn block_to_payload_v2<T: Encodable2718>(
+    mut value: SealedBlock<Header, BlockBody<T>>,
+) -> ExecutionPayloadV2 {
     ExecutionPayloadV2 {
-        payload_inner: ExecutionPayloadV1 {
-            parent_hash: value.parent_hash,
-            fee_recipient: value.beneficiary,
-            state_root: value.state_root,
-            receipts_root: value.receipts_root,
-            logs_bloom: value.logs_bloom,
-            prev_randao: value.mix_hash,
-            block_number: value.number,
-            gas_limit: value.gas_limit,
-            gas_used: value.gas_used,
-            timestamp: value.timestamp,
-            extra_data: value.extra_data.clone(),
-            base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-            block_hash: value.hash(),
-            transactions,
-        },
-        withdrawals: value.body.withdrawals.unwrap_or_default().into_inner(),
+        withdrawals: value.body.withdrawals.take().unwrap_or_default().into_inner(),
+        payload_inner: block_to_payload_v1(value),
     }
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV3`], and returns the parent beacon block root.
-pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
-    let transactions = value.encoded_2718_transactions();
+pub fn block_to_payload_v3<T: Encodable2718>(
+    value: SealedBlock<Header, BlockBody<T>>,
+) -> ExecutionPayloadV3 {
     ExecutionPayloadV3 {
         blob_gas_used: value.blob_gas_used.unwrap_or_default(),
         excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
-        payload_inner: ExecutionPayloadV2 {
-            payload_inner: ExecutionPayloadV1 {
-                parent_hash: value.parent_hash,
-                fee_recipient: value.beneficiary,
-                state_root: value.state_root,
-                receipts_root: value.receipts_root,
-                logs_bloom: value.logs_bloom,
-                prev_randao: value.mix_hash,
-                block_number: value.number,
-                gas_limit: value.gas_limit,
-                gas_used: value.gas_used,
-                timestamp: value.timestamp,
-                extra_data: value.extra_data.clone(),
-                base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-                block_hash: value.hash(),
-                transactions,
-            },
-            withdrawals: value.body.withdrawals.unwrap_or_default().into_inner(),
-        },
+        payload_inner: block_to_payload_v2(value),
     }
 }
 
@@ -260,10 +242,10 @@ pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayload
 /// The log bloom is assumed to be validated during serialization.
 ///
 /// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
-pub fn try_into_block(
+pub fn try_into_block<T: Decodable2718>(
     value: ExecutionPayload,
     sidecar: &ExecutionPayloadSidecar,
-) -> Result<Block, PayloadError> {
+) -> Result<Block<T>, PayloadError> {
     let mut base_payload = match value {
         ExecutionPayload::V1(payload) => try_payload_v1_to_block(payload)?,
         ExecutionPayload::V2(payload) => try_payload_v2_to_block(payload)?,
@@ -362,7 +344,7 @@ mod tests {
         CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
         ExecutionPayloadV2, ExecutionPayloadV3,
     };
-    use reth_primitives::BlockExt;
+    use reth_primitives::{Block, BlockExt, TransactionSigned};
 
     #[test]
     fn roundtrip_payload_to_block() {
@@ -393,7 +375,7 @@ mod tests {
             excess_blob_gas: 0x580000,
         };
 
-        let mut block = try_payload_v3_to_block(new_payload.clone()).unwrap();
+        let mut block: Block = try_payload_v3_to_block(new_payload.clone()).unwrap();
 
         // this newPayload came with a parent beacon block root, we need to manually insert it
         // before hashing
@@ -436,7 +418,7 @@ mod tests {
             excess_blob_gas: 0x580000,
         };
 
-        let _block = try_payload_v3_to_block(new_payload)
+        let _block = try_payload_v3_to_block::<TransactionSigned>(new_payload)
             .expect_err("execution payload conversion requires typed txs without a rlp header");
     }
 

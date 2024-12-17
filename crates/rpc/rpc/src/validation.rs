@@ -383,7 +383,7 @@ where
                     },
                     PraguePayloadFields {
                         requests: RequestsOrHash::Requests(
-                            request.request.execution_requests.into(),
+                            request.request.execution_requests.to_requests(),
                         ),
                         target_blobs_per_block: request.request.target_blobs_per_block,
                     },

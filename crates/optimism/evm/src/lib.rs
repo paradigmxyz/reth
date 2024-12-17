@@ -16,7 +16,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::{Address, U256};
 use op_alloy_consensus::EIP1559ParamError;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_primitives::{transaction::FillTxEnv, Head, TransactionSigned};
 use reth_revm::{
@@ -138,7 +138,7 @@ impl ConfigureEvmEnv for OpEvmConfig {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error> {
+    ) -> Result<EvmEnv, Self::Error> {
         // configure evm env based on parent block
         let cfg = CfgEnv::default().with_chain_id(self.chain_spec.chain().id());
 
@@ -165,15 +165,15 @@ impl ConfigureEvmEnv for OpEvmConfig {
             blob_excess_gas_and_price,
         };
 
-        let cfg_with_handler_cfg;
+        let cfg_env_with_handler_cfg;
         {
-            cfg_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
                 cfg_env: cfg,
                 handler_cfg: HandlerCfg { spec_id, is_optimism: true },
             };
         }
 
-        Ok((cfg_with_handler_cfg, block_env))
+        Ok((cfg_env_with_handler_cfg, block_env).into())
     }
 }
 
@@ -251,12 +251,13 @@ mod tests {
 
         // Use the `OpEvmConfig` to create the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
-        let (cfg_env, _) = OpEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
-            .cfg_and_block_env(&header, total_difficulty);
+        let EvmEnv { cfg_env_with_handler_cfg, .. } =
+            OpEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
+                .cfg_and_block_env(&header, total_difficulty);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
-        assert_eq!(cfg_env.chain_id, chain_spec.chain().id());
+        assert_eq!(cfg_env_with_handler_cfg.chain_id, chain_spec.chain().id());
     }
 
     #[test]

@@ -35,8 +35,20 @@ use tracing::{debug, error, trace};
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
+/// Outcome of the state root computation, including the state root itself with
+/// the trie updates and the total time spent.
+#[derive(Debug)]
+pub struct StateRootComputeOutcome {
+    /// The computed state root and trie updates
+    pub state_root: (B256, TrieUpdates),
+    /// The total time spent calculating the state root
+    pub total_time: Duration,
+    /// The time spent calculating the state root since the last state update
+    pub time_from_last_update: Duration,
+}
+
 /// Result of the state root calculation
-pub(crate) type StateRootResult = Result<(B256, TrieUpdates), ParallelStateRootError>;
+pub(crate) type StateRootResult = Result<StateRootComputeOutcome, ParallelStateRootError>;
 
 /// Handle to a spawned state root task.
 #[derive(Debug)]
@@ -326,7 +338,7 @@ where
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
         let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
-        fetched_proof_targets.extend_ref(&proof_targets);
+        extend_multi_proof_targets_ref(fetched_proof_targets, &proof_targets);
 
         // Dispatch proof gathering for this state update
         scope.spawn(move |_| {
@@ -379,12 +391,16 @@ where
             None
         } else {
             // Merge all ready proofs and state updates
-            ready_proofs.into_iter().reduce(|mut acc, (state_update, targets, proof)| {
-                acc.0.extend(state_update);
-                acc.1.extend(targets);
-                acc.2.extend(proof);
-                acc
-            })
+            ready_proofs.into_iter().reduce(
+                |(mut acc_state_update, mut acc_targets, mut acc_proof),
+                 (state_update, targets, proof)| {
+                    acc_state_update.extend(state_update);
+                    extend_multi_proof_targets(&mut acc_targets, targets);
+                    acc_proof.extend(proof);
+
+                    (acc_state_update, acc_targets, acc_proof)
+                },
+            )
         }
     }
 
@@ -431,17 +447,30 @@ where
         let mut current_state_update = HashedPostState::default();
         let mut current_proof_targets = MultiProofTargets::default();
         let mut current_multiproof = MultiProof::default();
+
         let mut updates_received = 0;
         let mut proofs_processed = 0;
         let mut roots_calculated = 0;
+
         let mut updates_finished = false;
+
+        // Timestamp when the first state update was received
+        let mut first_update_time = None;
+        // Timestamp when the last state update was received
+        let mut last_update_time = None;
 
         loop {
             match self.rx.recv() {
                 Ok(message) => match message {
                     StateRootMessage::StateUpdate(update) => {
+                        if updates_received == 0 {
+                            first_update_time = Some(Instant::now());
+                            debug!(target: "engine::root", "Started state root calculation");
+                        }
+                        last_update_time = Some(Instant::now());
+
                         updates_received += 1;
-                        trace!(
+                        debug!(
                             target: "engine::root",
                             len = update.len(),
                             total_updates = updates_received,
@@ -458,18 +487,17 @@ where
                         );
                     }
                     StateRootMessage::FinishedStateUpdates => {
+                        trace!(target: "engine::root", "Finished state updates");
                         updates_finished = true;
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
                         proofs_processed += 1;
-                        trace!(
+                        debug!(
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
                             total_proofs = proofs_processed,
                             "Processing calculated proof"
                         );
-
-                        trace!(target: "engine::root", proof = ?proof_calculated.proof, "Proof calculated");
 
                         if let Some((
                             combined_state_update,
@@ -483,7 +511,10 @@ where
                         ) {
                             if self.sparse_trie.is_none() {
                                 current_state_update.extend(combined_state_update);
-                                current_proof_targets.extend(combined_proof_targets);
+                                extend_multi_proof_targets(
+                                    &mut current_proof_targets,
+                                    combined_proof_targets,
+                                );
                                 current_multiproof.extend(combined_proof);
                             } else {
                                 self.spawn_root_calculation(
@@ -497,7 +528,7 @@ where
                     }
                     StateRootMessage::RootCalculated { trie, elapsed } => {
                         roots_calculated += 1;
-                        trace!(
+                        debug!(
                             target: "engine::root",
                             ?elapsed,
                             roots_calculated,
@@ -517,12 +548,13 @@ where
                             has_new_proofs,
                             all_proofs_received,
                             no_pending,
+                            ?updates_finished,
                             "State check"
                         );
 
                         // only spawn new calculation if we have accumulated new proofs
                         if has_new_proofs {
-                            trace!(
+                            debug!(
                                 target: "engine::root",
                                 account_proofs = current_multiproof.account_subtree.len(),
                                 storage_proofs = current_multiproof.storages.len(),
@@ -535,13 +567,21 @@ where
                                 std::mem::take(&mut current_multiproof),
                             );
                         } else if all_proofs_received && no_pending && updates_finished {
+                            let total_time = first_update_time
+                                .expect("first update time should be set")
+                                .elapsed();
+                            let time_from_last_update =
+                                last_update_time.expect("last update time should be set").elapsed();
                             debug!(
                                 target: "engine::root",
                                 total_updates = updates_received,
                                 total_proofs = proofs_processed,
                                 roots_calculated,
+                                ?total_time,
+                                ?time_from_last_update,
                                 "All proofs processed, ending calculation"
                             );
+
                             let mut trie = self
                                 .sparse_trie
                                 .take()
@@ -550,7 +590,12 @@ where
                             let trie_updates = trie
                                 .take_trie_updates()
                                 .expect("sparse trie should have updates retention enabled");
-                            return Ok((root, trie_updates));
+
+                            return Ok(StateRootComputeOutcome {
+                                state_root: (root, trie_updates),
+                                total_time,
+                                time_from_last_update,
+                            });
                         }
                     }
                     StateRootMessage::ProofCalculationError(e) => {
@@ -681,6 +726,18 @@ fn update_sparse_trie<
     let elapsed = started_at.elapsed();
 
     Ok((trie, elapsed))
+}
+
+fn extend_multi_proof_targets(targets: &mut MultiProofTargets, other: MultiProofTargets) {
+    for (address, slots) in other {
+        targets.entry(address).or_default().extend(slots);
+    }
+}
+
+fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {
+    for (address, slots) in other {
+        targets.entry(*address).or_default().extend(slots);
+    }
 }
 
 #[cfg(test)]
@@ -837,7 +894,8 @@ mod tests {
             drop(state_hook);
 
             handle.wait_for_result().expect("task failed")
-        });
+        })
+        .state_root;
         let root_from_base = state_root(accumulated_state);
 
         assert_eq!(

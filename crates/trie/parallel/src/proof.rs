@@ -20,7 +20,7 @@ use reth_trie::{
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
     HashBuilder, HashedPostStateSorted, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof,
-    TrieAccount, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -229,7 +229,7 @@ where
 
                     // Encode account
                     account_rlp.clear();
-                    let account = TrieAccount::from((account, storage_multiproof.root));
+                    let account = account.into_trie_account(storage_multiproof.root);
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);

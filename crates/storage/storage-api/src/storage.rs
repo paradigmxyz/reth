@@ -1,6 +1,6 @@
 use alloy_primitives::{Address, BlockNumber, B256};
 use reth_db_api::models::BlockNumberAddress;
-use reth_primitives::StorageEntry;
+use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     collections::{BTreeMap, BTreeSet},

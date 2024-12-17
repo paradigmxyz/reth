@@ -122,7 +122,7 @@ where
             // TODO(alexey): report gas metrics using `block.header.gas_used`
 
             // Seal the block back and save it
-            blocks.push(block.seal(hash));
+            blocks.push(block.seal_unchecked(hash));
 
             // Check if we should commit now
             let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;

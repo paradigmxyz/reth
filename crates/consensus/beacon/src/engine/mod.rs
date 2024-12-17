@@ -2061,7 +2061,7 @@ mod tests {
         // consensus engine is still idle because no FCUs were received
         let _ = env
             .send_new_payload(
-                block_to_payload_v1(SealedBlock::default()),
+                block_to_payload_v1(SealedBlock::<_>::default()),
                 ExecutionPayloadSidecar::none(),
             )
             .await;

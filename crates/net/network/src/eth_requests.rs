@@ -4,7 +4,7 @@ use crate::{
     budget::DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, metered_poll_nested_stream_with_budget,
     metrics::EthRequestHandlerMetrics,
 };
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, ReceiptWithBloom, TxReceipt};
 use alloy_eips::BlockHashOrNumber;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
@@ -81,7 +81,7 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
 impl<C, N> EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader + HeaderProvider + ReceiptProvider<Receipt = reth_primitives::Receipt>,
+    C: BlockReader + HeaderProvider + ReceiptProvider<Receipt: Encodable + TxReceipt>,
 {
     /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::Header> {
@@ -188,7 +188,7 @@ where
         &self,
         _peer_id: PeerId,
         request: GetReceipts,
-        response: oneshot::Sender<RequestResult<Receipts>>,
+        response: oneshot::Sender<RequestResult<Receipts<C::Receipt>>>,
     ) {
         self.metrics.eth_receipts_requests_received_total.increment(1);
 
@@ -200,10 +200,8 @@ where
             if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
-                let receipt = receipts_by_block
-                    .into_iter()
-                    .map(|receipt| receipt.with_bloom())
-                    .collect::<Vec<_>>();
+                let receipt =
+                    receipts_by_block.into_iter().map(ReceiptWithBloom::from).collect::<Vec<_>>();
 
                 total_bytes += receipt.length();
                 receipts.push(receipt);
@@ -226,7 +224,7 @@ where
 impl<C, N> Future for EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader<Block = N::Block, Receipt = reth_primitives::Receipt>
+    C: BlockReader<Block = N::Block, Receipt = N::Receipt>
         + HeaderProvider<Header = N::BlockHeader>
         + Unpin,
 {
@@ -317,6 +315,6 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The specific receipts requested.
         request: GetReceipts,
         /// The channel sender for the response containing receipts.
-        response: oneshot::Sender<RequestResult<Receipts>>,
+        response: oneshot::Sender<RequestResult<Receipts<N::Receipt>>>,
     },
 }
