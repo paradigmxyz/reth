@@ -1628,7 +1628,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockBodyIndicesProvider
     for DatabaseProvider<TX, N>
 {
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::BlockMeta,
+            num,
+            |static_file| static_file.block_body_indices(num),
+            || Ok(self.tx.get::<tables::BlockBodyIndices>(num)?),
+        )
     }
 }
 

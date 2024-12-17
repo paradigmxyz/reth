@@ -68,7 +68,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     }
 
     pub(crate) fn commit(&self) -> ProviderResult<()> {
-        for writer_lock in [&self.headers, &self.transactions, &self.receipts] {
+        for writer_lock in [&self.headers, &self.block_meta, &self.transactions, &self.receipts] {
             let mut writer = writer_lock.write();
             if let Some(writer) = writer.as_mut() {
                 writer.commit()?;
@@ -204,7 +204,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// [`NippyJarWriter`] for more on healing.
     fn ensure_end_range_consistency(&mut self) -> ProviderResult<()> {
         // If we have lost rows (in this run or previous), we need to update the [SegmentHeader].
-        let expected_rows = if self.user_header().segment().is_headers() {
+        let expected_rows = if self.user_header().segment().is_block_based() {
             self.user_header().block_len().unwrap_or_default()
         } else {
             self.user_header().tx_len().unwrap_or_default()
@@ -234,7 +234,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 StaticFileSegment::Receipts => {
                     self.prune_receipt_data(to_delete, last_block_number.expect("should exist"))?
                 }
-                StaticFileSegment::BlockMeta => todo!(),
+                StaticFileSegment::BlockMeta => self.prune_block_meta(to_delete)?,
             }
         }
 
@@ -410,12 +410,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 let block_start = self.writer.user_header().expected_block_start();
 
                 // We only delete the file if it's NOT the first static file AND:
-                // * it's a Header segment  OR
+                // * it's a block based segment  OR
                 // * it's a tx-based segment AND `last_block` is lower than the first block of this
                 //   file's block range. Otherwise, having no rows simply means that this block
                 //   range has no transactions, but the file should remain.
                 if block_start != 0 &&
-                    (segment.is_headers() || last_block.is_some_and(|b| b < block_start))
+                    (segment.is_block_based() || last_block.is_some_and(|b| b < block_start))
                 {
                     self.delete_current_and_open_previous()?;
                 } else {
@@ -889,6 +889,10 @@ fn create_jar(
     // Transaction and Receipt already have the compression scheme used natively in its encoding.
     // (zstd-dictionary)
     if segment.is_headers() {
+        jar = jar.with_lz4();
+    }
+
+    if segment.is_block_meta() {
         jar = jar.with_lz4();
     }
 
