@@ -2,8 +2,8 @@
 
 use alloy_primitives::map::HashSet;
 use rayon::iter::{ParallelBridge, ParallelIterator};
+use reth_errors::ProviderError;
 use reth_evm::system_calls::OnStateHook;
-use reth_execution_errors::StateProofError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider,
@@ -89,7 +89,7 @@ pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     /// Proof calculation completed for a specific state update
     ProofCalculated(Box<ProofCalculated>),
     /// Error during proof calculation
-    ProofCalculationError(StateProofError),
+    ProofCalculationError(ProviderError),
     /// State root calculation completed
     RootCalculated {
         /// The updated sparse trie
@@ -346,6 +346,8 @@ where
                 Ok(provider) => provider,
                 Err(error) => {
                     error!(target: "engine::root", ?error, "Could not get provider");
+                    let _ = state_root_message_sender
+                        .send(StateRootMessage::ProofCalculationError(error));
                     return;
                 }
             };
@@ -368,9 +370,9 @@ where
                         }),
                     ));
                 }
-                Err(e) => {
-                    let _ =
-                        state_root_message_sender.send(StateRootMessage::ProofCalculationError(e));
+                Err(error) => {
+                    let _ = state_root_message_sender
+                        .send(StateRootMessage::ProofCalculationError(error.into()));
                 }
             }
         });
