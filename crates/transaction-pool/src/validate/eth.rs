@@ -60,6 +60,37 @@ where
     Client: StateProviderFactory,
     Tx: EthPoolTransaction,
 {
+    /// Validates a single transaction.
+    ///
+    /// See also [`TransactionValidator::validate_transaction`]
+    pub fn validate_one(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        self.inner.validate_one(origin, transaction)
+    }
+
+    /// Validates a single transaction with an optional provider.
+    pub fn validate_one_with_provider(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+        provider: &mut Option<Box<dyn reth_storage_api::StateProvider>>,
+    ) -> TransactionValidationOutcome<Tx> {
+        match provider {
+            Some(state) => self.inner.validate_with_state(origin, transaction, state),
+            None => match self.inner.client.latest() {
+                Ok(state) => {
+                    let result = self.inner.validate_with_state(origin, transaction, &state);
+                    *provider = Some(state);
+                    result
+                }
+                Err(err) => TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err)),
+            },
+        }
+    }
+
     /// Validates all given transactions using a single state provider.
     ///
     /// Returns all outcomes for the given transactions in the same order.
@@ -67,22 +98,11 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        // Get the latest state provider once for all transactions
-        match self.inner.client.latest() {
-            Ok(state_provider) => transactions
-                .into_iter()
-                .map(|(origin, tx)| self.inner.validate_with_state(origin, tx, &state_provider))
-                .collect(),
-            Err(err) => {
-                // If we can't get the state provider, return errors for all transactions
-                transactions
-                    .into_iter()
-                    .map(|(_, tx)| {
-                        TransactionValidationOutcome::Error(*tx.hash(), Box::new(err.clone()))
-                    })
-                    .collect()
-            }
-        }
+        let mut provider = None;
+        transactions
+            .into_iter()
+            .map(|(origin, tx)| self.validate_one_with_provider(origin, tx, &mut provider))
+            .collect()
     }
 
     /// Validates a transaction with a provided state.

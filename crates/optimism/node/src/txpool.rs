@@ -113,14 +113,16 @@ where
         }
     }
 
-    /// Validates a single transaction.
-    ///
-    /// See also [`TransactionValidator::validate_transaction`]
-    pub fn validate_one(
+    /// Validates a transaction with a provided state.
+    pub fn validate_with_state<S>(
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-    ) -> TransactionValidationOutcome<Tx> {
+        state: &S,
+    ) -> TransactionValidationOutcome<Tx>
+    where
+        S: reth_storage_api::AccountReader + reth_storage_api::StateProvider,
+    {
         if transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
                 transaction,
@@ -128,10 +130,7 @@ where
             )
         }
 
-        let outcome = match self.inner.client().latest() {
-            Ok(state) => self.inner.validate_with_state(origin, transaction, &state),
-            Err(err) => TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err)),
-        };
+        let outcome = self.inner.validate_with_state(origin, transaction, state);
 
         if !self.requires_l1_data_gas_fee() {
             // no need to check L1 gas fee
@@ -187,16 +186,40 @@ where
         outcome
     }
 
-    /// Validates all given transactions.
-    ///
-    /// Returns all outcomes for the given transactions in the same order.
-    ///
-    /// See also [`Self::validate_one`]
+    /// Validates a single transaction.
+    pub fn validate_one(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        match self.inner.client().latest() {
+            Ok(state) => self.validate_with_state(origin, transaction, &state),
+            Err(err) => TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err)),
+        }
+    }
+
+    /// Validates all given transactions using a single state provider.
     pub fn validate_all(
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+        // Get state provider once for all transactions
+        let state = match self.inner.client().latest() {
+            Ok(state) => state,
+            Err(err) => {
+                return transactions
+                    .into_iter()
+                    .map(|(_, tx)| {
+                        TransactionValidationOutcome::Error(*tx.hash(), Box::new(err.clone()))
+                    })
+                    .collect();
+            }
+        };
+
+        transactions
+            .into_iter()
+            .map(|(origin, tx)| self.validate_with_state(origin, tx, &state))
+            .collect()
     }
 }
 
