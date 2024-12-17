@@ -400,8 +400,8 @@ where
                 ));
             }
             Err(error) => {
-                let _ = state_root_message_sender
-                    .send(StateRootMessage::ProofCalculationError(error.into()));
+                let _ =
+                    state_root_message_sender.send(StateRootMessage::ProofCalculationError(error));
             }
         });
     }
