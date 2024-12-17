@@ -58,6 +58,13 @@ install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
 
+.PHONY: install-scroll
+install-scroll: ## Build and install the scroll-reth binary under `~/.cargo/bin`.
+	cargo install --path crates/scroll/bin --bin scroll-reth --force --locked \
+		--features "scroll $(FEATURES)" \
+		--profile "$(PROFILE)" \
+		$(CARGO_INSTALL_EXTRA_FLAGS)
+
 .PHONY: build
 build: ## Build the reth binary into `target` directory.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"

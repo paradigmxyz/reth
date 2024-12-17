@@ -4,6 +4,8 @@ name: sync test
 
 on:
   merge_group:
+  push:
+    branches: [main, scroll]
 
 env:
   CARGO_TERM_COLOR: always
@@ -35,6 +37,12 @@ jobs:
             tip: "0xbb9b85352c7ebca6ba8efc63bd66cecd038c92ec8ebd02e153a3e0b197e672b7"
             block: 10000
             unwind-target: "0x118a6e922a8c6cab221fc5adfe5056d2b72d58c6580e9c5629de55299e2cf8de"
+          - build: install-scroll
+            bin: scroll-reth
+            chain: scroll-mainnet
+            tip: "0x1f398ce1e03b9d7d7fcba8512dc43c9f84ecaffb15954ab178fab48151e84484"
+            block: 50000
+            unwind-target: "0xc434910471ff41b3f097360b8c5d20459018023833081192dbe490a12ae2937f"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
