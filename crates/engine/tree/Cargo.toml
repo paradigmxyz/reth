@@ -58,6 +58,7 @@ reth-metrics = { workspace = true, features = ["common"] }
 # misc
 rayon.workspace = true
 tracing.workspace = true
+derive_more.workspace = true
 
 # optional deps for test-utils
 reth-prune-types = { workspace = true, optional = true }

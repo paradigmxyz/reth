@@ -1,6 +1,7 @@
 //! State root task related functionality.
 
 use alloy_primitives::map::HashSet;
+use derive_more::derive::Deref;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::ProviderError;
 use reth_evm::system_calls::OnStateHook;
@@ -22,7 +23,6 @@ use reth_trie_sparse::{
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
     collections::BTreeMap,
-    ops::Deref,
     sync::{
         mpsc::{self, channel, Receiver, Sender},
         Arc,
@@ -185,20 +185,13 @@ impl ProofSequencer {
 
 /// A wrapper for the sender that signals completion when dropped
 #[allow(dead_code)]
+#[derive(Deref)]
 pub(crate) struct StateHookSender<BPF: BlindedProviderFactory>(Sender<StateRootMessage<BPF>>);
 
 #[allow(dead_code)]
 impl<BPF: BlindedProviderFactory> StateHookSender<BPF> {
     pub(crate) const fn new(inner: Sender<StateRootMessage<BPF>>) -> Self {
         Self(inner)
-    }
-}
-
-impl<BPF: BlindedProviderFactory> Deref for StateHookSender<BPF> {
-    type Target = Sender<StateRootMessage<BPF>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 
@@ -355,7 +348,6 @@ where
             // TODO: replace with parallel proof
             let result = Proof::overlay_multiproof(
                 provider.tx_ref(),
-                // TODO(alexey): this clone can be expensive, we should avoid it
                 input.as_ref().clone(),
                 proof_targets.clone(),
             );
