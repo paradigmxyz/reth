@@ -19,11 +19,12 @@ reth-primitives-traits.workspace = true
 reth-scroll-execution.workspace = true
 reth-scroll-primitives.workspace = true
 reth-scroll-trie.workspace = true
-reth-trie.workspace = true 
+reth-trie.workspace = true
 reth-trie-db.workspace = true
 
 # alloy
-alloy-consensus = { workspace = true, optional = true}
+alloy-consensus.workspace = true
+alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
@@ -43,7 +44,7 @@ itertools.workspace = true
 [dev-dependencies]
 reth-db-api.workspace = true
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
-reth-scroll-state-commitment = { workspace = true, features = ["test-utils"]}
+reth-scroll-state-commitment = { workspace = true, features = ["test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils" ] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-provider = { workspace = true, features = ["test-utils" ] }
@@ -62,9 +63,9 @@ scroll = [
 ]
 test-utils = [
     "dep:zktrie_rust", 
-    "dep:zktrie", 
-    "dep:alloy-consensus",
+    "dep:zktrie",
     "reth-db/test-utils",
+    "reth-db/mdbx",
     "reth-db-api/test-utils",
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",

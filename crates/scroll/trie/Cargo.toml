@@ -23,6 +23,4 @@ hex-literal = "0.4"
 proptest-arbitrary-interop.workspace = true
 
 [features]
-scroll = [
-    "reth-trie/scroll"
-]
+scroll = ["reth-trie/scroll"]

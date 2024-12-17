@@ -300,6 +300,7 @@ fn insert_storage(tx: &impl DbTxMut, hashed_address: B256, storage: &BTreeMap<B2
         .unwrap();
     }
 }
+
 #[test]
 fn arbitrary_storage_root() {
     proptest!(ProptestConfig::with_cases(10), |(item in arb::<(Address, std::collections::BTreeMap<B256, U256>)>())| {

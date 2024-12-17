@@ -2,7 +2,7 @@
 
 use crate::{ForkError, ScrollEvmConfig};
 use alloy_consensus::{Header, Transaction};
-use alloy_eips::{eip2718::Encodable2718, eip7685::Requests};
+use alloy_eips::eip7685::Requests;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_evm::{
@@ -18,12 +18,12 @@ use reth_primitives::{
 };
 use reth_revm::primitives::{CfgEnvWithHandlerCfg, U256};
 use reth_scroll_chainspec::{ChainSpecProvider, ScrollChainSpec};
-use reth_scroll_consensus::apply_curie_hard_fork;
+use reth_scroll_consensus::{apply_curie_hard_fork, L1_GAS_PRICE_ORACLE_ADDRESS};
 use reth_scroll_execution::FinalizeExecution;
 use reth_scroll_forks::{ScrollHardfork, ScrollHardforks};
 use revm::{
     db::BundleState,
-    primitives::{bytes::BytesMut, BlockEnv, EnvWithHandlerCfg, ResultAndState},
+    primitives::{BlockEnv, EnvWithHandlerCfg, ExecutionResult, ResultAndState},
     Database, DatabaseCommit, State,
 };
 use std::{
@@ -78,6 +78,15 @@ where
         block: &BlockWithSenders,
         _total_difficulty: U256,
     ) -> Result<(), Self::Error> {
+        // set state clear flag if the block is after the Spurious Dragon hardfork.
+        let state_clear_flag =
+            (*self.evm_config.chain_spec()).is_spurious_dragon_active_at_block(block.header.number);
+        self.state.set_state_clear_flag(state_clear_flag);
+
+        // load the l1 gas oracle contract in cache
+        let _ =
+            self.state.load_cache_account(L1_GAS_PRICE_ORACLE_ADDRESS).map_err(|err| err.into())?;
+
         if self
             .evm_config
             .chain_spec()
@@ -149,14 +158,7 @@ where
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
             if transaction.is_l1_message() {
                 evm.context.evm.env.cfg.disable_base_fee = true; // disable base fee for l1 msg
-            } else {
-                // RLP encode the transaction following eip 2718
-                let mut buf = BytesMut::with_capacity(transaction.encode_2718_len());
-                transaction.encode_2718(&mut buf);
-                let transaction_rlp_bytes = buf.freeze();
-                evm.context.evm.env.tx.scroll.rlp_bytes = Some(transaction_rlp_bytes.into());
             }
-            evm.context.evm.env.tx.scroll.is_l1_msg = transaction.is_l1_message();
 
             // execute the transaction and commit the result to the database
             let ResultAndState { result, state } =
@@ -167,6 +169,11 @@ where
             evm.db_mut().commit(state);
 
             let l1_fee = if transaction.is_l1_message() {
+                // l1 messages do not get any gas refunded
+                if let ExecutionResult::Success { gas_refunded, .. } = result {
+                    cumulative_gas_used += gas_refunded
+                }
+
                 U256::ZERO
             } else {
                 // compute l1 fee for all non-l1 transaction

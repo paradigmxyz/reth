@@ -30,8 +30,8 @@ pub fn hash(element_1: Fr, element_2: Fr) -> Fr {
 }
 
 /// Poseidon code hash
-pub fn hash_code(code: &[u8]) -> B256 {
-    poseidon_bn254::hash_code(code).into()
+pub fn hash_code<T: AsRef<[u8]>>(code: T) -> B256 {
+    poseidon_bn254::hash_code(code.as_ref()).into()
 }
 
 /// Split and transform input be bytes into two field elements and hash using poseidon.

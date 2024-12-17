@@ -12,7 +12,10 @@ pub trait FillTxEnv {
 
 impl FillTxEnv for TransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
-        #[cfg(all(feature = "optimism", not(feature = "scroll")))]
+        #[cfg(any(
+            all(feature = "optimism", not(feature = "scroll")),
+            all(feature = "scroll", not(feature = "optimism"))
+        ))]
         let envelope = alloy_eips::eip2718::Encodable2718::encoded_2718(self);
 
         tx_env.caller = sender;
@@ -122,8 +125,8 @@ impl FillTxEnv for TransactionSigned {
                 tx_env.nonce = None;
                 tx_env.authorization_list = None;
 
-                // TODO (scroll): fill in the Scroll fields when revm fork is introduced in Reth.
-                // <https://github.com/scroll-tech/revm/blob/scroll-evm-executor/v49/crates/primitives/src/env.rs#L608-L611>
+                tx_env.scroll.is_l1_msg = true;
+                tx_env.scroll.rlp_bytes = None;
             }
         }
 
@@ -135,6 +138,12 @@ impl FillTxEnv for TransactionSigned {
                 is_system_transaction: Some(false),
                 enveloped_tx: Some(envelope.into()),
             }
+        }
+
+        #[cfg(all(feature = "scroll", not(feature = "optimism")))]
+        if !self.is_l1_message() {
+            tx_env.scroll.is_l1_msg = false;
+            tx_env.scroll.rlp_bytes = Some(envelope.into());
         }
     }
 }
