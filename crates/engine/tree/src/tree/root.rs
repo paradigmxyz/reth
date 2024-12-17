@@ -1,6 +1,6 @@
 //! State root task related functionality.
 
-use alloy_primitives::map::HashSet;
+use alloy_primitives::{map::HashSet, Address};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::ProviderError;
 use reth_evm::system_calls::OnStateHook;
@@ -84,6 +84,8 @@ pub struct StateRootConfig<Factory> {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum StateRootMessage<BPF: BlindedProviderFactory> {
+    /// Prefetch proof targets
+    PrefetchProofs(HashSet<Address>),
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
@@ -323,6 +325,31 @@ where
         }
     }
 
+    /// Handles request for proof prefetch.
+    fn prefetch_proof(
+        scope: &rayon::Scope<'env>,
+        view: ConsistentDbView<Factory>,
+        input: Arc<TrieInput>,
+        targets: HashSet<Address>,
+        fetched_proof_targets: &mut MultiProofTargets,
+        proof_sequence_number: u64,
+        state_root_message_sender: Sender<StateRootMessage<BPF>>,
+    ) {
+        let proof_targets =
+            targets.into_iter().map(|address| (keccak256(address), Default::default())).collect();
+        extend_multi_proof_targets_ref(fetched_proof_targets, &proof_targets);
+
+        Self::spawn_multiproof(
+            scope,
+            view,
+            input,
+            Default::default(),
+            proof_targets,
+            proof_sequence_number,
+            state_root_message_sender,
+        );
+    }
+
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
@@ -340,6 +367,26 @@ where
         let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
         extend_multi_proof_targets_ref(fetched_proof_targets, &proof_targets);
 
+        Self::spawn_multiproof(
+            scope,
+            view,
+            input,
+            hashed_state_update,
+            proof_targets,
+            proof_sequence_number,
+            state_root_message_sender,
+        );
+    }
+
+    fn spawn_multiproof(
+        scope: &rayon::Scope<'env>,
+        view: ConsistentDbView<Factory>,
+        input: Arc<TrieInput>,
+        hashed_state_update: HashedPostState,
+        proof_targets: MultiProofTargets,
+        proof_sequence_number: u64,
+        state_root_message_sender: Sender<StateRootMessage<BPF>>,
+    ) {
         // Dispatch proof gathering for this state update
         scope.spawn(move |_| {
             let provider = match view.provider_ro() {
@@ -464,6 +511,13 @@ where
         loop {
             match self.rx.recv() {
                 Ok(message) => match message {
+                    StateRootMessage::PrefetchProofs(targets) => {
+                        debug!(
+                            target: "engine::root",
+                            len = targets.len(),
+                            "Prefetching proofs"
+                        );
+                    }
                     StateRootMessage::StateUpdate(update) => {
                         if updates_received == 0 {
                             first_update_time = Some(Instant::now());
