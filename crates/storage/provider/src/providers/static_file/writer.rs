@@ -68,7 +68,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     }
 
     pub(crate) fn commit(&self) -> ProviderResult<()> {
-        for writer_lock in [&self.headers, &self.transactions, &self.receipts] {
+        for writer_lock in [&self.headers, &self.block_meta, &self.transactions, &self.receipts] {
             let mut writer = writer_lock.write();
             if let Some(writer) = writer.as_mut() {
                 writer.commit()?;
@@ -889,6 +889,10 @@ fn create_jar(
     // Transaction and Receipt already have the compression scheme used natively in its encoding.
     // (zstd-dictionary)
     if segment.is_headers() {
+        jar = jar.with_lz4();
+    }
+
+    if segment.is_block_meta() {
         jar = jar.with_lz4();
     }
 

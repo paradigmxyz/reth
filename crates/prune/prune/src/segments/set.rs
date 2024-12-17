@@ -73,7 +73,10 @@ where
             // Static file transactions
             .segment(StaticFileTransactions::new(static_file_provider.clone()))
             // Static file receipts
-            .segment(StaticFileReceipts::new(static_file_provider))
+            .segment(StaticFileReceipts::new(static_file_provider.clone()))
+            // TODO: enable tbd
+            //  Static file block meta
+            // .segment(StaticFileBlockMeta::new(static_file_provider))
             // Account history
             .segment_opt(account_history.map(AccountHistory::new))
             // Storage history
