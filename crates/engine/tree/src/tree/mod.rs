@@ -476,8 +476,8 @@ pub enum TreeAction {
 /// from a scoped thread.
 struct StateHookContext<P> {
     provider_ro: P,
-    nodes_sorted: TrieUpdatesSorted,
-    state_sorted: HashedPostStateSorted,
+    nodes_sorted: Arc<TrieUpdatesSorted>,
+    state_sorted: Arc<HashedPostStateSorted>,
     prefix_sets: Arc<TriePrefixSetsMut>,
 }
 
@@ -2248,19 +2248,16 @@ where
             let (state_root_handle, state_hook) = if persistence_not_in_progress {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
-                let input = Arc::new(
+                let state_root_config = StateRootConfig::new_from_input(
+                    consistent_view.clone(),
                     self.compute_trie_input(consistent_view.clone(), block.header().parent_hash())
-                        .unwrap(),
+                        .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?,
                 );
-                let state_root_config = StateRootConfig {
-                    consistent_view: consistent_view.clone(),
-                    input: input.clone(),
-                };
 
                 let provider_ro = consistent_view.provider_ro()?;
-                let nodes_sorted = input.nodes.clone().into_sorted();
-                let state_sorted = input.state.clone().into_sorted();
-                let prefix_sets = Arc::new(input.prefix_sets.clone());
+                let nodes_sorted = state_root_config.nodes_sorted.clone();
+                let state_sorted = state_root_config.state_sorted.clone();
+                let prefix_sets = state_root_config.prefix_sets.clone();
 
                 // context will hold the values that need to be kept alive
                 let context =
