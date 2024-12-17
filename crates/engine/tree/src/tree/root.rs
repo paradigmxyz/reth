@@ -345,6 +345,7 @@ where
                 config.state_sorted.clone(),
                 config.prefix_sets.clone(),
             )
+            .with_branch_node_hash_masks(true)
             .multiproof(proof_targets);
 
             match result {
