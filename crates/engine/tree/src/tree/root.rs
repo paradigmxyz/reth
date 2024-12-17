@@ -2,7 +2,7 @@
 
 use alloy_primitives::{map::HashSet, Address};
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use reth_errors::ProviderError;
+use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::system_calls::OnStateHook;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -388,39 +388,20 @@ where
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
     ) {
         // Dispatch proof gathering for this state update
-        scope.spawn(move |_| {
-            let provider = match view.provider_ro() {
-                Ok(provider) => provider,
-                Err(error) => {
-                    error!(target: "engine::root", ?error, "Could not get provider");
-                    let _ = state_root_message_sender
-                        .send(StateRootMessage::ProofCalculationError(error));
-                    return;
-                }
-            };
-
-            // TODO: replace with parallel proof
-            let result = Proof::overlay_multiproof(
-                provider.tx_ref(),
-                // TODO(alexey): this clone can be expensive, we should avoid it
-                input.as_ref().clone(),
-                proof_targets.clone(),
-            );
-            match result {
-                Ok(proof) => {
-                    let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
-                        Box::new(ProofCalculated {
-                            state_update: hashed_state_update,
-                            targets: proof_targets,
-                            proof,
-                            sequence_number: proof_sequence_number,
-                        }),
-                    ));
-                }
-                Err(error) => {
-                    let _ = state_root_message_sender
-                        .send(StateRootMessage::ProofCalculationError(error.into()));
-                }
+        scope.spawn(move |_| match calculate_multiproof(view, input, proof_targets.clone()) {
+            Ok(proof) => {
+                let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
+                    Box::new(ProofCalculated {
+                        state_update: hashed_state_update,
+                        targets: proof_targets,
+                        proof,
+                        sequence_number: proof_sequence_number,
+                    }),
+                ));
+            }
+            Err(error) => {
+                let _ = state_root_message_sender
+                    .send(StateRootMessage::ProofCalculationError(error.into()));
             }
         });
     }
@@ -721,6 +702,26 @@ fn get_proof_targets(
     }
 
     targets
+}
+
+/// Calculate multiproof for the targets.
+#[inline]
+fn calculate_multiproof<Factory>(
+    view: ConsistentDbView<Factory>,
+    input: Arc<TrieInput>,
+    proof_targets: MultiProofTargets,
+) -> ProviderResult<MultiProof>
+where
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
+{
+    // TODO: replace with parallel proof
+    let provider_ro = view.provider_ro()?;
+    Ok(Proof::overlay_multiproof(
+        provider_ro.tx_ref(),
+        // TODO(alexey): this clone can be expensive, we should avoid it
+        input.as_ref().clone(),
+        proof_targets,
+    )?)
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
