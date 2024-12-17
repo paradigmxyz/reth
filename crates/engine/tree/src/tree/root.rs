@@ -351,7 +351,7 @@ where
     /// - Withdrawal recipients
     ///
     /// This method does not prefetch the proofs on its own, but only sends the message to the
-    /// [`StateRootTask`] that will be processed by the loop in [`StateRootTask::run`] method.
+    /// [`StateRootTask`] that will be processed by the main loop.
     pub fn prefetech_account_proofs<
         T: SignedTransaction + alloy_consensus::Transaction,
         B: BlockBody<Transaction = T>,
@@ -368,7 +368,7 @@ where
             body.transactions()
                 .iter()
                 .flat_map(|tx| [tx.recover_signer(), tx.kind().to().copied()])
-                .filter_map(|address| address),
+                .flatten(),
         );
         if let Some(withdrawals) = body.withdrawals() {
             accounts.extend(withdrawals.iter().map(|withdrawal| withdrawal.address));
