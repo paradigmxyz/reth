@@ -2255,6 +2255,7 @@ where
         //
         //     let state_root_task = StateRootTask::new(state_root_config,
         // blinded_provider_factory);     let state_hook = state_root_task.state_hook();
+        //     state_root_task.prefetch_account_proofs(&sealed_block.body);
         //     (Some(state_root_task.spawn(scope)), Box::new(state_hook) as Box<dyn OnStateHook>)
         // } else {
         //     (None, Box::new(|_state: &EvmState| {}) as Box<dyn OnStateHook>)
