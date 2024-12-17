@@ -24,8 +24,8 @@ use reth_trie::{
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::sync::Arc;
-use tracing::{debug, error};
+use std::{sync::Arc, time::Instant};
+use tracing::{debug, error, trace};
 
 #[cfg(feature = "metrics")]
 use crate::metrics::ParallelStateRootMetrics;
@@ -112,27 +112,58 @@ where
             prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
             prefix_sets.storage_prefix_sets.clone(),
         );
+        let storage_root_targets_len = storage_root_targets.len();
 
-        // Pre-calculate storage roots for accounts which were changed.
-        tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
-        debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-generating storage proofs");
+        let num_threads =
+            std::thread::available_parallelism().map_or(1, |num| (num.get() / 2).max(1));
+
+        // create a local thread pool with a fixed number of workers
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("proof-worker-{}", i))
+            .build()
+            .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
+
+        debug!(
+            target: "trie::parallel_state_root",
+            total_targets = storage_root_targets_len,
+            num_threads,
+            "Starting parallel proof generation"
+        );
+
         let mut storage_proofs =
             B256HashMap::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
+
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
             let view = self.view.clone();
-            let target_slots: HashSet<B256> =
-                targets.get(&hashed_address).cloned().unwrap_or_default();
-
+            let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
             let trie_nodes_sorted = self.nodes_sorted.clone();
             let hashed_state_sorted = self.state_sorted.clone();
+            let collect_masks = self.collect_branch_node_hash_masks;
 
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
-            rayon::spawn_fifo(move || {
+            pool.spawn_fifo(move || {
+                debug!(
+                    target: "trie::parallel",
+                    ?hashed_address,
+                    "Starting proof calculation"
+                );
+
+                let task_start = Instant::now();
                 let result = (|| -> Result<_, ParallelStateRootError> {
+                    let provider_start = Instant::now();
                     let provider_ro = view.provider_ro()?;
+                    trace!(
+                        target: "trie::parallel",
+                        ?hashed_address,
+                        provider_time_ms = provider_start.elapsed().as_millis(),
+                        "Got provider"
+                    );
+
+                    let cursor_start = Instant::now();
                     let trie_cursor_factory = InMemoryTrieCursorFactory::new(
                         DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
                         &trie_nodes_sorted,
@@ -141,23 +172,43 @@ where
                         DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
                         &hashed_state_sorted,
                     );
+                    trace!(
+                        target: "trie::parallel",
+                        ?hashed_address,
+                        cursor_time_ms = cursor_start.elapsed().as_millis(),
+                        "Created cursors"
+                    );
 
-                    StorageProof::new_hashed(
+                    let proof_start = Instant::now();
+                    let proof_result = StorageProof::new_hashed(
                         trie_cursor_factory,
                         hashed_cursor_factory,
                         hashed_address,
                     )
                     .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().cloned()))
-                    .with_branch_node_hash_masks(self.collect_branch_node_hash_masks)
+                    .with_branch_node_hash_masks(collect_masks)
                     .storage_multiproof(target_slots)
-                    .map_err(|e| {
-                        ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                            DatabaseError::Other(e.to_string()),
-                        ))
-                    })
+                    .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+
+                    trace!(
+                        target: "trie::parallel",
+                        ?hashed_address,
+                        proof_time_ms = proof_start.elapsed().as_millis(),
+                        "Completed proof calculation"
+                    );
+
+                    proof_result
                 })();
-                if let Err(err) = tx.send(result) {
-                    error!(target: "trie::parallel", ?hashed_address, err_content = ?err.0,  "Failed to send proof result");
+
+                let task_time = task_start.elapsed();
+                if let Err(e) = tx.send(result) {
+                    error!(
+                        target: "trie::parallel",
+                        ?hashed_address,
+                        error = ?e,
+                        task_time_ms = task_time.as_millis(),
+                        "Failed to send proof result"
+                    );
                 }
             });
             storage_proofs.insert(hashed_address, rx);
