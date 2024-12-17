@@ -40,6 +40,8 @@ use tokio::sync::mpsc::Receiver;
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;
 
+/// Helper type alias to access [`PoolTransaction`] for a given [`TransactionPool`].
+pub type PoolTx<P> = <P as TransactionPool>::Transaction;
 /// Helper type alias to access [`PoolTransaction::Consensus`] for a given [`TransactionPool`].
 pub type PoolConsensusTx<P> = <<P as TransactionPool>::Transaction as PoolTransaction>::Consensus;
 
