@@ -1574,14 +1574,21 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Withdrawals
     ) -> ProviderResult<Option<Withdrawals>> {
         if self.chain_spec.is_shanghai_active_at_timestamp(timestamp) {
             if let Some(number) = self.convert_hash_or_number(id)? {
-                // If we are past shanghai, then all blocks should have a withdrawal list, even if
-                // empty
-                let withdrawals = self
-                    .tx
-                    .get::<tables::BlockWithdrawals>(number)
-                    .map(|w| w.map(|w| w.withdrawals))?
-                    .unwrap_or_default();
-                return Ok(Some(withdrawals))
+                return self.static_file_provider.get_with_static_file_or_database(
+                    StaticFileSegment::BlockMeta,
+                    number,
+                    |static_file| static_file.withdrawals_by_block(number.into(), timestamp),
+                    || {
+                        // If we are past shanghai, then all blocks should have a withdrawal list,
+                        // even if empty
+                        let withdrawals = self
+                            .tx
+                            .get::<tables::BlockWithdrawals>(number)
+                            .map(|w| w.map(|w| w.withdrawals))?
+                            .unwrap_or_default();
+                        Ok(Some(withdrawals))
+                    },
+                )
             }
         }
         Ok(None)
@@ -1614,7 +1621,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockBodyIndicesProvider
     for DatabaseProvider<TX, N>
 {
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::BlockMeta,
+            num,
+            |static_file| static_file.block_body_indices(num),
+            || Ok(self.tx.get::<tables::BlockBodyIndices>(num)?),
+        )
     }
 
     fn block_body_indices_range(

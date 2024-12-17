@@ -30,10 +30,10 @@ pub struct HighestStaticFiles {
     /// Highest static file block of receipts, inclusive.
     /// If [`None`], no static file is available.
     pub receipts: Option<BlockNumber>,
-    /// Highest static file block of transactions, inclusive.
+    /// Highest static file block of block meta, inclusive.
     /// If [`None`], no static file is available.
     pub transactions: Option<BlockNumber>,
-    /// Highest static file block of transactions, inclusive.
+    /// Highest static file block of block meta, inclusive.
     /// If [`None`], no static file is available.
     pub block_meta: Option<BlockNumber>,
 }

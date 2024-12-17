@@ -9,6 +9,9 @@ pub use headers::Headers;
 mod receipts;
 pub use receipts::Receipts;
 
+mod block_meta;
+pub use block_meta::BlockMeta;
+
 use alloy_primitives::BlockNumber;
 use reth_provider::StaticFileProviderFactory;
 use reth_static_file_types::StaticFileSegment;

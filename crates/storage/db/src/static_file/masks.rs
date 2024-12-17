@@ -1,6 +1,9 @@
 use crate::{
     add_static_file_mask,
-    static_file::mask::{ColumnSelectorOne, ColumnSelectorTwo},
+    static_file::{
+        mask::{ColumnSelectorOne, ColumnSelectorTwo},
+        ColumnSelectorThree,
+    },
     BlockBodyIndices, BlockWithdrawals, HeaderTerminalDifficulties,
 };
 use alloy_primitives::BlockHash;
@@ -55,4 +58,8 @@ add_static_file_mask! {
 add_static_file_mask! {
     #[doc = "Mask for a `StoredBlockWithdrawals` from BlockMeta static file segment"]
     WithdrawalsMask, <BlockWithdrawals as Table>::Value, 0b100
+}
+add_static_file_mask! {
+    #[doc = "Mask for selecting all columns from BlockMeta static file segment"]
+    AllBlockMetaMask<H>, <BlockBodyIndices as Table>::Value, StoredBlockOmmers::<H>, <BlockWithdrawals as Table>::Value, 0b111
 }

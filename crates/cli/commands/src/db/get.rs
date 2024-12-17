@@ -3,9 +3,11 @@ use alloy_primitives::{hex, BlockHash};
 use clap::Parser;
 use reth_db::{
     static_file::{
-        ColumnSelectorOne, ColumnSelectorTwo, HeaderWithHashMask, ReceiptMask, TransactionMask,
+        AllBlockMetaMask, ColumnSelectorOne, ColumnSelectorThree, ColumnSelectorTwo,
+        HeaderWithHashMask, ReceiptMask, TransactionMask,
     },
-    tables, RawKey, RawTable, Receipts, TableViewer, Transactions,
+    tables, BlockBodyIndices, BlockOmmers, BlockWithdrawals, RawKey, RawTable, Receipts,
+    TableViewer, Transactions,
 };
 use reth_db_api::table::{Decompress, DupSort, Table};
 use reth_db_common::DbTool;
@@ -72,7 +74,10 @@ impl Command {
                     StaticFileSegment::Receipts => {
                         (table_key::<tables::Receipts>(&key)?, <ReceiptMask<ReceiptTy<N>>>::MASK)
                     }
-                    StaticFileSegment::BlockMeta => todo!(),
+                    StaticFileSegment::BlockMeta => (
+                        table_key::<tables::BlockBodyIndices>(&key)?,
+                        <AllBlockMetaMask<Header>>::MASK,
+                    ),
                 };
 
                 let content = tool.provider_factory.static_file_provider().find_static_file(
@@ -115,7 +120,22 @@ impl Command {
                                     println!("{}", serde_json::to_string_pretty(&receipt)?);
                                 }
                                 StaticFileSegment::BlockMeta => {
-                                    todo!()
+                                    let indices = <<BlockBodyIndices as Table>::Value>::decompress(
+                                        content[0].as_slice(),
+                                    )?;
+                                    let ommers = <<BlockOmmers as Table>::Value>::decompress(
+                                        content[1].as_slice(),
+                                    )?;
+                                    let withdrawals =
+                                        <<BlockWithdrawals as Table>::Value>::decompress(
+                                            content[2].as_slice(),
+                                        )?;
+                                    println!(
+                                        "BlockIndices\n{}\nOmmers\n{}\nWithdrawals\n{}",
+                                        serde_json::to_string_pretty(&indices)?,
+                                        serde_json::to_string_pretty(&ommers)?,
+                                        serde_json::to_string_pretty(&withdrawals)?
+                                    );
                                 }
                             }
                         }

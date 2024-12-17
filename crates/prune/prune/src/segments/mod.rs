@@ -9,7 +9,7 @@ use reth_provider::{errors::provider::ProviderResult, BlockReader, PruneCheckpoi
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 pub use set::SegmentSet;
 pub use static_file::{
-    Headers as StaticFileHeaders, Receipts as StaticFileReceipts,
+    BlockMeta as StaticFileBlockMeta, Headers as StaticFileHeaders, Receipts as StaticFileReceipts,
     Transactions as StaticFileTransactions,
 };
 use std::{fmt::Debug, ops::RangeInclusive};

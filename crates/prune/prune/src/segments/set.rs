@@ -1,3 +1,4 @@
+use super::{StaticFileBlockMeta, StaticFileHeaders, StaticFileReceipts, StaticFileTransactions};
 use crate::segments::{
     AccountHistory, ReceiptsByLogs, Segment, SenderRecovery, StorageHistory, TransactionLookup,
     UserReceipts,
@@ -10,8 +11,6 @@ use reth_provider::{
     StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
-
-use super::{StaticFileHeaders, StaticFileReceipts, StaticFileTransactions};
 
 /// Collection of [`Segment`]. Thread-safe, allocated on the heap.
 #[derive(Debug)]
@@ -73,7 +72,9 @@ where
             // Static file transactions
             .segment(StaticFileTransactions::new(static_file_provider.clone()))
             // Static file receipts
-            .segment(StaticFileReceipts::new(static_file_provider))
+            .segment(StaticFileReceipts::new(static_file_provider.clone()))
+            //  Static file block meta
+            .segment(StaticFileBlockMeta::new(static_file_provider))
             // Account history
             .segment_opt(account_history.map(AccountHistory::new))
             // Storage history
