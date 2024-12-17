@@ -288,7 +288,7 @@ where
         + 'static,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
-        self.call_bundle(request).await.map_err(Into::into)
+        Self::call_bundle(self, request).await.map_err(Into::into)
     }
 }
 
