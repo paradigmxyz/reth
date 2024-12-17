@@ -16,7 +16,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
 use reth_tasks::pool::BlockingTaskGuard;
-use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{PoolPooledTx, PoolTransaction, PoolTx, TransactionPool};
 use revm::{
     db::{CacheDB, DatabaseCommit, DatabaseRef},
     primitives::{ResultAndState, TxEnv},
@@ -45,12 +45,7 @@ impl<Eth> EthBundle<Eth> {
 impl<Eth> EthBundle<Eth>
 where
     Eth: EthTransactions<
-            Pool: TransactionPool<
-                Transaction: PoolTransaction<
-                    Consensus: From<PooledTransaction>,
-                    Pooled = PooledTransaction,
-                >,
-            >,
+            Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
         > + LoadPendingBlock
         + Call
         + 'static,
@@ -199,7 +194,9 @@ where
                         })?;
                     }
 
-                    let tx: PoolConsensusTx<Eth::Pool> = tx.into();
+                    let tx: PoolPooledTx<Eth::Pool> = tx;
+                    let tx = PoolTx::<Eth::Pool>::pooled_into_consensus(tx);
+                    // let tx = PoolConsensusTx::<Eth::Pool>::Trafrom(tx);
 
                     hasher.update(*tx.tx_hash());
                     let gas_price = tx.effective_gas_price(basefee);
@@ -288,7 +285,7 @@ where
         + 'static,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
-        self.call_bundle(request).await.map_err(Into::into)
+        Self::call_bundle(self, request).await.map_err(Into::into)
     }
 }
 
