@@ -326,7 +326,7 @@ where
     }
 
     /// Handles request for proof prefetch.
-    fn prefetch_proof(
+    fn on_prefetch_proof(
         scope: &rayon::Scope<'env>,
         view: ConsistentDbView<Factory>,
         input: Arc<TrieInput>,
@@ -516,6 +516,15 @@ where
                             target: "engine::root",
                             len = targets.len(),
                             "Prefetching proofs"
+                        );
+                        Self::on_prefetch_proof(
+                            scope,
+                            self.config.consistent_view.clone(),
+                            self.config.input.clone(),
+                            targets,
+                            &mut self.fetched_proof_targets,
+                            self.proof_sequencer.next_sequence(),
+                            self.tx.clone(),
                         );
                     }
                     StateRootMessage::StateUpdate(update) => {
