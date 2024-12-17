@@ -257,7 +257,8 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_primitives::SealedBlock;
     use reth_provider::{
-        providers::StaticFileWriter, DatabaseProviderFactory, StaticFileProviderFactory,
+        providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
+        StaticFileProviderFactory,
     };
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{

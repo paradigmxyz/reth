@@ -4,10 +4,14 @@ use crate::ConfigureEvm;
 use alloy_rpc_types_engine::JwtSecret;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_consensus::FullConsensus;
+use reth_db_api::{
+    database_metrics::{DatabaseMetadata, DatabaseMetrics},
+    Database,
+};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
-use reth_node_types::{HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine, TxTy};
+use reth_node_types::{HeaderTy, NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine, TxTy};
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
@@ -20,26 +24,25 @@ use std::{future::Future, marker::PhantomData};
 /// Its types are configured by node internally and are not intended to be user configurable.
 pub trait FullNodeTypes: Send + Sync + Unpin + 'static {
     /// Node's types with the database.
-    type Types: NodeTypesWithDB + NodeTypesWithEngine;
+    type Types: NodeTypesWithEngine;
+    /// Underlying database type used by the node to store and retrieve data.
+    type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
     /// The provider type used to interact with the node.
-    type Provider: FullProvider<Self::Types>;
+    type Provider: FullProvider<NodeTypesWithDBAdapter<Self::Types, Self::DB>>;
 }
 
 /// An adapter type that adds the builtin provider type to the user configured node types.
 #[derive(Debug)]
-pub struct FullNodeTypesAdapter<Types, Provider> {
-    /// An instance of the user configured node types.
-    pub types: PhantomData<Types>,
-    /// The provider type used by the node.
-    pub provider: PhantomData<Provider>,
-}
+pub struct FullNodeTypesAdapter<Types, DB, Provider>(PhantomData<(Types, DB, Provider)>);
 
-impl<Types, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, Provider>
+impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
-    Types: NodeTypesWithDB + NodeTypesWithEngine,
-    Provider: FullProvider<Types>,
+    Types: NodeTypesWithEngine,
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    Provider: FullProvider<NodeTypesWithDBAdapter<Types, DB>>,
 {
     type Types = Types;
+    type DB = DB;
     type Provider = Provider;
 }
 

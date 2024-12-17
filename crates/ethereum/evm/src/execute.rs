@@ -6,12 +6,13 @@ use crate::{
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
-use alloy_eips::eip7685::Requests;
+use alloy_eips::{eip6110, eip7685::Requests};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_consensus::ConsensusError;
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
+    env::EvmEnv,
     execute::{
         balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
         BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
@@ -127,8 +128,9 @@ where
         header: &alloy_consensus::Header,
         total_difficulty: U256,
     ) -> EnvWithHandlerCfg {
-        let (cfg, block_env) = self.evm_config.cfg_and_block_env(header, total_difficulty);
-        EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } =
+            self.evm_config.cfg_and_block_env(header, total_difficulty);
+        EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, Default::default())
     }
 }
 
@@ -246,7 +248,7 @@ where
             let mut requests = Requests::default();
 
             if !deposit_requests.is_empty() {
-                requests.push_request(core::iter::once(0).chain(deposit_requests).collect());
+                requests.push_request_with_type(eip6110::DEPOSIT_REQUEST_TYPE, deposit_requests);
             }
 
             requests.extend(self.system_caller.apply_post_execution_changes(&mut evm)?);

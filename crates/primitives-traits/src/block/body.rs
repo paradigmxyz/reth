@@ -9,9 +9,9 @@ use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Bytes, B256};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
-pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> {}
+pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
 
-impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> {}
+impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
 
 /// Abstraction for block's body.
 pub trait BlockBody:
@@ -27,7 +27,6 @@ pub trait BlockBody:
     + alloy_rlp::Decodable
     + InMemorySize
     + MaybeSerde
-    + MaybeSerdeBincodeCompat
     + 'static
 {
     /// Ordered list of signed transactions as committed in block.

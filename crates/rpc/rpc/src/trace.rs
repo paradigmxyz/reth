@@ -18,7 +18,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc::{
     base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
 };
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;
@@ -117,11 +117,12 @@ where
         let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
             .map_transaction(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
-        let (cfg, block, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
+        let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
         let env = EnvWithHandlerCfg::new_with_cfg_env(
-            cfg,
-            block,
+            cfg_env_with_handler_cfg,
+            block_env,
             self.eth_api().evm_config().tx_env(tx.as_signed(), tx.signer()),
         );
 
@@ -147,7 +148,8 @@ where
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
         let at = block_id.unwrap_or(BlockId::pending());
-        let (cfg, block_env, at) = self.eth_api().evm_env_at(at).await?;
+        let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
         let this = self.clone();
         // execute all transactions on top of each other and record the traces
@@ -160,7 +162,7 @@ where
 
                 while let Some((call, trace_types)) = calls.next() {
                     let env = this.eth_api().prepare_call_env(
-                        cfg.clone(),
+                        cfg_env_with_handler_cfg.clone(),
                         block_env.clone(),
                         call,
                         &mut db,

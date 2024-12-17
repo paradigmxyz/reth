@@ -1,3 +1,5 @@
+use core::fmt;
+
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, BlockchainTreePendingStateProvider, CanonStateNotifications,
@@ -24,7 +26,7 @@ use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubs
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::table::Value;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_node_types::{
     BlockTy, FullNodePrimitives, HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
     ReceiptTy, TxTy,
@@ -35,9 +37,8 @@ use reth_primitives::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::CanonChainTracker;
+use reth_storage_api::{BlockBodyIndicesProvider, CanonChainTracker, OmmersProvider};
 use reth_storage_errors::provider::ProviderResult;
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::BTreeMap,
     ops::{RangeBounds, RangeInclusive},
@@ -124,7 +125,6 @@ impl<T> TreeNodeTypes for T where T: ProviderNodeTypes + NodeTypesForTree {}
 /// This type serves as the main entry point for interacting with the blockchain and provides data
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
-#[allow(missing_debug_implementations)]
 pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// Provider type used to access the database.
     database: ProviderFactory<N>,
@@ -401,17 +401,6 @@ impl<N: TreeNodeTypes> BlockReader for BlockchainProvider<N> {
         Ok(self.tree.pending_block_and_receipts())
     }
 
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
-        self.database.ommers(id)
-    }
-
-    fn block_body_indices(
-        &self,
-        number: BlockNumber,
-    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.database.block_body_indices(number)
-    }
-
     /// Returns the block with senders with matching number or hash from database.
     ///
     /// **NOTE: If [`TransactionVariant::NoHash`] is provided then the transactions have invalid
@@ -583,6 +572,21 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider<N> {
     }
 }
 
+impl<N: TreeNodeTypes> OmmersProvider for BlockchainProvider<N> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+        self.database.ommers(id)
+    }
+}
+
+impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider<N> {
+    fn block_body_indices(
+        &self,
+        number: BlockNumber,
+    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        self.database.block_body_indices(number)
+    }
+}
+
 impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.database.provider()?.get_stage_checkpoint(id)
@@ -602,7 +606,7 @@ impl<N: TreeNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
         &self,
         header: &Header,
         evm_config: EvmConfig,
-    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
+    ) -> ProviderResult<EvmEnv>
     where
         EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
@@ -962,5 +966,11 @@ impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider<N> {
     /// Get basic account information.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         self.database.provider()?.basic_account(address)
+    }
+}
+
+impl<N: NodeTypesWithDB> fmt::Debug for BlockchainProvider<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BlockchainProvider").finish_non_exhaustive()
     }
 }

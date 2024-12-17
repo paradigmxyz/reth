@@ -540,7 +540,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.in_memory_state.head_state().into_iter().flat_map(|head| head.iter())
     }
 
-    /// Returns a `TransactionSigned` for the given `TxHash` if found.
+    /// Returns [`SignedTransaction`] type for the given `TxHash` if found.
     pub fn transaction_by_hash(&self, hash: TxHash) -> Option<N::SignedTx>
     where
         N::SignedTx: Encodable2718,
@@ -560,8 +560,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         None
     }
 
-    /// Returns a tuple with `TransactionSigned` and `TransactionMeta` for the
-    /// given `TxHash` if found.
+    /// Returns a tuple with [`SignedTransaction`] type and [`TransactionMeta`] for the
+    /// given [`TxHash`] if found.
     pub fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
@@ -640,7 +640,7 @@ impl<N: NodePrimitives> BlockState<N> {
     pub fn block_with_senders(&self) -> BlockWithSenders<N::Block> {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
-        let (header, body) = block.split();
+        let (header, body) = block.split_header_body();
         BlockWithSenders::new_unchecked(N::Block::new(header.unseal(), body), senders)
     }
 

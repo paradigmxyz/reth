@@ -49,9 +49,6 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// The genesis block specification.
     fn genesis(&self) -> &Genesis;
 
-    /// The block gas limit.
-    fn max_gas_limit(&self) -> u64;
-
     /// The bootnodes for the chain, if any.
     fn bootnodes(&self) -> Option<Vec<NodeRecord>>;
 
@@ -103,10 +100,6 @@ impl EthChainSpec for ChainSpec {
 
     fn genesis(&self) -> &Genesis {
         self.genesis()
-    }
-
-    fn max_gas_limit(&self) -> u64 {
-        self.max_gas_limit
     }
 
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {

@@ -169,19 +169,21 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
         let EthBuiltPayload { block, fees, sidecars, requests, .. } = value;
 
         Self {
-            execution_payload: block_to_payload_v3(Arc::unwrap_or_clone(block)),
-            block_value: fees,
-            // From the engine API spec:
-            //
-            // > Client software **MAY** use any heuristics to decide whether to set
-            // `shouldOverrideBuilder` flag or not. If client software does not implement any
-            // heuristic this flag **SHOULD** be set to `false`.
-            //
-            // Spec:
-            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
-            should_override_builder: false,
-            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
-            execution_requests: requests.unwrap_or_default().take(),
+            envelope_inner: ExecutionPayloadEnvelopeV3 {
+                execution_payload: block_to_payload_v3(Arc::unwrap_or_clone(block)),
+                block_value: fees,
+                // From the engine API spec:
+                //
+                // > Client software **MAY** use any heuristics to decide whether to set
+                // `shouldOverrideBuilder` flag or not. If client software does not implement any
+                // heuristic this flag **SHOULD** be set to `false`.
+                //
+                // Spec:
+                // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+                should_override_builder: false,
+                blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            },
+            execution_requests: requests.unwrap_or_default(),
         }
     }
 }

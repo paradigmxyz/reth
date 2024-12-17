@@ -15,7 +15,7 @@ use reth_execution_errors::{
     SparseStateTrieError, SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind,
     StateProofError, TrieWitnessError,
 };
-use reth_trie_common::Nibbles;
+use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
     SparseStateTrie,
@@ -171,8 +171,8 @@ where
     fn get_proof_targets(
         &self,
         state: &HashedPostState,
-    ) -> Result<B256HashMap<B256HashSet>, StateProofError> {
-        let mut proof_targets = B256HashMap::default();
+    ) -> Result<MultiProofTargets, StateProofError> {
+        let mut proof_targets = MultiProofTargets::default();
         for hashed_address in state.accounts.keys() {
             proof_targets.insert(*hashed_address, B256HashSet::default());
         }

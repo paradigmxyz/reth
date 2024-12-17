@@ -109,6 +109,7 @@ pub use events::{FullTransactionEvent, TransactionEvent};
 pub use listener::{AllTransactionsEvents, TransactionEvents};
 pub use parked::{BasefeeOrd, ParkedOrd, ParkedPool, QueuedOrd};
 pub use pending::PendingPool;
+use reth_primitives_traits::{BlockBody, BlockHeader};
 
 mod best;
 mod blob;
@@ -378,7 +379,11 @@ where
     }
 
     /// Updates the entire pool after a new block was executed.
-    pub fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
+    pub fn on_canonical_state_change<H, B>(&self, update: CanonicalStateUpdate<'_, H, B>)
+    where
+        H: BlockHeader,
+        B: BlockBody,
+    {
         trace!(target: "txpool", ?update, "updating pool on canonical state change");
 
         let block_info = update.block_info();

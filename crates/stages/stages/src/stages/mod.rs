@@ -60,8 +60,9 @@ mod tests {
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::MockNodeTypesWithDB,
-        AccountExtReader, BlockReader, DatabaseProviderFactory, ProviderFactory, ProviderResult,
-        ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
+        AccountExtReader, BlockBodyIndicesProvider, DatabaseProviderFactory, ProviderFactory,
+        ProviderResult, ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory,
+        StorageReader,
     };
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_stages_api::{

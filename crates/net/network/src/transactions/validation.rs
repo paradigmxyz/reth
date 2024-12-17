@@ -42,7 +42,7 @@ pub trait ValidateTx68 {
 
     /// Returns the reasonable minimum encoded transaction length, if any. This property is not
     /// spec'ed out but can be inferred by looking at which
-    /// [`reth_primitives::PooledTransactionsElement`] will successfully pass decoding
+    /// [`reth_primitives::PooledTransaction`] will successfully pass decoding
     /// for any given transaction type.
     fn min_encoded_tx_length(&self, ty: TxType) -> Option<usize>;
 

@@ -374,9 +374,11 @@ impl<N: NodePrimitives> Chain<N> {
 
 /// Wrapper type for `blocks` display in `Chain`
 #[derive(Debug)]
-pub struct DisplayBlocksChain<'a>(pub &'a BTreeMap<BlockNumber, SealedBlockWithSenders>);
+pub struct DisplayBlocksChain<'a, B: reth_primitives_traits::Block>(
+    pub &'a BTreeMap<BlockNumber, SealedBlockWithSenders<B>>,
+);
 
-impl fmt::Display for DisplayBlocksChain<'_> {
+impl<B: reth_primitives_traits::Block> fmt::Display for DisplayBlocksChain<'_, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut list = f.debug_list();
         let mut values = self.0.values().map(|block| block.num_hash());
@@ -537,6 +539,7 @@ pub(super) mod serde_bincode_compat {
     use reth_primitives::{
         serde_bincode_compat::SealedBlockWithSenders, EthPrimitives, NodePrimitives,
     };
+    use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, Block};
     use reth_trie_common::serde_bincode_compat::updates::TrieUpdates;
     use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
@@ -574,7 +577,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<B> Serialize for SealedBlocksWithSenders<'_, B>
     where
-        B: reth_primitives_traits::Block,
+        B: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
     {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -592,7 +595,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<'de, B> Deserialize<'de> for SealedBlocksWithSenders<'_, B>
     where
-        B: reth_primitives_traits::Block,
+        B: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
     {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where

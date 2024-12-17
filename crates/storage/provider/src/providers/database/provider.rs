@@ -47,7 +47,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
@@ -60,8 +60,8 @@ use reth_primitives_traits::{Block as _, BlockBody as _, SignedTransaction};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyReader, NodePrimitivesProvider, StateProvider, StorageChangeSetReader,
-    TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, BlockBodyReader, NodePrimitivesProvider, OmmersProvider,
+    StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
@@ -70,9 +70,8 @@ use reth_trie::{
     HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor};
-use revm::{
-    db::states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+use revm::db::states::{
+    PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
 use std::{
     cmp::Ordering,
@@ -1222,30 +1221,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
         Ok(None)
     }
 
-    /// Returns the ommers for the block with matching id from the database.
-    ///
-    /// If the block is not found, this returns `None`.
-    /// If the block exists, but doesn't contain ommers, this returns `None`.
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        if let Some(number) = self.convert_hash_or_number(id)? {
-            // If the Paris (Merge) hardfork block is known and block is after it, return empty
-            // ommers.
-            if self.chain_spec.final_paris_total_difficulty(number).is_some() {
-                return Ok(Some(Vec::new()))
-            }
-
-            let ommers =
-                self.tx.get::<tables::BlockOmmers<Self::Header>>(number)?.map(|o| o.ommers);
-            return Ok(ommers)
-        }
-
-        Ok(None)
-    }
-
-    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
-    }
-
     /// Returns the block with senders with matching number or hash from database.
     ///
     /// **NOTE: The transactions have invalid hashes, since they would need to be calculated on the
@@ -1635,6 +1610,36 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Withdrawals
     }
 }
 
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> OmmersProvider for DatabaseProvider<TX, N> {
+    /// Returns the ommers for the block with matching id from the database.
+    ///
+    /// If the block is not found, this returns `None`.
+    /// If the block exists, but doesn't contain ommers, this returns `None`.
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+        if let Some(number) = self.convert_hash_or_number(id)? {
+            // If the Paris (Merge) hardfork block is known and block is after it, return empty
+            // ommers.
+            if self.chain_spec.final_paris_total_difficulty(number).is_some() {
+                return Ok(Some(Vec::new()))
+            }
+
+            let ommers =
+                self.tx.get::<tables::BlockOmmers<Self::Header>>(number)?.map(|o| o.ommers);
+            return Ok(ommers)
+        }
+
+        Ok(None)
+    }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockBodyIndicesProvider
+    for DatabaseProvider<TX, N>
+{
+    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
+    }
+}
+
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> EvmEnvProvider<HeaderTy<N>>
     for DatabaseProvider<TX, N>
 {
@@ -1642,7 +1647,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> EvmEnvProvider<HeaderTy<N>>
         &self,
         header: &HeaderTy<N>,
         evm_config: EvmConfig,
-    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
+    ) -> ProviderResult<EvmEnv>
     where
         EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {

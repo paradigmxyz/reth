@@ -9,6 +9,7 @@ use op_alloy_consensus::DepositTransaction;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_evm::{
+    env::EvmEnv,
     execute::{
         balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
         BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
@@ -111,8 +112,9 @@ where
     ///
     /// Caution: this does not initialize the tx environment.
     fn evm_env_for_block(&self, header: &Header, total_difficulty: U256) -> EnvWithHandlerCfg {
-        let (cfg, block_env) = self.evm_config.cfg_and_block_env(header, total_difficulty);
-        EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
+        let evm_env = self.evm_config.cfg_and_block_env(header, total_difficulty);
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
+        EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, Default::default())
     }
 }
 
