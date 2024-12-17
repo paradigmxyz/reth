@@ -2225,8 +2225,6 @@ where
         let sealed_block = Arc::new(block.block.clone());
         let block = block.unseal();
 
-        let exec_time = Instant::now();
-
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
         let input = self
@@ -2238,12 +2236,15 @@ where
         let state_root_handle = state_root_task.spawn();
 
         let state_root_task_start = Instant::now();
+
+        let execution_start = Instant::now();
         let output = self.metrics.executor.execute_metered(
             executor,
             (&block, U256::MAX).into(),
             Box::new(state_hook),
         )?;
-        trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
+        let execution_time = execution_start.elapsed();
+        trace!(target: "engine::tree", elapsed = ?execution_time, ?block_number, "Executed block");
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
@@ -2305,8 +2306,9 @@ where
                         ?task_state_root,
                         ?regular_state_root,
                         "match" = ?task_state_root == regular_state_root,
-                        task_elapsed = ?state_root_task_elapsed,
-                        regular_elapsed = ?regular_state_root_elapsed,
+                        execution_elapsed = ?execution_time,
+                        state_root_task_elapsed = ?state_root_task_elapsed,
+                        state_root_regular_elapsed = ?regular_state_root_elapsed,
                         "State root task finished"
                     );
                     let diff = compare_trie_updates(&task_trie_updates, &regular_trie_updates);
