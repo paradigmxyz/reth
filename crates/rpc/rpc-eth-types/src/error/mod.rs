@@ -579,7 +579,7 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
 /// Represents a reverted transaction and its output data.
 ///
 /// Displays "execution reverted(: reason)?" if the reason is a string.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub struct RevertError {
     /// The transaction output data
     ///
@@ -616,8 +616,6 @@ impl std::fmt::Display for RevertError {
         Ok(())
     }
 }
-
-impl core::error::Error for RevertError {}
 
 /// A helper error type that's mainly used to mirror `geth` Txpool's error messages
 #[derive(Debug, thiserror::Error)]
