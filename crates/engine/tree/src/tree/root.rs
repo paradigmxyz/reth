@@ -2,7 +2,10 @@
 
 use alloy_primitives::map::{HashMap, HashSet};
 use rayon::iter::{ParallelBridge, ParallelIterator};
+use reth_errors::ProviderResult;
 use reth_evm::system_calls::OnStateHook;
+use reth_primitives::BlockWithSenders;
+use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider,
@@ -15,13 +18,13 @@ use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, Nibbles, TrieInput,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
 use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieError},
     SparseStateTrie,
 };
-use revm_primitives::{keccak256, map::DefaultHashBuilder, EvmState, B256};
+use revm_primitives::{keccak256, map::DefaultHashBuilder, Address, EvmState, B256};
 use std::{
     collections::BTreeMap,
     ops::Deref,
@@ -89,6 +92,8 @@ impl<Factory> StateRootConfig<Factory> {
 /// Messages used internally by the state root task
 #[derive(Debug)]
 pub(crate) enum StateRootMessage {
+    /// Prefetch proof targets
+    PrefetchProofs(HashSet<Address>),
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
@@ -314,6 +319,84 @@ where
         }
     }
 
+    /// Prefetch proofs for the accounts in the provided block.
+    ///
+    /// Accounts that will be prefetched are:
+    /// - Transaction senders
+    /// - Transaction recipients
+    /// - Withdrawal recipients
+    ///
+    /// This method does not prefetch the proofs on its own, but only sends the message to the
+    /// [`StateRootTask`] that will be processed by the main loop.
+    pub fn prefetch_account_proofs<
+        T: SignedTransaction + alloy_consensus::Transaction,
+        BB: BlockBody<Transaction = T>,
+        B: Block<Body = BB>,
+    >(
+        &self,
+        body: &BlockWithSenders<B>,
+    ) {
+        let mut accounts = HashSet::<Address>::with_capacity_and_hasher(
+            body.body().transactions().len() * 2 +
+                body.body().withdrawals().map_or(0, |withdrawals| withdrawals.len()),
+            Default::default(),
+        );
+        accounts.extend(body.senders.iter().copied());
+        accounts.extend(body.body().transactions().iter().filter_map(|tx| tx.kind().to().copied()));
+        if let Some(withdrawals) = body.body().withdrawals() {
+            accounts.extend(withdrawals.iter().map(|withdrawal| withdrawal.address));
+        }
+
+        let _ = self.tx.send(StateRootMessage::PrefetchProofs(accounts));
+    }
+
+    /// Handles request for proof prefetch.
+    fn on_prefetch_proof(
+        config: StateRootConfig<Factory>,
+        targets: HashSet<Address>,
+        fetched_proof_targets: &mut HashMap<B256, HashSet<B256>>,
+        proof_sequence_number: u64,
+        state_root_message_sender: Sender<StateRootMessage>,
+    ) {
+        let proof_targets = targets
+            .into_iter()
+            .map(|address| (keccak256(address), Default::default()))
+            .collect::<HashMap<B256, HashSet<B256>>>();
+        for (address, slots) in &proof_targets {
+            fetched_proof_targets.entry(*address).or_default().extend(slots)
+        }
+
+        Self::spawn_multiproof(
+            config,
+            Default::default(),
+            proof_targets,
+            proof_sequence_number,
+            state_root_message_sender,
+        );
+    }
+
+    fn spawn_multiproof(
+        config: StateRootConfig<Factory>,
+        hashed_state_update: HashedPostState,
+        proof_targets: HashMap<B256, HashSet<B256>>,
+        proof_sequence_number: u64,
+        state_root_message_sender: Sender<StateRootMessage>,
+    ) {
+        // Dispatch proof gathering for this state update
+        rayon::spawn(move || match calculate_multiproof(config, proof_targets.clone()) {
+            Ok(proof) => {
+                let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated {
+                    proof,
+                    state_update: hashed_state_update,
+                    sequence_number: proof_sequence_number,
+                });
+            }
+            Err(error) => {
+                error!("Proof calculation failed: {:?}", error);
+            }
+        });
+    }
+
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
@@ -447,6 +530,20 @@ where
         loop {
             match self.rx.recv() {
                 Ok(message) => match message {
+                    StateRootMessage::PrefetchProofs(targets) => {
+                        debug!(
+                            target: "engine::root",
+                            len = targets.len(),
+                            "Prefetching proofs"
+                        );
+                        Self::on_prefetch_proof(
+                            self.config.clone(),
+                            targets,
+                            &mut self.fetched_proof_targets,
+                            self.proof_sequencer.next_sequence(),
+                            self.tx.clone(),
+                        );
+                    }
                     StateRootMessage::StateUpdate(state) => {
                         last_state_update_received = Some(Instant::now());
 
@@ -603,6 +700,31 @@ fn get_proof_targets(
     }
 
     targets
+}
+
+/// Calculate multiproof for the targets.
+#[inline]
+fn calculate_multiproof<Factory>(
+    config: StateRootConfig<Factory>,
+    proof_targets: HashMap<B256, HashSet<B256>>,
+) -> ProviderResult<MultiProof>
+where
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
+{
+    let provider = config.consistent_view.provider_ro()?;
+
+    Ok(Proof::from_tx(provider.tx_ref())
+        .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
+            DatabaseTrieCursorFactory::new(provider.tx_ref()),
+            &config.nodes_sorted,
+        ))
+        .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(provider.tx_ref()),
+            &config.state_sorted,
+        ))
+        .with_prefix_sets_mut(config.prefix_sets.as_ref().clone())
+        .with_branch_node_hash_masks(true)
+        .multiproof(proof_targets)?)
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
