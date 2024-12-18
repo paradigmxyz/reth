@@ -529,6 +529,8 @@ where
     invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
+    /// state root task thread pool
+    state_root_task_pool: rayon::ThreadPool,
 }
 
 impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug> std::fmt::Debug
@@ -592,6 +594,15 @@ where
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
+        let num_threads =
+            std::thread::available_parallelism().map_or(1, |num| (num.get() / 2).max(1));
+
+        let state_root_task_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("state-root-task-worker-{}", i))
+            .build()
+            .expect("Failed to create proof worker thread pool");
+
         Self {
             provider,
             executor_provider,
@@ -610,6 +621,7 @@ where
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
+            state_root_task_pool,
         }
     }
 
@@ -2279,8 +2291,11 @@ where
                     context.prefix_sets.clone(),
                 );
 
-                let state_root_task =
-                    StateRootTask::new(state_root_config, blinded_provider_factory);
+                let state_root_task = StateRootTask::new(
+                    state_root_config,
+                    blinded_provider_factory,
+                    &self.state_root_task_pool,
+                );
                 let state_hook = state_root_task.state_hook();
                 (Some(state_root_task.spawn(scope)), Box::new(state_hook) as Box<dyn OnStateHook>)
             } else {
