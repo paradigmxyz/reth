@@ -10,6 +10,7 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use core::{fmt::Debug, marker::PhantomData};
+use reth_db::TableSet;
 pub use reth_primitives_traits::{
     Block, BlockBody, FullBlock, FullNodePrimitives, FullReceipt, FullSignedTx, NodePrimitives,
 };
@@ -35,7 +36,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     /// The type used to perform state commitment operations.
     type StateCommitment: StateCommitment;
     /// The type responsible for writing chain primitives to storage.
-    type Storage: Default + Send + Sync + Unpin + Debug + 'static;
+    type Storage: TableSet + Default + Send + Sync + Unpin + Debug + 'static;
 }
 
 /// The type that configures an Ethereum-like node with an engine for consensus.
@@ -153,7 +154,7 @@ where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     C: EthChainSpec<Header = P::BlockHeader> + 'static,
     SC: StateCommitment,
-    S: Default + Send + Sync + Unpin + Debug + 'static,
+    S: TableSet + Default + Send + Sync + Unpin + Debug + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;
@@ -214,7 +215,7 @@ where
     E: EngineTypes + Send + Sync + Unpin,
     C: EthChainSpec<Header = P::BlockHeader> + 'static,
     SC: StateCommitment,
-    S: Default + Send + Sync + Unpin + Debug + 'static,
+    S: TableSet + Default + Send + Sync + Unpin + Debug + 'static,
 {
     type Primitives = P;
     type ChainSpec = C;
@@ -228,7 +229,7 @@ where
     E: EngineTypes + Send + Sync + Unpin,
     C: EthChainSpec<Header = P::BlockHeader> + 'static,
     SC: StateCommitment,
-    S: Default + Send + Sync + Unpin + Debug + 'static,
+    S: TableSet + Default + Send + Sync + Unpin + Debug + 'static,
 {
     type Engine = E;
 }
