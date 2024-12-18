@@ -39,6 +39,7 @@ bytes.workspace = true
 derive_more.workspace = true
 serde_with = { workspace = true, optional = true }
 auto_impl.workspace = true
+thiserror.workspace = true
 
 # required by reth-codecs
 modular-bitfield = { workspace = true, optional = true }
@@ -82,6 +83,7 @@ std = [
 	"derive_more/std",
 	"k256/std",
 	"secp256k1?/std",
+	"thiserror/std",
 	"alloy-trie/std"
 ]
 secp256k1 = ["dep:secp256k1"]
