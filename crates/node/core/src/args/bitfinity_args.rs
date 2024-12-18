@@ -76,12 +76,12 @@ pub struct BitfinityResetEvmStateArgs {
     /// Network url
     /// This is the URL of the IC network.
     /// E.g.
-    /// - https://ic0.app
-    /// - http://127.0.0.1:3333
+    /// - <https://ic0.app>
+    /// - <http://127.0.0.1:3333>
     #[arg(long)]
     pub evm_network: String,
 
-    /// URL used to fetch the ChainSpec information.
+    /// URL used to fetch the `ChainSpec` information.
     /// This is usually the URL of the Bitfinity EVM block extractor.
     #[arg(long)]
     pub evm_datasource_url: String,

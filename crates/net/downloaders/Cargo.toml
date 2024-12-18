@@ -54,6 +54,7 @@ tempfile = { workspace = true, optional = true }
 itertools.workspace = true
 
 # Bitfinity deps
+alloy-genesis.workspace = true
 candid.workspace = true
 did.workspace = true
 eyre.workspace = true

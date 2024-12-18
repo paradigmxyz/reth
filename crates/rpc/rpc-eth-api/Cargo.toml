@@ -61,6 +61,7 @@ tracing.workspace = true
 
 # Bitfinity dependencies
 ethereum-json-rpc-client.workspace = true
+did.workspace = true
 
 [features]
 js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]

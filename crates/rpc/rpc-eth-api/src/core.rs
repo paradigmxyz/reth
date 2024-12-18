@@ -371,9 +371,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     /// Aliases don't use the namespace.
     /// Thus, this will generate `eth_getLastCertifiedBlock` and `ic_getLastCertifiedBlock`.
     #[method(name = "getLastCertifiedBlock", aliases = ["ic_getLastCertifiedBlock"])]
-    async fn get_last_certified_block(
-        &self,
-    ) -> RpcResult<CertifiedResult<ethereum_json_rpc_client::Block<ethereum_json_rpc_client::H256>>>;
+    async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<did::Block<did::H256>>>;
 }
 
 #[async_trait::async_trait]
@@ -830,10 +828,7 @@ where
         BitfinityEvmRpc::get_genesis_balances(self).await
     }
 
-    async fn get_last_certified_block(
-        &self,
-    ) -> RpcResult<CertifiedResult<ethereum_json_rpc_client::Block<ethereum_json_rpc_client::H256>>>
-    {
+    async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<did::Block<did::H256>>> {
         trace!(target: "rpc::eth", "Serving get_last_certified_block");
         BitfinityEvmRpc::get_last_certified_block(self).await
     }

@@ -35,11 +35,10 @@ pub use crate::core::cli::*;
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
 #[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
-pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
-{
+pub struct Cli<Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
     #[command(subcommand)]
-    pub command: Commands<C, Ext>,
+    pub command: Commands<Ext>,
 
     /// The chain this node is running.
     ///
@@ -52,7 +51,7 @@ pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + f
         value_parser = C::parser(),
         global = true,
     )]
-    pub chain: Arc<C::ChainSpec>,
+    pub chain: Arc<ChainSpec>,
 
     /// Add a new instance of a node.
     ///
@@ -182,9 +181,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
                 runner.run_command_until_exit(|ctx| command.execute::<EthereumNode>(ctx))
             }
             Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<EthereumNode>()),
-            Commands::BitfinityResetEvmState(builder) => runner.run_until_ctrl_c(async move {
-                builder.build().await.unwrap().execute().await
-            }),
+            Commands::BitfinityResetEvmState(builder) => runner
+                .run_until_ctrl_c(async move { builder.build().await.unwrap().execute().await }),
         }
     }
 
@@ -203,7 +201,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
 pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Start the node
     #[command(name = "node")]
-    Node(Box<node::NodeCommand<C, Ext>>),
+    Node(Box<node::NodeCommand<Ext>>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(init_cmd::InitCommand<C>),
@@ -242,7 +240,9 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     Prune(prune::PruneCommand<C>),
     /// Export state to EVM canister
     #[command(name = "bitfinity-reset-evm-state")]
-    BitfinityResetEvmState(crate::commands::bitfinity_reset_evm_state::BitfinityResetEvmStateCommandBuilder),
+    BitfinityResetEvmState(
+        crate::commands::bitfinity_reset_evm_state::BitfinityResetEvmStateCommandBuilder,
+    ),
 }
 
 #[cfg(test)]

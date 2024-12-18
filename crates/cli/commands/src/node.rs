@@ -1,12 +1,12 @@
 //! Main node command for launching a node
 
 use clap::{value_parser, Args, Parser};
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
 use reth_db::{init_db, DatabaseEnv};
-use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+// use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::{
@@ -21,7 +21,7 @@ use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sy
 /// Start the node
 #[derive(Debug, Parser)]
 pub struct NodeCommand<
-    C: ChainSpecParser = EthereumChainSpecParser,
+    // C: ChainSpecParser = EthereumChainSpecParser,
     Ext: clap::Args + fmt::Debug = NoArgs,
 > {
     /// The path to the configuration file to use.
@@ -41,7 +41,6 @@ pub struct NodeCommand<
     //     required = false,
     // )]
     // pub chain: Arc<C::ChainSpec>,
-
     /// Enable Prometheus metrics.
     ///
     /// The metrics will be served at the given interface and port.
@@ -73,7 +72,7 @@ pub struct NodeCommand<
 
     /// Bitfinity Args
     #[command(flatten)]
-    pub bitfinity: crate::args::BitfinityImportArgs,
+    pub bitfinity: reth_node_core::args::BitfinityImportArgs,
 
     /// All datadir related arguments
     #[command(flatten)]
@@ -116,7 +115,11 @@ pub struct NodeCommand<
     pub ext: Ext,
 }
 
-impl<C: ChainSpecParser> NodeCommand<C> {
+impl<
+        // C: ChainSpecParser
+        Ext: clap::Args + fmt::Debug,
+    > NodeCommand<Ext>
+{
     /// Parsers only the default CLI arguments
     pub fn parse_args() -> Self {
         Self::parse()
@@ -133,9 +136,9 @@ impl<C: ChainSpecParser> NodeCommand<C> {
 }
 
 impl<
-        C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>,
+        // C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>,
         Ext: clap::Args + fmt::Debug,
-    > NodeCommand<C, Ext>
+    > NodeCommand<Ext>
 {
     /// Launches the node
     ///
@@ -143,7 +146,7 @@ impl<
     /// closure.
     pub async fn execute<L, Fut>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
     {
         tracing::info!(target: "reth::cli", version = ?version::SHORT_VERSION, "Starting reth");
@@ -220,26 +223,22 @@ pub struct NoArgs;
 mod tests {
     use super::*;
     use reth_discv4::DEFAULT_DISCOVERY_PORT;
-    use reth_ethereum_cli::chainspec::SUPPORTED_CHAINS;
-    use std::{
-        net::{IpAddr, Ipv4Addr},
-        path::Path,
-    };
+    use std::net::{IpAddr, Ipv4Addr};
 
-    #[test]
-    fn parse_help_node_command() {
-        let err = NodeCommand::<EthereumChainSpecParser>::try_parse_args_from(["reth", "--help"])
-            .unwrap_err();
-        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
-    }
+    // #[test]
+    // fn parse_help_node_command() {
+    //     let err = NodeCommand::<EthereumChainSpecParser>::try_parse_args_from(["reth", "--help"])
+    //         .unwrap_err();
+    //     assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
+    // }
 
-    #[test]
-    fn parse_common_node_command_chain_args() {
-        for chain in SUPPORTED_CHAINS {
-            let args: NodeCommand = NodeCommand::parse_from(["reth", "--chain", chain]);
-            assert_eq!(args.chain.chain, chain.parse::<reth_chainspec::Chain>().unwrap());
-        }
-    }
+    // #[test]
+    // fn parse_common_node_command_chain_args() {
+    //     for chain in SUPPORTED_CHAINS {
+    //         let args: NodeCommand = NodeCommand::parse_from(["reth", "--chain", chain]);
+    //         assert_eq!(args.chain.chain, chain.parse::<reth_chainspec::Chain>().unwrap());
+    //     }
+    // }
 
     #[test]
     fn parse_discovery_addr() {
