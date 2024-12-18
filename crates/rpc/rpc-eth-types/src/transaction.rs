@@ -4,7 +4,7 @@
 
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
-use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
+use reth_primitives::{RecoveredTx, TransactionSigned};
 use reth_primitives_traits::SignedTransaction;
 use reth_rpc_types_compat::{
     transaction::{from_recovered, from_recovered_with_block_context},
@@ -15,13 +15,13 @@ use reth_rpc_types_compat::{
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TransactionSource<T = TransactionSigned> {
     /// Transaction exists in the pool (Pending)
-    Pool(TransactionSignedEcRecovered<T>),
+    Pool(RecoveredTx<T>),
     /// Transaction already included in a block
     ///
     /// This can be a historical block or a pending block (received from the CL)
     Block {
         /// Transaction fetched via provider
-        transaction: TransactionSignedEcRecovered<T>,
+        transaction: RecoveredTx<T>,
         /// Index of the transaction in the block
         index: u64,
         /// Hash of the block.
@@ -37,7 +37,7 @@ pub enum TransactionSource<T = TransactionSigned> {
 
 impl<T: SignedTransaction> TransactionSource<T> {
     /// Consumes the type and returns the wrapped transaction.
-    pub fn into_recovered(self) -> TransactionSignedEcRecovered<T> {
+    pub fn into_recovered(self) -> RecoveredTx<T> {
         self.into()
     }
 
@@ -63,7 +63,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
     }
 
     /// Returns the transaction and block related info, if not pending
-    pub fn split(self) -> (TransactionSignedEcRecovered<T>, TransactionInfo) {
+    pub fn split(self) -> (RecoveredTx<T>, TransactionInfo) {
         match self {
             Self::Pool(tx) => {
                 let hash = tx.trie_hash();
@@ -86,7 +86,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
     }
 }
 
-impl<T> From<TransactionSource<T>> for TransactionSignedEcRecovered<T> {
+impl<T> From<TransactionSource<T>> for RecoveredTx<T> {
     fn from(value: TransactionSource<T>) -> Self {
         match value {
             TransactionSource::Pool(tx) => tx,

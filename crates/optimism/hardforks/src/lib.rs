@@ -6,6 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 
@@ -24,6 +25,12 @@ pub trait OpHardforks: EthereumHardforks {
     /// number.
     fn is_bedrock_active_at_block(&self, block_number: u64) -> bool {
         self.fork(OpHardfork::Bedrock).active_at_block(block_number)
+    }
+
+    /// Returns `true` if [`Regolith`](OpHardfork::Regolith) is active at given block
+    /// timestamp.
+    fn is_regolith_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork(OpHardfork::Regolith).active_at_timestamp(timestamp)
     }
 
     /// Returns `true` if [`Canyon`](OpHardfork::Canyon) is active at given block timestamp.
@@ -52,9 +59,9 @@ pub trait OpHardforks: EthereumHardforks {
         self.fork(OpHardfork::Holocene).active_at_timestamp(timestamp)
     }
 
-    /// Returns `true` if [`Regolith`](OpHardfork::Regolith) is active at given block
+    /// Returns `true` if [`Isthmus`](OpHardfork::Isthmus) is active at given block
     /// timestamp.
-    fn is_regolith_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.fork(OpHardfork::Regolith).active_at_timestamp(timestamp)
+    fn is_isthmus_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.fork(OpHardfork::Isthmus).active_at_timestamp(timestamp)
     }
 }

@@ -44,7 +44,9 @@ use reth_eth_wire::{
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{
-    test_utils::PeersHandle, EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
+    events::{PeerEvent, SessionInfo},
+    test_utils::PeersHandle,
+    EthProtocolInfo, NetworkEvent, NetworkStatus, PeerInfo, PeerRequest,
 };
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::ReputationChangeKind;
@@ -68,13 +70,37 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error, trace, warn};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
+// TODO: Inlined diagram due to a bug in aquamarine library, should become an include when it's
+// fixed. See https://github.com/mersinvald/aquamarine/issues/50
+// include_mmd!("docs/mermaid/network-manager.mmd")
 /// Manages the _entire_ state of the network.
 ///
 /// This is an endless [`Future`] that consistently drives the state of the entire network forward.
 ///
 /// The [`NetworkManager`] is the container type for all parts involved with advancing the network.
 ///
-/// include_mmd!("docs/mermaid/network-manager.mmd")
+/// ```mermaid
+/// graph TB
+///   handle(NetworkHandle)
+///   events(NetworkEvents)
+///   transactions(Transactions Task)
+///   ethrequest(ETH Request Task)
+///   discovery(Discovery Task)
+///   subgraph NetworkManager
+///     direction LR
+///     subgraph Swarm
+///         direction TB
+///         B1[(Session Manager)]
+///         B2[(Connection Lister)]
+///         B3[(Network State)]
+///     end
+///  end
+///  handle <--> |request response channel| NetworkManager
+///  NetworkManager --> |Network events| events
+///  transactions <--> |transactions| NetworkManager
+///  ethrequest <--> |ETH request handing| NetworkManager
+///  discovery --> |Discovered peers| NetworkManager
+/// ```
 #[derive(Debug)]
 #[must_use = "The NetworkManager does nothing unless polled"]
 pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -290,9 +316,11 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     /// components of the network
     ///
     /// ```
-    /// use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+    /// use reth_network::{
+    ///     config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager,
+    /// };
     /// use reth_network_peers::mainnet_nodes;
-    /// use reth_provider::test_utils::NoopProvider;
+    /// use reth_storage_api::noop::NoopProvider;
     /// use reth_transaction_pool::TransactionPool;
     /// async fn launch<Pool: TransactionPool>(pool: Pool) {
     ///     // This block provider implementation is used for testing purposes.
@@ -301,8 +329,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     ///     // The key that's used for encrypting sessions and to identify our node.
     ///     let local_key = rng_secret_key();
     ///
-    ///     let config =
-    ///         NetworkConfig::builder(local_key).boot_nodes(mainnet_nodes()).build(client.clone());
+    ///     let config = NetworkConfig::<_, EthNetworkPrimitives>::builder(local_key)
+    ///         .boot_nodes(mainnet_nodes())
+    ///         .build(client.clone());
     ///     let transactions_manager_config = config.transactions_manager_config.clone();
     ///
     ///     // create the network instance
@@ -398,7 +427,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         &mut self,
         peer_id: PeerId,
         _capabilities: Arc<Capabilities>,
-        _message: CapabilityMessage,
+        _message: CapabilityMessage<N>,
     ) {
         trace!(target: "net", ?peer_id, "received unexpected message");
         self.swarm
@@ -644,6 +673,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     let _ = tx.send(None);
                 }
             }
+            NetworkHandleMessage::EthMessage { peer_id, message } => {
+                self.swarm.sessions_mut().send_message(&peer_id, message)
+            }
         }
     }
 
@@ -709,24 +741,26 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
                 self.update_active_connection_metrics();
 
-                self.event_sender.notify(NetworkEvent::SessionEstablished {
+                let session_info = SessionInfo {
                     peer_id,
                     remote_addr,
                     client_version,
                     capabilities,
-                    version,
                     status,
-                    messages,
-                });
+                    version,
+                };
+
+                self.event_sender
+                    .notify(NetworkEvent::ActivePeerSession { info: session_info, messages });
             }
             SwarmEvent::PeerAdded(peer_id) => {
                 trace!(target: "net", ?peer_id, "Peer added");
-                self.event_sender.notify(NetworkEvent::PeerAdded(peer_id));
+                self.event_sender.notify(NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id)));
                 self.metrics.tracked_peers.set(self.swarm.state().peers().num_known_peers() as f64);
             }
             SwarmEvent::PeerRemoved(peer_id) => {
                 trace!(target: "net", ?peer_id, "Peer dropped");
-                self.event_sender.notify(NetworkEvent::PeerRemoved(peer_id));
+                self.event_sender.notify(NetworkEvent::Peer(PeerEvent::PeerRemoved(peer_id)));
                 self.metrics.tracked_peers.set(self.swarm.state().peers().num_known_peers() as f64);
             }
             SwarmEvent::SessionClosed { peer_id, remote_addr, error } => {
@@ -769,7 +803,8 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                             .saturating_sub(1)
                             as f64,
                     );
-                self.event_sender.notify(NetworkEvent::SessionClosed { peer_id, reason });
+                self.event_sender
+                    .notify(NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }));
             }
             SwarmEvent::IncomingPendingSessionClosed { remote_addr, error } => {
                 trace!(

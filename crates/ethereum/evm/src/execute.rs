@@ -4,24 +4,26 @@ use crate::{
     dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
     EthEvmConfig,
 };
-use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::Transaction as _;
-use alloy_eips::eip7685::Requests;
+use alloy_eips::{eip6110, eip7685::Requests};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_consensus::ConsensusError;
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
+    env::EvmEnv,
     execute::{
-        BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
-        BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput, ProviderError,
+        balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
+        BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
+        ProviderError,
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
     ConfigureEvm, TxEnvOverrides,
 };
-use reth_primitives::{BlockWithSenders, Receipt};
-use reth_revm::db::{BundleState, State};
+use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
+use reth_revm::db::{states::bundle_state::BundleRetention, BundleState, State};
 use reth_scroll_execution::FinalizeExecution;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
@@ -58,9 +60,18 @@ impl<EvmConfig> EthExecutionStrategyFactory<EvmConfig> {
 
 impl<EvmConfig> BlockExecutionStrategyFactory for EthExecutionStrategyFactory<EvmConfig>
 where
-    EvmConfig:
-        Clone + Unpin + Sync + Send + 'static + ConfigureEvm<Header = alloy_consensus::Header>,
+    EvmConfig: Clone
+        + Unpin
+        + Sync
+        + Send
+        + 'static
+        + ConfigureEvm<
+            Header = alloy_consensus::Header,
+            Transaction = reth_primitives::TransactionSigned,
+        >,
 {
+    type Primitives = EthPrimitives;
+
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>>
         = EthExecutionStrategy<DB, EvmConfig>
     where
@@ -121,18 +132,25 @@ where
         header: &alloy_consensus::Header,
         total_difficulty: U256,
     ) -> EnvWithHandlerCfg {
-        let (cfg, block_env) = self.evm_config.cfg_and_block_env(header, total_difficulty);
-        EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } =
+            self.evm_config.cfg_and_block_env(header, total_difficulty);
+        EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, Default::default())
     }
 }
 
-impl<DB, EvmConfig> BlockExecutionStrategy<DB> for EthExecutionStrategy<DB, EvmConfig>
+impl<DB, EvmConfig> BlockExecutionStrategy for EthExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
     State<DB>: FinalizeExecution<Output = BundleState>,
-    EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
+    EvmConfig: ConfigureEvm<
+        Header = alloy_consensus::Header,
+        Transaction = reth_primitives::TransactionSigned,
+    >,
 {
+    type DB = DB;
     type Error = BlockExecutionError;
+
+    type Primitives = EthPrimitives;
 
     fn init(&mut self, tx_env_overrides: Box<dyn TxEnvOverrides>) {
         self.tx_env_overrides = Some(tx_env_overrides);
@@ -151,7 +169,7 @@ where
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
-        self.system_caller.apply_pre_execution_changes(block, &mut evm)?;
+        self.system_caller.apply_pre_execution_changes(&block.block, &mut evm)?;
 
         Ok(())
     }
@@ -160,7 +178,7 @@ where
         &mut self,
         block: &BlockWithSenders,
         total_difficulty: U256,
-    ) -> Result<ExecuteOutput, Self::Error> {
+    ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
         let env = self.evm_env_for_block(&block.header, total_difficulty);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
@@ -193,7 +211,7 @@ where
                     error: Box::new(new_err),
                 }
             })?;
-            self.system_caller.on_state(&result_and_state);
+            self.system_caller.on_state(&result_and_state.state);
             let ResultAndState { result, state } = result_and_state;
             evm.db_mut().commit(state);
 
@@ -232,7 +250,12 @@ where
             let deposit_requests =
                 crate::eip6110::parse_deposits_from_receipts(&self.chain_spec, receipts)?;
 
-            let mut requests = Requests::new(vec![deposit_requests]);
+            let mut requests = Requests::default();
+
+            if !deposit_requests.is_empty() {
+                requests.push_request_with_type(eip6110::DEPOSIT_REQUEST_TYPE, deposit_requests);
+            }
+
             requests.extend(self.system_caller.apply_post_execution_changes(&mut evm)?);
             requests
         } else {
@@ -241,7 +264,7 @@ where
         drop(evm);
 
         let mut balance_increments =
-            post_block_balance_increments(&self.chain_spec, block, total_difficulty);
+            post_block_balance_increments(&self.chain_spec, &block.block, total_difficulty);
 
         // Irregular state change at Ethereum DAO hardfork
         if self.chain_spec.fork(EthereumHardfork::Dao).transitions_at_block(block.number) {
@@ -258,8 +281,11 @@ where
         }
         // increment balances
         self.state
-            .increment_balances(balance_increments)
+            .increment_balances(balance_increments.clone())
             .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
+        // call state hook with changes due to balance increments.
+        let balance_state = balance_increment_state(&balance_increments, &mut self.state)?;
+        self.system_caller.on_state(&balance_state);
 
         Ok(requests)
     }
@@ -274,6 +300,11 @@ where
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {
         self.system_caller.with_state_hook(hook);
+    }
+
+    fn finish(&mut self) -> BundleState {
+        self.state_mut().merge_transitions(BundleRetention::Reverts);
+        self.state_mut().finalize()
     }
 
     fn validate_block_post_execution(
@@ -312,6 +343,7 @@ mod tests {
     use alloy_eips::{
         eip2935::{HISTORY_STORAGE_ADDRESS, HISTORY_STORAGE_CODE},
         eip4788::{BEACON_ROOTS_ADDRESS, BEACON_ROOTS_CODE, SYSTEM_ADDRESS},
+        eip4895::Withdrawal,
         eip7002::{WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS, WITHDRAWAL_REQUEST_PREDEPLOY_CODE},
         eip7685::EMPTY_REQUESTS_HASH,
     };
@@ -328,9 +360,9 @@ mod tests {
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use revm_primitives::BLOCKHASH_SERVE_WINDOW;
+    use revm_primitives::{address, EvmState, BLOCKHASH_SERVE_WINDOW};
     use secp256k1::{Keypair, Secp256k1};
-    use std::collections::HashMap;
+    use std::{collections::HashMap, sync::mpsc};
 
     fn create_state_provider_with_beacon_root_contract() -> StateProviderTest {
         let mut db = StateProviderTest::default();
@@ -409,8 +441,8 @@ mod tests {
         let err = executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block {
+                    &BlockWithSenders::new_unchecked(
+                        Block {
                             header: header.clone(),
                             body: BlockBody {
                                 transactions: vec![],
@@ -418,8 +450,8 @@ mod tests {
                                 withdrawals: None,
                             },
                         },
-                        senders: vec![],
-                    },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -440,8 +472,8 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block {
+                    &BlockWithSenders::new_unchecked(
+                        Block {
                             header: header.clone(),
                             body: BlockBody {
                                 transactions: vec![],
@@ -449,8 +481,8 @@ mod tests {
                                 withdrawals: None,
                             },
                         },
-                        senders: vec![],
-                    },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -510,8 +542,8 @@ mod tests {
             .batch_executor(StateProviderDatabase::new(&db))
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block {
+                    &BlockWithSenders::new_unchecked(
+                        Block {
                             header,
                             body: BlockBody {
                                 transactions: vec![],
@@ -519,8 +551,8 @@ mod tests {
                                 withdrawals: None,
                             },
                         },
-                        senders: vec![],
-                    },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -564,8 +596,8 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block {
+                    &BlockWithSenders::new_unchecked(
+                        Block {
                             header,
                             body: BlockBody {
                                 transactions: vec![],
@@ -573,8 +605,8 @@ mod tests {
                                 withdrawals: None,
                             },
                         },
-                        senders: vec![],
-                    },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -610,10 +642,10 @@ mod tests {
         let _err = executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header: header.clone(), body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header: header.clone(), body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -631,10 +663,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -685,10 +717,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header: header.clone(), body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header: header.clone(), body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -765,10 +797,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -808,10 +840,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -858,10 +890,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -914,10 +946,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -962,10 +994,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -997,10 +1029,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -1035,10 +1067,10 @@ mod tests {
         executor
             .execute_and_verify_one(
                 (
-                    &BlockWithSenders {
-                        block: Block { header, body: Default::default() },
-                        senders: vec![],
-                    },
+                    &BlockWithSenders::new_unchecked(
+                        Block { header, body: Default::default() },
+                        vec![],
+                    ),
                     U256::ZERO,
                 )
                     .into(),
@@ -1145,9 +1177,9 @@ mod tests {
         let receipt = receipts.first().unwrap();
         assert!(receipt.success);
 
-        assert!(requests[0].is_empty(), "there should be no deposits");
-        assert!(!requests[1].is_empty(), "there should be a withdrawal");
-        assert!(requests[2].is_empty(), "there should be no consolidations");
+        // There should be exactly one entry with withdrawal requests
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0][0], 1);
     }
 
     #[test]
@@ -1237,6 +1269,69 @@ mod tests {
                     block_available_gas: 1_500_000,
                 }
             ),
+        }
+    }
+
+    #[test]
+    fn test_balance_increment_not_duplicated() {
+        let chain_spec = Arc::new(
+            ChainSpecBuilder::from(&*MAINNET)
+                .shanghai_activated()
+                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
+                .build(),
+        );
+
+        let withdrawal_recipient = address!("1000000000000000000000000000000000000000");
+
+        let mut db = StateProviderTest::default();
+        let initial_balance = 100;
+        db.insert_account(
+            withdrawal_recipient,
+            Account { balance: U256::from(initial_balance), nonce: 1, ..Default::default() },
+            None,
+            HashMap::default(),
+        );
+
+        let withdrawal =
+            Withdrawal { index: 0, validator_index: 0, address: withdrawal_recipient, amount: 1 };
+
+        let header = Header { timestamp: 1, number: 1, ..Header::default() };
+
+        let block = &BlockWithSenders::new_unchecked(
+            Block {
+                header,
+                body: BlockBody {
+                    transactions: vec![],
+                    ommers: vec![],
+                    withdrawals: Some(vec![withdrawal].into()),
+                },
+            },
+            vec![],
+        );
+
+        let provider = executor_provider(chain_spec);
+        let executor = provider.executor(StateProviderDatabase::new(&db));
+
+        let (tx, rx) = mpsc::channel();
+        let tx_clone = tx.clone();
+
+        let _output = executor
+            .execute_with_state_hook((block, U256::ZERO).into(), move |state: &EvmState| {
+                if let Some(account) = state.get(&withdrawal_recipient) {
+                    let _ = tx_clone.send(account.info.balance);
+                }
+            })
+            .expect("Block execution should succeed");
+
+        drop(tx);
+        let balance_changes: Vec<U256> = rx.try_iter().collect();
+
+        if let Some(final_balance) = balance_changes.last() {
+            let expected_final_balance = U256::from(initial_balance) + U256::from(1_000_000_000); // initial + 1 Gwei in Wei
+            assert_eq!(
+                *final_balance, expected_final_balance,
+                "Final balance should match expected value after withdrawal"
+            );
         }
     }
 }

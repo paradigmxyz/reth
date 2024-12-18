@@ -17,6 +17,7 @@ reth-execution-errors.workspace = true
 reth-primitives.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
+reth-trie-sparse.workspace = true
 reth-trie-common.workspace = true
 
 # revm re-export scroll
@@ -24,6 +25,7 @@ reth-primitives-traits.workspace = true
 revm.workspace = true
 
 # alloy
+alloy-eips.workspace = true
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
@@ -64,6 +66,7 @@ serde = [
 	"alloy-primitives/serde",
 	"alloy-consensus/serde",
 	"alloy-trie/serde",
+    "alloy-eips/serde",
 	"revm/serde",
 	"reth-trie-common/serde",
 	"reth-primitives-traits/serde",

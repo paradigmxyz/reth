@@ -7,7 +7,7 @@ use crate::{
     trie_cursor::TrieCursorFactory,
     updates::{StorageTrieUpdates, TrieUpdates},
     walker::TrieWalker,
-    HashBuilder, Nibbles, TrieAccount, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{keccak256, Address, B256};
@@ -202,15 +202,13 @@ where
                         self.trie_cursor_factory.clone(),
                         self.hashed_cursor_factory.clone(),
                         hashed_address,
-                        #[cfg(feature = "metrics")]
-                        self.metrics.storage_trie.clone(),
-                    )
-                    .with_prefix_set(
                         self.prefix_sets
                             .storage_prefix_sets
                             .get(&hashed_address)
                             .cloned()
                             .unwrap_or_default(),
+                        #[cfg(feature = "metrics")]
+                        self.metrics.storage_trie.clone(),
                     );
 
                     let storage_root = if retain_updates {
@@ -226,7 +224,7 @@ where
                     };
 
                     account_rlp.clear();
-                    let account = TrieAccount::from((account, storage_root));
+                    let account = account.into_trie_account(storage_root);
                     account.encode(&mut account_rlp as &mut dyn BufMut);
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 
@@ -301,29 +299,32 @@ impl<T, H> StorageRoot<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         address: Address,
+        prefix_set: PrefixSet,
         #[cfg(feature = "metrics")] metrics: TrieRootMetrics,
     ) -> Self {
         Self::new_hashed(
             trie_cursor_factory,
             hashed_cursor_factory,
             keccak256(address),
+            prefix_set,
             #[cfg(feature = "metrics")]
             metrics,
         )
     }
 
     /// Creates a new storage root calculator given a hashed address.
-    pub fn new_hashed(
+    pub const fn new_hashed(
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         hashed_address: B256,
+        prefix_set: PrefixSet,
         #[cfg(feature = "metrics")] metrics: TrieRootMetrics,
     ) -> Self {
         Self {
             trie_cursor_factory,
             hashed_cursor_factory,
             hashed_address,
-            prefix_set: PrefixSet::default(),
+            prefix_set,
             #[cfg(feature = "metrics")]
             metrics,
         }

@@ -70,6 +70,7 @@ exclude_crates=(
   reth-transaction-pool # c-kzg
   reth-trie-parallel # tokio
   reth-testing-utils
+  reth-network-peers
   reth-scroll-cli # tokio
   reth-scroll-node # tokio
   reth-scroll # tokio

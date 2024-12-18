@@ -7,11 +7,14 @@ use reth_beacon_consensus::{
 };
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider};
+use reth_db_api::{
+    database_metrics::{DatabaseMetadata, DatabaseMetrics},
+    Database,
+};
 use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
-    persistence::PersistenceNodeTypes,
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
@@ -19,8 +22,8 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BlockTy, BuiltPayload, EngineValidator, FullNodeTypes, NodeTypesWithEngine,
-    PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
+    BlockTy, BuiltPayload, EngineValidator, FullNodeTypes, NodeTypesWithDBAdapter,
+    NodeTypesWithEngine, PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -29,7 +32,7 @@ use reth_node_core::{
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::{EthPrimitives, EthereumHardforks};
-use reth_provider::providers::{BlockchainProvider2, ProviderNodeTypes};
+use reth_provider::providers::{BlockchainProvider2, NodeTypesForProvider};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -68,19 +71,20 @@ impl EngineNodeLauncher {
     }
 }
 
-impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
+impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Types:
-        ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine + PersistenceNodeTypes,
-    T: FullNodeTypes<Types = Types, Provider = BlockchainProvider2<Types>>,
+    Types: NodeTypesForProvider + NodeTypesWithEngine<Primitives = EthPrimitives>,
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    T: FullNodeTypes<
+        Types = Types,
+        DB = DB,
+        Provider = BlockchainProvider2<NodeTypesWithDBAdapter<Types, DB>>,
+    >,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<
             NodeAdapter<T, CB::Components>,
-            Validator: EngineValidator<
-                <Types as NodeTypesWithEngine>::Engine,
-                Block = BlockTy<Types>,
-            >,
+            Validator: EngineValidator<Types::Engine, Block = BlockTy<Types>>,
         >,
 
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
@@ -175,13 +179,15 @@ where
         ));
         info!(target: "reth::cli", "StaticFileProducer initialized");
 
+        let consensus = Arc::new(ctx.components().consensus().clone());
+
         // Configure the pipeline
         let pipeline_exex_handle =
             exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
         let pipeline = build_networked_pipeline(
             &ctx.toml_config().stages,
             network_client.clone(),
-            ctx.consensus(),
+            consensus.clone(),
             ctx.provider_factory().clone(),
             ctx.task_executor(),
             ctx.sync_metrics_tx(),
@@ -223,7 +229,7 @@ where
 
         let mut engine_service = if ctx.is_dev() {
             let eth_service = LocalEngineService::new(
-                ctx.consensus(),
+                consensus.clone(),
                 ctx.components().block_executor().clone(),
                 ctx.provider_factory().clone(),
                 ctx.blockchain_db().clone(),
@@ -242,7 +248,7 @@ where
             Either::Left(eth_service)
         } else {
             let eth_service = EngineService::new(
-                ctx.consensus(),
+                consensus.clone(),
                 ctx.components().block_executor().clone(),
                 ctx.chain_spec(),
                 network_client.clone(),

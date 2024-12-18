@@ -1,6 +1,6 @@
 use alloy_primitives::B256;
 use reth_engine_primitives::InvalidBlockHook;
-use reth_primitives::{Receipt, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
 use reth_provider::BlockExecutionOutput;
 use reth_trie::updates::TrieUpdates;
 
@@ -9,32 +9,32 @@ use reth_trie::updates::TrieUpdates;
 #[non_exhaustive]
 pub struct NoopInvalidBlockHook;
 
-impl InvalidBlockHook for NoopInvalidBlockHook {
+impl<N: NodePrimitives> InvalidBlockHook<N> for NoopInvalidBlockHook {
     fn on_invalid_block(
         &self,
-        _parent_header: &SealedHeader,
-        _block: &SealedBlockWithSenders,
-        _output: &BlockExecutionOutput<Receipt>,
+        _parent_header: &SealedHeader<N::BlockHeader>,
+        _block: &SealedBlockWithSenders<N::Block>,
+        _output: &BlockExecutionOutput<N::Receipt>,
         _trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
     }
 }
 
 /// Multiple [`InvalidBlockHook`]s that are executed in order.
-pub struct InvalidBlockHooks(pub Vec<Box<dyn InvalidBlockHook>>);
+pub struct InvalidBlockHooks<N: NodePrimitives>(pub Vec<Box<dyn InvalidBlockHook<N>>>);
 
-impl std::fmt::Debug for InvalidBlockHooks {
+impl<N: NodePrimitives> std::fmt::Debug for InvalidBlockHooks<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InvalidBlockHooks").field("len", &self.0.len()).finish()
     }
 }
 
-impl InvalidBlockHook for InvalidBlockHooks {
+impl<N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockHooks<N> {
     fn on_invalid_block(
         &self,
-        parent_header: &SealedHeader,
-        block: &SealedBlockWithSenders,
-        output: &BlockExecutionOutput<Receipt>,
+        parent_header: &SealedHeader<N::BlockHeader>,
+        block: &SealedBlockWithSenders<N::Block>,
+        output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
         for hook in &self.0 {

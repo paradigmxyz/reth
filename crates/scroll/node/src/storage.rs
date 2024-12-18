@@ -4,7 +4,7 @@ use reth_node_types::NodeTypes;
 use reth_primitives::{BlockBody, EthPrimitives};
 use reth_provider::{
     providers::ChainStorage, BlockBodyReader, BlockBodyWriter, ChainSpecProvider, DBProvider,
-    EthStorage, ProviderResult, ReadBodyInput,
+    EthStorage, ProviderResult, ReadBodyInput, StorageLocation,
 };
 
 /// Storage implementation for Scroll.
@@ -19,16 +19,18 @@ where
         &self,
         provider: &Provider,
         bodies: Vec<(u64, Option<BlockBody>)>,
+        write_to: StorageLocation,
     ) -> ProviderResult<()> {
-        self.0.write_block_bodies(provider, bodies)
+        self.0.write_block_bodies(provider, bodies, write_to)
     }
 
     fn remove_block_bodies_above(
         &self,
         provider: &Provider,
         block: alloy_primitives::BlockNumber,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()> {
-        self.0.remove_block_bodies_above(provider, block)
+        self.0.remove_block_bodies_above(provider, block, remove_from)
     }
 }
 

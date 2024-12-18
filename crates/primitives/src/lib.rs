@@ -32,8 +32,6 @@ pub use traits::*;
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
 mod block;
-#[cfg(feature = "reth-codec")]
-mod compression;
 pub mod proofs;
 mod receipt;
 pub use reth_static_file_types as static_file;
@@ -43,22 +41,18 @@ pub use block::{generate_valid_header, valid_header_strategy};
 pub use block::{
     Block, BlockBody, BlockWithSenders, SealedBlock, SealedBlockFor, SealedBlockWithSenders,
 };
-#[cfg(feature = "reth-codec")]
-pub use compression::*;
-pub use receipt::{
-    gas_spent_by_transactions, Receipt, ReceiptWithBloom, ReceiptWithBloomRef, Receipts,
-};
+pub use receipt::{gas_spent_by_transactions, Receipt, Receipts};
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
     LogData, NodePrimitives, SealedHeader, StorageEntry,
 };
 pub use static_file::StaticFileSegment;
 
+pub use alloy_consensus::{transaction::PooledTransaction, ReceiptWithBloom};
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
-    BlobTransaction, InvalidTransactionError, PooledTransactionsElement,
-    PooledTransactionsElementEcRecovered, Transaction, TransactionMeta, TransactionSigned,
-    TransactionSignedEcRecovered, TransactionSignedNoHash, TxType,
+    InvalidTransactionError, PooledTransactionsElementEcRecovered, RecoveredTx, Transaction,
+    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TxType,
 };
 
 // Re-exports
@@ -95,6 +89,5 @@ impl reth_primitives_traits::NodePrimitives for EthPrimitives {
     type BlockHeader = alloy_consensus::Header;
     type BlockBody = crate::BlockBody;
     type SignedTx = crate::TransactionSigned;
-    type TxType = crate::TxType;
     type Receipt = crate::Receipt;
 }

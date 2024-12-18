@@ -28,7 +28,7 @@ tracing.workspace = true
 # HeaderBytes
 generic-array.workspace = true
 typenum = "1.15.0"
-byteorder = "1.4.3"
+byteorder.workspace = true
 
 # crypto
 rand.workspace = true

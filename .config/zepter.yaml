@@ -33,7 +33,7 @@ help:
   text: |
     Reth uses the Zepter CLI to detect abnormalities in Cargo features, e.g. missing propagation.
 
-    It looks like one more more checks failed; please check the console output.
+    It looks like one more checks failed; please check the console output.
 
     You can try to automatically address them by installing zepter (`cargo install zepter --locked`) and simply running `zepter` in the workspace root.
   links:

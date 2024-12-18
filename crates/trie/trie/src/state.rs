@@ -1,6 +1,6 @@
 use crate::prefix_set::{PrefixSetMut, TriePrefixSetsMut};
 use alloy_primitives::{
-    map::{hash_map, HashMap, HashSet},
+    map::{hash_map, B256HashMap, B256HashSet, HashMap, HashSet},
     Address, B256, U256,
 };
 use itertools::Itertools;
@@ -14,9 +14,9 @@ use std::borrow::Cow;
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct HashedPostState {
     /// Mapping of hashed address to account info, `None` if destroyed.
-    pub accounts: HashMap<B256, Option<Account>>,
+    pub accounts: B256HashMap<Option<Account>>,
     /// Mapping of hashed address to hashed storage.
-    pub storages: HashMap<B256, HashedStorage>,
+    pub storages: B256HashMap<HashedStorage>,
 }
 
 impl HashedPostState {
@@ -58,7 +58,7 @@ impl HashedPostState {
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
                 let hashed_account =
-                    account.account.as_ref().map(|a| Account::from_account_info(a.info.clone()));
+                    account.account.as_ref().map(|a| Account::from_account_info(&a.info));
                 let hashed_storage = HashedStorage::from_plain_storage::<KH>(
                     account.status,
                     account.account.as_ref().map(|a| a.storage.iter()).into_iter().flatten(),
@@ -209,7 +209,7 @@ pub struct HashedStorage {
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,
     /// Mapping of hashed storage slot to storage value.
-    pub storage: HashMap<B256, U256>,
+    pub storage: B256HashMap<U256>,
 }
 
 impl HashedStorage {
@@ -291,14 +291,14 @@ pub struct HashedPostStateSorted {
     /// Updated state of accounts.
     pub(crate) accounts: HashedAccountsSorted,
     /// Map of hashed addresses to hashed storage.
-    pub(crate) storages: HashMap<B256, HashedStorageSorted>,
+    pub(crate) storages: B256HashMap<HashedStorageSorted>,
 }
 
 impl HashedPostStateSorted {
     /// Create new instance of [`HashedPostStateSorted`]
     pub const fn new(
         accounts: HashedAccountsSorted,
-        storages: HashMap<B256, HashedStorageSorted>,
+        storages: B256HashMap<HashedStorageSorted>,
     ) -> Self {
         Self { accounts, storages }
     }
@@ -309,7 +309,7 @@ impl HashedPostStateSorted {
     }
 
     /// Returns reference to hashed account storages.
-    pub const fn account_storages(&self) -> &HashMap<B256, HashedStorageSorted> {
+    pub const fn account_storages(&self) -> &B256HashMap<HashedStorageSorted> {
         &self.storages
     }
 }
@@ -320,7 +320,7 @@ pub struct HashedAccountsSorted {
     /// Sorted collection of hashed addresses and their account info.
     pub(crate) accounts: Vec<(B256, Account)>,
     /// Set of destroyed account keys.
-    pub(crate) destroyed_accounts: HashSet<B256>,
+    pub(crate) destroyed_accounts: B256HashSet,
 }
 
 impl HashedAccountsSorted {
@@ -340,7 +340,7 @@ pub struct HashedStorageSorted {
     /// Sorted hashed storage slots with non-zero value.
     pub(crate) non_zero_valued_slots: Vec<(B256, U256)>,
     /// Slots that have been zero valued.
-    pub(crate) zero_valued_slots: HashSet<B256>,
+    pub(crate) zero_valued_slots: B256HashSet,
     /// Flag indicating whether the storage was wiped or not.
     pub(crate) wiped: bool,
 }

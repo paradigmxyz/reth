@@ -13,9 +13,7 @@ use crate::{
     AddOns, FullNode,
 };
 use reth_exex::ExExContext;
-use reth_node_api::{
-    FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes, NodeTypesWithDB, PayloadBuilder,
-};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_tasks::TaskExecutor;
 use std::{fmt, future::Future};
@@ -32,7 +30,7 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
     /// Creates a new instance of the node builder with the given configuration and types.
     pub const fn new(
         config: NodeConfig<<T::Types as NodeTypes>::ChainSpec>,
-        database: <T::Types as NodeTypesWithDB>::DB,
+        database: T::DB,
     ) -> Self {
         Self { config, adapter: NodeTypesAdapter::new(database) }
     }
@@ -56,12 +54,12 @@ impl<T: FullNodeTypes> NodeBuilderWithTypes<T> {
 /// Container for the node's types and the database the node uses.
 pub struct NodeTypesAdapter<T: FullNodeTypes> {
     /// The database type used by the node.
-    pub database: <T::Types as NodeTypesWithDB>::DB,
+    pub database: T::DB,
 }
 
 impl<T: FullNodeTypes> NodeTypesAdapter<T> {
     /// Create a new adapter from the given node types.
-    pub(crate) const fn new(database: <T::Types as NodeTypesWithDB>::DB) -> Self {
+    pub(crate) const fn new(database: T::DB) -> Self {
         Self { database }
     }
 }
@@ -85,13 +83,11 @@ pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
 
 impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeTypes for NodeAdapter<T, C> {
     type Types = T::Types;
+    type DB = T::DB;
     type Provider = T::Provider;
 }
 
-impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C>
-where
-    C::PayloadBuilder: PayloadBuilder,
-{
+impl<T: FullNodeTypes, C: NodeComponents<T>> FullNodeComponents for NodeAdapter<T, C> {
     type Pool = C::Pool;
     type Evm = C::Evm;
     type Executor = C::Executor;

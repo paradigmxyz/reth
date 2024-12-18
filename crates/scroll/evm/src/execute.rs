@@ -13,8 +13,8 @@ use reth_evm::{
     ConfigureEvm, ConfigureEvmEnv,
 };
 use reth_primitives::{
-    gas_spent_by_transactions, BlockWithSenders, GotExpected, InvalidTransactionError, Receipt,
-    TxType,
+    gas_spent_by_transactions, BlockWithSenders, EthPrimitives, GotExpected,
+    InvalidTransactionError, Receipt, TransactionSigned, TxType,
 };
 use reth_revm::primitives::{CfgEnvWithHandlerCfg, U256};
 use reth_scroll_chainspec::{ChainSpecProvider, ScrollChainSpec};
@@ -22,7 +22,7 @@ use reth_scroll_consensus::{apply_curie_hard_fork, L1_GAS_PRICE_ORACLE_ADDRESS};
 use reth_scroll_execution::FinalizeExecution;
 use reth_scroll_forks::{ScrollHardfork, ScrollHardforks};
 use revm::{
-    db::BundleState,
+    db::{states::bundle_state::BundleRetention, BundleState},
     primitives::{BlockEnv, EnvWithHandlerCfg, ExecutionResult, ResultAndState},
     Database, DatabaseCommit, State,
 };
@@ -65,12 +65,15 @@ where
     }
 }
 
-impl<DB, EvmConfig> BlockExecutionStrategy<DB> for ScrollExecutionStrategy<DB, EvmConfig>
+impl<DB, EvmConfig> BlockExecutionStrategy for ScrollExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
     State<DB>: FinalizeExecution<Output = BundleState>,
-    EvmConfig: ConfigureEvm<Header = Header> + ChainSpecProvider<ChainSpec = ScrollChainSpec>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>
+        + ChainSpecProvider<ChainSpec = ScrollChainSpec>,
 {
+    type DB = DB;
+    type Primitives = EthPrimitives;
     type Error = BlockExecutionError;
 
     fn apply_pre_execution_changes(
@@ -215,6 +218,11 @@ where
         &mut self.state
     }
 
+    fn finish(&mut self) -> BundleState {
+        self.state_mut().merge_transitions(BundleRetention::Reverts);
+        self.state_mut().finalize()
+    }
+
     fn validate_block_post_execution(
         &self,
         block: &BlockWithSenders,
@@ -274,9 +282,10 @@ impl ScrollExecutionStrategyFactory {
 
 impl<EvmConfig> BlockExecutionStrategyFactory for ScrollExecutionStrategyFactory<EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Header = Header> + ChainSpecProvider<ChainSpec = ScrollChainSpec>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>
+        + ChainSpecProvider<ChainSpec = ScrollChainSpec>,
 {
-    /// Associated strategy type.
+    type Primitives = EthPrimitives;
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>>
         = ScrollExecutionStrategy<DB, EvmConfig>
     where

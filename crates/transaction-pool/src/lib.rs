@@ -150,17 +150,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use crate::{identifier::TransactionId, pool::PoolInner};
-use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
-use alloy_primitives::{Address, TxHash, B256, U256};
-use aquamarine as _;
-use reth_eth_wire_types::HandleMempoolData;
-use reth_execution_types::ChangedAccount;
-use reth_storage_api::StateProviderFactory;
-use std::{collections::HashSet, sync::Arc};
-use tokio::sync::mpsc::Receiver;
-use tracing::{instrument, trace};
-
 pub use crate::{
     blobstore::{BlobStore, BlobStoreError},
     config::{
@@ -181,6 +170,18 @@ pub use crate::{
         TransactionValidator, ValidPoolTransaction,
     },
 };
+use crate::{identifier::TransactionId, pool::PoolInner};
+use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
+use alloy_primitives::{Address, TxHash, B256, U256};
+use aquamarine as _;
+use reth_eth_wire_types::HandleMempoolData;
+use reth_execution_types::ChangedAccount;
+use reth_primitives::RecoveredTx;
+use reth_primitives_traits::{BlockBody, BlockHeader};
+use reth_storage_api::StateProviderFactory;
+use std::{collections::HashSet, sync::Arc};
+use tokio::sync::mpsc::Receiver;
+use tracing::{instrument, trace};
 
 pub mod error;
 pub mod maintain;
@@ -419,21 +420,11 @@ where
         self.pool.get_pooled_transaction_elements(tx_hashes, limit)
     }
 
-    fn get_pooled_transactions_as<P>(
-        &self,
-        tx_hashes: Vec<TxHash>,
-        limit: GetPooledTransactionLimit,
-    ) -> Vec<P>
-    where
-        <Self::Transaction as PoolTransaction>::Pooled: Into<P>,
-    {
-        self.pool.get_pooled_transactions_as(tx_hashes, limit)
-    }
-
     fn get_pooled_transaction_element(
         &self,
         tx_hash: TxHash,
-    ) -> Option<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled> {
+    ) -> Option<RecoveredTx<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>>
+    {
         self.pool.get_pooled_transaction_element(tx_hash)
     }
 
@@ -623,7 +614,11 @@ where
         self.pool.set_block_info(info)
     }
 
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
+    fn on_canonical_state_change<H, B>(&self, update: CanonicalStateUpdate<'_, H, B>)
+    where
+        H: BlockHeader,
+        B: BlockBody,
+    {
         self.pool.on_canonical_state_change(update);
     }
 

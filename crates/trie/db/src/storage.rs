@@ -48,6 +48,7 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
             DatabaseTrieCursorFactory::new(tx),
             DatabaseHashedCursorFactory::new(tx),
             address,
+            Default::default(),
             #[cfg(feature = "metrics")]
             TrieRootMetrics::new(TrieType::Storage),
         )
@@ -58,6 +59,7 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
             DatabaseTrieCursorFactory::new(tx),
             DatabaseHashedCursorFactory::new(tx),
             hashed_address,
+            Default::default(),
             #[cfg(feature = "metrics")]
             TrieRootMetrics::new(TrieType::Storage),
         )
@@ -75,10 +77,10 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
             DatabaseTrieCursorFactory::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
             address,
+            prefix_set,
             #[cfg(feature = "metrics")]
             TrieRootMetrics::new(TrieType::Storage),
         )
-        .with_prefix_set(prefix_set)
         .root()
     }
 }

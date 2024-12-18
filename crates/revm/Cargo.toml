@@ -40,12 +40,13 @@ alloy-consensus.workspace = true
 [features]
 default = ["std"]
 std = [
-    "reth-primitives/std",
-    "alloy-primitives/std",
-    "revm/std",
-    "alloy-eips/std",
-    "alloy-consensus/std",
-    "reth-primitives-traits/std",
+	"reth-primitives/std",
+	"alloy-primitives/std",
+	"revm/std",
+	"alloy-eips/std",
+	"alloy-consensus/std",
+	"reth-primitives-traits/std",
+	"reth-ethereum-forks/std"
 ]
 witness = ["dep:reth-trie"]
 test-utils = [
@@ -57,12 +58,13 @@ test-utils = [
     "reth-primitives-traits/test-utils",
 ]
 serde = [
-    "revm/serde",
-    "alloy-eips/serde",
-    "alloy-primitives/serde",
-    "alloy-consensus/serde",
-    "reth-primitives-traits/serde",
-    "reth-trie?/serde",
+	"revm/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"alloy-consensus/serde",
+	"reth-primitives-traits/serde",
+	"reth-trie?/serde",
+	"reth-ethereum-forks/serde",
     "reth-scroll-primitives?/serde"
 ]
 scroll = [

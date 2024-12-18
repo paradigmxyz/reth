@@ -18,14 +18,15 @@ use reth::{
         handler::register::EvmHandler,
         inspector_handle_register,
         precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
-        primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
+        primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
         ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
     },
     rpc::types::engine::PayloadAttributes,
     tasks::TaskManager,
-    transaction_pool::TransactionPool,
+    transaction_pool::{PoolTransaction, TransactionPool},
 };
 use reth_chainspec::{Chain, ChainSpec};
+use reth_evm::env::EvmEnv;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{
     ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
@@ -87,6 +88,8 @@ impl MyEvmConfig {
 
 impl ConfigureEvmEnv for MyEvmConfig {
     type Header = Header;
+    type Transaction = TransactionSigned;
+
     type Error = Infallible;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
@@ -116,7 +119,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error> {
+    ) -> Result<EvmEnv, Self::Error> {
         self.inner.next_cfg_and_block_env(parent, attributes)
     }
 }
@@ -156,7 +159,7 @@ pub struct MyExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
     type EVM = MyEvmConfig;
     type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory<Self::EVM>>;
@@ -186,7 +189,9 @@ impl<Types, Node, Pool> PayloadServiceBuilder<Node, Pool> for MyPayloadBuilder
 where
     Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
-    Pool: TransactionPool + Unpin + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+        + Unpin
+        + 'static,
     Types::Engine: PayloadTypes<
         BuiltPayload = EthBuiltPayload,
         PayloadAttributes = PayloadAttributes,

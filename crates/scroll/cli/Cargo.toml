@@ -17,6 +17,7 @@ reth-db.workspace = true
 reth-cli.workspace = true
 reth-cli-commands.workspace = true
 reth-cli-runner.workspace = true
+reth-eth-wire.workspace = true
 reth-node-builder.workspace = true
 reth-node-core.workspace = true
 reth-node-metrics.workspace = true

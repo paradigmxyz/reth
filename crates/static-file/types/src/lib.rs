@@ -55,12 +55,12 @@ impl HighestStaticFiles {
     }
 
     /// Returns the minimum block of all segments.
-    pub fn min(&self) -> Option<u64> {
+    pub fn min_block_num(&self) -> Option<u64> {
         [self.headers, self.transactions, self.receipts].iter().filter_map(|&option| option).min()
     }
 
     /// Returns the maximum block of all segments.
-    pub fn max(&self) -> Option<u64> {
+    pub fn max_block_num(&self) -> Option<u64> {
         [self.headers, self.transactions, self.receipts].iter().filter_map(|&option| option).max()
     }
 }
@@ -92,7 +92,7 @@ impl StaticFileTargets {
         ]
         .iter()
         .all(|(target_block_range, highest_static_fileted_block)| {
-            target_block_range.map_or(true, |target_block_range| {
+            target_block_range.is_none_or(|target_block_range| {
                 *target_block_range.start() ==
                     highest_static_fileted_block.map_or(0, |highest_static_fileted_block| {
                         highest_static_fileted_block + 1
@@ -154,11 +154,11 @@ mod tests {
             HighestStaticFiles { headers: Some(300), receipts: Some(100), transactions: None };
 
         // Minimum value among the available segments
-        assert_eq!(files.min(), Some(100));
+        assert_eq!(files.min_block_num(), Some(100));
 
         let empty_files = HighestStaticFiles::default();
         // No values, should return None
-        assert_eq!(empty_files.min(), None);
+        assert_eq!(empty_files.min_block_num(), None);
     }
 
     #[test]
@@ -167,11 +167,11 @@ mod tests {
             HighestStaticFiles { headers: Some(300), receipts: Some(100), transactions: Some(500) };
 
         // Maximum value among the available segments
-        assert_eq!(files.max(), Some(500));
+        assert_eq!(files.max_block_num(), Some(500));
 
         let empty_files = HighestStaticFiles::default();
         // No values, should return None
-        assert_eq!(empty_files.max(), None);
+        assert_eq!(empty_files.max_block_num(), None);
     }
 
     #[test]

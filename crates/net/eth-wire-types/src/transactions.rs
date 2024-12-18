@@ -5,7 +5,7 @@ use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::PooledTransactionsElement;
+use reth_primitives::PooledTransaction;
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -46,7 +46,7 @@ where
     Constructor,
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct PooledTransactions<T = PooledTransactionsElement>(
+pub struct PooledTransactions<T = PooledTransaction>(
     /// The transaction bodies, each of which should correspond to a requested hash.
     pub Vec<T>,
 );
@@ -88,7 +88,7 @@ mod tests {
     use alloy_primitives::{hex, PrimitiveSignature as Signature, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_primitives::{PooledTransactionsElement, Transaction, TransactionSigned};
+    use reth_primitives::{PooledTransaction, Transaction, TransactionSigned};
     use std::str::FromStr;
 
     #[test]
@@ -175,17 +175,17 @@ mod tests {
                 ),
             ),
         ];
-        let message: Vec<PooledTransactionsElement> = txs
+        let message: Vec<PooledTransaction> = txs
             .into_iter()
             .map(|tx| {
-                PooledTransactionsElement::try_from(tx)
-                    .expect("Failed to convert TransactionSigned to PooledTransactionsElement")
+                PooledTransaction::try_from(tx)
+                    .expect("Failed to convert TransactionSigned to PooledTransaction")
             })
             .collect();
         let request = RequestPair {
             request_id: 1111,
             message: PooledTransactions(message), /* Assuming PooledTransactions wraps a
-                                                   * Vec<PooledTransactionsElement> */
+                                                   * Vec<PooledTransaction> */
         };
         request.encode(&mut data);
         assert_eq!(data, expected);
@@ -241,11 +241,11 @@ mod tests {
                 ),
             ),
         ];
-        let message: Vec<PooledTransactionsElement> = txs
+        let message: Vec<PooledTransaction> = txs
             .into_iter()
             .map(|tx| {
-                PooledTransactionsElement::try_from(tx)
-                    .expect("Failed to convert TransactionSigned to PooledTransactionsElement")
+                PooledTransaction::try_from(tx)
+                    .expect("Failed to convert TransactionSigned to PooledTransaction")
             })
             .collect();
         let expected = RequestPair { request_id: 1111, message: PooledTransactions(message) };
@@ -373,11 +373,11 @@ mod tests {
                 ),
             ),
         ];
-        let message: Vec<PooledTransactionsElement> = txs
+        let message: Vec<PooledTransaction> = txs
             .into_iter()
             .map(|tx| {
-                PooledTransactionsElement::try_from(tx)
-                    .expect("Failed to convert TransactionSigned to PooledTransactionsElement")
+                PooledTransaction::try_from(tx)
+                    .expect("Failed to convert TransactionSigned to PooledTransaction")
             })
             .collect();
         let expected_transactions =
@@ -510,11 +510,11 @@ mod tests {
                 ),
             ),
         ];
-        let message: Vec<PooledTransactionsElement> = txs
+        let message: Vec<PooledTransaction> = txs
             .into_iter()
             .map(|tx| {
-                PooledTransactionsElement::try_from(tx)
-                    .expect("Failed to convert TransactionSigned to PooledTransactionsElement")
+                PooledTransaction::try_from(tx)
+                    .expect("Failed to convert TransactionSigned to PooledTransaction")
             })
             .collect();
         let transactions = RequestPair { request_id: 0, message: PooledTransactions(message) };

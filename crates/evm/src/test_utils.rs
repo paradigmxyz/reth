@@ -1,24 +1,42 @@
 //! Helpers for testing.
 
 use crate::{
+    env::EvmEnv,
     execute::{
         BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionInput,
         BlockExecutionOutput, BlockExecutionStrategy, BlockExecutorProvider, Executor,
     },
+    provider::EvmEnvProvider,
     system_calls::OnStateHook,
+    ConfigureEvmEnv,
 };
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{BlockNumber, U256};
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{BlockWithSenders, Receipt, Receipts};
+use reth_primitives::{BlockWithSenders, EthPrimitives, NodePrimitives, Receipt, Receipts};
 use reth_prune_types::PruneModes;
 use reth_scroll_execution::FinalizeExecution;
-use reth_storage_errors::provider::ProviderError;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{db::BundleState, State};
 use revm_primitives::db::Database;
 use std::{fmt::Display, sync::Arc};
+
+impl<C: Send + Sync, N: NodePrimitives> EvmEnvProvider<N::BlockHeader>
+    for reth_storage_api::noop::NoopProvider<C, N>
+{
+    fn env_with_header<EvmConfig>(
+        &self,
+        header: &N::BlockHeader,
+        evm_config: EvmConfig,
+    ) -> ProviderResult<EvmEnv>
+    where
+        EvmConfig: ConfigureEvmEnv<Header = N::BlockHeader>,
+    {
+        Ok(evm_config.cfg_and_block_env(header, U256::MAX))
+    }
+}
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
@@ -34,6 +52,8 @@ impl MockExecutorProvider {
 }
 
 impl BlockExecutorProvider for MockExecutorProvider {
+    type Primitives = EthPrimitives;
+
     type Executor<DB: Database<Error: Into<ProviderError> + Display>>
         = Self
     where
@@ -125,16 +145,14 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
     }
 }
 
-impl<S, DB> BasicBlockExecutor<S, DB>
+impl<S> BasicBlockExecutor<S>
 where
-    S: BlockExecutionStrategy<DB>,
-    DB: Database,
-    State<DB>: FinalizeExecution<Output = BundleState>,
+    S: BlockExecutionStrategy,
 {
     /// Provides safe read access to the state
     pub fn with_state<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&State<DB>) -> R,
+        F: FnOnce(&State<S::DB>) -> R,
     {
         f(self.strategy.state_ref())
     }
@@ -142,22 +160,20 @@ where
     /// Provides safe write access to the state
     pub fn with_state_mut<F, R>(&mut self, f: F) -> R
     where
-        F: FnOnce(&mut State<DB>) -> R,
+        F: FnOnce(&mut State<S::DB>) -> R,
     {
         f(self.strategy.state_mut())
     }
 }
 
-impl<S, DB> BasicBatchExecutor<S, DB>
+impl<S> BasicBatchExecutor<S>
 where
-    S: BlockExecutionStrategy<DB>,
-    DB: Database,
-    State<DB>: FinalizeExecution<Output = BundleState>,
+    S: BlockExecutionStrategy,
 {
     /// Provides safe read access to the state
     pub fn with_state<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&State<DB>) -> R,
+        F: FnOnce(&State<S::DB>) -> R,
     {
         f(self.strategy.state_ref())
     }
@@ -165,13 +181,13 @@ where
     /// Provides safe write access to the state
     pub fn with_state_mut<F, R>(&mut self, f: F) -> R
     where
-        F: FnOnce(&mut State<DB>) -> R,
+        F: FnOnce(&mut State<S::DB>) -> R,
     {
         f(self.strategy.state_mut())
     }
 
     /// Accessor for batch executor receipts.
-    pub const fn receipts(&self) -> &Receipts {
+    pub const fn receipts(&self) -> &Receipts<<S::Primitives as NodePrimitives>::Receipt> {
         self.batch_record.receipts()
     }
 }

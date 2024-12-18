@@ -377,7 +377,7 @@ mod tests {
         // Test lowest_buffered_ancestor for the descendant block
         let lowest_ancestor = tree_state.lowest_buffered_ancestor(&descendant_hash);
         assert!(lowest_ancestor.is_some());
-        assert_eq!(lowest_ancestor.unwrap().block.header.hash(), ancestor_hash);
+        assert_eq!(lowest_ancestor.unwrap().block.hash(), ancestor_hash);
 
         // Test lowest_buffered_ancestor with a non-existent hash
         let non_existent_hash = B256::random();

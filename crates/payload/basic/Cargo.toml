@@ -15,7 +15,6 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
-reth-primitives-traits.workspace = true
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
 reth-payload-builder.workspace = true
@@ -25,10 +24,11 @@ reth-tasks.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace=true
 
-# ethereum
-alloy-rlp.workspace = true
-alloy-primitives.workspace = true
+# revm
 revm.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 
