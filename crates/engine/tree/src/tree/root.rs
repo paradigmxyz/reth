@@ -264,7 +264,7 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 /// to the tree.
 /// Then it updates relevant leaves according to the result of the transaction.
 #[derive(Debug)]
-pub struct StateRootTask<Factory, BPF: BlindedProviderFactory> {
+pub struct StateRootTask<'env, Factory, BPF: BlindedProviderFactory> {
     /// Task configuration.
     config: StateRootConfig<Factory>,
     /// Receiver for state root related messages.
@@ -278,10 +278,12 @@ pub struct StateRootTask<Factory, BPF: BlindedProviderFactory> {
     /// The sparse trie used for the state root calculation. If [`None`], then update is in
     /// progress.
     sparse_trie: Option<Box<SparseStateTrie<BPF>>>,
+    /// Reference to the shared thread pool for parallel proof generation
+    thread_pool: &'env rayon::ThreadPool,
 }
 
 #[allow(dead_code)]
-impl<'env, Factory, ABP, SBP, BPF> StateRootTask<Factory, BPF>
+impl<'env, Factory, ABP, SBP, BPF> StateRootTask<'env, Factory, BPF>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader>
         + StateCommitmentProvider
@@ -297,7 +299,11 @@ where
         + 'env,
 {
     /// Creates a new state root task with the unified message channel
-    pub fn new(config: StateRootConfig<Factory>, blinded_provider: BPF) -> Self {
+    pub fn new(
+        config: StateRootConfig<Factory>,
+        blinded_provider: BPF,
+        thread_pool: &'env rayon::ThreadPool,
+    ) -> Self {
         let (tx, rx) = channel();
 
         Self {
@@ -307,6 +313,7 @@ where
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
             sparse_trie: Some(Box::new(SparseStateTrie::new(blinded_provider).with_updates(true))),
+            thread_pool,
         }
     }
 
@@ -345,6 +352,7 @@ where
         fetched_proof_targets: &mut MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
+        thread_pool: &'env rayon::ThreadPool,
     ) {
         let proof_targets =
             targets.into_iter().map(|address| (keccak256(address), Default::default())).collect();
@@ -357,6 +365,7 @@ where
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
+            thread_pool,
         );
     }
 
@@ -370,6 +379,7 @@ where
         fetched_proof_targets: &mut MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
+        thread_pool: &'env rayon::ThreadPool,
     ) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
@@ -383,6 +393,7 @@ where
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
+            thread_pool,
         );
     }
 
@@ -393,6 +404,7 @@ where
         proof_targets: MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
+        thread_pool: &'env rayon::ThreadPool,
     ) {
         // Dispatch proof gathering for this state update
         scope.spawn(move |_| {
@@ -401,6 +413,7 @@ where
                 config.nodes_sorted.clone(),
                 config.state_sorted.clone(),
                 config.prefix_sets.clone(),
+                thread_pool,
             )
             .with_branch_node_hash_masks(true)
             .multiproof(proof_targets.clone());
@@ -523,6 +536,7 @@ where
                             &mut self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
+                            self.thread_pool,
                         );
                     }
                     StateRootMessage::StateUpdate(update) => {
@@ -546,6 +560,7 @@ where
                             &mut self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
+                            self.thread_pool,
                         );
                     }
                     StateRootMessage::FinishedStateUpdates => {
@@ -948,8 +963,17 @@ mod tests {
             ),
             config.prefix_sets.clone(),
         );
+        let num_threads =
+            std::thread::available_parallelism().map_or(1, |num| (num.get() / 2).max(1));
+
+        let state_root_task_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("proof-worker-{}", i))
+            .build()
+            .expect("Failed to create proof worker thread pool");
+
         let (root_from_task, _) = std::thread::scope(|std_scope| {
-            let task = StateRootTask::new(config, blinded_provider_factory);
+            let task = StateRootTask::new(config, blinded_provider_factory, &state_root_task_pool);
             let mut state_hook = task.state_hook();
             let handle = task.spawn(std_scope);
 
