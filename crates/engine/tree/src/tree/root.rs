@@ -18,7 +18,7 @@ use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, Nibbles, TrieInput,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieError},
@@ -421,29 +421,13 @@ where
             ?proof_targets,
             "Spawning proof task"
         );
-        rayon::spawn(move || {
-            let result = ParallelProof::new(
-                config.consistent_view.clone(),
-                config.nodes_sorted.clone(),
-                config.state_sorted.clone(),
-                config.prefix_sets.clone(),
-            )
-            .with_branch_node_hash_masks(true)
-            .multiproof(proof_targets);
-
-            match result {
-                Ok(proof) => {
-                    let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated {
-                        proof,
-                        state_update: hashed_state_update,
-                        sequence_number: proof_sequence_number,
-                    });
-                }
-                Err(e) => {
-                    error!(target: "engine::root", error = ?e, "Could not calculate multiproof");
-                }
-            }
-        });
+        Self::spawn_multiproof(
+            config,
+            hashed_state_update,
+            proof_targets,
+            proof_sequence_number,
+            state_root_message_sender,
+        );
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -709,22 +693,17 @@ fn calculate_multiproof<Factory>(
     proof_targets: HashMap<B256, HashSet<B256>>,
 ) -> ProviderResult<MultiProof>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
+    Factory:
+        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
-    let provider = config.consistent_view.provider_ro()?;
-
-    Ok(Proof::from_tx(provider.tx_ref())
-        .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
-            DatabaseTrieCursorFactory::new(provider.tx_ref()),
-            &config.nodes_sorted,
-        ))
-        .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(provider.tx_ref()),
-            &config.state_sorted,
-        ))
-        .with_prefix_sets_mut(config.prefix_sets.as_ref().clone())
-        .with_branch_node_hash_masks(true)
-        .multiproof(proof_targets)?)
+    Ok(ParallelProof::new(
+        config.consistent_view.clone(),
+        config.nodes_sorted.clone(),
+        config.state_sorted.clone(),
+        config.prefix_sets.clone(),
+    )
+    .with_branch_node_hash_masks(true)
+    .multiproof(proof_targets)?)
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
