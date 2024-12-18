@@ -361,7 +361,7 @@ where
         body: &BlockWithSenders<B>,
     ) {
         let mut accounts = AddressHashSet::with_capacity_and_hasher(
-            body.transactions().len() +
+            body.transactions().len() * 2 +
                 body.withdrawals().map_or(0, |withdrawals| withdrawals.len()),
             Default::default(),
         );
