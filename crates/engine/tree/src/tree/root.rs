@@ -5,6 +5,7 @@ use derive_more::derive::Deref;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::system_calls::OnStateHook;
+use reth_primitives::BlockWithSenders;
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -352,24 +353,20 @@ where
     ///
     /// This method does not prefetch the proofs on its own, but only sends the message to the
     /// [`StateRootTask`] that will be processed by the main loop.
-    pub fn prefetech_account_proofs<
+    pub fn prefetch_account_proofs<
         T: SignedTransaction + alloy_consensus::Transaction,
         B: BlockBody<Transaction = T>,
     >(
         &self,
-        body: B,
+        body: &BlockWithSenders<B>,
     ) {
         let mut accounts = AddressHashSet::with_capacity_and_hasher(
             body.transactions().len() +
                 body.withdrawals().map_or(0, |withdrawals| withdrawals.len()),
             Default::default(),
         );
-        accounts.extend(
-            body.transactions()
-                .iter()
-                .flat_map(|tx| [tx.recover_signer(), tx.kind().to().copied()])
-                .flatten(),
-        );
+        accounts.extend(body.senders.iter().copied());
+        accounts.extend(body.transactions().iter().filter_map(|tx| tx.kind().to().copied()));
         if let Some(withdrawals) = body.withdrawals() {
             accounts.extend(withdrawals.iter().map(|withdrawal| withdrawal.address));
         }
