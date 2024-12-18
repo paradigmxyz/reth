@@ -16,13 +16,17 @@ reth-db-api.workspace = true
 reth-provider.workspace = true
 reth-config.workspace = true
 reth-trie.workspace = true
+reth-trie-db.workspace = true
 reth-etl.workspace = true
 reth-codecs.workspace = true
 reth-stages-types.workspace = true
 reth-fs-util.workspace = true
+reth-node-types.workspace = true
 
 # eth
+alloy-consensus.workspace = true
 alloy-genesis.workspace = true
+alloy-primitives.workspace = true
 
 # misc
 eyre.workspace = true
@@ -38,6 +42,8 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-primitives-traits.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+alloy-consensus.workspace = true
 
 [lints]
 workspace = true

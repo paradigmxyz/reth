@@ -1,5 +1,5 @@
+use alloy_primitives::BlockNumber;
 use reth_errors::{RethError, RethResult};
-use reth_primitives::BlockNumber;
 use std::{
     fmt,
     task::{Context, Poll},
@@ -104,7 +104,7 @@ pub enum EngineHookError {
     Common(#[from] RethError),
     /// An internal error occurred.
     #[error(transparent)]
-    Internal(#[from] Box<dyn std::error::Error + Send + Sync>),
+    Internal(#[from] Box<dyn core::error::Error + Send + Sync>),
 }
 
 /// Level of database access the hook needs for execution.

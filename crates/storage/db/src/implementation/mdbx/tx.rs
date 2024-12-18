@@ -180,7 +180,12 @@ struct MetricsHandler<K: TransactionKind> {
     /// If `true`, the backtrace of transaction has already been recorded and logged.
     /// See [`MetricsHandler::log_backtrace_on_long_read_transaction`].
     backtrace_recorded: AtomicBool,
+    /// Shared database environment metrics.
     env_metrics: Arc<DatabaseEnvMetrics>,
+    /// Backtrace of the location where the transaction has been opened. Reported only with debug
+    /// assertions, because capturing the backtrace on every transaction opening is expensive.
+    #[cfg(debug_assertions)]
+    open_backtrace: Backtrace,
     _marker: PhantomData<K>,
 }
 
@@ -193,6 +198,8 @@ impl<K: TransactionKind> MetricsHandler<K> {
             close_recorded: false,
             record_backtrace: true,
             backtrace_recorded: AtomicBool::new(false),
+            #[cfg(debug_assertions)]
+            open_backtrace: Backtrace::force_capture(),
             env_metrics,
             _marker: PhantomData,
         }
@@ -232,11 +239,22 @@ impl<K: TransactionKind> MetricsHandler<K> {
             let open_duration = self.start.elapsed();
             if open_duration >= self.long_transaction_duration {
                 self.backtrace_recorded.store(true, Ordering::Relaxed);
+                #[cfg(debug_assertions)]
+                let message = format!(
+                   "The database read transaction has been open for too long. Open backtrace:\n{}\n\nCurrent backtrace:\n{}",
+                   self.open_backtrace,
+                   Backtrace::force_capture()
+                );
+                #[cfg(not(debug_assertions))]
+                let message = format!(
+                    "The database read transaction has been open for too long. Backtrace:\n{}",
+                    Backtrace::force_capture()
+                );
                 warn!(
                     target: "storage::db::mdbx",
                     ?open_duration,
                     %self.txn_id,
-                    "The database read transaction has been open for too long. Backtrace:\n{}", Backtrace::force_capture()
+                    "{message}"
                 );
             }
         }
@@ -265,8 +283,15 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     type DupCursor<T: DupSort> = Cursor<K, T>;
 
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
+        self.get_by_encoded_key::<T>(&key.encode())
+    }
+
+    fn get_by_encoded_key<T: Table>(
+        &self,
+        key: &<T::Key as Encode>::Encoded,
+    ) -> Result<Option<T::Value>, DatabaseError> {
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
-            tx.get(self.get_dbi::<T>()?, key.encode().as_ref())
+            tx.get(self.get_dbi::<T>()?, key.as_ref())
                 .map_err(|e| DatabaseError::Read(e.into()))?
                 .map(decode_one::<T>)
                 .transpose()

@@ -14,18 +14,18 @@ workspace = true
 [dependencies]
 # ethereum
 alloy-chains.workspace = true
-alloy-primitives = { workspace = true, features = ["serde", "rand", "rlp"] }
+alloy-primitives = { workspace = true, features = ["serde", "rlp"] }
 alloy-rlp = { workspace = true, features = ["arrayvec", "derive"] }
+once_cell.workspace = true
 
 # used for forkid
 crc = "3"
 
 # misc
 serde = { workspace = true, features = ["derive"], optional = true }
-thiserror-no-std = { workspace = true, default-features = false }
-once_cell.workspace = true
+thiserror.workspace = true
 dyn-clone.workspace = true
-rustc-hash.workspace = true
+rustc-hash = { workspace = true, optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -35,12 +35,32 @@ auto_impl.workspace = true
 
 [dev-dependencies]
 arbitrary = { workspace = true, features = ["derive"] }
-proptest.workspace = true
-proptest-derive.workspace = true
+alloy-consensus.workspace = true
 
 [features]
-default = ["std", "serde"]
-arbitrary = ["dep:arbitrary", "dep:proptest", "dep:proptest-derive"]
-optimism = []
-serde = ["dep:serde"]
-std = ["thiserror-no-std/std"]
+default = ["std", "serde", "rustc-hash"]
+arbitrary = [
+	"dep:arbitrary",
+	"dep:proptest",
+	"dep:proptest-derive",
+	"alloy-chains/arbitrary",
+	"alloy-consensus/arbitrary",
+	"alloy-primitives/arbitrary"
+]
+serde = [
+	"dep:serde",
+	"alloy-chains/serde",
+	"alloy-consensus/serde",
+	"alloy-primitives/serde"
+]
+std = [
+	"alloy-chains/std",
+	"alloy-primitives/std",
+	"thiserror/std",
+	"rustc-hash/std",
+	"alloy-consensus/std",
+	"once_cell/std",
+	"serde?/std",
+	"alloy-rlp/std"
+]
+rustc-hash = ["dep:rustc-hash"]

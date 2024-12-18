@@ -1,0 +1,45 @@
+[package]
+name = "reth-node-metrics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+reth-metrics.workspace = true
+reth-tasks.workspace = true
+
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
+metrics-process.workspace = true
+metrics-util.workspace = true
+
+tokio.workspace = true
+
+jsonrpsee-server.workspace = true
+http.workspace = true
+tower.workspace = true
+
+tracing.workspace = true
+eyre.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs = "0.16.0"
+
+[dev-dependencies]
+reqwest.workspace = true
+socket2 = { version = "0.5", default-features = false }
+
+[lints]
+workspace = true
+
+[features]
+jemalloc = ["dep:tikv-jemalloc-ctl"]
+
+[build-dependencies]
+vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

@@ -6,10 +6,10 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
-    fs::{self, ReadDir},
-    io,
+    fs::{self, File, OpenOptions, ReadDir},
+    io::{self, BufWriter, Error, ErrorKind, Write},
     path::{Path, PathBuf},
 };
 
@@ -138,6 +138,14 @@ pub enum FsPathError {
         /// The path related to the operation.
         path: PathBuf,
     },
+    /// Error variant for failed fsync operation with additional path context.
+    #[error("failed to sync path {path:?}: {source}")]
+    Fsync {
+        /// The source `io::Error`.
+        source: io::Error,
+        /// The path related to the operation.
+        path: PathBuf,
+    },
 }
 
 impl FsPathError {
@@ -195,6 +203,17 @@ impl FsPathError {
     pub fn metadata(source: io::Error, path: impl Into<PathBuf>) -> Self {
         Self::Metadata { source, path: path.into() }
     }
+
+    /// Returns the complementary error variant for `fsync`.
+    pub fn fsync(source: io::Error, path: impl Into<PathBuf>) -> Self {
+        Self::Fsync { source, path: path.into() }
+    }
+}
+
+/// Wrapper for [`File::open`].
+pub fn open(path: impl AsRef<Path>) -> Result<File> {
+    let path = path.as_ref();
+    File::open(path).map_err(|err| FsPathError::open(err, path))
 }
 
 /// Wrapper for `std::fs::read_to_string`
@@ -221,6 +240,12 @@ pub fn write(path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
 pub fn remove_dir_all(path: impl AsRef<Path>) -> Result<()> {
     let path = path.as_ref();
     fs::remove_dir_all(path).map_err(|err| FsPathError::remove_dir(err, path))
+}
+
+/// Wrapper for `File::create`.
+pub fn create_file(path: impl AsRef<Path>) -> Result<fs::File> {
+    let path = path.as_ref();
+    File::create(path).map_err(|err| FsPathError::create_file(err, path))
 }
 
 /// Wrapper for `std::fs::remove_file`
@@ -252,4 +277,83 @@ pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<()> {
 pub fn metadata(path: impl AsRef<Path>) -> Result<fs::Metadata> {
     let path = path.as_ref();
     fs::metadata(path).map_err(|err| FsPathError::metadata(err, path))
+}
+
+/// Reads the JSON file and deserialize it into the provided type.
+pub fn read_json_file<T: DeserializeOwned>(path: &Path) -> Result<T> {
+    // read the file into a byte array first
+    // https://github.com/serde-rs/json/issues/160
+    let bytes = read(path)?;
+    serde_json::from_slice(&bytes)
+        .map_err(|source| FsPathError::ReadJson { source, path: path.into() })
+}
+
+/// Writes the object as a JSON object.
+pub fn write_json_file<T: Serialize>(path: &Path, obj: &T) -> Result<()> {
+    let file = create_file(path)?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer_pretty(&mut writer, obj)
+        .map_err(|source| FsPathError::WriteJson { source, path: path.into() })?;
+    writer.flush().map_err(|e| FsPathError::write(e, path))
+}
+
+/// Writes atomically to file.
+///
+/// 1. Creates a temporary file with a `.tmp` extension in the same file directory.
+/// 2. Writes content with `write_fn`.
+/// 3. Fsyncs the temp file to disk.
+/// 4. Renames the temp file to the target path.
+/// 5. Fsyncs the file directory.
+///
+/// Atomic writes are hard:
+/// * <https://github.com/paradigmxyz/reth/issues/8622>
+/// * <https://users.rust-lang.org/t/how-to-write-replace-files-atomically/42821/13>
+pub fn atomic_write_file<F, E>(file_path: &Path, write_fn: F) -> Result<()>
+where
+    F: FnOnce(&mut File) -> std::result::Result<(), E>,
+    E: Into<Box<dyn core::error::Error + Send + Sync>>,
+{
+    #[cfg(windows)]
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let mut tmp_path = file_path.to_path_buf();
+    tmp_path.set_extension("tmp");
+
+    // Write to the temporary file
+    let mut file =
+        File::create(&tmp_path).map_err(|err| FsPathError::create_file(err, &tmp_path))?;
+
+    write_fn(&mut file).map_err(|err| FsPathError::Write {
+        source: Error::new(ErrorKind::Other, err.into()),
+        path: tmp_path.clone(),
+    })?;
+
+    // fsync() file
+    file.sync_all().map_err(|err| FsPathError::fsync(err, &tmp_path))?;
+
+    // Rename file, not move
+    rename(&tmp_path, file_path)?;
+
+    // fsync() directory
+    if let Some(parent) = file_path.parent() {
+        #[cfg(windows)]
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(0x02000000) // FILE_FLAG_BACKUP_SEMANTICS
+            .open(parent)
+            .map_err(|err| FsPathError::open(err, parent))?
+            .sync_all()
+            .map_err(|err| FsPathError::fsync(err, parent))?;
+
+        #[cfg(not(windows))]
+        OpenOptions::new()
+            .read(true)
+            .open(parent)
+            .map_err(|err| FsPathError::open(err, parent))?
+            .sync_all()
+            .map_err(|err| FsPathError::fsync(err, parent))?;
+    }
+
+    Ok(())
 }

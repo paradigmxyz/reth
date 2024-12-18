@@ -13,13 +13,11 @@ pub use storage_root_targets::StorageRootTargets;
 /// Parallel trie calculation stats.
 pub mod stats;
 
-/// Implementation of async state root computation.
-#[cfg(feature = "async")]
-pub mod async_root;
-
 /// Implementation of parallel state root computation.
-#[cfg(feature = "parallel")]
-pub mod parallel_root;
+pub mod root;
+
+/// Implementation of parallel proof computation.
+pub mod proof;
 
 /// Parallel state root metrics.
 #[cfg(feature = "metrics")]

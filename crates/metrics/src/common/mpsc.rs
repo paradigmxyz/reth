@@ -1,9 +1,9 @@
 //! Support for metering senders. Facilitates debugging by exposing metrics for number of messages
 //! sent, number of errors, etc.
 
+use crate::Metrics;
 use futures::Stream;
 use metrics::Counter;
-use reth_metrics_derive::Metrics;
 use std::{
     pin::Pin,
     task::{ready, Context, Poll},

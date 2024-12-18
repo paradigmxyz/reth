@@ -12,19 +12,57 @@ workspace = true
 
 [dependencies]
 reth-primitives.workspace = true
-reth-chainspec = { workspace = true, optional = true }
+reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
+reth-trie-common = { workspace = true, optional = true }
 reth-trie.workspace = true
 
 revm.workspace = true
 
-serde = { workspace = true, optional = true }
-
-[dev-dependencies]
-reth-primitives = { workspace = true, features = ["test-utils"] }
+# alloy
+alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
+serde = { workspace = true, optional = true }
+serde_with = { workspace = true, optional = true }
+
+[dev-dependencies]
+arbitrary.workspace = true
+bincode.workspace = true
+rand.workspace = true
+reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
+
 [features]
-optimism = ["dep:reth-chainspec"]
-serde = ["dep:serde", "reth-trie/serde", "revm/serde"]
+default = ["std"]
+optimism = ["reth-primitives/optimism", "revm/optimism"]
+serde = [
+	"dep:serde",
+	"rand/serde",
+	"revm/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"reth-primitives-traits/serde",
+	"alloy-consensus/serde",
+	"reth-trie/serde",
+	"reth-trie-common?/serde"
+]
+serde-bincode-compat = [
+	"serde",
+	"reth-trie-common/serde-bincode-compat",
+	"reth-primitives/serde-bincode-compat",
+	"reth-primitives-traits/serde-bincode-compat",
+	"serde_with",
+	"alloy-eips/serde-bincode-compat",
+    "alloy-consensus/serde-bincode-compat",
+]
+std = [
+	"reth-primitives/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"revm/std",
+	"serde?/std",
+	"reth-primitives-traits/std",
+	"alloy-consensus/std",
+	"serde_with?/std"
+]

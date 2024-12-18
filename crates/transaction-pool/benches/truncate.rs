@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+use alloy_primitives::{hex_literal::hex, Address};
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
@@ -8,7 +9,6 @@ use proptest::{
     strategy::ValueTree,
     test_runner::{RngAlgorithm, TestRng, TestRunner},
 };
-use reth_primitives::{hex_literal::hex, Address};
 use reth_transaction_pool::{
     pool::{BasefeeOrd, ParkedPool, PendingPool, QueuedOrd},
     test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
@@ -66,7 +66,7 @@ fn generate_many_transactions(senders: usize, max_depth: usize) -> Vec<MockTrans
     let rng = TestRng::from_seed(RngAlgorithm::ChaCha, &SEED);
     let mut runner = TestRunner::new_with_rng(config, rng);
 
-    let mut txs = Vec::new();
+    let mut txs = Vec::with_capacity(senders);
     for idx in 0..senders {
         // modulo max_depth so we know it is bounded, plus one so the minimum is always 1
         let depth = any::<usize>().new_tree(&mut runner).unwrap().current() % max_depth + 1;

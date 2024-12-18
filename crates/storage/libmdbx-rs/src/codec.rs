@@ -1,5 +1,5 @@
 use crate::{Error, TransactionKind};
-use derive_more::*;
+use derive_more::{Debug, Deref, DerefMut};
 use std::{borrow::Cow, slice};
 
 /// Implement this to be able to decode data values
@@ -22,7 +22,7 @@ pub trait TableObject: Sized {
     }
 }
 
-impl<'tx> TableObject for Cow<'tx, [u8]> {
+impl TableObject for Cow<'_, [u8]> {
     fn decode(_: &[u8]) -> Result<Self, Error> {
         unreachable!()
     }

@@ -1,44 +1,44 @@
-use reth_primitives::{
-    Address, BlockHash, BlockHashOrNumber, BlockNumber, GotExpected, StaticFileSegment,
-    TxHashOrNumber, TxNumber, B256, U256,
-};
-
-#[cfg(feature = "std")]
-use std::path::PathBuf;
-
-#[cfg(not(feature = "std"))]
-use alloc::{
-    boxed::Box,
-    string::{String, ToString},
-};
+use crate::{db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError};
+use alloc::{boxed::Box, string::String};
+use alloy_eips::{BlockHashOrNumber, HashOrNumber};
+use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
+use derive_more::Display;
+use reth_primitives_traits::GotExpected;
+use reth_static_file_types::StaticFileSegment;
 
 /// Provider result type.
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
 
 /// Bundled errors variants thrown by various providers.
-#[derive(Clone, Debug, thiserror_no_std::Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Display, PartialEq, Eq)]
 pub enum ProviderError {
     /// Database error.
-    #[error(transparent)]
-    Database(#[from] crate::db::DatabaseError),
+    Database(DatabaseError),
+    /// RLP error.
+    Rlp(alloy_rlp::Error),
     /// Filesystem path error.
-    #[error("{0}")]
+    #[display("{_0}")]
     FsPathError(String),
     /// Nippy jar error.
-    #[error("nippy jar error: {0}")]
+    #[display("nippy jar error: {_0}")]
     NippyJar(String),
+    /// Trie witness error.
+    #[display("trie witness error: {_0}")]
+    TrieWitnessError(String),
     /// Error when recovering the sender for a transaction
-    #[error("failed to recover sender for transaction")]
+    #[display("failed to recover sender for transaction")]
     SenderRecoveryError,
     /// The header number was not found for the given block hash.
-    #[error("block hash {0} does not exist in Headers table")]
+    #[display("block hash {_0} does not exist in Headers table")]
     BlockHashNotFound(BlockHash),
     /// A block body is missing.
-    #[error("block meta not found for block #{0}")]
+    #[display("block meta not found for block #{_0}")]
     BlockBodyIndicesNotFound(BlockNumber),
     /// The transition ID was found for the given address and storage key, but the changeset was
     /// not found.
-    #[error("storage change set for address {address} and key {storage_key} at block #{block_number} does not exist")]
+    #[display(
+        "storage change set for address {address} and key {storage_key} at block #{block_number} does not exist"
+    )]
     StorageChangesetNotFound {
         /// The block number found for the address and storage key.
         block_number: BlockNumber,
@@ -50,7 +50,7 @@ pub enum ProviderError {
         storage_key: Box<B256>,
     },
     /// The block number was found for the given address, but the changeset was not found.
-    #[error("account change set for address {address} at block #{block_number} does not exist")]
+    #[display("account change set for address {address} at block #{block_number} does not exist")]
     AccountChangesetNotFound {
         /// Block number found for the address.
         block_number: BlockNumber,
@@ -58,101 +58,124 @@ pub enum ProviderError {
         address: Address,
     },
     /// The total difficulty for a block is missing.
-    #[error("total difficulty not found for block #{0}")]
+    #[display("total difficulty not found for block #{_0}")]
     TotalDifficultyNotFound(BlockNumber),
     /// when required header related data was not found but was required.
-    #[error("no header found for {0:?}")]
+    #[display("no header found for {_0:?}")]
     HeaderNotFound(BlockHashOrNumber),
-    /// The specific transaction is missing.
-    #[error("no transaction found for {0:?}")]
-    TransactionNotFound(TxHashOrNumber),
-    /// The specific receipt is missing
-    #[error("no receipt found for {0:?}")]
-    ReceiptNotFound(TxHashOrNumber),
+    /// The specific transaction identified by hash or id is missing.
+    #[display("no transaction found for {_0:?}")]
+    TransactionNotFound(HashOrNumber),
+    /// The specific receipt for a transaction identified by hash or id is missing
+    #[display("no receipt found for {_0:?}")]
+    ReceiptNotFound(HashOrNumber),
     /// Unable to find the best block.
-    #[error("best block does not exist")]
+    #[display("best block does not exist")]
     BestBlockNotFound,
     /// Unable to find the finalized block.
-    #[error("finalized block does not exist")]
+    #[display("finalized block does not exist")]
     FinalizedBlockNotFound,
     /// Unable to find the safe block.
-    #[error("safe block does not exist")]
+    #[display("safe block does not exist")]
     SafeBlockNotFound,
-    /// Mismatch of sender and transaction.
-    #[error("mismatch of sender and transaction id {tx_id}")]
-    MismatchOfTransactionAndSenderId {
-        /// The transaction ID.
-        tx_id: TxNumber,
-    },
-    /// Block body wrong transaction count.
-    #[error("stored block indices does not match transaction count")]
-    BlockBodyTransactionCount,
     /// Thrown when the cache service task dropped.
-    #[error("cache service task stopped")]
+    #[display("cache service task stopped")]
     CacheServiceUnavailable,
     /// Thrown when we failed to lookup a block for the pending state.
-    #[error("unknown block {0}")]
+    #[display("unknown block {_0}")]
     UnknownBlockHash(B256),
     /// Thrown when we were unable to find a state for a block hash.
-    #[error("no state found for block {0}")]
+    #[display("no state found for block {_0}")]
     StateForHashNotFound(B256),
-    /// Unable to compute state root on top of historical block.
-    #[error("unable to compute state root on top of historical block")]
-    StateRootNotAvailableForHistoricalBlock,
+    /// Thrown when we were unable to find a state for a block number.
+    #[display("no state found for block number {_0}")]
+    StateForNumberNotFound(u64),
     /// Unable to find the block number for a given transaction index.
-    #[error("unable to find the block number for a given transaction index")]
+    #[display("unable to find the block number for a given transaction index")]
     BlockNumberForTransactionIndexNotFound,
     /// Root mismatch.
-    #[error("merkle trie {0}")]
+    #[display("merkle trie {_0}")]
     StateRootMismatch(Box<RootMismatch>),
     /// Root mismatch during unwind
-    #[error("unwind merkle trie {0}")]
+    #[display("unwind merkle trie {_0}")]
     UnwindStateRootMismatch(Box<RootMismatch>),
     /// State is not available for the given block number because it is pruned.
-    #[error("state at block #{0} is pruned")]
+    #[display("state at block #{_0} is pruned")]
     StateAtBlockPruned(BlockNumber),
     /// Provider does not support this particular request.
-    #[error("this provider does not support this request")]
+    #[display("this provider does not support this request")]
     UnsupportedProvider,
     /// Static File is not found at specified path.
     #[cfg(feature = "std")]
-    #[error("not able to find {0} static file at {1}")]
-    MissingStaticFilePath(StaticFileSegment, PathBuf),
+    #[display("not able to find {_0} static file at {_1:?}")]
+    MissingStaticFilePath(StaticFileSegment, std::path::PathBuf),
     /// Static File is not found for requested block.
-    #[error("not able to find {0} static file for block number {1}")]
+    #[display("not able to find {_0} static file for block number {_1}")]
     MissingStaticFileBlock(StaticFileSegment, BlockNumber),
     /// Static File is not found for requested transaction.
-    #[error("unable to find {0} static file for transaction id {1}")]
+    #[display("unable to find {_0} static file for transaction id {_1}")]
     MissingStaticFileTx(StaticFileSegment, TxNumber),
     /// Static File is finalized and cannot be written to.
-    #[error("unable to write block #{1} to finalized static file {0}")]
+    #[display("unable to write block #{_1} to finalized static file {_0}")]
     FinalizedStaticFile(StaticFileSegment, BlockNumber),
     /// Trying to insert data from an unexpected block number.
-    #[error("trying to append data to {0} as block #{1} but expected block #{2}")]
+    #[display("trying to append data to {_0} as block #{_1} but expected block #{_2}")]
     UnexpectedStaticFileBlockNumber(StaticFileSegment, BlockNumber, BlockNumber),
+    /// Trying to insert data from an unexpected block number.
+    #[display("trying to append row to {_0} at index #{_1} but expected index #{_2}")]
+    UnexpectedStaticFileTxNumber(StaticFileSegment, TxNumber, TxNumber),
     /// Static File Provider was initialized as read-only.
-    #[error("cannot get a writer on a read-only environment.")]
+    #[display("cannot get a writer on a read-only environment.")]
     ReadOnlyStaticFileAccess,
-    /// Error encountered when the block number conversion from U256 to u64 causes an overflow.
-    #[error("failed to convert block number U256 to u64: {0}")]
-    BlockNumberOverflow(U256),
     /// Consistent view error.
-    #[error("failed to initialize consistent view: {0}")]
+    #[display("failed to initialize consistent view: {_0}")]
     ConsistentView(Box<ConsistentViewError>),
     /// Storage lock error.
-    #[error(transparent)]
-    StorageLockError(#[from] crate::lockfile::StorageLockError),
+    StorageLockError(StorageLockError),
+    /// Storage writer error.
+    UnifiedStorageWriterError(UnifiedStorageWriterError),
+    /// Received invalid output from configured storage implementation.
+    InvalidStorageOutput,
 }
 
-impl From<reth_fs_util::FsPathError> for ProviderError {
-    fn from(err: reth_fs_util::FsPathError) -> Self {
-        Self::FsPathError(err.to_string())
+impl From<DatabaseError> for ProviderError {
+    fn from(error: DatabaseError) -> Self {
+        Self::Database(error)
+    }
+}
+
+impl From<alloy_rlp::Error> for ProviderError {
+    fn from(error: alloy_rlp::Error) -> Self {
+        Self::Rlp(error)
+    }
+}
+
+impl From<StorageLockError> for ProviderError {
+    fn from(error: StorageLockError) -> Self {
+        Self::StorageLockError(error)
+    }
+}
+
+impl From<UnifiedStorageWriterError> for ProviderError {
+    fn from(error: UnifiedStorageWriterError) -> Self {
+        Self::UnifiedStorageWriterError(error)
+    }
+}
+
+impl core::error::Error for ProviderError {
+    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
+        match self {
+            Self::Database(source) => core::error::Error::source(source),
+            Self::StorageLockError(source) => core::error::Error::source(source),
+            Self::UnifiedStorageWriterError(source) => core::error::Error::source(source),
+            _ => Option::None,
+        }
     }
 }
 
 /// A root mismatch error at a given block height.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror_no_std::Error)]
-#[error("root mismatch at #{block_number} ({block_hash}): {root}")]
+#[derive(Clone, Debug, PartialEq, Eq, Display)]
+#[display("root mismatch at #{block_number} ({block_hash}): {root}")]
 pub struct RootMismatch {
     /// The target block root diff.
     pub root: GotExpected<B256>,
@@ -163,16 +186,16 @@ pub struct RootMismatch {
 }
 
 /// Consistent database view error.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror_no_std::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, Display)]
 pub enum ConsistentViewError {
     /// Error thrown on attempt to initialize provider while node is still syncing.
-    #[error("node is syncing. best block: {best_block:?}")]
+    #[display("node is syncing. best block: {best_block:?}")]
     Syncing {
         /// Best block diff.
         best_block: GotExpected<BlockNumber>,
     },
     /// Error thrown on inconsistent database view.
-    #[error("inconsistent database state: {tip:?}")]
+    #[display("inconsistent database state: {tip:?}")]
     Inconsistent {
         /// The tip diff.
         tip: GotExpected<Option<B256>>,
@@ -180,7 +203,7 @@ pub enum ConsistentViewError {
 }
 
 impl From<ConsistentViewError> for ProviderError {
-    fn from(value: ConsistentViewError) -> Self {
-        Self::ConsistentView(Box::new(value))
+    fn from(error: ConsistentViewError) -> Self {
+        Self::ConsistentView(Box::new(error))
     }
 }

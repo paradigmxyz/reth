@@ -8,7 +8,7 @@ use std::{
 };
 use tokio::time::Sleep;
 
-/// Given a [Rate] this type enforces a rate limit.
+/// Given a [`Rate`] this type enforces a rate limit.
 #[derive(Debug)]
 pub struct RateLimit {
     rate: Rate,
@@ -122,6 +122,7 @@ impl Rate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::time;
 
     #[tokio::test]
     async fn test_rate_limit() {
@@ -156,5 +157,119 @@ mod tests {
             Poll::Ready(())
         })
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_initialization() {
+        let rate = Rate::new(5, Duration::from_secs(1));
+        let limit = RateLimit::new(rate);
+
+        // Verify the limit is correctly set
+        assert_eq!(limit.limit(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_allows_within_limit() {
+        let mut limit = RateLimit::new(Rate::new(3, Duration::from_millis(1)));
+
+        // Check that the rate limiter is ready initially
+        for _ in 0..3 {
+            poll_fn(|cx| {
+                // Should be ready within the limit
+                assert!(limit.poll_ready(cx).is_ready());
+                Poll::Ready(())
+            })
+            .await;
+            // Signal that a request has been made
+            limit.tick();
+        }
+
+        // After 3 requests, it should be pending (rate limit hit)
+        poll_fn(|cx| {
+            // Exceeded limit, should now be limited
+            assert!(limit.poll_ready(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_rate_limit_enforces_wait_after_limit() {
+        let mut limit = RateLimit::new(Rate::new(2, Duration::from_millis(500)));
+
+        // Consume the limit
+        for _ in 0..2 {
+            poll_fn(|cx| {
+                assert!(limit.poll_ready(cx).is_ready());
+                Poll::Ready(())
+            })
+            .await;
+            limit.tick();
+        }
+
+        // Should now be limited (pending)
+        poll_fn(|cx| {
+            assert!(limit.poll_ready(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        // Wait until the rate period elapses
+        time::sleep(limit.rate.duration()).await;
+
+        // Now it should be ready again after the wait
+        poll_fn(|cx| {
+            assert!(limit.poll_ready(cx).is_ready());
+            Poll::Ready(())
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_wait_method_awaits_readiness() {
+        let mut limit = RateLimit::new(Rate::new(1, Duration::from_millis(500)));
+
+        poll_fn(|cx| {
+            assert!(limit.poll_ready(cx).is_ready());
+            Poll::Ready(())
+        })
+        .await;
+
+        limit.tick();
+
+        // The limit should now be exceeded
+        poll_fn(|cx| {
+            assert!(limit.poll_ready(cx).is_pending());
+            Poll::Ready(())
+        })
+        .await;
+
+        // The `wait` method should block until the rate period elapses
+        limit.wait().await;
+
+        // After `wait`, it should now be ready
+        poll_fn(|cx| {
+            assert!(limit.poll_ready(cx).is_ready());
+            Poll::Ready(())
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "RateLimit limited; poll_ready must be called first")]
+    async fn test_tick_panics_when_limited() {
+        let mut limit = RateLimit::new(Rate::new(1, Duration::from_secs(1)));
+
+        poll_fn(|cx| {
+            assert!(limit.poll_ready(cx).is_ready());
+            Poll::Ready(())
+        })
+        .await;
+
+        // Consume the limit
+        limit.tick();
+
+        // Attempting to tick again without poll_ready being ready should panic
+        limit.tick();
     }
 }

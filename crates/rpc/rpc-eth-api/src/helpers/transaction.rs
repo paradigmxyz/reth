@@ -1,32 +1,35 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
-use std::{fmt, sync::Arc};
-
+use alloy_consensus::{BlockHeader, Transaction};
 use alloy_dyn_abi::TypedData;
+use alloy_eips::{eip2718::Encodable2718, BlockId};
+use alloy_network::TransactionBuilder;
+use alloy_primitives::{Address, Bytes, TxHash, B256};
+use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
+use reth_node_api::BlockBody;
 use reth_primitives::{
-    Address, BlockId, Bytes, FromRecoveredPooledTransaction, IntoRecoveredTransaction, Receipt,
-    SealedBlockWithSenders, TransactionMeta, TransactionSigned, TxHash, TxKind, B256, U256,
+    transaction::SignedTransactionIntoRecoveredExt, SealedBlockWithSenders, TransactionMeta,
 };
-use reth_provider::{BlockReaderIdExt, ReceiptProvider, TransactionsProvider};
+use reth_primitives_traits::SignedTransaction;
+use reth_provider::{
+    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
+    TransactionsProvider,
+};
 use reth_rpc_eth_types::{
-    utils::recover_raw_transaction, EthApiError, EthResult, EthStateCache, SignError,
-    TransactionSource,
+    utils::{binary_search, recover_raw_transaction},
+    EthApiError, SignError, TransactionSource,
 };
-use reth_rpc_types::{
-    transaction::{
-        EIP1559TransactionRequest, EIP2930TransactionRequest, EIP4844TransactionRequest,
-        LegacyTransactionRequest,
-    },
-    AnyTransactionReceipt, Index, Transaction, TransactionRequest, TypedTransactionRequest,
+use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
+use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
+use std::sync::Arc;
+
+use super::{EthApiSpec, EthSigner, LoadBlock, LoadReceipt, LoadState, SpawnBlocking};
+use crate::{
+    helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
+    RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
 };
-use reth_rpc_types_compat::transaction::from_recovered_with_block_context;
-use reth_transaction_pool::{TransactionOrigin, TransactionPool};
-
-use super::EthSigner;
-
-use super::{Call, EthApiSpec, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt, SpawnBlocking};
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
@@ -51,42 +54,44 @@ use super::{Call, EthApiSpec, LoadBlock, LoadFee, LoadPendingBlock, LoadReceipt,
 /// See also <https://github.com/paradigmxyz/reth/issues/6240>
 ///
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
-pub trait EthTransactions: LoadTransaction {
-    /// Returns a handle for reading data from disk.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> impl BlockReaderIdExt;
-
-    /// Returns a handle for forwarding received raw transactions.
-    ///
-    /// Access to transaction forwarder in default (L1) trait method implementations.
-    fn raw_tx_forwarder(&self) -> Option<Arc<dyn RawTransactionForwarder>>;
-
+pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns a handle for signing data.
     ///
     /// Singer access in default (L1) trait method implementations.
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>>;
+    #[expect(clippy::type_complexity)]
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>>;
 
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
+    #[expect(clippy::complexity)]
     fn transaction_by_hash(
         &self,
         hash: B256,
-    ) -> impl Future<Output = EthResult<Option<TransactionSource>>> + Send {
+    ) -> impl Future<
+        Output = Result<Option<TransactionSource<ProviderTx<Self::Provider>>>, Self::Error>,
+    > + Send {
         LoadTransaction::transaction_by_hash(self, hash)
     }
 
     /// Get all transactions in the block with the given hash.
     ///
     /// Returns `None` if block does not exist.
+    #[expect(clippy::type_complexity)]
     fn transactions_by_block(
         &self,
         block: B256,
-    ) -> impl Future<Output = EthResult<Option<Vec<TransactionSigned>>>> + Send {
-        async move { Ok(self.cache().get_block_transactions(block).await?) }
+    ) -> impl Future<Output = Result<Option<Vec<ProviderTx<Self::Provider>>>, Self::Error>> + Send
+    {
+        async move {
+            self.cache()
+                .get_sealed_block_with_senders(block)
+                .await
+                .map(|b| b.map(|b| b.body.transactions().to_vec()))
+                .map_err(Self::Error::from_eth_err)
+        }
     }
 
     /// Returns the EIP-2718 encoded transaction by hash.
@@ -99,29 +104,34 @@ pub trait EthTransactions: LoadTransaction {
     fn raw_transaction_by_hash(
         &self,
         hash: B256,
-    ) -> impl Future<Output = EthResult<Option<Bytes>>> + Send {
+    ) -> impl Future<Output = Result<Option<Bytes>, Self::Error>> + Send {
         async move {
             // Note: this is mostly used to fetch pooled transactions so we check the pool first
             if let Some(tx) =
-                self.pool().get_pooled_transaction_element(hash).map(|tx| tx.envelope_encoded())
+                self.pool().get_pooled_transaction_element(hash).map(|tx| tx.encoded_2718().into())
             {
                 return Ok(Some(tx))
             }
 
             self.spawn_blocking_io(move |ref this| {
-                Ok(LoadTransaction::provider(this)
-                    .transaction_by_hash(hash)?
-                    .map(|tx| tx.envelope_encoded()))
+                Ok(this
+                    .provider()
+                    .transaction_by_hash(hash)
+                    .map_err(Self::Error::from_eth_err)?
+                    .map(|tx| tx.encoded_2718().into()))
             })
             .await
         }
     }
 
     /// Returns the _historical_ transaction and the block it was mined in
+    #[expect(clippy::type_complexity)]
     fn historical_transaction_by_hash_at(
         &self,
         hash: B256,
-    ) -> impl Future<Output = EthResult<Option<(TransactionSource, B256)>>> + Send {
+    ) -> impl Future<
+        Output = Result<Option<(TransactionSource<ProviderTx<Self::Provider>>, B256)>, Self::Error>,
+    > + Send {
         async move {
             match self.transaction_by_hash_at(hash).await? {
                 None => Ok(None),
@@ -137,39 +147,45 @@ pub trait EthTransactions: LoadTransaction {
     fn transaction_receipt(
         &self,
         hash: B256,
-    ) -> impl Future<Output = EthResult<Option<AnyTransactionReceipt>>> + Send
+    ) -> impl Future<Output = Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self: LoadReceipt + 'static,
     {
         async move {
-            let result = self.load_transaction_and_receipt(hash).await?;
-
-            let (tx, meta, receipt) = match result {
-                Some((tx, meta, receipt)) => (tx, meta, receipt),
-                None => return Ok(None),
-            };
-
-            self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+            match self.load_transaction_and_receipt(hash).await? {
+                Some((tx, meta, receipt)) => {
+                    self.build_transaction_receipt(tx, meta, receipt).await.map(Some)
+                }
+                None => Ok(None),
+            }
         }
     }
 
     /// Helper method that loads a transaction and its receipt.
+    #[expect(clippy::complexity)]
     fn load_transaction_and_receipt(
         &self,
         hash: TxHash,
-    ) -> impl Future<Output = EthResult<Option<(TransactionSigned, TransactionMeta, Receipt)>>> + Send
+    ) -> impl Future<
+        Output = Result<
+            Option<(ProviderTx<Self::Provider>, TransactionMeta, ProviderReceipt<Self::Provider>)>,
+            Self::Error,
+        >,
+    > + Send
     where
         Self: 'static,
     {
-        let this = self.clone();
+        let provider = self.provider().clone();
         self.spawn_blocking_io(move |_| {
-            let (tx, meta) =
-                match LoadTransaction::provider(&this).transaction_by_hash_with_meta(hash)? {
-                    Some((tx, meta)) => (tx, meta),
-                    None => return Ok(None),
-                };
+            let (tx, meta) = match provider
+                .transaction_by_hash_with_meta(hash)
+                .map_err(Self::Error::from_eth_err)?
+            {
+                Some((tx, meta)) => (tx, meta),
+                None => return Ok(None),
+            };
 
-            let receipt = match EthTransactions::provider(&this).receipt_by_hash(hash)? {
+            let receipt = match provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)? {
                 Some(recpt) => recpt,
                 None => return Ok(None),
             };
@@ -178,34 +194,120 @@ pub trait EthTransactions: LoadTransaction {
         })
     }
 
-    /// Get [`Transaction`] by [`BlockId`] and index of transaction within that block.
+    /// Get transaction by [`BlockId`] and index of transaction within that block.
     ///
     /// Returns `Ok(None)` if the block does not exist, or index is out of range.
     fn transaction_by_block_and_tx_index(
         &self,
         block_id: BlockId,
-        index: Index,
-    ) -> impl Future<Output = EthResult<Option<Transaction>>> + Send
+        index: usize,
+    ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self: LoadBlock,
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
                 let block_hash = block.hash();
-                let block_number = block.number;
-                let base_fee_per_gas = block.base_fee_per_gas;
-                if let Some(tx) = block.into_transactions_ecrecovered().nth(index.into()) {
+                let block_number = block.number();
+                let base_fee_per_gas = block.base_fee_per_gas();
+                if let Some((signer, tx)) = block.transactions_with_sender().nth(index) {
+                    let tx_info = TransactionInfo {
+                        hash: Some(*tx.tx_hash()),
+                        block_hash: Some(block_hash),
+                        block_number: Some(block_number),
+                        base_fee: base_fee_per_gas.map(u128::from),
+                        index: Some(index as u64),
+                    };
+
                     return Ok(Some(from_recovered_with_block_context(
-                        tx,
-                        block_hash,
-                        block_number,
-                        base_fee_per_gas,
-                        index.into(),
-                    )))
+                        tx.clone().with_signer(*signer),
+                        tx_info,
+                        self.tx_resp_builder(),
+                    )?))
                 }
             }
 
             Ok(None)
+        }
+    }
+
+    /// Find a transaction by sender's address and nonce.
+    fn get_transaction_by_sender_and_nonce(
+        &self,
+        sender: Address,
+        nonce: u64,
+        include_pending: bool,
+    ) -> impl Future<Output = Result<Option<RpcTransaction<Self::NetworkTypes>>, Self::Error>> + Send
+    where
+        Self: LoadBlock + LoadState,
+    {
+        async move {
+            // Check the pool first
+            if include_pending {
+                if let Some(tx) =
+                    RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
+                {
+                    let transaction = tx.transaction.clone_into_consensus();
+                    return Ok(Some(from_recovered(transaction, self.tx_resp_builder())?));
+                }
+            }
+
+            // Check if the sender is a contract
+            if self.get_code(sender, None).await?.len() > 0 {
+                return Ok(None);
+            }
+
+            let highest = self.transaction_count(sender, None).await?.saturating_to::<u64>();
+
+            // If the nonce is higher or equal to the highest nonce, the transaction is pending or
+            // not exists.
+            if nonce >= highest {
+                return Ok(None);
+            }
+
+            let Ok(high) = self.provider().best_block_number() else {
+                return Err(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()).into());
+            };
+
+            // Perform a binary search over the block range to find the block in which the sender's
+            // nonce reached the requested nonce.
+            let num = binary_search::<_, _, Self::Error>(1, high, |mid| async move {
+                let mid_nonce =
+                    self.transaction_count(sender, Some(mid.into())).await?.saturating_to::<u64>();
+
+                Ok(mid_nonce > nonce)
+            })
+            .await?;
+
+            let block_id = num.into();
+            self.block_with_senders(block_id)
+                .await?
+                .and_then(|block| {
+                    let block_hash = block.hash();
+                    let block_number = block.number();
+                    let base_fee_per_gas = block.base_fee_per_gas();
+
+                    block
+                        .transactions_with_sender()
+                        .enumerate()
+                        .find(|(_, (signer, tx))| **signer == sender && (*tx).nonce() == nonce)
+                        .map(|(index, (signer, tx))| {
+                            let tx_info = TransactionInfo {
+                                hash: Some(*tx.tx_hash()),
+                                block_hash: Some(block_hash),
+                                block_number: Some(block_number),
+                                base_fee: base_fee_per_gas.map(u128::from),
+                                index: Some(index as u64),
+                            };
+                            from_recovered_with_block_context(
+                                tx.clone().with_signer(*signer),
+                                tx_info,
+                                self.tx_resp_builder(),
+                            )
+                        })
+                })
+                .ok_or(EthApiError::HeaderNotFound(block_id))?
+                .map(Some)
         }
     }
 
@@ -215,15 +317,15 @@ pub trait EthTransactions: LoadTransaction {
     fn raw_transaction_by_block_and_tx_index(
         &self,
         block_id: BlockId,
-        index: Index,
-    ) -> impl Future<Output = EthResult<Option<Bytes>>> + Send
+        index: usize,
+    ) -> impl Future<Output = Result<Option<Bytes>, Self::Error>> + Send
     where
         Self: LoadBlock,
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
-                if let Some(tx) = block.transactions().nth(index.into()) {
-                    return Ok(Some(tx.envelope_encoded()))
+                if let Some(tx) = block.transactions().get(index) {
+                    return Ok(Some(tx.encoded_2718().into()))
                 }
             }
 
@@ -234,24 +336,21 @@ pub trait EthTransactions: LoadTransaction {
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
     /// Returns the hash of the transaction.
-    fn send_raw_transaction(&self, tx: Bytes) -> impl Future<Output = EthResult<B256>> + Send {
+    fn send_raw_transaction(
+        &self,
+        tx: Bytes,
+    ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
-            // On optimism, transactions are forwarded directly to the sequencer to be included in
-            // blocks that it builds.
-            if let Some(client) = self.raw_tx_forwarder().as_ref() {
-                tracing::debug!( target: "rpc::eth",  "forwarding raw transaction to");
-                client.forward_raw_transaction(&tx).await?;
-            }
-
-            let recovered = recover_raw_transaction(tx)?;
+            let recovered = recover_raw_transaction(&tx)?;
             let pool_transaction =
-                <Self::Pool as TransactionPool>::Transaction::from_recovered_pooled_transaction(
-                    recovered,
-                );
+                <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
             // submit the transaction to the pool with a `Local` origin
-            let hash =
-                self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
+            let hash = self
+                .pool()
+                .add_transaction(TransactionOrigin::Local, pool_transaction)
+                .await
+                .map_err(Self::Error::from_eth_err)?;
 
             Ok(hash)
         }
@@ -262,204 +361,48 @@ pub trait EthTransactions: LoadTransaction {
     fn send_transaction(
         &self,
         mut request: TransactionRequest,
-    ) -> impl Future<Output = EthResult<B256>> + Send
+    ) -> impl Future<Output = Result<B256, Self::Error>> + Send
     where
-        Self: EthApiSpec + LoadBlock + LoadPendingBlock + LoadFee + Call,
+        Self: EthApiSpec + LoadBlock + EstimateCall,
     {
         async move {
             let from = match request.from {
                 Some(from) => from,
-                None => return Err(SignError::NoAccount.into()),
+                None => return Err(SignError::NoAccount.into_eth_err()),
             };
+
+            if self.find_signer(&from).is_err() {
+                return Err(SignError::NoAccount.into_eth_err())
+            }
 
             // set nonce if not already set before
             if request.nonce.is_none() {
-                let nonce = self.transaction_count(from, Some(BlockId::pending())).await?;
-                // note: `.to()` can't panic because the nonce is constructed from a `u64`
-                request.nonce = Some(nonce.to::<u64>());
+                let nonce = self.next_available_nonce(from).await?;
+                request.nonce = Some(nonce);
             }
 
             let chain_id = self.chain_id();
+            request.chain_id = Some(chain_id.to());
 
             let estimated_gas =
                 self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
             let gas_limit = estimated_gas;
+            request.set_gas_limit(gas_limit.to());
 
-            let TransactionRequest {
-                to,
-                gas_price,
-                max_fee_per_gas,
-                max_priority_fee_per_gas,
-                gas,
-                value,
-                input: data,
-                nonce,
-                mut access_list,
-                max_fee_per_blob_gas,
-                blob_versioned_hashes,
-                sidecar,
-                ..
-            } = request;
+            let transaction = self.sign_request(&from, request).await?.with_signer(from);
 
-            // todo: remove this inlining after https://github.com/alloy-rs/alloy/pull/183#issuecomment-1928161285
-            let transaction = match (
-                gas_price,
-                max_fee_per_gas,
-                access_list.take(),
-                max_fee_per_blob_gas,
-                blob_versioned_hashes,
-                sidecar,
-            ) {
-                // legacy transaction
-                // gas price required
-                (Some(_), None, None, None, None, None) => {
-                    Some(TypedTransactionRequest::Legacy(LegacyTransactionRequest {
-                        nonce: nonce.unwrap_or_default(),
-                        gas_price: U256::from(gas_price.unwrap_or_default()),
-                        gas_limit: U256::from(gas.unwrap_or_default()),
-                        value: value.unwrap_or_default(),
-                        input: data.into_input().unwrap_or_default(),
-                        kind: to.unwrap_or(TxKind::Create),
-                        chain_id: None,
-                    }))
-                }
-                // EIP2930
-                // if only accesslist is set, and no eip1599 fees
-                (_, None, Some(access_list), None, None, None) => {
-                    Some(TypedTransactionRequest::EIP2930(EIP2930TransactionRequest {
-                        nonce: nonce.unwrap_or_default(),
-                        gas_price: U256::from(gas_price.unwrap_or_default()),
-                        gas_limit: U256::from(gas.unwrap_or_default()),
-                        value: value.unwrap_or_default(),
-                        input: data.into_input().unwrap_or_default(),
-                        kind: to.unwrap_or(TxKind::Create),
-                        chain_id: 0,
-                        access_list,
-                    }))
-                }
-                // EIP1559
-                // if 4844 fields missing
-                // gas_price, max_fee_per_gas, access_list, max_fee_per_blob_gas,
-                // blob_versioned_hashes, sidecar,
-                (None, _, _, None, None, None) => {
-                    // Empty fields fall back to the canonical transaction schema.
-                    Some(TypedTransactionRequest::EIP1559(EIP1559TransactionRequest {
-                        nonce: nonce.unwrap_or_default(),
-                        max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
-                        max_priority_fee_per_gas: U256::from(
-                            max_priority_fee_per_gas.unwrap_or_default(),
-                        ),
-                        gas_limit: U256::from(gas.unwrap_or_default()),
-                        value: value.unwrap_or_default(),
-                        input: data.into_input().unwrap_or_default(),
-                        kind: to.unwrap_or(TxKind::Create),
-                        chain_id: 0,
-                        access_list: access_list.unwrap_or_default(),
-                    }))
-                }
-                // EIP4884
-                // all blob fields required
-                (
-                    None,
-                    _,
-                    _,
-                    Some(max_fee_per_blob_gas),
-                    Some(blob_versioned_hashes),
-                    Some(sidecar),
-                ) => {
-                    // As per the EIP, we follow the same semantics as EIP-1559.
-                    Some(TypedTransactionRequest::EIP4844(EIP4844TransactionRequest {
-                    chain_id: 0,
-                    nonce: nonce.unwrap_or_default(),
-                    max_priority_fee_per_gas: U256::from(
-                        max_priority_fee_per_gas.unwrap_or_default(),
-                    ),
-                    max_fee_per_gas: U256::from(max_fee_per_gas.unwrap_or_default()),
-                    gas_limit: U256::from(gas.unwrap_or_default()),
-                    value: value.unwrap_or_default(),
-                    input: data.into_input().unwrap_or_default(),
-                    #[allow(clippy::manual_unwrap_or_default)] // clippy is suggesting here unwrap_or_default
-                    to: match to {
-                        Some(TxKind::Call(to)) => to,
-                        _ => Address::default(),
-                    },
-                    access_list: access_list.unwrap_or_default(),
-
-                    // eip-4844 specific.
-                    max_fee_per_blob_gas: U256::from(max_fee_per_blob_gas),
-                    blob_versioned_hashes,
-                    sidecar,
-                }))
-                }
-
-                _ => None,
-            };
-
-            let transaction = match transaction {
-                Some(TypedTransactionRequest::Legacy(mut req)) => {
-                    req.chain_id = Some(chain_id.to());
-                    req.gas_limit = gas_limit.saturating_to();
-                    req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
-
-                    TypedTransactionRequest::Legacy(req)
-                }
-                Some(TypedTransactionRequest::EIP2930(mut req)) => {
-                    req.chain_id = chain_id.to();
-                    req.gas_limit = gas_limit.saturating_to();
-                    req.gas_price = self.legacy_gas_price(gas_price.map(U256::from)).await?;
-
-                    TypedTransactionRequest::EIP2930(req)
-                }
-                Some(TypedTransactionRequest::EIP1559(mut req)) => {
-                    let (max_fee_per_gas, max_priority_fee_per_gas) = self
-                        .eip1559_fees(
-                            max_fee_per_gas.map(U256::from),
-                            max_priority_fee_per_gas.map(U256::from),
-                        )
-                        .await?;
-
-                    req.chain_id = chain_id.to();
-                    req.gas_limit = gas_limit.saturating_to();
-                    req.max_fee_per_gas = max_fee_per_gas.saturating_to();
-                    req.max_priority_fee_per_gas = max_priority_fee_per_gas.saturating_to();
-
-                    TypedTransactionRequest::EIP1559(req)
-                }
-                Some(TypedTransactionRequest::EIP4844(mut req)) => {
-                    let (max_fee_per_gas, max_priority_fee_per_gas) = self
-                        .eip1559_fees(
-                            max_fee_per_gas.map(U256::from),
-                            max_priority_fee_per_gas.map(U256::from),
-                        )
-                        .await?;
-
-                    req.max_fee_per_gas = max_fee_per_gas;
-                    req.max_priority_fee_per_gas = max_priority_fee_per_gas;
-                    req.max_fee_per_blob_gas =
-                        self.eip4844_blob_fee(max_fee_per_blob_gas.map(U256::from)).await?;
-
-                    req.chain_id = chain_id.to();
-                    req.gas_limit = gas_limit;
-
-                    TypedTransactionRequest::EIP4844(req)
-                }
-                None => return Err(EthApiError::ConflictingFeeFieldsInRequest),
-            };
-
-            let signed_tx = self.sign_request(&from, transaction)?;
-
-            let recovered =
-                signed_tx.into_ecrecovered().ok_or(EthApiError::InvalidTransactionSignature)?;
-
-            let pool_transaction = match recovered.try_into() {
-                Ok(converted) => <<Self as LoadTransaction>::Pool as TransactionPool>::Transaction::from_recovered_pooled_transaction(converted),
-                Err(_) => return Err(EthApiError::TransactionConversionError),
-            };
+            let pool_transaction =
+                <<Self as RpcNodeCore>::Pool as TransactionPool>::Transaction::try_from_consensus(
+                    transaction,
+                )
+                .map_err(|_| EthApiError::TransactionConversionError)?;
 
             // submit the transaction to the pool with a `Local` origin
-            let hash = LoadTransaction::pool(self)
+            let hash = self
+                .pool()
                 .add_transaction(TransactionOrigin::Local, pool_transaction)
-                .await?;
+                .await
+                .map_err(Self::Error::from_eth_err)?;
 
             Ok(hash)
         }
@@ -469,17 +412,14 @@ pub trait EthTransactions: LoadTransaction {
     fn sign_request(
         &self,
         from: &Address,
-        request: TypedTransactionRequest,
-    ) -> EthResult<TransactionSigned> {
-        for signer in self.signers().read().iter() {
-            if signer.is_signer_for(from) {
-                return match signer.sign_transaction(request, from) {
-                    Ok(tx) => Ok(tx),
-                    Err(e) => Err(e.into()),
-                }
-            }
+        txn: TransactionRequest,
+    ) -> impl Future<Output = Result<ProviderTx<Self::Provider>, Self::Error>> + Send {
+        async move {
+            self.find_signer(from)?
+                .sign_transaction(txn, from)
+                .await
+                .map_err(Self::Error::from_eth_err)
         }
-        Err(EthApiError::InvalidTransactionSignature)
     }
 
     /// Signs given message. Returns the signature.
@@ -487,23 +427,56 @@ pub trait EthTransactions: LoadTransaction {
         &self,
         account: Address,
         message: Bytes,
-    ) -> impl Future<Output = EthResult<Bytes>> + Send {
-        async move { Ok(self.find_signer(&account)?.sign(account, &message).await?.to_hex_bytes()) }
+    ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
+        async move {
+            Ok(self
+                .find_signer(&account)?
+                .sign(account, &message)
+                .await
+                .map_err(Self::Error::from_eth_err)?
+                .as_bytes()
+                .into())
+        }
+    }
+
+    /// Signs a transaction request using the given account in request
+    /// Returns the EIP-2718 encoded signed transaction.
+    fn sign_transaction(
+        &self,
+        request: TransactionRequest,
+    ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
+        async move {
+            let from = match request.from {
+                Some(from) => from,
+                None => return Err(SignError::NoAccount.into_eth_err()),
+            };
+
+            Ok(self.sign_request(&from, request).await?.encoded_2718().into())
+        }
     }
 
     /// Encodes and signs the typed data according EIP-712. Payload must implement Eip712 trait.
-    fn sign_typed_data(&self, data: &TypedData, account: Address) -> EthResult<Bytes> {
-        Ok(self.find_signer(&account)?.sign_typed_data(account, data)?.to_hex_bytes())
+    fn sign_typed_data(&self, data: &TypedData, account: Address) -> Result<Bytes, Self::Error> {
+        Ok(self
+            .find_signer(&account)?
+            .sign_typed_data(account, data)
+            .map_err(Self::Error::from_eth_err)?
+            .as_bytes()
+            .into())
     }
 
     /// Returns the signer for the given account, if found in configured signers.
-    fn find_signer(&self, account: &Address) -> Result<Box<(dyn EthSigner + 'static)>, SignError> {
+    #[expect(clippy::type_complexity)]
+    fn find_signer(
+        &self,
+        account: &Address,
+    ) -> Result<Box<(dyn EthSigner<ProviderTx<Self::Provider>> + 'static)>, Self::Error> {
         self.signers()
             .read()
             .iter()
             .find(|signer| signer.is_signer_for(account))
             .map(|signer| dyn_clone::clone_box(&**signer))
-            .ok_or(SignError::NoAccount)
+            .ok_or_else(|| SignError::NoAccount.into_eth_err())
     }
 }
 
@@ -511,40 +484,28 @@ pub trait EthTransactions: LoadTransaction {
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` transactions RPC
 /// methods.
-pub trait LoadTransaction: SpawnBlocking {
-    /// Transaction pool with pending transactions. [`TransactionPool::Transaction`] is the
-    /// supported transaction type.
-    type Pool: TransactionPool;
-
-    /// Returns a handle for reading data from disk.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn provider(&self) -> impl TransactionsProvider;
-
-    /// Returns a handle for reading data from memory.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn cache(&self) -> &EthStateCache;
-
-    /// Returns a handle for reading data from pool.
-    ///
-    /// Data access in default (L1) trait method implementations.
-    fn pool(&self) -> &Self::Pool;
-
+pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.
     ///
     /// Returns `Ok(None)` if no matching transaction was found.
+    #[expect(clippy::complexity)]
     fn transaction_by_hash(
         &self,
         hash: B256,
-    ) -> impl Future<Output = EthResult<Option<TransactionSource>>> + Send {
+    ) -> impl Future<
+        Output = Result<Option<TransactionSource<ProviderTx<Self::Provider>>>, Self::Error>,
+    > + Send {
         async move {
             // Try to find the transaction on disk
             let mut resp = self
                 .spawn_blocking_io(move |this| {
-                    match this.provider().transaction_by_hash_with_meta(hash)? {
+                    match this
+                        .provider()
+                        .transaction_by_hash_with_meta(hash)
+                        .map_err(Self::Error::from_eth_err)?
+                    {
                         None => Ok(None),
                         Some((tx, meta)) => {
                             // Note: we assume this transaction is valid, because it's mined (or
@@ -570,9 +531,9 @@ pub trait LoadTransaction: SpawnBlocking {
             if resp.is_none() {
                 // tx not found on disk, check pool
                 if let Some(tx) =
-                    self.pool().get(&hash).map(|tx| tx.transaction.to_recovered_transaction())
+                    self.pool().get(&hash).map(|tx| tx.transaction.clone().into_consensus())
                 {
-                    resp = Some(TransactionSource::Pool(tx));
+                    resp = Some(TransactionSource::Pool(tx.into()));
                 }
             }
 
@@ -583,46 +544,40 @@ pub trait LoadTransaction: SpawnBlocking {
     /// Returns the transaction by including its corresponding [`BlockId`].
     ///
     /// Note: this supports pending transactions
+    #[expect(clippy::type_complexity)]
     fn transaction_by_hash_at(
         &self,
         transaction_hash: B256,
-    ) -> impl Future<Output = EthResult<Option<(TransactionSource, BlockId)>>> + Send {
+    ) -> impl Future<
+        Output = Result<
+            Option<(TransactionSource<ProviderTx<Self::Provider>>, BlockId)>,
+            Self::Error,
+        >,
+    > + Send {
         async move {
-            match self.transaction_by_hash(transaction_hash).await? {
-                None => Ok(None),
-                Some(tx) => {
-                    let res = match tx {
-                        tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
-                        TransactionSource::Block {
-                            transaction,
-                            index,
-                            block_hash,
-                            block_number,
-                            base_fee,
-                        } => {
-                            let at = BlockId::Hash(block_hash.into());
-                            let tx = TransactionSource::Block {
-                                transaction,
-                                index,
-                                block_hash,
-                                block_number,
-                                base_fee,
-                            };
-                            (tx, at)
-                        }
-                    };
-                    Ok(Some(res))
+            Ok(self.transaction_by_hash(transaction_hash).await?.map(|tx| match tx {
+                tx @ TransactionSource::Pool(_) => (tx, BlockId::pending()),
+                tx @ TransactionSource::Block { block_hash, .. } => {
+                    (tx, BlockId::Hash(block_hash.into()))
                 }
-            }
+            }))
         }
     }
 
     /// Fetches the transaction and the transaction's block
+    #[expect(clippy::type_complexity)]
     fn transaction_and_block(
         &self,
         hash: B256,
-    ) -> impl Future<Output = EthResult<Option<(TransactionSource, SealedBlockWithSenders)>>> + Send
-    {
+    ) -> impl Future<
+        Output = Result<
+            Option<(
+                TransactionSource<ProviderTx<Self::Provider>>,
+                Arc<SealedBlockWithSenders<ProviderBlock<Self::Provider>>>,
+            )>,
+            Self::Error,
+        >,
+    > + Send {
         async move {
             let (transaction, at) = match self.transaction_by_hash_at(hash).await? {
                 None => return Ok(None),
@@ -634,17 +589,12 @@ pub trait LoadTransaction: SpawnBlocking {
                 BlockId::Hash(hash) => hash.block_hash,
                 _ => return Ok(None),
             };
-            let block = self.cache().get_block_with_senders(block_hash).await?;
-            Ok(block.map(|block| (transaction, block.seal(block_hash))))
+            let block = self
+                .cache()
+                .get_sealed_block_with_senders(block_hash)
+                .await
+                .map_err(Self::Error::from_eth_err)?;
+            Ok(block.map(|block| (transaction, block)))
         }
     }
-}
-
-/// A trait that allows for forwarding raw transactions.
-///
-/// For example to a sequencer.
-#[async_trait::async_trait]
-pub trait RawTransactionForwarder: fmt::Debug + Send + Sync + 'static {
-    /// Forwards raw transaction bytes for `eth_sendRawTransaction`
-    async fn forward_raw_transaction(&self, raw: &[u8]) -> EthResult<()>;
 }

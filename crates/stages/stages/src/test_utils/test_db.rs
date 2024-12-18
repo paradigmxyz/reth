@@ -1,9 +1,8 @@
+use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::MAINNET;
 use reth_db::{
     tables,
-    test_utils::{
-        create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir, TempDatabase,
-    },
+    test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
     DatabaseEnv,
 };
 use reth_db_api::{
@@ -16,22 +15,22 @@ use reth_db_api::{
     DatabaseError as DbError,
 };
 use reth_primitives::{
-    keccak256, Account, Address, BlockNumber, Receipt, SealedBlock, SealedHeader,
-    StaticFileSegment, StorageEntry, TxHash, TxNumber, B256, U256,
+    Account, EthPrimitives, Receipt, SealedBlock, SealedHeader, StaticFileSegment, StorageEntry,
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
+    test_utils::MockNodeTypesWithDB,
     HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_testing_utils::generators::ChangeSet;
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{collections::BTreeMap, fmt::Debug, path::Path};
 use tempfile::TempDir;
 
 /// Test database that is used for testing stage implementations.
 #[derive(Debug)]
 pub struct TestStageDB {
-    pub factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
+    pub factory: ProviderFactory<MockNodeTypesWithDB>,
     pub temp_static_files_dir: TempDir,
 }
 
@@ -143,7 +142,7 @@ impl TestStageDB {
 
     /// Insert header to static file if `writer` exists, otherwise to DB.
     pub fn insert_header<TX: DbTx + DbTxMut>(
-        writer: Option<&mut StaticFileProviderRWRefMut<'_>>,
+        writer: Option<&mut StaticFileProviderRWRefMut<'_, EthPrimitives>>,
         tx: &TX,
         header: &SealedHeader,
         td: U256,
@@ -156,11 +155,11 @@ impl TestStageDB {
                 for block_number in 0..header.number {
                     let mut prev = header.clone().unseal();
                     prev.number = block_number;
-                    writer.append_header(prev, U256::ZERO, B256::ZERO)?;
+                    writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
                 }
             }
 
-            writer.append_header(header.header().clone(), td, header.hash())?;
+            writer.append_header(header.header(), td, &header.hash())?;
         } else {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
             tx.put::<tables::HeaderTerminalDifficulties>(header.number, td.into())?;
@@ -253,10 +252,10 @@ impl TestStageDB {
                 // Insert into body tables.
                 let block_body_indices = StoredBlockBodyIndices {
                     first_tx_num: next_tx_num,
-                    tx_count: block.body.len() as u64,
+                    tx_count: block.body.transactions.len() as u64,
                 };
 
-                if !block.body.is_empty() {
+                if !block.body.transactions.is_empty() {
                     tx.put::<tables::TransactionBlocks>(
                         block_body_indices.last_tx_num(),
                         block.number,
@@ -264,11 +263,11 @@ impl TestStageDB {
                 }
                 tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
 
-                let res = block.body.iter().try_for_each(|body_tx| {
+                let res = block.body.transactions.iter().try_for_each(|body_tx| {
                     if let Some(txs_writer) = &mut txs_writer {
-                        txs_writer.append_transaction(next_tx_num, body_tx.clone().into())?;
+                        txs_writer.append_transaction(next_tx_num, body_tx)?;
                     } else {
-                        tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?
+                        tx.put::<tables::Transactions>(next_tx_num, body_tx.clone())?
                     }
                     next_tx_num += 1;
                     Ok::<(), ProviderError>(())
@@ -282,10 +281,10 @@ impl TestStageDB {
                         segment_header.expected_block_start() == 0
                     {
                         for block in 0..block.number {
-                            txs_writer.increment_block(StaticFileSegment::Transactions, block)?;
+                            txs_writer.increment_block(block)?;
                         }
                     }
-                    txs_writer.increment_block(StaticFileSegment::Transactions, block.number)?;
+                    txs_writer.increment_block(block.number)?;
                 }
                 res
             })?;
@@ -349,7 +348,7 @@ impl TestStageDB {
                 let provider = self.factory.static_file_provider();
                 let mut writer = provider.latest_writer(StaticFileSegment::Receipts)?;
                 let res = receipts.into_iter().try_for_each(|(block_num, receipts)| {
-                    writer.increment_block(StaticFileSegment::Receipts, block_num)?;
+                    writer.increment_block(block_num)?;
                     writer.append_receipts(receipts.into_iter().map(Ok))?;
                     Ok(())
                 });
@@ -386,7 +385,7 @@ impl TestStageDB {
                 tx.put::<tables::HashedAccounts>(hashed_address, account)?;
 
                 // Insert into storage tables.
-                storage.into_iter().filter(|e| e.value != U256::ZERO).try_for_each(|entry| {
+                storage.into_iter().filter(|e| !e.value.is_zero()).try_for_each(|entry| {
                     let hashed_entry = StorageEntry { key: keccak256(entry.key), ..entry };
 
                     let mut cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;

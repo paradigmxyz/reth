@@ -8,6 +8,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+pub mod builder;
 pub mod cache;
 pub mod error;
 pub mod fee_history;
@@ -17,18 +18,24 @@ pub mod logs_utils;
 pub mod pending_block;
 pub mod receipt;
 pub mod revm_utils;
+pub mod simulate;
 pub mod transaction;
 pub mod utils;
 
+pub use builder::{
+    config::{EthConfig, EthFilterConfig},
+    ctx::EthApiBuilderCtx,
+};
 pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,
     EthStateCache,
 };
 pub use error::{EthApiError, EthResult, RevertError, RpcInvalidTransactionError, SignError};
 pub use fee_history::{FeeHistoryCache, FeeHistoryCacheConfig, FeeHistoryEntry};
-pub use gas_oracle::{GasCap, GasPriceOracle, GasPriceOracleConfig, GasPriceOracleResult};
+pub use gas_oracle::{
+    GasCap, GasPriceOracle, GasPriceOracleConfig, GasPriceOracleResult, RPC_DEFAULT_GAS_CAP,
+};
 pub use id_provider::EthSubscriptionIdProvider;
-pub use logs_utils::EthFilterError;
 pub use pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-pub use receipt::ReceiptBuilder;
+pub use receipt::EthReceiptBuilder;
 pub use transaction::TransactionSource;

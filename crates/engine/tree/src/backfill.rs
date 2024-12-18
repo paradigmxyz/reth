@@ -2,18 +2,49 @@
 //!
 //!  - Backfill sync: Sync to a certain block height in stages, e.g. download data from p2p then
 //!    execute that range.
-//!  - Live sync: In this mode the nodes is keeping up with the latest tip and listens for new
+//!  - Live sync: In this mode the node is keeping up with the latest tip and listens for new
 //!    requests from the consensus client.
 //!
 //! These modes are mutually exclusive and the node can only be in one mode at a time.
 
 use futures::FutureExt;
-use reth_db_api::database::Database;
+use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot;
 use tracing::trace;
+
+/// Represents the state of the backfill synchronization process.
+#[derive(Debug, PartialEq, Eq, Default)]
+pub enum BackfillSyncState {
+    /// The node is not performing any backfill synchronization.
+    /// This is the initial or default state.
+    #[default]
+    Idle,
+    /// A backfill synchronization has been requested or planned, but processing has not started
+    /// yet.
+    Pending,
+    /// The node is actively engaged in backfill synchronization.
+    Active,
+}
+
+impl BackfillSyncState {
+    /// Returns true if the state is idle.
+    pub const fn is_idle(&self) -> bool {
+        matches!(self, Self::Idle)
+    }
+
+    /// Returns true if the state is pending.
+    pub const fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending)
+    }
+
+    /// Returns true if the state is active.
+    pub const fn is_active(&self) -> bool {
+        matches!(self, Self::Active)
+    }
+}
 
 /// Backfill sync mode functionality.
 pub trait BackfillSync: Send + Sync {
@@ -34,8 +65,6 @@ pub enum BackfillAction {
 /// The events that can be emitted on backfill sync.
 #[derive(Debug)]
 pub enum BackfillEvent {
-    /// Backfill sync idle.
-    Idle,
     /// Backfill sync started.
     Started(PipelineTarget),
     /// Backfill sync finished.
@@ -49,25 +78,19 @@ pub enum BackfillEvent {
 
 /// Pipeline sync.
 #[derive(Debug)]
-pub struct PipelineSync<DB>
-where
-    DB: Database,
-{
+pub struct PipelineSync<N: ProviderNodeTypes> {
     /// The type that can spawn the pipeline task.
     pipeline_task_spawner: Box<dyn TaskSpawner>,
     /// The current state of the pipeline.
     /// The pipeline is used for large ranges.
-    pipeline_state: PipelineState<DB>,
+    pipeline_state: PipelineState<N>,
     /// Pending target block for the pipeline to sync
     pending_pipeline_target: Option<PipelineTarget>,
 }
 
-impl<DB> PipelineSync<DB>
-where
-    DB: Database + 'static,
-{
+impl<N: ProviderNodeTypes> PipelineSync<N> {
     /// Create a new instance.
-    pub fn new(pipeline: Pipeline<DB>, pipeline_task_spawner: Box<dyn TaskSpawner>) -> Self {
+    pub fn new(pipeline: Pipeline<N>, pipeline_task_spawner: Box<dyn TaskSpawner>) -> Self {
         Self {
             pipeline_task_spawner,
             pipeline_state: PipelineState::Idle(Some(pipeline)),
@@ -141,7 +164,10 @@ where
             }
         };
         let ev = match res {
-            Ok((_, result)) => BackfillEvent::Finished(result),
+            Ok((pipeline, result)) => {
+                self.pipeline_state = PipelineState::Idle(Some(pipeline));
+                BackfillEvent::Finished(result)
+            }
             Err(why) => {
                 // failed to receive the pipeline
                 BackfillEvent::TaskDropped(why.to_string())
@@ -151,10 +177,7 @@ where
     }
 }
 
-impl<DB> BackfillSync for PipelineSync<DB>
-where
-    DB: Database + 'static,
-{
+impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
     fn on_action(&mut self, event: BackfillAction) {
         match event {
             BackfillAction::Start(target) => self.set_pipeline_sync_target(target),
@@ -168,7 +191,7 @@ where
         }
 
         // make sure we poll the pipeline if it's active, and return any ready pipeline events
-        if !self.is_pipeline_idle() {
+        if self.is_pipeline_active() {
             // advance the pipeline
             if let Poll::Ready(event) = self.poll_pipeline(cx) {
                 return Poll::Ready(event)
@@ -189,14 +212,14 @@ where
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
 #[derive(Debug)]
-enum PipelineState<DB: Database> {
+enum PipelineState<N: ProviderNodeTypes> {
     /// Pipeline is idle.
-    Idle(Option<Pipeline<DB>>),
+    Idle(Option<Pipeline<N>>),
     /// Pipeline is running and waiting for a response
-    Running(oneshot::Receiver<PipelineWithResult<DB>>),
+    Running(oneshot::Receiver<PipelineWithResult<N>>),
 }
 
-impl<DB: Database> PipelineState<DB> {
+impl<N: ProviderNodeTypes> PipelineState<N> {
     /// Returns `true` if the state matches idle.
     const fn is_idle(&self) -> bool {
         matches!(self, Self::Idle(_))
@@ -206,26 +229,22 @@ impl<DB: Database> PipelineState<DB> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::insert_headers_into_client;
+    use crate::test_utils::{insert_headers_into_client, TestPipelineBuilder};
+    use alloy_consensus::Header;
+    use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use futures::poll;
-    use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
-    use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
+    use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, BlockNumber, Header, B256};
-    use reth_provider::{
-        test_utils::create_test_provider_factory_with_chain_spec, ExecutionOutcome,
-    };
-    use reth_prune_types::PruneModes;
-    use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
+    use reth_primitives::SealedHeader;
+    use reth_provider::test_utils::MockNodeTypesWithDB;
+    use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;
-    use reth_static_file::StaticFileProducer;
     use reth_tasks::TokioTaskExecutor;
     use std::{collections::VecDeque, future::poll_fn, sync::Arc};
-    use tokio::sync::watch;
 
     struct TestHarness {
-        pipeline_sync: PipelineSync<Arc<TempDatabase<DatabaseEnv>>>,
+        pipeline_sync: PipelineSync<MockNodeTypesWithDB>,
         tip: B256,
     }
 
@@ -245,67 +264,21 @@ mod tests {
                     checkpoint: StageCheckpoint::new(BlockNumber::from(pipeline_done_after)),
                     done: true,
                 })]))
-                .build(chain_spec);
+                .build(chain_spec.clone());
 
             let pipeline_sync = PipelineSync::new(pipeline, Box::<TokioTaskExecutor>::default());
             let client = TestFullBlockClient::default();
             let header = Header {
                 base_fee_per_gas: Some(7),
-                gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+                gas_limit: chain_spec.max_gas_limit,
                 ..Default::default()
-            }
-            .seal_slow();
+            };
+            let header = SealedHeader::seal(header);
             insert_headers_into_client(&client, header, 0..total_blocks);
 
             let tip = client.highest_block().expect("there should be blocks here").hash();
 
             Self { pipeline_sync, tip }
-        }
-    }
-
-    struct TestPipelineBuilder {
-        pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-        executor_results: Vec<ExecutionOutcome>,
-    }
-
-    impl TestPipelineBuilder {
-        /// Create a new [`TestPipelineBuilder`].
-        const fn new() -> Self {
-            Self { pipeline_exec_outputs: VecDeque::new(), executor_results: Vec::new() }
-        }
-
-        /// Set the pipeline execution outputs to use for the test consensus engine.
-        fn with_pipeline_exec_outputs(
-            mut self,
-            pipeline_exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-        ) -> Self {
-            self.pipeline_exec_outputs = pipeline_exec_outputs;
-            self
-        }
-
-        /// Set the executor results to use for the test consensus engine.
-        #[allow(dead_code)]
-        fn with_executor_results(mut self, executor_results: Vec<ExecutionOutcome>) -> Self {
-            self.executor_results = executor_results;
-            self
-        }
-
-        /// Builds the pipeline.
-        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
-            reth_tracing::init_test_tracing();
-
-            // Setup pipeline
-            let (tip_tx, _tip_rx) = watch::channel(B256::default());
-            let pipeline = Pipeline::builder()
-                .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
-                .with_tip_sender(tip_tx);
-
-            let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
-
-            let static_file_producer =
-                StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
-
-            pipeline.build(provider_factory, static_file_producer)
         }
     }
 

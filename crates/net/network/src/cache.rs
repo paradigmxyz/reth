@@ -3,7 +3,6 @@
 use core::hash::BuildHasher;
 use derive_more::{Deref, DerefMut};
 use itertools::Itertools;
-// use linked_hash_set::LinkedHashSet;
 use schnellru::{ByLength, Limiter, RandomState, Unlimited};
 use std::{fmt, hash::Hash};
 
@@ -42,7 +41,7 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     pub fn insert_and_get_evicted(&mut self, entry: T) -> (bool, Option<T>) {
         let new = self.inner.peek(&entry).is_none();
         let evicted =
-            if new && (self.limit as usize) <= self.inner.len() { self.remove_lru() } else { None };
+            (new && (self.limit as usize) <= self.inner.len()).then(|| self.remove_lru()).flatten();
         _ = self.inner.get_or_insert(entry, || ());
 
         (new, evicted)

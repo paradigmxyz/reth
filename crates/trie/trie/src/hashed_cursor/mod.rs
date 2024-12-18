@@ -1,12 +1,13 @@
-use reth_primitives::{Account, B256, U256};
-
-/// Default implementation of the hashed state cursor traits.
-mod default;
-pub use default::DatabaseHashedStorageCursor;
+use alloy_primitives::{B256, U256};
+use reth_primitives::Account;
+use reth_storage_errors::db::DatabaseError;
 
 /// Implementation of hashed state cursor traits for the post state.
 mod post_state;
 pub use post_state::*;
+
+/// Implementation of noop hashed state cursor.
+pub mod noop;
 
 /// The factory trait for creating cursors over the hashed state.
 pub trait HashedCursorFactory {
@@ -16,13 +17,13 @@ pub trait HashedCursorFactory {
     type StorageCursor: HashedStorageCursor<Value = U256>;
 
     /// Returns a cursor for iterating over all hashed accounts in the state.
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError>;
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError>;
 
     /// Returns a cursor for iterating over all hashed storage entries in the state.
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor, reth_db::DatabaseError>;
+    ) -> Result<Self::StorageCursor, DatabaseError>;
 }
 
 /// The cursor for iterating over hashed entries.
@@ -32,14 +33,14 @@ pub trait HashedCursor {
 
     /// Seek an entry greater or equal to the given key and position the cursor there.
     /// Returns the first entry with the key greater or equal to the sought key.
-    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError>;
+    fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError>;
 
     /// Move the cursor to the next entry and return it.
-    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, reth_db::DatabaseError>;
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError>;
 }
 
 /// The cursor for iterating over hashed storage entries.
 pub trait HashedStorageCursor: HashedCursor {
     /// Returns `true` if there are no entries for a given key.
-    fn is_storage_empty(&mut self) -> Result<bool, reth_db::DatabaseError>;
+    fn is_storage_empty(&mut self) -> Result<bool, DatabaseError>;
 }

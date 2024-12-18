@@ -6,11 +6,11 @@ use crate::{
 };
 use alloy_rlp::Decodable;
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
+use reth_chainspec::ChainSpec;
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
 use reth_provider::{
-    providers::{StaticFileProvider, StaticFileWriter},
-    HashingWriter, ProviderFactory,
+    providers::StaticFileWriter, test_utils::create_test_provider_factory_with_chain_spec,
+    DatabaseProviderFactory, HashingWriter, StaticFileProviderFactory,
 };
 use reth_stages::{stages::ExecutionStage, ExecInput, Stage};
 use std::{collections::BTreeMap, fs, path::Path, sync::Arc};
@@ -84,15 +84,10 @@ impl Case for BlockchainTestCase {
             .par_bridge()
             .try_for_each(|case| {
                 // Create a new test database and initialize a provider for the test case.
-                let db = create_test_rw_db();
-                let (_static_files_dir, static_files_dir_path) = create_test_static_files_dir();
-                let provider = ProviderFactory::new(
-                    db.as_ref(),
-                    Arc::new(case.network.clone().into()),
-                    StaticFileProvider::read_write(static_files_dir_path).unwrap(),
-                )
-                .provider_rw()
-                .unwrap();
+                let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
+                let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
+                    .database_provider_rw()
+                    .unwrap();
 
                 // Insert initial test state into the provider.
                 provider.insert_historical_block(
@@ -102,17 +97,15 @@ impl Case for BlockchainTestCase {
                     )
                     .try_seal_with_senders()
                     .unwrap(),
-                    None,
                 )?;
                 case.pre.write_to_db(provider.tx_ref())?;
 
                 // Initialize receipts static file with genesis
                 {
-                    let mut receipts_writer = provider
-                        .static_file_provider()
-                        .latest_writer(StaticFileSegment::Receipts)
-                        .unwrap();
-                    receipts_writer.increment_block(StaticFileSegment::Receipts, 0).unwrap();
+                    let static_file_provider = provider.static_file_provider();
+                    let mut receipts_writer =
+                        static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+                    receipts_writer.increment_block(0).unwrap();
                     receipts_writer.commit_without_sync_all().unwrap();
                 }
 
@@ -121,7 +114,6 @@ impl Case for BlockchainTestCase {
                     let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
                     provider.insert_historical_block(
                         decoded.clone().try_seal_with_senders().unwrap(),
-                        None,
                     )?;
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;
@@ -135,9 +127,7 @@ impl Case for BlockchainTestCase {
                 // Execute the execution stage using the EVM processor factory for the test case
                 // network.
                 let _ = ExecutionStage::new_with_executor(
-                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(Arc::new(
-                        case.network.clone().into(),
-                    )),
+                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(chain_spec),
                 )
                 .execute(
                     &provider,
@@ -189,7 +179,7 @@ pub fn should_skip(path: &Path) -> bool {
         | "ValueOverflow.json"
         | "ValueOverflowParis.json"
 
-        // txbyte is of type 02 and we dont parse tx bytes for this test to fail.
+        // txbyte is of type 02 and we don't parse tx bytes for this test to fail.
         | "typeTwoBerlin.json"
 
         // Test checks if nonce overflows. We are handling this correctly but we are not parsing

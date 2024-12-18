@@ -13,20 +13,18 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
+reth-consensus.workspace = true
 reth-primitives.workspace = true
-reth-fs-util.workspace = true
+reth-primitives-traits.workspace = true
+reth-cli-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
-reth-db-api.workspace = true
 reth-storage-errors.workspace = true
-reth-provider.workspace = true
+reth-storage-api.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
-reth-rpc-types.workspace = true
 reth-rpc-types-compat.workspace = true
-reth-rpc-api = { workspace = true, features = ["client"] }
-reth-rpc-eth-api = { workspace = true, features = ["client"] }
 reth-transaction-pool.workspace = true
 reth-tracing.workspace = true
 reth-config.workspace = true
@@ -34,44 +32,31 @@ reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
 reth-network-peers.workspace = true
-reth-tasks.workspace = true
-reth-consensus-common.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
+reth-ethereum-forks.workspace = true
 
 # ethereum
-alloy-genesis.workspace = true
-alloy-rpc-types-engine.workspace = true
-
-# async
-tokio.workspace = true
-
-# metrics
-reth-metrics.workspace = true
-metrics.workspace = true
-metrics-exporter-prometheus.workspace = true
-metrics-process.workspace = true
-metrics-util.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types-engine = { workspace = true, features = ["std", "jwt"] }
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
 
 # misc
 eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }
 humantime.workspace = true
-thiserror.workspace = true
 const_format.workspace = true
 rand.workspace = true
 derive_more.workspace = true
-once_cell.workspace = true
+toml.workspace = true
+serde.workspace = true
+strum = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
 
 # io
 dirs-next = "2.0.0"
-shellexpand = "3.0.0"
-serde_json.workspace = true
-
-# http/rpc
-http.workspace = true
-jsonrpsee.workspace = true
-tower.workspace = true
+shellexpand.workspace = true
 
 # tracing
 tracing.workspace = true
@@ -86,26 +71,16 @@ secp256k1 = { workspace = true, features = [
 # async
 futures.workspace = true
 
-[target.'cfg(unix)'.dependencies]
-tikv-jemalloc-ctl = { version = "0.5.0", optional = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-procfs = "0.16.0"
-
 [dev-dependencies]
 # test vectors generation
 proptest.workspace = true
+tokio.workspace = true
 
 [features]
-optimism = [
-    "reth-primitives/optimism",
-    "reth-provider/optimism",
-    "reth-rpc-types-compat/optimism",
-    "reth-rpc-eth-api/optimism",
-    "reth-rpc-eth-types/optimism"
-]
-
-jemalloc = ["dep:tikv-jemalloc-ctl"]
+optimism = ["reth-primitives/optimism", "reth-db/optimism"]
+# Features for vergen to generate correct env vars
+jemalloc = ["reth-cli-util/jemalloc"]
+asm-keccak = ["reth-primitives/asm-keccak", "alloy-primitives/asm-keccak"]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

@@ -1,12 +1,12 @@
 use alloy_primitives::{B256, U256};
-use reth_codecs::{derive_arbitrary, Compact};
-use serde::{Deserialize, Serialize};
 
 /// Account storage entry.
 ///
 /// `key` is the subkey when used as a value in the `StorageChangeSets` table.
-#[derive_arbitrary(compact)]
-#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 pub struct StorageEntry {
     /// Storage key.
     pub key: B256,
@@ -27,11 +27,12 @@ impl From<(B256, U256)> for StorageEntry {
     }
 }
 
-// NOTE: Removing main_codec and manually encode subkey
+// NOTE: Removing reth_codec and manually encode subkey
 // and compress second part of the value. If we have compression
 // over whole value (Even SubKey) that would mess up fetching of values with seek_by_key_subkey
-impl Compact for StorageEntry {
-    fn to_compact<B>(self, buf: &mut B) -> usize
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for StorageEntry {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {

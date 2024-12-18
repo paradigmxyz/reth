@@ -15,7 +15,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(not(feature = "std"))]
 extern crate alloc;
 
 mod display;
@@ -28,7 +27,7 @@ mod head;
 pub use forkid::{
     EnrForkIdEntry, ForkFilter, ForkFilterKey, ForkHash, ForkId, ForkTransition, ValidationError,
 };
-pub use hardfork::{EthereumHardfork, Hardfork, OptimismHardfork, DEV_HARDFORKS};
+pub use hardfork::{EthereumHardfork, Hardfork, DEV_HARDFORKS};
 pub use head::Head;
 
 pub use display::DisplayHardforks;

@@ -3,7 +3,7 @@ use reth_db::test_utils::create_test_rw_db;
 use reth_exex::ExExContext;
 use reth_node_api::FullNodeComponents;
 use reth_node_builder::{NodeBuilder, NodeConfig};
-use reth_node_ethereum::EthereumNode;
+use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
 use std::{
     future::Future,
     pin::Pin,
@@ -33,6 +33,7 @@ fn basic_exex() {
         .with_database(db)
         .with_types::<EthereumNode>()
         .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default())
         .install_exex("dummy", move |ctx| future::ok(DummyExEx { _ctx: ctx }))
         .check_launch();
 }

@@ -6,7 +6,7 @@ use crate::{
     txn_manager::{TxnManagerMessage, TxnPtr},
     Cursor, Error, Stat, TableObject,
 };
-use ffi::{mdbx_txn_renew, MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
+use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
 use indexmap::IndexSet;
 use parking_lot::{Mutex, MutexGuard};
 use std::{
@@ -17,6 +17,9 @@ use std::{
     sync::{atomic::AtomicBool, mpsc::sync_channel, Arc},
     time::Duration,
 };
+
+#[cfg(feature = "read-tx-timeouts")]
+use ffi::mdbx_txn_renew;
 
 mod private {
     use super::*;
@@ -110,6 +113,18 @@ where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
         self.inner.txn_execute(f)
+    }
+
+    /// Executes the given closure once the lock on the transaction is acquired. If the transaction
+    /// is timed out, it will be renewed first.
+    ///
+    /// Returns the result of the closure or an error if the transaction renewal fails.
+    #[inline]
+    pub(crate) fn txn_execute_renew_on_timeout<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
+        self.inner.txn_execute_renew_on_timeout(f)
     }
 
     /// Returns a copy of the raw pointer to the underlying MDBX transaction.
@@ -320,6 +335,14 @@ where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {
         self.txn.txn_execute_fail_on_timeout(f)
+    }
+
+    #[inline]
+    fn txn_execute_renew_on_timeout<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(*mut ffi::MDBX_txn) -> T,
+    {
+        self.txn.txn_execute_renew_on_timeout(f)
     }
 }
 
@@ -596,7 +619,7 @@ impl TransactionPtr {
     ///
     /// Returns the result of the closure or an error if the transaction renewal fails.
     #[inline]
-    fn txn_execute_renew_on_timeout<F, T>(&self, f: F) -> Result<T>
+    pub(crate) fn txn_execute_renew_on_timeout<F, T>(&self, f: F) -> Result<T>
     where
         F: FnOnce(*mut ffi::MDBX_txn) -> T,
     {

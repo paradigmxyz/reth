@@ -1,12 +1,16 @@
 //! Storage for blob data of EIP4844 transactions.
 
+use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
+use alloy_primitives::B256;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
-use reth_primitives::{BlobTransactionSidecar, B256};
 use std::{
     fmt,
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
@@ -42,7 +46,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     fn cleanup(&self) -> BlobStoreCleanupStat;
 
     /// Retrieves the decoded blob data for the given transaction hash.
-    fn get(&self, tx: B256) -> Result<Option<BlobTransactionSidecar>, BlobStoreError>;
+    fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError>;
 
     /// Checks if the given transaction hash is in the blob store.
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError>;
@@ -56,13 +60,20 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     fn get_all(
         &self,
         txs: Vec<B256>,
-    ) -> Result<Vec<(B256, BlobTransactionSidecar)>, BlobStoreError>;
+    ) -> Result<Vec<(B256, Arc<BlobTransactionSidecar>)>, BlobStoreError>;
 
     /// Returns the exact [`BlobTransactionSidecar`] for the given transaction hashes in the exact
     /// order they were requested.
     ///
     /// Returns an error if any of the blobs are not found in the blob store.
-    fn get_exact(&self, txs: Vec<B256>) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError>;
+    fn get_exact(&self, txs: Vec<B256>)
+        -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
+
+    /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
+    fn get_by_versioned_hashes(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
 
     /// Data size of all transactions in the blob store.
     fn data_size_hint(&self) -> Option<usize>;
@@ -82,7 +93,7 @@ pub enum BlobStoreError {
     DecodeError(#[from] alloy_rlp::Error),
     /// Other implementation specific error.
     #[error(transparent)]
-    Other(Box<dyn std::error::Error + Send + Sync>),
+    Other(Box<dyn core::error::Error + Send + Sync>),
 }
 
 /// Keeps track of the size of the blob store.
@@ -141,7 +152,7 @@ impl PartialEq for BlobStoreSize {
 }
 
 /// Statistics for the cleanup operation.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BlobStoreCleanupStat {
     /// the number of successfully deleted blobs
     pub delete_succeed: usize,

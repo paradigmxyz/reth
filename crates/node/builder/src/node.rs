@@ -1,76 +1,112 @@
-use crate::rpc::{RethRpcServerHandles, RpcRegistry};
-use reth_chainspec::ChainSpec;
-use reth_network::NetworkHandle;
-use reth_node_api::FullNodeComponents;
+// re-export the node api types
+pub use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
+
+use std::{
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
+
+use reth_node_api::{EngineTypes, FullNodeComponents};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
-    rpc::api::EngineApiClient,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_provider::ChainSpecProvider;
+use reth_rpc_api::EngineApiClient;
 use reth_rpc_builder::{auth::AuthServerHandle, RpcServerHandle};
 use reth_tasks::TaskExecutor;
-use std::{marker::PhantomData, sync::Arc};
 
-// re-export the node api types
-use crate::components::NodeComponentsBuilder;
-pub use reth_node_api::{FullNodeTypes, NodeTypes};
+use crate::{components::NodeComponentsBuilder, rpc::RethRpcAddOns, NodeAdapter, NodeAddOns};
 
-/// A [`crate::Node`] is a [`NodeTypes`] that comes with preconfigured components.
+/// A [`crate::Node`] is a [`NodeTypesWithEngine`] that comes with preconfigured components.
 ///
 /// This can be used to configure the builder with a preset of components.
-pub trait Node<N: FullNodeTypes>: NodeTypes + Clone {
+pub trait Node<N: FullNodeTypes>: NodeTypesWithEngine + Clone {
     /// The type that builds the node's components.
     type ComponentsBuilder: NodeComponentsBuilder<N>;
 
+    /// Exposes the customizable node add-on types.
+    type AddOns: NodeAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+    >;
+
     /// Returns a [`NodeComponentsBuilder`] for the node.
-    fn components_builder(self) -> Self::ComponentsBuilder;
+    fn components_builder(&self) -> Self::ComponentsBuilder;
+
+    /// Returns the node add-ons.
+    fn add_ons(&self) -> Self::AddOns;
 }
 
 /// A [`Node`] type builder
 #[derive(Clone, Default, Debug)]
-pub struct AnyNode<N = (), C = ()>(PhantomData<N>, C);
+pub struct AnyNode<N = (), C = (), AO = ()>(PhantomData<N>, C, AO);
 
-impl<N, C> AnyNode<N, C> {
+impl<N, C, AO> AnyNode<N, C, AO> {
     /// Configures the types of the node.
-    pub fn types<T>(self) -> AnyNode<T, C> {
-        AnyNode::<T, C>(PhantomData::<T>, self.1)
+    pub fn types<T>(self) -> AnyNode<T, C, AO> {
+        AnyNode(PhantomData, self.1, self.2)
     }
 
     /// Sets the node components builder.
-    pub fn components_builder<T>(self, value: T) -> AnyNode<N, T> {
-        AnyNode::<N, T>(PhantomData::<N>, value)
+    pub fn components_builder<T>(self, value: T) -> AnyNode<N, T, AO> {
+        AnyNode(PhantomData, value, self.2)
+    }
+
+    /// Sets the node add-ons.
+    pub fn add_ons<T>(self, value: T) -> AnyNode<N, C, T> {
+        AnyNode(PhantomData, self.1, value)
     }
 }
 
-impl<N, C> NodeTypes for AnyNode<N, C>
+impl<N, C, AO> NodeTypes for AnyNode<N, C, AO>
 where
     N: FullNodeTypes,
-    C: NodeComponentsBuilder<N> + Sync + Unpin + 'static,
+    C: Send + Sync + Unpin + 'static,
+    AO: Send + Sync + Unpin + Clone + 'static,
 {
-    type Primitives = N::Primitives;
+    type Primitives = <N::Types as NodeTypes>::Primitives;
 
-    type Engine = N::Engine;
+    type ChainSpec = <N::Types as NodeTypes>::ChainSpec;
+
+    type StateCommitment = <N::Types as NodeTypes>::StateCommitment;
+
+    type Storage = <N::Types as NodeTypes>::Storage;
 }
 
-impl<N, C> Node<N> for AnyNode<N, C>
+impl<N, C, AO> NodeTypesWithEngine for AnyNode<N, C, AO>
+where
+    N: FullNodeTypes,
+    C: Send + Sync + Unpin + 'static,
+    AO: Send + Sync + Unpin + Clone + 'static,
+{
+    type Engine = <N::Types as NodeTypesWithEngine>::Engine;
+}
+
+impl<N, C, AO> Node<N> for AnyNode<N, C, AO>
 where
     N: FullNodeTypes + Clone,
     C: NodeComponentsBuilder<N> + Clone + Sync + Unpin + 'static,
+    AO: NodeAddOns<NodeAdapter<N, C::Components>> + Clone + Sync + Unpin + 'static,
 {
     type ComponentsBuilder = C;
+    type AddOns = AO;
 
-    fn components_builder(self) -> Self::ComponentsBuilder {
-        self.1
+    fn components_builder(&self) -> Self::ComponentsBuilder {
+        self.1.clone()
+    }
+
+    fn add_ons(&self) -> Self::AddOns {
+        self.2.clone()
     }
 }
 
 /// The launched node with all components including RPC handlers.
 ///
 /// This can be used to interact with the launched node.
-#[derive(Debug, Clone)]
-pub struct FullNode<Node: FullNodeComponents> {
+#[derive(Debug)]
+pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     /// The evm configuration.
     pub evm_config: Node::Evm,
     /// The executor of the node.
@@ -78,50 +114,77 @@ pub struct FullNode<Node: FullNodeComponents> {
     /// The node's transaction pool.
     pub pool: Node::Pool,
     /// Handle to the node's network.
-    pub network: NetworkHandle,
+    pub network: Node::Network,
     /// Provider to interact with the node's database
     pub provider: Node::Provider,
     /// Handle to the node's payload builder service.
-    pub payload_builder: PayloadBuilderHandle<Node::Engine>,
+    pub payload_builder: PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
     /// Task executor for the node.
     pub task_executor: TaskExecutor,
-    /// Handles to the node's rpc servers
-    pub rpc_server_handles: RethRpcServerHandles,
-    /// The configured rpc namespaces
-    pub rpc_registry: RpcRegistry<Node>,
     /// The initial node config.
-    pub config: NodeConfig,
+    pub config: NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
     /// The data dir of the node.
     pub data_dir: ChainPath<DataDirPath>,
+    /// The handle to launched add-ons
+    pub add_ons_handle: AddOns::Handle,
 }
 
-impl<Node: FullNodeComponents> FullNode<Node> {
-    /// Returns the [`ChainSpec`] of the node.
-    pub fn chain_spec(&self) -> Arc<ChainSpec> {
+impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node, AddOns> {
+    fn clone(&self) -> Self {
+        Self {
+            evm_config: self.evm_config.clone(),
+            block_executor: self.block_executor.clone(),
+            pool: self.pool.clone(),
+            network: self.network.clone(),
+            provider: self.provider.clone(),
+            payload_builder: self.payload_builder.clone(),
+            task_executor: self.task_executor.clone(),
+            config: self.config.clone(),
+            data_dir: self.data_dir.clone(),
+            add_ons_handle: self.add_ons_handle.clone(),
+        }
+    }
+}
+
+impl<Engine, Node, AddOns> FullNode<Node, AddOns>
+where
+    Engine: EngineTypes,
+    Node: FullNodeComponents<Types: NodeTypesWithEngine<Engine = Engine>>,
+    AddOns: NodeAddOns<Node>,
+{
+    /// Returns the chain spec of the node.
+    pub fn chain_spec(&self) -> Arc<<Node::Types as NodeTypes>::ChainSpec> {
         self.provider.chain_spec()
     }
+}
 
+impl<Engine, Node, AddOns> FullNode<Node, AddOns>
+where
+    Engine: EngineTypes,
+    Node: FullNodeComponents<Types: NodeTypesWithEngine<Engine = Engine>>,
+    AddOns: RethRpcAddOns<Node>,
+{
     /// Returns the [`RpcServerHandle`] to the started rpc server.
     pub const fn rpc_server_handle(&self) -> &RpcServerHandle {
-        &self.rpc_server_handles.rpc
+        &self.add_ons_handle.rpc_server_handles.rpc
     }
 
     /// Returns the [`AuthServerHandle`] to the started authenticated engine API server.
     pub const fn auth_server_handle(&self) -> &AuthServerHandle {
-        &self.rpc_server_handles.auth
+        &self.add_ons_handle.rpc_server_handles.auth
     }
 
     /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
     ///
     /// This will send authenticated http requests to the node's auth server.
-    pub fn engine_http_client(&self) -> impl EngineApiClient<Node::Engine> {
+    pub fn engine_http_client(&self) -> impl EngineApiClient<Engine> {
         self.auth_server_handle().http_client()
     }
 
     /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
     ///
     /// This will send authenticated ws requests to the node's auth server.
-    pub async fn engine_ws_client(&self) -> impl EngineApiClient<Node::Engine> {
+    pub async fn engine_ws_client(&self) -> impl EngineApiClient<Engine> {
         self.auth_server_handle().ws_client().await
     }
 
@@ -129,7 +192,21 @@ impl<Node: FullNodeComponents> FullNode<Node> {
     ///
     /// This will send not authenticated IPC requests to the node's auth server.
     #[cfg(unix)]
-    pub async fn engine_ipc_client(&self) -> Option<impl EngineApiClient<Node::Engine>> {
+    pub async fn engine_ipc_client(&self) -> Option<impl EngineApiClient<Engine>> {
         self.auth_server_handle().ipc_client().await
+    }
+}
+
+impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Deref for FullNode<Node, AddOns> {
+    type Target = AddOns::Handle;
+
+    fn deref(&self) -> &Self::Target {
+        &self.add_ons_handle
+    }
+}
+
+impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> DerefMut for FullNode<Node, AddOns> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.add_ons_handle
     }
 }

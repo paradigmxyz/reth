@@ -4,11 +4,12 @@ use crate::{
     error::InvalidPoolTransactionError,
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
+    PriceBumpConfig,
 };
-use reth_primitives::{
-    Address, BlobTransactionSidecar, IntoRecoveredTransaction, SealedBlock,
-    TransactionSignedEcRecovered, TxHash, B256, U256,
-};
+use alloy_eips::eip4844::BlobTransactionSidecar;
+use alloy_primitives::{Address, TxHash, B256, U256};
+use futures_util::future::Either;
+use reth_primitives::{RecoveredTx, SealedBlock};
 use std::{fmt, future::Future, time::Instant};
 
 mod constants;
@@ -49,7 +50,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
     /// this transaction from ever becoming valid.
     Invalid(T, InvalidPoolTransactionError),
     /// An error occurred while trying to validate the transaction
-    Error(TxHash, Box<dyn std::error::Error + Send + Sync>),
+    Error(TxHash, Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl<T: PoolTransaction> TransactionValidationOutcome<T> {
@@ -208,6 +209,42 @@ pub trait TransactionValidator: Send + Sync {
     fn on_new_head_block(&self, _new_tip_block: &SealedBlock) {}
 }
 
+impl<A, B> TransactionValidator for Either<A, B>
+where
+    A: TransactionValidator,
+    B: TransactionValidator<Transaction = A::Transaction>,
+{
+    type Transaction = A::Transaction;
+
+    async fn validate_transaction(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Self::Transaction,
+    ) -> TransactionValidationOutcome<Self::Transaction> {
+        match self {
+            Self::Left(v) => v.validate_transaction(origin, transaction).await,
+            Self::Right(v) => v.validate_transaction(origin, transaction).await,
+        }
+    }
+
+    async fn validate_transactions(
+        &self,
+        transactions: Vec<(TransactionOrigin, Self::Transaction)>,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        match self {
+            Self::Left(v) => v.validate_transactions(transactions).await,
+            Self::Right(v) => v.validate_transactions(transactions).await,
+        }
+    }
+
+    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+        match self {
+            Self::Left(v) => v.on_new_head_block(new_tip_block),
+            Self::Right(v) => v.on_new_head_block(new_tip_block),
+        }
+    }
+}
+
 /// A valid transaction in the pool.
 ///
 /// This is used as the internal representation of a transaction inside the pool.
@@ -245,6 +282,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.sender()
     }
 
+    /// Returns a reference to the address of the sender
+    pub fn sender_ref(&self) -> &Address {
+        self.transaction.sender_ref()
+    }
+
     /// Returns the recipient of the transaction if it is not a CREATE transaction.
     pub fn to(&self) -> Option<Address> {
         self.transaction.to()
@@ -275,7 +317,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     ///
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
-    pub fn cost(&self) -> U256 {
+    pub fn cost(&self) -> &U256 {
         self.transaction.cost()
     }
 
@@ -337,16 +379,68 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     pub(crate) fn tx_type_conflicts_with(&self, other: &Self) -> bool {
         self.is_eip4844() != other.is_eip4844()
     }
-}
 
-impl<T: PoolTransaction> IntoRecoveredTransaction for ValidPoolTransaction<T> {
-    fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.to_recovered_transaction()
+    /// Converts to this type into the consensus transaction of the pooled transaction.
+    ///
+    /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
+    pub fn to_consensus(&self) -> RecoveredTx<T::Consensus> {
+        self.transaction.clone_into_consensus()
+    }
+
+    /// Determines whether a candidate transaction (`maybe_replacement`) is underpriced compared to
+    /// an existing transaction in the pool.
+    ///
+    /// A transaction is considered underpriced if it doesn't meet the required fee bump threshold.
+    /// This applies to both standard gas fees and, for blob-carrying transactions (EIP-4844),
+    /// the blob-specific fees.
+    #[inline]
+    pub(crate) fn is_underpriced(
+        &self,
+        maybe_replacement: &Self,
+        price_bumps: &PriceBumpConfig,
+    ) -> bool {
+        // Retrieve the required price bump percentage for this type of transaction.
+        //
+        // The bump is different for EIP-4844 and other transactions. See `PriceBumpConfig`.
+        let price_bump = price_bumps.price_bump(self.tx_type());
+
+        // Check if the max fee per gas is underpriced.
+        if maybe_replacement.max_fee_per_gas() < self.max_fee_per_gas() * (100 + price_bump) / 100 {
+            return true
+        }
+
+        let existing_max_priority_fee_per_gas =
+            self.transaction.max_priority_fee_per_gas().unwrap_or_default();
+        let replacement_max_priority_fee_per_gas =
+            maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or_default();
+
+        // Check max priority fee per gas (relevant for EIP-1559 transactions only)
+        if existing_max_priority_fee_per_gas != 0 &&
+            replacement_max_priority_fee_per_gas != 0 &&
+            replacement_max_priority_fee_per_gas <
+                existing_max_priority_fee_per_gas * (100 + price_bump) / 100
+        {
+            return true
+        }
+
+        // Check max blob fee per gas
+        if let Some(existing_max_blob_fee_per_gas) = self.transaction.max_fee_per_blob_gas() {
+            // This enforces that blob txs can only be replaced by blob txs
+            let replacement_max_blob_fee_per_gas =
+                maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or_default();
+            if replacement_max_blob_fee_per_gas <
+                existing_max_blob_fee_per_gas * (100 + price_bump) / 100
+            {
+                return true
+            }
+        }
+
+        false
     }
 }
 
 #[cfg(test)]
-impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
+impl<T: PoolTransaction> Clone for ValidPoolTransaction<T> {
     fn clone(&self) -> Self {
         Self {
             transaction: self.transaction.clone(),
@@ -361,9 +455,11 @@ impl<T: PoolTransaction + Clone> Clone for ValidPoolTransaction<T> {
 impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ValidPoolTransaction")
+            .field("id", &self.transaction_id)
+            .field("pragate", &self.propagate)
+            .field("origin", &self.origin)
             .field("hash", self.transaction.hash())
-            .field("provides", &self.transaction_id)
-            .field("raw_tx", &self.transaction)
+            .field("tx", &self.transaction)
             .finish()
     }
 }

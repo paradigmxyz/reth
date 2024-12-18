@@ -1,10 +1,9 @@
 use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
 use reth_db::tables;
-use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
+use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_provider::{
-    providers::{StaticFileProvider, StaticFileWriter},
-    BlockReader, DatabaseProviderRO,
+    providers::StaticFileWriter, BlockReader, DBProvider, StaticFileProviderFactory,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
@@ -14,24 +13,24 @@ use std::ops::RangeInclusive;
 #[derive(Debug, Default)]
 pub struct Receipts;
 
-impl<DB: Database> Segment<DB> for Receipts {
+impl<Provider: StaticFileProviderFactory + DBProvider + BlockReader> Segment<Provider>
+    for Receipts
+{
     fn segment(&self) -> StaticFileSegment {
         StaticFileSegment::Receipts
     }
 
     fn copy_to_static_files(
         &self,
-        provider: DatabaseProviderRO<DB>,
-        static_file_provider: StaticFileProvider,
+        provider: Provider,
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<()> {
+        let static_file_provider = provider.static_file_provider();
         let mut static_file_writer =
             static_file_provider.get_writer(*block_range.start(), StaticFileSegment::Receipts)?;
 
         for block in block_range {
-            let _static_file_block =
-                static_file_writer.increment_block(StaticFileSegment::Receipts, block)?;
-            debug_assert_eq!(_static_file_block, block);
+            static_file_writer.increment_block(block)?;
 
             let block_body_indices = provider
                 .block_body_indices(block)?

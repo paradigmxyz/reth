@@ -1,10 +1,9 @@
 #![allow(missing_docs, unreachable_pub)]
+use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
-use reth_primitives::{keccak256, Address, B256, U256};
-use reth_trie::{HashedPostState, HashedStorage};
+use reth_trie::{HashedPostState, HashedStorage, KeccakKeyHasher};
 use revm::db::{states::BundleBuilder, BundleAccount};
-use std::collections::HashMap;
 
 pub fn hash_post_state(c: &mut Criterion) {
     let mut group = c.benchmark_group("Hash Post State");
@@ -20,7 +19,7 @@ pub fn hash_post_state(c: &mut Criterion) {
 
         // parallel
         group.bench_function(BenchmarkId::new("parallel hashing", size), |b| {
-            b.iter(|| HashedPostState::from_bundle_state(&state))
+            b.iter(|| HashedPostState::from_bundle_state::<KeccakKeyHasher>(&state))
         });
     }
 }
@@ -30,7 +29,7 @@ fn from_bundle_state_seq(state: &HashMap<Address, BundleAccount>) -> HashedPostS
 
     for (address, account) in state {
         let hashed_address = keccak256(address);
-        this.accounts.insert(hashed_address, account.info.clone().map(Into::into));
+        this.accounts.insert(hashed_address, account.info.as_ref().map(Into::into));
 
         let hashed_storage = HashedStorage::from_iter(
             account.status.was_destroyed(),
@@ -68,7 +67,7 @@ fn generate_test_data(size: usize) -> HashMap<Address, BundleAccount> {
     let mut bundle_builder = BundleBuilder::default();
 
     for (address, storage) in state {
-        bundle_builder = bundle_builder.state_storage(address, storage);
+        bundle_builder = bundle_builder.state_storage(address, storage.into_iter().collect());
     }
 
     let bundle_state = bundle_builder.build();

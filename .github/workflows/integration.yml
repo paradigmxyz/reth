@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Install Geth
-        run: .github/scripts/install_geth.sh
+        run: .github/assets/install_geth.sh
       - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
         with:
@@ -47,7 +47,7 @@ jobs:
         name: Run tests
         run: |
           cargo nextest run \
-            --locked -p reth-node-optimism --features "optimism"
+            --locked -p reth-optimism-node --features "optimism"
 
   integration-success:
     name: integration success

@@ -1,8 +1,10 @@
 //! Types for launching execution extensions (ExEx).
+
+use std::future::Future;
+
 use futures::{future::BoxFuture, FutureExt};
 use reth_exex::ExExContext;
 use reth_node_api::FullNodeComponents;
-use std::future::Future;
 
 /// A trait for launching an `ExEx`.
 pub trait LaunchExEx<Node: FullNodeComponents>: Send {

@@ -1,11 +1,15 @@
 //! Transaction pool arguments
 
 use crate::cli::config::RethTransactionPoolConfig;
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
+use alloy_primitives::Address;
 use clap::Args;
-use reth_primitives::Address;
 use reth_transaction_pool::{
-    blobstore::disk::DEFAULT_MAX_CACHED_BLOBS, validate::DEFAULT_MAX_TX_INPUT_BYTES,
+    blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
+    pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
+    validate::DEFAULT_MAX_TX_INPUT_BYTES,
     LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
+    DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, MAX_NEW_PENDING_TXS_NOTIFICATIONS,
     REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
     TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
@@ -42,6 +46,14 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.pricebump", default_value_t = DEFAULT_PRICE_BUMP)]
     pub price_bump: u128,
 
+    /// Minimum base fee required by the protocol.
+    #[arg(long = "txpool.minimal-protocol-fee", default_value_t = MIN_PROTOCOL_BASE_FEE)]
+    pub minimal_protocol_basefee: u64,
+
+    /// The default enforced gas limit for transactions entering the pool
+    #[arg(long = "txpool.gas-limit", default_value_t = ETHEREUM_BLOCK_GAS_LIMIT)]
+    pub gas_limit: u64,
+
     /// Price bump percentage to replace an already existing blob transaction
     #[arg(long = "blobpool.pricebump", default_value_t = REPLACE_BLOB_PRICE_BUMP)]
     pub blob_transaction_price_bump: u128,
@@ -63,6 +75,22 @@ pub struct TxPoolArgs {
     /// Flag to toggle local transaction propagation.
     #[arg(long = "txpool.no-local-transactions-propagation")]
     pub no_local_transactions_propagation: bool,
+    /// Number of additional transaction validation tasks to spawn.
+    #[arg(long = "txpool.additional-validation-tasks", alias = "txpool.additional_validation_tasks", default_value_t = DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS)]
+    pub additional_validation_tasks: usize,
+
+    /// Maximum number of pending transactions from the network to buffer
+    #[arg(long = "txpool.max-pending-txns", alias = "txpool.max_pending_txns", default_value_t = PENDING_TX_LISTENER_BUFFER_SIZE)]
+    pub pending_tx_listener_buffer_size: usize,
+
+    /// Maximum number of new transactions to buffer
+    #[arg(long = "txpool.max-new-txns", alias = "txpool.max_new_txns", default_value_t = NEW_TX_LISTENER_BUFFER_SIZE)]
+    pub new_tx_listener_buffer_size: usize,
+
+    /// How many new pending transactions to buffer and send to in progress pending transaction
+    /// iterators.
+    #[arg(long = "txpool.max-new-pending-txs-notifications", alias = "txpool.max-new-pending-txs-notifications", default_value_t = MAX_NEW_PENDING_TXS_NOTIFICATIONS)]
+    pub max_new_pending_txs_notifications: usize,
 }
 
 impl Default for TxPoolArgs {
@@ -76,12 +104,18 @@ impl Default for TxPoolArgs {
             queued_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bump: DEFAULT_PRICE_BUMP,
+            minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             blob_transaction_price_bump: REPLACE_BLOB_PRICE_BUMP,
             max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
             max_cached_entries: DEFAULT_MAX_CACHED_BLOBS,
             no_locals: false,
             locals: Default::default(),
             no_local_transactions_propagation: false,
+            additional_validation_tasks: DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS,
+            pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
+            new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
+            max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
         }
     }
 }
@@ -97,25 +131,30 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             },
             pending_limit: SubPoolLimit {
                 max_txs: self.pending_max_count,
-                max_size: self.pending_max_size * 1024 * 1024,
+                max_size: self.pending_max_size.saturating_mul(1024 * 1024),
             },
             basefee_limit: SubPoolLimit {
                 max_txs: self.basefee_max_count,
-                max_size: self.basefee_max_size * 1024 * 1024,
+                max_size: self.basefee_max_size.saturating_mul(1024 * 1024),
             },
             queued_limit: SubPoolLimit {
                 max_txs: self.queued_max_count,
-                max_size: self.queued_max_size * 1024 * 1024,
+                max_size: self.queued_max_size.saturating_mul(1024 * 1024),
             },
             blob_limit: SubPoolLimit {
                 max_txs: self.queued_max_count,
-                max_size: self.queued_max_size * 1024 * 1024,
+                max_size: self.queued_max_size.saturating_mul(1024 * 1024),
             },
             max_account_slots: self.max_account_slots,
             price_bumps: PriceBumpConfig {
                 default_price_bump: self.price_bump,
                 replace_blob_tx_price_bump: self.blob_transaction_price_bump,
             },
+            minimal_protocol_basefee: self.minimal_protocol_basefee,
+            gas_limit: self.gas_limit,
+            pending_tx_listener_buffer_size: self.pending_tx_listener_buffer_size,
+            new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
+            max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
         }
     }
 }
@@ -137,5 +176,16 @@ mod tests {
         let default_args = TxPoolArgs::default();
         let args = CommandParser::<TxPoolArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn txpool_parse_locals() {
+        let args = CommandParser::<TxPoolArgs>::parse_from([
+            "reth",
+            "--txpool.locals",
+            "0x0000000000000000000000000000000000000000",
+        ])
+        .args;
+        assert_eq!(args.locals, vec![Address::ZERO]);
     }
 }

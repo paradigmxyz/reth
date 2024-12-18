@@ -7,7 +7,10 @@
 //! ```
 
 use futures::StreamExt;
-use reth_network::{config::rng_secret_key, NetworkConfig, NetworkEvents, NetworkManager};
+use reth_network::{
+    config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkEventListenerProvider,
+    NetworkManager,
+};
 use reth_provider::test_utils::NoopProvider;
 
 #[tokio::main]
@@ -22,7 +25,7 @@ async fn main() -> eyre::Result<()> {
     let config = NetworkConfig::builder(local_key).mainnet_boot_nodes().build(client);
 
     // create the network instance
-    let network = NetworkManager::new(config).await?;
+    let network = NetworkManager::<EthNetworkPrimitives>::new(config).await?;
 
     // get a handle to the network to interact with it
     let handle = network.handle().clone();

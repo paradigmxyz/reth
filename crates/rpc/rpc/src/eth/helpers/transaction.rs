@@ -1,11 +1,10 @@
 //! Contains RPC handler implementations specific to transactions
 
-use reth_provider::{BlockReaderIdExt, TransactionsProvider};
+use reth_provider::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    RawTransactionForwarder,
+    FullEthApiTypes, RpcNodeCoreExt,
 };
-use reth_rpc_eth_types::EthStateCache;
 use reth_transaction_pool::TransactionPool;
 
 use crate::EthApi;
@@ -13,22 +12,11 @@ use crate::EthApi;
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadTransaction,
-    Pool: TransactionPool + 'static,
-    Provider: BlockReaderIdExt,
+    Self: LoadTransaction<Provider: BlockReaderIdExt>,
+    Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
 {
     #[inline]
-    fn provider(&self) -> impl BlockReaderIdExt {
-        self.inner.provider()
-    }
-
-    #[inline]
-    fn raw_tx_forwarder(&self) -> Option<std::sync::Arc<dyn RawTransactionForwarder>> {
-        self.inner.raw_tx_forwarder()
-    }
-
-    #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>> {
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
         self.inner.signers()
     }
 }
@@ -36,37 +24,27 @@ where
 impl<Provider, Pool, Network, EvmConfig> LoadTransaction
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: SpawnBlocking,
-    Provider: TransactionsProvider,
-    Pool: TransactionPool,
+    Self: SpawnBlocking
+        + FullEthApiTypes
+        + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>,
+    Provider: BlockReader,
 {
-    type Pool = Pool;
-
-    #[inline]
-    fn provider(&self) -> impl reth_provider::TransactionsProvider {
-        self.inner.provider()
-    }
-
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
-
-    #[inline]
-    fn pool(&self) -> &Self::Pool {
-        self.inner.pool()
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
+    use alloy_primitives::{hex_literal::hex, Bytes};
+    use reth_chainspec::ChainSpecProvider;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, hex_literal::hex, Bytes};
     use reth_provider::test_utils::NoopProvider;
     use reth_rpc_eth_api::helpers::EthTransactions;
     use reth_rpc_eth_types::{
         EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
+    };
+    use reth_rpc_server_types::constants::{
+        DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
     };
     use reth_tasks::pool::BlockingTaskPool;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
@@ -80,10 +58,9 @@ mod tests {
 
         let pool = testing_pool();
 
-        let evm_config = EthEvmConfig::default();
-        let cache = EthStateCache::spawn(noop_provider, Default::default(), evm_config);
-        let fee_history_cache =
-            FeeHistoryCache::new(cache.clone(), FeeHistoryCacheConfig::default());
+        let evm_config = EthEvmConfig::new(noop_provider.chain_spec());
+        let cache = EthStateCache::spawn(noop_provider, Default::default());
+        let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
         let eth_api = EthApi::new(
             noop_provider,
             pool.clone(),
@@ -91,10 +68,12 @@ mod tests {
             cache.clone(),
             GasPriceOracle::new(noop_provider, Default::default(), cache.clone()),
             ETHEREUM_BLOCK_GAS_LIMIT,
+            DEFAULT_MAX_SIMULATE_BLOCKS,
+            DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             fee_history_cache,
             evm_config,
-            None,
+            DEFAULT_PROOF_PERMITS,
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

@@ -9,44 +9,19 @@ pub use reth_evm::provider::EvmEnvProvider;
 mod block;
 pub use block::*;
 
-mod chain_info;
-pub use chain_info::CanonChainTracker;
-
 mod header_sync_gap;
 pub use header_sync_gap::{HeaderSyncGap, HeaderSyncGapProvider};
 
 mod state;
 pub use state::StateWriter;
 
-mod chain;
-pub use chain::{
-    CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
-    CanonStateNotifications, CanonStateSubscriptions,
-};
-
-mod spec;
-pub use spec::ChainSpecProvider;
-
-mod hashing;
-pub use hashing::HashingWriter;
-
-mod history;
-pub use history::HistoryWriter;
-
-mod database_provider;
-pub use database_provider::DatabaseProviderFactory;
+pub use reth_chainspec::ChainSpecProvider;
 
 mod static_file_provider;
 pub use static_file_provider::StaticFileProviderFactory;
 
-mod stats;
-pub use stats::StatsReader;
-
 mod full;
-pub use full::FullProvider;
+pub use full::{FullProvider, FullRpcProvider};
 
 mod tree_viewer;
 pub use tree_viewer::TreeViewer;
-
-mod finalized_block;
-pub use finalized_block::{FinalizedBlockReader, FinalizedBlockWriter};

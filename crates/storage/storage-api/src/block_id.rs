@@ -1,6 +1,7 @@
 use crate::BlockHashReader;
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_primitives::{BlockNumber, B256};
 use reth_chainspec::ChainInfo;
-use reth_primitives::{BlockHashOrNumber, BlockId, BlockNumber, BlockNumberOrTag, B256};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Client trait for getting important block numbers (such as the latest block number), converting
@@ -40,10 +41,10 @@ pub trait BlockNumReader: BlockHashReader + Send + Sync {
     }
 }
 
-/// Client trait for transforming [BlockId] into block numbers or hashes.
+/// Client trait for transforming [`BlockId`] into block numbers or hashes.
 ///
-/// Types that implement this trait must be able to resolve all variants of [BlockNumberOrTag] to
-/// block numbers or hashes. Automatic implementations for resolving [BlockNumberOrTag] variants
+/// Types that implement this trait must be able to resolve all variants of [`BlockNumberOrTag`] to
+/// block numbers or hashes. Automatic implementations for resolving [`BlockNumberOrTag`] variants
 /// are provided if the type implements the `pending_block_num_hash`, `finalized_block_num`, and
 /// `safe_block_num` methods.
 ///
@@ -62,14 +63,12 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
                     .map(|res_opt| res_opt.map(|num_hash| num_hash.number))
             }
             BlockNumberOrTag::Number(num) => num,
-            BlockNumberOrTag::Finalized => match self.finalized_block_number()? {
-                Some(block_number) => block_number,
-                None => return Err(ProviderError::FinalizedBlockNotFound),
-            },
-            BlockNumberOrTag::Safe => match self.safe_block_number()? {
-                Some(block_number) => block_number,
-                None => return Err(ProviderError::SafeBlockNotFound),
-            },
+            BlockNumberOrTag::Finalized => {
+                self.finalized_block_number()?.ok_or(ProviderError::FinalizedBlockNotFound)?
+            }
+            BlockNumberOrTag::Safe => {
+                self.safe_block_number()?.ok_or(ProviderError::SafeBlockNotFound)?
+            }
         };
         Ok(Some(num))
     }
@@ -83,11 +82,10 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
                 BlockNumberOrTag::Pending => self
                     .pending_block_num_hash()
                     .map(|res_opt| res_opt.map(|num_hash| num_hash.hash)),
-                _ => self
-                    .convert_block_number(num)?
-                    .map(|num| self.block_hash(num))
-                    .transpose()
-                    .map(|maybe_hash| maybe_hash.flatten()),
+                BlockNumberOrTag::Finalized => self.finalized_block_hash(),
+                BlockNumberOrTag::Safe => self.safe_block_hash(),
+                BlockNumberOrTag::Earliest => self.block_hash(0),
+                BlockNumberOrTag::Number(num) => self.block_hash(num),
             },
         }
     }
@@ -101,13 +99,13 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
     }
 
     /// Get the current pending block number and hash.
-    fn pending_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>>;
+    fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>>;
 
     /// Get the current safe block number and hash.
-    fn safe_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>>;
+    fn safe_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>>;
 
     /// Get the current finalized block number and hash.
-    fn finalized_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>>;
+    fn finalized_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>>;
 
     /// Get the safe block number.
     fn safe_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
@@ -129,3 +127,6 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
         self.finalized_block_num_hash().map(|res_opt| res_opt.map(|num_hash| num_hash.hash))
     }
 }
+
+#[cfg(test)]
+fn _object_safe(_: Box<dyn BlockIdReader>) {}

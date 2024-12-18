@@ -1,31 +1,60 @@
-use std::sync::Arc;
-
+use alloy_eips::eip2718::Encodable2718;
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures::StreamExt;
-use reth::rpc::api::eth::helpers::EthTransactions;
 use reth_chainspec::ChainSpec;
-use reth_e2e_test_utils::setup;
-use reth_provider::CanonStateSubscriptions;
-
-use crate::utils::EthNode;
+use reth_node_api::{FullNodeComponents, FullNodePrimitives, NodeTypes};
+use reth_node_builder::{
+    rpc::RethRpcAddOns, EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig, NodeHandle,
+};
+use reth_node_core::args::DevArgs;
+use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
+use reth_provider::{providers::BlockchainProvider2, CanonStateSubscriptions};
+use reth_rpc_eth_api::helpers::EthTransactions;
+use reth_tasks::TaskManager;
+use std::sync::Arc;
 
 #[tokio::test]
 async fn can_run_dev_node() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let (mut nodes, _tasks, _) = setup(1, custom_chain(), true).await?;
+    let tasks = TaskManager::current();
+    let exec = tasks.executor();
 
-    assert_chain_advances(nodes.pop().unwrap()).await;
+    let node_config = NodeConfig::test()
+        .with_chain(custom_chain())
+        .with_dev(DevArgs { dev: true, ..Default::default() });
+    let NodeHandle { node, .. } = NodeBuilder::new(node_config.clone())
+        .testing_node(exec.clone())
+        .with_types_and_provider::<EthereumNode, BlockchainProvider2<_>>()
+        .with_components(EthereumNode::components())
+        .with_add_ons(EthereumAddOns::default())
+        .launch_with_fn(|builder| {
+            let launcher = EngineNodeLauncher::new(
+                builder.task_executor().clone(),
+                builder.config().datadir(),
+                Default::default(),
+            );
+            builder.launch_with(launcher)
+        })
+        .await?;
+
+    assert_chain_advances(node).await;
+
     Ok(())
 }
 
-async fn assert_chain_advances(mut node: EthNode) {
-    let mut notifications = node.inner.provider.canonical_state_stream();
+async fn assert_chain_advances<N, AddOns>(node: FullNode<N, AddOns>)
+where
+    N: FullNodeComponents<Provider: CanonStateSubscriptions>,
+    AddOns: RethRpcAddOns<N, EthApi: EthTransactions>,
+    N::Types: NodeTypes<Primitives: FullNodePrimitives>,
+{
+    let mut notifications = node.provider.canonical_state_stream();
 
     // submit tx through rpc
     let raw_tx = hex!("02f876820a28808477359400847735940082520894ab0840c0e43688012c1adb0f5e3fc665188f83d28a029d394a5d630544000080c080a0a044076b7e67b5deecc63f61a8d7913fab86ca365b344b5759d1fe3563b4c39ea019eab979dd000da04dfc72bb0377c092d30fd9e1cab5ae487de49586cc8b0090");
 
-    let eth_api = node.inner.rpc_registry.eth_api();
+    let eth_api = node.rpc_registry.eth_api();
 
     let hash = eth_api.send_raw_transaction(raw_tx.into()).await.unwrap();
 
@@ -36,8 +65,8 @@ async fn assert_chain_advances(mut node: EthNode) {
 
     let head = notifications.next().await.unwrap();
 
-    let tx = head.tip().transactions().next().unwrap();
-    assert_eq!(tx.hash(), hash);
+    let tx = &head.tip().transactions()[0];
+    assert_eq!(tx.trie_hash(), hash);
     println!("mined transaction: {hash}");
 }
 
@@ -48,7 +77,7 @@ fn custom_chain() -> Arc<ChainSpec> {
     "nonce": "0x42",
     "timestamp": "0x0",
     "extraData": "0x5343",
-    "gasLimit": "0x1388",
+    "gasLimit": "0x13880",
     "difficulty": "0x400000000",
     "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "coinbase": "0x0000000000000000000000000000000000000000",

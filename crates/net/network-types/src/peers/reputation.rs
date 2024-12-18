@@ -1,7 +1,5 @@
 //! Peer reputation management
 
-use reth_network_api::{Reputation, ReputationChangeKind};
-
 /// The default reputation of a peer
 pub const DEFAULT_REPUTATION: Reputation = 0;
 
@@ -50,6 +48,59 @@ pub const fn is_banned_reputation(reputation: i32) -> bool {
     reputation < BANNED_REPUTATION
 }
 
+/// The type that tracks the reputation score.
+pub type Reputation = i32;
+
+/// Various kinds of reputation changes.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum ReputationChangeKind {
+    /// Received an unspecific bad message from the peer
+    BadMessage,
+    /// Peer sent a bad block.
+    ///
+    /// Note: this will we only used in pre-merge, pow consensus, since after no more block announcements are sent via devp2p: [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
+    BadBlock,
+    /// Peer sent a bad transaction message. E.g. Transactions which weren't recoverable.
+    BadTransactions,
+    /// Peer sent a bad announcement message, e.g. invalid transaction type for the configured
+    /// network.
+    BadAnnouncement,
+    /// Peer sent a message that included a hash or transaction that we already received from the
+    /// peer.
+    ///
+    /// According to the [Eth spec](https://github.com/ethereum/devp2p/blob/master/caps/eth.md):
+    ///
+    /// > A node should never send a transaction back to a peer that it can determine already knows
+    /// > of it (either because it was previously sent or because it was informed from this peer
+    /// > originally). This is usually achieved by remembering a set of transaction hashes recently
+    /// > relayed by the peer.
+    AlreadySeenTransaction,
+    /// Peer failed to respond in time.
+    Timeout,
+    /// Peer does not adhere to network protocol rules.
+    BadProtocol,
+    /// Failed to establish a connection to the peer.
+    FailedToConnect,
+    /// Connection dropped by peer.
+    Dropped,
+    /// Reset the reputation to the default value.
+    Reset,
+    /// Apply a reputation change by value
+    Other(Reputation),
+}
+
+impl ReputationChangeKind {
+    /// Returns true if the reputation change is a [`ReputationChangeKind::Reset`].
+    pub const fn is_reset(&self) -> bool {
+        matches!(self, Self::Reset)
+    }
+
+    /// Returns true if the reputation change is [`ReputationChangeKind::Dropped`].
+    pub const fn is_dropped(&self) -> bool {
+        matches!(self, Self::Dropped)
+    }
+}
+
 /// How the [`ReputationChangeKind`] are weighted.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -78,6 +129,21 @@ pub struct ReputationChangeWeights {
 // === impl ReputationChangeWeights ===
 
 impl ReputationChangeWeights {
+    /// Creates a new instance that doesn't penalize any kind of reputation change.
+    pub const fn zero() -> Self {
+        Self {
+            bad_block: 0,
+            bad_transactions: 0,
+            already_seen_transactions: 0,
+            bad_message: 0,
+            timeout: 0,
+            bad_protocol: 0,
+            failed_to_connect: 0,
+            dropped: 0,
+            bad_announcement: 0,
+        }
+    }
+
     /// Returns the quantifiable [`ReputationChange`] for the given [`ReputationChangeKind`] using
     /// the configured weights
     pub fn change(&self, kind: ReputationChangeKind) -> ReputationChange {
@@ -137,4 +203,17 @@ impl From<Reputation> for ReputationChange {
     fn from(value: Reputation) -> Self {
         Self(value)
     }
+}
+
+/// Outcomes when a reputation change is applied to a peer
+#[derive(Debug, Clone, Copy)]
+pub enum ReputationChangeOutcome {
+    /// Nothing to do.
+    None,
+    /// Ban the peer.
+    Ban,
+    /// Ban and disconnect
+    DisconnectAndBan,
+    /// Unban the peer
+    Unban,
 }

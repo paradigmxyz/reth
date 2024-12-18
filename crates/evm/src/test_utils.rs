@@ -1,14 +1,21 @@
 //! Helpers for testing.
 
-use crate::execute::{
-    BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
+use crate::{
+    execute::{
+        BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionInput,
+        BlockExecutionOutput, BlockExecutionStrategy, BlockExecutorProvider, Executor,
+    },
+    system_calls::OnStateHook,
 };
+use alloy_eips::eip7685::Requests;
+use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, EthPrimitives, NodePrimitives, Receipt, Receipts};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
+use revm::State;
 use revm_primitives::db::Database;
 use std::{fmt::Display, sync::Arc};
 
@@ -26,6 +33,8 @@ impl MockExecutorProvider {
 }
 
 impl BlockExecutorProvider for MockExecutorProvider {
+    type Primitives = EthPrimitives;
+
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
@@ -37,7 +46,7 @@ impl BlockExecutorProvider for MockExecutorProvider {
         self.clone()
     }
 
-    fn batch_executor<DB>(&self, _: DB, _: PruneModes) -> Self::BatchExecutor<DB>
+    fn batch_executor<DB>(&self, _: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
@@ -56,9 +65,34 @@ impl<DB> Executor<DB> for MockExecutorProvider {
         Ok(BlockExecutionOutput {
             state: bundle,
             receipts: receipts.into_iter().flatten().flatten().collect(),
-            requests: requests.into_iter().flatten().collect(),
+            requests: requests.into_iter().fold(Requests::default(), |mut reqs, req| {
+                reqs.extend(req);
+                reqs
+            }),
             gas_used: 0,
         })
+    }
+
+    fn execute_with_state_closure<F>(
+        self,
+        input: Self::Input<'_>,
+        _: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: FnMut(&State<DB>),
+    {
+        <Self as Executor<DB>>::execute(self, input)
+    }
+
+    fn execute_with_state_hook<F>(
+        self,
+        input: Self::Input<'_>,
+        _: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: OnStateHook,
+    {
+        <Self as Executor<DB>>::execute(self, input)
     }
 }
 
@@ -77,7 +111,56 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
 
     fn set_tip(&mut self, _: BlockNumber) {}
 
+    fn set_prune_modes(&mut self, _: PruneModes) {}
+
     fn size_hint(&self) -> Option<usize> {
         None
+    }
+}
+
+impl<S> BasicBlockExecutor<S>
+where
+    S: BlockExecutionStrategy,
+{
+    /// Provides safe read access to the state
+    pub fn with_state<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&State<S::DB>) -> R,
+    {
+        f(self.strategy.state_ref())
+    }
+
+    /// Provides safe write access to the state
+    pub fn with_state_mut<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut State<S::DB>) -> R,
+    {
+        f(self.strategy.state_mut())
+    }
+}
+
+impl<S> BasicBatchExecutor<S>
+where
+    S: BlockExecutionStrategy,
+{
+    /// Provides safe read access to the state
+    pub fn with_state<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&State<S::DB>) -> R,
+    {
+        f(self.strategy.state_ref())
+    }
+
+    /// Provides safe write access to the state
+    pub fn with_state_mut<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut State<S::DB>) -> R,
+    {
+        f(self.strategy.state_mut())
+    }
+
+    /// Accessor for batch executor receipts.
+    pub const fn receipts(&self) -> &Receipts<<S::Primitives as NodePrimitives>::Receipt> {
+        self.batch_record.receipts()
     }
 }

@@ -1,5 +1,5 @@
-use crate::{nodes::CHILD_INDEX_RANGE, BranchNodeCompact, Nibbles, StoredSubNode};
-use reth_primitives::B256;
+use crate::{BranchNodeCompact, Nibbles, StoredSubNode, CHILD_INDEX_RANGE};
+use alloy_primitives::B256;
 
 /// Cursor for iterating over a subtrie.
 #[derive(Clone)]
@@ -49,7 +49,7 @@ impl From<StoredSubNode> for CursorSubNode {
 
 impl From<CursorSubNode> for StoredSubNode {
     fn from(value: CursorSubNode) -> Self {
-        let nibble = if value.nibble >= 0 { Some(value.nibble as u8) } else { None };
+        let nibble = (value.nibble >= 0).then_some(value.nibble as u8);
         Self { key: value.key.to_vec(), nibble, node: value.node }
     }
 }
@@ -76,7 +76,7 @@ impl CursorSubNode {
     pub fn state_flag(&self) -> bool {
         self.node
             .as_ref()
-            .map_or(true, |node| self.nibble < 0 || node.state_mask.is_bit_set(self.nibble as u8))
+            .is_none_or(|node| self.nibble < 0 || node.state_mask.is_bit_set(self.nibble as u8))
     }
 
     /// Returns `true` if the tree flag is set for the current nibble.
@@ -84,12 +84,12 @@ impl CursorSubNode {
     pub fn tree_flag(&self) -> bool {
         self.node
             .as_ref()
-            .map_or(true, |node| self.nibble < 0 || node.tree_mask.is_bit_set(self.nibble as u8))
+            .is_none_or(|node| self.nibble < 0 || node.tree_mask.is_bit_set(self.nibble as u8))
     }
 
     /// Returns `true` if the current nibble has a root hash.
     pub fn hash_flag(&self) -> bool {
-        self.node.as_ref().map_or(false, |node| match self.nibble {
+        self.node.as_ref().is_some_and(|node| match self.nibble {
             // This guy has it
             -1 => node.root_hash.is_some(),
             // Or get it from the children

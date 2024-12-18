@@ -102,9 +102,11 @@ where
     }
 }
 
+/// A future representing the response of an RPC request
 #[pin_project]
 #[allow(missing_debug_implementations)]
 pub struct ResponseFuture<F> {
+    /// The kind of response future, error or pending
     #[pin]
     kind: Kind<F>,
 }
@@ -174,7 +176,7 @@ mod tests {
         missing_jwt_error().await;
         wrong_jwt_signature_error().await;
         invalid_issuance_timestamp_error().await;
-        jwt_decode_error().await;
+        jwt_decode_error().await
     }
 
     async fn valid_jwt() {
@@ -232,7 +234,7 @@ mod tests {
 
         let body = r#"{"jsonrpc": "2.0", "method": "greet_melkor", "params": [], "id": 1}"#;
         let response = client
-            .post(&format!("http://{AUTH_ADDR}:{AUTH_PORT}"))
+            .post(format!("http://{AUTH_ADDR}:{AUTH_PORT}"))
             .bearer_auth(jwt.unwrap_or_default())
             .body(body)
             .header(header::CONTENT_TYPE, "application/json")

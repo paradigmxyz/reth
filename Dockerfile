@@ -17,11 +17,11 @@ COPY --from=planner /app/recipe.json recipe.json
 
 # Build profile, release by default
 ARG BUILD_PROFILE=release
-ENV BUILD_PROFILE $BUILD_PROFILE
+ENV BUILD_PROFILE=$BUILD_PROFILE
 
 # Extra Cargo flags
 ARG RUSTFLAGS=""
-ENV RUSTFLAGS "$RUSTFLAGS"
+ENV RUSTFLAGS="$RUSTFLAGS"
 
 # Extra Cargo features
 ARG FEATURES="jemalloc"

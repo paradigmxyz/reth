@@ -1,4 +1,4 @@
-use crate::B256;
+use alloy_primitives::B256;
 
 /// Additional fields in the context of a block that contains this transaction.
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]

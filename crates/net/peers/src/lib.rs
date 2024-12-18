@@ -39,6 +39,11 @@
 //! - [`TrustedPeer`]: A [`NodeRecord`] with an optional domain name, which can be resolved to a
 //!   [`NodeRecord`]. Useful for adding trusted peers at startup, whose IP address may not be
 //!   static.
+//!
+//!
+//! ## Feature Flags
+//!
+//! - `net`: Support for address lookups.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -47,11 +52,19 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
+use alloc::{
+    format,
+    string::{String, ToString},
+};
 use alloy_primitives::B512;
-use std::str::FromStr;
+use core::str::FromStr;
 
 // Re-export PeerId for ease of use.
+#[cfg(feature = "secp256k1")]
 pub use enr::Enr;
 
 /// Alias for a peer identifier
@@ -103,8 +116,8 @@ pub fn id2pk(id: PeerId) -> Result<secp256k1::PublicKey, secp256k1::Error> {
 pub enum AnyNode {
     /// An "enode:" peer with full ip
     NodeRecord(NodeRecord),
-    #[cfg(feature = "secp256k1")]
     /// An "enr:" peer
+    #[cfg(feature = "secp256k1")]
     Enr(Enr<secp256k1::SecretKey>),
     /// An incomplete "enode" with only a peer id
     PeerId(PeerId),
@@ -112,6 +125,7 @@ pub enum AnyNode {
 
 impl AnyNode {
     /// Returns the peer id of the node.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn peer_id(&self) -> PeerId {
         match self {
             Self::NodeRecord(record) => record.id,
@@ -122,6 +136,7 @@ impl AnyNode {
     }
 
     /// Returns the full node record if available.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn node_record(&self) -> Option<NodeRecord> {
         match self {
             Self::NodeRecord(record) => Some(*record),
@@ -130,8 +145,8 @@ impl AnyNode {
                 let node_record = NodeRecord {
                     address: enr
                         .ip4()
-                        .map(std::net::IpAddr::from)
-                        .or_else(|| enr.ip6().map(std::net::IpAddr::from))?,
+                        .map(core::net::IpAddr::from)
+                        .or_else(|| enr.ip6().map(core::net::IpAddr::from))?,
                     tcp_port: enr.tcp4().or_else(|| enr.tcp6())?,
                     udp_port: enr.udp4().or_else(|| enr.udp6())?,
                     id: pk2id(&enr.public_key()),
@@ -179,8 +194,8 @@ impl FromStr for AnyNode {
     }
 }
 
-impl std::fmt::Display for AnyNode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for AnyNode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::NodeRecord(record) => write!(f, "{record}"),
             #[cfg(feature = "secp256k1")]

@@ -4,8 +4,9 @@ use crate::{
     error::PeerRequestResult,
     priority::Priority,
 };
+use alloy_primitives::B256;
 use futures::FutureExt;
-use reth_primitives::{BlockBody, B256};
+use reth_primitives::BlockBody;
 use std::fmt::{Debug, Formatter};
 use tokio::sync::oneshot;
 
@@ -35,6 +36,7 @@ impl<F> BodiesClient for TestBodiesClient<F>
 where
     F: Fn(Vec<B256>) -> PeerRequestResult<Vec<BlockBody>> + Send + Sync,
 {
+    type Body = BlockBody;
     type Output = BodiesFut;
 
     fn get_block_bodies_with_priority(

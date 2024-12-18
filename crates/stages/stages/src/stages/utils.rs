@@ -1,4 +1,5 @@
 //! Utils for `stages`.
+use alloy_primitives::{BlockNumber, TxNumber};
 use reth_config::config::EtlConfig;
 use reth_db::BlockNumberList;
 use reth_db_api::{
@@ -9,7 +10,11 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_etl::Collector;
-use reth_primitives::BlockNumber;
+use reth_primitives::StaticFileSegment;
+use reth_provider::{
+    providers::StaticFileProvider, BlockReader, DBProvider, ProviderError,
+    StaticFileProviderFactory,
+};
 use reth_stages_api::StageError;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
@@ -34,37 +39,37 @@ const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
 ///
 /// As a result, the `Collector` will contain entries such as `(Address1.3, [1,2,3])` and
 /// `(Address1.300, [100,300])`. The entries may be stored across one or more files.
-pub(crate) fn collect_history_indices<TX, CS, H, P>(
-    tx: &TX,
+pub(crate) fn collect_history_indices<Provider, CS, H, P>(
+    provider: &Provider,
     range: impl RangeBounds<CS::Key>,
     sharded_key_factory: impl Fn(P, BlockNumber) -> H::Key,
     partial_key_factory: impl Fn((CS::Key, CS::Value)) -> (u64, P),
     etl_config: &EtlConfig,
 ) -> Result<Collector<H::Key, H::Value>, StageError>
 where
-    TX: DbTxMut + DbTx,
+    Provider: DBProvider,
     CS: Table,
     H: Table<Value = BlockNumberList>,
     P: Copy + Eq + Hash,
 {
-    let mut changeset_cursor = tx.cursor_read::<CS>()?;
+    let mut changeset_cursor = provider.tx_ref().cursor_read::<CS>()?;
 
     let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<P, Vec<u64>> = HashMap::new();
+    let mut cache: HashMap<P, Vec<u64>> = HashMap::default();
 
     let mut collect = |cache: &HashMap<P, Vec<u64>>| {
-        for (key, indice_list) in cache {
-            let last = indice_list.last().expect("qed");
+        for (key, indices) in cache {
+            let last = indices.last().expect("qed");
             collector.insert(
                 sharded_key_factory(*key, *last),
-                BlockNumberList::new_pre_sorted(indice_list),
+                BlockNumberList::new_pre_sorted(indices.iter().copied()),
             )?;
         }
         Ok::<(), StageError>(())
     };
 
     // observability
-    let total_changesets = tx.entries::<CS>()?;
+    let total_changesets = provider.tx_ref().entries::<CS>()?;
     let interval = (total_changesets / 1000).max(1);
 
     let mut flush_counter = 0;
@@ -101,8 +106,8 @@ where
 /// `Address.StorageKey`). It flushes indices to disk when reaching a shard's max length
 /// (`NUM_OF_INDICES_IN_SHARD`) or when the partial key changes, ensuring the last previous partial
 /// key shard is stored.
-pub(crate) fn load_history_indices<TX, H, P>(
-    tx: &TX,
+pub(crate) fn load_history_indices<Provider, H, P>(
+    provider: &Provider,
     mut collector: Collector<H::Key, H::Value>,
     append_only: bool,
     sharded_key_factory: impl Clone + Fn(P, u64) -> <H as Table>::Key,
@@ -110,11 +115,11 @@ pub(crate) fn load_history_indices<TX, H, P>(
     get_partial: impl Fn(<H as Table>::Key) -> P,
 ) -> Result<(), StageError>
 where
-    TX: DbTxMut + DbTx,
+    Provider: DBProvider<Tx: DbTxMut>,
     H: Table<Value = BlockNumberList>,
     P: Copy + Default + Eq,
 {
-    let mut write_cursor = tx.cursor_write::<H>()?;
+    let mut write_cursor = provider.tx_ref().cursor_write::<H>()?;
     let mut current_partial = P::default();
     let mut current_list = Vec::<u64>::new();
 
@@ -185,7 +190,7 @@ where
     Ok(())
 }
 
-/// Shard and insert the indice list according to [`LoadMode`] and its length.
+/// Shard and insert the indices list according to [`LoadMode`] and its length.
 pub(crate) fn load_indices<H, C, P>(
     cursor: &mut C,
     partial_key: P,
@@ -242,4 +247,40 @@ impl LoadMode {
     const fn is_flush(&self) -> bool {
         matches!(self, Self::Flush)
     }
+}
+
+/// Called when database is ahead of static files. Attempts to find the first block we are missing
+/// transactions for.
+pub(crate) fn missing_static_data_error<Provider>(
+    last_tx_num: TxNumber,
+    static_file_provider: &StaticFileProvider<Provider::Primitives>,
+    provider: &Provider,
+    segment: StaticFileSegment,
+) -> Result<StageError, ProviderError>
+where
+    Provider: BlockReader + StaticFileProviderFactory,
+{
+    let mut last_block =
+        static_file_provider.get_highest_static_file_block(segment).unwrap_or_default();
+
+    // To be extra safe, we make sure that the last tx num matches the last block from its indices.
+    // If not, get it.
+    loop {
+        if let Some(indices) = provider.block_body_indices(last_block)? {
+            if indices.last_tx_num() <= last_tx_num {
+                break
+            }
+        }
+        if last_block == 0 {
+            break
+        }
+        last_block -= 1;
+    }
+
+    let missing_block = Box::new(provider.sealed_header(last_block + 1)?.unwrap_or_default());
+
+    Ok(StageError::MissingStaticFileData {
+        block: Box::new(missing_block.block_with_parent()),
+        segment,
+    })
 }

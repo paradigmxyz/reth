@@ -7,9 +7,11 @@ use crate::{
     },
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
-use reth_consensus::Consensus;
+use reth_consensus::FullConsensus;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_transaction_pool::TransactionPool;
+use reth_node_api::{HeaderTy, NodeTypes, NodeTypesWithEngine, TxTy};
+use reth_payload_builder::PayloadBuilderHandle;
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{future::Future, marker::PhantomData};
 
 /// A generic, general purpose and customizable [`NodeComponentsBuilder`] implementation.
@@ -275,6 +277,7 @@ where
             network_builder,
             executor_builder,
             consensus_builder: _,
+
             _marker,
         } = self;
         ComponentsBuilder {
@@ -354,7 +357,10 @@ impl Default for ComponentsBuilder<(), (), (), (), (), ()> {
 /// A type that's responsible for building the components of the node.
 pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
     /// The components for the node with the given types
-    type Components: NodeComponents<Node>;
+    type Components: NodeComponents<
+        Node,
+        PayloadBuilder = PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
+    >;
 
     /// Consumes the type and returns the created components.
     fn build_components(
@@ -368,10 +374,12 @@ where
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Components<Node, Pool, EVM, Executor, Cons>>> + Send,
-    Pool: TransactionPool + Unpin + 'static,
-    EVM: ConfigureEvm,
-    Executor: BlockExecutorProvider,
-    Cons: Consensus + Clone + Unpin + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
+        + 'static,
+    EVM: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>,
+    Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
+    Cons: FullConsensus<<Node::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static,
 {
     type Components = Components<Node, Pool, EVM, Executor, Cons>;
 

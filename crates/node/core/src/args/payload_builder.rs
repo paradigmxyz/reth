@@ -1,14 +1,11 @@
-use crate::{
-    args::utils::parse_duration_from_secs, cli::config::PayloadBuilderConfig,
-    version::default_extradata,
-};
+use crate::{cli::config::PayloadBuilderConfig, version::default_extradata};
+use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
+use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT, merge::SLOT_DURATION};
 use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
-use reth_primitives::constants::{
-    ETHEREUM_BLOCK_GAS_LIMIT, MAXIMUM_EXTRA_DATA_SIZE, SLOT_DURATION,
-};
+use reth_cli_util::{parse_duration_from_secs, parse_duration_from_secs_or_ms};
 use std::{borrow::Cow, ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
@@ -23,8 +20,12 @@ pub struct PayloadBuilderArgs {
     #[arg(long = "builder.gaslimit", default_value = "30000000", value_name = "GAS_LIMIT")]
     pub max_gas_limit: u64,
 
-    /// The interval at which the job should build a new payload after the last (in seconds).
-    #[arg(long = "builder.interval", value_parser = parse_duration_from_secs, default_value = "1", value_name = "SECONDS")]
+    /// The interval at which the job should build a new payload after the last.
+    ///
+    /// Interval is specified in seconds or in milliseconds if the value ends with `ms`:
+    ///   * `50ms` -> 50 milliseconds
+    ///   * `1` -> 1 second
+    #[arg(long = "builder.interval", value_parser = parse_duration_from_secs_or_ms, default_value = "1", value_name = "DURATION")]
     pub interval: Duration,
 
     /// The deadline for when the payload builder job should resolve.
@@ -85,7 +86,7 @@ impl TypedValueParser for ExtradataValueParser {
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        if val.as_bytes().len() > MAXIMUM_EXTRA_DATA_SIZE {
+        if val.len() > MAXIMUM_EXTRA_DATA_SIZE {
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidValue,
                 format!(
@@ -155,5 +156,21 @@ mod tests {
         let default_args = PayloadBuilderArgs::default();
         let args = CommandParser::<PayloadBuilderArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_args_with_s_interval() {
+        let args =
+            CommandParser::<PayloadBuilderArgs>::parse_from(["reth", "--builder.interval", "50"])
+                .args;
+        assert_eq!(args.interval, Duration::from_secs(50));
+    }
+
+    #[test]
+    fn test_args_with_ms_interval() {
+        let args =
+            CommandParser::<PayloadBuilderArgs>::parse_from(["reth", "--builder.interval", "50ms"])
+                .args;
+        assert_eq!(args.interval, Duration::from_millis(50));
     }
 }

@@ -10,22 +10,18 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_primitives::Address;
+use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
-    builder::NodeHandle,
-    cli::Cli,
-    primitives::{Address, IntoRecoveredTransaction},
-    rpc::{
-        compat::transaction::transaction_to_call_request,
-        types::trace::{parity::TraceType, tracerequest::TraceCallRequest},
-    },
-    transaction_pool::TransactionPool,
+    builder::NodeHandle, chainspec::EthereumChainSpecParser, cli::Cli,
+    rpc::compat::transaction::transaction_to_call_request, transaction_pool::TransactionPool,
 };
 use reth_node_ethereum::node::EthereumNode;
 
 fn main() {
-    Cli::<RethCliTxpoolExt>::parse()
+    Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             // launch the node
             let NodeHandle { mut node, node_exit_future, bitfinity_import: _ } =
@@ -48,8 +44,7 @@ fn main() {
                     if let Some(recipient) = tx.to() {
                         if args.is_match(&recipient) {
                             // trace the transaction with `trace_call`
-                            let callrequest =
-                                transaction_to_call_request(tx.to_recovered_transaction());
+                            let callrequest = transaction_to_call_request(tx.to_consensus());
                             let tracerequest = TraceCallRequest::new(callrequest)
                                 .with_trace_type(TraceType::Trace);
                             if let Ok(trace_result) = traceapi.trace_call(tracerequest).await {

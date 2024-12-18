@@ -2,58 +2,85 @@ use crate::{
     engine_api::EngineApiTestContext, network::NetworkTestContext, payload::PayloadTestContext,
     rpc::RpcTestContext, traits::PayloadEnvelopeExt,
 };
-
-use alloy_rpc_types::BlockNumberOrTag;
+use alloy_consensus::BlockHeader;
+use alloy_eips::BlockId;
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use alloy_rpc_types_engine::PayloadStatusEnum;
+use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
-use reth::{
-    api::{BuiltPayload, EngineTypes, FullNodeComponents, PayloadBuilderAttributes},
-    builder::FullNode,
-    payload::PayloadTypes,
-    providers::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader},
-    rpc::types::engine::PayloadStatusEnum,
+use reth_chainspec::EthereumHardforks;
+use reth_network_api::test_utils::PeersHandleProvider;
+use reth_node_api::{Block, EngineTypes, FullNodeComponents};
+use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes, NodeTypesWithEngine};
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
+use reth_primitives::EthPrimitives;
+use reth_provider::{
+    BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader,
 };
-use reth_node_builder::NodeTypes;
-use reth_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use reth_rpc_eth_api::helpers::{EthApiSpec, EthTransactions, TraceExt};
 use reth_stages_types::StageId;
 use std::{marker::PhantomData, pin::Pin};
 use tokio_stream::StreamExt;
+use url::Url;
 
 /// An helper struct to handle node actions
-pub struct NodeTestContext<Node>
+#[allow(missing_debug_implementations)]
+pub struct NodeTestContext<Node, AddOns>
 where
     Node: FullNodeComponents,
+    AddOns: RethRpcAddOns<Node>,
 {
-    pub inner: FullNode<Node>,
-    pub payload: PayloadTestContext<Node::Engine>,
-    pub network: NetworkTestContext,
-    pub engine_api: EngineApiTestContext<Node::Engine>,
-    pub rpc: RpcTestContext<Node>,
+    /// The core structure representing the full node.
+    pub inner: FullNode<Node, AddOns>,
+    /// Context for testing payload-related features.
+    pub payload: PayloadTestContext<<Node::Types as NodeTypesWithEngine>::Engine>,
+    /// Context for testing network functionalities.
+    pub network: NetworkTestContext<Node::Network>,
+    /// Context for testing the Engine API.
+    pub engine_api: EngineApiTestContext<
+        <Node::Types as NodeTypesWithEngine>::Engine,
+        <Node::Types as NodeTypes>::ChainSpec,
+    >,
+    /// Context for testing RPC features.
+    pub rpc: RpcTestContext<Node, AddOns::EthApi>,
 }
 
-impl<Node> NodeTestContext<Node>
+impl<Node, Engine, AddOns> NodeTestContext<Node, AddOns>
 where
+    Engine: EngineTypes,
     Node: FullNodeComponents,
+    Node::Types: NodeTypesWithEngine<
+        ChainSpec: EthereumHardforks,
+        Engine = Engine,
+        Primitives = EthPrimitives,
+    >,
+    Node::Network: PeersHandleProvider,
+    AddOns: RethRpcAddOns<Node>,
 {
     /// Creates a new test node
-    pub async fn new(node: FullNode<Node>) -> eyre::Result<Self> {
+    pub async fn new(
+        node: FullNode<Node, AddOns>,
+        attributes_generator: impl Fn(u64) -> Engine::PayloadBuilderAttributes + 'static,
+    ) -> eyre::Result<Self> {
         let builder = node.payload_builder.clone();
 
         Ok(Self {
             inner: node.clone(),
-            payload: PayloadTestContext::new(builder).await?,
+            payload: PayloadTestContext::new(builder, attributes_generator).await?,
             network: NetworkTestContext::new(node.network.clone()),
             engine_api: EngineApiTestContext {
+                chain_spec: node.chain_spec(),
                 engine_api_client: node.auth_server_handle().http_client(),
                 canonical_stream: node.provider.canonical_state_stream(),
-                _marker: PhantomData::<Node::Engine>,
+                _marker: PhantomData::<Engine>,
             },
-            rpc: RpcTestContext { inner: node.rpc_registry },
+            rpc: RpcTestContext { inner: node.add_ons_handle.rpc_registry },
         })
     }
 
     /// Establish a connection to the node
-    pub async fn connect(&mut self, node: &mut NodeTestContext<Node>) {
+    pub async fn connect(&mut self, node: &mut Self) {
         self.network.add_peer(node.network.record()).await;
         node.network.next_session_established().await;
         self.network.next_session_established().await;
@@ -66,23 +93,19 @@ where
         &mut self,
         length: u64,
         tx_generator: impl Fn(u64) -> Pin<Box<dyn Future<Output = Bytes>>>,
-        attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes
-            + Copy,
-    ) -> eyre::Result<
-        Vec<(
-            <Node::Engine as PayloadTypes>::BuiltPayload,
-            <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
-        )>,
-    >
+    ) -> eyre::Result<Vec<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>>
     where
-        <Node::Engine as EngineTypes>::ExecutionPayloadV3:
-            From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
+        Engine::ExecutionPayloadEnvelopeV3: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+        Engine::ExecutionPayloadEnvelopeV4: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = reth_primitives::Block>>
+            + EthTransactions
+            + TraceExt,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {
             let raw_tx = tx_generator(i).await;
             let tx_hash = self.rpc.inject_tx(raw_tx).await?;
-            let (payload, eth_attr) = self.advance_block(vec![], attributes_generator).await?;
+            let (payload, eth_attr) = self.advance_block().await?;
             let block_hash = payload.block().hash();
             let block_number = payload.block().number;
             self.assert_new_block(tx_hash, block_hash, block_number).await?;
@@ -97,17 +120,13 @@ where
     /// It triggers the resolve payload via engine api and expects the built payload event.
     pub async fn new_payload(
         &mut self,
-        attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
-    ) -> eyre::Result<(
-        <<Node as NodeTypes>::Engine as PayloadTypes>::BuiltPayload,
-        <<Node as NodeTypes>::Engine as PayloadTypes>::PayloadBuilderAttributes,
-    )>
+    ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
     where
-        <Node::Engine as EngineTypes>::ExecutionPayloadV3:
-            From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV3:
+            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
     {
         // trigger new payload building draining the pool
-        let eth_attr = self.payload.new_payload(attributes_generator).await.unwrap();
+        let eth_attr = self.payload.new_payload().await.unwrap();
         // first event is the payload attributes
         self.payload.expect_attr_event(eth_attr.clone()).await?;
         // wait for the payload builder to have finished building
@@ -118,33 +137,39 @@ where
         Ok((self.payload.expect_built_payload().await?, eth_attr))
     }
 
+    /// Triggers payload building job and submits it to the engine.
+    pub async fn build_and_submit_payload(
+        &mut self,
+    ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
+    where
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV3:
+            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV4:
+            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+    {
+        let (payload, eth_attr) = self.new_payload().await?;
+
+        self.engine_api
+            .submit_payload(payload.clone(), eth_attr.clone(), PayloadStatusEnum::Valid)
+            .await?;
+
+        Ok((payload, eth_attr))
+    }
+
     /// Advances the node forward one block
     pub async fn advance_block(
         &mut self,
-        versioned_hashes: Vec<B256>,
-        attributes_generator: impl Fn(u64) -> <Node::Engine as PayloadTypes>::PayloadBuilderAttributes,
-    ) -> eyre::Result<(
-        <Node::Engine as PayloadTypes>::BuiltPayload,
-        <<Node as NodeTypes>::Engine as PayloadTypes>::PayloadBuilderAttributes,
-    )>
+    ) -> eyre::Result<(Engine::BuiltPayload, Engine::PayloadBuilderAttributes)>
     where
-        <Node::Engine as EngineTypes>::ExecutionPayloadV3:
-            From<<Node::Engine as PayloadTypes>::BuiltPayload> + PayloadEnvelopeExt,
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV3:
+            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
+        <Engine as EngineTypes>::ExecutionPayloadEnvelopeV4:
+            From<Engine::BuiltPayload> + PayloadEnvelopeExt,
     {
-        let (payload, eth_attr) = self.new_payload(attributes_generator).await?;
-
-        let block_hash = self
-            .engine_api
-            .submit_payload(
-                payload.clone(),
-                eth_attr.clone(),
-                PayloadStatusEnum::Valid,
-                versioned_hashes,
-            )
-            .await?;
+        let (payload, eth_attr) = self.build_and_submit_payload().await?;
 
         // trigger forkchoice update via engine api to commit the block to the blockchain
-        self.engine_api.update_forkchoice(block_hash, block_hash).await?;
+        self.engine_api.update_forkchoice(payload.block().hash(), payload.block().hash()).await?;
 
         Ok((payload, eth_attr))
     }
@@ -172,17 +197,19 @@ where
 
             if check {
                 if let Some(latest_block) = self.inner.provider.block_by_number(number)? {
-                    assert_eq!(latest_block.hash_slow(), expected_block_hash);
+                    assert_eq!(latest_block.header().hash_slow(), expected_block_hash);
                     break
                 }
-                if wait_finish_checkpoint {
-                    panic!("Finish checkpoint matches, but could not fetch block.");
-                }
+                assert!(
+                    !wait_finish_checkpoint,
+                    "Finish checkpoint matches, but could not fetch block."
+                );
             }
         }
         Ok(())
     }
 
+    /// Waits for the node to unwind to the given block number
     pub async fn wait_unwind(&self, number: BlockNumber) -> eyre::Result<()> {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -208,7 +235,7 @@ where
         // get head block from notifications stream and verify the tx has been pushed to the
         // pool is actually present in the canonical block
         let head = self.engine_api.canonical_stream.next().await.unwrap();
-        let tx = head.tip().transactions().next();
+        let tx = head.tip().transactions().first();
         assert_eq!(tx.unwrap().hash().as_slice(), tip_tx_hash.as_slice());
 
         loop {
@@ -217,14 +244,55 @@ where
             if let Some(latest_block) =
                 self.inner.provider.block_by_number_or_tag(BlockNumberOrTag::Latest)?
             {
-                if latest_block.number == block_number {
+                if latest_block.header().number() == block_number {
                     // make sure the block hash we submitted via FCU engine api is the new latest
                     // block using an RPC call
-                    assert_eq!(latest_block.hash_slow(), block_hash);
+                    assert_eq!(latest_block.header().hash_slow(), block_hash);
                     break
                 }
             }
         }
         Ok(())
+    }
+
+    /// Gets block hash by number.
+    pub fn block_hash(&self, number: u64) -> BlockHash {
+        self.inner
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Number(number))
+            .unwrap()
+            .unwrap()
+            .hash()
+    }
+
+    /// Sends FCU and waits for the node to sync to the given block.
+    pub async fn sync_to(&self, block: BlockHash) -> eyre::Result<()> {
+        self.engine_api.update_forkchoice(block, block).await?;
+
+        let start = std::time::Instant::now();
+
+        while self
+            .inner
+            .provider
+            .sealed_header_by_id(BlockId::Number(BlockNumberOrTag::Latest))?
+            .is_none_or(|h| h.hash() != block)
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            assert!(start.elapsed() <= std::time::Duration::from_secs(10), "timed out");
+        }
+
+        // Hack to make sure that all components have time to process canonical state update.
+        // Otherwise, this might result in e.g "nonce too low" errors when advancing chain further,
+        // making tests flaky.
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+
+        Ok(())
+    }
+
+    /// Returns the RPC URL.
+    pub fn rpc_url(&self) -> Url {
+        let addr = self.inner.rpc_server_handle().http_local_addr().unwrap();
+        format!("http://{}", addr).parse().unwrap()
     }
 }

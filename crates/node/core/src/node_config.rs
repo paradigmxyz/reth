@@ -6,39 +6,36 @@ use crate::{
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
-    metrics::prometheus_exporter,
     utils::get_single_header,
 };
-use metrics_exporter_prometheus::PrometheusHandle;
-use once_cell::sync::Lazy;
-use reth_chainspec::{ChainSpec, MAINNET};
+use alloy_consensus::BlockHeader;
+use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::{BlockNumber, B256};
+use eyre::eyre;
+use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
-use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
+use reth_ethereum_forks::Head;
 use reth_network_p2p::headers::client::HeadersClient;
-use reth_primitives::{
-    revm_primitives::EnvKzgSettings, BlockHashOrNumber, BlockNumber, Head, SealedHeader, B256,
-};
-use reth_provider::{
-    providers::StaticFileProvider, BlockHashReader, HeaderProvider, ProviderFactory,
-    StageCheckpointReader,
-};
+use reth_primitives_traits::SealedHeader;
 use reth_stages_types::StageId;
+use reth_storage_api::{
+    BlockHashReader, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
+};
 use reth_storage_errors::provider::ProviderResult;
-use reth_tasks::TaskExecutor;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use serde::{de::DeserializeOwned, Serialize};
+use std::{
+    fs,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tracing::*;
-
-/// The default prometheus recorder handle. We use a global static to ensure that it is only
-/// installed once.
-pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
-    Lazy::new(|| prometheus_exporter::install_recorder().unwrap());
 
 /// This includes all necessary configuration to launch the node.
 /// The individual configuration options can be overwritten before launching the node.
 ///
 /// # Example
 /// ```rust
-/// # use reth_tasks::{TaskManager, TaskSpawner};
 /// # use reth_node_core::{
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
@@ -47,10 +44,6 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// # use tokio::runtime::Handle;
 ///
 /// async fn t() {
-///     let handle = Handle::current();
-///     let manager = TaskManager::new(handle);
-///     let executor = manager.executor();
-///
 ///     // create the builder
 ///     let builder = NodeConfig::default();
 ///
@@ -66,7 +59,6 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 ///
 /// # Example
 /// ```rust
-/// # use reth_tasks::{TaskManager, TaskSpawner};
 /// # use reth_node_core::{
 /// #     node_config::NodeConfig,
 /// #     args::RpcServerArgs,
@@ -75,10 +67,6 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 /// # use tokio::runtime::Handle;
 ///
 /// async fn t() {
-///     let handle = Handle::current();
-///     let manager = TaskManager::new(handle);
-///     let executor = manager.executor();
-///
 ///     // create the builder with a test database, using the `test` method
 ///     let builder = NodeConfig::test();
 ///
@@ -88,8 +76,8 @@ pub static PROMETHEUS_RECORDER_HANDLE: Lazy<PrometheusHandle> =
 ///     let builder = builder.with_rpc(rpc);
 /// }
 /// ```
-#[derive(Debug, Clone)]
-pub struct NodeConfig {
+#[derive(Debug)]
+pub struct NodeConfig<ChainSpec> {
     /// All data directory related arguments
     pub datadir: DatadirArgs,
 
@@ -151,12 +139,34 @@ pub struct NodeConfig {
 
 }
 
-impl NodeConfig {
+impl NodeConfig<ChainSpec> {
     /// Creates a testing [`NodeConfig`], causing the database to be launched ephemerally.
     pub fn test() -> Self {
         Self::default()
             // set all ports to zero by default for test instances
             .with_unused_ports()
+    }
+}
+
+impl<ChainSpec> NodeConfig<ChainSpec> {
+    /// Creates a new config with given chain spec, setting all fields to default values.
+    pub fn new(chain: Arc<ChainSpec>) -> Self {
+        Self {
+            config: None,
+            chain,
+            metrics: None,
+            instance: 1,
+            network: NetworkArgs::default(),
+            rpc: RpcServerArgs::default(),
+            txpool: TxPoolArgs::default(),
+            builder: PayloadBuilderArgs::default(),
+            debug: DebugArgs::default(),
+            db: DatabaseArgs::default(),
+            dev: DevArgs::default(),
+            pruning: PruningArgs::default(),
+            datadir: DatadirArgs::default(),
+            bitfinity_import_arg: crate::args::BitfinityImportArgs::default(),
+        }
     }
 
     /// Sets --dev mode for the node.
@@ -251,13 +261,16 @@ impl NodeConfig {
     }
 
     /// Set the pruning args for the node
-    pub const fn with_pruning(mut self, pruning: PruningArgs) -> Self {
+    pub fn with_pruning(mut self, pruning: PruningArgs) -> Self {
         self.pruning = pruning;
         self
     }
 
     /// Returns pruning configuration.
-    pub fn prune_config(&self) -> Option<PruneConfig> {
+    pub fn prune_config(&self) -> Option<PruneConfig>
+    where
+        ChainSpec: EthChainSpec,
+    {
         self.pruning.prune_config(&self.chain)
     }
 
@@ -270,7 +283,7 @@ impl NodeConfig {
     ) -> eyre::Result<Option<BlockNumber>>
     where
         Provider: HeaderProvider,
-        Client: HeadersClient,
+        Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
     {
         let max_block = if let Some(block) = self.debug.max_block {
             Some(block)
@@ -283,48 +296,16 @@ impl NodeConfig {
         Ok(max_block)
     }
 
-    /// Loads '`EnvKzgSettings::Default`'
-    pub const fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
-        Ok(EnvKzgSettings::Default)
-    }
-
-    /// Installs the prometheus recorder.
-    pub fn install_prometheus_recorder(&self) -> eyre::Result<PrometheusHandle> {
-        Ok(PROMETHEUS_RECORDER_HANDLE.clone())
-    }
-
-    /// Serves the prometheus endpoint over HTTP with the given database and prometheus handle.
-    pub async fn start_metrics_endpoint<Metrics>(
-        &self,
-        prometheus_handle: PrometheusHandle,
-        db: Metrics,
-        static_file_provider: StaticFileProvider,
-        task_executor: TaskExecutor,
-    ) -> eyre::Result<()>
-    where
-        Metrics: DatabaseMetrics + 'static + Send + Sync,
-    {
-        if let Some(listen_addr) = self.metrics {
-            info!(target: "reth::cli", addr = %listen_addr, "Starting metrics endpoint");
-            prometheus_exporter::serve(
-                listen_addr,
-                prometheus_handle,
-                db,
-                static_file_provider,
-                metrics_process::Collector::default(),
-                task_executor,
-            )
-            .await?;
-        }
-
-        Ok(())
-    }
-
     /// Fetches the head block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    pub fn lookup_head<DB: Database>(&self, factory: ProviderFactory<DB>) -> ProviderResult<Head> {
-        let provider = factory.provider()?;
+    pub fn lookup_head<Factory>(&self, factory: &Factory) -> ProviderResult<Head>
+    where
+        Factory: DatabaseProviderFactory<
+            Provider: HeaderProvider + StageCheckpointReader + BlockHashReader,
+        >,
+    {
+        let provider = factory.database_provider_ro()?;
 
         let head = provider.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default().block_number;
 
@@ -343,9 +324,9 @@ impl NodeConfig {
         Ok(Head {
             number: head,
             hash,
-            difficulty: header.difficulty,
+            difficulty: header.difficulty(),
             total_difficulty,
-            timestamp: header.timestamp,
+            timestamp: header.timestamp(),
         })
     }
 
@@ -361,17 +342,17 @@ impl NodeConfig {
     ) -> ProviderResult<u64>
     where
         Provider: HeaderProvider,
-        Client: HeadersClient,
+        Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
     {
         let header = provider.header_by_hash_or_number(tip.into())?;
 
         // try to look up the header in the database
         if let Some(header) = header {
             info!(target: "reth::cli", ?tip, "Successfully looked up tip block in the database");
-            return Ok(header.number)
+            return Ok(header.number())
         }
 
-        Ok(self.fetch_tip_from_network(client, tip.into()).await.number)
+        Ok(self.fetch_tip_from_network(client, tip.into()).await.number())
     }
 
     /// Attempt to look up the block with the given number and return the header.
@@ -381,9 +362,9 @@ impl NodeConfig {
         &self,
         client: Client,
         tip: BlockHashOrNumber,
-    ) -> SealedHeader
+    ) -> SealedHeader<Client::Header>
     where
-        Client: HeadersClient,
+        Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
     {
         info!(target: "reth::cli", ?tip, "Fetching tip block from the network.");
         let mut fetch_failures = 0;
@@ -419,28 +400,88 @@ impl NodeConfig {
     }
 
     /// Resolve the final datadir path.
-    pub fn datadir(&self) -> ChainPath<DataDirPath> {
-        self.datadir.clone().resolve_datadir(self.chain.chain)
+    pub fn datadir(&self) -> ChainPath<DataDirPath>
+    where
+        ChainSpec: EthChainSpec,
+    {
+        self.datadir.clone().resolve_datadir(self.chain.chain())
+    }
+
+    /// Load an application configuration from a specified path.
+    ///
+    /// A new configuration file is created with default values if none
+    /// exists.
+    pub fn load_path<T: Serialize + DeserializeOwned + Default>(
+        path: impl AsRef<Path>,
+    ) -> eyre::Result<T> {
+        let path = path.as_ref();
+        match fs::read_to_string(path) {
+            Ok(cfg_string) => {
+                toml::from_str(&cfg_string).map_err(|e| eyre!("Failed to parse TOML: {e}"))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| eyre!("Failed to create directory: {e}"))?;
+                }
+                let cfg = T::default();
+                let s = toml::to_string_pretty(&cfg)
+                    .map_err(|e| eyre!("Failed to serialize to TOML: {e}"))?;
+                fs::write(path, s).map_err(|e| eyre!("Failed to write configuration file: {e}"))?;
+                Ok(cfg)
+            }
+            Err(e) => Err(eyre!("Failed to load configuration: {e}")),
+        }
+    }
+
+    /// Modifies the [`ChainSpec`] generic of the config using the provided closure.
+    pub fn map_chainspec<F, C>(self, f: F) -> NodeConfig<C>
+    where
+        F: FnOnce(Arc<ChainSpec>) -> C,
+    {
+        let chain = Arc::new(f(self.chain));
+        NodeConfig {
+            chain,
+            datadir: self.datadir,
+            config: self.config,
+            metrics: self.metrics,
+            instance: self.instance,
+            network: self.network,
+            rpc: self.rpc,
+            txpool: self.txpool,
+            builder: self.builder,
+            debug: self.debug,
+            db: self.db,
+            dev: self.dev,
+            pruning: self.pruning,
+            bitfinity_import_arg: self.bitfinity_import_arg,
+        }
     }
 }
 
-impl Default for NodeConfig {
+impl Default for NodeConfig<ChainSpec> {
     fn default() -> Self {
+        Self::new(MAINNET.clone())
+    }
+}
+
+impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
+    fn clone(&self) -> Self {
         Self {
-            config: None,
-            chain: MAINNET.clone(),
-            metrics: None,
-            instance: 1,
-            network: NetworkArgs::default(),
-            rpc: RpcServerArgs::default(),
-            txpool: TxPoolArgs::default(),
-            builder: PayloadBuilderArgs::default(),
-            debug: DebugArgs::default(),
-            db: DatabaseArgs::default(),
-            dev: DevArgs::default(),
-            pruning: PruningArgs::default(),
-            datadir: DatadirArgs::default(),
-            bitfinity_import_arg: Default::default(),
+            chain: self.chain.clone(),
+            config: self.config.clone(),
+            metrics: self.metrics,
+            instance: self.instance,
+            network: self.network.clone(),
+            rpc: self.rpc.clone(),
+            txpool: self.txpool.clone(),
+            builder: self.builder.clone(),
+            debug: self.debug.clone(),
+            db: self.db,
+            dev: self.dev,
+            pruning: self.pruning.clone(),
+            datadir: self.datadir.clone(),
+            bitfinity_import_arg: self.bitfinity_import_arg.clone(),
         }
     }
 }

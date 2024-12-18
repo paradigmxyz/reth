@@ -1,6 +1,6 @@
 //! Version information for reth.
-use reth_db_api::models::ClientVersion;
-use reth_rpc_types::engine::ClientCode;
+use alloy_rpc_types_engine::ClientCode;
+use reth_db::ClientVersion;
 
 /// The client code for Reth
 pub const CLIENT_CODE: ClientCode = ClientCode::RH;
@@ -19,6 +19,12 @@ pub const VERGEN_GIT_SHA: &str = const_format::str_index!(VERGEN_GIT_SHA_LONG, .
 
 /// The build timestamp.
 pub const VERGEN_BUILD_TIMESTAMP: &str = env!("VERGEN_BUILD_TIMESTAMP");
+
+/// The target triple.
+pub const VERGEN_CARGO_TARGET_TRIPLE: &str = env!("VERGEN_CARGO_TARGET_TRIPLE");
+
+/// The build features.
+pub const VERGEN_CARGO_FEATURES: &str = env!("VERGEN_CARGO_FEATURES");
 
 /// The short version information for reth.
 ///
@@ -70,8 +76,23 @@ pub const LONG_VERSION: &str = const_format::concatcp!(
     env!("VERGEN_CARGO_FEATURES"),
     "\n",
     "Build Profile: ",
-    build_profile_name()
+    BUILD_PROFILE_NAME
 );
+
+/// The build profile name.
+pub const BUILD_PROFILE_NAME: &str = {
+    // Derived from https://stackoverflow.com/questions/73595435/how-to-get-profile-from-cargo-toml-in-build-rs-or-at-runtime
+    // We split on the path separator of the *host* machine, which may be different from
+    // `std::path::MAIN_SEPARATOR_STR`.
+    const OUT_DIR: &str = env!("OUT_DIR");
+    let unix_parts = const_format::str_split!(OUT_DIR, '/');
+    if unix_parts.len() >= 4 {
+        unix_parts[unix_parts.len() - 4]
+    } else {
+        let win_parts = const_format::str_split!(OUT_DIR, '\\');
+        win_parts[win_parts.len() - 4]
+    }
+};
 
 /// The version information for reth formatted for P2P (devp2p).
 ///
@@ -116,20 +137,6 @@ pub fn default_client_version() -> ClientVersion {
     }
 }
 
-pub(crate) const fn build_profile_name() -> &'static str {
-    // Derived from https://stackoverflow.com/questions/73595435/how-to-get-profile-from-cargo-toml-in-build-rs-or-at-runtime
-    // We split on the path separator of the *host* machine, which may be different from
-    // `std::path::MAIN_SEPARATOR_STR`.
-    const OUT_DIR: &str = env!("OUT_DIR");
-    let unix_parts = const_format::str_split!(OUT_DIR, '/');
-    if unix_parts.len() >= 4 {
-        unix_parts[unix_parts.len() - 4]
-    } else {
-        let win_parts = const_format::str_split!(OUT_DIR, '\\');
-        win_parts[win_parts.len() - 4]
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,9 +144,6 @@ mod tests {
     #[test]
     fn assert_extradata_less_32bytes() {
         let extradata = default_extradata();
-        assert!(
-            extradata.as_bytes().len() <= 32,
-            "extradata must be less than 32 bytes: {extradata}"
-        )
+        assert!(extradata.len() <= 32, "extradata must be less than 32 bytes: {extradata}")
     }
 }

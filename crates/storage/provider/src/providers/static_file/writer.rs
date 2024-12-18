@@ -1,35 +1,108 @@
-use crate::providers::static_file::metrics::StaticFileProviderOperation;
-
 use super::{
     manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics, StaticFileProvider,
 };
-use dashmap::mapref::one::RefMut;
+use crate::providers::static_file::metrics::StaticFileProviderOperation;
+use alloy_consensus::BlockHeader;
+use alloy_primitives::{BlockHash, BlockNumber, TxNumber, U256};
+use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
 use reth_db_api::models::CompactU256;
-use reth_nippy_jar::{ConsistencyFailStrategy, NippyJar, NippyJarError, NippyJarWriter};
+use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
+use reth_node_types::NodePrimitives;
 use reth_primitives::{
-    static_file::{find_fixed_range, SegmentHeader, SegmentRangeInclusive},
-    BlockHash, BlockNumber, Header, Receipt, StaticFileSegment, TransactionSignedNoHash, TxNumber,
-    U256,
+    static_file::{SegmentHeader, SegmentRangeInclusive},
+    Receipt, StaticFileSegment,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
+    borrow::Borrow,
+    fmt::Debug,
     path::{Path, PathBuf},
     sync::{Arc, Weak},
     time::Instant,
 };
 use tracing::debug;
 
-/// Mutable reference to a dashmap element of [`StaticFileProviderRW`].
-pub type StaticFileProviderRWRefMut<'a> = RefMut<'a, StaticFileSegment, StaticFileProviderRW>;
+/// Static file writers for every known [`StaticFileSegment`].
+///
+/// WARNING: Trying to use more than one writer for the same segment type **will result in a
+/// deadlock**.
+#[derive(Debug)]
+pub(crate) struct StaticFileWriters<N> {
+    headers: RwLock<Option<StaticFileProviderRW<N>>>,
+    transactions: RwLock<Option<StaticFileProviderRW<N>>>,
+    receipts: RwLock<Option<StaticFileProviderRW<N>>>,
+}
+
+impl<N> Default for StaticFileWriters<N> {
+    fn default() -> Self {
+        Self {
+            headers: Default::default(),
+            transactions: Default::default(),
+            receipts: Default::default(),
+        }
+    }
+}
+
+impl<N: NodePrimitives> StaticFileWriters<N> {
+    pub(crate) fn get_or_create(
+        &self,
+        segment: StaticFileSegment,
+        create_fn: impl FnOnce() -> ProviderResult<StaticFileProviderRW<N>>,
+    ) -> ProviderResult<StaticFileProviderRWRefMut<'_, N>> {
+        let mut write_guard = match segment {
+            StaticFileSegment::Headers => self.headers.write(),
+            StaticFileSegment::Transactions => self.transactions.write(),
+            StaticFileSegment::Receipts => self.receipts.write(),
+        };
+
+        if write_guard.is_none() {
+            *write_guard = Some(create_fn()?);
+        }
+
+        Ok(StaticFileProviderRWRefMut(write_guard))
+    }
+
+    pub(crate) fn commit(&self) -> ProviderResult<()> {
+        for writer_lock in [&self.headers, &self.transactions, &self.receipts] {
+            let mut writer = writer_lock.write();
+            if let Some(writer) = writer.as_mut() {
+                writer.commit()?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Mutable reference to a [`StaticFileProviderRW`] behind a [`RwLockWriteGuard`].
+#[derive(Debug)]
+pub struct StaticFileProviderRWRefMut<'a, N>(
+    pub(crate) RwLockWriteGuard<'a, RawRwLock, Option<StaticFileProviderRW<N>>>,
+);
+
+impl<N> std::ops::DerefMut for StaticFileProviderRWRefMut<'_, N> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // This is always created by [`StaticFileWriters::get_or_create`]
+        self.0.as_mut().expect("static file writer provider should be init")
+    }
+}
+
+impl<N> std::ops::Deref for StaticFileProviderRWRefMut<'_, N> {
+    type Target = StaticFileProviderRW<N>;
+
+    fn deref(&self) -> &Self::Target {
+        // This is always created by [`StaticFileWriters::get_or_create`]
+        self.0.as_ref().expect("static file writer provider should be init")
+    }
+}
 
 #[derive(Debug)]
 /// Extends `StaticFileProvider` with writing capabilities
-pub struct StaticFileProviderRW {
+pub struct StaticFileProviderRW<N> {
     /// Reference back to the provider. We need [Weak] here because [`StaticFileProviderRW`] is
     /// stored in a [`dashmap::DashMap`] inside the parent [`StaticFileProvider`].which is an
     /// [Arc]. If we were to use an [Arc] here, we would create a reference cycle.
-    reader: Weak<StaticFileProviderInner>,
+    reader: Weak<StaticFileProviderInner<N>>,
     /// A [`NippyJarWriter`] instance.
     writer: NippyJarWriter<SegmentHeader>,
     /// Path to opened file.
@@ -43,36 +116,43 @@ pub struct StaticFileProviderRW {
     prune_on_commit: Option<(u64, Option<BlockNumber>)>,
 }
 
-impl StaticFileProviderRW {
+impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Creates a new [`StaticFileProviderRW`] for a [`StaticFileSegment`].
+    ///
+    /// Before use, transaction based segments should ensure the block end range is the expected
+    /// one, and heal if not. For more check `Self::ensure_end_range_consistency`.
     pub fn new(
         segment: StaticFileSegment,
         block: BlockNumber,
-        reader: Weak<StaticFileProviderInner>,
+        reader: Weak<StaticFileProviderInner<N>>,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<Self> {
         let (writer, data_path) = Self::open(segment, block, reader.clone(), metrics.clone())?;
-        Ok(Self {
+        let mut writer = Self {
             writer,
             data_path,
             buf: Vec::with_capacity(100),
             reader,
             metrics,
             prune_on_commit: None,
-        })
+        };
+
+        writer.ensure_end_range_consistency()?;
+
+        Ok(writer)
     }
 
     fn open(
         segment: StaticFileSegment,
         block: u64,
-        reader: Weak<StaticFileProviderInner>,
+        reader: Weak<StaticFileProviderInner<N>>,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<(NippyJarWriter<SegmentHeader>, PathBuf)> {
         let start = Instant::now();
 
         let static_file_provider = Self::upgrade_provider_to_strong_reference(&reader);
 
-        let block_range = find_fixed_range(block);
+        let block_range = static_file_provider.find_fixed_range(block);
         let (jar, path) = match static_file_provider.get_segment_provider_from_block(
             segment,
             block_range.start(),
@@ -90,14 +170,7 @@ impl StaticFileProviderRW {
             Err(err) => return Err(err),
         };
 
-        let reader = Self::upgrade_provider_to_strong_reference(&reader);
-        let access = if reader.is_read_only() {
-            ConsistencyFailStrategy::ThrowError
-        } else {
-            ConsistencyFailStrategy::Heal
-        };
-
-        let result = match NippyJarWriter::new(jar, access) {
+        let result = match NippyJarWriter::new(jar) {
             Ok(writer) => Ok((writer, path)),
             Err(NippyJarError::FrozenJar) => {
                 // This static file has been frozen, so we should
@@ -117,33 +190,15 @@ impl StaticFileProviderRW {
         Ok(result)
     }
 
-    /// Checks the consistency of the file and heals it if necessary and `read_only` is set to
-    /// false. If the check fails, it will return an error.
+    /// If a file level healing happens, we need to update the end range on the
+    /// [`SegmentHeader`].
     ///
-    /// If healing does happen, it will update the end range on the [`SegmentHeader`]. However, for
-    /// transaction based segments, the block end range has to be found and healed externally.
+    /// However, for transaction based segments, the block end range has to be found and healed
+    /// externally.
     ///
-    /// Check [`NippyJarWriter::ensure_file_consistency`] for more on healing.
-    pub fn ensure_file_consistency(&mut self, read_only: bool) -> ProviderResult<()> {
-        let inconsistent_error = || {
-            ProviderError::NippyJar(
-                "Inconsistent state found. Restart the node to heal.".to_string(),
-            )
-        };
-
-        let check_mode = if read_only {
-            ConsistencyFailStrategy::ThrowError
-        } else {
-            ConsistencyFailStrategy::Heal
-        };
-
-        self.writer.ensure_file_consistency(check_mode).map_err(|error| {
-            if matches!(error, NippyJarError::InconsistentState) {
-                return inconsistent_error()
-            }
-            ProviderError::NippyJar(error.to_string())
-        })?;
-
+    /// Check [`reth_nippy_jar::NippyJarChecker`] &
+    /// [`NippyJarWriter`] for more on healing.
+    fn ensure_end_range_consistency(&mut self) -> ProviderResult<()> {
         // If we have lost rows (in this run or previous), we need to update the [SegmentHeader].
         let expected_rows = if self.user_header().segment().is_headers() {
             self.user_header().block_len().unwrap_or_default()
@@ -152,9 +207,6 @@ impl StaticFileProviderRW {
         };
         let pruned_rows = expected_rows - self.writer.rows() as u64;
         if pruned_rows > 0 {
-            if read_only {
-                return Err(inconsistent_error())
-            }
             self.user_header_mut().prune(pruned_rows);
         }
 
@@ -250,16 +302,16 @@ impl StaticFileProviderRW {
         //
         // If that expected block start is 0, then it means that there's no actual block data, and
         // there's no block data in static files.
-        let segment_max_block = match self.writer.user_header().block_range() {
-            Some(block_range) => Some(block_range.end()),
-            None => {
-                if self.writer.user_header().expected_block_start() > 0 {
-                    Some(self.writer.user_header().expected_block_start() - 1)
-                } else {
-                    None
-                }
-            }
-        };
+        let segment_max_block = self
+            .writer
+            .user_header()
+            .block_range()
+            .as_ref()
+            .map(|block_range| block_range.end())
+            .or_else(|| {
+                (self.writer.user_header().expected_block_start() > 0)
+                    .then(|| self.writer.user_header().expected_block_start() - 1)
+            });
 
         self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
     }
@@ -268,12 +320,10 @@ impl StaticFileProviderRW {
     /// and create the next one if we are past the end range.
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
-    pub fn increment_block(
-        &mut self,
-        segment: StaticFileSegment,
-        expected_block_number: BlockNumber,
-    ) -> ProviderResult<BlockNumber> {
-        self.check_next_block_number(expected_block_number, segment)?;
+    pub fn increment_block(&mut self, expected_block_number: BlockNumber) -> ProviderResult<()> {
+        let segment = self.writer.user_header().segment();
+
+        self.check_next_block_number(expected_block_number)?;
 
         let start = Instant::now();
         if let Some(last_block) = self.writer.user_header().block_end() {
@@ -288,12 +338,16 @@ impl StaticFileProviderRW {
                 self.writer = writer;
                 self.data_path = data_path;
 
-                *self.writer.user_header_mut() =
-                    SegmentHeader::new(find_fixed_range(last_block + 1), None, None, segment);
+                *self.writer.user_header_mut() = SegmentHeader::new(
+                    self.reader().find_fixed_range(last_block + 1),
+                    None,
+                    None,
+                    segment,
+                );
             }
         }
 
-        let block = self.writer.user_header_mut().increment_block();
+        self.writer.user_header_mut().increment_block();
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 segment,
@@ -302,16 +356,12 @@ impl StaticFileProviderRW {
             );
         }
 
-        Ok(block)
+        Ok(())
     }
 
     /// Verifies if the incoming block number matches the next expected block number
     /// for a static file. This ensures data continuity when adding new blocks.
-    fn check_next_block_number(
-        &self,
-        expected_block_number: u64,
-        segment: StaticFileSegment,
-    ) -> ProviderResult<()> {
+    fn check_next_block_number(&self, expected_block_number: u64) -> ProviderResult<()> {
         // The next static file block number can be found by checking the one after block_end.
         // However if it's a new file that hasn't been added any data, its block range will actually
         // be None. In that case, the next block will be found on `expected_block_start`.
@@ -324,7 +374,7 @@ impl StaticFileProviderRW {
 
         if expected_block_number != next_static_file_block {
             return Err(ProviderError::UnexpectedStaticFileBlockNumber(
-                segment,
+                self.writer.user_header().segment(),
                 expected_block_number,
                 next_static_file_block,
             ))
@@ -339,13 +389,9 @@ impl StaticFileProviderRW {
     ///
     /// # Note
     /// Commits to the configuration file at the end.
-    fn truncate(
-        &mut self,
-        segment: StaticFileSegment,
-        num_rows: u64,
-        last_block: Option<u64>,
-    ) -> ProviderResult<()> {
+    fn truncate(&mut self, num_rows: u64, last_block: Option<u64>) -> ProviderResult<()> {
         let mut remaining_rows = num_rows;
+        let segment = self.writer.user_header().segment();
         while remaining_rows > 0 {
             let len = match segment {
                 StaticFileSegment::Headers => {
@@ -361,7 +407,14 @@ impl StaticFileProviderRW {
                 // delete the whole file and go to the next static file
                 let block_start = self.writer.user_header().expected_block_start();
 
-                if block_start != 0 {
+                // We only delete the file if it's NOT the first static file AND:
+                // * it's a Header segment  OR
+                // * it's a tx-based segment AND `last_block` is lower than the first block of this
+                //   file's block range. Otherwise, having no rows simply means that this block
+                //   range has no transactions, but the file should remain.
+                if block_start != 0 &&
+                    (segment.is_headers() || last_block.is_some_and(|b| b < block_start))
+                {
                     self.delete_current_and_open_previous()?;
                 } else {
                     // Update `SegmentHeader`
@@ -418,6 +471,7 @@ impl StaticFileProviderRW {
             self.metrics.clone(),
         )?;
         self.writer = previous_writer;
+        self.writer.set_dirty();
         self.data_path = data_path;
         NippyJar::<SegmentHeader>::load(&current_path)
             .map_err(|e| ProviderError::NippyJar(e.to_string()))?
@@ -442,21 +496,26 @@ impl StaticFileProviderRW {
     /// Returns the current [`TxNumber`] as seen in the static file.
     fn append_with_tx_number<V: Compact>(
         &mut self,
-        segment: StaticFileSegment,
         tx_num: TxNumber,
         value: V,
-    ) -> ProviderResult<TxNumber> {
-        debug_assert!(self.writer.user_header().segment() == segment);
-
-        if self.writer.user_header().tx_range().is_none() {
-            self.writer.user_header_mut().set_tx_range(tx_num, tx_num);
-        } else {
+    ) -> ProviderResult<()> {
+        if let Some(range) = self.writer.user_header().tx_range() {
+            let next_tx = range.end() + 1;
+            if next_tx != tx_num {
+                return Err(ProviderError::UnexpectedStaticFileTxNumber(
+                    self.writer.user_header().segment(),
+                    tx_num,
+                    next_tx,
+                ))
+            }
             self.writer.user_header_mut().increment_tx();
+        } else {
+            self.writer.user_header_mut().set_tx_range(tx_num, tx_num);
         }
 
         self.append_column(value)?;
 
-        Ok(self.writer.user_header().tx_end().expect("qed"))
+        Ok(())
     }
 
     /// Appends header to static file.
@@ -467,19 +526,22 @@ impl StaticFileProviderRW {
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn append_header(
         &mut self,
-        header: Header,
-        terminal_difficulty: U256,
-        hash: BlockHash,
-    ) -> ProviderResult<BlockNumber> {
+        header: &N::BlockHeader,
+        total_difficulty: U256,
+        hash: &BlockHash,
+    ) -> ProviderResult<()>
+    where
+        N::BlockHeader: Compact,
+    {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
-        let block_number = self.increment_block(StaticFileSegment::Headers, header.number)?;
+        self.increment_block(header.number())?;
 
         self.append_column(header)?;
-        self.append_column(CompactU256::from(terminal_difficulty))?;
+        self.append_column(CompactU256::from(total_difficulty))?;
         self.append_column(hash)?;
 
         if let Some(metrics) = &self.metrics {
@@ -490,7 +552,7 @@ impl StaticFileProviderRW {
             );
         }
 
-        Ok(block_number)
+        Ok(())
     }
 
     /// Appends transaction to static file.
@@ -499,15 +561,15 @@ impl StaticFileProviderRW {
     /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
-    pub fn append_transaction(
-        &mut self,
-        tx_num: TxNumber,
-        tx: TransactionSignedNoHash,
-    ) -> ProviderResult<TxNumber> {
+    pub fn append_transaction(&mut self, tx_num: TxNumber, tx: &N::SignedTx) -> ProviderResult<()>
+    where
+        N::SignedTx: Compact,
+    {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
-        let result = self.append_with_tx_number(StaticFileSegment::Transactions, tx_num, tx)?;
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Transactions);
+        self.append_with_tx_number(tx_num, tx)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -517,7 +579,7 @@ impl StaticFileProviderRW {
             );
         }
 
-        Ok(result)
+        Ok(())
     }
 
     /// Appends receipt to static file.
@@ -526,15 +588,15 @@ impl StaticFileProviderRW {
     /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
-    pub fn append_receipt(
-        &mut self,
-        tx_num: TxNumber,
-        receipt: Receipt,
-    ) -> ProviderResult<TxNumber> {
+    pub fn append_receipt(&mut self, tx_num: TxNumber, receipt: &N::Receipt) -> ProviderResult<()>
+    where
+        N::Receipt: Compact,
+    {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
-        let result = self.append_with_tx_number(StaticFileSegment::Receipts, tx_num, receipt)?;
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
+        self.append_with_tx_number(tx_num, receipt)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -544,16 +606,19 @@ impl StaticFileProviderRW {
             );
         }
 
-        Ok(result)
+        Ok(())
     }
 
     /// Appends multiple receipts to the static file.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file, if any.
-    pub fn append_receipts<I>(&mut self, receipts: I) -> ProviderResult<Option<TxNumber>>
+    pub fn append_receipts<I, R>(&mut self, receipts: I) -> ProviderResult<Option<TxNumber>>
     where
-        I: IntoIterator<Item = Result<(TxNumber, Receipt), ProviderError>>,
+        I: Iterator<Item = Result<(TxNumber, R), ProviderError>>,
+        R: Borrow<Receipt>,
     {
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
+
         let mut receipts_iter = receipts.into_iter().peekable();
         // If receipts are empty, we can simply return None
         if receipts_iter.peek().is_none() {
@@ -569,7 +634,8 @@ impl StaticFileProviderRW {
 
         for receipt_result in receipts_iter {
             let (tx_num, receipt) = receipt_result?;
-            tx_number = self.append_with_tx_number(StaticFileSegment::Receipts, tx_num, receipt)?;
+            self.append_with_tx_number(tx_num, receipt.borrow())?;
+            tx_number = tx_num;
             count += 1;
         }
 
@@ -647,10 +713,9 @@ impl StaticFileProviderRW {
     ) -> ProviderResult<()> {
         let start = Instant::now();
 
-        let segment = StaticFileSegment::Transactions;
-        debug_assert!(self.writer.user_header().segment() == segment);
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Transactions);
 
-        self.truncate(segment, to_delete, Some(last_block))?;
+        self.truncate(to_delete, Some(last_block))?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -671,10 +736,9 @@ impl StaticFileProviderRW {
     ) -> ProviderResult<()> {
         let start = Instant::now();
 
-        let segment = StaticFileSegment::Receipts;
-        debug_assert!(self.writer.user_header().segment() == segment);
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
 
-        self.truncate(segment, to_delete, Some(last_block))?;
+        self.truncate(to_delete, Some(last_block))?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -691,10 +755,9 @@ impl StaticFileProviderRW {
     fn prune_header_data(&mut self, to_delete: u64) -> ProviderResult<()> {
         let start = Instant::now();
 
-        let segment = StaticFileSegment::Headers;
-        debug_assert!(self.writer.user_header().segment() == segment);
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
-        self.truncate(segment, to_delete, None)?;
+        self.truncate(to_delete, None)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -707,7 +770,7 @@ impl StaticFileProviderRW {
         Ok(())
     }
 
-    fn reader(&self) -> StaticFileProvider {
+    fn reader(&self) -> StaticFileProvider<N> {
         Self::upgrade_provider_to_strong_reference(&self.reader)
     }
 
@@ -720,8 +783,8 @@ impl StaticFileProviderRW {
     /// active. In reality, it's impossible to detach the [`StaticFileProviderRW`] from the
     /// [`StaticFileProvider`].
     fn upgrade_provider_to_strong_reference(
-        provider: &Weak<StaticFileProviderInner>,
-    ) -> StaticFileProvider {
+        provider: &Weak<StaticFileProviderInner<N>>,
+    ) -> StaticFileProvider<N> {
         provider.upgrade().map(StaticFileProvider).expect("StaticFileProvider is dropped")
     }
 

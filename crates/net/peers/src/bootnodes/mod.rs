@@ -1,6 +1,7 @@
 //! Bootnodes for the network
 
 use crate::NodeRecord;
+use alloc::vec::Vec;
 
 mod ethereum;
 pub use ethereum::*;
@@ -11,11 +12,6 @@ pub use optimism::*;
 /// Returns parsed mainnet nodes
 pub fn mainnet_nodes() -> Vec<NodeRecord> {
     parse_nodes(&MAINNET_BOOTNODES[..])
-}
-
-/// Returns parsed goerli nodes
-pub fn goerli_nodes() -> Vec<NodeRecord> {
-    parse_nodes(&GOERLI_BOOTNODES[..])
 }
 
 /// Returns parsed sepolia nodes

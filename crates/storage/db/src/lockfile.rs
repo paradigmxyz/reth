@@ -7,7 +7,7 @@ use reth_tracing::tracing::error;
 use std::{
     path::{Path, PathBuf},
     process,
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 use sysinfo::{ProcessRefreshKind, RefreshKind, System};
 
@@ -30,31 +30,35 @@ impl StorageLock {
     /// Note: In-process exclusivity is not on scope. If called from the same process (or another
     /// with the same PID), it will succeed.
     pub fn try_acquire(path: &Path) -> Result<Self, StorageLockError> {
-        let file_path = path.join(LOCKFILE_NAME);
-
         #[cfg(feature = "disable-lock")]
         {
+            let file_path = path.join(LOCKFILE_NAME);
             // Too expensive for ef-tests to write/read lock to/from disk.
             Ok(Self(Arc::new(StorageLockInner { file_path })))
         }
 
         #[cfg(not(feature = "disable-lock"))]
-        {
-            if let Some(process_lock) = ProcessUID::parse(&file_path)? {
-                if process_lock.pid != (process::id() as usize) && process_lock.is_active() {
-                    error!(
-                        target: "reth::db::lockfile",
-                        path = ?file_path,
-                        pid = process_lock.pid,
-                        start_time = process_lock.start_time,
-                        "Storage lock already taken."
-                    );
-                    return Err(StorageLockError::Taken(process_lock.pid))
-                }
-            }
+        Self::try_acquire_file_lock(path)
+    }
 
-            Ok(Self(Arc::new(StorageLockInner::new(file_path)?)))
+    /// Acquire a file write lock.
+    #[cfg(any(test, not(feature = "disable-lock")))]
+    fn try_acquire_file_lock(path: &Path) -> Result<Self, StorageLockError> {
+        let file_path = path.join(LOCKFILE_NAME);
+        if let Some(process_lock) = ProcessUID::parse(&file_path)? {
+            if process_lock.pid != (process::id() as usize) && process_lock.is_active() {
+                error!(
+                    target: "reth::db::lockfile",
+                    path = ?file_path,
+                    pid = process_lock.pid,
+                    start_time = process_lock.start_time,
+                    "Storage lock already taken."
+                );
+                return Err(StorageLockError::Taken(process_lock.pid))
+            }
         }
+
+        Ok(Self(Arc::new(StorageLockInner::new(file_path)?)))
     }
 }
 
@@ -91,7 +95,7 @@ impl StorageLockInner {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct ProcessUID {
     /// OS process identifier
     pid: usize,
@@ -102,14 +106,20 @@ struct ProcessUID {
 impl ProcessUID {
     /// Creates [`Self`] for the provided PID.
     fn new(pid: usize) -> Option<Self> {
-        System::new_with_specifics(RefreshKind::new().with_processes(ProcessRefreshKind::new()))
-            .process(pid.into())
-            .map(|process| Self { pid, start_time: process.start_time() })
+        let mut system = System::new();
+        let pid2 = sysinfo::Pid::from(pid);
+        system.refresh_processes_specifics(
+            sysinfo::ProcessesToUpdate::Some(&[pid2]),
+            true,
+            ProcessRefreshKind::new(),
+        );
+        system.process(pid2).map(|process| Self { pid, start_time: process.start_time() })
     }
 
     /// Creates [`Self`] from own process.
     fn own() -> Self {
-        Self::new(process::id() as usize).expect("own process")
+        static CACHE: OnceLock<ProcessUID> = OnceLock::new();
+        CACHE.get_or_init(|| Self::new(process::id() as usize).expect("own process")).clone()
     }
 
     /// Parses [`Self`] from a file.
@@ -144,15 +154,25 @@ impl ProcessUID {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    // helper to ensure some tests are run serially
+    static SERIAL: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn serial_lock() -> MutexGuard<'static, ()> {
+        SERIAL.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
 
     #[test]
     fn test_lock() {
+        let _guard = serial_lock();
+
         let temp_dir = tempfile::tempdir().unwrap();
 
-        let lock = StorageLock::try_acquire(temp_dir.path()).unwrap();
+        let lock = StorageLock::try_acquire_file_lock(temp_dir.path()).unwrap();
 
         // Same process can re-acquire the lock
-        assert_eq!(Ok(lock.clone()), StorageLock::try_acquire(temp_dir.path()));
+        assert_eq!(Ok(lock.clone()), StorageLock::try_acquire_file_lock(temp_dir.path()));
 
         // A lock of a non existent PID can be acquired.
         let lock_file = temp_dir.path().join(LOCKFILE_NAME);
@@ -162,26 +182,31 @@ mod tests {
             fake_pid += 1;
         }
         ProcessUID { pid: fake_pid, start_time: u64::MAX }.write(&lock_file).unwrap();
-        assert_eq!(Ok(lock.clone()), StorageLock::try_acquire(temp_dir.path()));
+        assert_eq!(Ok(lock.clone()), StorageLock::try_acquire_file_lock(temp_dir.path()));
 
         let mut pid_1 = ProcessUID::new(1).unwrap();
 
         // If a parsed `ProcessUID` exists, the lock can NOT be acquired.
         pid_1.write(&lock_file).unwrap();
-        assert_eq!(Err(StorageLockError::Taken(1)), StorageLock::try_acquire(temp_dir.path()));
+        assert_eq!(
+            Err(StorageLockError::Taken(1)),
+            StorageLock::try_acquire_file_lock(temp_dir.path())
+        );
 
         // A lock of a different but existing PID can be acquired ONLY IF the start_time differs.
         pid_1.start_time += 1;
         pid_1.write(&lock_file).unwrap();
-        assert_eq!(Ok(lock), StorageLock::try_acquire(temp_dir.path()));
+        assert_eq!(Ok(lock), StorageLock::try_acquire_file_lock(temp_dir.path()));
     }
 
     #[test]
     fn test_drop_lock() {
+        let _guard = serial_lock();
+
         let temp_dir = tempfile::tempdir().unwrap();
         let lock_file = temp_dir.path().join(LOCKFILE_NAME);
 
-        let lock = StorageLock::try_acquire(temp_dir.path()).unwrap();
+        let lock = StorageLock::try_acquire_file_lock(temp_dir.path()).unwrap();
 
         assert!(lock_file.exists());
         drop(lock);

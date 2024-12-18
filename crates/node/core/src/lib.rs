@@ -12,35 +12,18 @@ pub mod args;
 pub mod cli;
 pub mod dirs;
 pub mod exit;
-pub mod metrics;
 pub mod node_config;
 pub mod utils;
 pub mod version;
 
-// Re-export for backwards compatibility.
-pub use metrics::prometheus_exporter;
-
-/// Re-exported from `reth_primitives`.
+/// Re-exported primitive types
 pub mod primitives {
-    pub use reth_primitives::*;
+    pub use reth_ethereum_forks::*;
+    pub use reth_primitives_traits::*;
 }
 
 /// Re-export of `reth_rpc_*` crates.
 pub mod rpc {
-    /// Re-exported from `reth_rpc_types`.
-    pub mod types {
-        pub use reth_rpc_types::*;
-    }
-
-    /// Re-exported from `reth_rpc_api`.
-    pub mod api {
-        pub use reth_rpc_api::*;
-    }
-    /// Re-exported from `reth_rpc::eth`.
-    pub mod eth {
-        pub use reth_rpc_eth_api::*;
-    }
-
     /// Re-exported from `reth_rpc::rpc`.
     pub mod result {
         pub use reth_rpc_server_types::result::*;

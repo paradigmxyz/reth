@@ -30,9 +30,12 @@ impl RpcRequestMetrics {
         Self {
             inner: Arc::new(RpcServerMetricsInner {
                 connection_metrics: transport.connection_metrics(),
-                call_metrics: HashMap::from_iter(module.method_names().map(|method| {
-                    (method, RpcServerCallMetrics::new_with_labels(&[("method", method)]))
-                })),
+                call_metrics: module
+                    .method_names()
+                    .map(|method| {
+                        (method, RpcServerCallMetrics::new_with_labels(&[("method", method)]))
+                    })
+                    .collect(),
             }),
         }
     }
@@ -81,9 +84,11 @@ struct RpcServerMetricsInner {
 /// A [`RpcServiceT`] middleware that captures RPC metrics for the server.
 ///
 /// This is created per connection and captures metrics for each request.
-#[derive(Clone)]
-pub(crate) struct RpcRequestMetricsService<S> {
+#[derive(Clone, Debug)]
+pub struct RpcRequestMetricsService<S> {
+    /// The metrics collector for RPC requests
     metrics: RpcRequestMetrics,
+    /// The inner service being wrapped
     inner: S,
 }
 
@@ -125,7 +130,7 @@ impl<S> Drop for RpcRequestMetricsService<S> {
 
 /// Response future to update the metrics for a single request/response pair.
 #[pin_project::pin_project]
-pub(crate) struct MeteredRequestFuture<F> {
+pub struct MeteredRequestFuture<F> {
     #[pin]
     fut: F,
     /// time when the request started

@@ -1,3 +1,4 @@
+use alloy_primitives::BlockNumber;
 use futures::Stream;
 use futures_util::{FutureExt, StreamExt};
 use pin_project::pin_project;
@@ -5,9 +6,9 @@ use reth_network_p2p::{
     bodies::downloader::{BodyDownloader, BodyDownloaderResult},
     error::DownloadResult,
 };
-use reth_primitives::BlockNumber;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
+    fmt::Debug,
     future::Future,
     ops::RangeInclusive,
     pin::Pin,
@@ -23,15 +24,15 @@ pub const BODIES_TASK_BUFFER_SIZE: usize = 4;
 /// A [BodyDownloader] that drives a spawned [BodyDownloader] on a spawned task.
 #[derive(Debug)]
 #[pin_project]
-pub struct TaskDownloader {
+pub struct TaskDownloader<H, B> {
     #[pin]
-    from_downloader: ReceiverStream<BodyDownloaderResult>,
+    from_downloader: ReceiverStream<BodyDownloaderResult<H, B>>,
     to_downloader: UnboundedSender<RangeInclusive<BlockNumber>>,
 }
 
 // === impl TaskDownloader ===
 
-impl TaskDownloader {
+impl<H: Send + Sync + Unpin + 'static, B: Send + Sync + Unpin + 'static> TaskDownloader<H, B> {
     /// Spawns the given `downloader` via [`tokio::task::spawn`] returns a [`TaskDownloader`] that's
     /// connected to that task.
     ///
@@ -45,12 +46,16 @@ impl TaskDownloader {
     /// use reth_consensus::Consensus;
     /// use reth_downloaders::bodies::{bodies::BodiesDownloaderBuilder, task::TaskDownloader};
     /// use reth_network_p2p::bodies::client::BodiesClient;
+    /// use reth_primitives_traits::InMemorySize;
     /// use reth_storage_api::HeaderProvider;
-    /// use std::sync::Arc;
+    /// use std::{fmt::Debug, sync::Arc};
     ///
-    /// fn t<B: BodiesClient + 'static, Provider: HeaderProvider + Unpin + 'static>(
+    /// fn t<
+    ///     B: BodiesClient<Body: Debug + InMemorySize> + 'static,
+    ///     Provider: HeaderProvider<Header = alloy_consensus::Header> + Unpin + 'static,
+    /// >(
     ///     client: Arc<B>,
-    ///     consensus: Arc<dyn Consensus>,
+    ///     consensus: Arc<dyn Consensus<Provider::Header, B::Body>>,
     ///     provider: Provider,
     /// ) {
     ///     let downloader = BodiesDownloaderBuilder::default().build(client, consensus, provider);
@@ -59,7 +64,7 @@ impl TaskDownloader {
     /// ```
     pub fn spawn<T>(downloader: T) -> Self
     where
-        T: BodyDownloader + 'static,
+        T: BodyDownloader<Header = H, Body = B> + 'static,
     {
         Self::spawn_with(downloader, &TokioTaskExecutor::default())
     }
@@ -68,7 +73,7 @@ impl TaskDownloader {
     /// that's connected to that task.
     pub fn spawn_with<T, S>(downloader: T, spawner: &S) -> Self
     where
-        T: BodyDownloader + 'static,
+        T: BodyDownloader<Header = H, Body = B> + 'static,
         S: TaskSpawner,
     {
         let (bodies_tx, bodies_rx) = mpsc::channel(BODIES_TASK_BUFFER_SIZE);
@@ -86,15 +91,20 @@ impl TaskDownloader {
     }
 }
 
-impl BodyDownloader for TaskDownloader {
+impl<H: Debug + Send + Sync + Unpin + 'static, B: Debug + Send + Sync + Unpin + 'static>
+    BodyDownloader for TaskDownloader<H, B>
+{
+    type Header = H;
+    type Body = B;
+
     fn set_download_range(&mut self, range: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
         let _ = self.to_downloader.send(range);
         Ok(())
     }
 }
 
-impl Stream for TaskDownloader {
-    type Item = BodyDownloaderResult;
+impl<H, B> Stream for TaskDownloader<H, B> {
+    type Item = BodyDownloaderResult<H, B>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.project().from_downloader.poll_next(cx)
@@ -102,9 +112,9 @@ impl Stream for TaskDownloader {
 }
 
 /// A [`BodyDownloader`] that runs on its own task
-struct SpawnedDownloader<T> {
+struct SpawnedDownloader<T: BodyDownloader> {
     updates: UnboundedReceiverStream<RangeInclusive<BlockNumber>>,
-    bodies_tx: PollSender<BodyDownloaderResult>,
+    bodies_tx: PollSender<BodyDownloaderResult<T::Header, T::Body>>,
     downloader: T,
 }
 

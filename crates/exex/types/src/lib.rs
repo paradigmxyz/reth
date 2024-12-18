@@ -1,4 +1,4 @@
-//! Commonly used types for exex usage.
+//! Commonly used ExEx types.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -8,28 +8,22 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use alloy_primitives::BlockNumber;
+mod finished_height;
+mod head;
+mod notification;
 
-/// The finished height of all `ExEx`'s.
-#[derive(Debug, Clone, Copy)]
-pub enum FinishedExExHeight {
-    /// No `ExEx`'s are installed, so there is no finished height.
-    NoExExs,
-    /// Not all `ExExs` have emitted a `FinishedHeight` event yet.
-    NotReady,
-    /// The finished height of all `ExEx`'s.
-    ///
-    /// This is the lowest common denominator between all `ExEx`'s.
-    ///
-    /// This block is used to (amongst other things) determine what blocks are safe to prune.
-    ///
-    /// The number is inclusive, i.e. all blocks `<= finished_height` are safe to prune.
-    Height(BlockNumber),
-}
+pub use finished_height::FinishedExExHeight;
+pub use head::ExExHead;
+pub use notification::ExExNotification;
 
-impl FinishedExExHeight {
-    /// Returns `true` if not all `ExExs` have emitted a `FinishedHeight` event yet.
-    pub const fn is_not_ready(&self) -> bool {
-        matches!(self, Self::NotReady)
-    }
+/// Bincode-compatible serde implementations for commonly used ExEx types.
+///
+/// `bincode` crate doesn't work with optionally serializable serde fields, but some of the
+/// ExEx types require optional serialization for RPC compatibility. This module makes so that
+/// all fields are serialized.
+///
+/// Read more: <https://github.com/bincode-org/bincode/issues/326>
+#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
+pub mod serde_bincode_compat {
+    pub use super::notification::serde_bincode_compat::*;
 }

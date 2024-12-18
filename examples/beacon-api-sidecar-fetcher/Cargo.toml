@@ -10,6 +10,8 @@ reth.workspace = true
 reth-node-ethereum.workspace = true
 
 alloy-rpc-types-beacon.workspace = true
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
 
 clap.workspace = true
 eyre.workspace = true

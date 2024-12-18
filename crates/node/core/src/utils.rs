@@ -1,25 +1,21 @@
 //! Utility functions for node startup and shutdown, for example path parsing and retrieving single
 //! blocks from the network.
 
+use alloy_consensus::BlockHeader;
+use alloy_eips::BlockHashOrNumber;
+use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
-use reth_chainspec::ChainSpec;
-use reth_consensus_common::validation::validate_block_pre_execution;
-use reth_fs_util as fs;
-use reth_network::NetworkManager;
+use reth_consensus::Consensus;
 use reth_network_p2p::{
-    bodies::client::BodiesClient,
-    headers::client::{HeadersClient, HeadersRequest},
-    priority::Priority,
+    bodies::client::BodiesClient, headers::client::HeadersClient, priority::Priority,
 };
-use reth_primitives::{BlockHashOrNumber, HeadersDirection, SealedBlock, SealedHeader};
-use reth_provider::BlockReader;
-use reth_rpc_types::engine::{JwtError, JwtSecret};
+use reth_primitives::SealedBlock;
+use reth_primitives_traits::SealedHeader;
 use std::{
     env::VarError,
     path::{Path, PathBuf},
-    sync::Arc,
 };
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info};
 
 /// Parses a user-specified path with support for environment variables and common shorthands (e.g.
 /// ~ for the user's home directory).
@@ -38,52 +34,26 @@ pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtE
     }
 }
 
-/// Collect the peers from the [`NetworkManager`] and write them to the given
-/// `persistent_peers_file`, if configured.
-pub fn write_peers_to_file<C>(network: &NetworkManager<C>, persistent_peers_file: Option<PathBuf>)
-where
-    C: BlockReader + Unpin,
-{
-    if let Some(file_path) = persistent_peers_file {
-        let known_peers = network.all_peers().collect::<Vec<_>>();
-        if let Ok(known_peers) = serde_json::to_string_pretty(&known_peers) {
-            trace!(target: "reth::cli", peers_file =?file_path, num_peers=%known_peers.len(), "Saving current peers");
-            let parent_dir = file_path.parent().map(fs::create_dir_all).transpose();
-            match parent_dir.and_then(|_| fs::write(&file_path, known_peers)) {
-                Ok(_) => {
-                    info!(target: "reth::cli", peers_file=?file_path, "Wrote network peers to file");
-                }
-                Err(err) => {
-                    warn!(target: "reth::cli", %err, peers_file=?file_path, "Failed to write network peers to file");
-                }
-            }
-        }
-    }
-}
-
 /// Get a single header from network
 pub async fn get_single_header<Client>(
     client: Client,
     id: BlockHashOrNumber,
-) -> Result<SealedHeader>
+) -> Result<SealedHeader<Client::Header>>
 where
-    Client: HeadersClient,
+    Client: HeadersClient<Header: reth_primitives_traits::BlockHeader>,
 {
-    let request = HeadersRequest { direction: HeadersDirection::Rising, limit: 1, start: id };
+    let (peer_id, response) = client.get_header_with_priority(id, Priority::High).await?.split();
 
-    let (peer_id, response) =
-        client.get_headers_with_priority(request, Priority::High).await?.split();
-
-    if response.len() != 1 {
+    let Some(header) = response else {
         client.report_bad_message(peer_id);
-        eyre::bail!("Invalid number of headers received. Expected: 1. Received: {}", response.len())
-    }
+        eyre::bail!("Invalid number of headers received. Expected: 1. Received: 0")
+    };
 
-    let header = response.into_iter().next().unwrap().seal_slow();
+    let header = SealedHeader::seal(header);
 
     let valid = match id {
         BlockHashOrNumber::Hash(hash) => header.hash() == hash,
-        BlockHashOrNumber::Number(number) => header.number == number,
+        BlockHashOrNumber::Number(number) => header.number() == number,
     };
 
     if !valid {
@@ -99,31 +69,23 @@ where
 }
 
 /// Get a body from network based on header
-pub async fn get_single_body<Client>(
+pub async fn get_single_body<H, Client>(
     client: Client,
-    chain_spec: Arc<ChainSpec>,
-    header: SealedHeader,
-) -> Result<SealedBlock>
+    header: SealedHeader<H>,
+    consensus: impl Consensus<H, Client::Body>,
+) -> Result<SealedBlock<H, Client::Body>>
 where
     Client: BodiesClient,
 {
     let (peer_id, response) = client.get_block_body(header.hash()).await?.split();
 
-    if response.is_none() {
+    let Some(body) = response else {
         client.report_bad_message(peer_id);
         eyre::bail!("Invalid number of bodies received. Expected: 1. Received: 0")
-    }
-
-    let block = response.unwrap();
-    let block = SealedBlock {
-        header,
-        body: block.transactions,
-        ommers: block.ommers,
-        withdrawals: block.withdrawals,
-        requests: block.requests,
     };
 
-    validate_block_pre_execution(&block, &chain_spec)?;
+    let block = SealedBlock { header, body };
+    consensus.validate_block_pre_execution(&block)?;
 
     Ok(block)
 }

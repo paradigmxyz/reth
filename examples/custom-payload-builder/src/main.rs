@@ -17,11 +17,14 @@ use reth::{
     cli::{config::PayloadBuilderConfig, Cli},
     payload::PayloadBuilderHandle,
     providers::CanonStateSubscriptions,
-    transaction_pool::TransactionPool,
+    transaction_pool::{PoolTransaction, TransactionPool},
 };
 use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
-use reth_node_ethereum::{EthEngineTypes, EthereumNode};
+use reth_chainspec::ChainSpec;
+use reth_node_api::NodeTypesWithEngine;
+use reth_node_ethereum::{node::EthereumAddOns, EthEngineTypes, EthEvmConfig, EthereumNode};
 use reth_payload_builder::PayloadBuilderService;
+use reth_primitives::{EthPrimitives, TransactionSigned};
 
 pub mod generator;
 pub mod job;
@@ -32,14 +35,22 @@ pub struct CustomPayloadBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadBuilder
 where
-    Node: FullNodeTypes<Engine = EthEngineTypes>,
-    Pool: TransactionPool + Unpin + 'static,
+    Node: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = EthEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+        >,
+    >,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+        + Unpin
+        + 'static,
 {
     async fn spawn_payload_service(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<Node::Engine>> {
+    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
         tracing::info!("Spawning a custom payload builder");
         let conf = ctx.payload_builder_config();
 
@@ -54,8 +65,9 @@ where
             pool,
             ctx.task_executor().clone(),
             payload_job_config,
-            ctx.chain_spec().clone(),
-            reth_ethereum_payload_builder::EthereumPayloadBuilder::default(),
+            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(EthEvmConfig::new(
+                ctx.chain_spec(),
+            )),
         );
 
         let (payload_service, payload_builder) =
@@ -78,6 +90,7 @@ fn main() {
                 .with_components(
                     EthereumNode::components().payload(CustomPayloadBuilder::default()),
                 )
+                .with_add_ons(EthereumAddOns::default())
                 .launch()
                 .await?;
 

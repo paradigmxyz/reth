@@ -104,10 +104,11 @@ impl DatabaseEnvMetrics {
         value_size: Option<usize>,
         f: impl FnOnce() -> R,
     ) -> R {
-        self.operations
-            .get(&(table, operation))
-            .expect("operation & table metric handle not found")
-            .record(value_size, f)
+        if let Some(metrics) = self.operations.get(&(table, operation)) {
+            metrics.record(value_size, f)
+        } else {
+            f()
+        }
     }
 
     /// Record metrics for opening a database transaction.
@@ -347,7 +348,7 @@ impl OperationMetrics {
 
         // Record duration only for large values to prevent the performance hit of clock syscall
         // on small operations
-        if value_size.map_or(false, |size| size > LARGE_VALUE_THRESHOLD_BYTES) {
+        if value_size.is_some_and(|size| size > LARGE_VALUE_THRESHOLD_BYTES) {
             let start = Instant::now();
             let result = f();
             self.large_value_duration_seconds.record(start.elapsed());

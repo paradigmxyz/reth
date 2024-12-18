@@ -15,18 +15,20 @@ workspace = true
 reth-mdbx-sys.workspace = true
 
 bitflags.workspace = true
-byteorder = "1"
+byteorder.workspace = true
 derive_more.workspace = true
 indexmap = "2"
 parking_lot.workspace = true
+smallvec.workspace = true
 thiserror.workspace = true
-dashmap = { workspace = true, features = ["inline"], optional = true }
 tracing.workspace = true
+
+dashmap = { workspace = true, features = ["inline"], optional = true }
 
 [features]
 default = []
 return-borrowed = []
-read-tx-timeouts = ["dashmap", "dashmap/inline"]
+read-tx-timeouts = ["dep:dashmap"]
 
 [dev-dependencies]
 pprof = { workspace = true, features = [

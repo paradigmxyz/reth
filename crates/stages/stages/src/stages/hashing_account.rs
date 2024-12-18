@@ -1,14 +1,14 @@
+use alloy_primitives::{keccak256, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db::{tables, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_primitives::{keccak256, Account, B256};
-use reth_provider::{AccountExtReader, DatabaseProviderRW, HashingWriter, StatsReader};
+use reth_primitives::Account;
+use reth_provider::{AccountExtReader, DBProvider, HashingWriter, StatsReader};
 use reth_stages_api::{
     AccountHashingCheckpoint, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint,
     StageError, StageId, UnwindInput, UnwindOutput,
@@ -58,24 +58,34 @@ impl AccountHashingStage {
     ///
     /// Proceeds to go to the `BlockTransitionIndex` end, go back `transitions` and change the
     /// account state in the `AccountChangeSets` table.
-    pub fn seed<DB: Database>(
-        provider: &DatabaseProviderRW<DB>,
+    pub fn seed<Tx: DbTx + DbTxMut + 'static, N: reth_provider::providers::ProviderNodeTypes>(
+        provider: &reth_provider::DatabaseProvider<Tx, N>,
         opts: SeedOpts,
-    ) -> Result<Vec<(reth_primitives::Address, reth_primitives::Account)>, StageError> {
+    ) -> Result<Vec<(alloy_primitives::Address, reth_primitives::Account)>, StageError>
+    where
+        N::Primitives: reth_primitives_traits::FullNodePrimitives<
+            BlockBody = reth_primitives::BlockBody,
+            BlockHeader = reth_primitives::Header,
+        >,
+    {
+        use alloy_primitives::U256;
         use reth_db_api::models::AccountBeforeTx;
-        use reth_primitives::U256;
-        use reth_provider::providers::StaticFileWriter;
+        use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
         use reth_testing_utils::{
             generators,
-            generators::{random_block_range, random_eoa_accounts},
+            generators::{random_block_range, random_eoa_accounts, BlockRangeParams},
         };
 
         let mut rng = generators::rng();
 
-        let blocks = random_block_range(&mut rng, opts.blocks.clone(), B256::ZERO, opts.txs);
+        let blocks = random_block_range(
+            &mut rng,
+            opts.blocks.clone(),
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: opts.txs, ..Default::default() },
+        );
 
         for block in blocks {
-            provider.insert_historical_block(block.try_seal_with_senders().unwrap(), None).unwrap();
+            provider.insert_historical_block(block.try_seal_with_senders().unwrap()).unwrap();
         }
         provider
             .static_file_provider()
@@ -121,18 +131,17 @@ impl Default for AccountHashingStage {
     }
 }
 
-impl<DB: Database> Stage<DB> for AccountHashingStage {
+impl<Provider> Stage<Provider> for AccountHashingStage
+where
+    Provider: DBProvider<Tx: DbTxMut> + HashingWriter + AccountExtReader + StatsReader,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::AccountHashing
     }
 
     /// Execute the stage.
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -221,14 +230,14 @@ impl<DB: Database> Stage<DB> for AccountHashingStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Aggregate all transition changesets and make a list of accounts that have been changed.
-        provider.unwind_account_hashing(range)?;
+        provider.unwind_account_hashing_range(range)?;
 
         let mut stage_checkpoint =
             input.checkpoint.account_hashing_stage_checkpoint().unwrap_or_default();
@@ -278,9 +287,7 @@ pub struct SeedOpts {
     pub txs: Range<u8>,
 }
 
-fn stage_checkpoint_progress<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
-) -> ProviderResult<EntitiesCheckpoint> {
+fn stage_checkpoint_progress(provider: &impl StatsReader) -> ProviderResult<EntitiesCheckpoint> {
     Ok(EntitiesCheckpoint {
         processed: provider.count_entries::<tables::HashedAccounts>()? as u64,
         total: provider.count_entries::<tables::PlainAccountState>()? as u64,
@@ -294,8 +301,9 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         UnwindStageTestRunner,
     };
+    use alloy_primitives::U256;
     use assert_matches::assert_matches;
-    use reth_primitives::{Account, U256};
+    use reth_primitives::Account;
     use reth_provider::providers::StaticFileWriter;
     use reth_stages_api::StageUnitCheckpoint;
     use test_utils::*;
@@ -345,7 +353,8 @@ mod tests {
     mod test_utils {
         use super::*;
         use crate::test_utils::TestStageDB;
-        use reth_primitives::Address;
+        use alloy_primitives::Address;
+        use reth_provider::DatabaseProviderFactory;
 
         pub(crate) struct AccountHashingTestRunner {
             pub(crate) db: TestStageDB,
@@ -440,7 +449,7 @@ mod tests {
             type Seed = Vec<(Address, Account)>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
-                let provider = self.db.factory.provider_rw()?;
+                let provider = self.db.factory.database_provider_rw()?;
                 let res = Ok(AccountHashingStage::seed(
                     &provider,
                     SeedOpts { blocks: 1..=input.target(), accounts: 10, txs: 0..3 },

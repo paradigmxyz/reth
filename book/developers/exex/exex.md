@@ -28,3 +28,4 @@ and run it on the Holesky testnet.
 1. [How do ExExes work?](./how-it-works.md)
 1. [Hello World](./hello-world.md)
 1. [Tracking State](./tracking-state.md)
+1. [Remote](./remote.md)

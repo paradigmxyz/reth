@@ -3,7 +3,7 @@ use crate::{
     table::{Decode, Encode},
     DatabaseError,
 };
-use reth_primitives::BlockNumber;
+use alloy_primitives::BlockNumber;
 use serde::{Deserialize, Serialize};
 use std::hash::Hash;
 
@@ -16,7 +16,7 @@ pub const NUM_OF_INDICES_IN_SHARD: usize = 2_000;
 /// `Address | 200` -> data is from block 0 to 200.
 ///
 /// `Address | 300` -> data is from block 201 to 300.
-#[derive(Debug, Default, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct ShardedKey<T> {
     /// The key for this type.
     pub key: T,
@@ -43,11 +43,7 @@ impl<T> ShardedKey<T> {
     }
 }
 
-impl<T> Encode for ShardedKey<T>
-where
-    T: Encode,
-    Vec<u8>: From<<T as Encode>::Encoded>,
-{
+impl<T: Encode> Encode for ShardedKey<T> {
     type Encoded = Vec<u8>;
 
     fn encode(self) -> Self::Encoded {
@@ -57,30 +53,11 @@ where
     }
 }
 
-impl<T> Decode for ShardedKey<T>
-where
-    T: Decode,
-{
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        let value = value.as_ref();
-
-        let tx_num_index = value.len() - 8;
-
-        let highest_tx_number = u64::from_be_bytes(
-            value[tx_num_index..].try_into().map_err(|_| DatabaseError::Decode)?,
-        );
-        let key = T::decode(&value[..tx_num_index])?;
-
+impl<T: Decode> Decode for ShardedKey<T> {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        let (key, highest_tx_number) = value.split_last_chunk().unwrap();
+        let key = T::decode(key)?;
+        let highest_tx_number = u64::from_be_bytes(*highest_tx_number);
         Ok(Self::new(key, highest_tx_number))
-    }
-}
-
-impl<T> Hash for ShardedKey<T>
-where
-    T: Hash,
-{
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.key.hash(state);
-        self.highest_block_number.hash(state);
     }
 }

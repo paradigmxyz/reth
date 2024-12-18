@@ -40,14 +40,20 @@ pub use backfill::*;
 mod context;
 pub use context::*;
 
+mod dyn_context;
+pub use dyn_context::*;
+
 mod event;
 pub use event::*;
 
 mod manager;
 pub use manager::*;
 
-mod notification;
-pub use notification::*;
+mod notifications;
+pub use notifications::*;
+
+mod wal;
+pub use wal::*;
 
 // Re-export exex types
 #[doc(inline)]
