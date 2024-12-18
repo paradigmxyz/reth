@@ -2325,12 +2325,14 @@ where
                     match state_root_handle.wait_for_result() {
                         Ok(StateRootComputeOutcome {
                             state_root: (task_state_root, _task_trie_updates),
+                            total_time,
                             ..
                         }) => {
                             info!(
                                 target: "engine::tree",
                                 block = ?sealed_block.num_hash(),
                                 ?task_state_root,
+                                ?total_time,
                                 "State root task finished"
                             );
                         }
