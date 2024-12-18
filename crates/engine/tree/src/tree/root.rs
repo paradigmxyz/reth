@@ -502,8 +502,6 @@ where
 
         let mut updates_finished = false;
 
-        // Timestamp when the first state update was received
-        let mut first_update_time = None;
         // Timestamp when the last state update was received
         let mut last_update_time = None;
 
@@ -528,7 +526,6 @@ where
                     }
                     StateRootMessage::StateUpdate(update) => {
                         if updates_received == 0 {
-                            first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
                         }
                         last_update_time = Some(Instant::now());
@@ -631,7 +628,7 @@ where
                                 std::mem::take(&mut current_multiproof),
                             );
                         } else if all_proofs_received && no_pending && updates_finished {
-                            let total_time = first_update_time
+                            let total_time = last_update_time
                                 .expect("first update time should be set")
                                 .elapsed();
                             let time_from_last_update =
