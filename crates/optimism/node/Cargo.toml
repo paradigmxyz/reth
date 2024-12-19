@@ -43,7 +43,7 @@ reth-optimism-rpc.workspace = true
 reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
-reth-optimism-primitives = { workspace = true, features = ["serde"] }
+reth-optimism-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"] }
 
 # revm with required optimism features
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
@@ -88,6 +88,7 @@ alloy-consensus.workspace = true
 futures.workspace = true
 
 [features]
+default = ["reth-codec"]
 optimism = [
 	"reth-primitives/optimism",
 	"reth-provider/optimism",
