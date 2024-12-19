@@ -19,9 +19,7 @@ use reth_chain_state::CanonStateNotification;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
-use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, SealedHeader, TransactionSigned,
-};
+use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, SealedHeader};
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -78,13 +76,9 @@ pub fn maintain_transaction_pool_future<N, Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) -> BoxFuture<'static, ()>
 where
-    N: NodePrimitives<
-        BlockHeader = reth_primitives::Header,
-        BlockBody = reth_primitives::BlockBody,
-        SignedTx = TransactionSigned,
-    >,
+    N: NodePrimitives,
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
-    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = TransactionSigned>> + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
@@ -104,13 +98,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     task_spawner: Tasks,
     config: MaintainPoolConfig,
 ) where
-    N: NodePrimitives<
-        BlockHeader = reth_primitives::Header,
-        BlockBody = reth_primitives::BlockBody,
-        SignedTx = TransactionSigned,
-    >,
+    N: NodePrimitives,
     Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
-    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = TransactionSigned>> + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
@@ -339,7 +329,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                             // been validated previously, we still need the blob in order to
                             // accurately set the transaction's
                             // encoded-length which is propagated over the network.
-                            pool.get_blob(TransactionSigned::hash(&tx))
+                            pool.get_blob(*tx.tx_hash())
                                 .ok()
                                 .flatten()
                                 .map(Arc::unwrap_or_clone)
@@ -680,7 +670,7 @@ mod tests {
     use alloy_primitives::{hex, U256};
     use reth_chainspec::MAINNET;
     use reth_fs_util as fs;
-    use reth_primitives::PooledTransaction;
+    use reth_primitives::{PooledTransaction, TransactionSigned};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 
