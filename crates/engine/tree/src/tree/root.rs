@@ -407,7 +407,18 @@ where
     ) {
         // Dispatch proof gathering for this state update
         scope.spawn(move |_| {
+            debug!(
+                target: "engine::root",
+                targets = ?proof_targets.len(),
+                sequence = ?proof_sequence_number,
+                "Spawning multiproof"
+            );
             let result = calculate_multiproof(thread_pool, config, proof_targets.clone());
+            debug!(
+                target: "engine::root",
+                sequence = ?proof_sequence_number,
+                "Multiproof finished"
+            );
 
             match result {
                 Ok(proof) => {

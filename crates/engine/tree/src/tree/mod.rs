@@ -2370,7 +2370,7 @@ where
                 if let Some(state_root_handle) = state_root_handle {
                     match state_root_handle.wait_for_result() {
                         Ok(StateRootComputeOutcome {
-                            state_root: (task_state_root, _task_trie_updates),
+                            state_root: (task_state_root, task_trie_updates),
                             total_time,
                             ..
                         }) => {
@@ -2385,6 +2385,13 @@ where
                                 state_root_regular_elapsed = ?root_elapsed,
                                 "State root task finished"
                             );
+
+                            return Ok((
+                                Some((task_state_root, task_trie_updates)),
+                                hashed_state,
+                                output,
+                                total_time,
+                            ))
                         }
                         Err(error) => {
                             info!(target: "engine::tree", ?error, "Failed to wait for state root task result");
