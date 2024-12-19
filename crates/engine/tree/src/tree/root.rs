@@ -20,7 +20,7 @@ use reth_trie_sparse::{
     errors::{SparseStateTrieError, SparseStateTrieResult, SparseTrieError, SparseTrieErrorKind},
     SparseStateTrie,
 };
-use revm_primitives::{keccak256, EvmState, B256};
+use revm_primitives::{keccak256, map::B256HashSet, EvmState, B256};
 use std::{
     collections::BTreeMap,
     sync::{
@@ -407,16 +407,23 @@ where
     ) {
         // Dispatch proof gathering for this state update
         scope.spawn(move |_| {
+            let targets_len = proof_targets.len();
+            let storage_targets_len = proof_targets.values().map(B256HashSet::len).sum::<usize>();
             debug!(
                 target: "engine::root",
-                targets = ?proof_targets.len(),
+                ?targets_len,
+                ?storage_targets_len,
                 sequence = ?proof_sequence_number,
                 "Spawning multiproof"
             );
+            let start = Instant::now();
             let result = calculate_multiproof(thread_pool, config, proof_targets.clone());
             debug!(
                 target: "engine::root",
                 sequence = ?proof_sequence_number,
+                ?targets_len,
+                ?storage_targets_len,
+                elapsed = ?start.elapsed(),
                 "Multiproof finished"
             );
 
