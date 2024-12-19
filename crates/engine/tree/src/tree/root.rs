@@ -843,7 +843,7 @@ fn update_sparse_trie<
         trie.update_account(address, account.unwrap_or_default())?;
     }
 
-    trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
+    trie.root();
     let elapsed = started_at.elapsed();
 
     Ok((trie, elapsed))
