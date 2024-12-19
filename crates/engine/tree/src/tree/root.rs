@@ -549,7 +549,8 @@ where
                         let next_sequence = self.proof_sequencer.next_sequence();
                         debug!(
                             target: "engine::root",
-                            len = update.len(),
+                            accounts = update.len(),
+                            storages = update.values().map(|account| account.storage.len()).sum::<usize>(),
                             total_updates = updates_received,
                             ?next_sequence,
                             "Received new state update"
