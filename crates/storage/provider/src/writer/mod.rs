@@ -361,7 +361,7 @@ mod tests {
 
         let reth_account_a = account_a.into();
         let reth_account_b = account_b.into();
-        let reth_account_b_changed = (&account_b_changed).into();
+        let reth_account_b_changed = account_b_changed.clone().into();
 
         // Check plain state
         assert_eq!(
@@ -1135,12 +1135,13 @@ mod tests {
         let mut state = State::builder().with_bundle_update().build();
 
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
+            #[cfg(feature = "scroll")]
+            let bundle_state = &(state.bundle_state.clone(), &()).into();
+            #[cfg(not(feature = "scroll"))]
+            let bundle_state = &state.bundle_state;
             assert_eq!(
-                StateRoot::overlay_root(
-                    tx,
-                    provider_factory.hashed_post_state(&state.bundle_state)
-                )
-                .unwrap(),
+                StateRoot::overlay_root(tx, provider_factory.hashed_post_state(bundle_state))
+                    .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
                     address,
                     (account, storage.into_iter())

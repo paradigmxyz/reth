@@ -58,6 +58,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
                     nonce: rng.gen::<u64>(),
                     code_hash: KECCAK_EMPTY,
                     code: Some(Default::default()),
+                    ..Default::default()
                 },
                 storage,
                 status: AccountStatus::Touched,
@@ -81,6 +82,7 @@ fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> RethAccount {
         } else {
             Some(revm_account.info.code_hash)
         },
+        ..Default::default()
     }
 }
 
