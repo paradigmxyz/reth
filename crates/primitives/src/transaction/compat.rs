@@ -2,13 +2,8 @@ use crate::{Transaction, TransactionSigned};
 use alloy_primitives::{Address, TxKind, U256};
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
+use reth_primitives_traits::FillTxEnv;
 use revm_primitives::{AuthorizationList, TxEnv};
-
-/// Implements behaviour to fill a [`TxEnv`] from another transaction.
-pub trait FillTxEnv {
-    /// Fills [`TxEnv`] with an [`Address`] and transaction.
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address);
-}
 
 impl FillTxEnv for TransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
