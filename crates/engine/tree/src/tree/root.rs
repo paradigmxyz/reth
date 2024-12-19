@@ -6,7 +6,7 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::system_calls::OnStateHook;
 use reth_primitives::BlockWithSenders;
-use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
 };
@@ -356,21 +356,19 @@ where
     /// [`StateRootTask`] that will be processed by the main loop.
     pub fn prefetch_account_proofs<
         T: SignedTransaction + alloy_consensus::Transaction,
-        BB: BlockBody<Transaction = T>,
-        B: Block<Body = BB>,
+        B: BlockBody<Transaction = T>,
     >(
         &self,
-        block: &BlockWithSenders<B>,
+        body: &BlockWithSenders<B>,
     ) {
         let mut accounts = AddressHashSet::with_capacity_and_hasher(
-            block.body().transactions().len() * 2 +
-                block.body().withdrawals().map_or(0, |withdrawals| withdrawals.len()),
+            body.transactions().len() * 2 +
+                body.withdrawals().map_or(0, |withdrawals| withdrawals.len()),
             Default::default(),
         );
-        accounts.extend(block.senders.iter().copied());
-        accounts
-            .extend(block.body().transactions().iter().filter_map(|tx| tx.kind().to().copied()));
-        if let Some(withdrawals) = block.body().withdrawals() {
+        accounts.extend(body.senders.iter().copied());
+        accounts.extend(body.transactions().iter().filter_map(|tx| tx.kind().to().copied()));
+        if let Some(withdrawals) = body.withdrawals() {
             accounts.extend(withdrawals.iter().map(|withdrawal| withdrawal.address));
         }
 
