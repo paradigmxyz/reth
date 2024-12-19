@@ -2289,8 +2289,11 @@ where
                     context.prefix_sets.clone(),
                 );
 
-                let state_root_task =
-                    StateRootTask::new(state_root_config, blinded_provider_factory);
+                let state_root_task = StateRootTask::new(
+                    state_root_config,
+                    blinded_provider_factory,
+                    &self.state_root_task_pool,
+                );
                 let state_hook = state_root_task.state_hook();
                 (Some(state_root_task.spawn(scope)), Box::new(state_hook) as Box<dyn OnStateHook>)
             } else {
