@@ -733,6 +733,6 @@ impl NetworkPrimitives for OpNetworkPrimitives {
     type BlockBody = reth_primitives::BlockBody;
     type Block = reth_primitives::Block;
     type BroadcastedTransaction = reth_primitives::TransactionSigned;
-    type PooledTransaction = reth_primitives::PooledTransaction;
+    type PooledTransaction = op_alloy_consensus::OpPooledTransaction;
     type Receipt = reth_primitives::Receipt;
 }
