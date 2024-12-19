@@ -33,7 +33,7 @@ use std::{
 use tracing::{debug, error, trace};
 
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
-const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 4;
+const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates and the total time spent.
