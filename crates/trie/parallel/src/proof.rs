@@ -25,7 +25,7 @@ use reth_trie::{
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::sync::Arc;
-use tracing::{debug, error};
+use tracing::debug;
 
 #[cfg(feature = "metrics")]
 use crate::metrics::ParallelStateRootMetrics;
@@ -151,8 +151,11 @@ where
                     .storage_multiproof(target_slots)
                     .map_err(|e| ParallelStateRootError::Other(e.to_string()))
                 })();
+                // We can have the receiver dropped before we send, because we still calculate
+                // storage proofs for deleted accounts, but do not actually walk over them in
+                // `account_node_iter` below.
                 if let Err(err) = tx.send(result) {
-                    error!(target: "trie::parallel", ?hashed_address, err_content = ?err.0,  "Failed to send proof result");
+                    debug!(target: "trie::parallel", ?hashed_address, err_content = ?err.0, "Failed to send proof result");
                 }
             });
             storage_proofs.insert(hashed_address, rx);
