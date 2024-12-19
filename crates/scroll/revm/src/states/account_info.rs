@@ -25,22 +25,24 @@ pub struct ScrollAccountInfo {
 }
 
 impl From<(AccountInfo, &ScrollPostExecutionContext)> for ScrollAccountInfo {
-    fn from((info, context): (AccountInfo, &ScrollPostExecutionContext)) -> Self {
-        let context = context.get(&info.code_hash).copied();
-        let (code_size, poseidon_code_hash) = context
-            .or_else(|| {
-                info.code
-                    .as_ref()
-                    .map(|code| (code.len() as u64, hash_code(code.original_byte_slice())))
-            })
-            .unwrap_or((0, POSEIDON_EMPTY));
+    fn from((info, _context): (AccountInfo, &ScrollPostExecutionContext)) -> Self {
+        // TODO(scroll): uncomment once use of the revm sdk pattern is adopted. Tracked in
+        // https://github.com/scroll-tech/reth/issues/97
+        // let context = context.get(&info.code_hash).copied();
+        // let (code_size, poseidon_code_hash) = context
+        //     .or_else(|| {
+        //         info.code
+        //             .as_ref()
+        //             .map(|code| (code.len() as u64, hash_code(code.original_byte_slice())))
+        //     })
+        //     .unwrap_or((0, POSEIDON_EMPTY));
         Self {
             balance: info.balance,
             nonce: info.nonce,
             code_hash: info.code_hash,
             code: info.code,
-            code_size,
-            poseidon_code_hash,
+            code_size: info.code_size as u64,
+            poseidon_code_hash: info.poseidon_code_hash,
         }
     }
 }

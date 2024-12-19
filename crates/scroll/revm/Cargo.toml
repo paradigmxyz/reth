@@ -16,7 +16,7 @@ workspace = true
 revm = { version = "18.0.0", features = ["std"], default-features = false }
 
 # scroll
-reth-scroll-primitives.workspace = true
+reth-scroll-primitives = { workspace = true, optional = true }
 
 # misc
 serde = { workspace = true, optional = true }
@@ -26,21 +26,21 @@ default = ["std"]
 dev = ["revm/dev"]
 arbitrary = [
 	"revm/arbitrary",
-	"reth-scroll-primitives/arbitrary"
+	"reth-scroll-primitives?/arbitrary"
 ]
 asm-keccak = ["revm/asm-keccak"]
 c-kzg = ["revm/c-kzg"]
 optimism = ["revm/optimism"]
 serde = [
 	"revm/serde",
-	"serde/std",
-	"reth-scroll-primitives/serde"
+	"dep:serde",
+	"reth-scroll-primitives?/serde"
 ]
-scroll = ["revm/scroll-poseidon-codehash"]
+scroll = ["revm/scroll-poseidon-codehash", "dep:reth-scroll-primitives"]
 test-utils = ["revm/test-utils"]
 std = [
 	"revm/std",
-	"serde/std"
+	"serde?/std"
 ]
 
 blst = ["revm/blst"]

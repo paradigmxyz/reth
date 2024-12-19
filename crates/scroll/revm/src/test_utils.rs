@@ -1,9 +1,9 @@
 use crate::{
     shared::AccountInfo,
     states::{
-        ScrollAccountInfoRevert, ScrollAccountRevert, ScrollPlainStateReverts, ScrollStateChangeset,
+        ScrollAccountInfo, ScrollAccountInfoRevert, ScrollAccountRevert, ScrollPlainStateReverts,
+        ScrollStateChangeset,
     },
-    ScrollAccountInfo,
 };
 use reth_scroll_primitives::poseidon::{hash_code, POSEIDON_EMPTY};
 use revm::db::{
