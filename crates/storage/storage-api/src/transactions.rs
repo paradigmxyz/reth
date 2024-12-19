@@ -86,7 +86,7 @@ pub type ProviderTx<P> = <P as TransactionsProvider>::Transaction;
 
 ///  Client trait for fetching additional transactions related data.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait TransactionsProviderExt: BlockReader + Send + Sync {
+pub trait TransactionsProviderExt: BlockReader {
     /// Get transactions range by block range.
     fn transaction_range_by_block_range(
         &self,
