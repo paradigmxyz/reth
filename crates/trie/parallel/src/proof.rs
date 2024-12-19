@@ -141,7 +141,7 @@ where
 
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
-            self.thread_pool.spawn_fifo(move || {
+            self.thread_pool.spawn(move || {
                 debug!(
                     target: "trie::parallel",
                     ?hashed_address,
