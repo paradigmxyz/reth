@@ -3,9 +3,18 @@
 
 #![warn(unused_crate_dependencies)]
 
+#[cfg(feature = "serde")]
+use serde as _;
+
+#[cfg(feature = "scroll")]
 pub mod states;
-#[cfg(feature = "test-utils")]
+#[cfg(all(feature = "scroll", feature = "test-utils"))]
 mod test_utils;
+
+#[cfg(feature = "scroll")]
+pub use crate::states::ScrollAccountInfo as AccountInfo;
+#[cfg(not(feature = "scroll"))]
+pub use revm::primitives::AccountInfo;
 
 #[cfg(all(feature = "optimism", not(feature = "scroll")))]
 pub use revm::{primitives::OptimismFields, L1BlockInfo, L1_BLOCK_CONTRACT};
@@ -20,12 +29,6 @@ pub use revm::{
     ContextPrecompile, ContextPrecompiles, Evm, EvmBuilder, EvmContext, GetInspector, Inspector,
     JournaledState,
 };
-
-#[cfg(feature = "scroll")]
-pub use crate::states::ScrollAccountInfo as AccountInfo;
-#[cfg(not(feature = "scroll"))]
-pub use revm::primitives::AccountInfo;
-pub use states::ScrollAccountInfo;
 
 /// Shared module, available for all feature flags.
 pub mod shared {
