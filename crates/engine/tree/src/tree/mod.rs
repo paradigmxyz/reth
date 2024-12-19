@@ -2232,7 +2232,7 @@ where
             .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?;
         let state_root_config = StateRootConfig::new_from_input(consistent_view, input);
         let state_root_task = StateRootTask::new(state_root_config);
-        // state_root_task.prefetch_account_proofs(&block);
+        state_root_task.prefetch_account_proofs(&block);
         let state_hook = state_root_task.state_hook();
         let state_root_handle = state_root_task.spawn();
 
