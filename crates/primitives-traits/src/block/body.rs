@@ -98,3 +98,11 @@ pub trait BlockBody:
         self.encoded_2718_transactions_iter().map(Into::into).collect()
     }
 }
+
+/// This is a helper alias to make it easy to refer to the inner `Transaction` associated type of a
+/// given type that implements [`BlockBody`].
+pub type BodyTx<N> = <N as BlockBody>::Transaction;
+
+/// This is a helper alias to make it easy to refer to the inner `OmmerHeader` associated type of a
+/// given type that implements [`BlockBody`].
+pub type BodyOmmer<N> = <N as BlockBody>::OmmerHeader;
