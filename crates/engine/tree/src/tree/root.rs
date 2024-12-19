@@ -6,19 +6,14 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::system_calls::OnStateHook;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
-    StateCommitmentProvider,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
 };
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
-    proof::Proof,
-    trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, Nibbles,
     TrieInput,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
 use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
@@ -413,15 +408,7 @@ where
     ) {
         // Dispatch proof gathering for this state update
         scope.spawn(move |_| {
-            let result = ParallelProof::new(
-                config.consistent_view.clone(),
-                config.nodes_sorted.clone(),
-                config.state_sorted.clone(),
-                config.prefix_sets.clone(),
-                thread_pool,
-            )
-            .with_branch_node_hash_masks(true)
-            .multiproof(proof_targets.clone());
+            let result = calculate_multiproof(thread_pool, config, proof_targets.clone());
 
             match result {
                 Ok(proof) => {
@@ -436,7 +423,7 @@ where
                 }
                 Err(error) => {
                     let _ = state_root_message_sender
-                        .send(StateRootMessage::ProofCalculationError(error.into()));
+                        .send(StateRootMessage::ProofCalculationError(error));
                 }
             }
         });
@@ -742,28 +729,24 @@ fn get_proof_targets(
 
 /// Calculate multiproof for the targets.
 #[inline]
-#[allow(dead_code)]
 fn calculate_multiproof<Factory>(
+    thread_pool: &rayon::ThreadPool,
     config: StateRootConfig<Factory>,
     proof_targets: MultiProofTargets,
 ) -> ProviderResult<MultiProof>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
+    Factory:
+        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
-    let provider = config.consistent_view.provider_ro()?;
-
-    Ok(Proof::from_tx(provider.tx_ref())
-        .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
-            DatabaseTrieCursorFactory::new(provider.tx_ref()),
-            &config.nodes_sorted,
-        ))
-        .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(provider.tx_ref()),
-            &config.state_sorted,
-        ))
-        .with_prefix_sets_mut(config.prefix_sets.as_ref().clone())
-        .with_branch_node_hash_masks(true)
-        .multiproof(proof_targets)?)
+    Ok(ParallelProof::new(
+        config.consistent_view,
+        config.nodes_sorted,
+        config.state_sorted,
+        config.prefix_sets,
+        thread_pool,
+    )
+    .with_branch_node_hash_masks(true)
+    .multiproof(proof_targets)?)
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
