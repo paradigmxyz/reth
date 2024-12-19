@@ -45,16 +45,18 @@ reth-chainspec = { workspace = true, features = ["test-utils"] }
 [features]
 default = ["std"]
 std = [
-    "alloy-chains/std",
-    "alloy-genesis/std",
-    "alloy-primitives/std",
-    "alloy-eips/std",
-    "alloy-serde/std",
-    "reth-chainspec/std",
-    "reth-ethereum-forks/std",
-    "reth-primitives-traits/std",
-    "reth-scroll-forks/std",
-    "alloy-consensus/std",
-    "once_cell/std",
-    "serde/std"
+	"alloy-chains/std",
+	"alloy-genesis/std",
+	"alloy-primitives/std",
+	"alloy-eips/std",
+	"alloy-serde/std",
+	"reth-chainspec/std",
+	"reth-ethereum-forks/std",
+	"reth-primitives-traits/std",
+	"reth-scroll-forks/std",
+	"alloy-consensus/std",
+	"once_cell/std",
+	"serde/std",
+	"derive_more/std",
+	"reth-network-peers/std"
 ]

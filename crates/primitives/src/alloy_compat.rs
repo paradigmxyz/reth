@@ -159,6 +159,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
                     }
                     #[cfg(all(feature = "scroll", not(feature = "optimism")))]
                     crate::TxType::L1Message => {
+                        use alloy_consensus::Transaction as _;
                         let fields =
                             inner
                                 .fields
