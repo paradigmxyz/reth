@@ -155,7 +155,7 @@ where
                     trace!(
                         target: "trie::parallel",
                         ?hashed_address,
-                        provider_time_ms = provider_start.elapsed().as_millis(),
+                        provider_time = ?provider_start.elapsed(),
                         "Got provider"
                     );
 
@@ -171,7 +171,7 @@ where
                     trace!(
                         target: "trie::parallel",
                         ?hashed_address,
-                        cursor_time_ms = cursor_start.elapsed().as_millis(),
+                        cursor_time = ?cursor_start.elapsed(),
                         "Created cursors"
                     );
 
@@ -189,20 +189,19 @@ where
                     trace!(
                         target: "trie::parallel",
                         ?hashed_address,
-                        proof_time_ms = proof_start.elapsed().as_millis(),
+                        proof_time = ?proof_start.elapsed(),
                         "Completed proof calculation"
                     );
 
                     proof_result
                 })();
 
-                let task_time = task_start.elapsed();
                 if let Err(e) = tx.send(result) {
                     error!(
                         target: "trie::parallel",
                         ?hashed_address,
                         error = ?e,
-                        task_time_ms = task_time.as_millis(),
+                        task_time = ?task_start.elapsed(),
                         "Failed to send proof result"
                     );
                 }
