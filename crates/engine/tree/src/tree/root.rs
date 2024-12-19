@@ -337,16 +337,18 @@ where
         body: &BlockWithSenders<B>,
     ) {
         let mut accounts = HashSet::<Address>::with_capacity_and_hasher(
-            // body.body().transactions().len() * 2 +
-            //     body.body().withdrawals().map_or(0, |withdrawals| withdrawals.len()),
-            body.body().transactions().len(),
+            body.body().transactions().len()
+            // * 2
+            + body.body().withdrawals().map_or(0, |withdrawals| withdrawals.len()),
+            // body.body().transactions().len(),
             Default::default(),
         );
         accounts.extend(body.senders.iter().copied());
         // accounts.extend(body.body().transactions().iter().filter_map(|tx|
-        // tx.kind().to().copied())); if let Some(withdrawals) = body.body().withdrawals() {
-        //     accounts.extend(withdrawals.iter().map(|withdrawal| withdrawal.address));
-        // }
+        // tx.kind().to().copied()));
+        if let Some(withdrawals) = body.body().withdrawals() {
+            accounts.extend(withdrawals.iter().map(|withdrawal| withdrawal.address));
+        }
 
         let _ = self.tx.send(StateRootMessage::PrefetchProofs(accounts));
     }
