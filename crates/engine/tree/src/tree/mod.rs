@@ -75,11 +75,13 @@ use tokio::sync::{
     oneshot::{self, error::TryRecvError},
 };
 use tracing::*;
+use trie_updates::compare_trie_updates;
 
 pub mod config;
 mod invalid_block_hook;
 mod metrics;
 mod persistence_state;
+mod trie_updates;
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
@@ -2386,12 +2388,34 @@ where
                                 "State root task finished"
                             );
 
-                            return Ok((
-                                Some((task_state_root, task_trie_updates)),
-                                hashed_state,
-                                output,
-                                total_time,
-                            ))
+                            if let Some(trie_updates) =
+                                state_root_result.as_ref().map(|(_, updates)| updates)
+                            {
+                                let diff = compare_trie_updates(&task_trie_updates, trie_updates);
+                                if diff.has_differences() {
+                                    for address in &diff.account_nodes_with_different_values {
+                                        let mut task =
+                                            task_trie_updates.account_nodes.get(address).cloned();
+                                        let regular =
+                                            trie_updates.account_nodes.get(address).cloned();
+                                        if let (Some(task), Some(regular)) =
+                                            (task.as_mut(), regular.as_ref())
+                                        {
+                                            task.tree_mask = regular.tree_mask;
+                                        }
+                                        if task != regular {
+                                            debug!(target: "engine::tree", ?address, ?task, ?regular, "Difference in account trie updates");
+                                        }
+                                    }
+                                } else {
+                                    return Ok((
+                                        Some((task_state_root, task_trie_updates)),
+                                        hashed_state,
+                                        output,
+                                        total_time,
+                                    ))
+                                }
+                            }
                         }
                         Err(error) => {
                             info!(target: "engine::tree", ?error, "Failed to wait for state root task result");
