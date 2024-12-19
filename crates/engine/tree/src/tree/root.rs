@@ -450,6 +450,13 @@ where
         let ready_proofs =
             self.proof_sequencer.add_proof(sequence_number, state_update, targets, proof);
 
+        debug!(
+            target: "engine::root",
+            sequence = ?sequence_number,
+            ready_proofs = ?ready_proofs.len(),
+            "Returning proofs"
+        );
+
         if ready_proofs.is_empty() {
             None
         } else {
