@@ -112,7 +112,7 @@ fn unwind_and_copy<
 
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(
-        NoopBlockExecutorProvider::default(), // Not necessary for unwinding.
+        NoopBlockExecutorProvider::<N::Primitives>::default(), // Not necessary for unwinding.
         ExecutionStageThresholds {
             max_blocks: Some(u64::MAX),
             max_changes: None,

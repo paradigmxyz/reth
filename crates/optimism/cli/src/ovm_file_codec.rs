@@ -213,7 +213,7 @@ impl Decodable for TransactionSigned {
     /// This cannot be used for decoding EIP-4844 transactions in p2p `PooledTransactions`, since
     /// the EIP-4844 variant of [`TransactionSigned`] does not include the blob sidecar.
     ///
-    /// For a method suitable for decoding pooled transactions, see \[`PooledTransactionsElement`\].
+    /// For a method suitable for decoding pooled transactions, see \[`PooledTransaction`\].
     ///
     /// CAUTION: Due to a quirk in [`Header::decode`], this method will succeed even if a typed
     /// transaction is encoded in this format, and does not start with a RLP header:

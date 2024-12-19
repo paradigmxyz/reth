@@ -1,5 +1,6 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::{BlockHeader, Header, Sealable};
+use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
@@ -11,7 +12,7 @@ use reth_evm::{
 };
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
-use reth_primitives::{SealedHeader, StaticFileSegment};
+use reth_primitives::StaticFileSegment;
 use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
@@ -193,10 +194,7 @@ where
         unwind_to: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: StaticFileProviderFactory
-            + DBProvider
-            + BlockReader
-            + HeaderProvider<Header = reth_primitives::Header>,
+        Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
     {
         // If thre's any receipts pruning configured, receipts are written directly to database and
         // inconsistencies are expected.
@@ -266,7 +264,7 @@ where
 
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
-    E: BlockExecutorProvider<Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>>,
+    E: BlockExecutorProvider,
     Provider: DBProvider
         + BlockReader<
             Block = <E::Primitives as NodePrimitives>::Block,
@@ -359,9 +357,15 @@ where
             let execute_start = Instant::now();
 
             self.metrics.metered_one((&block, td).into(), |input| {
-                executor.execute_and_verify_one(input).map_err(|error| StageError::Block {
-                    block: Box::new(SealedHeader::seal(block.header().clone())),
-                    error: BlockErrorKind::Execution(error),
+                executor.execute_and_verify_one(input).map_err(|error| {
+                    let header = block.header();
+                    StageError::Block {
+                        block: Box::new(BlockWithParent::new(
+                            header.parent_hash(),
+                            NumHash::new(header.number(), header.hash_slow()),
+                        )),
+                        error: BlockErrorKind::Execution(error),
+                    }
                 })
             })?;
 
@@ -424,7 +428,7 @@ where
         if !blocks.is_empty() {
             let blocks = blocks.into_iter().map(|block| {
                 let hash = block.header().hash_slow();
-                block.seal(hash)
+                block.seal_unchecked(hash)
             });
 
             let previous_input =

@@ -5,15 +5,15 @@ use alloy_rpc_types_eth::transaction::TransactionRequest;
 use reth_evm::ConfigureEvm;
 use reth_provider::ProviderHeader;
 use reth_rpc_eth_api::{
-    helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
-    FromEthApiError, IntoEthApiError,
+    helpers::{estimate::EstimateCall, Call, EthCall, LoadBlock, LoadState, SpawnBlocking},
+    FromEthApiError, FullEthApiTypes, IntoEthApiError,
 };
 use reth_rpc_eth_types::{revm_utils::CallFees, RpcInvalidTransactionError};
 use revm::primitives::{BlockEnv, OptimismFields, TxEnv};
 
 impl<N> EthCall for OpEthApi<N>
 where
-    Self: EstimateCall + LoadPendingBlock,
+    Self: EstimateCall + LoadBlock + FullEthApiTypes,
     N: OpNodeCore,
 {
 }

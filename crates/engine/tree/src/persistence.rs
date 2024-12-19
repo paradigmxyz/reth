@@ -1,4 +1,5 @@
 use crate::metrics::PersistenceMetrics;
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
@@ -17,11 +18,6 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tracing::{debug, error};
 
-/// A helper trait with requirements for [`ProviderNodeTypes`] to be used within
-/// [`PersistenceService`].
-pub trait PersistenceNodeTypes: ProviderNodeTypes<Primitives = EthPrimitives> {}
-impl<T> PersistenceNodeTypes for T where T: ProviderNodeTypes<Primitives = EthPrimitives> {}
-
 /// Writes parts of reth's in memory tree state to the database and static files.
 ///
 /// This is meant to be a spawned service that listens for various incoming persistence operations,
@@ -32,7 +28,7 @@ impl<T> PersistenceNodeTypes for T where T: ProviderNodeTypes<Primitives = EthPr
 #[derive(Debug)]
 pub struct PersistenceService<N>
 where
-    N: PersistenceNodeTypes,
+    N: ProviderNodeTypes,
 {
     /// The provider factory to use
     provider: ProviderFactory<N>,
@@ -48,7 +44,7 @@ where
 
 impl<N> PersistenceService<N>
 where
-    N: PersistenceNodeTypes,
+    N: ProviderNodeTypes,
 {
     /// Create a new persistence service
     pub fn new(
@@ -74,7 +70,7 @@ where
 
 impl<N> PersistenceService<N>
 where
-    N: PersistenceNodeTypes,
+    N: ProviderNodeTypes,
 {
     /// This is the main loop, that will listen to database events and perform the requested
     /// database actions
@@ -148,9 +144,10 @@ where
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
         debug!(target: "engine::persistence", first=?blocks.first().map(|b| b.block.num_hash()), last=?blocks.last().map(|b| b.block.num_hash()), "Saving range of blocks");
         let start_time = Instant::now();
-        let last_block_hash_num = blocks
-            .last()
-            .map(|block| BlockNumHash { hash: block.block().hash(), number: block.block().number });
+        let last_block_hash_num = blocks.last().map(|block| BlockNumHash {
+            hash: block.block().hash(),
+            number: block.block().header().number(),
+        });
 
         if last_block_hash_num.is_some() {
             let provider_rw = self.provider.database_provider_rw()?;
@@ -219,7 +216,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         sync_metrics_tx: MetricEventsSender,
     ) -> PersistenceHandle<N::Primitives>
     where
-        N: PersistenceNodeTypes,
+        N: ProviderNodeTypes,
     {
         // create the initial channels
         let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();

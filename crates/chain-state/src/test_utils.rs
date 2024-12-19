@@ -5,7 +5,10 @@ use crate::{
     CanonStateSubscriptions,
 };
 use alloy_consensus::{Header, Transaction as _, TxEip1559, EMPTY_ROOT_HASH};
-use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip7685::Requests};
+use alloy_eips::{
+    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, INITIAL_BASE_FEE},
+    eip7685::Requests,
+};
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
@@ -17,6 +20,7 @@ use reth_primitives::{
     BlockBody, EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredTx, SealedBlock,
     SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
 };
+use reth_primitives_traits::Account;
 use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};
@@ -137,8 +141,8 @@ impl TestBlockBuilder {
             number,
             parent_hash,
             gas_used: transactions.len() as u64 * MIN_TRANSACTION_GAS,
-            gas_limit: self.chain_spec.max_gas_limit,
             mix_hash: B256::random(),
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
             transactions_root: calculate_transaction_root(
                 &transactions.clone().into_iter().map(|tx| tx.into_signed()).collect::<Vec<_>>(),
@@ -147,14 +151,12 @@ impl TestBlockBuilder {
             beneficiary: Address::random(),
             state_root: state_root_unhashed(HashMap::from([(
                 self.signer,
-                (
-                    AccountInfo {
-                        balance: initial_signer_balance - signer_balance_decrease,
-                        nonce: num_txs,
-                        ..Default::default()
-                    },
-                    EMPTY_ROOT_HASH,
-                ),
+                Account {
+                    balance: initial_signer_balance - signer_balance_decrease,
+                    nonce: num_txs,
+                    ..Default::default()
+                }
+                .into_trie_account(EMPTY_ROOT_HASH),
             )])),
             // use the number as the timestamp so it is monotonically increasing
             timestamp: number +

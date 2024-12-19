@@ -26,10 +26,11 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{EthPrimitives, Head, SealedBlock, SealedHeader};
+use reth_primitives::{Head, SealedBlock, SealedHeader};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
-    ChainSpecProvider, ProviderError, StageCheckpointReader,
+    providers::{ProviderNodeTypes, TreeNodeTypes},
+    BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
+    StageCheckpointReader,
 };
 use reth_stages_api::{ControlFlow, Pipeline, PipelineTarget, StageId};
 use reth_tasks::TaskSpawner;
@@ -84,15 +85,9 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// Helper trait expressing requirements for node types to be used in engine.
-pub trait EngineNodeTypes:
-    ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine
-{
-}
+pub trait EngineNodeTypes: ProviderNodeTypes + NodeTypesWithEngine {}
 
-impl<T> EngineNodeTypes for T where
-    T: ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine
-{
-}
+impl<T> EngineNodeTypes for T where T: ProviderNodeTypes + NodeTypesWithEngine {}
 
 /// Represents a pending forkchoice update.
 ///
@@ -232,7 +227,7 @@ where
 
 impl<N, BT, Client> BeaconConsensusEngine<N, BT, Client>
 where
-    N: EngineNodeTypes,
+    N: TreeNodeTypes,
     BT: BlockchainTreeEngine
         + BlockReader<Block = BlockTy<N>, Header = HeaderTy<N>>
         + BlockIdReader
@@ -760,14 +755,14 @@ where
         // iterate over ancestors in the invalid cache
         // until we encounter the first valid ancestor
         let mut current_hash = parent_hash;
-        let mut current_header = self.invalid_headers.get(&current_hash);
-        while let Some(header) = current_header {
-            current_hash = header.parent_hash;
-            current_header = self.invalid_headers.get(&current_hash);
+        let mut current_block = self.invalid_headers.get(&current_hash);
+        while let Some(block) = current_block {
+            current_hash = block.parent;
+            current_block = self.invalid_headers.get(&current_hash);
 
             // If current_header is None, then the current_hash does not have an invalid
             // ancestor in the cache, check its presence in blockchain tree
-            if current_header.is_none() &&
+            if current_block.is_none() &&
                 self.blockchain.find_block_by_hash(current_hash, BlockSource::Any)?.is_some()
             {
                 return Ok(Some(current_hash))
@@ -806,13 +801,13 @@ where
         head: B256,
     ) -> ProviderResult<Option<PayloadStatus>> {
         // check if the check hash was previously marked as invalid
-        let Some(header) = self.invalid_headers.get(&check) else { return Ok(None) };
+        let Some(block) = self.invalid_headers.get(&check) else { return Ok(None) };
 
         // populate the latest valid hash field
-        let status = self.prepare_invalid_response(header.parent_hash)?;
+        let status = self.prepare_invalid_response(block.parent)?;
 
         // insert the head block into the invalid header cache
-        self.invalid_headers.insert_with_invalid_ancestor(head, header);
+        self.invalid_headers.insert_with_invalid_ancestor(head, block);
 
         Ok(Some(status))
     }
@@ -821,10 +816,10 @@ where
     /// to a forkchoice update.
     fn check_invalid_ancestor(&mut self, head: B256) -> ProviderResult<Option<PayloadStatus>> {
         // check if the head was previously marked as invalid
-        let Some(header) = self.invalid_headers.get(&head) else { return Ok(None) };
+        let Some(block) = self.invalid_headers.get(&head) else { return Ok(None) };
 
         // populate the latest valid hash field
-        Ok(Some(self.prepare_invalid_response(header.parent_hash)?))
+        Ok(Some(self.prepare_invalid_response(block.parent)?))
     }
 
     /// Record latency metrics for one call to make a block canonical
@@ -1454,7 +1449,7 @@ where
     fn on_pipeline_outcome(&mut self, ctrl: ControlFlow) -> RethResult<()> {
         // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
         if let ControlFlow::Unwind { bad_block, .. } = ctrl {
-            warn!(target: "consensus::engine", invalid_hash=?bad_block.hash(), invalid_number=?bad_block.number, "Bad block detected in unwind");
+            warn!(target: "consensus::engine", invalid_num_hash=?bad_block.block, "Bad block detected in unwind");
             // update the `invalid_headers` cache with the new invalid header
             self.invalid_headers.insert(*bad_block);
             return Ok(())
@@ -1673,7 +1668,7 @@ where
                             self.latest_valid_hash_for_invalid_payload(block.parent_hash)?
                         };
                         // keep track of the invalid header
-                        self.invalid_headers.insert(block.header);
+                        self.invalid_headers.insert(block.header.block_with_parent());
                         PayloadStatus::new(
                             PayloadStatusEnum::Invalid { validation_error: error.to_string() },
                             latest_valid_hash,
@@ -1782,7 +1777,7 @@ where
                             let (block, err) = err.split();
                             warn!(target: "consensus::engine", invalid_number=?block.number, invalid_hash=?block.hash(), %err, "Marking block as invalid");
 
-                            self.invalid_headers.insert(block.header);
+                            self.invalid_headers.insert(block.header.block_with_parent());
                         }
                     }
                 }
@@ -1801,7 +1796,7 @@ where
 /// receiver and forwarding them to the blockchain tree.
 impl<N, BT, Client> Future for BeaconConsensusEngine<N, BT, Client>
 where
-    N: EngineNodeTypes,
+    N: TreeNodeTypes,
     Client: EthBlockClient + 'static,
     BT: BlockchainTreeEngine
         + BlockReader<Block = BlockTy<N>, Header = HeaderTy<N>>
@@ -2035,7 +2030,7 @@ mod tests {
             .await;
         assert_matches!(
             res.await,
-            Ok(Err(BeaconConsensusEngineError::Pipeline(n))) if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
+            Ok(Err(BeaconConsensusEngineError::Pipeline(n))) if matches!(*n.as_ref(), PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 
@@ -2066,7 +2061,7 @@ mod tests {
         // consensus engine is still idle because no FCUs were received
         let _ = env
             .send_new_payload(
-                block_to_payload_v1(SealedBlock::default()),
+                block_to_payload_v1(SealedBlock::<_>::default()),
                 ExecutionPayloadSidecar::none(),
             )
             .await;
@@ -2141,7 +2136,7 @@ mod tests {
 
         assert_matches!(
             rx.await,
-            Ok(Err(BeaconConsensusEngineError::Pipeline(n)))  if matches!(*n.as_ref(),PipelineError::Stage(StageError::ChannelClosed))
+            Ok(Err(BeaconConsensusEngineError::Pipeline(n)))  if matches!(*n.as_ref(), PipelineError::Stage(StageError::ChannelClosed))
         );
     }
 

@@ -23,7 +23,7 @@ use reth_chain_state::{
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::{models::BlockNumberAddress, transaction::DbTx, Database};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
@@ -35,7 +35,8 @@ use reth_primitives_traits::BlockBody as _;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DBProvider, NodePrimitivesProvider, StateCommitmentProvider, StorageChangeSetReader,
+    BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, OmmersProvider,
+    StateCommitmentProvider, StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
@@ -314,17 +315,6 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        self.consistent_provider()?.ommers(id)
-    }
-
-    fn block_body_indices(
-        &self,
-        number: BlockNumber,
-    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.consistent_provider()?.block_body_indices(number)
-    }
-
     /// Returns the block with senders with matching number or hash from database.
     ///
     /// **NOTE: If [`TransactionVariant::NoHash`] is provided then the transactions have invalid
@@ -478,6 +468,21 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
     }
 }
 
+impl<N: ProviderNodeTypes> OmmersProvider for BlockchainProvider2<N> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+        self.consistent_provider()?.ommers(id)
+    }
+}
+
+impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider2<N> {
+    fn block_body_indices(
+        &self,
+        number: BlockNumber,
+    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        self.consistent_provider()?.block_body_indices(number)
+    }
+}
+
 impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider2<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.consistent_provider()?.get_stage_checkpoint(id)
@@ -493,41 +498,15 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider2<N> {
 }
 
 impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for BlockchainProvider2<N> {
-    fn fill_env_with_header<EvmConfig>(
+    fn env_with_header<EvmConfig>(
         &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
         header: &HeaderTy<N>,
         evm_config: EvmConfig,
-    ) -> ProviderResult<()>
+    ) -> ProviderResult<EvmEnv>
     where
         EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
-        self.consistent_provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
-    }
-
-    fn fill_cfg_env_at<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        at: BlockHashOrNumber,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        self.consistent_provider()?.fill_cfg_env_at(cfg, at, evm_config)
-    }
-
-    fn fill_cfg_env_with_header<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        header: &HeaderTy<N>,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        self.consistent_provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
+        self.consistent_provider()?.env_with_header(header, evm_config)
     }
 }
 
@@ -840,10 +819,10 @@ mod tests {
     use reth_primitives::{BlockExt, Receipt, SealedBlock, StaticFileSegment};
     use reth_primitives_traits::{BlockBody as _, SignedTransaction};
     use reth_storage_api::{
-        BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
-        ChangeSetReader, DatabaseProviderFactory, HeaderProvider, ReceiptProvider,
-        ReceiptProviderIdExt, StateProviderFactory, TransactionVariant, TransactionsProvider,
-        WithdrawalsProvider,
+        BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
+        BlockReaderIdExt, BlockSource, ChangeSetReader, DatabaseProviderFactory, HeaderProvider,
+        OmmersProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory,
+        TransactionVariant, TransactionsProvider, WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1556,7 +1535,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
@@ -1565,7 +1544,7 @@ mod tests {
         assert_eq!(provider.block_by_id(block_hash.into()).unwrap(), Some(database_block.unseal()));
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
             Some(in_memory_block.clone().unseal())
@@ -1649,7 +1628,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert_eq!(
             provider.header_by_id(block_number.into()).unwrap(),
@@ -1670,7 +1649,7 @@ mod tests {
         );
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
 
         assert_eq!(
             provider.header_by_id(block_number.into()).unwrap(),
@@ -1707,7 +1686,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
@@ -1719,7 +1698,7 @@ mod tests {
         );
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
@@ -1747,7 +1726,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert!(!receipts.get(database_block.number as usize).unwrap().is_empty());
         assert!(!provider
@@ -1765,7 +1744,7 @@ mod tests {
         );
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
 
         assert_eq!(
             provider.receipts_by_block_id(block_number.into())?.unwrap(),
@@ -2598,7 +2577,7 @@ mod tests {
                             .unseal::<reth_primitives::Block>()
                             .with_recovered_senders()
                             .unwrap()
-                            .seal(block.hash())
+                            .seal_unchecked(block.hash())
                     )
                 ),
                 (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
@@ -2614,7 +2593,7 @@ mod tests {
                             .unseal::<reth_primitives::Block>()
                             .with_recovered_senders()
                             .unwrap()
-                            .seal(block.hash())
+                            .seal_unchecked(block.hash())
                     )
                 ),
                 (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)

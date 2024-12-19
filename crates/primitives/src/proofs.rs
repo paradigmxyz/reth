@@ -3,7 +3,7 @@
 use crate::Receipt;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
-use alloy_trie::root::ordered_trie_root_with_encoder;
+pub use alloy_trie::root::ordered_trie_root_with_encoder;
 
 pub use alloy_consensus::proofs::calculate_receipt_root;
 

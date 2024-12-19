@@ -20,13 +20,14 @@ pub use execute::*;
 pub use network::*;
 pub use payload::*;
 pub use pool::*;
+use reth_network_p2p::BlockClient;
 
 use crate::{ConfigureEvm, FullNodeTypes};
 use reth_consensus::FullConsensus;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_network::NetworkHandle;
+use reth_network::{NetworkHandle, NetworkPrimitives};
 use reth_network_api::FullNetwork;
-use reth_node_api::{HeaderTy, NodeTypes, NodeTypesWithEngine, PayloadBuilder, TxTy};
+use reth_node_api::{BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, PayloadBuilder, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -49,7 +50,9 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     type Consensus: FullConsensus<<T::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static;
 
     /// Network API.
-    type Network: FullNetwork;
+    type Network: FullNetwork<
+        Client: BlockClient<Header = HeaderTy<T::Types>, Body = BodyTy<T::Types>>,
+    >;
 
     /// Builds new blocks.
     type PayloadBuilder: PayloadBuilder<PayloadType = <T::Types as NodeTypesWithEngine>::Engine>
@@ -78,7 +81,7 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
 ///
 /// This provides access to all the components of the node.
 #[derive(Debug)]
-pub struct Components<Node: FullNodeTypes, Pool, EVM, Executor, Consensus> {
+pub struct Components<Node: FullNodeTypes, N: NetworkPrimitives, Pool, EVM, Executor, Consensus> {
     /// The transaction pool of the node.
     pub transaction_pool: Pool,
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
@@ -88,14 +91,15 @@ pub struct Components<Node: FullNodeTypes, Pool, EVM, Executor, Consensus> {
     /// The consensus implementation of the node.
     pub consensus: Consensus,
     /// The network implementation of the node.
-    pub network: NetworkHandle,
+    pub network: NetworkHandle<N>,
     /// The handle to the payload builder service.
     pub payload_builder: PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>,
 }
 
-impl<Node, Pool, EVM, Executor, Cons> NodeComponents<Node>
-    for Components<Node, Pool, EVM, Executor, Cons>
+impl<Node, Pool, EVM, Executor, Cons, N> NodeComponents<Node>
+    for Components<Node, N, Pool, EVM, Executor, Cons>
 where
+    N: NetworkPrimitives<BlockHeader = HeaderTy<Node::Types>, BlockBody = BodyTy<Node::Types>>,
     Node: FullNodeTypes,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
@@ -108,7 +112,7 @@ where
     type Evm = EVM;
     type Executor = Executor;
     type Consensus = Cons;
-    type Network = NetworkHandle;
+    type Network = NetworkHandle<N>;
     type PayloadBuilder = PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>;
 
     fn pool(&self) -> &Self::Pool {
@@ -136,8 +140,9 @@ where
     }
 }
 
-impl<Node, Pool, EVM, Executor, Cons> Clone for Components<Node, Pool, EVM, Executor, Cons>
+impl<Node, N, Pool, EVM, Executor, Cons> Clone for Components<Node, N, Pool, EVM, Executor, Cons>
 where
+    N: NetworkPrimitives,
     Node: FullNodeTypes,
     Pool: TransactionPool,
     EVM: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>,
