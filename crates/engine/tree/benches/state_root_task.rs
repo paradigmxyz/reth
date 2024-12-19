@@ -145,10 +145,34 @@ fn bench_state_root(c: &mut Criterion) {
                         let nodes_sorted = config.nodes_sorted.clone();
                         let state_sorted = config.state_sorted.clone();
                         let prefix_sets = config.prefix_sets.clone();
+                        let num_threads = std::thread::available_parallelism()
+                            .map_or(1, |num| (num.get() / 2).max(1));
 
-                        (config, state_updates, provider, nodes_sorted, state_sorted, prefix_sets)
+                        let state_root_task_pool = rayon::ThreadPoolBuilder::new()
+                            .num_threads(num_threads)
+                            .thread_name(|i| format!("proof-worker-{}", i))
+                            .build()
+                            .expect("Failed to create proof worker thread pool");
+
+                        (
+                            config,
+                            state_updates,
+                            provider,
+                            nodes_sorted,
+                            state_sorted,
+                            prefix_sets,
+                            state_root_task_pool,
+                        )
                     },
-                    |(config, state_updates, provider, nodes_sorted, state_sorted, prefix_sets)| {
+                    |(
+                        config,
+                        state_updates,
+                        provider,
+                        nodes_sorted,
+                        state_sorted,
+                        prefix_sets,
+                        state_root_task_pool,
+                    )| {
                         let blinded_provider_factory = ProofBlindedProviderFactory::new(
                             InMemoryTrieCursorFactory::new(
                                 DatabaseTrieCursorFactory::new(provider.tx_ref()),
@@ -162,7 +186,11 @@ fn bench_state_root(c: &mut Criterion) {
                         );
 
                         black_box(std::thread::scope(|scope| {
-                            let task = StateRootTask::new(config, blinded_provider_factory);
+                            let task = StateRootTask::new(
+                                config,
+                                blinded_provider_factory,
+                                &state_root_task_pool,
+                            );
                             let mut hook = task.state_hook();
                             let handle = task.spawn(scope);
 
