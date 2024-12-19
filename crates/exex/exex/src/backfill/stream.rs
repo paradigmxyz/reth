@@ -8,7 +8,7 @@ use futures::{
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
 use reth_node_api::NodePrimitives;
 use reth_primitives::{BlockWithSenders, EthPrimitives};
-use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
+use reth_provider::{BlockReader, Chain, StateProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::debug;
@@ -114,8 +114,8 @@ where
 
 impl<E, P> Stream for StreamBackfillJob<E, P, SingleBlockStreamItem<E::Primitives>>
 where
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>> + Clone + Send + 'static,
-    P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>> + Clone + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
 {
     type Item = BackfillJobResult<SingleBlockStreamItem<E::Primitives>>;
 
@@ -147,8 +147,8 @@ where
 
 impl<E, P> Stream for StreamBackfillJob<E, P, BatchBlockStreamItem<E::Primitives>>
 where
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>> + Clone + Send + 'static,
-    P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>> + Clone + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
 {
     type Item = BackfillJobResult<BatchBlockStreamItem<E::Primitives>>;
 
