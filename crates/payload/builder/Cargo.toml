@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives = { workspace = true, optional = true }
+reth-primitives-traits.workspace = true
 reth-chain-state.workspace = true
 reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
@@ -44,8 +45,9 @@ alloy-consensus.workspace = true
 
 [features]
 test-utils = [
-    "alloy-primitives",
-    "reth-chain-state/test-utils",
-    "reth-primitives/test-utils",
-    "revm/test-utils",
+	"alloy-primitives",
+	"reth-chain-state/test-utils",
+	"reth-primitives/test-utils",
+	"revm/test-utils",
+	"reth-primitives-traits/test-utils"
 ]

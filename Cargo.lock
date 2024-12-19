@@ -8686,6 +8686,7 @@ dependencies = [
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
  "reth-primitives",
+ "reth-primitives-traits",
  "revm",
  "tokio",
  "tokio-stream",

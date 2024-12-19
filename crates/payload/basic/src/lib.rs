@@ -19,7 +19,7 @@ use reth_evm::state_change::post_block_withdrawals_balance_increments;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
-use reth_primitives::{proofs, SealedHeader};
+use reth_primitives::{proofs, NodePrimitives, SealedHeader};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
@@ -191,7 +191,7 @@ where
         Ok(job)
     }
 
-    fn on_new_state(&mut self, new_state: CanonStateNotification) {
+    fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
         let mut cached = CachedReads::default();
 
         // extract the state from the notification and put it into the cache

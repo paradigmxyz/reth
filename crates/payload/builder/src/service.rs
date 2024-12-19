@@ -14,6 +14,7 @@ use reth_payload_builder_primitives::{
     Events, PayloadBuilder, PayloadBuilderError, PayloadEvents, PayloadStoreExt,
 };
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind, PayloadTypes};
+use reth_primitives_traits::NodePrimitives;
 use std::{
     fmt,
     future::Future,
@@ -352,12 +353,13 @@ where
     }
 }
 
-impl<Gen, St, T> Future for PayloadBuilderService<Gen, St, T>
+impl<Gen, St, T, N> Future for PayloadBuilderService<Gen, St, T>
 where
     T: PayloadTypes,
+    N: NodePrimitives,
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Gen::Job: PayloadJob<PayloadAttributes = T::PayloadBuilderAttributes>,
     <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
 {
