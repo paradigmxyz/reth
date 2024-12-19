@@ -361,6 +361,7 @@ impl From<Genesis> for OpChainSpec {
                 block_hardforks.push((
                     EthereumHardfork::Paris.boxed(),
                     ForkCondition::TTD {
+                        activation_block_number: genesis.config.merge_netsplit_block.expect("merge netsplit block is required"),
                         total_difficulty: ttd,
                         fork_block: genesis.config.merge_netsplit_block,
                     },

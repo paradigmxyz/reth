@@ -38,7 +38,7 @@ impl core::fmt::Display for DisplayFork {
             ForkCondition::Block(at) | ForkCondition::Timestamp(at) => {
                 write!(f, "{name_with_eip:32} @{at}")?;
             }
-            ForkCondition::TTD { fork_block, total_difficulty } => {
+            ForkCondition::TTD { fork_block, total_difficulty, .. } => {
                 write!(
                     f,
                     "{:32} @{} ({})",
@@ -154,9 +154,9 @@ impl DisplayHardforks {
                 ForkCondition::Block(_) => {
                     pre_merge.push(display_fork);
                 }
-                ForkCondition::TTD { total_difficulty, .. } => {
+                ForkCondition::TTD { activation_block_number, total_difficulty, fork_block } => {
                     display_fork.activated_at =
-                        ForkCondition::TTD { fork_block: known_paris_block, total_difficulty };
+                        ForkCondition::TTD { activation_block_number, fork_block, total_difficulty };
                     with_merge.push(display_fork);
                 }
                 ForkCondition::Timestamp(_) => {
