@@ -126,6 +126,7 @@ where
                         headers: Some(finalized_block_number),
                         receipts: Some(finalized_block_number),
                         transactions: Some(finalized_block_number),
+                        block_meta: Some(finalized_block_number),
                     })?;
 
                 // Check if the moving data to static files has been requested.
