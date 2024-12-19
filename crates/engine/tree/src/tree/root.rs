@@ -3,17 +3,22 @@
 use alloy_primitives::{map::HashSet, Address};
 use derive_more::derive::Deref;
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use reth_errors::ProviderError;
+use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::system_calls::OnStateHook;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
+    providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
+    StateCommitmentProvider,
 };
 use reth_trie::{
+    hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
+    proof::Proof,
+    trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, Nibbles,
     TrieInput,
 };
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseProof, DatabaseTrieCursorFactory};
 use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
@@ -733,6 +738,32 @@ fn get_proof_targets(
     }
 
     targets
+}
+
+/// Calculate multiproof for the targets.
+#[inline]
+#[allow(dead_code)]
+fn calculate_multiproof<Factory>(
+    config: StateRootConfig<Factory>,
+    proof_targets: MultiProofTargets,
+) -> ProviderResult<MultiProof>
+where
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
+{
+    let provider = config.consistent_view.provider_ro()?;
+
+    Ok(Proof::from_tx(provider.tx_ref())
+        .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
+            DatabaseTrieCursorFactory::new(provider.tx_ref()),
+            &config.nodes_sorted,
+        ))
+        .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(provider.tx_ref()),
+            &config.state_sorted,
+        ))
+        .with_prefix_sets_mut(config.prefix_sets.as_ref().clone())
+        .with_branch_node_hash_masks(true)
+        .multiproof(proof_targets)?)
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
