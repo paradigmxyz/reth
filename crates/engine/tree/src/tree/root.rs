@@ -1,10 +1,12 @@
 //! State root task related functionality.
 
-use alloy_primitives::{map::HashSet, Address};
+use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::system_calls::OnStateHook;
+use reth_primitives::BlockWithSenders;
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
 };
@@ -20,7 +22,7 @@ use reth_trie_sparse::{
     errors::{SparseStateTrieError, SparseStateTrieResult, SparseTrieError, SparseTrieErrorKind},
     SparseStateTrie,
 };
-use revm_primitives::{keccak256, EvmState, B256};
+use revm_primitives::{keccak256, map::AddressHashSet, EvmState, B256};
 use std::{
     collections::BTreeMap,
     sync::{
@@ -103,7 +105,7 @@ impl<Factory> StateRootConfig<Factory> {
 #[allow(dead_code)]
 pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     /// Prefetch proof targets
-    PrefetchProofs(HashSet<Address>),
+    PrefetchProofs(AddressHashSet),
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
@@ -343,11 +345,41 @@ where
         }
     }
 
+    /// Prefetch proofs for the accounts in the provided block.
+    ///
+    /// Accounts that will be prefetched are:
+    /// - Transaction senders
+    /// - Transaction recipients
+    /// - Withdrawal recipients
+    ///
+    /// This method does not prefetch the proofs on its own, but only sends the message to the
+    /// [`StateRootTask`] that will be processed by the main loop.
+    pub fn prefetch_account_proofs<
+        T: SignedTransaction + alloy_consensus::Transaction,
+        B: BlockBody<Transaction = T>,
+    >(
+        &self,
+        body: &BlockWithSenders<B>,
+    ) {
+        let mut accounts = AddressHashSet::with_capacity_and_hasher(
+            body.transactions().len() * 2 +
+                body.withdrawals().map_or(0, |withdrawals| withdrawals.len()),
+            Default::default(),
+        );
+        accounts.extend(body.senders.iter().copied());
+        accounts.extend(body.transactions().iter().filter_map(|tx| tx.kind().to().copied()));
+        if let Some(withdrawals) = body.withdrawals() {
+            accounts.extend(withdrawals.iter().map(|withdrawal| withdrawal.address));
+        }
+
+        let _ = self.tx.send(StateRootMessage::PrefetchProofs(accounts));
+    }
+
     /// Handles request for proof prefetch.
     fn on_prefetch_proof(
         scope: &rayon::Scope<'env>,
         config: StateRootConfig<Factory>,
-        targets: HashSet<Address>,
+        targets: AddressHashSet,
         fetched_proof_targets: &mut MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,

@@ -2294,6 +2294,7 @@ where
                     blinded_provider_factory,
                     &self.state_root_task_pool,
                 );
+                state_root_task.prefetch_account_proofs(&block);
                 let state_hook = state_root_task.state_hook();
                 (Some(state_root_task.spawn(scope)), Box::new(state_hook) as Box<dyn OnStateHook>)
             } else {
