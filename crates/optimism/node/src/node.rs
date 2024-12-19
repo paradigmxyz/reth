@@ -28,7 +28,7 @@ use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
 };
-use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_rpc::{
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
@@ -667,9 +667,9 @@ pub struct OpNetworkPrimitives;
 
 impl NetworkPrimitives for OpNetworkPrimitives {
     type BlockHeader = alloy_consensus::Header;
-    type BlockBody = reth_primitives::BlockBody;
-    type Block = reth_primitives::Block;
-    type BroadcastedTransaction = reth_primitives::TransactionSigned;
+    type BlockBody = reth_primitives::BlockBody<OpTransactionSigned>;
+    type Block = reth_primitives::Block<OpTransactionSigned>;
+    type BroadcastedTransaction = OpTransactionSigned;
     type PooledTransaction = reth_primitives::PooledTransaction;
-    type Receipt = reth_primitives::Receipt;
+    type Receipt = OpReceipt;
 }
