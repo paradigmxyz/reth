@@ -2252,11 +2252,9 @@ where
         let sealed_block = Arc::new(block.block.clone());
         let block = block.unseal();
 
-        let exec_time = Instant::now();
-
         let persistence_not_in_progress = !self.persistence_state.in_progress();
 
-        let state_root_result = match std::thread::scope(|scope| {
+        let state_root_result = std::thread::scope(|scope| {
             let (state_root_handle, state_hook) = if persistence_not_in_progress {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
@@ -2302,13 +2300,14 @@ where
                 (None, Box::new(|_state: &EvmState| {}) as Box<dyn OnStateHook>)
             };
 
+            let execution_start = Instant::now();
             let output = self.metrics.executor.execute_metered(
                 executor,
                 (&block, U256::MAX).into(),
                 state_hook,
             )?;
-
-            trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
+            let execution_time = execution_start.elapsed();
+            trace!(target: "engine::tree", elapsed = ?execution_time, ?block_number, "Executed block");
 
             if let Err(err) = self.consensus.validate_block_post_execution(
                 &block,
@@ -2335,6 +2334,38 @@ where
             // is being persisted as we are computing in parallel, because we initialize
             // a different database transaction per thread and it might end up with a
             // different view of the database.
+            let (state_root_result, hashed_state, output, root_elapsed) =
+                if persistence_not_in_progress {
+                    match self
+                        .compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
+                    {
+                        Ok(result) => {
+                            info!(
+                                target: "engine::tree",
+                                block = ?sealed_block.num_hash(),
+                                regular_state_root = ?result.0,
+                                "Regular root task finished"
+                            );
+                            Ok((
+                                Some((result.0, result.1)),
+                                hashed_state,
+                                output,
+                                root_time.elapsed(),
+                            ))
+                        }
+                        Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(
+                            error,
+                        ))) => {
+                            debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
+                            Ok((None, hashed_state, output, root_time.elapsed()))
+                        }
+                        Err(error) => Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
+                    }
+                } else {
+                    Ok((None, hashed_state, output, root_time.elapsed()))
+                }?;
+            let state_root = state_root_result.as_ref().map(|(state_root, _)| *state_root);
+
             if persistence_not_in_progress {
                 if let Some(state_root_handle) = state_root_handle {
                     match state_root_handle.wait_for_result() {
@@ -2347,46 +2378,31 @@ where
                                 target: "engine::tree",
                                 block = ?sealed_block.num_hash(),
                                 ?task_state_root,
-                                ?total_time,
+                                regular_state_root = ?state_root,
+                                "match" = ?Some(task_state_root) == state_root,
+                                execution_elapsed = ?execution_time,
+                                state_root_task_elapsed = ?total_time,
+                                state_root_regular_elapsed = ?root_elapsed,
                                 "State root task finished"
                             );
                         }
                         Err(error) => {
-                            info!(target: "engine::tree", ?error, "Failed to wait for state root task
-             result");
+                            info!(target: "engine::tree", ?error, "Failed to wait for state root task result");
                         }
                     }
                 }
-
-                match self.compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
-                {
-                    Ok(result) => {
-                        info!(
-                            target: "engine::tree",
-                            block = ?sealed_block.num_hash(),
-                            regular_state_root = ?result.0,
-                            "Regular root task finished"
-                        );
-                        Ok((Some((result.0, result.1)), hashed_state, output, root_time))
-                    }
-                    Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
-                        debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
-                        Ok((None, hashed_state, output, root_time))
-                    }
-                    Err(error) => Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
-                }
-            } else {
-                Ok((None, hashed_state, output, root_time))
             }
-        }) {
-            Ok((Some(res), hashed_state, output, root_time)) => {
-                (Some(res), hashed_state, output, root_time)
-            }
-            Ok((None, hashed_state, output, root_time)) => (None, hashed_state, output, root_time),
-            Err(e) => return Err(e),
-        };
 
-        let (state_root, trie_output, hashed_state, output, root_time) = match state_root_result {
+            Result::<_, InsertBlockErrorKindTwo>::Ok((
+                state_root_result,
+                hashed_state,
+                output,
+                root_elapsed,
+            ))
+        })?;
+
+        let (state_root, trie_output, hashed_state, output, root_elapsed) = match state_root_result
+        {
             (Some(res), hashed_state, output, root_time) => {
                 (res.0, res.1, hashed_state, output, root_time)
             }
@@ -2412,7 +2428,6 @@ where
             .into())
         }
 
-        let root_elapsed = root_time.elapsed();
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?sealed_block.num_hash(), "Calculated state root");
 
