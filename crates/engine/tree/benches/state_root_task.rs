@@ -19,10 +19,9 @@ use reth_trie::{
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use revm_primitives::{
-    alloy_primitives::private::rand::seq::IteratorRandom, Account as RevmAccount, AccountInfo,
-    AccountStatus, Address, EvmState, EvmStorageSlot, HashMap, B256, KECCAK_EMPTY, U256,
+    Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot, HashMap,
+    B256, KECCAK_EMPTY, U256,
 };
-use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
 struct BenchParams {
@@ -32,73 +31,59 @@ struct BenchParams {
     selfdestructs_per_update: usize,
 }
 
+/// Generates a series of random state updates with configurable accounts,
+/// storage, and self-destructs
 fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
     let mut rng = generators::rng();
     let all_addresses: Vec<Address> = (0..params.num_accounts).map(|_| rng.gen()).collect();
     let mut updates = Vec::new();
 
-    let mut created_accounts: HashSet<Address> = HashSet::new();
-
-    for update_idx in 0..params.updates_per_account {
-        let num_accounts_in_update = rng.gen_range(1..=params.num_accounts);
+    for _ in 0..params.updates_per_account {
         let mut state_update = EvmState::default();
+        let num_accounts_in_update = rng.gen_range(1..=params.num_accounts);
 
-        let selected_addresses = &all_addresses[0..num_accounts_in_update];
+        // regular updates for randomly selected accounts
+        for &address in &all_addresses[0..num_accounts_in_update] {
+            // randomly choose to self-destruct with probability
+            // (selfdestructs/accounts)
+            let is_selfdestruct =
+                rng.gen_bool(params.selfdestructs_per_update as f64 / params.num_accounts as f64);
 
-        // first, create/update regular accounts
-        for &address in selected_addresses {
-            let mut storage = HashMap::default();
-            for _ in 0..params.storage_slots_per_account {
-                let slot = U256::from(rng.gen::<u64>());
-                storage.insert(
-                    slot,
-                    EvmStorageSlot::new_changed(U256::ZERO, U256::from(rng.gen::<u64>())),
-                );
-            }
-
-            let account = RevmAccount {
-                info: AccountInfo {
-                    balance: U256::from(rng.gen::<u64>()),
-                    nonce: rng.gen::<u64>(),
-                    code_hash: KECCAK_EMPTY,
-                    code: Some(Default::default()),
-                },
-                storage,
-                status: AccountStatus::Touched,
+            let account = if is_selfdestruct {
+                RevmAccount {
+                    info: AccountInfo {
+                        balance: U256::ZERO,
+                        nonce: 0,
+                        code_hash: KECCAK_EMPTY,
+                        code: Some(Default::default()),
+                    },
+                    storage: HashMap::default(),
+                    status: AccountStatus::SelfDestructed,
+                }
+            } else {
+                RevmAccount {
+                    info: AccountInfo {
+                        balance: U256::from(rng.gen::<u64>()),
+                        nonce: rng.gen::<u64>(),
+                        code_hash: KECCAK_EMPTY,
+                        code: Some(Default::default()),
+                    },
+                    storage: (0..params.storage_slots_per_account)
+                        .map(|_| {
+                            (
+                                U256::from(rng.gen::<u64>()),
+                                EvmStorageSlot::new_changed(
+                                    U256::ZERO,
+                                    U256::from(rng.gen::<u64>()),
+                                ),
+                            )
+                        })
+                        .collect(),
+                    status: AccountStatus::Touched,
+                }
             };
 
             state_update.insert(address, account);
-            created_accounts.insert(address);
-        }
-
-        // handle self-destructs only for previously created accounts
-        if update_idx > 0 && params.selfdestructs_per_update > 0 {
-            let available_accounts: Vec<_> = created_accounts.iter().copied().collect();
-            let num_selfdestructs = params.selfdestructs_per_update.min(available_accounts.len());
-
-            if num_selfdestructs > 0 {
-                let selfdestruct_addresses: Vec<Address> = (0..available_accounts.len())
-                    .choose_multiple(&mut rng, num_selfdestructs)
-                    .into_iter()
-                    .map(|idx| available_accounts[idx])
-                    .collect();
-
-                for address in selfdestruct_addresses {
-                    let account = RevmAccount {
-                        info: AccountInfo {
-                            balance: U256::ZERO,
-                            nonce: 0,
-                            code_hash: KECCAK_EMPTY,
-                            code: Some(Default::default()),
-                        },
-                        storage: HashMap::default(),
-                        status: AccountStatus::SelfDestructed,
-                    };
-
-                    state_update.insert(address, account);
-                    created_accounts.remove(&address);
-                }
-            }
         }
 
         updates.push(state_update);
@@ -122,6 +107,8 @@ fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> Option<RethAccoun
     }
 }
 
+/// Applies state updates to the provider, ensuring self-destructs only affect
+/// existing accounts
 fn setup_provider(
     factory: &ProviderFactory<MockNodeTypesWithDB>,
     state_updates: &[EvmState],
@@ -129,55 +116,43 @@ fn setup_provider(
     for update in state_updates {
         let provider_rw = factory.provider_rw()?;
 
-        // first pass: Handle account creations and updates (no self-destructs)
-        let mut account_updates: Vec<(Address, Option<RethAccount>)> = Vec::new();
-        let mut storage_updates: Vec<(Address, Vec<StorageEntry>)> = Vec::new();
+        let mut account_updates = Vec::new();
 
         for (address, account) in update {
-            if account.status != AccountStatus::SelfDestructed {
-                account_updates.push((*address, convert_revm_to_reth_account(account)));
-
-                let storage_entries: Vec<_> = account
-                    .storage
-                    .iter()
-                    .map(|(slot, value)| StorageEntry {
-                        key: B256::from(*slot),
-                        value: value.present_value,
-                    })
-                    .collect();
-
-                if !storage_entries.is_empty() {
-                    storage_updates.push((*address, storage_entries));
+            // only process self-destructs if account exists, always process
+            // other updates
+            let should_process = match account.status {
+                AccountStatus::SelfDestructed => {
+                    provider_rw.basic_account(*address).ok().flatten().is_some()
                 }
+                _ => true,
+            };
+
+            if should_process {
+                account_updates.push((
+                    *address,
+                    convert_revm_to_reth_account(account),
+                    (account.status == AccountStatus::Touched).then(|| {
+                        account
+                            .storage
+                            .iter()
+                            .map(|(slot, value)| StorageEntry {
+                                key: B256::from(*slot),
+                                value: value.present_value,
+                            })
+                            .collect::<Vec<_>>()
+                    }),
+                ));
             }
         }
 
-        // apply regular updates first
-        if !account_updates.is_empty() {
-            provider_rw.insert_account_for_hashing(account_updates.into_iter())?;
-        }
-
-        if !storage_updates.is_empty() {
-            provider_rw.insert_storage_for_hashing(
-                storage_updates.into_iter().map(|(addr, entries)| (addr, entries.into_iter())),
-            )?;
-        }
-
-        // second pass: Handle self-destructs
-        let mut selfdestruct_updates = Vec::new();
-
-        for (address, account) in update {
-            if account.status == AccountStatus::SelfDestructed {
-                // check if account exists in the current state before self-destructing
-                if let Ok(Some(_)) = provider_rw.basic_account(*address) {
-                    selfdestruct_updates.push((*address, None));
-                }
+        // update in the provider account and its storage (if available)
+        for (address, account, maybe_storage) in account_updates {
+            provider_rw.insert_account_for_hashing(std::iter::once((address, account)))?;
+            if let Some(storage) = maybe_storage {
+                provider_rw
+                    .insert_storage_for_hashing(std::iter::once((address, storage.into_iter())))?;
             }
-        }
-
-        // apply self-destructs if any
-        if !selfdestruct_updates.is_empty() {
-            provider_rw.insert_account_for_hashing(selfdestruct_updates.into_iter())?;
         }
 
         provider_rw.commit()?;
