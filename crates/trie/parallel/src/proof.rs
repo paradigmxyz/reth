@@ -125,7 +125,7 @@ where
         );
 
         // Pre-calculate storage roots for accounts which were changed.
-        tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
+        tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
         let mut storage_proofs =
             B256HashMap::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
