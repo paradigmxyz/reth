@@ -93,7 +93,7 @@ optimism = [
 	"reth-beacon-consensus/optimism",
 	"revm/optimism",
 	"reth-optimism-rpc/optimism",
-	"reth-engine-local/optimism",
+	"reth-engine-local/op",
 	"reth-optimism-consensus/optimism",
 	"reth-db/optimism",
 	"reth-optimism-node/optimism",
