@@ -1,4 +1,4 @@
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{BlockNumber, B256, map::{HashMap, HashSet}};
 use derive_more::Deref;
 use reth_db::tables;
 use reth_db_api::{
@@ -13,7 +13,6 @@ use reth_trie::{
     KeyHasher, Nibbles,
 };
 use std::{
-    collections::{HashMap, HashSet},
     marker::PhantomData,
     ops::RangeInclusive,
 };
