@@ -9,6 +9,8 @@ pub enum ForkCondition {
     Block(BlockNumber),
     /// The fork is activated after a total difficulty has been reached.
     TTD {
+        /// The activation block number for the fork.
+        activation_block_number: BlockNumber,
         /// The block number at which TTD is reached, if it is known.
         ///
         /// This should **NOT** be set unless you want this block advertised as [EIP-2124][eip2124]
@@ -58,9 +60,9 @@ impl ForkCondition {
     /// `58_750_000_000_000_000_000_000`)
     ///
     /// This will return false for any condition that is not TTD-based.
-    pub fn active_at_ttd(&self, ttd: U256, difficulty: U256) -> bool {
-        matches!(self, Self::TTD { total_difficulty, .. }
-            if ttd.saturating_sub(difficulty) >= *total_difficulty)
+    pub fn active_at_ttd(&self, block_number: BlockNumber) -> bool {
+        matches!(self, Self::TTD { activation_block_number, .. }
+            if block_number >= *activation_block_number)
     }
 
     /// Checks whether the fork condition is satisfied at the given timestamp.
@@ -87,7 +89,7 @@ impl ForkCondition {
     pub fn active_at_head(&self, head: &Head) -> bool {
         self.active_at_block(head.number) ||
             self.active_at_timestamp(head.timestamp) ||
-            self.active_at_ttd(head.total_difficulty, head.difficulty)
+            self.active_at_ttd(head.number)
     }
 
     /// Get the total terminal difficulty for this fork condition.
@@ -128,7 +130,7 @@ mod tests {
 
         // Test if TTD-based condition with known block activates
         let fork_condition =
-            ForkCondition::TTD { fork_block: Some(10), total_difficulty: U256::from(1000) };
+            ForkCondition::TTD { activation_block_number: 10, fork_block: Some(10), total_difficulty: U256::from(1000) };
         assert!(
             fork_condition.active_at_block(10),
             "The TTD condition should be active at block 10"
@@ -136,7 +138,7 @@ mod tests {
 
         // Test if TTD-based condition with unknown block does not activate
         let fork_condition =
-            ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(1000) };
+            ForkCondition::TTD { activation_block_number: 10, fork_block: None, total_difficulty: U256::from(1000) };
         assert!(
             !fork_condition.active_at_block(10),
             "The TTD condition should not be active at block 10 with an unknown block number"
@@ -167,21 +169,21 @@ mod tests {
     fn test_active_at_ttd() {
         // Test if the condition activates at the correct total difficulty
         let fork_condition =
-            ForkCondition::TTD { fork_block: Some(10), total_difficulty: U256::from(1000) };
+            ForkCondition::TTD { activation_block_number: 10, fork_block: Some(10), total_difficulty: U256::from(1000) };
         assert!(
-            fork_condition.active_at_ttd(U256::from(1000000), U256::from(100)),
+            fork_condition.active_at_ttd(10),
             "The TTD condition should be active when the total difficulty matches"
         );
 
         // Test if the condition does not activate when the total difficulty is lower
         assert!(
-            !fork_condition.active_at_ttd(U256::from(900), U256::from(100)),
+            !fork_condition.active_at_ttd(9),
             "The TTD condition should not be active when the total difficulty is lower"
         );
 
         // Test with a saturated subtraction
         assert!(
-            !fork_condition.active_at_ttd(U256::from(900), U256::from(1000)),
+            !fork_condition.active_at_ttd(9),
             "The TTD condition should not be active when the subtraction saturates"
         );
     }
@@ -259,25 +261,25 @@ mod tests {
 
         // Test if the condition activates based on total difficulty and block number
         let fork_condition =
-            ForkCondition::TTD { fork_block: Some(9), total_difficulty: U256::from(900) };
+            ForkCondition::TTD { activation_block_number: 10, fork_block: Some(9), total_difficulty: U256::from(900) };
         assert!(
             fork_condition.active_at_head(&head),
             "The condition should be active at the given head total difficulty"
         );
         let fork_condition =
-            ForkCondition::TTD { fork_block: None, total_difficulty: U256::from(900) };
+            ForkCondition::TTD { activation_block_number: 10, fork_block: None, total_difficulty: U256::from(900) };
         assert!(
             fork_condition.active_at_head(&head),
             "The condition should be active at the given head total difficulty as the block number is unknown"
         );
         let fork_condition =
-            ForkCondition::TTD { fork_block: Some(11), total_difficulty: U256::from(900) };
+            ForkCondition::TTD { activation_block_number: 10, fork_block: Some(11), total_difficulty: U256::from(900) };
         assert!(
             fork_condition.active_at_head(&head),
             "The condition should be active as the total difficulty is higher"
         );
         let fork_condition =
-            ForkCondition::TTD { fork_block: Some(10), total_difficulty: U256::from(9000) };
+            ForkCondition::TTD { activation_block_number: 10, fork_block: Some(10), total_difficulty: U256::from(9000) };
         assert!(
             fork_condition.active_at_head(&head),
             "The condition should be active as the total difficulty is higher than head"

@@ -24,10 +24,10 @@ use reth_chainspec::{EthereumHardfork, Hardforks};
 pub fn base_block_reward(
     chain_spec: impl Hardforks,
     block_number: BlockNumber,
-    block_difficulty: U256,
-    total_difficulty: U256,
+    _block_difficulty: U256,
+    _total_difficulty: U256,
 ) -> Option<u128> {
-    if chain_spec.fork(EthereumHardfork::Paris).active_at_ttd(total_difficulty, block_difficulty) {
+    if chain_spec.fork(EthereumHardfork::Paris).active_at_ttd(block_number) {
         None
     } else {
         Some(base_block_reward_pre_merge(chain_spec, block_number))
@@ -126,7 +126,7 @@ mod tests {
             // Petersburg
             ((7280000, U256::ZERO), Some(ETH_TO_WEI * 2)),
             // Merge
-            ((10000000, U256::from(58_750_000_000_000_000_000_000_u128)), None),
+            ((20000000, U256::from(58_750_000_000_000_000_000_000_u128)), None),
         ];
 
         for ((block_number, td), expected_reward) in cases {

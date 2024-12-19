@@ -1991,7 +1991,7 @@ mod tests {
     };
     use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
     use assert_matches::assert_matches;
-    use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, MAINNET};
     use reth_node_types::FullNodePrimitives;
     use reth_primitives::BlockExt;
     use reth_provider::{BlockWriter, ProviderFactory, StorageLocation};
@@ -2458,7 +2458,7 @@ mod tests {
                     .chain(MAINNET.chain)
                     .genesis(MAINNET.genesis.clone())
                     .london_activated()
-                    .paris_at_ttd(U256::from(3))
+                    .paris_at_ttd( U256::from(3), EthereumHardfork::London.activation_block(MAINNET.chain).unwrap())
                     .build(),
             );
 
