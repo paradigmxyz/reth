@@ -4,7 +4,7 @@ use crate::{
     budget::DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, metered_poll_nested_stream_with_budget,
     metrics::EthRequestHandlerMetrics,
 };
-use alloy_consensus::{BlockHeader, ReceiptWithBloom, TxReceipt};
+use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
@@ -16,7 +16,7 @@ use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
-use reth_storage_api::{BlockReader, HeaderProvider, ReceiptProvider};
+use reth_storage_api::{BlockReader, HeaderProvider};
 use std::{
     future::Future,
     pin::Pin,
@@ -81,7 +81,7 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
 impl<C, N> EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader + HeaderProvider + ReceiptProvider<Receipt: Encodable + TxReceipt>,
+    C: BlockReader,
 {
     /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::Header> {
