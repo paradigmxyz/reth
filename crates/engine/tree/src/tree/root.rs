@@ -363,13 +363,13 @@ where
         block: &BlockWithSenders<B>,
     ) {
         let mut accounts = AddressHashSet::with_capacity_and_hasher(
-            // block.body().transactions().len() * 2 +
-            block.body().withdrawals().map_or(0, |withdrawals| withdrawals.len()),
+            block.body().transactions().len() * 2 +
+                block.body().withdrawals().map_or(0, |withdrawals| withdrawals.len()),
             Default::default(),
         );
-        // accounts.extend(block.senders.iter().copied());
-        // accounts
-        //     .extend(block.body().transactions().iter().filter_map(|tx| tx.kind().to().copied()));
+        accounts.extend(block.senders.iter().copied());
+        accounts
+            .extend(block.body().transactions().iter().filter_map(|tx| tx.kind().to().copied()));
         if let Some(withdrawals) = block.body().withdrawals() {
             accounts.extend(withdrawals.iter().map(|withdrawal| withdrawal.address));
         }
