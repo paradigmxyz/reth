@@ -535,10 +535,12 @@ where
                         last_update_time = Some(Instant::now());
 
                         updates_received += 1;
+                        let next_sequence = self.proof_sequencer.next_sequence();
                         debug!(
                             target: "engine::root",
                             len = update.len(),
                             total_updates = updates_received,
+                            ?next_sequence,
                             "Received new state update"
                         );
                         Self::on_state_update(
@@ -546,7 +548,7 @@ where
                             self.config.clone(),
                             update,
                             &mut self.fetched_proof_targets,
-                            self.proof_sequencer.next_sequence(),
+                            next_sequence,
                             self.tx.clone(),
                             self.thread_pool,
                         );
