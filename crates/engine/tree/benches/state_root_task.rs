@@ -133,7 +133,7 @@ fn setup_provider(
         let mut account_updates: Vec<(Address, Option<RethAccount>)> = Vec::new();
         let mut storage_updates: Vec<(Address, Vec<StorageEntry>)> = Vec::new();
 
-        for (address, account) in update.iter() {
+        for (address, account) in update {
             if account.status != AccountStatus::SelfDestructed {
                 account_updates.push((*address, convert_revm_to_reth_account(account)));
 
@@ -166,7 +166,7 @@ fn setup_provider(
         // second pass: Handle self-destructs
         let mut selfdestruct_updates = Vec::new();
 
-        for (address, account) in update.iter() {
+        for (address, account) in update {
             if account.status == AccountStatus::SelfDestructed {
                 // check if account exists in the current state before self-destructing
                 if let Ok(Some(_)) = provider_rw.basic_account(*address) {
