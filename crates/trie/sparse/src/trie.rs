@@ -305,8 +305,14 @@ impl<P> RevealedSparseTrie<P> {
                 match self.nodes.entry(path) {
                     Entry::Occupied(mut entry) => match entry.get() {
                         // Blinded nodes can be replaced.
-                        SparseNode::Hash(_) => {
-                            entry.insert(SparseNode::new_branch(branch.state_mask));
+                        SparseNode::Hash(hash) => {
+                            entry.insert(SparseNode::Branch {
+                                state_mask: branch.state_mask,
+                                // Memoize the hash of a previously blinded node in a new branch
+                                // node.
+                                hash: Some(*hash),
+                                store_in_db_trie: None,
+                            });
                         }
                         // Branch node already exists, or an extension node was placed where a
                         // branch node was before.
@@ -327,10 +333,15 @@ impl<P> RevealedSparseTrie<P> {
             }
             TrieNode::Extension(ext) => match self.nodes.entry(path) {
                 Entry::Occupied(mut entry) => match entry.get() {
-                    SparseNode::Hash(_) => {
+                    SparseNode::Hash(hash) => {
                         let mut child_path = entry.key().clone();
                         child_path.extend_from_slice_unchecked(&ext.key);
-                        entry.insert(SparseNode::new_ext(ext.key));
+                        entry.insert(SparseNode::Extension {
+                            key: ext.key,
+                            // Memoize the hash of a previously blinded node in a new extension
+                            // node.
+                            hash: Some(*hash),
+                        });
                         self.reveal_node_or_hash(child_path, &ext.child)?;
                     }
                     // Extension node already exists, or an extension node was placed where a branch
@@ -354,11 +365,16 @@ impl<P> RevealedSparseTrie<P> {
             },
             TrieNode::Leaf(leaf) => match self.nodes.entry(path) {
                 Entry::Occupied(mut entry) => match entry.get() {
-                    SparseNode::Hash(_) => {
+                    SparseNode::Hash(hash) => {
                         let mut full = entry.key().clone();
                         full.extend_from_slice_unchecked(&leaf.key);
-                        entry.insert(SparseNode::new_leaf(leaf.key));
                         self.values.insert(full, leaf.value);
+                        entry.insert(SparseNode::Leaf {
+                            key: leaf.key,
+                            // Memoize the hash of a previously blinded node in a new leaf
+                            // node.
+                            hash: Some(*hash),
+                        });
                     }
                     // Left node already exists.
                     SparseNode::Leaf { .. } => {}
