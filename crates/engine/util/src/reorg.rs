@@ -1,7 +1,6 @@
 //! Stream wrapper that simulates reorgs.
 
 use alloy_consensus::{Header, Transaction};
-use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus,
 };
@@ -299,7 +298,7 @@ where
 
     // Configure environments
     let EvmEnv { cfg_env_with_handler_cfg, block_env } =
-        evm_config.cfg_and_block_env(&reorg_target.header, U256::MAX);
+        evm_config.cfg_and_block_env(&reorg_target.header);
     let env = EnvWithHandlerCfg::new_with_cfg_env(
         cfg_env_with_handler_cfg,
         block_env,

@@ -716,7 +716,7 @@ impl EvmEnvProvider for MockEthProvider {
     where
         EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
-        Ok(evm_config.cfg_and_block_env(header, U256::MAX))
+        Ok(evm_config.cfg_and_block_env(header))
     }
 }
 

@@ -1,5 +1,5 @@
 use alloy_consensus::constants::ETH_TO_WEI;
-use alloy_primitives::{BlockNumber, U256};
+use alloy_primitives::BlockNumber;
 use reth_chainspec::{EthereumHardfork, Hardforks};
 
 /// Calculates the base block reward.
@@ -21,13 +21,9 @@ use reth_chainspec::{EthereumHardfork, Hardforks};
 /// - Definition: [Yellow Paper][yp] (page 15, 11.3)
 ///
 /// [yp]: https://ethereum.github.io/yellowpaper/paper.pdf
-pub fn base_block_reward(
-    chain_spec: impl Hardforks,
-    block_number: BlockNumber,
-    _block_difficulty: U256,
-    _total_difficulty: U256,
-) -> Option<u128> {
-    if chain_spec.fork(EthereumHardfork::Paris).active_at_ttd(block_number) {
+pub fn base_block_reward(chain_spec: impl Hardforks, block_number: BlockNumber) -> Option<u128> {
+    // TODO: check if mainnet vs sepolia
+    if Some(block_number) > EthereumHardfork::Paris.mainnet_activation_block() {
         None
     } else {
         Some(base_block_reward_pre_merge(chain_spec, block_number))
@@ -113,6 +109,7 @@ pub const fn ommer_reward(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::U256;
     use reth_chainspec::MAINNET;
 
     #[test]
@@ -126,11 +123,11 @@ mod tests {
             // Petersburg
             ((7280000, U256::ZERO), Some(ETH_TO_WEI * 2)),
             // Merge
-            ((20000000, U256::from(58_750_000_000_000_000_000_000_u128)), None),
+            ((10000000, U256::from(58_750_000_000_000_000_000_000_u128)), None),
         ];
 
-        for ((block_number, td), expected_reward) in cases {
-            assert_eq!(base_block_reward(&*MAINNET, block_number, U256::ZERO, td), expected_reward);
+        for ((block_number, _td), expected_reward) in cases {
+            assert_eq!(base_block_reward(&*MAINNET, block_number), expected_reward);
         }
     }
 

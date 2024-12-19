@@ -3,15 +3,15 @@
 use crate::{
     env::EvmEnv,
     execute::{
-        BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionInput,
-        BlockExecutionOutput, BlockExecutionStrategy, BlockExecutorProvider, Executor,
+        BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionOutput,
+        BlockExecutionStrategy, BlockExecutorProvider, Executor,
     },
     provider::EvmEnvProvider,
     system_calls::OnStateHook,
     ConfigureEvmEnv,
 };
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{BlockNumber, U256};
+use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
@@ -33,7 +33,7 @@ impl<C: Send + Sync, N: NodePrimitives> EvmEnvProvider<N::BlockHeader>
     where
         EvmConfig: ConfigureEvmEnv<Header = N::BlockHeader>,
     {
-        Ok(evm_config.cfg_and_block_env(header, U256::MAX))
+        Ok(evm_config.cfg_and_block_env(header))
     }
 }
 
@@ -73,7 +73,7 @@ impl BlockExecutorProvider for MockExecutorProvider {
 }
 
 impl<DB> Executor<DB> for MockExecutorProvider {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Input<'a> = &'a BlockWithSenders;
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
@@ -115,7 +115,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
 }
 
 impl<DB> BatchExecutor<DB> for MockExecutorProvider {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Input<'a> = &'a BlockWithSenders;
     type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 

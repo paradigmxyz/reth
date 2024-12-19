@@ -1241,10 +1241,7 @@ impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for ConsistentProvider<N>
     where
         EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
     {
-        let total_difficulty = self
-            .header_td_by_number(header.number())?
-            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?;
-        Ok(evm_config.cfg_and_block_env(header, total_difficulty))
+        Ok(evm_config.cfg_and_block_env(header))
     }
 }
 

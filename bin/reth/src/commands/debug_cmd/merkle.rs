@@ -164,7 +164,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             let mut executor = executor_provider.batch_executor(StateProviderDatabase::new(
                 LatestStateProviderRef::new(&provider_rw),
             ));
-            executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
+            executor.execute_and_verify_one(&sealed_block.clone().unseal())?;
             let execution_outcome = executor.finalize();
 
             provider_rw.write_state(

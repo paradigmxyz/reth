@@ -2261,11 +2261,7 @@ where
         // };
         let state_hook = Box::new(|_state: &EvmState| {});
 
-        let output = self.metrics.executor.execute_metered(
-            executor,
-            (&block, U256::MAX).into(),
-            state_hook,
-        )?;
+        let output = self.metrics.executor.execute_metered(executor, &block, state_hook)?;
 
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
 
