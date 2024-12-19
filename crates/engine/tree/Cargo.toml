@@ -32,7 +32,6 @@ reth-prune.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
-reth-trie-db.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie.workspace = true
@@ -82,6 +81,7 @@ reth-stages = { workspace = true, features = ["test-utils"] }
 reth-static-file.workspace = true
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
+reth-trie-db.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
@@ -120,6 +120,6 @@ test-utils = [
     "reth-static-file",
     "reth-tracing",
     "reth-trie/test-utils",
-    "reth-prune-types?/test-utils",
     "reth-trie-db/test-utils",
+    "reth-prune-types?/test-utils",
 ]
