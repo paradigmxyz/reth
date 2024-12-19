@@ -21,7 +21,7 @@ use std::{collections::VecDeque, fmt, iter::Peekable};
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFactory> {
     /// Blinded node provider factory.
-    provider_factory: F,
+    provider_factory: Box<F>,
     /// Sparse account trie.
     state: SparseTrie<F::AccountNodeProvider>,
     /// Sparse storage tries.
@@ -70,7 +70,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Create new [`SparseStateTrie`] with blinded node provider factory.
     pub fn new(provider_factory: F) -> Self {
         Self {
-            provider_factory,
+            provider_factory: Box::new(provider_factory),
             state: Default::default(),
             storages: Default::default(),
             revealed: Default::default(),
