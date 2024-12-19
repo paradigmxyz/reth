@@ -10,7 +10,7 @@ use reth_primitives::{Account as RethAccount, StorageEntry};
 use reth_provider::{
     providers::ConsistentDbView,
     test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-    HashingWriter, ProviderFactory,
+    AccountReader, HashingWriter, ProviderFactory,
 };
 use reth_testing_utils::generators::{self, Rng};
 use reth_trie::{
@@ -19,9 +19,10 @@ use reth_trie::{
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use revm_primitives::{
-    Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot, HashMap,
-    B256, KECCAK_EMPTY, U256,
+    alloy_primitives::private::rand::seq::IteratorRandom, Account as RevmAccount, AccountInfo,
+    AccountStatus, Address, EvmState, EvmStorageSlot, HashMap, B256, KECCAK_EMPTY, U256,
 };
+use std::collections::HashSet;
 
 #[derive(Debug, Clone)]
 struct BenchParams {
@@ -36,12 +37,15 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
     let all_addresses: Vec<Address> = (0..params.num_accounts).map(|_| rng.gen()).collect();
     let mut updates = Vec::new();
 
+    let mut created_accounts: HashSet<Address> = HashSet::new();
+
     for update_idx in 0..params.updates_per_account {
         let num_accounts_in_update = rng.gen_range(1..=params.num_accounts);
         let mut state_update = EvmState::default();
 
         let selected_addresses = &all_addresses[0..num_accounts_in_update];
 
+        // first, create/update regular accounts
         for &address in selected_addresses {
             let mut storage = HashMap::default();
             for _ in 0..params.storage_slots_per_account {
@@ -64,28 +68,36 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
             };
 
             state_update.insert(address, account);
+            created_accounts.insert(address);
         }
 
-        // add self-destructs if this isn't the first update,
-        // we do this to ensure accounts exist before being self-destructed
+        // handle self-destructs only for previously created accounts
         if update_idx > 0 && params.selfdestructs_per_update > 0 {
-            let num_selfdestructs = params.selfdestructs_per_update.min(num_accounts_in_update);
-            let selfdestruct_addresses =
-                &all_addresses[num_accounts_in_update - num_selfdestructs..num_accounts_in_update];
+            let available_accounts: Vec<_> = created_accounts.iter().copied().collect();
+            let num_selfdestructs = params.selfdestructs_per_update.min(available_accounts.len());
 
-            for &address in selfdestruct_addresses {
-                let account = RevmAccount {
-                    info: AccountInfo {
-                        balance: U256::ZERO,
-                        nonce: 0,
-                        code_hash: KECCAK_EMPTY,
-                        code: Some(Default::default()),
-                    },
-                    storage: HashMap::default(),
-                    status: AccountStatus::SelfDestructed,
-                };
+            if num_selfdestructs > 0 {
+                let selfdestruct_addresses: Vec<Address> = (0..available_accounts.len())
+                    .choose_multiple(&mut rng, num_selfdestructs)
+                    .into_iter()
+                    .map(|idx| available_accounts[idx])
+                    .collect();
 
-                state_update.insert(address, account);
+                for address in selfdestruct_addresses {
+                    let account = RevmAccount {
+                        info: AccountInfo {
+                            balance: U256::ZERO,
+                            nonce: 0,
+                            code_hash: KECCAK_EMPTY,
+                            code: Some(Default::default()),
+                        },
+                        storage: HashMap::default(),
+                        status: AccountStatus::SelfDestructed,
+                    };
+
+                    state_update.insert(address, account);
+                    created_accounts.remove(&address);
+                }
             }
         }
 
@@ -96,11 +108,9 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
 }
 
 fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> Option<RethAccount> {
-    // if the account is self-destructed, return None to indicate deletion
-    if revm_account.status == AccountStatus::SelfDestructed {
-        None
-    } else {
-        Some(RethAccount {
+    match revm_account.status {
+        AccountStatus::SelfDestructed => None,
+        _ => Some(RethAccount {
             balance: revm_account.info.balance,
             nonce: revm_account.info.nonce,
             bytecode_hash: if revm_account.info.code_hash == KECCAK_EMPTY {
@@ -108,7 +118,7 @@ fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> Option<RethAccoun
             } else {
                 Some(revm_account.info.code_hash)
             },
-        })
+        }),
     }
 }
 
@@ -116,29 +126,63 @@ fn setup_provider(
     factory: &ProviderFactory<MockNodeTypesWithDB>,
     state_updates: &[EvmState],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let provider_rw = factory.provider_rw()?;
-
     for update in state_updates {
-        let account_updates = update
-            .iter()
-            .map(|(address, account)| (*address, convert_revm_to_reth_account(account)));
-        provider_rw.insert_account_for_hashing(account_updates)?;
+        let provider_rw = factory.provider_rw()?;
 
-        // only insert storage for non-self-destructed accounts
-        let storage_updates = update
-            .iter()
-            .filter(|&(_, account)| account.status != AccountStatus::SelfDestructed)
-            .map(|(address, account)| {
-                let storage_entries = account.storage.iter().map(|(slot, value)| StorageEntry {
-                    key: B256::from(*slot),
-                    value: value.present_value,
-                });
-                (*address, storage_entries)
-            });
-        provider_rw.insert_storage_for_hashing(storage_updates)?;
+        // first pass: Handle account creations and updates (no self-destructs)
+        let mut account_updates: Vec<(Address, Option<RethAccount>)> = Vec::new();
+        let mut storage_updates: Vec<(Address, Vec<StorageEntry>)> = Vec::new();
+
+        for (address, account) in update.iter() {
+            if account.status != AccountStatus::SelfDestructed {
+                account_updates.push((*address, convert_revm_to_reth_account(account)));
+
+                let storage_entries: Vec<_> = account
+                    .storage
+                    .iter()
+                    .map(|(slot, value)| StorageEntry {
+                        key: B256::from(*slot),
+                        value: value.present_value,
+                    })
+                    .collect();
+
+                if !storage_entries.is_empty() {
+                    storage_updates.push((*address, storage_entries));
+                }
+            }
+        }
+
+        // apply regular updates first
+        if !account_updates.is_empty() {
+            provider_rw.insert_account_for_hashing(account_updates.into_iter())?;
+        }
+
+        if !storage_updates.is_empty() {
+            provider_rw.insert_storage_for_hashing(
+                storage_updates.into_iter().map(|(addr, entries)| (addr, entries.into_iter())),
+            )?;
+        }
+
+        // second pass: Handle self-destructs
+        let mut selfdestruct_updates = Vec::new();
+
+        for (address, account) in update.iter() {
+            if account.status == AccountStatus::SelfDestructed {
+                // check if account exists in the current state before self-destructing
+                if let Ok(Some(_)) = provider_rw.basic_account(*address) {
+                    selfdestruct_updates.push((*address, None));
+                }
+            }
+        }
+
+        // apply self-destructs if any
+        if !selfdestruct_updates.is_empty() {
+            provider_rw.insert_account_for_hashing(selfdestruct_updates.into_iter())?;
+        }
+
+        provider_rw.commit()?;
     }
 
-    provider_rw.commit()?;
     Ok(())
 }
 
