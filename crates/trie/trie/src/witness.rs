@@ -211,9 +211,9 @@ impl<F> WitnessBlindedProviderFactory<F> {
 
 impl<F> BlindedProviderFactory for WitnessBlindedProviderFactory<F>
 where
-    F: BlindedProviderFactory,
-    F::AccountNodeProvider: BlindedProvider<Error = SparseTrieError>,
-    F::StorageNodeProvider: BlindedProvider<Error = SparseTrieError>,
+    F: BlindedProviderFactory + Send + Sync,
+    F::AccountNodeProvider: BlindedProvider<Error = SparseTrieError> + Send + Sync,
+    F::StorageNodeProvider: BlindedProvider<Error = SparseTrieError> + Send + Sync,
 {
     type AccountNodeProvider = WitnessBlindedProvider<F::AccountNodeProvider>;
     type StorageNodeProvider = WitnessBlindedProvider<F::StorageNodeProvider>;
