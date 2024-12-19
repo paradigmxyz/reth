@@ -670,7 +670,7 @@ mod tests {
     use alloy_primitives::{hex, U256};
     use reth_chainspec::MAINNET;
     use reth_fs_util as fs;
-    use reth_primitives::PooledTransaction;
+    use reth_primitives::{PooledTransaction, TransactionSigned};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 
