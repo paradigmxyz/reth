@@ -1,6 +1,6 @@
 # Running Reth on OP Stack chains
 
-`reth` ships with the `optimism` feature flag in several crates, including the binary, enabling support for OP Stack chains out of the box. Optimism has a small diff from the [L1 EELS][l1-el-spec],
+`reth` ships with the `optimism` feature flag in several crates, including the binary, enabling support for OP Stack chains out of the box. Optimism has a small diff from the [L1 ELs][l1-el-spec],
 comprising of the following key changes:
 1. A new transaction type, [`0x7E (Deposit)`][deposit-spec], which is used to deposit funds from L1 to L2.
 1. Modifications to the `PayloadAttributes` that allow the [sequencer][sequencer] to submit transactions to the EL through the Engine API. Payloads will be built with deposit transactions at the top of the block,
