@@ -68,7 +68,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
                     },
-                    storage: (0..params.storage_slots_per_account)
+                    storage: (0..rng.gen_range(0..=params.storage_slots_per_account))
                         .map(|_| {
                             (
                                 U256::from(rng.gen::<u64>()),
