@@ -52,13 +52,11 @@ pub(crate) type StateRootResult = Result<StateRootComputeOutcome, ParallelStateR
 
 /// Handle to a spawned state root task.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct StateRootHandle {
     /// Channel for receiving the final result.
     rx: mpsc::Receiver<StateRootResult>,
 }
 
-#[allow(dead_code)]
 impl StateRootHandle {
     /// Creates a new handle from a receiver.
     pub(crate) const fn new(rx: mpsc::Receiver<StateRootResult>) -> Self {
@@ -101,7 +99,6 @@ impl<Factory> StateRootConfig<Factory> {
 
 /// Messages used internally by the state root task
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     /// Prefetch proof targets
     PrefetchProofs(HashSet<Address>),
@@ -205,11 +202,9 @@ impl ProofSequencer {
 }
 
 /// A wrapper for the sender that signals completion when dropped
-#[allow(dead_code)]
 #[derive(Deref)]
 pub(crate) struct StateHookSender<BPF: BlindedProviderFactory>(Sender<StateRootMessage<BPF>>);
 
-#[allow(dead_code)]
 impl<BPF: BlindedProviderFactory> StateHookSender<BPF> {
     pub(crate) const fn new(inner: Sender<StateRootMessage<BPF>>) -> Self {
         Self(inner)
@@ -283,7 +278,6 @@ pub struct StateRootTask<'env, Factory, BPF: BlindedProviderFactory> {
     thread_pool: &'env rayon::ThreadPool,
 }
 
-#[allow(dead_code)]
 impl<'env, Factory, ABP, SBP, BPF> StateRootTask<'env, Factory, BPF>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader>
