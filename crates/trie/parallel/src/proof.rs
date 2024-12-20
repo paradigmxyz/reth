@@ -126,6 +126,7 @@ where
 
         // Pre-calculate storage roots for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
+        debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-generating storage proofs");
 
         let mut storage_proofs =
             B256HashMap::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
@@ -141,7 +142,7 @@ where
 
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
-            self.thread_pool.spawn(move || {
+            self.thread_pool.spawn_fifo(move || {
                 debug!(
                     target: "trie::parallel",
                     ?hashed_address,
