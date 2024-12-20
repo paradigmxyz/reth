@@ -190,12 +190,9 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     pub async fn latest_block_with_senders(
         &self,
     ) -> ProviderResult<Option<Arc<SealedBlockWithSenders<B>>>> {
-        if let Some(chain_change) = &self.latest_chain_change {
-            if let Some(latest_block) = chain_change.blocks.last() {
-                return self.get_sealed_block_with_senders(latest_block.hash()).await;
-            }
-        }
-        Ok(None)
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(CacheAction::GetLatestBlockWithSenders { response_tx });
+        rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
 }
 
@@ -361,6 +358,15 @@ where
                 }
                 Some(action) => {
                     match action {
+                        CacheAction::GetLatestBlockWithSenders { response_tx } => {
+                            let latest_block = this
+                                .latest_chain_change
+                                .as_ref()
+                                .and_then(|chain_change| chain_change.blocks.last())
+                                .cloned()
+                                .map(Arc::new);
+                            let _ = response_tx.send(Ok(latest_block));
+                        }
                         CacheAction::GetBlockWithSenders { block_hash, response_tx } => {
                             if let Some(block) = this.full_block_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(Some(block)));
@@ -511,6 +517,9 @@ where
 enum CacheAction<B: Block, R> {
     GetBlockWithSenders {
         block_hash: B256,
+        response_tx: BlockWithSendersResponseSender<B>,
+    },
+    GetLatestBlockWithSenders {
         response_tx: BlockWithSendersResponseSender<B>,
     },
     GetHeader {
