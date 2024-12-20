@@ -104,7 +104,6 @@ impl<T: InMemorySize> InMemorySize for alloy_consensus::Block<T> {
     }
 }
 
-
 #[cfg(feature = "op")]
 impl InMemorySize for op_alloy_consensus::OpDepositReceipt {
     fn size(&self) -> usize {
