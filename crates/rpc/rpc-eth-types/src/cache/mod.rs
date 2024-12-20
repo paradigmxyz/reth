@@ -185,8 +185,8 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
 
     /// Returns the most recent canonical block from the cache, if available.
     /// Used to efficiently handle latest block requests and avoid race conditions during chain
-    /// reorgs. 
-    /// Returns None if no canonical chain is tracked or during reorgs.
+    /// reorgs.
+    /// Returns `None` if no canonical chain is tracked or during reorgs.
     pub async fn latest_block_with_senders(
         &self,
     ) -> ProviderResult<Option<Arc<SealedBlockWithSenders<B>>>> {
