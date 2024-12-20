@@ -12,11 +12,11 @@ use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{
-    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
-    ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes,
+    env::EvmEnv, state_change::post_block_withdrawals_balance_increments,
+    system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes,
 };
 use reth_primitives::{BlockExt, InvalidTransactionError, SealedBlockWithSenders};
-use reth_primitives_traits::receipt::ReceiptExt;
+use reth_primitives_traits::Receipt;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderBlock, ProviderError,
     ProviderHeader, ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
@@ -47,7 +47,7 @@ pub trait LoadPendingBlock:
             HeaderResponse = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
         >,
     > + RpcNodeCore<
-        Provider: BlockReaderIdExt<Receipt: ReceiptExt>
+        Provider: BlockReaderIdExt<Receipt: Receipt>
                       + EvmEnvProvider<ProviderHeader<Self::Provider>>
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
@@ -87,13 +87,15 @@ pub trait LoadPendingBlock:
                 // Note: for the PENDING block we assume it is past the known merge block and
                 // thus this will not fail when looking up the total
                 // difficulty value for the blockenv.
-                let (cfg, block_env) = self
+                let evm_env = self
                     .provider()
                     .env_with_header(block.header(), self.evm_config().clone())
                     .map_err(Self::Error::from_eth_err)?;
 
+                let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
+
                 return Ok(PendingBlockEnv::new(
-                    cfg,
+                    cfg_env_with_handler_cfg,
                     block_env,
                     PendingBlockEnvOrigin::ActualPending(block, receipts),
                 ));
@@ -108,7 +110,7 @@ pub trait LoadPendingBlock:
             .map_err(Self::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
 
-        let (cfg, block_env) = self
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = self
             .evm_config()
             .next_cfg_and_block_env(
                 &latest,
@@ -116,13 +118,14 @@ pub trait LoadPendingBlock:
                     timestamp: latest.timestamp() + 12,
                     suggested_fee_recipient: latest.beneficiary(),
                     prev_randao: B256::random(),
+                    gas_limit: latest.gas_limit(),
                 },
             )
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
 
         Ok(PendingBlockEnv::new(
-            cfg,
+            cfg_env_with_handler_cfg,
             block_env,
             PendingBlockEnvOrigin::DerivedFromLatest(latest.hash()),
         ))

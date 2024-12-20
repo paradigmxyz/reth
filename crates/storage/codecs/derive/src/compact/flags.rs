@@ -126,7 +126,9 @@ fn build_struct_field_flags(
     let mut total_bits = 0;
 
     // Find out the adequate bit size for the length of each field, if applicable.
-    for (name, ftype, is_compact, _) in fields {
+    for field in fields {
+        let StructFieldDescriptor { name, ftype, is_compact, use_alt_impl: _, is_reference: _ } =
+            field;
         // This happens when dealing with a wrapper struct eg. Struct(pub U256).
         let name = if name.is_empty() { "placeholder" } else { name };
 

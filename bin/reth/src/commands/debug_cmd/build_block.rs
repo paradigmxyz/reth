@@ -22,14 +22,14 @@ use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, Environ
 use reth_cli_runner::CliContext;
 use reth_consensus::{Consensus, FullConsensus};
 use reth_errors::RethResult;
+use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_primitives::{
-    BlobTransaction, BlockExt, PooledTransactionsElement, SealedBlockFor, SealedBlockWithSenders,
-    SealedHeader, Transaction, TransactionSigned,
+    BlockExt, SealedBlockFor, SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
 };
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -189,14 +189,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     let sidecar: BlobTransactionSidecar =
                         blobs_bundle.pop_sidecar(blob_versioned_hashes.len());
 
-                    // first construct the tx, calculating the length of the tx with sidecar before
-                    // insertion
-                    let tx = BlobTransaction::try_from_signed(
-                        transaction.as_ref().clone(),
-                        sidecar.clone(),
-                    )
-                    .expect("should not fail to convert blob tx if it is already eip4844");
-                    let pooled = PooledTransactionsElement::BlobTransaction(tx);
+                    let pooled = transaction
+                        .clone()
+                        .into_signed()
+                        .try_into_pooled_eip4844(sidecar.clone())
+                        .expect("should not fail to convert blob tx if it is already eip4844");
                     let encoded_length = pooled.encode_2718_len();
 
                     // insert the blob into the store
@@ -228,7 +225,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         };
         let payload_config = PayloadConfig::new(
             Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
-            Bytes::default(),
             reth_payload_builder::EthPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 payload_attrs,
@@ -247,6 +243,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             EthEvmConfig::new(provider_factory.chain_spec()),
+            EthereumBuilderConfig::new(Default::default()),
         );
 
         match payload_builder.try_build(args)? {

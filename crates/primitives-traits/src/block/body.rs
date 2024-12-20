@@ -1,8 +1,7 @@
 //! Block body abstraction.
 
 use crate::{
-    BlockHeader, FullSignedTx, InMemorySize, MaybeArbitrary, MaybeSerde, MaybeSerdeBincodeCompat,
-    SignedTransaction,
+    BlockHeader, FullSignedTx, InMemorySize, MaybeSerde, MaybeSerdeBincodeCompat, SignedTransaction,
 };
 use alloc::{fmt, vec::Vec};
 use alloy_consensus::Transaction;
@@ -10,9 +9,9 @@ use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Bytes, B256};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
-pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> {}
+pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
 
-impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> {}
+impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
 
 /// Abstraction for block's body.
 pub trait BlockBody:
@@ -28,8 +27,6 @@ pub trait BlockBody:
     + alloy_rlp::Decodable
     + InMemorySize
     + MaybeSerde
-    + MaybeArbitrary
-    + MaybeSerdeBincodeCompat
     + 'static
 {
     /// Ordered list of signed transactions as committed in block.
@@ -101,3 +98,11 @@ pub trait BlockBody:
         self.encoded_2718_transactions_iter().map(Into::into).collect()
     }
 }
+
+/// This is a helper alias to make it easy to refer to the inner `Transaction` associated type of a
+/// given type that implements [`BlockBody`].
+pub type BodyTx<N> = <N as BlockBody>::Transaction;
+
+/// This is a helper alias to make it easy to refer to the inner `OmmerHeader` associated type of a
+/// given type that implements [`BlockBody`].
+pub type BodyOmmer<N> = <N as BlockBody>::OmmerHeader;

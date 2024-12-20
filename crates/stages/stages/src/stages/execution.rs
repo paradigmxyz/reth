@@ -428,7 +428,7 @@ where
         if !blocks.is_empty() {
             let blocks = blocks.into_iter().map(|block| {
                 let hash = block.header().hash_slow();
-                block.seal(hash)
+                block.seal_unchecked(hash)
             });
 
             let previous_input =

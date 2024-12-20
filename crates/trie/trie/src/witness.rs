@@ -15,7 +15,7 @@ use reth_execution_errors::{
     SparseStateTrieError, SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind,
     StateProofError, TrieWitnessError,
 };
-use reth_trie_common::Nibbles;
+use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
     SparseStateTrie,
@@ -75,8 +75,8 @@ impl<T, H> TrieWitness<T, H> {
 
 impl<T, H> TrieWitness<T, H>
 where
-    T: TrieCursorFactory + Clone,
-    H: HashedCursorFactory + Clone,
+    T: TrieCursorFactory + Clone + Send + Sync,
+    H: HashedCursorFactory + Clone + Send + Sync,
 {
     /// Compute the state transition witness for the trie. Gather all required nodes
     /// to apply `state` on top of the current trie state.
@@ -171,8 +171,8 @@ where
     fn get_proof_targets(
         &self,
         state: &HashedPostState,
-    ) -> Result<B256HashMap<B256HashSet>, StateProofError> {
-        let mut proof_targets = B256HashMap::default();
+    ) -> Result<MultiProofTargets, StateProofError> {
+        let mut proof_targets = MultiProofTargets::default();
         for hashed_address in state.accounts.keys() {
             proof_targets.insert(*hashed_address, B256HashSet::default());
         }
@@ -249,7 +249,7 @@ where
 {
     type Error = P::Error;
 
-    fn blinded_node(&mut self, path: Nibbles) -> Result<Option<Bytes>, Self::Error> {
+    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<Bytes>, Self::Error> {
         let maybe_node = self.provider.blinded_node(path)?;
         if let Some(node) = &maybe_node {
             self.tx

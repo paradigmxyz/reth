@@ -1,4 +1,4 @@
-# Runs benchmarks on serialization/deserialization of storage values and keys.
+# Runs benchmarks.
 
 on:
   pull_request:
@@ -9,7 +9,6 @@ on:
 env:
   CARGO_TERM_COLOR: always
   BASELINE: base
-  IAI_CALLGRIND_RUNNER: iai-callgrind-runner
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -17,47 +16,26 @@ concurrency:
 
 name: bench
 jobs:
-  iai:
+  codspeed:
     runs-on:
       group: Reth
-    # Only run benchmarks in merge groups and on main
-    if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
-      - name: Install Valgrind
-        run: sudo apt update && sudo apt install valgrind
+        with:
+          submodules: true
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: Install cargo-binstall
-        uses: taiki-e/install-action@cargo-binstall
-      - name: Install iai-callgrind-runner
-        run: |
-          echo "::group::Install"
-          version=$(cargo metadata --format-version=1 |\
-            jq '.packages[] | select(.name == "iai-callgrind").version' |\
-            tr -d '"'
-          )
-          cargo binstall iai-callgrind-runner --version $version --no-confirm --no-symlinks --force
-          echo "::endgroup::"
-          echo "::group::Verification"
-          which iai-callgrind-runner
-          echo "::endgroup::"
-      - name: Checkout base
-        uses: actions/checkout@v4
+      - name: Install cargo-codspeed
+        uses: taiki-e/install-action@v2
         with:
-          ref: ${{ github.base_ref || 'main' }}
-      # On `main` branch, generates test vectors and serializes them to disk using `serde-json`.
-      - name: Generate test vectors
-        run: cargo run --bin reth --features dev -- test-vectors tables
-      # Runs iai and stores `main` baseline report for comparison later on $BASELINE.
-      - name: Save baseline
-        run: cargo bench -p reth-db --bench iai --profile profiling --features test-utils -- --save-baseline=$BASELINE
-      - name: Checkout PR
-        uses: actions/checkout@v4
+          tool: cargo-codspeed
+      - name: Build the benchmark target(s)
+        run: ./.github/scripts/codspeed-build.sh
+      - name: Run the benchmarks
+        uses: CodSpeedHQ/action@v3
         with:
-          clean: false
-      # Runs iai on incoming merge using previously generated test-vectors and compares the report against `main` report.
-      - name: Compare PR benchmarks
-        run: cargo bench -p reth-db --bench iai --profile profiling --features test-utils -- --baseline=$BASELINE
+          run: cargo codspeed run --workspace
+          token: ${{ secrets.CODSPEED_TOKEN }}

@@ -35,6 +35,14 @@ impl<H> SealedHeader<H> {
         &self.header
     }
 
+    /// Clone the header.
+    pub fn clone_header(&self) -> H
+    where
+        H: Clone,
+    {
+        self.header.clone()
+    }
+
     /// Returns header/block hash.
     #[inline]
     pub const fn hash(&self) -> BlockHash {

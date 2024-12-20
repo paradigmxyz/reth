@@ -1,6 +1,7 @@
 //! Merkle trie proofs.
 
 use crate::{Nibbles, TrieAccount};
+use alloc::vec::Vec;
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
@@ -258,10 +259,9 @@ impl AccountProof {
         let expected = if self.info.is_none() && self.storage_root == EMPTY_ROOT_HASH {
             None
         } else {
-            Some(alloy_rlp::encode(TrieAccount::from((
-                self.info.unwrap_or_default(),
-                self.storage_root,
-            ))))
+            Some(alloy_rlp::encode(
+                self.info.unwrap_or_default().into_trie_account(self.storage_root),
+            ))
         };
         let nibbles = Nibbles::unpack(keccak256(self.address));
         verify_proof(root, nibbles, expected, &self.proof)

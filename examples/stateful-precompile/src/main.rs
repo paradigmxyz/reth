@@ -14,14 +14,14 @@ use reth::{
         inspector_handle_register,
         precompile::{Precompile, PrecompileSpecId},
         primitives::{
-            BlockEnv, CfgEnvWithHandlerCfg, Env, PrecompileResult, SpecId, StatefulPrecompileMut,
-            TxEnv,
+            CfgEnvWithHandlerCfg, Env, PrecompileResult, SpecId, StatefulPrecompileMut, TxEnv,
         },
         ContextPrecompile, ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
 };
 use reth_chainspec::{Chain, ChainSpec};
+use reth_evm::env::EvmEnv;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
@@ -178,7 +178,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error> {
+    ) -> Result<EvmEnv, Self::Error> {
         self.inner.next_cfg_and_block_env(parent, attributes)
     }
 }

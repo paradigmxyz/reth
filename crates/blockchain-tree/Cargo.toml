@@ -77,7 +77,8 @@ test-utils = [
 	"reth-db-api/test-utils",
 	"reth-provider/test-utils",
 	"reth-trie-db/test-utils",
-	"reth-trie/test-utils"
+	"reth-trie/test-utils",
+	"reth-trie-parallel/test-utils"
 ]
 optimism = [
 	"reth-primitives/optimism",

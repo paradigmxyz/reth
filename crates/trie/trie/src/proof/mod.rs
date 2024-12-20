@@ -14,7 +14,7 @@ use alloy_primitives::{
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    proof::ProofRetainer, AccountProof, MultiProof, StorageMultiProof, TrieAccount,
+    proof::ProofRetainer, AccountProof, MultiProof, MultiProofTargets, StorageMultiProof,
 };
 
 mod blinded;
@@ -103,7 +103,7 @@ where
     /// Generate a state multiproof according to specified targets.
     pub fn multiproof(
         mut self,
-        mut targets: B256HashMap<B256HashSet>,
+        mut targets: MultiProofTargets,
     ) -> Result<MultiProof, StateProofError> {
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
@@ -149,7 +149,7 @@ where
 
                     // Encode account
                     account_rlp.clear();
-                    let account = TrieAccount::from((account, storage_multiproof.root));
+                    let account = account.into_trie_account(storage_multiproof.root);
                     account.encode(&mut account_rlp as &mut dyn BufMut);
 
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);

@@ -167,6 +167,8 @@ type PendingForkchoiceUpdate<PayloadAttributes> =
 /// # Panics
 ///
 /// If the future is polled more than once. Leads to undefined state.
+///
+/// Note: soon deprecated. See `reth_engine_service::EngineService`.
 #[must_use = "Future does nothing unless polled"]
 #[allow(missing_debug_implementations)]
 pub struct BeaconConsensusEngine<N, BT, Client>
@@ -2061,7 +2063,7 @@ mod tests {
         // consensus engine is still idle because no FCUs were received
         let _ = env
             .send_new_payload(
-                block_to_payload_v1(SealedBlock::default()),
+                block_to_payload_v1(SealedBlock::<_>::default()),
                 ExecutionPayloadSidecar::none(),
             )
             .await;

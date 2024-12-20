@@ -223,7 +223,11 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a `GetReceipts` request-response pair.
     GetReceipts(RequestPair<GetReceipts>),
     /// Represents a Receipts request-response pair.
-    Receipts(RequestPair<Receipts>),
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound = "N::Receipt: serde::Serialize + serde::de::DeserializeOwned")
+    )]
+    Receipts(RequestPair<Receipts<N::Receipt>>),
 }
 
 impl<N: NetworkPrimitives> EthMessage<N> {

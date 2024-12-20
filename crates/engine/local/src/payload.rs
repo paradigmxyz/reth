@@ -45,7 +45,7 @@ where
     }
 }
 
-#[cfg(feature = "optimism")]
+#[cfg(feature = "op")]
 impl<ChainSpec> PayloadAttributesBuilder<op_alloy_rpc_types_engine::OpPayloadAttributes>
     for LocalPayloadAttributesBuilder<ChainSpec>
 where
