@@ -105,7 +105,7 @@ impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs> {
 }
 impl<EvmConfig, T> OpPayloadBuilder<EvmConfig, T>
 where
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -122,7 +122,7 @@ where
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-        Txs: PayloadTransactions<Transaction = TransactionSigned>,
+        Txs: PayloadTransactions<Transaction = OpTransactionSigned>,
     {
         let evm_env = self
             .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
@@ -299,7 +299,7 @@ impl<'a, Txs> OpBuilder<'a, Txs> {
 
 impl<Txs> OpBuilder<'_, Txs>
 where
-    Txs: PayloadTransactions<Transaction = TransactionSigned>,
+    Txs: PayloadTransactions<Transaction = OpTransactionSigned>,
 {
     /// Executes the payload and returns the outcome.
     pub fn execute<EvmConfig, DB>(

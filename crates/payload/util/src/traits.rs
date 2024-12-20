@@ -23,8 +23,14 @@ pub trait PayloadTransactions {
 }
 
 /// [`PayloadTransactions`] implementation that produces nothing.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct NoopPayloadTransactions<T>(core::marker::PhantomData<T>);
+
+impl<T> Default for NoopPayloadTransactions<T> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
 
 impl<T> PayloadTransactions for NoopPayloadTransactions<T> {
     type Transaction = T;

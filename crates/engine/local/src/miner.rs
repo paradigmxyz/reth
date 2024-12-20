@@ -93,8 +93,6 @@ impl<EngineT, B> LocalMiner<EngineT, B>
 where
     EngineT: EngineTypes,
     B: PayloadAttributesBuilder<<EngineT as PayloadTypes>::PayloadAttributes>,
-    EngineT::BuiltPayload:
-        BuiltPayload<Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>>,
 {
     /// Spawns a new [`LocalMiner`] with the given parameters.
     pub fn spawn_new(
