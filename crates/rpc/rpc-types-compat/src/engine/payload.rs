@@ -83,6 +83,7 @@ pub fn try_payload_v1_to_block<T: Decodable2718>(
         extra_data: payload.extra_data,
         // Defaults
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
+        #[allow(deprecated)]
         difficulty: Default::default(),
         nonce: Default::default(),
         target_blobs_per_block: None,
