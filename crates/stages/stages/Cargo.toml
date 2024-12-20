@@ -36,6 +36,7 @@ reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
+reth-fs-util.workspace = true
 
 reth-testing-utils = { workspace = true, optional = true }
 
@@ -58,6 +59,15 @@ num-traits = "0.2.15"
 tempfile = { workspace = true, optional = true }
 bincode.workspace = true
 
+reqwest = { workspace = true, default-features = false, features = [
+    "rustls-tls-native-roots",
+    "blocking"
+] }
+
+serde = { workspace = true, features = ["derive"] }
+blake3.workspace = true
+
+
 [dev-dependencies]
 # reth
 reth-chainspec.workspace = true
@@ -75,6 +85,7 @@ reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-network-peers.workspace = true
+reth-tracing.workspace = true
 
 alloy-rlp.workspace = true
 itertools.workspace = true

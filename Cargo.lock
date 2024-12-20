@@ -1361,6 +1361,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "blake3"
+version = "1.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8ee0c1824c4dea5b5f81736aff91bae041d2c07ee1192bec91054e10e3e601e"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2020,6 +2033,12 @@ name = "const-oid"
 version = "0.9.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
+
+[[package]]
+name = "constant_time_eq"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6"
 
 [[package]]
 name = "convert_case"
@@ -6394,6 +6413,7 @@ checksum = "7fe060fe50f524be480214aba758c71f99f90ee8c83c5a36b5e9e1d568eb4eb3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",
@@ -9247,6 +9267,7 @@ dependencies = [
  "alloy-rlp",
  "assert_matches",
  "bincode",
+ "blake3",
  "codspeed-criterion-compat",
  "futures-util",
  "itertools 0.13.0",
@@ -9255,6 +9276,7 @@ dependencies = [
  "pprof",
  "rand 0.8.5",
  "rayon",
+ "reqwest",
  "reth-chainspec",
  "reth-codecs",
  "reth-config",
@@ -9268,6 +9290,7 @@ dependencies = [
  "reth-execution-errors",
  "reth-execution-types",
  "reth-exex",
+ "reth-fs-util",
  "reth-network-p2p",
  "reth-network-peers",
  "reth-primitives",
@@ -9280,8 +9303,10 @@ dependencies = [
  "reth-static-file",
  "reth-storage-errors",
  "reth-testing-utils",
+ "reth-tracing",
  "reth-trie",
  "reth-trie-db",
+ "serde",
  "tempfile",
  "thiserror 2.0.9",
  "tokio",
