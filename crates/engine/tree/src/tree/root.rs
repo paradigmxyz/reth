@@ -36,7 +36,7 @@ use tracing::{debug, error, trace};
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
-const STATE_UPDATE_CHUNK_SIZE: usize = 2;
+const STATE_UPDATE_CHUNK_SIZE: usize = 3;
 
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates and the total time spent.
@@ -387,26 +387,7 @@ where
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
         thread_pool: &'env rayon::ThreadPool,
     ) {
-        for account_chunk in &update.into_iter().chunks(STATE_UPDATE_CHUNK_SIZE) {
-            let mut chunk =
-                EvmState::with_capacity_and_hasher(STATE_UPDATE_CHUNK_SIZE, Default::default());
-            for (address, account) in account_chunk {
-                if account.storage.is_empty() {
-                    chunk.insert(address, account);
-                    continue;
-                }
-
-                for storage_chunk in &account.storage.into_iter().chunks(STATE_UPDATE_CHUNK_SIZE) {
-                    chunk.insert(
-                        address,
-                        Account {
-                            info: account.info.clone(),
-                            storage: storage_chunk.collect(),
-                            status: account.status,
-                        },
-                    );
-                }
-            }
+        for chunk in &update.into_iter().chunks(STATE_UPDATE_CHUNK_SIZE) {
             let hashed_state_update = evm_state_to_hashed_post_state(chunk);
 
             let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
