@@ -12,7 +12,7 @@ pub use hash::*;
 
 #[cfg(feature = "poseidon")]
 /// Implementation of poseidon hashing functionality.
-pub mod hash {
+mod hash {
     use super::B256;
     pub use poseidon_bn254::{hash_with_domain, Fr, PrimeField};
 
