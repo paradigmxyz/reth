@@ -24,7 +24,7 @@ alloy-rlp.workspace = true
 alloy-trie.workspace = true
 
 # revm-primitives scroll re-export
-revm-primitives = { package = "reth-scroll-revm", path = "../scroll/revm", features = ["serde"] }
+revm-primitives = { package = "reth-scroll-revm", path = "../scroll/revm", features = ["serde"], default-features = false }
 reth-scroll-primitives = { workspace = true, optional = true }
 
 # op

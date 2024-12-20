@@ -24,7 +24,7 @@ reth-codecs = { workspace = true, optional = true }
 reth-codecs-derive = { workspace = true, optional = true }
 
 # scroll
-poseidon-bn254 = { workspace = true, features = ["bn254"] }
+poseidon-bn254 = { workspace = true, features = ["bn254"], optional = true }
 
 # required by reth-codecs
 bytes.workspace = true
@@ -84,3 +84,4 @@ serde = [
 	"rand/serde",
 	"reth-codecs/serde"
 ]
+poseidon = ["dep:poseidon-bn254"]

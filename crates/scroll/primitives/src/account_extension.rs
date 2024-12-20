@@ -1,4 +1,4 @@
-use crate::poseidon::{hash_code, POSEIDON_EMPTY};
+use crate::poseidon::POSEIDON_EMPTY;
 use alloy_primitives::B256;
 use serde::{Deserialize, Serialize};
 
@@ -23,12 +23,13 @@ impl AccountExtension {
         Self { code_size: 0, poseidon_code_hash: None }
     }
 
+    #[cfg(feature = "poseidon")]
     /// Creates an [`AccountExtension`] from the provided bytecode.
     pub fn from_bytecode<T: AsRef<[u8]>>(code: &T) -> Self {
         let code = code.as_ref();
         Self {
             code_size: code.len() as u64,
-            poseidon_code_hash: (!code.is_empty()).then_some(hash_code(code)),
+            poseidon_code_hash: (!code.is_empty()).then_some(crate::poseidon::hash_code(code)),
         }
     }
 }

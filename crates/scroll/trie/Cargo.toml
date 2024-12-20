@@ -12,7 +12,7 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
-reth-scroll-primitives.workspace = true
+reth-scroll-primitives = { workspace = true, features = ["poseidon"] }
 reth-trie.workspace = true
 alloy-trie = { workspace = true, features = ["serde"] }
 alloy-primitives.workspace = true
