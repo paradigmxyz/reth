@@ -2,6 +2,7 @@
 
 use alloy_primitives::{map::HashSet, Address};
 use derive_more::derive::Deref;
+use itertools::Itertools;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::system_calls::OnStateHook;
@@ -20,7 +21,7 @@ use reth_trie_sparse::{
     errors::{SparseStateTrieError, SparseStateTrieResult, SparseTrieError, SparseTrieErrorKind},
     SparseStateTrie,
 };
-use revm_primitives::{keccak256, map::B256HashSet, EvmState, B256};
+use revm_primitives::{keccak256, map::B256HashSet, Account, EvmState, B256};
 use std::{
     collections::BTreeMap,
     sync::{
@@ -34,6 +35,8 @@ use tracing::{debug, error, trace};
 
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
+
+const STATE_UPDATE_CHUNK_SIZE: usize = 3;
 
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates and the total time spent.
@@ -222,7 +225,9 @@ impl<BPF: BlindedProviderFactory> Drop for StateHookSender<BPF> {
     }
 }
 
-fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
+fn evm_state_to_hashed_post_state(
+    update: impl IntoIterator<Item = (Address, Account)>,
+) -> HashedPostState {
     let mut hashed_state = HashedPostState::default();
 
     for (address, account) in update {
@@ -378,24 +383,26 @@ where
         config: StateRootConfig<Factory>,
         update: EvmState,
         fetched_proof_targets: &mut MultiProofTargets,
-        proof_sequence_number: u64,
+        proof_sequencer: &mut ProofSequencer,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
         thread_pool: &'env rayon::ThreadPool,
     ) {
-        let hashed_state_update = evm_state_to_hashed_post_state(update);
+        for chunk in &update.into_iter().chunks(STATE_UPDATE_CHUNK_SIZE) {
+            let hashed_state_update = evm_state_to_hashed_post_state(chunk);
 
-        let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
-        extend_multi_proof_targets_ref(fetched_proof_targets, &proof_targets);
+            let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
+            extend_multi_proof_targets_ref(fetched_proof_targets, &proof_targets);
 
-        Self::spawn_multiproof(
-            scope,
-            config,
-            hashed_state_update,
-            proof_targets,
-            proof_sequence_number,
-            state_root_message_sender,
-            thread_pool,
-        );
+            Self::spawn_multiproof(
+                scope,
+                config.clone(),
+                hashed_state_update,
+                proof_targets,
+                proof_sequencer.next_sequence(),
+                state_root_message_sender.clone(),
+                thread_pool,
+            );
+        }
     }
 
     fn spawn_multiproof(
@@ -562,13 +569,11 @@ where
                         last_update_time = Some(Instant::now());
 
                         updates_received += 1;
-                        let next_sequence = self.proof_sequencer.next_sequence();
                         debug!(
                             target: "engine::root",
                             accounts = update.len(),
                             storages = update.values().map(|account| account.storage.len()).sum::<usize>(),
                             total_updates = updates_received,
-                            ?next_sequence,
                             "Received new state update"
                         );
                         Self::on_state_update(
@@ -576,7 +581,7 @@ where
                             self.config.clone(),
                             update,
                             &mut self.fetched_proof_targets,
-                            next_sequence,
+                            &mut self.proof_sequencer,
                             self.tx.clone(),
                             self.thread_pool,
                         );
