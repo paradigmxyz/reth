@@ -18,7 +18,7 @@ use reth_node_api::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
-use reth_optimism_primitives::OpTransactionSigned;
+use reth_optimism_primitives::{OpBlock, OpTransactionSigned};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Block, SealedBlockFor};
 use reth_rpc_types_compat::engine::payload::block_to_payload;
@@ -39,7 +39,7 @@ impl<T: PayloadTypes> PayloadTypes for OpEngineTypes<T> {
 
 impl<T: PayloadTypes> EngineTypes for OpEngineTypes<T>
 where
-    T::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = reth_primitives::Block>>
+    T::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = OpBlock>>
         + TryInto<ExecutionPayloadV1>
         + TryInto<ExecutionPayloadEnvelopeV2>
         + TryInto<OpExecutionPayloadEnvelopeV3>
@@ -90,7 +90,7 @@ impl OpEngineValidator {
 }
 
 impl PayloadValidator for OpEngineValidator {
-    type Block = Block<OpTransactionSigned>;
+    type Block = OpBlock;
 
     fn ensure_well_formed_payload(
         &self,
