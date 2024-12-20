@@ -3,7 +3,7 @@
 
 #![allow(missing_docs)]
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use reth_engine_tree::tree::root::{StateRootConfig, StateRootTask};
 use reth_evm::system_calls::OnStateHook;
 use reth_primitives::{Account as RethAccount, StorageEntry};
@@ -22,6 +22,7 @@ use revm_primitives::{
     Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot, HashMap,
     B256, KECCAK_EMPTY, U256,
 };
+use std::hint::black_box;
 
 #[derive(Debug, Clone)]
 struct BenchParams {

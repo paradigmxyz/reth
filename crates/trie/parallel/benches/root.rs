@@ -20,6 +20,12 @@ pub fn calculate_state_root(c: &mut Criterion) {
     group.sample_size(20);
 
     for size in [1_000, 3_000, 5_000, 10_000] {
+        // Too slow.
+        #[allow(unexpected_cfgs)]
+        if cfg!(codspeed) && size > 3_000 {
+            continue;
+        }
+
         let (db_state, updated_state) = generate_test_data(size);
         let provider_factory = create_test_provider_factory();
         {

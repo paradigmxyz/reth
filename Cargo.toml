@@ -601,8 +601,7 @@ toml = "0.8"
 # misc-testing
 arbitrary = "1.3"
 assert_matches = "1.5.0"
-criterion = "0.5"
-iai-callgrind = "0.14"
+criterion = { package = "codspeed-criterion-compat", version = "2.7" }
 pprof = "0.14"
 proptest = "1.4"
 proptest-derive = "0.5"

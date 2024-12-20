@@ -10,6 +10,12 @@ pub fn hash_post_state(c: &mut Criterion) {
     group.sample_size(20);
 
     for size in [100, 1_000, 3_000, 5_000, 10_000] {
+        // Too slow.
+        #[allow(unexpected_cfgs)]
+        if cfg!(codspeed) && size > 1_000 {
+            continue;
+        }
+
         let state = generate_test_data(size);
 
         // sequence

@@ -54,6 +54,14 @@ proptest-arbitrary-interop.workspace = true
 [features]
 default = ["metrics"]
 metrics = ["reth-metrics", "dep:metrics", "reth-trie/metrics"]
+test-utils = [
+    "reth-trie/test-utils",
+    "reth-trie-common/test-utils",
+    "reth-db/test-utils",
+    "reth-primitives/test-utils",
+    "reth-provider/test-utils",
+    "reth-trie-db/test-utils",
+]
 
 [[bench]]
 name = "root"
