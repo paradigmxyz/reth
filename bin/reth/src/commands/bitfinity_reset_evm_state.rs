@@ -322,12 +322,6 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
                 }
             }
 
-            // 
-            // Is this really neeeded?!
-            //  
-            // // if we reach here, we have failed to send the request. Last retry
-            // client.reset_state(EvmResetState::AddAccounts(accounts.clone())).await??;
-
             Ok(())
         })
     }
