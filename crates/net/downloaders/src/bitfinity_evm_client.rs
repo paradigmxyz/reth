@@ -16,6 +16,7 @@ use reth_chainspec::{
 };
 
 use alloy_rlp::Decodable;
+use reth_cli::chainspec::ChainSpecParser;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
@@ -27,7 +28,7 @@ use reth_network_peers::PeerId;
 use reth_primitives::{BlockBody, ForkCondition, Header};
 use serde_json::json;
 
-use std::{self, cmp::min, collections::HashMap};
+use std::{self, cmp::min, collections::HashMap, sync::Arc};
 use std::{sync::OnceLock, time::Duration};
 use thiserror::Error;
 
@@ -378,6 +379,30 @@ impl BitfinityEvmClient {
         }
 
         Err(eyre::eyre!("Failed to connect to any RPC endpoint"))
+    }
+}
+
+/// `ChainSpec` parser for bitfinity chain.
+#[derive(Debug, Clone)]
+pub struct BitfinityChainSpecParser;
+
+impl ChainSpecParser for BitfinityChainSpecParser {
+    type ChainSpec = ChainSpec;
+
+    const SUPPORTED_CHAINS: &'static [&'static str] = &["bitfinity"];
+
+    fn parse(s: &str) -> eyre::Result<Arc<Self::ChainSpec>> {
+        match s {
+            "bitfinity" => {
+                let rpc_url = std::env::var("BITFINITY_RPC_URL")?;
+                let spec = tokio::runtime::Builder::new_current_thread()
+                    .build()
+                    .unwrap()
+                    .block_on(BitfinityEvmClient::fetch_chain_spec(rpc_url))?;
+                Ok(Arc::new(spec))
+            }
+            _ => eyre::bail!("chain `{s}` is not supported"),
+        }
     }
 }
 

@@ -64,6 +64,7 @@ ic-cbor.workspace = true
 ic-certificate-verification.workspace = true
 ic-certification.workspace = true
 reth-chainspec.workspace = true
+reth-cli.workspace = true
 rlp.workspace = true
 serde_json.workspace = true
 backon.workspace = true

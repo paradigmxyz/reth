@@ -8376,6 +8376,7 @@ dependencies = [
  "rand 0.8.5",
  "rayon",
  "reth-chainspec",
+ "reth-cli",
  "reth-config",
  "reth-consensus",
  "reth-db",

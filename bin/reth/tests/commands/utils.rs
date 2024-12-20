@@ -23,7 +23,7 @@ use reth_errors::BlockExecutionError;
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
-use reth_primitives::{BlockNumber, BlockWithSenders, Receipt};
+use reth_primitives::{BlockNumber, BlockWithSenders, EthPrimitives, Receipt};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
     BlockNumReader, ExecutionOutcome, ProviderError, ProviderFactory,
@@ -136,7 +136,6 @@ pub async fn bitfinity_import_config_data(
         Arc::new(ShareableBlockchainTree::new(reth_blockchain_tree::BlockchainTree::new(
             TreeExternals::new(provider_factory.clone(), consensus, executor),
             BlockchainTreeConfig::default(),
-            None,
         )?));
 
     let blockchain_db = BlockchainProvider::new(provider_factory.clone(), blockchain_tree)?;
@@ -217,6 +216,8 @@ impl BlockExecutorProvider for MockExecutorProvider {
     {
         self.clone()
     }
+
+    type Primitives = EthPrimitives;
 }
 
 impl<DB> Executor<DB> for MockExecutorProvider {
@@ -233,6 +234,35 @@ impl<DB> Executor<DB> for MockExecutorProvider {
             requests: requests.into_iter().flatten().collect(),
             gas_used: 0,
         })
+    }
+
+    fn execute_with_state_closure<F>(
+        self,
+        input: Self::Input<'_>,
+        state: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: FnMut(&reth_revm::State<DB>),
+    {
+        let ExecutionOutcome { bundle, receipts, requests, first_block: _ } =
+            self.exec_results.lock().pop().unwrap();
+        Ok(BlockExecutionOutput {
+            state: bundle,
+            receipts: receipts.into_iter().flatten().flatten().collect(),
+            requests: requests.into_iter().flatten().collect(),
+            gas_used: 0,
+        })
+    }
+
+    fn execute_with_state_hook<F>(
+        self,
+        input: Self::Input<'_>,
+        state_hook: F,
+    ) -> Result<Self::Output, Self::Error>
+    where
+        F: reth_evm::system_calls::OnStateHook + 'static,
+    {
+        todo!()
     }
 }
 
@@ -254,4 +284,6 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
     fn size_hint(&self) -> Option<usize> {
         None
     }
+
+    fn set_prune_modes(&mut self, prune_modes: PruneModes) {}
 }

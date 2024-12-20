@@ -62,7 +62,6 @@ async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
         .unwrap();
 
     assert_eq!(result.certificate, vec![1u8, 3, 11]);
-
 }
 
 #[tokio::test]
@@ -195,33 +194,79 @@ async fn start_reth_node(
 ) -> (
     EthJsonRpcClient<ReqwestClient>,
     NodeHandle<
-        reth_node_builder::NodeAdapter<
-            reth_node_api::FullNodeTypesAdapter<
-                EthereumNode,
-                Arc<reth_db::DatabaseEnv>,
-                reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>,
+        NodeAdapter<
+            FullNodeTypesAdapter<
+                NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+                BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
             >,
-            reth_node_builder::components::Components<
-                reth_node_api::FullNodeTypesAdapter<
-                    EthereumNode,
-                    Arc<reth_db::DatabaseEnv>,
-                    reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>,
+            Components<
+                FullNodeTypesAdapter<
+                    NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+                    BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
                 >,
-                reth_transaction_pool::Pool<
-                    reth_transaction_pool::TransactionValidationTaskExecutor<
-                        reth_transaction_pool::EthTransactionValidator<
-                            reth_provider::providers::BlockchainProvider<Arc<reth_db::DatabaseEnv>>,
-                            reth_transaction_pool::EthPooledTransaction,
+                Pool<
+                    TransactionValidationTaskExecutor<
+                        EthTransactionValidator<
+                            BlockchainProvider<
+                                NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+                            >,
+                            EthPooledTransaction,
                         >,
                     >,
-                    reth_transaction_pool::CoinbaseTipOrdering<
-                        reth_transaction_pool::EthPooledTransaction,
-                    >,
-                    reth_transaction_pool::blobstore::DiskFileBlobStore,
+                    CoinbaseTipOrdering<EthPooledTransaction>,
+                    DiskFileBlobStore,
                 >,
-                reth_node_ethereum::EthEvmConfig,
-                reth_node_ethereum::EthExecutorProvider,
+                EthEvmConfig,
+                EthExecutorProvider<EthEvmConfig>,
                 Arc<dyn Consensus>,
+                EthereumEngineValidator,
+            >,
+        >,
+        RpcAddOns<
+            NodeAdapter<
+                FullNodeTypesAdapter<
+                    NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+                    BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+                >,
+                Components<
+                    FullNodeTypesAdapter<
+                        NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+                        BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+                    >,
+                    Pool<
+                        TransactionValidationTaskExecutor<
+                            EthTransactionValidator<
+                                BlockchainProvider<
+                                    NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+                                >,
+                                EthPooledTransaction,
+                            >,
+                        >,
+                        CoinbaseTipOrdering<EthPooledTransaction>,
+                        DiskFileBlobStore,
+                    >,
+                    EthEvmConfig,
+                    EthExecutorProvider<EthEvmConfig>,
+                    Arc<dyn Consensus>,
+                    EthereumEngineValidator,
+                >,
+            >,
+            EthApi<
+                BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+                Pool<
+                    TransactionValidationTaskExecutor<
+                        EthTransactionValidator<
+                            BlockchainProvider<
+                                NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+                            >,
+                            EthPooledTransaction,
+                        >,
+                    >,
+                    CoinbaseTipOrdering<EthPooledTransaction>,
+                    DiskFileBlobStore,
+                >,
+                NetworkHandle,
+                EthEvmConfig,
             >,
         >,
     >,
@@ -311,7 +356,6 @@ pub mod eth_server {
 
         #[method(name = "getLastCertifiedBlock", aliases = ["ic_getLastCertifiedBlock"])]
         async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>>;
-
     }
 
     #[derive(Debug)]
@@ -356,10 +400,10 @@ pub mod eth_server {
         }
 
         async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>> {
-            Ok(CertifiedResult { 
-                data: Default::default(), 
-                witness: vec![], 
-                certificate: vec![1u8, 3, 11] 
+            Ok(CertifiedResult {
+                data: Default::default(),
+                witness: vec![],
+                certificate: vec![1u8, 3, 11],
             })
         }
     }
