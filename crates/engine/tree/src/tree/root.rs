@@ -331,7 +331,7 @@ where
             .spawn_scoped(scope, move || {
                 debug!(target: "engine::tree", "Starting state root task");
 
-                let result = rayon::scope(|scope| self.run(scope));
+                let result = rayon::scope_fifo(|scope| self.run(scope));
                 let _ = tx.send(result);
             })
             .expect("failed to spawn state root thread");
@@ -352,7 +352,7 @@ where
 
     /// Handles request for proof prefetch.
     fn on_prefetch_proof(
-        scope: &rayon::Scope<'env>,
+        scope: &rayon::ScopeFifo<'env>,
         config: StateRootConfig<Factory>,
         targets: HashSet<Address>,
         fetched_proof_targets: &mut MultiProofTargets,
@@ -379,7 +379,7 @@ where
     ///
     /// Returns proof targets derived from the state update.
     fn on_state_update(
-        scope: &rayon::Scope<'env>,
+        scope: &rayon::ScopeFifo<'env>,
         config: StateRootConfig<Factory>,
         update: EvmState,
         fetched_proof_targets: &mut MultiProofTargets,
@@ -406,7 +406,7 @@ where
     }
 
     fn spawn_multiproof(
-        scope: &rayon::Scope<'env>,
+        scope: &rayon::ScopeFifo<'env>,
         config: StateRootConfig<Factory>,
         hashed_state_update: HashedPostState,
         proof_targets: MultiProofTargets,
@@ -415,7 +415,7 @@ where
         thread_pool: &'env rayon::ThreadPool,
     ) {
         // Dispatch proof gathering for this state update
-        scope.spawn(move |_| {
+        scope.spawn_fifo(move |_| {
             let targets_len = proof_targets.len();
             let storage_targets_len = proof_targets.values().map(B256HashSet::len).sum::<usize>();
             debug!(
@@ -495,7 +495,7 @@ where
     /// Spawns root calculation with the current state and proofs.
     fn spawn_root_calculation(
         &mut self,
-        scope: &rayon::Scope<'env>,
+        scope: &rayon::ScopeFifo<'env>,
         state: HashedPostState,
         targets: MultiProofTargets,
         multiproof: MultiProof,
@@ -513,7 +513,7 @@ where
         let targets = get_proof_targets(&state, &targets);
 
         let tx = self.tx.clone();
-        scope.spawn(move |_| {
+        scope.spawn_fifo(move |_| {
             let result = update_sparse_trie(trie, multiproof, targets, state);
             match result {
                 Ok((trie, elapsed)) => {
@@ -531,7 +531,7 @@ where
         });
     }
 
-    fn run(mut self, scope: &rayon::Scope<'env>) -> StateRootResult {
+    fn run(mut self, scope: &rayon::ScopeFifo<'env>) -> StateRootResult {
         let mut current_state_update = HashedPostState::default();
         let mut current_proof_targets = MultiProofTargets::default();
         let mut current_multiproof = MultiProof::default();
