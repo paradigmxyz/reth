@@ -46,13 +46,8 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 
 # misc
 rand.workspace = true
-tokio = { workspace = true, default-features = false, features = [
-    "sync",
-    "rt",
-    "macros",
-] }
 rayon.workspace = true
-criterion = { workspace = true, features = ["async_tokio"] }
+criterion.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 

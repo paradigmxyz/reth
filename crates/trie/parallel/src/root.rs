@@ -259,8 +259,8 @@ mod tests {
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
 
-    #[tokio::test]
-    async fn random_parallel_root() {
+    #[test]
+    fn random_parallel_root() {
         let factory = create_test_provider_factory();
         let consistent_view = ConsistentDbView::new(factory.clone(), None);
 

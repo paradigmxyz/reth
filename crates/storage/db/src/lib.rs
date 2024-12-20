@@ -162,6 +162,7 @@ pub mod test_utils {
     }
 
     /// Create `static_files` path for testing
+    #[track_caller]
     pub fn create_test_static_files_dir() -> (TempDir, PathBuf) {
         let temp_dir = TempDir::with_prefix("reth-test-static-").expect(ERROR_TEMPDIR);
         let path = temp_dir.path().to_path_buf();
@@ -175,6 +176,7 @@ pub mod test_utils {
     }
 
     /// Create read/write database for testing
+    #[track_caller]
     pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let path = tempdir_path();
         let emsg = format!("{ERROR_DB_CREATION}: {path:?}");
@@ -190,6 +192,7 @@ pub mod test_utils {
     }
 
     /// Create read/write database for testing
+    #[track_caller]
     pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<TempDatabase<DatabaseEnv>> {
         let path = path.as_ref().to_path_buf();
         let db = init_db(
@@ -202,6 +205,7 @@ pub mod test_utils {
     }
 
     /// Create read only database for testing
+    #[track_caller]
     pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let args = DatabaseArguments::new(ClientVersion::default())
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
