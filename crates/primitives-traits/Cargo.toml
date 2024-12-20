@@ -51,22 +51,26 @@ proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
-alloy-primitives = { workspace = true, features = ["arbitrary"] }
-alloy-consensus = { workspace = true, features = ["arbitrary"] }
+reth-codecs.workspace = true
 
+alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
+alloy-consensus = { workspace = true, features = ["arbitrary", "serde"] }
+
+arbitrary = { workspace = true, features = ["derive"] }
 secp256k1 = { workspace = true, features = [
 	"recovery",
 	"global-context",
 	"rand"
 ] }
 bincode.workspace = true
+byteorder.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
 modular-bitfield.workspace = true
-serde.workspace = true
 
 [features]
 default = ["std"]
