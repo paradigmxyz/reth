@@ -50,8 +50,8 @@ pub trait EthereumHardforks: Hardforks {
     fn is_paris_active_at_block(&self, block_number: u64) -> Option<bool> {
         match self.fork(EthereumHardfork::Paris) {
             ForkCondition::Block(paris_block) => Some(block_number >= paris_block),
-            ForkCondition::TTD { fork_block, .. } => {
-                fork_block.map(|paris_block| block_number >= paris_block)
+            ForkCondition::TTD { activation_block_number, .. } => {
+                Some(block_number >= activation_block_number)
             }
             _ => None,
         }

@@ -355,26 +355,7 @@ impl From<Genesis> for OpChainSpec {
             .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
             .collect::<Vec<_>>();
 
-        // Paris
-        let paris_block_and_final_difficulty =
-            if let Some(ttd) = genesis.config.terminal_total_difficulty {
-                block_hardforks.push((
-                    EthereumHardfork::Paris.boxed(),
-                    ForkCondition::TTD {
-                        activation_block_number: genesis
-                            .config
-                            .merge_netsplit_block
-                            .expect("merge netsplit block is required"),
-                        total_difficulty: ttd,
-                        fork_block: genesis.config.merge_netsplit_block,
-                    },
-                ));
-
-                genesis.config.merge_netsplit_block.map(|block| (block, ttd))
-            } else {
-                None
-            };
-
+        // We assume no OP network merges, and set the paris block and total difficulty to zero
         // Time-based hardforks
         let time_hardfork_opts = [
             (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
@@ -417,7 +398,7 @@ impl From<Genesis> for OpChainSpec {
                 chain: genesis.config.chain_id.into(),
                 genesis,
                 hardforks: ChainHardforks::new(ordered_hardforks),
-                paris_block_and_final_difficulty,
+                paris_block_and_final_difficulty: Some((0, U256::ZERO)),
                 base_fee_params: optimism_genesis_info.base_fee_params,
                 ..Default::default()
             },

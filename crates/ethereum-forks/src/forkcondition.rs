@@ -9,7 +9,11 @@ pub enum ForkCondition {
     Block(BlockNumber),
     /// The fork is activated after a total difficulty has been reached.
     TTD {
-        /// The activation block number for the fork.
+        /// The activation block number for the merge.
+        ///
+        /// This should represent the first post-merge block for the given network. Sepolia and
+        /// mainnet are the only networks that have merged, and they have both finalized post-merge,
+        /// so total difficulty is effectively deprecated.
         activation_block_number: BlockNumber,
         /// The block number at which TTD is reached, if it is known.
         ///

@@ -609,25 +609,10 @@ impl From<Genesis> for ChainSpec {
             .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
             .collect::<Vec<_>>();
 
-        // Paris
-        let paris_block_and_final_difficulty =
-            if let Some(ttd) = genesis.config.terminal_total_difficulty {
-                hardforks.push((
-                    EthereumHardfork::Paris.boxed(),
-                    ForkCondition::TTD {
-                        activation_block_number: genesis
-                            .config
-                            .merge_netsplit_block
-                            .expect("TODO: remove"),
-                        fork_block: genesis.config.merge_netsplit_block,
-                        total_difficulty: ttd,
-                    },
-                ));
-
-                genesis.config.merge_netsplit_block.map(|block| (block, ttd))
-            } else {
-                None
-            };
+        // We expect no new networks to be configured with the merge, so we ignore the TTD field
+        // and merge netsplit block from external genesis files. All existing networks that have
+        // merged should have a static ChainSpec already (namely mainnet and sepolia).
+        let paris_block_and_final_difficulty = Some((0, U256::ZERO));
 
         // Time-based hardforks
         let time_hardfork_opts = [
