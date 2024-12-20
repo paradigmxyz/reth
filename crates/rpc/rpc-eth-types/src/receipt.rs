@@ -1,7 +1,7 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
 use super::{EthApiError, EthResult};
-use alloy_consensus::{ReceiptEnvelope, Transaction};
+use alloy_consensus::{ReceiptEnvelope, TxReceipt};
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
@@ -9,13 +9,17 @@ use reth_primitives_traits::SignedTransaction;
 use revm_primitives::calc_blob_gasprice;
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
-pub fn build_receipt<T>(
-    transaction: &TransactionSigned,
+pub fn build_receipt<R, T, E>(
+    transaction: &T,
     meta: TransactionMeta,
-    receipt: &Receipt,
-    all_receipts: &[Receipt],
-    build_envelope: impl FnOnce(ReceiptWithBloom<alloy_consensus::Receipt<Log>>) -> T,
-) -> EthResult<TransactionReceipt<T>> {
+    receipt: &R,
+    all_receipts: &[R],
+    build_envelope: impl FnOnce(ReceiptWithBloom<alloy_consensus::Receipt<Log>>) -> E,
+) -> EthResult<TransactionReceipt<E>>
+where
+    R: TxReceipt<Log = alloy_primitives::Log>,
+    T: SignedTransaction,
+{
     // Note: we assume this transaction is valid, because it's mined (or part of pending block)
     // and we don't need to check for pre EIP-2
     let from =
@@ -23,28 +27,28 @@ pub fn build_receipt<T>(
 
     // get the previous transaction cumulative gas used
     let gas_used = if meta.index == 0 {
-        receipt.cumulative_gas_used
+        receipt.cumulative_gas_used()
     } else {
         let prev_tx_idx = (meta.index - 1) as usize;
         all_receipts
             .get(prev_tx_idx)
-            .map(|prev_receipt| receipt.cumulative_gas_used - prev_receipt.cumulative_gas_used)
+            .map(|prev_receipt| receipt.cumulative_gas_used() - prev_receipt.cumulative_gas_used())
             .unwrap_or_default()
     };
 
-    let blob_gas_used = transaction.transaction.blob_gas_used();
+    let blob_gas_used = transaction.blob_gas_used();
     // Blob gas price should only be present if the transaction is a blob transaction
     let blob_gas_price = blob_gas_used.and_then(|_| meta.excess_blob_gas.map(calc_blob_gasprice));
-    let logs_bloom = receipt.bloom_slow();
+    let logs_bloom = receipt.bloom();
 
     // get number of logs in the block
     let mut num_logs = 0;
     for prev_receipt in all_receipts.iter().take(meta.index as usize) {
-        num_logs += prev_receipt.logs.len();
+        num_logs += prev_receipt.logs().len();
     }
 
     let logs: Vec<Log> = receipt
-        .logs
+        .logs()
         .iter()
         .enumerate()
         .map(|(tx_log_idx, log)| Log {
@@ -60,13 +64,13 @@ pub fn build_receipt<T>(
         .collect();
 
     let rpc_receipt = alloy_rpc_types_eth::Receipt {
-        status: receipt.success.into(),
-        cumulative_gas_used: receipt.cumulative_gas_used as u128,
+        status: receipt.status_or_post_state(),
+        cumulative_gas_used: receipt.cumulative_gas_used(),
         logs,
     };
 
-    let (contract_address, to) = match transaction.transaction.kind() {
-        TxKind::Create => (Some(from.create(transaction.transaction.nonce())), None),
+    let (contract_address, to) = match transaction.kind() {
+        TxKind::Create => (Some(from.create(transaction.nonce())), None),
         TxKind::Call(addr) => (None, Some(Address(*addr))),
     };
 
@@ -78,7 +82,7 @@ pub fn build_receipt<T>(
         block_number: Some(meta.block_number),
         from,
         to,
-        gas_used: gas_used as u128,
+        gas_used,
         contract_address,
         effective_gas_price: transaction.effective_gas_price(meta.base_fee),
         // EIP-4844 fields
