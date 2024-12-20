@@ -1844,6 +1844,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "afb84c814227b90d6895e01398aee0d8033c00e7466aca416fb6a8e0eb19d8a7"
 
 [[package]]
+name = "codspeed"
+version = "2.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "450a0e9df9df1c154156f4344f99d8f6f6e69d0fc4de96ef6e2e68b2ec3bce97"
+dependencies = [
+ "colored",
+ "libc",
+ "serde_json",
+]
+
+[[package]]
+name = "codspeed-criterion-compat"
+version = "2.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eb1a6cb9c20e177fde58cdef97c1c7c9264eb1424fe45c4fccedc2fb078a569"
+dependencies = [
+ "codspeed",
+ "colored",
+ "criterion",
+ "futures",
+ "tokio",
+]
+
+[[package]]
 name = "coins-bip32"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1899,6 +1923,16 @@ name = "colorchoice"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b63caa9aa9397e2d9480a9b13673856c78d8ac123288526c37d7839f2a86990"
+
+[[package]]
+name = "colored"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cbf2150cce219b664a8a70df7a1f933836724b503f8a413af9365b4dcc4d90b8"
+dependencies = [
+ "lazy_static",
+ "windows-sys 0.48.0",
+]
 
 [[package]]
 name = "combine"
@@ -3932,42 +3966,6 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
-]
-
-[[package]]
-name = "iai-callgrind"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22275f8051874cd2f05b2aa1e0098d5cbec34df30ff92f1a1e2686a4cefed870"
-dependencies = [
- "bincode",
- "derive_more",
- "iai-callgrind-macros",
- "iai-callgrind-runner",
-]
-
-[[package]]
-name = "iai-callgrind-macros"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8e6677dc52bd798b988e62ffd6831bf7eb46e4348cb1c74c1164954ebd0e5a1"
-dependencies = [
- "derive_more",
- "proc-macro-error2",
- "proc-macro2",
- "quote",
- "serde",
- "serde_json",
- "syn 2.0.90",
-]
-
-[[package]]
-name = "iai-callgrind-runner"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a02dd95fe4949513b45a328b5b18f527ee02e96f3428b48090aa7cf9043ab0b8"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -6998,10 +6996,9 @@ dependencies = [
  "arbitrary",
  "assert_matches",
  "bytes",
- "criterion",
+ "codspeed-criterion-compat",
  "derive_more",
  "eyre",
- "iai-callgrind",
  "metrics",
  "page_size",
  "parking_lot",
@@ -7391,7 +7388,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "assert_matches",
- "criterion",
+ "codspeed-criterion-compat",
  "crossbeam-channel",
  "derive_more",
  "futures",
@@ -7912,7 +7909,7 @@ version = "1.1.4"
 dependencies = [
  "bitflags 2.6.0",
  "byteorder",
- "criterion",
+ "codspeed-criterion-compat",
  "dashmap 6.1.0",
  "derive_more",
  "indexmap 2.6.0",
@@ -7979,7 +7976,7 @@ dependencies = [
  "alloy-rlp",
  "aquamarine",
  "auto_impl",
- "criterion",
+ "codspeed-criterion-compat",
  "derive_more",
  "discv5",
  "enr",
@@ -8762,7 +8759,7 @@ dependencies = [
  "bincode",
  "bytes",
  "c-kzg",
- "criterion",
+ "codspeed-criterion-compat",
  "derive_more",
  "modular-bitfield",
  "once_cell",
@@ -9287,7 +9284,7 @@ dependencies = [
  "alloy-rlp",
  "assert_matches",
  "bincode",
- "criterion",
+ "codspeed-criterion-compat",
  "futures-util",
  "itertools 0.13.0",
  "num-traits",
@@ -9514,7 +9511,7 @@ dependencies = [
  "assert_matches",
  "auto_impl",
  "bitflags 2.6.0",
- "criterion",
+ "codspeed-criterion-compat",
  "futures-util",
  "metrics",
  "parking_lot",
@@ -9560,7 +9557,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie",
  "auto_impl",
- "criterion",
+ "codspeed-criterion-compat",
  "itertools 0.13.0",
  "metrics",
  "proptest",
@@ -9593,7 +9590,7 @@ dependencies = [
  "arbitrary",
  "bincode",
  "bytes",
- "criterion",
+ "codspeed-criterion-compat",
  "derive_more",
  "hash-db",
  "itertools 0.13.0",
@@ -9643,7 +9640,7 @@ version = "1.1.4"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
- "criterion",
+ "codspeed-criterion-compat",
  "derive_more",
  "itertools 0.13.0",
  "metrics",
@@ -9671,7 +9668,7 @@ dependencies = [
  "alloy-rlp",
  "arbitrary",
  "assert_matches",
- "criterion",
+ "codspeed-criterion-compat",
  "itertools 0.13.0",
  "pretty_assertions",
  "proptest",

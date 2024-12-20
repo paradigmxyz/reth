@@ -120,6 +120,8 @@ test-utils = [
     "reth-static-file",
     "reth-tracing",
     "reth-trie/test-utils",
-    "reth-trie-db/test-utils",
+    "reth-trie-sparse/test-utils",
     "reth-prune-types?/test-utils",
+    "reth-trie-db/test-utils",
+    "reth-trie-parallel/test-utils",
 ]

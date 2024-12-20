@@ -69,7 +69,6 @@ pprof = { workspace = true, features = [
     "criterion",
 ] }
 criterion.workspace = true
-iai-callgrind.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
@@ -122,11 +121,6 @@ harness = false
 
 [[bench]]
 name = "criterion"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "iai"
 required-features = ["test-utils"]
 harness = false
 
