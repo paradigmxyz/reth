@@ -90,11 +90,6 @@ where
             // Fetch the block
             let fetch_block_start = Instant::now();
 
-            let td = self
-                .provider
-                .header_td_by_number(block_number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-
             // we need the block's transactions along with their hashes
             let block = self
                 .provider
@@ -116,7 +111,7 @@ where
             let (unsealed_header, hash) = block.header.split();
             let block = P::Block::new(unsealed_header, block.body).with_senders_unchecked(senders);
 
-            executor.execute_and_verify_one((&block, td).into())?;
+            executor.execute_and_verify_one(&block)?;
             execution_duration += execute_start.elapsed();
 
             // TODO(alexey): report gas metrics using `block.header.gas_used`
@@ -199,11 +194,6 @@ where
         BlockWithSenders<P::Block>,
         BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
     )> {
-        let td = self
-            .provider
-            .header_td_by_number(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-
         // Fetch the block with senders for execution.
         let block_with_senders = self
             .provider
@@ -217,7 +207,7 @@ where
 
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body().transactions().len(), "Executing block");
 
-        let block_execution_output = executor.execute((&block_with_senders, td).into())?;
+        let block_execution_output = executor.execute(&block_with_senders)?;
 
         Ok((block_with_senders, block_execution_output))
     }

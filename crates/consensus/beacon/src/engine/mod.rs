@@ -2460,7 +2460,7 @@ mod tests {
                     .chain(MAINNET.chain)
                     .genesis(MAINNET.genesis.clone())
                     .london_activated()
-                    .paris_at_ttd(U256::from(3))
+                    .paris_at_ttd(U256::from(3), 3)
                     .build(),
             );
 

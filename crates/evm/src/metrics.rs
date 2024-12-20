@@ -5,7 +5,7 @@
 use crate::{execute::Executor, system_calls::OnStateHook};
 use alloy_consensus::BlockHeader;
 use metrics::{Counter, Gauge, Histogram};
-use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput};
+use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
 use reth_primitives::BlockWithSenders;
 use revm_primitives::EvmState;
@@ -97,13 +97,13 @@ impl ExecutorMetrics {
     pub fn execute_metered<'a, E, DB, O, Error, B>(
         &self,
         executor: E,
-        input: BlockExecutionInput<'a, BlockWithSenders<B>>,
+        input: &'a BlockWithSenders<B>,
         state_hook: Box<dyn OnStateHook>,
     ) -> Result<BlockExecutionOutput<O>, Error>
     where
         E: Executor<
             DB,
-            Input<'a> = BlockExecutionInput<'a, BlockWithSenders<B>>,
+            Input<'a> = &'a BlockWithSenders<B>,
             Output = BlockExecutionOutput<O>,
             Error = Error,
         >,
@@ -114,11 +114,8 @@ impl ExecutorMetrics {
         // be accessible.
         let wrapper = MeteredStateHook { metrics: self.clone(), inner_hook: state_hook };
 
-        // Store reference to block for metered
-        let block = input.block;
-
         // Use metered to execute and track timing/gas metrics
-        let output = self.metered(block, || executor.execute_with_state_hook(input, wrapper))?;
+        let output = self.metered(input, || executor.execute_with_state_hook(input, wrapper))?;
 
         // Update the metrics for the number of accounts, storage slots and bytecodes updated
         let accounts = output.state.state.len();
@@ -134,16 +131,12 @@ impl ExecutorMetrics {
     }
 
     /// Execute the given block and update metrics for the execution.
-    pub fn metered_one<F, R, B>(
-        &self,
-        input: BlockExecutionInput<'_, BlockWithSenders<B>>,
-        f: F,
-    ) -> R
+    pub fn metered_one<F, R, B>(&self, input: &BlockWithSenders<B>, f: F) -> R
     where
-        F: FnOnce(BlockExecutionInput<'_, BlockWithSenders<B>>) -> R,
+        F: FnOnce(&BlockWithSenders<B>) -> R,
         B: reth_primitives_traits::Block,
     {
-        self.metered(input.block, || f(input))
+        self.metered(input, || f(input))
     }
 }
 
@@ -165,7 +158,7 @@ mod tests {
 
     impl Executor<()> for MockExecutor {
         type Input<'a>
-            = BlockExecutionInput<'a, BlockWithSenders>
+            = &'a BlockWithSenders
         where
             Self: 'a;
         type Output = BlockExecutionOutput<()>;
@@ -236,11 +229,7 @@ mod tests {
     fn test_executor_metrics_hook_metrics_recorded() {
         let snapshotter = setup_test_recorder();
         let metrics = ExecutorMetrics::default();
-
-        let input = BlockExecutionInput {
-            block: &BlockWithSenders::default(),
-            total_difficulty: Default::default(),
-        };
+        let input = BlockWithSenders::default();
 
         let (tx, _rx) = mpsc::channel();
         let expected_output = 42;
@@ -266,7 +255,7 @@ mod tests {
             state
         };
         let executor = MockExecutor { state };
-        let _result = metrics.execute_metered(executor, input, state_hook).unwrap();
+        let _result = metrics.execute_metered(executor, &input, state_hook).unwrap();
 
         let snapshot = snapshotter.snapshot().into_vec();
 
@@ -289,11 +278,7 @@ mod tests {
     #[test]
     fn test_executor_metrics_hook_called() {
         let metrics = ExecutorMetrics::default();
-
-        let input = BlockExecutionInput {
-            block: &BlockWithSenders::default(),
-            total_difficulty: Default::default(),
-        };
+        let input = BlockWithSenders::default();
 
         let (tx, rx) = mpsc::channel();
         let expected_output = 42;
@@ -302,7 +287,7 @@ mod tests {
         let state = EvmState::default();
 
         let executor = MockExecutor { state };
-        let _result = metrics.execute_metered(executor, input, state_hook).unwrap();
+        let _result = metrics.execute_metered(executor, &input, state_hook).unwrap();
 
         let actual_output = rx.try_recv().unwrap();
         assert_eq!(actual_output, expected_output);

@@ -23,6 +23,7 @@ pub struct Head {
     /// The timestamp of the head block.
     pub timestamp: u64,
 }
+
 impl Head {
     /// Creates a new `Head` instance.
     pub const fn new(

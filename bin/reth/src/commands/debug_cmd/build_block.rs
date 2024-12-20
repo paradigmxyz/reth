@@ -265,7 +265,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
                 let block_execution_output =
-                    executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
+                    executor.execute(&block_with_senders.clone().unseal())?;
                 let execution_outcome =
                     ExecutionOutcome::from((block_execution_output, block.number));
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");

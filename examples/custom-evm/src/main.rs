@@ -4,7 +4,7 @@
 
 use alloy_consensus::Header;
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, Address, Bytes, U256};
+use alloy_primitives::{address, Address, Bytes};
 use reth::{
     builder::{
         components::{ExecutorBuilder, PayloadServiceBuilder},
@@ -103,13 +103,8 @@ impl ConfigureEvmEnv for MyEvmConfig {
         self.inner.fill_tx_env_system_contract_call(env, caller, contract, data);
     }
 
-    fn fill_cfg_env(
-        &self,
-        cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Self::Header,
-        total_difficulty: U256,
-    ) {
-        self.inner.fill_cfg_env(cfg_env, header, total_difficulty);
+    fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
+        self.inner.fill_cfg_env(cfg_env, header);
     }
 
     fn next_cfg_and_block_env(

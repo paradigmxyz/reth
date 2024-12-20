@@ -1,6 +1,6 @@
 use alloy_consensus::constants::ETH_TO_WEI;
-use alloy_primitives::{BlockNumber, U256};
-use reth_chainspec::{EthereumHardfork, Hardforks};
+use alloy_primitives::BlockNumber;
+use reth_chainspec::{EthereumHardfork, EthereumHardforks, Hardforks};
 
 /// Calculates the base block reward.
 ///
@@ -21,13 +21,11 @@ use reth_chainspec::{EthereumHardfork, Hardforks};
 /// - Definition: [Yellow Paper][yp] (page 15, 11.3)
 ///
 /// [yp]: https://ethereum.github.io/yellowpaper/paper.pdf
-pub fn base_block_reward(
-    chain_spec: impl Hardforks,
+pub fn base_block_reward<ChainSpec: EthereumHardforks>(
+    chain_spec: &ChainSpec,
     block_number: BlockNumber,
-    block_difficulty: U256,
-    total_difficulty: U256,
 ) -> Option<u128> {
-    if chain_spec.fork(EthereumHardfork::Paris).active_at_ttd(total_difficulty, block_difficulty) {
+    if chain_spec.is_paris_active_at_block(block_number).is_some_and(|active| active) {
         None
     } else {
         Some(base_block_reward_pre_merge(chain_spec, block_number))
@@ -62,12 +60,9 @@ pub fn base_block_reward_pre_merge(chain_spec: impl Hardforks, block_number: Blo
 /// #
 /// // This is block 126 on mainnet.
 /// let block_number = 126;
-/// let block_difficulty = U256::from(18_145_285_642usize);
-/// let total_difficulty = U256::from(2_235_668_675_900usize);
 /// let number_of_ommers = 1;
 ///
-/// let reward = base_block_reward(&*MAINNET, block_number, block_difficulty, total_difficulty)
-///     .map(|reward| block_reward(reward, 1));
+/// let reward = base_block_reward(&*MAINNET, block_number).map(|reward| block_reward(reward, 1));
 ///
 /// // The base block reward is 5 ETH, and the ommer inclusion reward is 1/32th of 5 ETH.
 /// assert_eq!(reward.unwrap(), ETH_TO_WEI * 5 + ((ETH_TO_WEI * 5) >> 5));
@@ -113,6 +108,7 @@ pub const fn ommer_reward(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::U256;
     use reth_chainspec::MAINNET;
 
     #[test]
@@ -126,11 +122,11 @@ mod tests {
             // Petersburg
             ((7280000, U256::ZERO), Some(ETH_TO_WEI * 2)),
             // Merge
-            ((10000000, U256::from(58_750_000_000_000_000_000_000_u128)), None),
+            ((15537394, U256::from(58_750_000_000_000_000_000_000_u128)), None),
         ];
 
-        for ((block_number, td), expected_reward) in cases {
-            assert_eq!(base_block_reward(&*MAINNET, block_number, U256::ZERO, td), expected_reward);
+        for ((block_number, _td), expected_reward) in cases {
+            assert_eq!(base_block_reward(&*MAINNET, block_number), expected_reward);
         }
     }
 
