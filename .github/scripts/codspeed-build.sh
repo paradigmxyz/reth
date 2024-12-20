@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -eo pipefail
 
+# TODO: Benchmarks run WAY too slow due to excessive amount of iterations.
+
 cmd=(cargo codspeed build --profile profiling)
 excludes=(
     # Unnecessary
@@ -14,4 +16,6 @@ excludes=(
 )
 
 "${cmd[@]}" --features test-utils --workspace "${excludes[@]}"
-"${cmd[@]}" -p reth-transaction-pool --features test-utils,arbitrary
+
+# TODO: Slow benchmarks due to too many iterations
+## "${cmd[@]}" -p reth-transaction-pool --features test-utils,arbitrary
