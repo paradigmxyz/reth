@@ -51,12 +51,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
 
             let account = if is_selfdestruct {
                 RevmAccount {
-                    info: AccountInfo {
-                        balance: U256::ZERO,
-                        nonce: 0,
-                        code_hash: KECCAK_EMPTY,
-                        code: Some(Default::default()),
-                    },
+                    info: AccountInfo::default(),
                     storage: HashMap::default(),
                     status: AccountStatus::SelfDestructed,
                 }
