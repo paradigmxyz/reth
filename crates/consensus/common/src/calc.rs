@@ -60,12 +60,9 @@ pub fn base_block_reward_pre_merge(chain_spec: impl Hardforks, block_number: Blo
 /// #
 /// // This is block 126 on mainnet.
 /// let block_number = 126;
-/// let block_difficulty = U256::from(18_145_285_642usize);
-/// let total_difficulty = U256::from(2_235_668_675_900usize);
 /// let number_of_ommers = 1;
 ///
-/// let reward = base_block_reward(&*MAINNET, block_number, block_difficulty, total_difficulty)
-///     .map(|reward| block_reward(reward, 1));
+/// let reward = base_block_reward(&*MAINNET, block_number).map(|reward| block_reward(reward, 1));
 ///
 /// // The base block reward is 5 ETH, and the ommer inclusion reward is 1/32th of 5 ETH.
 /// assert_eq!(reward.unwrap(), ETH_TO_WEI * 5 + ((ETH_TO_WEI * 5) >> 5));
