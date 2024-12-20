@@ -95,6 +95,9 @@ where
         self,
         targets: MultiProofTargets,
     ) -> Result<MultiProof, ParallelStateRootError> {
+        let thread_name =
+            std::thread::current().name().map(ToString::to_string).unwrap_or_default();
+
         let mut tracker = ParallelTrieTracker::default();
 
         // Extend prefix sets with targets
@@ -121,12 +124,12 @@ where
         debug!(
             target: "trie::parallel_state_root",
             total_targets = storage_root_targets_len,
+            ?thread_name,
             "Starting parallel proof generation"
         );
 
         // Pre-calculate storage roots for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
-        debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-generating storage proofs");
 
         let mut storage_proofs =
             B256HashMap::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
@@ -142,9 +145,12 @@ where
 
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
+            let thread_name = thread_name.clone();
             self.thread_pool.spawn_fifo(move || {
                 debug!(
                     target: "trie::parallel",
+                    parent_thread = ?thread_name,
+                    thread = ?std::thread::current().name().unwrap_or_default(),
                     ?hashed_address,
                     "Starting proof calculation"
                 );
@@ -155,6 +161,8 @@ where
                     let provider_ro = view.provider_ro()?;
                     trace!(
                         target: "trie::parallel",
+                        parent_thread = ?thread_name,
+                        thread = ?std::thread::current().name().unwrap_or_default(),
                         ?hashed_address,
                         provider_time = ?provider_start.elapsed(),
                         "Got provider"
@@ -171,6 +179,8 @@ where
                     );
                     trace!(
                         target: "trie::parallel",
+                        parent_thread = ?thread_name,
+                        thread = ?std::thread::current().name().unwrap_or_default(),
                         ?hashed_address,
                         cursor_time = ?cursor_start.elapsed(),
                         "Created cursors"
@@ -189,6 +199,8 @@ where
 
                     trace!(
                         target: "trie::parallel",
+                        parent_thread = ?thread_name,
+                        thread = ?std::thread::current().name().unwrap_or_default(),
                         ?hashed_address,
                         proof_time = ?proof_start.elapsed(),
                         "Completed proof calculation"
@@ -200,6 +212,8 @@ where
                 if let Err(e) = tx.send(result) {
                     error!(
                         target: "trie::parallel",
+                        parent_thread = ?thread_name,
+                        thread = ?std::thread::current().name().unwrap_or_default(),
                         ?hashed_address,
                         error = ?e,
                         task_time = ?task_start.elapsed(),

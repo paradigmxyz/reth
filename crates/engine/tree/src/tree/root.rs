@@ -423,7 +423,7 @@ where
                 ?targets_len,
                 ?storage_targets_len,
                 sequence = ?proof_sequence_number,
-                thread = ?std::thread::current().name(),
+                thread = ?std::thread::current().name().unwrap_or_default(),
                 "Spawning multiproof"
             );
             let start = Instant::now();
@@ -434,7 +434,7 @@ where
                 ?targets_len,
                 ?storage_targets_len,
                 elapsed = ?start.elapsed(),
-                thread = ?std::thread::current().name(),
+                thread = ?std::thread::current().name().unwrap_or_default(),
                 "Multiproof finished"
             );
 
