@@ -246,10 +246,9 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             if destroyed {
                 hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
             } else if changed_storage_iter.peek().is_some() {
-                hashed_state.storages.insert(
-                    hashed_address,
-                    HashedStorage::from_iter(false, changed_storage_iter),
-                );
+                hashed_state
+                    .storages
+                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
             }
         }
     }
