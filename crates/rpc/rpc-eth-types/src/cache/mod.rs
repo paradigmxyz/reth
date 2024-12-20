@@ -592,11 +592,13 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
     while let Some(event) = events.next().await {
         if let Some(reverted) = event.reverted() {
             let chain_change = ChainChange::new(reverted);
+
             let _ =
                 eth_state_cache.to_service.send(CacheAction::RemoveReorgedChain { chain_change });
         }
 
         let chain_change = ChainChange::new(event.committed());
+
         let _ =
             eth_state_cache.to_service.send(CacheAction::CacheNewCanonicalChain { chain_change });
     }
