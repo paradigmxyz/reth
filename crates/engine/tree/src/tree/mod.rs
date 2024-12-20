@@ -2479,6 +2479,7 @@ where
         ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
 
+    /// Computes the trie input at the provided parent hash.
     fn compute_trie_input(
         &self,
         consistent_view: ConsistentDbView<P>,
