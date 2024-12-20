@@ -58,5 +58,6 @@ optimism = [
 	"reth-optimism-evm/optimism",
 	"revm/optimism",
 	"reth-execution-types/optimism",
-	"reth-optimism-consensus/optimism"
+	"reth-optimism-consensus/optimism",
+	"reth-optimism-primitives/optimism"
 ]

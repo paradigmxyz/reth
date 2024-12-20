@@ -7,7 +7,7 @@ use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadI
 use reth_chain_state::ExecutedBlock;
 use reth_primitives::{NodePrimitives, SealedBlockFor};
 
-/// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into
+/// Represents a built payload type that contains a built `SealedBlock` and can be converted into
 /// engine API execution payloads.
 pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
     /// The node primitive types
