@@ -64,7 +64,6 @@ type HeaderLruCache<H, L> = MultiConsumerLruCache<B256, H, L, HeaderResponseSend
 #[derive(Debug, Clone)]
 pub struct EthStateCache<B: Block, R> {
     to_service: UnboundedSender<CacheAction<B, R>>,
-    latest_chain_change: Option<ChainChange<B, R>>,
 }
 
 impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
@@ -92,7 +91,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
             rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_operations)),
             latest_chain_change: None,
         };
-        let cache = Self { to_service, latest_chain_change: None };
+        let cache = Self { to_service };
         (cache, service)
     }
 
@@ -583,14 +582,9 @@ impl<B: Block, R: Clone> ChainChange<B, R> {
 /// Awaits for new chain events and directly inserts them into the cache so they're available
 /// immediately before they need to be fetched from disk.
 ///
-/// Updates [`EthStateCache`] in two scenario :
-/// 1. On reorgs: sets `EthStateCache::latest_chain_change` to None and removes reorged blocks
-/// 2. On new canonical blocks: updates `EthStateCache::latest_chain_change` and caches the new
-///    blocks
-///
 /// Reorged blocks are removed from the cache.
 pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
-    mut eth_state_cache: EthStateCache<N::Block, N::Receipt>,
+    eth_state_cache: EthStateCache<N::Block, N::Receipt>,
     mut events: St,
 ) where
     St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
@@ -598,13 +592,11 @@ pub async fn cache_new_blocks_task<St, N: NodePrimitives>(
     while let Some(event) = events.next().await {
         if let Some(reverted) = event.reverted() {
             let chain_change = ChainChange::new(reverted);
-            eth_state_cache.latest_chain_change = None;
             let _ =
                 eth_state_cache.to_service.send(CacheAction::RemoveReorgedChain { chain_change });
         }
 
         let chain_change = ChainChange::new(event.committed());
-        eth_state_cache.latest_chain_change = Some(chain_change.clone());
         let _ =
             eth_state_cache.to_service.send(CacheAction::CacheNewCanonicalChain { chain_change });
     }
