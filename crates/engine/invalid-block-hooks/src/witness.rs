@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{keccak256, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use eyre::OptionExt;
 use pretty_assertions::Comparison;
@@ -79,7 +79,7 @@ where
 
         // Setup environment for the execution.
         let EvmEnv { cfg_env_with_handler_cfg, block_env } =
-            self.evm_config.cfg_and_block_env(block.header(), U256::MAX);
+            self.evm_config.cfg_and_block_env(block.header());
 
         // Setup EVM
         let mut evm = self.evm_config.evm_with_env(
@@ -116,7 +116,6 @@ where
         let balance_increments = post_block_balance_increments(
             self.provider.chain_spec().as_ref(),
             &block.clone().unseal().block,
-            U256::MAX,
         );
 
         // increment balances

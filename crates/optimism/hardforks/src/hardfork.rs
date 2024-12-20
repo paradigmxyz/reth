@@ -220,7 +220,11 @@ impl OpHardfork {
             (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(105235063)),
             (
                 EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD { fork_block: Some(105235063), total_difficulty: U256::ZERO },
+                ForkCondition::TTD {
+                    activation_block_number: 105235063,
+                    fork_block: Some(105235063),
+                    total_difficulty: U256::ZERO,
+                },
             ),
             (Self::Bedrock.boxed(), ForkCondition::Block(105235063)),
             (Self::Regolith.boxed(), ForkCondition::Timestamp(0)),
@@ -252,7 +256,11 @@ impl OpHardfork {
             (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
             (
                 EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+                ForkCondition::TTD {
+                    activation_block_number: 0,
+                    fork_block: Some(0),
+                    total_difficulty: U256::ZERO,
+                },
             ),
             (Self::Bedrock.boxed(), ForkCondition::Block(0)),
             (Self::Regolith.boxed(), ForkCondition::Timestamp(0)),
@@ -284,7 +292,11 @@ impl OpHardfork {
             (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
             (
                 EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+                ForkCondition::TTD {
+                    activation_block_number: 0,
+                    fork_block: Some(0),
+                    total_difficulty: U256::ZERO,
+                },
             ),
             (Self::Bedrock.boxed(), ForkCondition::Block(0)),
             (Self::Regolith.boxed(), ForkCondition::Timestamp(0)),
@@ -316,7 +328,11 @@ impl OpHardfork {
             (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
             (
                 EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+                ForkCondition::TTD {
+                    activation_block_number: 0,
+                    fork_block: Some(0),
+                    total_difficulty: U256::ZERO,
+                },
             ),
             (Self::Bedrock.boxed(), ForkCondition::Block(0)),
             (Self::Regolith.boxed(), ForkCondition::Timestamp(0)),

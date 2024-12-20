@@ -109,19 +109,15 @@ impl ConfigureEvmEnv for EthEvmConfig {
         env.block.basefee = U256::ZERO;
     }
 
-    fn fill_cfg_env(
-        &self,
-        cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Header,
-        total_difficulty: U256,
-    ) {
+    fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Header) {
         let spec_id = config::revm_spec(
             self.chain_spec(),
             &Head {
                 number: header.number,
                 timestamp: header.timestamp,
                 difficulty: header.difficulty,
-                total_difficulty,
+                // NOTE: this does nothing within revm_spec
+                total_difficulty: U256::MIN,
                 hash: Default::default(),
             },
         );
@@ -226,14 +222,10 @@ mod tests {
             .shanghai_activated()
             .build();
 
-        // Define the total difficulty as zero (default)
-        let total_difficulty = U256::ZERO;
-
         // Use the `EthEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
         let EvmEnv { cfg_env_with_handler_cfg, .. } =
-            EthEvmConfig::new(Arc::new(chain_spec.clone()))
-                .cfg_and_block_env(&header, total_difficulty);
+            EthEvmConfig::new(Arc::new(chain_spec.clone())).cfg_and_block_env(&header);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec

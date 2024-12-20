@@ -19,9 +19,7 @@ use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_primitives::{GotExpected, NodePrimitives, SealedBlockWithSenders, SealedHeader};
 use reth_primitives_traits::{constants::GAS_LIMIT_BOUND_DIVISOR, Block as _, BlockBody};
-use reth_provider::{
-    BlockExecutionInput, BlockExecutionOutput, BlockReaderIdExt, StateProviderFactory,
-};
+use reth_provider::{BlockExecutionOutput, BlockReaderIdExt, StateProviderFactory};
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::internal_rpc_err;
@@ -152,18 +150,15 @@ where
 
         let block = block.unseal();
         let mut accessed_blacklisted = None;
-        let output = executor.execute_with_state_closure(
-            BlockExecutionInput::new(&block, U256::MAX),
-            |state| {
-                if !self.disallow.is_empty() {
-                    for account in state.cache.accounts.keys() {
-                        if self.disallow.contains(account) {
-                            accessed_blacklisted = Some(*account);
-                        }
+        let output = executor.execute_with_state_closure(&block, |state| {
+            if !self.disallow.is_empty() {
+                for account in state.cache.accounts.keys() {
+                    if self.disallow.contains(account) {
+                        accessed_blacklisted = Some(*account);
                     }
                 }
-            },
-        )?;
+            }
+        })?;
 
         // update the cached reads
         self.update_cached_reads(latest_header_hash, request_cache).await;

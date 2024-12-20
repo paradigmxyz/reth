@@ -397,7 +397,6 @@ where
             .header_td(&block.parent_hash)?
             .ok_or_else(|| BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash })?;
 
-        // Pass the parent total difficulty to short-circuit unnecessary calculations.
         if !self
             .externals
             .provider_factory
@@ -1037,6 +1036,7 @@ where
                         })
                     },
                 )?;
+
             if !self
                 .externals
                 .provider_factory

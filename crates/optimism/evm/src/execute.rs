@@ -25,7 +25,7 @@ use reth_optimism_forks::OpHardfork;
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{BlockWithSenders, Receipt, TransactionSigned, TxType};
 use reth_revm::{Database, State};
-use revm_primitives::{db::DatabaseCommit, EnvWithHandlerCfg, ResultAndState, U256};
+use revm_primitives::{db::DatabaseCommit, EnvWithHandlerCfg, ResultAndState};
 use tracing::trace;
 
 /// Factory for [`OpExecutionStrategy`].
@@ -111,8 +111,8 @@ where
     /// Configures a new evm configuration and block environment for the given block.
     ///
     /// Caution: this does not initialize the tx environment.
-    fn evm_env_for_block(&self, header: &Header, total_difficulty: U256) -> EnvWithHandlerCfg {
-        let evm_env = self.evm_config.cfg_and_block_env(header, total_difficulty);
+    fn evm_env_for_block(&self, header: &Header) -> EnvWithHandlerCfg {
+        let evm_env = self.evm_config.cfg_and_block_env(header);
         let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
         EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, Default::default())
     }
@@ -131,17 +131,13 @@ where
         self.tx_env_overrides = Some(tx_env_overrides);
     }
 
-    fn apply_pre_execution_changes(
-        &mut self,
-        block: &BlockWithSenders,
-        total_difficulty: U256,
-    ) -> Result<(), Self::Error> {
+    fn apply_pre_execution_changes(&mut self, block: &BlockWithSenders) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
             (*self.chain_spec).is_spurious_dragon_active_at_block(block.header.number);
         self.state.set_state_clear_flag(state_clear_flag);
 
-        let env = self.evm_env_for_block(&block.header, total_difficulty);
+        let env = self.evm_env_for_block(&block.header);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
         self.system_caller.apply_beacon_root_contract_call(
@@ -164,9 +160,8 @@ where
     fn execute_transactions(
         &mut self,
         block: &BlockWithSenders,
-        total_difficulty: U256,
     ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
-        let env = self.evm_env_for_block(&block.header, total_difficulty);
+        let env = self.evm_env_for_block(&block.header);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
         let is_regolith =
@@ -260,11 +255,10 @@ where
     fn apply_post_execution_changes(
         &mut self,
         block: &BlockWithSenders,
-        total_difficulty: U256,
         _receipts: &[Receipt],
     ) -> Result<Requests, Self::Error> {
         let balance_increments =
-            post_block_balance_increments(&self.chain_spec.clone(), &block.block, total_difficulty);
+            post_block_balance_increments(&self.chain_spec.clone(), &block.block);
         // increment balances
         self.state
             .increment_balances(balance_increments.clone())
@@ -317,7 +311,7 @@ mod tests {
     use crate::OpChainSpec;
     use alloy_consensus::TxEip1559;
     use alloy_primitives::{
-        b256, Address, PrimitiveSignature as Signature, StorageKey, StorageValue,
+        b256, Address, PrimitiveSignature as Signature, StorageKey, StorageValue, U256,
     };
     use op_alloy_consensus::TxDeposit;
     use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -417,22 +411,13 @@ mod tests {
 
         // Attempt to execute a block with one deposit and one non-deposit transaction
         executor
-            .execute_and_verify_one(
-                (
-                    &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: BlockBody {
-                                transactions: vec![tx, tx_deposit],
-                                ..Default::default()
-                            },
-                        },
-                        senders: vec![addr, addr],
-                    },
-                    U256::ZERO,
-                )
-                    .into(),
-            )
+            .execute_and_verify_one(&BlockWithSenders {
+                block: Block {
+                    header,
+                    body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
+                },
+                senders: vec![addr, addr],
+            })
             .unwrap();
 
         let receipts = executor.receipts();
@@ -501,22 +486,13 @@ mod tests {
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
-            .execute_and_verify_one(
-                (
-                    &BlockWithSenders {
-                        block: Block {
-                            header,
-                            body: BlockBody {
-                                transactions: vec![tx, tx_deposit],
-                                ..Default::default()
-                            },
-                        },
-                        senders: vec![addr, addr],
-                    },
-                    U256::ZERO,
-                )
-                    .into(),
-            )
+            .execute_and_verify_one(&BlockWithSenders {
+                block: Block {
+                    header,
+                    body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
+                },
+                senders: vec![addr, addr],
+            })
             .expect("Executing a block while canyon is active should not fail");
 
         let receipts = executor.receipts();

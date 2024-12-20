@@ -32,7 +32,7 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: &Head) -> revm_primitives::SpecI
         revm_primitives::CANCUN
     } else if chain_spec.fork(EthereumHardfork::Shanghai).active_at_head(block) {
         revm_primitives::SHANGHAI
-    } else if chain_spec.fork(EthereumHardfork::Paris).active_at_head(block) {
+    } else if chain_spec.is_paris_active_at_block(block.number).is_some_and(|active| active) {
         revm_primitives::MERGE
     } else if chain_spec.fork(EthereumHardfork::London).active_at_head(block) {
         revm_primitives::LONDON
@@ -166,19 +166,7 @@ mod tests {
                 &Head {
                     total_difficulty: U256::from(58_750_000_000_000_000_000_010_u128),
                     difficulty: U256::from(10_u128),
-                    ..Default::default()
-                }
-            ),
-            revm_primitives::MERGE
-        );
-        // TTD trumps the block number
-        assert_eq!(
-            revm_spec(
-                &MAINNET,
-                &Head {
-                    number: 15537394 - 10,
-                    total_difficulty: U256::from(58_750_000_000_000_000_000_010_u128),
-                    difficulty: U256::from(10_u128),
+                    number: 15537394,
                     ..Default::default()
                 }
             ),
