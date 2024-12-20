@@ -166,19 +166,7 @@ mod tests {
                 &Head {
                     total_difficulty: U256::from(58_750_000_000_000_000_000_010_u128),
                     difficulty: U256::from(10_u128),
-                    ..Default::default()
-                }
-            ),
-            revm_primitives::MERGE
-        );
-        // TTD trumps the block number
-        assert_eq!(
-            revm_spec(
-                &MAINNET,
-                &Head {
-                    number: 15537394 - 10,
-                    total_difficulty: U256::from(58_750_000_000_000_000_000_010_u128),
-                    difficulty: U256::from(10_u128),
+                    number: 15537394,
                     ..Default::default()
                 }
             ),

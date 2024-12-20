@@ -355,7 +355,16 @@ impl From<Genesis> for OpChainSpec {
             .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
             .collect::<Vec<_>>();
 
-        // We assume no OP network merges, and set the paris block and total difficulty to zero
+        // We set the paris hardfork for OP networks to zero
+        block_hardforks.push((
+            EthereumHardfork::Paris.boxed(),
+            ForkCondition::TTD {
+                activation_block_number: 0,
+                total_difficulty: U256::ZERO,
+                fork_block: genesis.config.merge_netsplit_block,
+            },
+        ));
+
         // Time-based hardforks
         let time_hardfork_opts = [
             (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
@@ -398,6 +407,8 @@ impl From<Genesis> for OpChainSpec {
                 chain: genesis.config.chain_id.into(),
                 genesis,
                 hardforks: ChainHardforks::new(ordered_hardforks),
+                // We assume no OP network merges, and set the paris block and total difficulty to
+                // zero
                 paris_block_and_final_difficulty: Some((0, U256::ZERO)),
                 base_fee_params: optimism_genesis_info.base_fee_params,
                 ..Default::default()
@@ -991,10 +1002,10 @@ mod tests {
             // OpHardfork::Isthmus.boxed(),
         ];
 
-        assert!(expected_hardforks
-            .iter()
-            .zip(hardforks.iter())
-            .all(|(expected, actual)| &**expected == *actual));
+        for (expected, actual) in expected_hardforks.iter().zip(hardforks.iter()) {
+            println!("got {expected:?}, {actual:?}");
+            assert_eq!(&**expected, &**actual);
+        }
         assert_eq!(expected_hardforks.len(), hardforks.len());
     }
 

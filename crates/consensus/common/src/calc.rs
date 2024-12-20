@@ -122,7 +122,7 @@ mod tests {
             // Petersburg
             ((7280000, U256::ZERO), Some(ETH_TO_WEI * 2)),
             // Merge
-            ((10000000, U256::from(58_750_000_000_000_000_000_000_u128)), None),
+            ((15537394, U256::from(58_750_000_000_000_000_000_000_u128)), None),
         ];
 
         for ((block_number, _td), expected_reward) in cases {
