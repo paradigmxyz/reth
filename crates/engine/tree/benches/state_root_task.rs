@@ -22,7 +22,7 @@ use revm_primitives::{
     Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot, HashMap,
     B256, KECCAK_EMPTY, U256,
 };
-use std::{hint::black_box, sync::Arc};
+use std::hint::black_box;
 
 #[derive(Debug, Clone)]
 struct BenchParams {

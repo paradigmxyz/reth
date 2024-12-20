@@ -33,8 +33,6 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-codspeed
-      - name: Generate test vectors
-        run: cargo run --bin reth --features dev,test-utils --profile profiling -- test-vectors tables
       - name: Build the benchmark target(s)
         run: ./.github/scripts/codspeed-build.sh
       - name: Run the benchmarks
