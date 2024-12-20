@@ -96,7 +96,7 @@ impl EthereumHardfork {
     /// Retrieves the activation block for the specified hardfork on the Sepolia testnet.
     pub const fn sepolia_activation_block(&self) -> Option<u64> {
         match self {
-            Self::Paris => Some(1735371),
+            Self::Paris => Some(1450409),
             Self::Shanghai => Some(2990908),
             Self::Cancun => Some(5187023),
             Self::Frontier |
