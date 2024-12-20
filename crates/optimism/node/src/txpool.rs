@@ -1,5 +1,7 @@
 //! OP transaction pool types
-use alloy_consensus::{BlobTransactionSidecar, BlobTransactionValidationError, BlockHeader, Transaction, Typed2718};
+use alloy_consensus::{
+    BlobTransactionSidecar, BlobTransactionValidationError, BlockHeader, Transaction, Typed2718,
+};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Address, TxHash, TxKind, U256};
 use op_alloy_consensus::OpTypedTransaction;
@@ -16,7 +18,9 @@ use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_revm::L1BlockInfo;
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction, EthTransactionValidator, Pool, PoolTransaction, TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator
+    CoinbaseTipOrdering, EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction,
+    EthTransactionValidator, Pool, PoolTransaction, TransactionOrigin,
+    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use revm::primitives::{AccessList, KzgSettings};
 use std::sync::{
