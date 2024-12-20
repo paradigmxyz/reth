@@ -887,8 +887,8 @@ impl ChainSpecBuilder {
     pub fn build(self) -> ChainSpec {
         let paris_block_and_final_difficulty = {
             self.hardforks.get(EthereumHardfork::Paris).and_then(|cond| {
-                if let ForkCondition::TTD { total_difficulty, fork_block, .. } = cond {
-                    fork_block.map(|fork_block| (fork_block, total_difficulty))
+                if let ForkCondition::TTD { total_difficulty, activation_block_number, .. } = cond {
+                    Some((activation_block_number, total_difficulty))
                 } else {
                     None
                 }

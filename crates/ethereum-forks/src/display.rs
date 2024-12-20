@@ -38,17 +38,12 @@ impl core::fmt::Display for DisplayFork {
             ForkCondition::Block(at) | ForkCondition::Timestamp(at) => {
                 write!(f, "{name_with_eip:32} @{at}")?;
             }
-            ForkCondition::TTD { fork_block, total_difficulty, .. } => {
+            ForkCondition::TTD { total_difficulty, .. } => {
+                // All networks that have merged are finalized.
                 write!(
                     f,
-                    "{:32} @{} ({})",
-                    name_with_eip,
-                    total_difficulty,
-                    if fork_block.is_some() {
-                        "network is known to be merged"
-                    } else {
-                        "network is not known to be merged"
-                    }
+                    "{:32} @{} (network is known to be merged)",
+                    name_with_eip, total_difficulty,
                 )?;
             }
             ForkCondition::Never => unreachable!(),
