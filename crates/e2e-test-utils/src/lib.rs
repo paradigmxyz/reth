@@ -82,11 +82,12 @@ where
 
         let span = span!(Level::INFO, "node", idx);
         let _enter = span.enter();
-        let NodeHandle { node, node_exit_future: _, bitfinity_import: _ } = NodeBuilder::new(node_config.clone())
-            .testing_node(exec.clone())
-            .node(Default::default())
-            .launch()
-            .await?;
+        let NodeHandle { node, node_exit_future: _, bitfinity_import: _ } =
+            NodeBuilder::new(node_config.clone())
+                .testing_node(exec.clone())
+                .node(Default::default())
+                .launch()
+                .await?;
 
         let mut node = NodeTestContext::new(node, attributes_generator).await?;
 
@@ -166,7 +167,7 @@ where
         let span = span!(Level::INFO, "node", idx);
         let _enter = span.enter();
         let node = N::default();
-        let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
+        let NodeHandle { node, .. } = NodeBuilder::new(node_config.clone())
             .testing_node(exec.clone())
             .with_types_and_provider::<N, BlockchainProvider2<_>>()
             .with_components(node.components_builder())

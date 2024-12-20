@@ -382,30 +382,6 @@ impl BitfinityEvmClient {
     }
 }
 
-/// `ChainSpec` parser for bitfinity chain.
-#[derive(Debug, Clone)]
-pub struct BitfinityChainSpecParser;
-
-impl ChainSpecParser for BitfinityChainSpecParser {
-    type ChainSpec = ChainSpec;
-
-    const SUPPORTED_CHAINS: &'static [&'static str] = &["bitfinity"];
-
-    fn parse(s: &str) -> eyre::Result<Arc<Self::ChainSpec>> {
-        match s {
-            "bitfinity" => {
-                let rpc_url = std::env::var("BITFINITY_RPC_URL")?;
-                let spec = tokio::runtime::Builder::new_current_thread()
-                    .build()
-                    .unwrap()
-                    .block_on(BitfinityEvmClient::fetch_chain_spec(rpc_url))?;
-                Ok(Arc::new(spec))
-            }
-            _ => eyre::bail!("chain `{s}` is not supported"),
-        }
-    }
-}
-
 struct BlockCertificateChecker {
     certified_data: CertifiedResult<did::Block<did::H256>>,
     evmc_principal: Principal,
