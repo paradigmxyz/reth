@@ -7716,6 +7716,7 @@ dependencies = [
  "reth-evm",
  "reth-execution-types",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-revm",
  "reth-testing-utils",
  "revm-primitives",
