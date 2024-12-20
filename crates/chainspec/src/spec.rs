@@ -240,6 +240,12 @@ impl ChainSpec {
         self.chain == Chain::optimism_mainnet()
     }
 
+    /// Returns the known paris block, if it exists.
+    #[inline]
+    pub fn paris_block(&self) -> Option<u64> {
+        self.paris_block_and_final_difficulty.map(|(block, _)| block)
+    }
+
     /// Get the genesis block specification.
     ///
     /// To get the header for the genesis block, use [`Self::genesis_header`] instead.

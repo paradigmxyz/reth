@@ -32,7 +32,7 @@ pub fn revm_spec(chain_spec: &ChainSpec, block: &Head) -> revm_primitives::SpecI
         revm_primitives::CANCUN
     } else if chain_spec.fork(EthereumHardfork::Shanghai).active_at_head(block) {
         revm_primitives::SHANGHAI
-    } else if Some(block.number) >= EthereumHardfork::Paris.mainnet_activation_block() {
+    } else if Some(block.number) >= chain_spec.paris_block() {
         revm_primitives::MERGE
     } else if chain_spec.fork(EthereumHardfork::London).active_at_head(block) {
         revm_primitives::LONDON
