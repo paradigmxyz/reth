@@ -152,6 +152,7 @@ where
                     parent_thread = ?thread_name,
                     thread = ?std::thread::current().name().unwrap_or_default(),
                     ?hashed_address,
+                    ?target_slots,
                     "Starting proof calculation"
                 );
 
