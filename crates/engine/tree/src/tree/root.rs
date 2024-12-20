@@ -36,7 +36,7 @@ use tracing::{debug, error, trace};
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
-const STATE_UPDATE_CHUNK_SIZE: usize = 3;
+const STATE_UPDATE_CHUNK_SIZE: usize = 2;
 
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates and the total time spent.
