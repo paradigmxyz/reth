@@ -2328,7 +2328,27 @@ where
             let hashed_state = self.provider.hashed_post_state(&output.state);
 
             trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
-            let root_time = Instant::now();
+
+            let calculate_state_root = || {
+                let root_time = Instant::now();
+                match self.compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
+                {
+                    Ok(result) => {
+                        info!(
+                            target: "engine::tree",
+                            block = ?sealed_block.num_hash(),
+                            regular_state_root = ?result.0,
+                            "Regular root task finished"
+                        );
+                        Ok((Some((result.0, result.1)), root_time.elapsed()))
+                    }
+                    Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
+                        debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
+                        Ok((None, root_time.elapsed()))
+                    }
+                    Err(error) => Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
+                }
+            };
 
             // We attempt to compute state root in parallel if we are currently not persisting
             // anything to database. This is safe, because the database state cannot
@@ -2336,38 +2356,6 @@ where
             // is being persisted as we are computing in parallel, because we initialize
             // a different database transaction per thread and it might end up with a
             // different view of the database.
-            let (state_root_result, hashed_state, output, root_elapsed) =
-                if persistence_not_in_progress {
-                    match self
-                        .compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
-                    {
-                        Ok(result) => {
-                            info!(
-                                target: "engine::tree",
-                                block = ?sealed_block.num_hash(),
-                                regular_state_root = ?result.0,
-                                "Regular root task finished"
-                            );
-                            Ok((
-                                Some((result.0, result.1)),
-                                hashed_state,
-                                output,
-                                root_time.elapsed(),
-                            ))
-                        }
-                        Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(
-                            error,
-                        ))) => {
-                            debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
-                            Ok((None, hashed_state, output, root_time.elapsed()))
-                        }
-                        Err(error) => Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
-                    }
-                } else {
-                    Ok((None, hashed_state, output, root_time.elapsed()))
-                }?;
-            let state_root = state_root_result.as_ref().map(|(state_root, _)| *state_root);
-
             if persistence_not_in_progress {
                 if let Some(state_root_handle) = state_root_handle {
                     match state_root_handle.wait_for_result() {
@@ -2376,6 +2364,10 @@ where
                             total_time,
                             ..
                         }) => {
+                            let (state_root_result, root_elapsed) = calculate_state_root()?;
+                            let state_root =
+                                state_root_result.as_ref().map(|(state_root, _)| *state_root);
+
                             info!(
                                 target: "engine::tree",
                                 block = ?sealed_block.num_hash(),
@@ -2424,12 +2416,7 @@ where
                 }
             }
 
-            Result::<_, InsertBlockErrorKindTwo>::Ok((
-                state_root_result,
-                hashed_state,
-                output,
-                root_elapsed,
-            ))
+            calculate_state_root().map(|(result, elapsed)| (result, hashed_state, output, elapsed))
         })?;
 
         let (state_root, trie_output, hashed_state, output, root_elapsed) = match state_root_result
