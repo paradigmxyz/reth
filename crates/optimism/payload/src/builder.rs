@@ -122,7 +122,7 @@ where
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-        Txs: PayloadTransactions<Transaction = TransactionSigned>,
+        Txs: PayloadTransactions<Transaction = OpTransactionSigned>,
     {
         let evm_env = self
             .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
