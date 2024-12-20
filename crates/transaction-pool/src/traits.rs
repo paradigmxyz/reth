@@ -978,7 +978,7 @@ pub trait PoolTransaction:
     type TryFromConsensusError: fmt::Display;
 
     /// Associated type representing the raw consensus variant of the transaction.
-    type Consensus: From<Self::Pooled>;
+    type Consensus: SignedTransaction + From<Self::Pooled>;
 
     /// Associated type representing the recovered pooled variant of the transaction.
     type Pooled: SignedTransaction;

@@ -4,12 +4,11 @@ use alloy_consensus::{Signed, Transaction as _};
 use alloy_primitives::{Bytes, PrimitiveSignature as Signature, Sealable, Sealed, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
-use op_alloy_rpc_types::Transaction;
+use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
 use reth_node_api::FullNodeComponents;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives_traits::transaction::signed::SignedTransaction;
-use op_alloy_rpc_types::OpTransactionRequest;
 use reth_primitives::{RecoveredTx, TransactionSigned};
+use reth_primitives_traits::transaction::signed::SignedTransaction;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ProviderTx, ReceiptProvider, TransactionsProvider,
 };
@@ -95,18 +94,10 @@ where
         let mut deposit_nonce = None;
 
         let inner = match transaction {
-            OpTypedTransaction::Legacy(tx) => {
-                Signed::new_unchecked(tx, signature, hash).into()
-            }
-            OpTypedTransaction::Eip2930(tx) => {
-                Signed::new_unchecked(tx, signature, hash).into()
-            }
-            OpTypedTransaction::Eip1559(tx) => {
-                Signed::new_unchecked(tx, signature, hash).into()
-            }
-            OpTypedTransaction::Eip7702(tx) => {
-                Signed::new_unchecked(tx, signature, hash).into()
-            }
+            OpTypedTransaction::Legacy(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            OpTypedTransaction::Eip2930(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            OpTypedTransaction::Eip1559(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            OpTypedTransaction::Eip7702(tx) => Signed::new_unchecked(tx, signature, hash).into(),
             OpTypedTransaction::Deposit(tx) => {
                 self.inner
                     .eth_api

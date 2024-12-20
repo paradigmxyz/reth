@@ -78,8 +78,14 @@ impl<T, Provider, Primitives: FullNodePrimitives> ChainStorageReader<Provider, P
 }
 
 /// Ethereum storage implementation.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct EthStorage<T>(std::marker::PhantomData<T>);
+
+impl<T> Default for EthStorage<T> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
 
 impl<Provider, T> BlockBodyWriter<Provider, reth_primitives::BlockBody<T>> for EthStorage<T>
 where
