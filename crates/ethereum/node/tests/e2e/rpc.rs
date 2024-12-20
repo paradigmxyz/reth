@@ -239,11 +239,7 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
             },
             execution_payload: block_to_payload_v3(payload.block().clone()),
             blobs_bundle: BlobsBundleV1::new([]),
-            execution_requests: payload
-                .requests()
-                .map(|reqs| alloy_rpc_types_beacon::requests::ExecutionRequestsV4::try_from(&reqs))
-                .unwrap()
-                .unwrap(),
+            execution_requests: payload.requests().unwrap().try_into().unwrap(),
             target_blobs_per_block: eip4844::TARGET_BLOBS_PER_BLOCK,
             signature: Default::default(),
         },
