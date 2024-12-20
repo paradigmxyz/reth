@@ -2367,7 +2367,7 @@ where
                     match state_root_handle.wait_for_result() {
                         Ok(StateRootComputeOutcome {
                             state_root: (task_state_root, _task_trie_updates),
-                            total_time,
+                            time_from_last_update,
                             ..
                         }) => {
                             info!(
@@ -2377,7 +2377,7 @@ where
                                 regular_state_root = ?state_root,
                                 "match" = ?Some(task_state_root) == state_root,
                                 execution_elapsed = ?execution_time,
-                                state_root_task_elapsed = ?total_time,
+                                state_root_task_elapsed = ?time_from_last_update,
                                 state_root_regular_elapsed = ?root_elapsed,
                                 "State root task finished"
                             );
