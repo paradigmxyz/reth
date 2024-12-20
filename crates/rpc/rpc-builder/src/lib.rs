@@ -230,7 +230,7 @@ use reth_consensus::FullConsensus;
 use reth_engine_primitives::{EngineTypes, PayloadValidator};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
-use reth_primitives::{NodePrimitives, PooledTransaction};
+use reth_primitives::NodePrimitives;
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
     EvmEnvProvider, FullRpcProvider, ProviderBlock, ProviderHeader, ProviderReceipt,
@@ -248,7 +248,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthConfig, EthStateCache, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::{noop::NoopTransactionPool, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
 use tower::Layer;
 use tower_http::cors::CorsLayer;
@@ -323,7 +323,6 @@ where
             Receipt = <BlockExecutor::Primitives as NodePrimitives>::Receipt,
             Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
         >,
-        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
     >,
     BlockExecutor: BlockExecutorProvider,
 {
@@ -715,7 +714,6 @@ where
                 Receipt = <Events::Primitives as NodePrimitives>::Receipt,
                 Header = <Events::Primitives as NodePrimitives>::BlockHeader,
             >,
-            Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
         >,
     {
         let Self {
@@ -841,7 +839,6 @@ where
                 Block = <Events::Primitives as NodePrimitives>::Block,
                 Header = <Events::Primitives as NodePrimitives>::BlockHeader,
             >,
-            Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
         >,
         Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     {
@@ -1382,7 +1379,6 @@ where
             Receipt = <BlockExecutor::Primitives as NodePrimitives>::Receipt,
             Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
         >,
-        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
     >,
     BlockExecutor: BlockExecutorProvider,
     Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
