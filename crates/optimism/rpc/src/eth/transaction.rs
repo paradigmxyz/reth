@@ -6,7 +6,7 @@ use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
 use reth_node_api::FullNodeComponents;
-use reth_optimism_primitives::OpTransactionSigned;
+use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives::{RecoveredTx, TransactionSigned};
 use reth_primitives_traits::transaction::signed::SignedTransaction;
 use reth_provider::{
@@ -77,7 +77,7 @@ where
 
 impl<N> TransactionCompat<OpTransactionSigned> for OpEthApi<N>
 where
-    N: FullNodeComponents<Provider: ReceiptProvider<Receipt = reth_primitives::Receipt>>,
+    N: FullNodeComponents<Provider: ReceiptProvider<Receipt = OpReceipt>>,
 {
     type Transaction = Transaction;
     type Error = OpEthApiError;
@@ -105,8 +105,10 @@ where
                     .receipt_by_hash(hash)
                     .map_err(Self::Error::from_eth_err)?
                     .inspect(|receipt| {
-                        deposit_receipt_version = receipt.deposit_receipt_version;
-                        deposit_nonce = receipt.deposit_nonce;
+                        if let OpReceipt::Deposit(receipt) = receipt {
+                            deposit_receipt_version = receipt.deposit_receipt_version;
+                            deposit_nonce = receipt.deposit_nonce;
+                        }
                     });
 
                 OpTxEnvelope::Deposit(tx.seal_unchecked(hash))
