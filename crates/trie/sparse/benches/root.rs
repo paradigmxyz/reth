@@ -20,6 +20,12 @@ fn calculate_root_from_leaves(c: &mut Criterion) {
     group.sample_size(20);
 
     for size in [1_000, 5_000, 10_000, 100_000] {
+        // Too slow.
+        #[allow(unexpected_cfgs)]
+        if cfg!(codspeed) && size > 5_000 {
+            continue;
+        }
+
         let state = generate_test_data(size);
 
         // hash builder

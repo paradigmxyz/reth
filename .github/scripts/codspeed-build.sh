@@ -14,6 +14,7 @@ excludes=(
     # TODO: some benchmarks panic: https://github.com/paradigmxyz/reth/actions/runs/12307046814/job/34349955788
     --exclude reth-db
     --exclude reth-trie-parallel
+    --exclude reth-engine-tree
 )
 
 "${cmd[@]}" --features test-utils --workspace "${excludes[@]}"
