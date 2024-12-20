@@ -3,13 +3,14 @@
 use alloy_eips::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use op_alloy_consensus::{
-    DepositTransaction, OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope,
+    DepositTransaction, OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope, OpTxType,
 };
 use op_alloy_rpc_types::{L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
+use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
 use reth_provider::{ChainSpecProvider, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
@@ -22,13 +23,13 @@ where
     Self: Send + Sync,
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
     Self::Provider:
-        TransactionsProvider<Transaction = TransactionSigned> + ReceiptProvider<Receipt = Receipt>,
+        TransactionsProvider<Transaction = OpTransactionSigned> + ReceiptProvider<Receipt = OpReceipt>,
 {
     async fn build_transaction_receipt(
         &self,
-        tx: TransactionSigned,
+        tx: OpTransactionSigned,
         meta: TransactionMeta,
-        receipt: Receipt,
+        receipt: OpReceipt,
     ) -> Result<RpcReceipt<Self::NetworkTypes>, Self::Error> {
         let (block, receipts) = self
             .inner
@@ -107,7 +108,7 @@ impl OpReceiptFieldsBuilder {
     pub fn l1_block_info(
         mut self,
         chain_spec: &OpChainSpec,
-        tx: &TransactionSigned,
+        tx: &OpTransactionSigned,
         l1_block_info: revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
         let raw_tx = tx.encoded_2718();
@@ -196,25 +197,21 @@ impl OpReceiptBuilder {
     /// Returns a new builder.
     pub fn new(
         chain_spec: &OpChainSpec,
-        transaction: &TransactionSigned,
+        transaction: &OpTransactionSigned,
         meta: TransactionMeta,
-        receipt: &Receipt,
-        all_receipts: &[Receipt],
+        receipt: &OpReceipt,
+        all_receipts: &[OpReceipt],
         l1_block_info: revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
         let timestamp = meta.timestamp;
         let core_receipt =
             build_receipt(transaction, meta, receipt, all_receipts, |receipt_with_bloom| {
-                match receipt.tx_type {
-                    TxType::Legacy => OpReceiptEnvelope::<Log>::Legacy(receipt_with_bloom),
-                    TxType::Eip2930 => OpReceiptEnvelope::<Log>::Eip2930(receipt_with_bloom),
-                    TxType::Eip1559 => OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom),
-                    TxType::Eip4844 => {
-                        // TODO: unreachable
-                        OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom)
-                    }
-                    TxType::Eip7702 => OpReceiptEnvelope::<Log>::Eip7702(receipt_with_bloom),
-                    TxType::Deposit => {
+                match receipt.tx_type() {
+                    OpTxType::Legacy => OpReceiptEnvelope::<Log>::Legacy(receipt_with_bloom),
+                    OpTxType::Eip2930 => OpReceiptEnvelope::<Log>::Eip2930(receipt_with_bloom),
+                    OpTxType::Eip1559 => OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom),
+                    OpTxType::Eip7702 => OpReceiptEnvelope::<Log>::Eip7702(receipt_with_bloom),
+                    OpTxType::Deposit => {
                         OpReceiptEnvelope::<Log>::Deposit(OpDepositReceiptWithBloom::<Log> {
                             receipt: OpDepositReceipt::<Log> {
                                 inner: receipt_with_bloom.receipt,
@@ -226,6 +223,7 @@ impl OpReceiptBuilder {
                     }
                 }
             })?;
+
 
         let op_receipt_fields = OpReceiptFieldsBuilder::new(timestamp)
             .l1_block_info(chain_spec, transaction, l1_block_info)?
