@@ -6,6 +6,7 @@ use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
 use reth_engine_primitives::{BeaconEngineMessage, EngineApiMessageVersion, EngineTypes};
+use reth_node_types::{BlockBody, NodePrimitives};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributesBuilder, PayloadKind, PayloadTypes};
@@ -92,6 +93,7 @@ impl<EngineT, B> LocalMiner<EngineT, B>
 where
     EngineT: EngineTypes,
     B: PayloadAttributesBuilder<<EngineT as PayloadTypes>::PayloadAttributes>,
+    EngineT::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>>,
 {
     /// Spawns a new [`LocalMiner`] with the given parameters.
     pub fn spawn_new(

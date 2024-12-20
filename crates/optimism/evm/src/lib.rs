@@ -18,9 +18,9 @@ use alloy_primitives::{Address, U256};
 use op_alloy_consensus::EIP1559ParamError;
 use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
-use reth_primitives_traits::FillTxEnv;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{Head, TransactionSigned};
+use reth_primitives_traits::FillTxEnv;
 use reth_revm::{
     inspector_handle_register,
     primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},

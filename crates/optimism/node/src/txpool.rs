@@ -241,7 +241,7 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
 impl<Client, Tx> OpTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
-    Tx: EthPoolTransaction<Consensus = TransactionSigned>,
+    Tx: EthPoolTransaction<Consensus = OpTransactionSigned>,
 {
     /// Create a new [`OpTransactionValidator`].
     pub fn new(inner: EthTransactionValidator<Client, Tx>) -> Self {
@@ -373,8 +373,8 @@ where
 
 impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt<Block = reth_primitives::Block>,
-    Tx: EthPoolTransaction<Consensus = TransactionSigned>,
+    Client: StateProviderFactory + BlockReaderIdExt<Block = OpBlock>,
+    Tx: EthPoolTransaction<Consensus = OpTransactionSigned>,
 {
     type Transaction = Tx;
 

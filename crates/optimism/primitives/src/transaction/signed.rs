@@ -597,6 +597,9 @@ impl TryFrom<OpTransactionSigned> for OpPooledTransaction {
                 Ok(Self::Eip7702(Signed::new_unchecked(tx, signature, hash)))
             }
             OpTypedTransaction::Deposit(_) => Err(TransactionConversionError::UnsupportedForP2P),
+        }
+    }
+}
 
 /// Bincode-compatible transaction type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]

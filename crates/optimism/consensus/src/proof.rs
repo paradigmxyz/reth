@@ -1,5 +1,6 @@
 //! Helper function for Receipt root calculation for Optimism hardforks.
 
+use alloy_consensus::TxReceipt;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_trie::root::ordered_trie_root_with_encoder;
@@ -43,7 +44,7 @@ pub(crate) fn calculate_receipt_root_optimism(
 ///
 /// NOTE: Prefer calculate receipt root optimism if you have log blooms memoized.
 pub fn calculate_receipt_root_no_memo_optimism(
-    receipts: &[&Receipt],
+    receipts: &[&OpReceipt],
     chain_spec: impl reth_chainspec::Hardforks,
     timestamp: u64,
 ) -> B256 {
@@ -59,7 +60,9 @@ pub fn calculate_receipt_root_no_memo_optimism(
             .iter()
             .map(|r| {
                 let mut r = (*r).clone();
-                r.deposit_nonce = None;
+                if let OpReceipt::Deposit(r) = &mut r {
+                    r.deposit_nonce = None;
+                }
                 r
             })
             .collect::<Vec<_>>();
