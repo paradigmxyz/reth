@@ -1,4 +1,5 @@
 use crate::{BranchNodeCompact, HashBuilder, Nibbles};
+use alloc::vec::Vec;
 use alloy_primitives::{
     map::{B256HashMap, B256HashSet, HashMap, HashSet},
     B256,

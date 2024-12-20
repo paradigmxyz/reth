@@ -114,7 +114,8 @@ std = [
 	"bytes/std",
 	"derive_more/std",
 	"reth-zstd-compressors?/std",
-	"secp256k1?/std"
+	"secp256k1?/std",
+	"reth-trie-common/std"
 ]
 reth-codec = [
 	"dep:reth-codecs",

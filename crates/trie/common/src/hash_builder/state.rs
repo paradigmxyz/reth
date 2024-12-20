@@ -1,4 +1,5 @@
 use crate::TrieMask;
+use alloc::vec::Vec;
 use alloy_trie::{hash_builder::HashBuilderValue, nodes::RlpNode, HashBuilder};
 use nybbles::Nibbles;
 
