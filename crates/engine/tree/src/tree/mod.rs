@@ -2457,6 +2457,28 @@ where
         Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
     }
 
+    /// Compute state root for the given hashed post state in parallel.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(_)` if computed successfully.
+    /// Returns `Err(_)` if error was encountered during computation.
+    /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
+    /// should be used instead.
+    fn compute_state_root_parallel(
+        &self,
+        parent_hash: B256,
+        hashed_state: &HashedPostState,
+    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
+        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+
+        let mut input = self.compute_trie_input(consistent_view.clone(), parent_hash)?;
+        // Extend with block we are validating root for.
+        input.append_ref(hashed_state);
+
+        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
+    }
+
     fn compute_trie_input(
         &self,
         consistent_view: ConsistentDbView<P>,
@@ -2482,28 +2504,6 @@ where
         }
 
         Ok(input)
-    }
-
-    /// Compute state root for the given hashed post state in parallel.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(_)` if computed successfully.
-    /// Returns `Err(_)` if error was encountered during computation.
-    /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
-    /// should be used instead.
-    fn compute_state_root_parallel(
-        &self,
-        parent_hash: B256,
-        hashed_state: &HashedPostState,
-    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-
-        let mut input = self.compute_trie_input(consistent_view.clone(), parent_hash)?;
-        // Extend with block we are validating root for.
-        input.append_ref(hashed_state);
-
-        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
 
     /// Handles an error that occurred while inserting a block.
