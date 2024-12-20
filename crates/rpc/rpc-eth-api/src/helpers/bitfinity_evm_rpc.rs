@@ -13,7 +13,7 @@ use revm_primitives::{Address, Bytes, B256, U256};
 
 /// Proxy to the Bitfinity EVM RPC.
 pub trait BitfinityEvmRpc {
-    /// Returns the ChainSpec.
+    /// Returns the `ChainSpec`.
     fn chain_spec(&self) -> Arc<ChainSpec>;
 
     /// Forwards `eth_gasPrice` calls to the Bitfinity EVM.
@@ -63,7 +63,7 @@ pub trait BitfinityEvmRpc {
                 ))
             })?;
 
-            Ok(tx_hash.0.into())
+            Ok(tx_hash.0)
         }
     }
 
@@ -80,10 +80,7 @@ pub trait BitfinityEvmRpc {
                 ))
             })?;
 
-            Ok(balances
-                .into_iter()
-                .map(|(address, balance)| (address.0.into(), balance.0))
-                .collect())
+            Ok(balances.into_iter().map(|(address, balance)| (address.0, balance.0)).collect())
         }
     }
 

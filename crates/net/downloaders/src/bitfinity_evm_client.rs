@@ -16,7 +16,6 @@ use reth_chainspec::{
 };
 
 use alloy_rlp::Decodable;
-use reth_cli::chainspec::ChainSpecParser;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
@@ -25,10 +24,10 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{BlockBody, ForkCondition, Header};
+use reth_primitives::{BlockBody, ForkCondition, Header, TransactionSigned};
 use serde_json::json;
 
-use std::{self, cmp::min, collections::HashMap, sync::Arc};
+use std::{self, cmp::min, collections::HashMap};
 use std::{sync::OnceLock, time::Duration};
 use thiserror::Error;
 
@@ -118,6 +117,8 @@ impl BitfinityEvmClient {
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
 
+        info!(target: "downloaders::bitfinity_evm_client", "Latest remote block: {latest_remote_block}");
+
         let mut end_block =
             min(end_block.unwrap_or(latest_remote_block), start_block + max_blocks - 1);
 
@@ -131,7 +132,7 @@ impl BitfinityEvmClient {
             let count = std::cmp::min(batch_size as u64, end_block + 1 - begin_block);
             let last_block = begin_block + count - 1;
 
-            debug!(target: "downloaders::bitfinity_evm_client", "Fetching blocks from {} to {}", begin_block, last_block);
+            info!(target: "downloaders::bitfinity_evm_client", "Fetching blocks from {} to {}", begin_block, last_block);
 
             let blocks_to_fetch = (begin_block..=last_block).map(Into::into).collect::<Vec<_>>();
 
@@ -150,21 +151,29 @@ impl BitfinityEvmClient {
                 .map(did::Block::<did::Transaction>::from)
                 .collect::<Vec<_>>();
 
-            trace!(target: "downloaders::bitfinity_evm_client", blocks = full_blocks.len(), "Fetched blocks");
+            info!(target: "downloaders::bitfinity_evm_client", blocks = full_blocks.len(), "Fetched blocks");
 
             for block in full_blocks {
                 if let Some(block_checker) = &block_checker {
                     block_checker.check_block(&block)?;
                 }
                 let header =
-                    reth_primitives::Block::decode(&mut block.header_rlp_encoded().as_slice())?;
+                    reth_primitives::Header::decode(&mut block.header_rlp_encoded().as_slice())?;
+
+                let mut body = reth_primitives::BlockBody::default();
+                for tx in block.transactions {
+                    let decoded_tx =
+                        TransactionSigned::decode(&mut tx.rlp_encoded_2718().to_vec().as_slice())?;
+                    body.transactions.push(decoded_tx);
+                }
 
                 let block_hash = header.hash_slow();
 
-                headers.insert(header.number, header.header.clone());
+                headers.insert(header.number, header.clone());
                 hash_to_number.insert(block_hash, header.number);
-                bodies.insert(block_hash, header.body);
+                bodies.insert(block_hash, body);
             }
+            info!(target: "downloaders::bitfinity_evm_client", blocks = headers.len(), "Decoded blocks");
         }
 
         info!(blocks = headers.len(), "Initialized remote client");

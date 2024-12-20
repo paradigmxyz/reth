@@ -25,7 +25,7 @@ pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + f
 {
     /// Start the node
     #[command(name = "node")]
-    Node(Box<node::NodeCommand<Spec, Ext>>),
+    Node(Box<node::NodeCommand<Ext>>),
     /// Initialize the database from a genesis file.
     #[command(name = "init")]
     Init(init_cmd::InitCommand<Spec>),

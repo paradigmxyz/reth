@@ -27,8 +27,8 @@ use reth_provider::{
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
-        AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
-        SpawnBlocking, Trace,
+        bitfinity_evm_rpc::BitfinityEvmRpc, AddDevSigners, EthApiSpec, EthFees, EthSigner,
+        EthState, LoadBlock, LoadFee, LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
@@ -67,6 +67,14 @@ impl<T> OpNodeCore for T where T: RpcNodeCore<Provider: BlockReader> {}
 pub struct OpEthApi<N: OpNodeCore> {
     /// Gateway to node's core components.
     inner: Arc<OpEthApiInner<N>>,
+}
+
+/// This implementation required only to fix compilation error:
+/// With it, `OpEthApi` implements `FullEthApi: BitfinityEvmRpc`.
+impl<N: OpNodeCore> BitfinityEvmRpc for OpEthApi<N> {
+    fn chain_spec(&self) -> Arc<reth_chainspec::ChainSpec> {
+        unimplemented!("bitfinity doesn't work with optimism")
+    }
 }
 
 impl<N> OpEthApi<N>

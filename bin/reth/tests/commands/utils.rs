@@ -6,6 +6,8 @@ use std::{
     time,
 };
 
+use alloy_eips::eip7685::Requests;
+use alloy_primitives::BlockNumber;
 use lightspeed_scheduler::JobExecutor;
 use parking_lot::Mutex;
 use reth::{
@@ -17,13 +19,14 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals};
 use reth_chainspec::ChainSpec;
 use reth_db::{init_db, DatabaseEnv};
-use reth_db_common::init::init_genesis;
 use reth_downloaders::bitfinity_evm_client::BitfinityEvmClient;
 use reth_errors::BlockExecutionError;
 use reth_evm::execute::{
     BatchExecutor, BlockExecutionInput, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
-use reth_primitives::{BlockNumber, BlockWithSenders, EthPrimitives, Receipt};
+use reth_node_api::NodeTypesWithDBAdapter;
+use reth_node_ethereum::EthereumNode;
+use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
     BlockNumReader, ExecutionOutcome, ProviderError, ProviderFactory,
@@ -36,7 +39,8 @@ use tracing::{debug, info};
 
 pub const LOCAL_EVM_CANISTER_ID: &str = "bkyz2-fmaaa-aaaaa-qaaaq-cai";
 /// EVM block extractor for devnet running on Digital Ocean.
-pub const DEFAULT_EVM_DATASOURCE_URL: &str = "https://orca-app-5yyst.ondigitalocean.app";
+pub const DEFAULT_EVM_DATASOURCE_URL: &str =
+    "https://block-extractor-testnet-1052151659755.europe-west9.run.app";
 
 pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
     let mut tracer = RethTracer::new();
@@ -52,13 +56,15 @@ pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
     Ok(guard)
 }
 
+pub type NodeTypes = NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>;
+
 #[derive(Clone)]
 pub struct ImportData {
     pub chain: Arc<ChainSpec>,
     pub data_dir: ChainPath<DataDirPath>,
     pub database: Arc<DatabaseEnv>,
-    pub provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
-    pub blockchain_db: BlockchainProvider<Arc<DatabaseEnv>>,
+    pub provider_factory: ProviderFactory<NodeTypes>,
+    pub blockchain_db: BlockchainProvider<NodeTypes>,
     pub bitfinity_args: BitfinityImportArgs,
 }
 
@@ -126,7 +132,7 @@ pub async fn bitfinity_import_config_data(
         StaticFileProvider::read_write(data_dir.static_files())?,
     );
 
-    init_genesis(provider_factory.clone())?;
+    reth_db_common::init::init_genesis(&provider_factory)?;
 
     let consensus = Arc::new(EthBeaconConsensus::new(chain.clone()));
 
@@ -162,7 +168,7 @@ pub async fn bitfinity_import_config_data(
 
 /// Waits until the block is imported.
 pub async fn wait_until_local_block_imported(
-    provider_factory: &ProviderFactory<Arc<DatabaseEnv>>,
+    provider_factory: &ProviderFactory<NodeTypes>,
     block: BlockNumber,
     timeout: time::Duration,
 ) {
@@ -210,7 +216,7 @@ impl BlockExecutorProvider for MockExecutorProvider {
         self.clone()
     }
 
-    fn batch_executor<DB>(&self, _: DB, _: PruneModes) -> Self::BatchExecutor<DB>
+    fn batch_executor<DB>(&self, _: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
     {
@@ -231,15 +237,15 @@ impl<DB> Executor<DB> for MockExecutorProvider {
         Ok(BlockExecutionOutput {
             state: bundle,
             receipts: receipts.into_iter().flatten().flatten().collect(),
-            requests: requests.into_iter().flatten().collect(),
+            requests: Requests::new(requests.into_iter().flatten().collect()),
             gas_used: 0,
         })
     }
 
     fn execute_with_state_closure<F>(
         self,
-        input: Self::Input<'_>,
-        state: F,
+        _input: Self::Input<'_>,
+        _state: F,
     ) -> Result<Self::Output, Self::Error>
     where
         F: FnMut(&reth_revm::State<DB>),
@@ -249,15 +255,15 @@ impl<DB> Executor<DB> for MockExecutorProvider {
         Ok(BlockExecutionOutput {
             state: bundle,
             receipts: receipts.into_iter().flatten().flatten().collect(),
-            requests: requests.into_iter().flatten().collect(),
+            requests: Requests::new(requests.into_iter().flatten().collect()),
             gas_used: 0,
         })
     }
 
     fn execute_with_state_hook<F>(
         self,
-        input: Self::Input<'_>,
-        state_hook: F,
+        _input: Self::Input<'_>,
+        _state_hook: F,
     ) -> Result<Self::Output, Self::Error>
     where
         F: reth_evm::system_calls::OnStateHook + 'static,
@@ -285,5 +291,5 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
         None
     }
 
-    fn set_prune_modes(&mut self, prune_modes: PruneModes) {}
+    fn set_prune_modes(&mut self, _prune_modes: PruneModes) {}
 }

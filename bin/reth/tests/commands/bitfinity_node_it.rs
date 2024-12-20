@@ -5,8 +5,8 @@
 use super::utils::*;
 use did::keccak;
 use eth_server::{EthImpl, EthServer};
+use ethereum_json_rpc_client::CertifiedResult;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
-use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
 use jsonrpsee::{
     server::{Server, ServerHandle},
     Methods, RpcModule,
@@ -16,12 +16,27 @@ use reth::{
     args::{DatadirArgs, RpcServerArgs},
     dirs::{DataDirPath, MaybePlatformPath},
 };
-use reth_consensus::Consensus;
+use reth_consensus::FullConsensus;
+use reth_db::DatabaseEnv;
 use reth_db::{init_db, test_utils::tempdir_path};
-use reth_node_builder::{NodeBuilder, NodeConfig, NodeHandle};
-use reth_node_ethereum::EthereumNode;
+use reth_network::NetworkHandle;
+use reth_node_api::{FullNodeTypesAdapter, NodeTypesWithDBAdapter};
+use reth_node_builder::components::Components;
+use reth_node_builder::rpc::RpcAddOns;
+use reth_node_builder::{NodeAdapter, NodeBuilder, NodeConfig, NodeHandle};
+use reth_node_ethereum::node::EthereumEngineValidatorBuilder;
+use reth_node_ethereum::{
+    BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory, EthereumNode,
+};
+use reth_provider::providers::BlockchainProvider;
+use reth_rpc::EthApi;
 use reth_tasks::TaskManager;
-use revm_primitives::{Address, U256};
+use reth_transaction_pool::blobstore::DiskFileBlobStore;
+use reth_transaction_pool::{
+    CoinbaseTipOrdering, EthPooledTransaction, EthTransactionValidator, Pool,
+    TransactionValidationTaskExecutor,
+};
+use revm_primitives::{hex, Address, U256};
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 
 #[tokio::test]
@@ -52,7 +67,7 @@ async fn bitfinity_test_node_forward_ic_or_eth_get_last_certified_block() {
     assert!(result.is_ok());
 
     // Try with `eth_getLastCertifiedBlock` alias
-    let result: CertifiedResult<Block<H256>> = reth_client
+    let result: CertifiedResult<did::Block<did::H256>> = reth_client
         .single_request(
             "eth_getLastCertifiedBlock".to_owned(),
             ethereum_json_rpc_client::Params::None,
@@ -80,7 +95,7 @@ async fn bitfinity_test_node_forward_get_gas_price_requests() {
     let gas_price_result = reth_client.gas_price().await;
 
     // Assert
-    assert_eq!(gas_price_result.unwrap().as_u128(), gas_price);
+    assert_eq!(gas_price_result.unwrap(), gas_price.into());
 }
 
 #[tokio::test]
@@ -99,7 +114,7 @@ async fn bitfinity_test_node_forward_max_priority_fee_per_gas_requests() {
     let result = reth_client.max_priority_fee_per_gas().await;
 
     // Assert
-    assert_eq!(result.unwrap().as_u128(), max_priority_fee_per_gas);
+    assert_eq!(result.unwrap(), max_priority_fee_per_gas.into());
 }
 
 #[tokio::test]
@@ -114,7 +129,7 @@ async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
         start_reth_node(Some(format!("http://{}", eth_server_address)), None).await;
 
     // Act
-    let result: Vec<(ethereum_json_rpc_client::H160, ethereum_json_rpc_client::U256)> = reth_client
+    let result: Vec<(did::H160, did::U256)> = reth_client
         .single_request(
             "eth_getGenesisBalances".to_owned(),
             ethereum_json_rpc_client::Params::None,
@@ -126,14 +141,14 @@ async fn bitfinity_test_node_forward_eth_get_genesis_balances() {
     // Assert
     assert_eq!(result.len(), 3);
 
-    assert_eq!(did::H160::from(result[0].0), Address::from_slice(&[1u8; 20]).into());
-    assert_eq!(did::U256::from(result[0].1), U256::from(10).into());
+    assert_eq!(result[0].0, Address::from_slice(&[1u8; 20]).into());
+    assert_eq!(result[0].1, U256::from(10).into());
 
-    assert_eq!(did::H160::from(result[1].0), Address::from_slice(&[2u8; 20]).into());
-    assert_eq!(did::U256::from(result[1].1), U256::from(20).into());
+    assert_eq!(result[1].0, Address::from_slice(&[2u8; 20]).into());
+    assert_eq!(result[1].1, U256::from(20).into());
 
-    assert_eq!(did::H160::from(result[2].0), Address::from_slice(&[3u8; 20]).into());
-    assert_eq!(did::U256::from(result[2].1), U256::from(30).into());
+    assert_eq!(result[2].0, Address::from_slice(&[3u8; 20]).into());
+    assert_eq!(result[2].1, U256::from(30).into());
 }
 
 #[tokio::test]
@@ -153,14 +168,14 @@ async fn bitfinity_test_node_forward_ic_get_genesis_balances() {
     // Assert
     assert_eq!(result.len(), 3);
 
-    assert_eq!(did::H160::from(result[0].0), Address::from_slice(&[1u8; 20]).into());
-    assert_eq!(did::U256::from(result[0].1), U256::from(10).into());
+    assert_eq!(result[0].0, Address::from_slice(&[1u8; 20]).into());
+    assert_eq!(result[0].1, U256::from(10).into());
 
-    assert_eq!(did::H160::from(result[1].0), Address::from_slice(&[2u8; 20]).into());
-    assert_eq!(did::U256::from(result[1].1), U256::from(20).into());
+    assert_eq!(result[1].0, Address::from_slice(&[2u8; 20]).into());
+    assert_eq!(result[1].1, U256::from(20).into());
 
-    assert_eq!(did::H160::from(result[2].0), Address::from_slice(&[3u8; 20]).into());
-    assert_eq!(did::U256::from(result[2].1), U256::from(30).into());
+    assert_eq!(result[2].0, Address::from_slice(&[3u8; 20]).into());
+    assert_eq!(result[2].1, U256::from(30).into());
 }
 
 #[tokio::test]
@@ -177,14 +192,13 @@ async fn bitfinity_test_node_forward_send_raw_transaction_requests() {
     // Create a random transaction
     let mut tx = [0u8; 256];
     rand::thread_rng().fill_bytes(&mut tx);
-    let expected_tx_hash =
-        keccak::keccak_hash(format!("0x{}", reth_primitives::hex::encode(tx)).as_bytes());
+    let expected_tx_hash = keccak::keccak_hash(format!("0x{}", hex::encode(tx)).as_bytes());
 
     // Act
     let result = reth_client.send_raw_transaction_bytes(&tx).await;
 
     // Assert
-    assert_eq!(result.unwrap(), expected_tx_hash.0);
+    assert_eq!(result.unwrap(), expected_tx_hash);
 }
 
 /// Start a local reth node
@@ -217,9 +231,8 @@ async fn start_reth_node(
                     DiskFileBlobStore,
                 >,
                 EthEvmConfig,
-                EthExecutorProvider<EthEvmConfig>,
-                Arc<dyn Consensus>,
-                EthereumEngineValidator,
+                BasicBlockExecutorProvider<EthExecutionStrategyFactory>,
+                Arc<dyn FullConsensus>,
             >,
         >,
         RpcAddOns<
@@ -246,9 +259,8 @@ async fn start_reth_node(
                         DiskFileBlobStore,
                     >,
                     EthEvmConfig,
-                    EthExecutorProvider<EthEvmConfig>,
-                    Arc<dyn Consensus>,
-                    EthereumEngineValidator,
+                    BasicBlockExecutorProvider<EthExecutionStrategyFactory>,
+                    Arc<dyn FullConsensus>,
                 >,
             >,
             EthApi<
@@ -268,6 +280,7 @@ async fn start_reth_node(
                 NetworkHandle,
                 EthEvmConfig,
             >,
+            EthereumEngineValidatorBuilder,
         >,
     >,
 ) {
@@ -336,7 +349,7 @@ pub mod eth_server {
 
     use alloy_rlp::Bytes;
     use did::keccak;
-    use ethereum_json_rpc_client::{Block, CertifiedResult, H256};
+    use ethereum_json_rpc_client::CertifiedResult;
     use jsonrpsee::{core::RpcResult, proc_macros::rpc};
     use revm_primitives::{Address, B256, U256};
 
@@ -355,7 +368,9 @@ pub mod eth_server {
         async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>>;
 
         #[method(name = "getLastCertifiedBlock", aliases = ["ic_getLastCertifiedBlock"])]
-        async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>>;
+        async fn get_last_certified_block(
+            &self,
+        ) -> RpcResult<CertifiedResult<did::Block<did::H256>>>;
     }
 
     #[derive(Debug)]
@@ -399,7 +414,9 @@ pub mod eth_server {
             ])
         }
 
-        async fn get_last_certified_block(&self) -> RpcResult<CertifiedResult<Block<H256>>> {
+        async fn get_last_certified_block(
+            &self,
+        ) -> RpcResult<CertifiedResult<did::Block<did::H256>>> {
             Ok(CertifiedResult {
                 data: Default::default(),
                 witness: vec![],

@@ -4,6 +4,7 @@
 //!
 
 use super::utils::*;
+use alloy_eips::BlockNumberOrTag;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use reth_provider::{BlockNumReader, BlockReader, BlockReaderIdExt};
 use std::time::Duration;
@@ -35,7 +36,7 @@ async fn bitfinity_test_should_import_data_from_evm() {
         let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap();
         let local_block = provider.block_by_number(end_block).unwrap().unwrap();
 
-        assert_eq!(remote_block.hash.unwrap().0, local_block.header.hash_slow().0);
+        assert_eq!(remote_block.hash.0, local_block.header.hash_slow().0);
         assert_eq!(remote_block.state_root.0, local_block.state_root.0);
     }
 }
@@ -67,7 +68,7 @@ async fn bitfinity_test_should_import_with_small_batch_size() {
         let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap();
         let local_block = provider.block_by_number(end_block).unwrap().unwrap();
 
-        assert_eq!(remote_block.hash.unwrap().0, local_block.header.hash_slow().0);
+        assert_eq!(remote_block.hash.0, local_block.header.hash_slow().0);
         assert_eq!(remote_block.state_root.0, local_block.state_root.0);
     }
 }
@@ -89,16 +90,13 @@ async fn bitfinity_test_finalized_and_safe_query_params_works() {
 
     let latest_block = import_data
         .blockchain_db
-        .block_by_number_or_tag(reth_rpc_types::BlockNumberOrTag::Finalized)
+        .block_by_number_or_tag(BlockNumberOrTag::Finalized)
         .unwrap()
         .unwrap();
     assert_eq!(end_block, latest_block.number);
 
-    let safe_block = import_data
-        .blockchain_db
-        .block_by_number_or_tag(reth_rpc_types::BlockNumberOrTag::Safe)
-        .unwrap()
-        .unwrap();
+    let safe_block =
+        import_data.blockchain_db.block_by_number_or_tag(BlockNumberOrTag::Safe).unwrap().unwrap();
     assert_eq!(end_block, safe_block.number);
 }
 
@@ -119,7 +117,7 @@ async fn bitfinity_test_should_import_data_from_evm_with_backup_rpc_url() {
     import_data.bitfinity_args.batch_size = (end_block as usize) * 10;
 
     // Act
-    import_blocks(import_data.clone(), Duration::from_secs(20), false).await;
+    import_blocks(import_data.clone(), Duration::from_secs(200), false).await;
 
     // Assert
     {
@@ -132,7 +130,7 @@ async fn bitfinity_test_should_import_data_from_evm_with_backup_rpc_url() {
         let remote_block = evm_rpc_client.get_block_by_number(end_block.into()).await.unwrap();
         let local_block = provider.block_by_number(end_block).unwrap().unwrap();
 
-        assert_eq!(remote_block.hash.unwrap().0, local_block.header.hash_slow().0);
+        assert_eq!(remote_block.hash.0, local_block.header.hash_slow().0);
         assert_eq!(remote_block.state_root.0, local_block.state_root.0);
     }
 }

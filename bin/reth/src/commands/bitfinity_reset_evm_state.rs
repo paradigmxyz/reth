@@ -23,6 +23,7 @@ use reth_provider::providers::StaticFileProvider;
 use reth_provider::{BlockNumReader, BlockReader, ProviderFactory};
 use tracing::{debug, error, info, trace, warn};
 
+/// `ProviderFactory` type alias.
 pub type BitfinityResetEvmProviderFactory =
     ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>;
 

@@ -4,7 +4,6 @@
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
 use clap::{Args, Parser};
-use reth::cli::Cli;
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{
     engine_tree_config::{
@@ -12,7 +11,7 @@ use reth_node_builder::{
     },
     EngineNodeLauncher,
 };
-use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
+use reth_node_ethereum::node::EthereumAddOns;
 use reth_provider::providers::BlockchainProvider2;
 use reth_tracing::tracing::warn;
 use tracing::info;
@@ -98,8 +97,8 @@ fn main() {
                     let config = handle.node.config.config.clone();
                     let chain = handle.node.chain_spec();
                     let datadir = handle.node.data_dir.clone();
-                    let (provider_factory, bitfinity) =
-            
+                    let (provider_factory, bitfinity) = handle.bitfinity_import.clone().expect("Bitfinity import not configured");            
+
                     // Init bitfinity import
                     {
                         let import = BitfinityImportCommand::new(

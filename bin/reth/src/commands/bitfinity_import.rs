@@ -69,6 +69,8 @@ impl std::fmt::Debug for BitfinityImportCommand {
     }
 }
 
+type TypedPipeline = Pipeline<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>;
+
 impl BitfinityImportCommand {
     /// Create a new `ImportCommand` with the given arguments.
     pub fn new(
@@ -217,10 +219,7 @@ impl BitfinityImportCommand {
         static_file_producer: StaticFileProducer<
             ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
         >,
-    ) -> eyre::Result<(
-        Pipeline<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-        impl Stream<Item = NodeEvent>,
-    )>
+    ) -> eyre::Result<(TypedPipeline, impl Stream<Item = NodeEvent>)>
     where
         C: Consensus + 'static,
     {
