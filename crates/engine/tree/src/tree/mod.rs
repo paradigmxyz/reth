@@ -599,7 +599,7 @@ where
 
         let state_root_task_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads)
-            .thread_name(|i| format!("state-root-task-worker-{}", i))
+            .thread_name(|i| format!("srt-worker-{}", i))
             .build()
             .expect("Failed to create proof worker thread pool");
 
