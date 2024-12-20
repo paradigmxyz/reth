@@ -206,12 +206,12 @@ impl OpReceiptBuilder {
         let timestamp = meta.timestamp;
         let core_receipt =
             build_receipt(transaction, meta, receipt, all_receipts, |receipt_with_bloom| {
-                match receipt.tx_type() {
-                    OpTxType::Legacy => OpReceiptEnvelope::<Log>::Legacy(receipt_with_bloom),
-                    OpTxType::Eip2930 => OpReceiptEnvelope::<Log>::Eip2930(receipt_with_bloom),
-                    OpTxType::Eip1559 => OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom),
-                    OpTxType::Eip7702 => OpReceiptEnvelope::<Log>::Eip7702(receipt_with_bloom),
-                    OpTxType::Deposit => {
+                match receipt {
+                    OpReceipt::Legacy(_) => OpReceiptEnvelope::<Log>::Legacy(receipt_with_bloom),
+                    OpReceipt::Eip2930(_) => OpReceiptEnvelope::<Log>::Eip2930(receipt_with_bloom),
+                    OpReceipt::Eip1559(_) => OpReceiptEnvelope::<Log>::Eip1559(receipt_with_bloom),
+                    OpReceipt::Eip7702(_) => OpReceiptEnvelope::<Log>::Eip7702(receipt_with_bloom),
+                    OpReceipt::Deposit(receipt) => {
                         OpReceiptEnvelope::<Log>::Deposit(OpDepositReceiptWithBloom::<Log> {
                             receipt: OpDepositReceipt::<Log> {
                                 inner: receipt_with_bloom.receipt,
@@ -227,8 +227,6 @@ impl OpReceiptBuilder {
 
         let op_receipt_fields = OpReceiptFieldsBuilder::new(timestamp)
             .l1_block_info(chain_spec, transaction, l1_block_info)?
-            .deposit_nonce(receipt.deposit_nonce)
-            .deposit_version(receipt.deposit_receipt_version)
             .build();
 
         Ok(Self { core_receipt, op_receipt_fields })
