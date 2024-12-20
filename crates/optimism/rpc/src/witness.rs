@@ -9,6 +9,7 @@ use reth_chainspec::ChainSpecProvider;
 use reth_evm::ConfigureEvm;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_payload_builder::OpPayloadBuilder;
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{SealedHeader, TransactionSigned};
 use reth_provider::{BlockReaderIdExt, ProviderError, ProviderResult, StateProviderFactory};
 pub use reth_rpc_api::DebugExecutionWitnessApiServer;
@@ -58,7 +59,7 @@ where
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone
         + 'static,
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned> + 'static,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned> + 'static,
 {
     async fn execute_payload(
         &self,

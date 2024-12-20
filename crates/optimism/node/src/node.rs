@@ -7,6 +7,7 @@ use crate::{
     OpEngineTypes,
 };
 use alloy_consensus::Header;
+use op_alloy_consensus::OpPooledTransaction;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
@@ -605,7 +606,7 @@ impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTransaction>,
+            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = OpPooledTransaction>,
         > + Unpin
         + 'static,
 {
@@ -672,6 +673,6 @@ impl NetworkPrimitives for OpNetworkPrimitives {
     type BlockBody = reth_primitives::BlockBody<OpTransactionSigned>;
     type Block = reth_primitives::Block<OpTransactionSigned>;
     type BroadcastedTransaction = OpTransactionSigned;
-    type PooledTransaction = reth_primitives::PooledTransaction;
+    type PooledTransaction = OpPooledTransaction;
     type Receipt = OpReceipt;
 }

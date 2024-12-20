@@ -9,7 +9,7 @@ use parking_lot::RwLock;
 use reth_chainspec::ChainSpec;
 use reth_node_api::{Block, BlockBody};
 use reth_optimism_evm::RethL1BlockInfo;
-use reth_optimism_primitives::OpTransactionSigned;
+use reth_optimism_primitives::{OpBlock, OpTransactionSigned};
 use reth_primitives::{
     transaction::TransactionConversionError, GotExpected, InvalidTransactionError, RecoveredTx,
     SealedBlock, TransactionSigned,
@@ -30,8 +30,8 @@ use std::sync::{
 
 /// Type alias for default optimism transaction pool
 pub type OpTransactionPool<Client, S> = Pool<
-    TransactionValidationTaskExecutor<OpTransactionValidator<Client, EthPooledTransaction>>,
-    CoinbaseTipOrdering<EthPooledTransaction>,
+    TransactionValidationTaskExecutor<OpTransactionValidator<Client, OpPooledTransaction>>,
+    CoinbaseTipOrdering<OpPooledTransaction>,
     S,
 >;
 
