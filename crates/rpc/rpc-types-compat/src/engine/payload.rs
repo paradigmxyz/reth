@@ -5,19 +5,20 @@ use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, Header, EMPTY_OMMER_RO
 use alloy_eips::{
     eip2718::{Decodable2718, Encodable2718},
     eip4895::Withdrawals,
+    eip7685::RequestsOrHash,
 };
 use alloy_primitives::{B256, U256};
 use alloy_rlp::BufMut;
 use alloy_rpc_types_engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
-    ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV2,
-    ExecutionPayloadV3, PayloadError,
+    CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV2, ExecutionPayloadV3, PayloadError, PraguePayloadFields,
 };
 use reth_primitives::{
     proofs::{self},
     Block, BlockBody, BlockExt, SealedBlock,
 };
-use reth_primitives_traits::BlockBody as _;
+use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 
 /// Converts [`ExecutionPayloadV1`] to [`Block`]
 pub fn try_payload_v1_to_block<T: Decodable2718>(
@@ -119,10 +120,34 @@ pub fn try_payload_v3_to_block<T: Decodable2718>(
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayload`]
-pub fn block_to_payload<T: Encodable2718>(
+pub fn block_to_payload<T: SignedTransaction>(
     value: SealedBlock<Header, BlockBody<T>>,
-) -> ExecutionPayload {
-    if value.header.parent_beacon_block_root.is_some() {
+) -> (ExecutionPayload, ExecutionPayloadSidecar) {
+    let cancun = if let Some(parent_beacon_block_root) = value.parent_beacon_block_root {
+        Some(CancunPayloadFields {
+            parent_beacon_block_root,
+            versioned_hashes: value.body.blob_versioned_hashes_iter().copied().collect(),
+        })
+    } else {
+        None
+    };
+
+    let prague = if let Some(requests_hash) = value.requests_hash {
+        Some(PraguePayloadFields {
+            requests: RequestsOrHash::Hash(requests_hash),
+            target_blobs_per_block: value.target_blobs_per_block.unwrap_or_default(),
+        })
+    } else {
+        None
+    };
+
+    let sidecar = match (cancun, prague) {
+        (Some(cancun), Some(prague)) => ExecutionPayloadSidecar::v4(cancun, prague),
+        (Some(cancun), None) => ExecutionPayloadSidecar::v3(cancun),
+        _ => ExecutionPayloadSidecar::none(),
+    };
+
+    let execution_payload = if value.header.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
         ExecutionPayload::V3(block_to_payload_v3(value))
     } else if value.body.withdrawals.is_some() {
@@ -131,7 +156,9 @@ pub fn block_to_payload<T: Encodable2718>(
     } else {
         // otherwise V1
         ExecutionPayload::V1(block_to_payload_v1(value))
-    }
+    };
+
+    (execution_payload, sidecar)
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV1`]
