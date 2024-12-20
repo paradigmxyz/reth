@@ -53,6 +53,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
             }
 
             let account = RevmAccount {
+                #[allow(clippy::needless_update)]
                 info: AccountInfo {
                     balance: U256::from(rng.gen::<u64>()),
                     nonce: rng.gen::<u64>(),
@@ -74,6 +75,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
 }
 
 fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> RethAccount {
+    #[allow(clippy::needless_update)]
     RethAccount {
         balance: revm_account.info.balance,
         nonce: revm_account.info.nonce,
