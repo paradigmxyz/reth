@@ -8,11 +8,11 @@ pub const POSEIDON_EMPTY: B256 =
 pub const EMPTY_ROOT_HASH: B256 = B256::ZERO;
 
 #[cfg(feature = "poseidon")]
-pub use poseidon::*;
+pub use hash::*;
 
 #[cfg(feature = "poseidon")]
 /// Implementation of poseidon hashing functionality.
-pub mod poseidon {
+pub mod hash {
     use super::B256;
     pub use poseidon_bn254::{hash_with_domain, Fr, PrimeField};
 
