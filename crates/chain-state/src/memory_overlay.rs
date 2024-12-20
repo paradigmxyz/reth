@@ -1,5 +1,3 @@
-#![allow(clippy::needless_lifetimes)]
-
 use super::ExecutedBlock;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{
@@ -32,8 +30,7 @@ pub struct MemoryOverlayStateProviderRef<'a, N: NodePrimitives = reth_primitives
 
 /// A state provider that stores references to in-memory blocks along with their state as well as
 /// the historical state provider for fallback lookups.
-#[allow(missing_debug_implementations, type_alias_bounds)]
-pub type MemoryOverlayStateProvider<N: NodePrimitives> = MemoryOverlayStateProviderRef<'static, N>;
+pub type MemoryOverlayStateProvider<N> = MemoryOverlayStateProviderRef<'static, N>;
 
 impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     /// Create new memory overlay state provider.
@@ -65,7 +62,7 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     }
 }
 
-impl<'a, N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'a, N> {
+impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N> {
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
         for block in &self.in_memory {
             if block.block.number() == number {
@@ -98,7 +95,7 @@ impl<'a, N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'a
     }
 }
 
-impl<'a, N: NodePrimitives> AccountReader for MemoryOverlayStateProviderRef<'a, N> {
+impl<N: NodePrimitives> AccountReader for MemoryOverlayStateProviderRef<'_, N> {
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
         for block in &self.in_memory {
             if let Some(account) = block.execution_output.account(&address) {
@@ -110,7 +107,7 @@ impl<'a, N: NodePrimitives> AccountReader for MemoryOverlayStateProviderRef<'a, 
     }
 }
 
-impl<'a, N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'a, N> {
+impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, N> {
     fn state_root(&self, state: HashedPostState) -> ProviderResult<B256> {
         self.state_root_from_nodes(TrieInput::from_state(state))
     }
@@ -138,7 +135,7 @@ impl<'a, N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<
     }
 }
 
-impl<'a, N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'a, N> {
+impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_, N> {
     // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
         let state = &self.trie_state().state;
@@ -177,7 +174,7 @@ impl<'a, N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRe
     }
 }
 
-impl<'a, N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'a, N> {
+impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_, N> {
     fn proof(
         &self,
         mut input: TrieInput,
@@ -210,13 +207,13 @@ impl<'a, N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef
     }
 }
 
-impl<'a, N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'a, N> {
+impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
         self.historical.hashed_post_state(bundle_state)
     }
 }
 
-impl<'a, N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'a, N> {
+impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
     fn storage(
         &self,
         address: Address,
