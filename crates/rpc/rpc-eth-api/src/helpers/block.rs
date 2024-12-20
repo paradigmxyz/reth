@@ -5,7 +5,7 @@ use std::sync::Arc;
 use alloy_eips::BlockId;
 use alloy_primitives::Sealable;
 use alloy_rlp::Encodable;
-use alloy_rpc_types_eth::{Block, BlockNumberOrTag, BlockTransactions, Header, Index};
+use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives::{SealedBlockFor, SealedBlockWithSenders};
@@ -91,31 +91,24 @@ pub trait EthBlocks: LoadBlock {
                     .map(|block| block.body.transactions().len()))
             }
 
-            match block_id {
-                BlockId::Number(BlockNumberOrTag::Latest) => Ok(self
-                    .cache()
-                    .latest_block_with_senders()
-                    .await
+            let maybe_block = if block_id.is_latest() {
+                self.cache().latest_block_with_senders().await.map_err(Self::Error::from_eth_err)?
+            } else {
+                match self
+                    .provider()
+                    .block_hash_for_id(block_id)
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|b| b.body.transactions().len())),
-                _ => {
-                    let block_hash = match self
-                        .provider()
-                        .block_hash_for_id(block_id)
-                        .map_err(Self::Error::from_eth_err)?
-                    {
-                        Some(block_hash) => block_hash,
-                        None => return Ok(None),
-                    };
-
-                    Ok(self
+                {
+                    Some(block_hash) => self
                         .cache()
                         .get_sealed_block_with_senders(block_hash)
                         .await
-                        .map_err(Self::Error::from_eth_err)?
-                        .map(|b| b.body.transactions().len()))
+                        .map_err(Self::Error::from_eth_err)?,
+                    None => None,
                 }
-            }
+            };
+
+            Ok(maybe_block.map(|b| b.body.transactions().len()))
         }
     }
 
