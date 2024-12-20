@@ -23,6 +23,7 @@ alloy-rlp.workspace = true
 
 # misc
 derive_more.workspace = true
+thiserror.workspace = true
 
 [features]
 default = ["std"]
@@ -31,5 +32,6 @@ std = [
 	"alloy-primitives/std",
 	"alloy-rlp/std",
 	"derive_more/std",
-	"reth-primitives-traits/std"
+	"reth-primitives-traits/std",
+	"thiserror/std"
 ]

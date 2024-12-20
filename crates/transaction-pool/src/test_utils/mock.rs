@@ -30,7 +30,7 @@ use rand::{
 };
 use reth_primitives::{
     transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
-    PooledTransactionsElement, PooledTransactionsElementEcRecovered, RecoveredTx, Transaction,
+    PooledTransaction, PooledTransactionsElementEcRecovered, RecoveredTx, Transaction,
     TransactionSigned, TxType,
 };
 use reth_primitives_traits::InMemorySize;
@@ -666,7 +666,7 @@ impl PoolTransaction for MockTransaction {
 
     type Consensus = TransactionSigned;
 
-    type Pooled = PooledTransactionsElement;
+    type Pooled = PooledTransaction;
 
     fn try_from_consensus(
         tx: RecoveredTx<Self::Consensus>,
@@ -872,7 +872,7 @@ impl EthPoolTransaction for MockTransaction {
         sidecar: Arc<BlobTransactionSidecar>,
     ) -> Option<RecoveredTx<Self::Pooled>> {
         let (tx, signer) = self.into_consensus().to_components();
-        Self::Pooled::try_from_blob_transaction(tx, Arc::unwrap_or_clone(sidecar))
+        tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
             .map(|tx| tx.with_signer(signer))
             .ok()
     }
@@ -882,7 +882,7 @@ impl EthPoolTransaction for MockTransaction {
         sidecar: BlobTransactionSidecar,
     ) -> Option<Self> {
         let (tx, signer) = tx.to_components();
-        Self::Pooled::try_from_blob_transaction(tx, sidecar)
+        tx.try_into_pooled_eip4844(sidecar)
             .map(|tx| tx.with_signer(signer))
             .ok()
             .map(Self::from_pooled)

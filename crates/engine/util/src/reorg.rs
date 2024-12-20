@@ -14,8 +14,8 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
-    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
-    ConfigureEvm,
+    env::EvmEnv, state_change::post_block_withdrawals_balance_increments,
+    system_calls::SystemCaller, ConfigureEvm,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
@@ -298,8 +298,13 @@ where
         .build();
 
     // Configure environments
-    let (cfg, block_env) = evm_config.cfg_and_block_env(&reorg_target.header, U256::MAX);
-    let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
+    let EvmEnv { cfg_env_with_handler_cfg, block_env } =
+        evm_config.cfg_and_block_env(&reorg_target.header, U256::MAX);
+    let env = EnvWithHandlerCfg::new_with_cfg_env(
+        cfg_env_with_handler_cfg,
+        block_env,
+        Default::default(),
+    );
     let mut evm = evm_config.evm_with_env(&mut state, env);
 
     // apply eip-4788 pre block contract call

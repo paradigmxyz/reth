@@ -305,8 +305,14 @@ impl<P> RevealedSparseTrie<P> {
                 match self.nodes.entry(path) {
                     Entry::Occupied(mut entry) => match entry.get() {
                         // Blinded nodes can be replaced.
-                        SparseNode::Hash(_) => {
-                            entry.insert(SparseNode::new_branch(branch.state_mask));
+                        SparseNode::Hash(hash) => {
+                            entry.insert(SparseNode::Branch {
+                                state_mask: branch.state_mask,
+                                // Memoize the hash of a previously blinded node in a new branch
+                                // node.
+                                hash: Some(*hash),
+                                store_in_db_trie: None,
+                            });
                         }
                         // Branch node already exists, or an extension node was placed where a
                         // branch node was before.
@@ -327,10 +333,15 @@ impl<P> RevealedSparseTrie<P> {
             }
             TrieNode::Extension(ext) => match self.nodes.entry(path) {
                 Entry::Occupied(mut entry) => match entry.get() {
-                    SparseNode::Hash(_) => {
+                    SparseNode::Hash(hash) => {
                         let mut child_path = entry.key().clone();
                         child_path.extend_from_slice_unchecked(&ext.key);
-                        entry.insert(SparseNode::new_ext(ext.key));
+                        entry.insert(SparseNode::Extension {
+                            key: ext.key,
+                            // Memoize the hash of a previously blinded node in a new extension
+                            // node.
+                            hash: Some(*hash),
+                        });
                         self.reveal_node_or_hash(child_path, &ext.child)?;
                     }
                     // Extension node already exists, or an extension node was placed where a branch
@@ -354,11 +365,16 @@ impl<P> RevealedSparseTrie<P> {
             },
             TrieNode::Leaf(leaf) => match self.nodes.entry(path) {
                 Entry::Occupied(mut entry) => match entry.get() {
-                    SparseNode::Hash(_) => {
+                    SparseNode::Hash(hash) => {
                         let mut full = entry.key().clone();
                         full.extend_from_slice_unchecked(&leaf.key);
-                        entry.insert(SparseNode::new_leaf(leaf.key));
                         self.values.insert(full, leaf.value);
+                        entry.insert(SparseNode::Leaf {
+                            key: leaf.key,
+                            // Memoize the hash of a previously blinded node in a new leaf
+                            // node.
+                            hash: Some(*hash),
+                        });
                     }
                     // Left node already exists.
                     SparseNode::Leaf { .. } => {}
@@ -1297,7 +1313,7 @@ mod tests {
         trie_cursor::noop::NoopAccountTrieCursor,
         updates::TrieUpdates,
         walker::TrieWalker,
-        BranchNode, ExtensionNode, HashedPostState, LeafNode, TrieAccount,
+        BranchNode, ExtensionNode, HashedPostState, LeafNode,
     };
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
@@ -1357,7 +1373,7 @@ mod tests {
                     hash_builder.add_branch(branch.key, branch.value, branch.children_are_in_trie);
                 }
                 TrieElement::Leaf(key, account) => {
-                    let account = TrieAccount::from((account, EMPTY_ROOT_HASH));
+                    let account = account.into_trie_account(EMPTY_ROOT_HASH);
                     account.encode(&mut account_rlp);
 
                     hash_builder.add_leaf(Nibbles::unpack(key), &account_rlp);
@@ -1437,7 +1453,7 @@ mod tests {
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
             account_rlp
         };
 
@@ -1462,7 +1478,7 @@ mod tests {
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
             account_rlp
         };
 
@@ -1491,7 +1507,7 @@ mod tests {
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
             account_rlp
         };
 
@@ -1528,7 +1544,7 @@ mod tests {
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
             account_rlp
         };
 
@@ -1560,13 +1576,13 @@ mod tests {
         let old_value = Account { nonce: 1, ..Default::default() };
         let old_value_encoded = {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((old_value, EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            old_value.into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
             account_rlp
         };
         let new_value = Account { nonce: 2, ..Default::default() };
         let new_value_encoded = {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((new_value, EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            new_value.into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
             account_rlp
         };
 
@@ -1928,7 +1944,7 @@ mod tests {
                 for (update, keys_to_delete) in updates {
                     // Insert state updates into the sparse trie and calculate the root
                     for (key, account) in update.clone() {
-                        let account = TrieAccount::from((account, EMPTY_ROOT_HASH));
+                        let account = account.into_trie_account(EMPTY_ROOT_HASH);
                         let mut account_rlp = Vec::new();
                         account.encode(&mut account_rlp);
                         sparse.update_leaf(key, account_rlp).unwrap();
@@ -2049,7 +2065,7 @@ mod tests {
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
             account_rlp
         };
 
@@ -2205,7 +2221,7 @@ mod tests {
         let value = || Account::default();
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
             account_rlp
         };
 
@@ -2332,7 +2348,7 @@ mod tests {
         let value = || Account { bytecode_hash: Some(B256::repeat_byte(1)), ..Default::default() };
         let value_encoded = || {
             let mut account_rlp = Vec::new();
-            TrieAccount::from((value(), EMPTY_ROOT_HASH)).encode(&mut account_rlp);
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
             account_rlp
         };
 

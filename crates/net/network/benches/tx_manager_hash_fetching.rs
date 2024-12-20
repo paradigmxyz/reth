@@ -23,7 +23,7 @@ pub fn tx_fetch_bench(c: &mut Criterion) {
     let rt = TokioRuntime::new().unwrap();
 
     let mut group = c.benchmark_group("Transaction Fetch");
-    group.sample_size(10);
+    group.sample_size(30);
 
     group.bench_function("fetch_transactions", |b| {
         b.to_async(&rt).iter_with_setup(

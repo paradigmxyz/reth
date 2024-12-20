@@ -26,7 +26,7 @@ use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubs
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::table::Value;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_node_types::{
     BlockTy, FullNodePrimitives, HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
     ReceiptTy, TxTy,
@@ -39,7 +39,6 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{BlockBodyIndicesProvider, CanonChainTracker, OmmersProvider};
 use reth_storage_errors::provider::ProviderResult;
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::BTreeMap,
     ops::{RangeBounds, RangeInclusive},
@@ -607,7 +606,7 @@ impl<N: TreeNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
         &self,
         header: &Header,
         evm_config: EvmConfig,
-    ) -> ProviderResult<(CfgEnvWithHandlerCfg, BlockEnv)>
+    ) -> ProviderResult<EvmEnv>
     where
         EvmConfig: ConfigureEvmEnv<Header = Header>,
     {

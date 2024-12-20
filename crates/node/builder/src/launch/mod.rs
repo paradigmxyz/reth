@@ -8,6 +8,10 @@ pub(crate) mod engine;
 pub use common::LaunchContext;
 use common::{Attached, LaunchContextWith, WithConfigs};
 pub use exex::ExExLauncher;
+use reth_db_api::{
+    database_metrics::{DatabaseMetadata, DatabaseMetrics},
+    Database,
+};
 
 use std::{future::Future, sync::Arc};
 
@@ -17,21 +21,21 @@ use reth_beacon_consensus::{
     BeaconConsensusEngine,
 };
 use reth_blockchain_tree::{
-    externals::TreeNodeTypes, noop::NoopBlockchainTree, BlockchainTree, BlockchainTreeConfig,
-    ShareableBlockchainTree, TreeExternals,
+    noop::NoopBlockchainTree, BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree,
+    TreeExternals,
 };
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
-use reth_node_api::{AddOnsContext, FullNodeTypes, NodeTypesWithEngine};
+use reth_node_api::{AddOnsContext, FullNodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_provider::providers::{BlockchainProvider, ProviderNodeTypes};
+use reth_provider::providers::{BlockchainProvider, NodeTypesForTree};
 use reth_rpc::eth::RpcNodeCore;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
@@ -99,10 +103,15 @@ impl DefaultNodeLauncher {
     }
 }
 
-impl<Types, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
+impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for DefaultNodeLauncher
 where
-    Types: ProviderNodeTypes + NodeTypesWithEngine + TreeNodeTypes,
-    T: FullNodeTypes<Provider = BlockchainProvider<Types>, Types = Types>,
+    Types: NodeTypesWithEngine + NodeTypesForTree,
+    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    T: FullNodeTypes<
+        Provider = BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>,
+        Types = Types,
+        DB = DB,
+    >,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>,
 {

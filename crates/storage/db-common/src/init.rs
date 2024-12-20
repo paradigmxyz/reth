@@ -373,6 +373,10 @@ where
         + StateWriter
         + AsRef<Provider>,
 {
+    if etl_config.file_size == 0 {
+        return Err(eyre::eyre!("ETL file size cannot be zero"))
+    }
+
     let block = provider_rw.last_block_number()?;
     let hash = provider_rw.block_hash(block)?.unwrap();
     let expected_state_root = provider_rw

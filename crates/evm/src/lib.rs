@@ -26,7 +26,11 @@ use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, Sp
 
 pub mod builder;
 pub mod either;
+/// EVM environment configuration.
+pub mod env;
 pub mod execute;
+use env::EvmEnv;
+
 #[cfg(feature = "std")]
 pub mod metrics;
 pub mod noop;
@@ -179,16 +183,12 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         }
     }
 
-    /// Creates a new [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the given header.
-    fn cfg_and_block_env(
-        &self,
-        header: &Self::Header,
-        total_difficulty: U256,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
+    /// Creates a new [`EvmEnv`] for the given header.
+    fn cfg_and_block_env(&self, header: &Self::Header, total_difficulty: U256) -> EvmEnv {
         let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
         let mut block_env = BlockEnv::default();
         self.fill_cfg_and_block_env(&mut cfg, &mut block_env, header, total_difficulty);
-        (cfg, block_env)
+        EvmEnv::new(cfg, block_env)
     }
 
     /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
@@ -207,7 +207,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         self.fill_block_env(block_env, header, after_merge);
     }
 
-    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for `parent + 1` block.
+    /// Returns the configured [`EvmEnv`] for `parent + 1` block.
     ///
     /// This is intended for usage in block building after the merge and requires additional
     /// attributes that can't be derived from the parent block: attributes that are determined by
@@ -216,7 +216,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error>;
+    ) -> Result<EvmEnv, Self::Error>;
 }
 
 /// Represents additional attributes required to configure the next block.

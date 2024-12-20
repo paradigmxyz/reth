@@ -36,6 +36,7 @@ op-alloy-consensus.workspace = true
 serde_json.workspace = true
 
 # misc
+thiserror.workspace = true
 derive_more.workspace = true
 once_cell.workspace = true
 
@@ -59,5 +60,6 @@ std = [
 	"alloy-consensus/std",
 	"once_cell/std",
 	"derive_more/std",
-	"reth-network-peers/std"
+	"reth-network-peers/std",
+	"thiserror/std"
 ]

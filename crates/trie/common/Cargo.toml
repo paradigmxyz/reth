@@ -19,9 +19,7 @@ alloy-trie.workspace = true
 alloy-consensus.workspace = true
 reth-primitives-traits.workspace = true
 reth-codecs = { workspace = true, optional = true }
-revm-primitives.workspace = true
 
-alloy-genesis.workspace = true
 alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }
 
@@ -43,6 +41,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["serde"] }
 reth-codecs.workspace = true
+alloy-genesis.workspace = true
 
 alloy-primitives = { workspace = true, features = ["getrandom"] }
 alloy-trie = { workspace = true, features = ["arbitrary", "serde"] }
@@ -71,7 +70,6 @@ serde = [
     "alloy-consensus/serde",
     "alloy-trie/serde",
     "alloy-rpc-types-eth?/serde",
-    "revm-primitives/serde",
     "reth-primitives-traits/serde",
     "reth-codecs?/serde"
 ]
@@ -101,7 +99,6 @@ arbitrary = [
 	"alloy-consensus/arbitrary",
 	"alloy-primitives/arbitrary",
 	"nybbles/arbitrary",
-	"revm-primitives/arbitrary",
 	"reth-codecs/arbitrary",
 	"alloy-rpc-types-eth?/arbitrary"
 ]

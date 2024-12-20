@@ -67,7 +67,7 @@ where
             payload_job_config,
             reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
                 EthEvmConfig::new(ctx.chain_spec()),
-                EthereumBuilderConfig::new(conf.extradata_bytes()),
+                EthereumBuilderConfig::new(conf.extra_data_bytes()),
             ),
         );
 

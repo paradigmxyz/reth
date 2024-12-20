@@ -16,6 +16,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_eth_wire::NetPrimitivesFor;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
@@ -104,11 +105,12 @@ pub struct Command<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `stage` command
-    pub async fn execute<N, E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
+    pub async fn execute<N, E, F, P>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
         E: BlockExecutorProvider<Primitives = N::Primitives>,
         F: FnOnce(Arc<C::ChainSpec>) -> E,
+        P: NetPrimitivesFor<N::Primitives>,
     {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
@@ -174,7 +176,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
                     let network = self
                         .network
-                        .network_config(
+                        .network_config::<P>(
                             &config,
                             provider_factory.chain_spec(),
                             p2p_secret_key,
@@ -186,13 +188,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     let fetch_client = Arc::new(network.fetch_client().await?);
 
                     // Use `to` as the tip for the stage
-                    let tip = fetch_client
+                    let tip: P::BlockHeader = fetch_client
                         .get_header(BlockHashOrNumber::Number(self.to))
                         .await?
                         .into_data()
                         .ok_or(StageError::MissingSyncGap)?;
                     let (_, rx) = watch::channel(tip.hash_slow());
-
                     (
                         Box::new(HeaderStage::new(
                             provider_factory.clone(),
@@ -224,7 +225,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
                     let network = self
                         .network
-                        .network_config(
+                        .network_config::<P>(
                             &config,
                             provider_factory.chain_spec(),
                             p2p_secret_key,
