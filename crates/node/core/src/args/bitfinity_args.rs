@@ -89,4 +89,12 @@ pub struct BitfinityResetEvmStateArgs {
     /// Number of parallel requests to send data to the IC.
     #[arg(long, default_value = "4")]
     pub parallel_requests: usize,
+
+    /// Max size in bytes of a single request to the IC.
+    #[arg(long, default_value = "500000")]
+    pub max_request_bytes: usize,
+
+    /// Single accounts bigger than this value will be split in multiple requests.
+    #[arg(long, default_value = "500000")]
+    pub max_account_request_bytes: usize,
 }

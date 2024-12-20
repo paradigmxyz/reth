@@ -113,6 +113,8 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
         import_data.provider_factory.clone(),
         executor.clone(),
         parallel_requests,
+        750_000,
+        750_000,
     );
 
     // Act
@@ -219,6 +221,8 @@ async fn build_bitfinity_reset_evm_command(
         evm_network: format!("http://127.0.0.1:{dfx_port}"),
         evm_datasource_url: evm_datasource_url.to_string(),
         parallel_requests: 4,
+        max_request_bytes: 750_000,
+        max_account_request_bytes: 750_000,
     };
 
     let principal = candid::Principal::from_text(bitfinity_args.evmc_principal.as_str()).unwrap();
@@ -242,6 +246,8 @@ async fn build_bitfinity_reset_evm_command(
             provider_factory,
             executor,
             bitfinity_args.parallel_requests,
+            bitfinity_args.max_request_bytes,
+            bitfinity_args.max_account_request_bytes,
         ),
     )
 }
