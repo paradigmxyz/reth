@@ -1,7 +1,7 @@
 use crate::stats::ParallelTrieStats;
 use metrics::Histogram;
 use reth_metrics::Metrics;
-use reth_trie::metrics::{TrieRootMetrics, TrieType};
+use reth_trie::metrics::{ParallelWorkType, TrieRootMetrics, TrieType};
 
 /// Parallel state root metrics.
 #[derive(Debug)]
@@ -14,12 +14,12 @@ pub struct ParallelStateRootMetrics {
     pub storage_trie: TrieRootMetrics,
 }
 
-impl Default for ParallelStateRootMetrics {
-    fn default() -> Self {
+impl ParallelStateRootMetrics {
+    pub fn new(ty: ParallelWorkType) -> Self {
         Self {
-            state_trie: TrieRootMetrics::new(TrieType::State),
-            parallel: ParallelTrieMetrics::default(),
-            storage_trie: TrieRootMetrics::new(TrieType::Storage),
+            state_trie: TrieRootMetrics::new(ty, TrieType::State),
+            parallel: ParallelTrieMetrics::new(ty),
+            storage_trie: TrieRootMetrics::new(ty, TrieType::Storage),
         }
     }
 }
@@ -41,4 +41,10 @@ pub struct ParallelTrieMetrics {
     pub precomputed_storage_roots: Histogram,
     /// The number of leaves for which we did not pre-compute the storage roots.
     pub missed_leaves: Histogram,
+}
+
+impl ParallelTrieMetrics {
+    fn new(ty: ParallelWorkType) -> Self {
+        Self::new_with_labels(&[("work", ty.as_str())])
+    }
 }

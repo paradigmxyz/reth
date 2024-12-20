@@ -11,11 +11,11 @@ pub struct StateRootMetrics {
     pub storage_trie: TrieRootMetrics,
 }
 
-impl Default for StateRootMetrics {
-    fn default() -> Self {
+impl StateRootMetrics {
+    pub fn new(ty: ParallelWorkType) -> Self {
         Self {
-            state_trie: TrieRootMetrics::new(TrieType::State),
-            storage_trie: TrieRootMetrics::new(TrieType::Storage),
+            state_trie: TrieRootMetrics::new(ty, TrieType::State),
+            storage_trie: TrieRootMetrics::new(ty, TrieType::Storage),
         }
     }
 }
@@ -34,8 +34,8 @@ pub struct TrieRootMetrics {
 
 impl TrieRootMetrics {
     /// Create new metrics for the given trie type.
-    pub fn new(ty: TrieType) -> Self {
-        Self::new_with_labels(&[("type", ty.as_str())])
+    pub fn new(work_type: ParallelWorkType, ty: TrieType) -> Self {
+        Self::new_with_labels(&[("work", work_type.as_str()), ("type", ty.as_str())])
     }
 
     /// Record trie stats as metrics.
@@ -60,6 +60,21 @@ impl TrieType {
         match self {
             Self::State => "state",
             Self::Storage => "storage",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ParallelWorkType {
+    Root,
+    Proof,
+}
+
+impl ParallelWorkType {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Root => "root",
+            Self::Proof => "proof",
         }
     }
 }

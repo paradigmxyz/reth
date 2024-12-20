@@ -6,7 +6,8 @@ use reth_db::{cursor::DbCursorRO, models::BlockNumberAddress, tables, DatabaseEr
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::StorageRootError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
+    hashed_cursor::HashedPostStateCursorFactory, metrics::ParallelWorkType, HashedPostState,
+    HashedStorage, StorageRoot,
 };
 
 #[cfg(feature = "metrics")]
@@ -45,7 +46,7 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
             address,
             Default::default(),
             #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(TrieType::Storage),
+            TrieRootMetrics::new(ParallelWorkType::Root, TrieType::Storage),
         )
     }
 
@@ -56,7 +57,7 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
             hashed_address,
             Default::default(),
             #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(TrieType::Storage),
+            TrieRootMetrics::new(ParallelWorkType::Root, TrieType::Storage),
         )
     }
 
@@ -74,7 +75,7 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
             address,
             prefix_set,
             #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(TrieType::Storage),
+            TrieRootMetrics::new(ParallelWorkType::Root, TrieType::Storage),
         )
         .root()
     }

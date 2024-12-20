@@ -1,5 +1,6 @@
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
+    metrics::ParallelWorkType,
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, TriePrefixSets},
     progress::{IntermediateStateRootState, StateRootProgress},
@@ -50,7 +51,7 @@ impl<T, H> StateRoot<T, H> {
             previous_state: None,
             threshold: 100_000,
             #[cfg(feature = "metrics")]
-            metrics: StateRootMetrics::default(),
+            metrics: StateRootMetrics::new(ParallelWorkType::Root),
         }
     }
 

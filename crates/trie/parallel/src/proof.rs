@@ -16,6 +16,7 @@ use reth_trie::{
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     proof::StorageProof,
+    stats::TrieTracker,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
@@ -28,7 +29,7 @@ use std::{sync::Arc, time::Instant};
 use tracing::{debug, error, trace};
 
 #[cfg(feature = "metrics")]
-use crate::metrics::ParallelStateRootMetrics;
+use {crate::metrics::ParallelStateRootMetrics, reth_trie::metrics::ParallelWorkType};
 
 /// TODO:
 #[derive(Debug)]
@@ -70,7 +71,7 @@ impl<'env, Factory> ParallelProof<'env, Factory> {
             collect_branch_node_hash_masks: false,
             thread_pool,
             #[cfg(feature = "metrics")]
-            metrics: ParallelStateRootMetrics::default(),
+            metrics: ParallelStateRootMetrics::new(ParallelWorkType::Proof),
         }
     }
 
@@ -142,6 +143,7 @@ where
             let trie_nodes_sorted = self.nodes_sorted.clone();
             let hashed_state_sorted = self.state_sorted.clone();
             let collect_masks = self.collect_branch_node_hash_masks;
+            let metrics = self.metrics.storage_trie.clone();
 
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
@@ -187,7 +189,7 @@ where
                         "Created cursors"
                     );
 
-                    let proof_start = Instant::now();
+                    let tracker = TrieTracker::default();
                     let proof_result = StorageProof::new_hashed(
                         trie_cursor_factory,
                         hashed_cursor_factory,
@@ -197,13 +199,16 @@ where
                     .with_branch_node_hash_masks(collect_masks)
                     .storage_multiproof(target_slots)
                     .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+                    let stats = tracker.finish();
+                    let proof_elapsed = stats.duration();
+                    metrics.record(stats);
 
                     trace!(
                         target: "trie::parallel",
                         parent_thread = ?thread_name,
                         thread = ?std::thread::current().name().unwrap_or_default(),
                         ?hashed_address,
-                        proof_time = ?proof_start.elapsed(),
+                        proof_time = ?proof_elapsed,
                         "Completed proof calculation"
                     );
 

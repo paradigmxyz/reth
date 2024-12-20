@@ -1,5 +1,3 @@
-#[cfg(feature = "metrics")]
-use crate::metrics::ParallelStateRootMetrics;
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
 use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
@@ -22,6 +20,9 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 use tracing::*;
+
+#[cfg(feature = "metrics")]
+use {crate::metrics::ParallelStateRootMetrics, reth_trie::metrics::ParallelWorkType};
 
 /// Parallel incremental state root calculator.
 ///
@@ -52,7 +53,7 @@ impl<Factory> ParallelStateRoot<Factory> {
             view,
             input,
             #[cfg(feature = "metrics")]
-            metrics: ParallelStateRootMetrics::default(),
+            metrics: ParallelStateRootMetrics::new(ParallelWorkType::Root),
         }
     }
 }
