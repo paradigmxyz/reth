@@ -9660,7 +9660,6 @@ dependencies = [
  "reth-trie-common",
  "reth-trie-db",
  "thiserror 2.0.7",
- "tokio",
  "tracing",
 ]
 

@@ -19,8 +19,6 @@ pub fn calculate_state_root(c: &mut Criterion) {
     let mut group = c.benchmark_group("Calculate State Root");
     group.sample_size(20);
 
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-
     for size in [1_000, 3_000, 5_000, 10_000] {
         let (db_state, updated_state) = generate_test_data(size);
         let provider_factory = create_test_provider_factory();
@@ -37,14 +35,14 @@ pub fn calculate_state_root(c: &mut Criterion) {
 
         // state root
         group.bench_function(BenchmarkId::new("sync root", size), |b| {
-            b.to_async(&runtime).iter_with_setup(
+            b.iter_with_setup(
                 || {
                     let sorted_state = updated_state.clone().into_sorted();
                     let prefix_sets = updated_state.construct_prefix_sets().freeze();
                     let provider = provider_factory.provider().unwrap();
                     (provider, sorted_state, prefix_sets)
                 },
-                |(provider, sorted_state, prefix_sets)| async move {
+                |(provider, sorted_state, prefix_sets)| {
                     let hashed_cursor_factory = HashedPostStateCursorFactory::new(
                         DatabaseHashedCursorFactory::new(provider.tx_ref()),
                         &sorted_state,
@@ -59,14 +57,14 @@ pub fn calculate_state_root(c: &mut Criterion) {
 
         // parallel root
         group.bench_function(BenchmarkId::new("parallel root", size), |b| {
-            b.to_async(&runtime).iter_with_setup(
+            b.iter_with_setup(
                 || {
                     ParallelStateRoot::new(
                         view.clone(),
                         TrieInput::from_state(updated_state.clone()),
                     )
                 },
-                |calculator| async { calculator.incremental_root() },
+                |calculator| calculator.incremental_root(),
             );
         });
     }
