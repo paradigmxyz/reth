@@ -5,7 +5,7 @@ use reth_scroll_chainspec::ScrollChainSpec;
 use reth_transaction_pool::noop::NoopTransactionPool;
 
 /// Pool builder for Scroll.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ScrollPoolBuilder;
 
 impl<Node> PoolBuilder<Node> for ScrollPoolBuilder

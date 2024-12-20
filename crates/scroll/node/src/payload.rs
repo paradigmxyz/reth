@@ -13,7 +13,7 @@ use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::TransactionPool;
 
 /// Payload builder for Scroll.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ScrollPayloadBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for ScrollPayloadBuilder

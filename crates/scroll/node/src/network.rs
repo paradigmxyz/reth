@@ -8,7 +8,7 @@ use reth_tracing::tracing::info;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 /// The network builder for Scroll.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ScrollNetworkBuilder;
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for ScrollNetworkBuilder
