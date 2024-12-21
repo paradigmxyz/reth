@@ -1,4 +1,4 @@
-//! Command for debugging merkle trie calculation.
+//! Command for debugging merkle tree calculation.
 use crate::{args::NetworkArgs, utils::get_single_header};
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
