@@ -3,7 +3,7 @@
 //! announcements. Validation and filtering of announcements is network dependent.
 
 use crate::metrics::{AnnouncedTxTypesMetrics, TxTypesCounter};
-use alloy_primitives::{Signature, TxHash};
+use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
 use derive_more::{Deref, DerefMut};
 use reth_eth_wire::{
     DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
@@ -42,7 +42,7 @@ pub trait ValidateTx68 {
 
     /// Returns the reasonable minimum encoded transaction length, if any. This property is not
     /// spec'ed out but can be inferred by looking at which
-    /// [`reth_primitives::PooledTransactionsElement`] will successfully pass decoding
+    /// [`reth_primitives::PooledTransaction`] will successfully pass decoding
     /// for any given transaction type.
     fn min_encoded_tx_length(&self, ty: TxType) -> Option<usize>;
 

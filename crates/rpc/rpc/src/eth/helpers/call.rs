@@ -3,19 +3,24 @@
 use crate::EthApi;
 use alloy_consensus::Header;
 use reth_evm::ConfigureEvm;
-use reth_rpc_eth_api::helpers::{
-    estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking,
+use reth_provider::{BlockReader, ProviderHeader};
+use reth_rpc_eth_api::{
+    helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
+    FullEthApiTypes,
 };
 
-impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig> where
-    Self: EstimateCall + LoadPendingBlock
+impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: EstimateCall + LoadPendingBlock + FullEthApiTypes,
+    Provider: BlockReader,
 {
 }
 
 impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadState<Evm: ConfigureEvm<Header = Header>> + SpawnBlocking,
+    Self: LoadState<Evm: ConfigureEvm<Header = ProviderHeader<Self::Provider>>> + SpawnBlocking,
     EvmConfig: ConfigureEvm<Header = Header>,
+    Provider: BlockReader,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
@@ -28,7 +33,9 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EstimateCall for EthApi<Provider, Pool, Network, EvmConfig> where
-    Self: Call
+impl<Provider, Pool, Network, EvmConfig> EstimateCall for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: Call,
+    Provider: BlockReader,
 {
 }

@@ -30,7 +30,8 @@ use reth_execution_types::Chain;
 use reth_exex::{ExExContext, ExExEvent, ExExNotification, ExExNotifications, Wal};
 use reth_network::{config::SecretKey, NetworkConfigBuilder, NetworkManager};
 use reth_node_api::{
-    FullNodeTypes, FullNodeTypesAdapter, NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+    FullNodeTypes, FullNodeTypesAdapter, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter,
+    NodeTypesWithEngine,
 };
 use reth_node_builder::{
     components::{
@@ -45,7 +46,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{BlockExt, EthPrimitives, Head, SealedBlockWithSenders};
+use reth_primitives::{BlockExt, EthPrimitives, Head, SealedBlockWithSenders, TransactionSigned};
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
     BlockReader, EthStorage, ProviderFactory,
@@ -64,7 +65,7 @@ pub struct TestPoolBuilder;
 
 impl<Node> PoolBuilder<Node> for TestPoolBuilder
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<Types: NodeTypes<Primitives: NodePrimitives<SignedTx = TransactionSigned>>>,
 {
     type Pool = TestPool;
 
@@ -80,7 +81,7 @@ pub struct TestExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for TestExecutorBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
     type EVM = EthEvmConfig;
     type Executor = MockExecutorProvider;
@@ -174,7 +175,8 @@ pub type Adapter = NodeAdapter<
     RethFullAdapter<TmpDB, TestNode>,
     <<TestNode as Node<
         FullNodeTypesAdapter<
-            NodeTypesWithDBAdapter<TestNode, TmpDB>,
+            TestNode,
+            TmpDB,
             BlockchainProvider<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
         >,
     >>::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<TmpDB, TestNode>>>::Components,
@@ -289,7 +291,7 @@ pub async fn test_exex_context_with_chain_spec(
 
     let (_, payload_builder) = NoopPayloadBuilderService::<EthEngineTypes>::new();
 
-    let components = NodeAdapter::<FullNodeTypesAdapter<_, _>, _> {
+    let components = NodeAdapter::<FullNodeTypesAdapter<_, _, _>, _> {
         components: Components {
             transaction_pool,
             evm_config,

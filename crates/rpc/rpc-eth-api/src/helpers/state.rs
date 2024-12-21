@@ -1,7 +1,8 @@
 //! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
 //! RPC methods.
-
-use alloy_consensus::{constants::KECCAK_EMPTY, Header};
+use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
+use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, EIP1186AccountProofResponse};
@@ -9,19 +10,13 @@ use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::env::EvmEnv;
 use reth_provider::{
-    BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
-    StateProviderFactory,
+    BlockIdReader, BlockNumReader, ChainSpecProvider, EvmEnvProvider as _, StateProvider,
+    StateProviderBox, StateProviderFactory,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
-use reth_rpc_types_compat::proof::from_primitive_account_proof;
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, SpecId};
-
-use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
-
-use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
@@ -122,7 +117,7 @@ pub trait EthState: LoadState + SpawnBlocking {
                 let proof = state
                     .proof(Default::default(), address, &storage_keys)
                     .map_err(Self::Error::from_eth_err)?;
-                Ok(from_primitive_account_proof(proof, keys))
+                Ok(proof.into_eip1186_response(keys))
             })
             .await
         })
@@ -218,7 +213,7 @@ pub trait LoadState:
     fn evm_env_at(
         &self,
         at: BlockId,
-    ) -> impl Future<Output = Result<(CfgEnvWithHandlerCfg, BlockEnv, BlockId), Self::Error>> + Send
+    ) -> impl Future<Output = Result<(EvmEnv, BlockId), Self::Error>> + Send
     where
         Self: LoadPendingBlock + SpawnBlocking,
     {
@@ -226,41 +221,22 @@ pub trait LoadState:
             if at.is_pending() {
                 let PendingBlockEnv { cfg, block_env, origin } =
                     self.pending_block_env_and_cfg()?;
-                Ok((cfg, block_env, origin.state_block_id()))
+                Ok(((cfg, block_env).into(), origin.state_block_id()))
             } else {
                 // Use cached values if there is no pending block
                 let block_hash = RpcNodeCore::provider(self)
                     .block_hash_for_id(at)
                     .map_err(Self::Error::from_eth_err)?
                     .ok_or(EthApiError::HeaderNotFound(at))?;
-                let (cfg, env) = self
-                    .cache()
-                    .get_evm_env(block_hash)
-                    .await
+
+                let header =
+                    self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
+                let evm_env = self
+                    .provider()
+                    .env_with_header(&header, self.evm_config().clone())
                     .map_err(Self::Error::from_eth_err)?;
-                Ok((cfg, env, block_hash.into()))
+                Ok((evm_env, block_hash.into()))
             }
-        }
-    }
-
-    /// Returns the revm evm env for the raw block header
-    ///
-    /// This is used for tracing raw blocks
-    fn evm_env_for_raw_block(
-        &self,
-        header: &Header,
-    ) -> impl Future<Output = Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error>> + Send
-    where
-        Self: LoadPendingBlock + SpawnBlocking,
-    {
-        async move {
-            // get the parent config first
-            let (cfg, mut block_env, _) = self.evm_env_at(header.parent_hash.into()).await?;
-
-            let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
-            self.evm_config().fill_block_env(&mut block_env, header, after_merge);
-
-            Ok((cfg, block_env))
         }
     }
 

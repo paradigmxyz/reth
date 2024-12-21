@@ -1,6 +1,6 @@
 use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
 use reth_exex_types::ExExHead;
-use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::Head;
 use reth_provider::BlockReader;
@@ -57,11 +57,12 @@ where
 impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
-    Node::Provider: Debug + BlockReader<Block = reth_primitives::Block>,
+    Node::Provider: Debug + BlockReader,
     Node::Executor: Debug,
+    Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
     /// Returns dynamic version of the context
-    pub fn into_dyn(self) -> ExExContextDyn {
+    pub fn into_dyn(self) -> ExExContextDyn<<Node::Types as NodeTypes>::Primitives> {
         ExExContextDyn::from(self)
     }
 }
@@ -69,6 +70,7 @@ where
 impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
+    Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
     /// Returns the transaction pool of the node.
     pub fn pool(&self) -> &Node::Pool {
@@ -107,19 +109,13 @@ where
 
     /// Sets notifications stream to [`crate::ExExNotificationsWithoutHead`], a stream of
     /// notifications without a head.
-    pub fn set_notifications_without_head(&mut self)
-    where
-        Node::Provider: BlockReader<Block = reth_primitives::Block>,
-    {
+    pub fn set_notifications_without_head(&mut self) {
         self.notifications.set_without_head();
     }
 
     /// Sets notifications stream to [`crate::ExExNotificationsWithHead`], a stream of notifications
     /// with the provided head.
-    pub fn set_notifications_with_head(&mut self, head: ExExHead)
-    where
-        Node::Provider: BlockReader<Block = reth_primitives::Block>,
-    {
+    pub fn set_notifications_with_head(&mut self, head: ExExHead) {
         self.notifications.set_with_head(head);
     }
 }
@@ -142,7 +138,7 @@ mod tests {
 
         impl<Node: FullNodeComponents> ExEx<Node>
         where
-            Node::Provider: BlockReader<Block = reth_primitives::Block>,
+            Node::Provider: BlockReader,
         {
             async fn _test_bounds(mut self) -> eyre::Result<()> {
                 self.ctx.pool();

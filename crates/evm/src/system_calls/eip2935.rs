@@ -4,7 +4,6 @@ use alloc::{boxed::Box, string::ToString};
 use alloy_eips::eip2935::HISTORY_STORAGE_ADDRESS;
 
 use crate::ConfigureEvm;
-use alloy_consensus::Header;
 use alloy_primitives::B256;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
@@ -35,7 +34,7 @@ pub(crate) fn transact_blockhashes_contract_call<EvmConfig, EXT, DB>(
 where
     DB: Database,
     DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm,
 {
     if !chain_spec.is_prague_active_at_timestamp(block_timestamp) {
         return Ok(None)
@@ -66,6 +65,11 @@ where
         }
     };
 
+    // NOTE: Revm currently marks these accounts as "touched" when we do the above transact calls,
+    // and includes them in the result.
+    //
+    // There should be no state changes to these addresses anyways as a result of this system call,
+    // so we can just remove them from the state returned.
     res.state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
     res.state.remove(&evm.block().coinbase);
 

@@ -8,6 +8,7 @@ use reth_db::DatabaseError;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
+    StateCommitmentProvider,
 };
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
@@ -15,7 +16,7 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashBuilder, Nibbles, StorageRoot, TrieAccount, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    HashBuilder, Nibbles, StorageRoot, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
@@ -58,7 +59,12 @@ impl<Factory> ParallelStateRoot<Factory> {
 
 impl<Factory> ParallelStateRoot<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + Clone + Send + Sync + 'static,
+    Factory: DatabaseProviderFactory<Provider: BlockReader>
+        + StateCommitmentProvider
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     /// Calculate incremental state root in parallel.
     pub fn incremental_root(self) -> Result<B256, ParallelStateRootError> {
@@ -115,10 +121,10 @@ where
                         trie_cursor_factory,
                         hashed_state,
                         hashed_address,
+                        prefix_set,
                         #[cfg(feature = "metrics")]
                         metrics,
                     )
-                    .with_prefix_set(prefix_set)
                     .calculate(retain_updates)?)
                 })();
                 let _ = tx.send(result);
@@ -173,6 +179,7 @@ where
                                 trie_cursor_factory.clone(),
                                 hashed_cursor_factory.clone(),
                                 hashed_address,
+                                Default::default(),
                                 #[cfg(feature = "metrics")]
                                 self.metrics.storage_trie.clone(),
                             )
@@ -185,7 +192,7 @@ where
                     }
 
                     account_rlp.clear();
-                    let account = TrieAccount::from((account, storage_root));
+                    let account = account.into_trie_account(storage_root);
                     account.encode(&mut account_rlp as &mut dyn BufMut);
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
                 }
@@ -252,8 +259,8 @@ mod tests {
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
 
-    #[tokio::test]
-    async fn random_parallel_root() {
+    #[test]
+    fn random_parallel_root() {
         let factory = create_test_provider_factory();
         let consistent_view = ConsistentDbView::new(factory.clone(), None);
 

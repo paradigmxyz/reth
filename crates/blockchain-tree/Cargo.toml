@@ -31,6 +31,7 @@ reth-consensus.workspace = true
 reth-node-types.workspace = true
 
 # ethereum
+alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
@@ -76,7 +77,8 @@ test-utils = [
 	"reth-db-api/test-utils",
 	"reth-provider/test-utils",
 	"reth-trie-db/test-utils",
-	"reth-trie/test-utils"
+	"reth-trie/test-utils",
+	"reth-trie-parallel/test-utils"
 ]
 optimism = [
 	"reth-primitives/optimism",

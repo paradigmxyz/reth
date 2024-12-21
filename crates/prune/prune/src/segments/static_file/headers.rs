@@ -3,7 +3,7 @@ use std::num::NonZeroUsize;
 use crate::{
     db_ext::DbTxPruneExt,
     segments::{PruneInput, Segment},
-    PrunerError,
+    PruneLimiter, PrunerError,
 };
 use alloy_primitives::BlockNumber;
 use itertools::Itertools;
@@ -14,8 +14,7 @@ use reth_db::{
 };
 use reth_provider::{providers::StaticFileProvider, DBProvider, StaticFileProviderFactory};
 use reth_prune_types::{
-    PruneLimiter, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
-    SegmentOutputCheckpoint,
+    PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
 use reth_static_file_types::StaticFileSegment;
 use tracing::trace;
@@ -92,7 +91,7 @@ impl<Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>> Segment<Prov
         }
 
         let done = last_pruned_block == Some(block_range_end);
-        let progress = PruneProgress::new(done, &limiter);
+        let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
             progress,
@@ -195,7 +194,8 @@ where
 #[cfg(test)]
 mod tests {
     use crate::segments::{
-        static_file::headers::HEADER_TABLES_TO_PRUNE, PruneInput, Segment, SegmentOutput,
+        static_file::headers::HEADER_TABLES_TO_PRUNE, PruneInput, PruneLimiter, Segment,
+        SegmentOutput,
     };
     use alloy_primitives::{BlockNumber, B256, U256};
     use assert_matches::assert_matches;
@@ -206,8 +206,8 @@ mod tests {
         StaticFileProviderFactory,
     };
     use reth_prune_types::{
-        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
-        PruneSegment, SegmentOutputCheckpoint,
+        PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
+        SegmentOutputCheckpoint,
     };
     use reth_stages::test_utils::TestStageDB;
     use reth_testing_utils::{generators, generators::random_header_range};

@@ -7,7 +7,7 @@ use crate::{
         ReverseWalker, Walker,
     },
     database::Database,
-    table::{DupSort, Table, TableImporter},
+    table::{DupSort, Encode, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
@@ -46,6 +46,13 @@ impl DbTx for TxMock {
     type DupCursor<T: DupSort> = CursorMock;
 
     fn get<T: Table>(&self, _key: T::Key) -> Result<Option<T::Value>, DatabaseError> {
+        Ok(None)
+    }
+
+    fn get_by_encoded_key<T: Table>(
+        &self,
+        _key: &<T::Key as Encode>::Encoded,
+    ) -> Result<Option<T::Value>, DatabaseError> {
         Ok(None)
     }
 

@@ -70,6 +70,7 @@ reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-downloaders.workspace = true
 reth-revm.workspace = true
 reth-static-file.workspace = true
+reth-stages-api = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }

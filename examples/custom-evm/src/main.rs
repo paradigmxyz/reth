@@ -4,7 +4,7 @@
 
 use alloy_consensus::Header;
 use alloy_genesis::Genesis;
-use alloy_primitives::{address, Address, Bytes, U256};
+use alloy_primitives::{address, Address, Bytes};
 use reth::{
     builder::{
         components::{ExecutorBuilder, PayloadServiceBuilder},
@@ -15,14 +15,15 @@ use reth::{
         handler::register::EvmHandler,
         inspector_handle_register,
         precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
-        primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
+        primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
         ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
     },
     rpc::types::engine::PayloadAttributes,
     tasks::TaskManager,
-    transaction_pool::TransactionPool,
+    transaction_pool::{PoolTransaction, TransactionPool},
 };
 use reth_chainspec::{Chain, ChainSpec};
+use reth_evm::env::EvmEnv;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{
     ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
@@ -84,6 +85,8 @@ impl MyEvmConfig {
 
 impl ConfigureEvmEnv for MyEvmConfig {
     type Header = Header;
+    type Transaction = TransactionSigned;
+
     type Error = Infallible;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
@@ -100,20 +103,15 @@ impl ConfigureEvmEnv for MyEvmConfig {
         self.inner.fill_tx_env_system_contract_call(env, caller, contract, data);
     }
 
-    fn fill_cfg_env(
-        &self,
-        cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Self::Header,
-        total_difficulty: U256,
-    ) {
-        self.inner.fill_cfg_env(cfg_env, header, total_difficulty);
+    fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
+        self.inner.fill_cfg_env(cfg_env, header);
     }
 
     fn next_cfg_and_block_env(
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error> {
+    ) -> Result<EvmEnv, Self::Error> {
         self.inner.next_cfg_and_block_env(parent, attributes)
     }
 }
@@ -153,7 +151,7 @@ pub struct MyExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
     type EVM = MyEvmConfig;
     type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory<Self::EVM>>;
@@ -183,7 +181,9 @@ impl<Types, Node, Pool> PayloadServiceBuilder<Node, Pool> for MyPayloadBuilder
 where
     Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
-    Pool: TransactionPool + Unpin + 'static,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+        + Unpin
+        + 'static,
     Types::Engine: PayloadTypes<
         BuiltPayload = EthBuiltPayload,
         PayloadAttributes = PayloadAttributes,

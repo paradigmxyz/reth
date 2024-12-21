@@ -5,8 +5,9 @@ use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest, BlockId};
 use futures::Future;
-use reth_chainspec::{EthChainSpec, MIN_TRANSACTION_GAS};
-use reth_provider::{ChainSpecProvider, StateProvider};
+use reth_chainspec::MIN_TRANSACTION_GAS;
+use reth_evm::env::EvmEnv;
+use reth_provider::StateProvider;
 use reth_revm::{
     database::StateProviderDatabase,
     db::CacheDB,
@@ -57,7 +58,7 @@ pub trait EstimateCall: Call {
         request.nonce = None;
 
         // Keep a copy of gas related request values
-        let tx_request_gas_limit = request.gas;
+        let tx_request_gas_limit = request.gas.map(U256::from);
         let tx_request_gas_price = request.gas_price;
         // the gas limit of the corresponding block
         let block_env_gas_limit = block.gas_limit;
@@ -65,7 +66,13 @@ pub trait EstimateCall: Call {
         // Determine the highest possible gas limit, considering both the request's specified limit
         // and the block's limit.
         let mut highest_gas_limit = tx_request_gas_limit
-            .map(|tx_gas_limit| U256::from(tx_gas_limit).max(block_env_gas_limit))
+            .map(|mut tx_gas_limit| {
+                if block_env_gas_limit < tx_gas_limit {
+                    // requested gas limit is higher than the allowed gas limit, capping
+                    tx_gas_limit = block_env_gas_limit;
+                }
+                tx_gas_limit
+            })
             .unwrap_or(block_env_gas_limit);
 
         // Configure the evm env
@@ -110,9 +117,7 @@ pub trait EstimateCall: Call {
         }
 
         // We can now normalize the highest gas limit to a u64
-        let mut highest_gas_limit: u64 = highest_gas_limit
-            .try_into()
-            .unwrap_or_else(|_| self.provider().chain_spec().max_gas_limit());
+        let mut highest_gas_limit = highest_gas_limit.saturating_to::<u64>();
 
         // If the provided gas limit is less than computed cap, use that
         env.tx.gas_limit = env.tx.gas_limit.min(highest_gas_limit);
@@ -255,13 +260,14 @@ pub trait EstimateCall: Call {
         Self: LoadPendingBlock,
     {
         async move {
-            let (cfg, block_env, at) = self.evm_env_at(at).await?;
+            let (evm_env, at) = self.evm_env_at(at).await?;
+            let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
             self.spawn_blocking_io(move |this| {
                 let state = this.state_at_block_id(at)?;
                 EstimateCall::estimate_gas_with(
                     &this,
-                    cfg,
+                    cfg_env_with_handler_cfg,
                     block_env,
                     request,
                     state,

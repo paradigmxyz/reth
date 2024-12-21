@@ -1,4 +1,21 @@
-//! Common abstracted types in Reth.
+//! Commonly used types and traits in Reth.
+//!
+//! This crate contains various primitive traits used across reth's components.
+//! It provides the [`Block`] trait which is used to represent a block and all its components.
+//! A [`Block`] is composed of a [`Header`] and a [`BlockBody`]. In ethereum (and optimism), a block
+//! body consists of a list of transactions, a list of uncle headers, and a list of withdrawals. For
+//! optimism, uncle headers and withdrawals are always empty lists.
+//!
+//! ## Feature Flags
+//!
+//! - `arbitrary`: Adds `proptest` and `arbitrary` support for primitive types.
+//! - `op`: Implements the traits for various [op-alloy](https://github.com/alloy-rs/op-alloy)
+//!   types.
+//! - `reth-codec`: Enables db codec support for reth types including zstd compression for certain
+//!   types.
+//! - `serde`: Adds serde support for all types.
+//! - `secp256k1`: Adds secp256k1 support for transaction signing/recovery. (By default the no-std
+//!   friendly `k256` is used)
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -27,12 +44,8 @@ pub mod transaction;
 pub use transaction::{
     execute::FillTxEnv,
     signed::{FullSignedTx, SignedTransaction},
-    tx_type::{FullTxType, TxType},
     FullTransaction, Transaction,
 };
-
-mod integer_list;
-pub use integer_list::{IntegerList, IntegerListError};
 
 pub mod block;
 pub use block::{
@@ -44,6 +57,8 @@ pub use block::{
 mod encoded;
 mod withdrawal;
 pub use encoded::WithEncoded;
+
+pub mod crypto;
 
 mod error;
 pub use error::{GotExpected, GotExpectedBoxed};
@@ -58,7 +73,7 @@ pub use storage::StorageEntry;
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
 pub use header::test_utils;
-pub use header::{BlockWithParent, Header, HeaderError, SealedHeader};
+pub use header::{Header, HeaderError, SealedHeader};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
 ///
@@ -68,9 +83,7 @@ pub use header::{BlockWithParent, Header, HeaderError, SealedHeader};
 ///
 /// Read more: <https://github.com/bincode-org/bincode/issues/326>
 #[cfg(feature = "serde-bincode-compat")]
-pub mod serde_bincode_compat {
-    pub use super::header::{serde_bincode_compat as header, serde_bincode_compat::*};
-}
+pub mod serde_bincode_compat;
 
 /// Heuristic size trait
 pub mod size;
@@ -79,18 +92,6 @@ pub use size::InMemorySize;
 /// Node traits
 pub mod node;
 pub use node::{BodyTy, FullNodePrimitives, HeaderTy, NodePrimitives, ReceiptTy};
-
-/// Helper trait that requires arbitrary implementation if the feature is enabled.
-#[cfg(any(feature = "test-utils", feature = "arbitrary"))]
-pub trait MaybeArbitrary: for<'a> arbitrary::Arbitrary<'a> {}
-/// Helper trait that requires arbitrary implementation if the feature is enabled.
-#[cfg(not(any(feature = "test-utils", feature = "arbitrary")))]
-pub trait MaybeArbitrary {}
-
-#[cfg(any(feature = "test-utils", feature = "arbitrary"))]
-impl<T> MaybeArbitrary for T where T: for<'a> arbitrary::Arbitrary<'a> {}
-#[cfg(not(any(feature = "test-utils", feature = "arbitrary")))]
-impl<T> MaybeArbitrary for T {}
 
 /// Helper trait that requires de-/serialize implementation since `serde` feature is enabled.
 #[cfg(feature = "serde")]
@@ -118,3 +119,16 @@ pub trait MaybeCompact {}
 impl<T> MaybeCompact for T where T: reth_codecs::Compact {}
 #[cfg(not(feature = "reth-codec"))]
 impl<T> MaybeCompact for T {}
+
+/// Helper trait that requires serde bincode compatibility implementation.
+#[cfg(feature = "serde-bincode-compat")]
+pub trait MaybeSerdeBincodeCompat: crate::serde_bincode_compat::SerdeBincodeCompat {}
+/// Noop. Helper trait that would require serde bincode compatibility implementation if
+/// `serde-bincode-compat` feature were enabled.
+#[cfg(not(feature = "serde-bincode-compat"))]
+pub trait MaybeSerdeBincodeCompat {}
+
+#[cfg(feature = "serde-bincode-compat")]
+impl<T> MaybeSerdeBincodeCompat for T where T: crate::serde_bincode_compat::SerdeBincodeCompat {}
+#[cfg(not(feature = "serde-bincode-compat"))]
+impl<T> MaybeSerdeBincodeCompat for T {}

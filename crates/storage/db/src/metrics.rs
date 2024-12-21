@@ -104,10 +104,11 @@ impl DatabaseEnvMetrics {
         value_size: Option<usize>,
         f: impl FnOnce() -> R,
     ) -> R {
-        self.operations
-            .get(&(table, operation))
-            .expect("operation & table metric handle not found")
-            .record(value_size, f)
+        if let Some(metrics) = self.operations.get(&(table, operation)) {
+            metrics.record(value_size, f)
+        } else {
+            f()
+        }
     }
 
     /// Record metrics for opening a database transaction.

@@ -1,6 +1,7 @@
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
+use alloy_trie::TrieAccount;
 use derive_more::Deref;
 use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, BytecodeDecodeError};
 
@@ -24,7 +25,7 @@ pub mod compact_ids {
 }
 
 /// An Ethereum account.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
@@ -49,13 +50,24 @@ impl Account {
     pub fn is_empty(&self) -> bool {
         self.nonce == 0 &&
             self.balance.is_zero() &&
-            self.bytecode_hash.map_or(true, |hash| hash == KECCAK_EMPTY)
+            self.bytecode_hash.is_none_or(|hash| hash == KECCAK_EMPTY)
     }
 
     /// Returns an account bytecode's hash.
     /// In case of no bytecode, returns [`KECCAK_EMPTY`].
     pub fn get_bytecode_hash(&self) -> B256 {
         self.bytecode_hash.unwrap_or(KECCAK_EMPTY)
+    }
+
+    /// Converts the account into a trie account with the given storage root.
+    pub fn into_trie_account(self, storage_root: B256) -> TrieAccount {
+        let Self { nonce, balance, bytecode_hash } = self;
+        TrieAccount {
+            nonce,
+            balance,
+            storage_root,
+            code_hash: bytecode_hash.unwrap_or(KECCAK_EMPTY),
+        }
     }
 }
 
@@ -178,11 +190,20 @@ impl From<&GenesisAccount> for Account {
 
 impl From<AccountInfo> for Account {
     fn from(revm_acc: AccountInfo) -> Self {
-        let code_hash = revm_acc.code_hash;
         Self {
             balance: revm_acc.balance,
             nonce: revm_acc.nonce,
-            bytecode_hash: (code_hash != KECCAK_EMPTY).then_some(code_hash),
+            bytecode_hash: (!revm_acc.is_empty_code_hash()).then_some(revm_acc.code_hash),
+        }
+    }
+}
+
+impl From<&AccountInfo> for Account {
+    fn from(revm_acc: &AccountInfo) -> Self {
+        Self {
+            balance: revm_acc.balance,
+            nonce: revm_acc.nonce,
+            bytecode_hash: (!revm_acc.is_empty_code_hash()).then_some(revm_acc.code_hash),
         }
     }
 }

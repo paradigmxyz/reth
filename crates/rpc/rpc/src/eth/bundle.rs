@@ -1,12 +1,13 @@
 //! `Eth` bundle implementation and helpers.
 
-use alloy_consensus::Transaction as _;
+use alloy_consensus::{BlockHeader, Transaction as _};
 use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::{PooledTransactionsElement, Transaction};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv};
+use reth_primitives::PooledTransaction;
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_api::{
@@ -15,12 +16,13 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
 use reth_tasks::pool::BlockingTaskGuard;
+use reth_transaction_pool::{PoolPooledTx, PoolTransaction, PoolTx, TransactionPool};
 use revm::{
     db::{CacheDB, DatabaseCommit, DatabaseRef},
     primitives::{ResultAndState, TxEnv},
 };
 use revm_primitives::{EnvKzgSettings, EnvWithHandlerCfg, SpecId, MAX_BLOB_GAS_PER_BLOCK};
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
 /// `Eth` bundle implementation.
 pub struct EthBundle<Eth> {
@@ -42,7 +44,11 @@ impl<Eth> EthBundle<Eth> {
 
 impl<Eth> EthBundle<Eth>
 where
-    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
+    Eth: EthTransactions<
+            Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
+        > + LoadPendingBlock
+        + Call
+        + 'static,
 {
     /// Simulates a bundle of transactions at the top of a given block number with the state of
     /// another (or the same) block. This can be used to simulate future blocks with the current
@@ -55,11 +61,14 @@ where
         let EthCallBundle {
             txs,
             block_number,
+            coinbase,
             state_block_number,
+            timeout: _,
             timestamp,
             gas_limit,
             difficulty,
             base_fee,
+            ..
         } = bundle;
         if txs.is_empty() {
             return Err(EthApiError::InvalidParams(
@@ -76,24 +85,15 @@ where
 
         let transactions = txs
             .into_iter()
-            .map(recover_raw_transaction)
+            .map(|tx| recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .map(|tx| tx.into_components())
+            .map(|tx| tx.to_components())
             .collect::<Vec<_>>();
 
         // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob
         // transactions.
-        if transactions
-            .iter()
-            .filter_map(|(tx, _)| {
-                if let PooledTransactionsElement::BlobTransaction(tx) = tx {
-                    Some(tx.tx().tx().blob_gas())
-                } else {
-                    None
-                }
-            })
-            .sum::<u64>() >
+        if transactions.iter().filter_map(|(tx, _)| tx.blob_gas_used()).sum::<u64>() >
             MAX_BLOB_GAS_PER_BLOCK
         {
             return Err(EthApiError::InvalidParams(
@@ -104,7 +104,12 @@ where
 
         let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
-        let (cfg, mut block_env, at) = self.eth_api().evm_env_at(block_id).await?;
+        let (evm_env, at) = self.eth_api().evm_env_at(block_id).await?;
+        let EvmEnv { cfg_env_with_handler_cfg, mut block_env } = evm_env;
+
+        if let Some(coinbase) = coinbase {
+            block_env.coinbase = coinbase;
+        }
 
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
@@ -117,13 +122,21 @@ where
             block_env.difficulty = U256::from(difficulty);
         }
 
+        // default to call gas limit unless user requests a smaller limit
+        block_env.gas_limit = U256::from(self.inner.eth_api.call_gas_limit());
         if let Some(gas_limit) = gas_limit {
-            block_env.gas_limit = U256::from(gas_limit);
+            let gas_limit = U256::from(gas_limit);
+            if gas_limit > block_env.gas_limit {
+                return Err(
+                    EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
+                )
+            }
+            block_env.gas_limit = gas_limit;
         }
 
         if let Some(base_fee) = base_fee {
             block_env.basefee = U256::from(base_fee);
-        } else if cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON) {
+        } else if cfg_env_with_handler_cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON) {
             let parent_block = block_env.number.saturating_to::<u64>();
             // here we need to fetch the _next_ block's basefee based on the parent block <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2130>
             let parent = RpcNodeCore::provider(self.eth_api())
@@ -149,7 +162,11 @@ where
             .spawn_with_state_at_block(at, move |state| {
                 let coinbase = block_env.coinbase;
                 let basefee = Some(block_env.basefee.to::<u64>());
-                let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, TxEnv::default());
+                let env = EnvWithHandlerCfg::new_with_cfg_env(
+                    cfg_env_with_handler_cfg,
+                    block_env,
+                    TxEnv::default(),
+                );
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let initial_coinbase = db
@@ -171,18 +188,18 @@ where
                 while let Some((tx, signer)) = transactions.next() {
                     // Verify that the given blob data, commitments, and proofs are all valid for
                     // this transaction.
-                    if let PooledTransactionsElement::BlobTransaction(ref tx) = tx {
-                        tx.validate(EnvKzgSettings::Default.get()).map_err(|e| {
+                    if let PooledTransaction::Eip4844(ref tx) = tx {
+                        tx.tx().validate_blob(EnvKzgSettings::Default.get()).map_err(|e| {
                             Eth::Error::from_eth_err(EthApiError::InvalidParams(e.to_string()))
                         })?;
                     }
 
-                    let tx = tx.into_transaction();
+                    let tx: PoolPooledTx<Eth::Pool> = tx;
+                    let tx = PoolTx::<Eth::Pool>::pooled_into_consensus(tx);
+                    // let tx = PoolConsensusTx::<Eth::Pool>::Trafrom(tx);
 
-                    hasher.update(tx.hash());
-                    let gas_price = Transaction::effective_tip_per_gas(tx.deref(), basefee)
-                        .ok_or_else(|| RpcInvalidTransactionError::FeeCapTooLow)
-                        .map_err(Eth::Error::from_eth_err)?;
+                    hasher.update(*tx.tx_hash());
+                    let gas_price = tx.effective_gas_price(basefee);
                     eth_api.evm_config().fill_tx_env(evm.tx_mut(), &tx, signer);
                     let ResultAndState { result, state } =
                         evm.transact().map_err(Eth::Error::from_evm_err)?;
@@ -220,7 +237,7 @@ where
                         gas_price: U256::from(gas_price),
                         gas_used,
                         to_address: tx.to(),
-                        tx_hash: tx.hash(),
+                        tx_hash: *tx.tx_hash(),
                         value,
                         revert,
                     };
@@ -261,7 +278,11 @@ where
 #[async_trait::async_trait]
 impl<Eth> EthCallBundleApiServer for EthBundle<Eth>
 where
-    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
+    Eth: EthTransactions<
+            Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
+        > + LoadPendingBlock
+        + Call
+        + 'static,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
         Self::call_bundle(self, request).await.map_err(Into::into)

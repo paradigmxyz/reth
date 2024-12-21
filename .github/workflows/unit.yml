@@ -35,11 +35,11 @@ jobs:
             partition: 2
             total_partitions: 2
           - type: optimism
-            args: --features "asm-keccak optimism" --locked --exclude reth --exclude reth-bench --exclude "example-*"
+            args: --features "asm-keccak optimism" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum"
             partition: 1
             total_partitions: 2
           - type: optimism
-            args: --features "asm-keccak optimism" --locked --exclude reth --exclude reth-bench --exclude "example-*"
+            args: --features "asm-keccak optimism" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum"
             partition: 2
             total_partitions: 2
           - type: book

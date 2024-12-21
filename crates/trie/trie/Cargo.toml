@@ -17,11 +17,13 @@ reth-execution-errors.workspace = true
 reth-primitives.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
+reth-trie-sparse.workspace = true
 reth-trie-common.workspace = true
 
 revm.workspace = true
 
 # alloy
+alloy-eips.workspace = true
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
@@ -59,18 +61,20 @@ criterion.workspace = true
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
-	"alloy-primitives/serde",
-	"alloy-consensus/serde",
-	"alloy-trie/serde",
-	"revm/serde",
-	"reth-trie-common/serde"
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-trie/serde",
+    "alloy-eips/serde",
+    "revm/serde",
+    "reth-trie-common/serde",
 ]
 test-utils = [
-	"triehash",
-	"revm/test-utils",
-	"reth-primitives/test-utils",
-	"reth-trie-common/test-utils",
-	"reth-stages-types/test-utils"
+    "triehash",
+    "revm/test-utils",
+    "reth-primitives/test-utils",
+    "reth-trie-common/test-utils",
+    "reth-trie-sparse/test-utils",
+    "reth-stages-types/test-utils",
 ]
 
 [[bench]]

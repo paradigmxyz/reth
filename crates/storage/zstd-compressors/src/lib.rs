@@ -1,41 +1,61 @@
+//! Commonly used zstd [`Compressor`] and [`Decompressor`] for reth types.
+
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use crate::alloc::string::ToString;
 use alloc::vec::Vec;
-use core::cell::RefCell;
 use zstd::bulk::{Compressor, Decompressor};
 
 /// Compression/Decompression dictionary for `Receipt`.
-pub static RECEIPT_DICTIONARY: &[u8] = include_bytes!("./receipt_dictionary.bin");
+pub static RECEIPT_DICTIONARY: &[u8] = include_bytes!("../receipt_dictionary.bin");
 /// Compression/Decompression dictionary for `Transaction`.
-pub static TRANSACTION_DICTIONARY: &[u8] = include_bytes!("./transaction_dictionary.bin");
+pub static TRANSACTION_DICTIONARY: &[u8] = include_bytes!("../transaction_dictionary.bin");
 
-// We use `thread_local` compressors and decompressors because dictionaries can be quite big, and
-// zstd-rs recommends to use one context/compressor per thread
 #[cfg(feature = "std")]
-std::thread_local! {
-    /// Thread Transaction compressor.
-    pub static TRANSACTION_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
-        Compressor::with_dictionary(0, TRANSACTION_DICTIONARY)
-            .expect("failed to initialize transaction compressor"),
-    );
+pub use locals::*;
+#[cfg(feature = "std")]
+mod locals {
+    use super::*;
+    use core::cell::RefCell;
 
-    /// Thread Transaction decompressor.
-    pub static TRANSACTION_DECOMPRESSOR: RefCell<ReusableDecompressor> =
-        RefCell::new(ReusableDecompressor::new(
-            Decompressor::with_dictionary(TRANSACTION_DICTIONARY)
-                .expect("failed to initialize transaction decompressor"),
-        ));
+    // We use `thread_local` compressors and decompressors because dictionaries can be quite big,
+    // and zstd-rs recommends to use one context/compressor per thread
+    std::thread_local! {
+        /// Thread Transaction compressor.
+        pub static TRANSACTION_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
+            Compressor::with_dictionary(0, TRANSACTION_DICTIONARY)
+                .expect("failed to initialize transaction compressor"),
+        );
 
-    /// Thread receipt compressor.
-    pub static RECEIPT_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
-        Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
-            .expect("failed to initialize receipt compressor"),
-    );
+        /// Thread Transaction decompressor.
+        pub static TRANSACTION_DECOMPRESSOR: RefCell<ReusableDecompressor> =
+            RefCell::new(ReusableDecompressor::new(
+                Decompressor::with_dictionary(TRANSACTION_DICTIONARY)
+                    .expect("failed to initialize transaction decompressor"),
+            ));
 
-    /// Thread receipt decompressor.
-    pub static RECEIPT_DECOMPRESSOR: RefCell<ReusableDecompressor> =
-        RefCell::new(ReusableDecompressor::new(
-            Decompressor::with_dictionary(RECEIPT_DICTIONARY)
-                .expect("failed to initialize receipt decompressor"),
-        ));
+        /// Thread receipt compressor.
+        pub static RECEIPT_COMPRESSOR: RefCell<Compressor<'static>> = RefCell::new(
+            Compressor::with_dictionary(0, RECEIPT_DICTIONARY)
+                .expect("failed to initialize receipt compressor"),
+        );
+
+        /// Thread receipt decompressor.
+        pub static RECEIPT_DECOMPRESSOR: RefCell<ReusableDecompressor> =
+            RefCell::new(ReusableDecompressor::new(
+                Decompressor::with_dictionary(RECEIPT_DICTIONARY)
+                    .expect("failed to initialize receipt decompressor"),
+            ));
+    }
 }
 
 /// Fn creates tx [`Compressor`]

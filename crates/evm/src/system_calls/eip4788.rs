@@ -2,7 +2,6 @@
 use alloc::{boxed::Box, string::ToString};
 
 use crate::ConfigureEvm;
-use alloy_consensus::Header;
 use alloy_eips::eip4788::BEACON_ROOTS_ADDRESS;
 use alloy_primitives::B256;
 use reth_chainspec::EthereumHardforks;
@@ -31,7 +30,7 @@ pub(crate) fn transact_beacon_root_contract_call<EvmConfig, EXT, DB, Spec>(
 where
     DB: Database,
     DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm,
     Spec: EthereumHardforks,
 {
     if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
@@ -76,6 +75,11 @@ where
         }
     };
 
+    // NOTE: Revm currently marks these accounts as "touched" when we do the above transact calls,
+    // and includes them in the result.
+    //
+    // There should be no state changes to these addresses anyways as a result of this system call,
+    // so we can just remove them from the state returned.
     res.state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
     res.state.remove(&evm.block().coinbase);
 

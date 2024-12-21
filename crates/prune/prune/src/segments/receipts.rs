@@ -6,14 +6,13 @@
 //!   node after static file producer has finished
 
 use crate::{db_ext::DbTxPruneExt, segments::PruneInput, PrunerError};
-use reth_db::{tables, transaction::DbTxMut};
+use reth_db::{table::Value, tables, transaction::DbTxMut};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    errors::provider::ProviderResult, BlockReader, DBProvider, PruneCheckpointWriter,
-    TransactionsProvider,
+    errors::provider::ProviderResult, BlockReader, DBProvider, NodePrimitivesProvider,
+    PruneCheckpointWriter, TransactionsProvider,
 };
-use reth_prune_types::{
-    PruneCheckpoint, PruneProgress, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
-};
+use reth_prune_types::{PruneCheckpoint, PruneSegment, SegmentOutput, SegmentOutputCheckpoint};
 use tracing::trace;
 
 pub(crate) fn prune<Provider>(
@@ -21,7 +20,10 @@ pub(crate) fn prune<Provider>(
     input: PruneInput,
 ) -> Result<SegmentOutput, PrunerError>
 where
-    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + TransactionsProvider
+        + BlockReader
+        + NodePrimitivesProvider<Primitives: NodePrimitives<Receipt: Value>>,
 {
     let tx_range = match input.get_next_tx_num_range(provider)? {
         Some(range) => range,
@@ -35,7 +37,9 @@ where
     let mut limiter = input.limiter;
 
     let mut last_pruned_transaction = tx_range_end;
-    let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Receipts>(
+    let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Receipts<
+        <Provider::Primitives as NodePrimitives>::Receipt,
+    >>(
         tx_range,
         &mut limiter,
         |_| false,
@@ -50,7 +54,7 @@ where
         // so we could finish pruning its receipts on the next run.
         .checked_sub(if done { 0 } else { 1 });
 
-    let progress = PruneProgress::new(done, &limiter);
+    let progress = limiter.progress(done);
 
     Ok(SegmentOutput {
         progress,
@@ -77,7 +81,7 @@ pub(crate) fn save_checkpoint(
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, SegmentOutput};
+    use crate::segments::{PruneInput, PruneLimiter, SegmentOutput};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -87,7 +91,7 @@ mod tests {
     use reth_db::tables;
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
-        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress, PruneSegment,
+        PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{

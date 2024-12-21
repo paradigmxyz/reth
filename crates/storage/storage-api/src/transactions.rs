@@ -1,4 +1,4 @@
-use crate::{BlockNumReader, BlockReader, ReceiptProvider};
+use crate::{BlockNumReader, BlockReader};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockNumber, TxHash, TxNumber};
 use reth_primitives::TransactionMeta;
@@ -84,12 +84,9 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
 /// A helper type alias to access [`TransactionsProvider::Transaction`].
 pub type ProviderTx<P> = <P as TransactionsProvider>::Transaction;
 
-/// A helper type alias to access [`ReceiptProvider::Receipt`].
-pub type ProviderReceipt<P> = <P as ReceiptProvider>::Receipt;
-
 ///  Client trait for fetching additional transactions related data.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait TransactionsProviderExt: BlockReader + Send + Sync {
+pub trait TransactionsProviderExt: BlockReader {
     /// Get transactions range by block range.
     fn transaction_range_by_block_range(
         &self,

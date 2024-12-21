@@ -7,7 +7,7 @@ use alloy_eips::{
 use alloy_primitives::{keccak256, Address, Bytes, B256, B64, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
-use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
+use op_alloy_consensus::{encode_holocene_extra_data, EIP1559ParamError};
 /// Re-export for use in downstream arguments.
 pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
@@ -45,7 +45,7 @@ impl OpPayloadBuilderAttributes {
         default_base_fee_params: BaseFeeParams,
     ) -> Result<Bytes, EIP1559ParamError> {
         self.eip_1559_params
-            .map(|params| decode_holocene_extra_data(params, default_base_fee_params))
+            .map(|params| encode_holocene_extra_data(params, default_base_fee_params))
             .ok_or(EIP1559ParamError::NoEIP1559Params)?
     }
 }
@@ -370,7 +370,9 @@ mod tests {
                 prev_randao: b256!("9158595abbdab2c90635087619aa7042bbebe47642dfab3c9bfb934f6b082765"),
                 suggested_fee_recipient: address!("4200000000000000000000000000000000000011"),
                 withdrawals: Some([].into()),
-                parent_beacon_block_root: b256!("8fe0193b9bf83cb7e5a08538e494fecc23046aab9a497af3704f4afdae3250ff").into()
+                parent_beacon_block_root: b256!("8fe0193b9bf83cb7e5a08538e494fecc23046aab9a497af3704f4afdae3250ff").into(),
+                target_blobs_per_block: None,
+                max_blobs_per_block: None,
             },
             transactions: Some([bytes!("7ef8f8a0dc19cfa777d90980e4875d0a548a881baaa3f83f14d1bc0d3038bc329350e54194deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e20000f424000000000000000000000000300000000670d6d890000000000000125000000000000000000000000000000000000000000000000000000000000000700000000000000000000000000000000000000000000000000000000000000014bf9181db6e381d4384bbf69c48b0ee0eed23c6ca26143c6d2544f9d39997a590000000000000000000000007f83d659683caf2767fd3c720981d51f5bc365bc")].into()),
             no_tx_pool: None,

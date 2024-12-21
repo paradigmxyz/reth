@@ -24,8 +24,8 @@ use reth_primitives::{
 use reth_provider::{
     BlockExecutionWriter, BlockNumReader, BlockWriter, CanonStateNotification,
     CanonStateNotificationSender, CanonStateNotifications, ChainSpecProvider, ChainSplit,
-    ChainSplitTarget, DBProvider, DisplayBlocksChain, HeaderProvider, ProviderError,
-    StaticFileProviderFactory, StorageLocation,
+    ChainSplitTarget, DBProvider, DisplayBlocksChain, HashedPostStateProvider, HeaderProvider,
+    ProviderError, StaticFileProviderFactory, StorageLocation,
 };
 use reth_stages_api::{MetricEvent, MetricEventsSender};
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
@@ -95,7 +95,7 @@ impl<N: NodeTypesWithDB, E> BlockchainTree<N, E> {
 impl<N, E> BlockchainTree<N, E>
 where
     N: TreeNodeTypes,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     /// Builds the blockchain tree for the node.
     ///
@@ -397,7 +397,6 @@ where
             .header_td(&block.parent_hash)?
             .ok_or_else(|| BlockchainTreeError::CanonicalChain { block_hash: block.parent_hash })?;
 
-        // Pass the parent total difficulty to short-circuit unnecessary calculations.
         if !self
             .externals
             .provider_factory
@@ -698,21 +697,17 @@ where
         if let Err(e) =
             self.externals.consensus.validate_header_with_total_difficulty(block, U256::MAX)
         {
-            error!(
-                ?block,
-                "Failed to validate total difficulty for block {}: {e}",
-                block.header.hash()
-            );
+            error!(?block, "Failed to validate total difficulty for block {}: {e}", block.hash());
             return Err(e);
         }
 
         if let Err(e) = self.externals.consensus.validate_header(block) {
-            error!(?block, "Failed to validate header {}: {e}", block.header.hash());
+            error!(?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e);
         }
 
         if let Err(e) = self.externals.consensus.validate_block_pre_execution(block) {
-            error!(?block, "Failed to validate block {}: {e}", block.header.hash());
+            error!(?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e);
         }
 
@@ -1041,6 +1036,7 @@ where
                         })
                     },
                 )?;
+
             if !self
                 .externals
                 .provider_factory
@@ -1215,7 +1211,7 @@ where
         recorder: &mut MakeCanonicalDurationsRecorder,
     ) -> Result<(), CanonicalError> {
         let (blocks, state, chain_trie_updates) = chain.into_inner();
-        let hashed_state = state.hash_state_slow();
+        let hashed_state = self.externals.provider_factory.hashed_post_state(state.state());
         let prefix_sets = hashed_state.construct_prefix_sets().freeze();
         let hashed_state_sorted = hashed_state.into_sorted();
 
@@ -1244,7 +1240,7 @@ where
                     ))
                     .with_prefix_sets(prefix_sets)
                     .root_with_updates()
-                    .map_err(Into::<BlockValidationError>::into)?;
+                    .map_err(BlockValidationError::from)?;
                 let tip = blocks.tip();
                 if state_root != tip.state_root {
                     return Err(ProviderError::StateRootMismatch(Box::new(RootMismatch {
@@ -1376,7 +1372,10 @@ where
 mod tests {
     use super::*;
     use alloy_consensus::{Header, TxEip1559, EMPTY_ROOT_HASH};
-    use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip4895::Withdrawals};
+    use alloy_eips::{
+        eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, INITIAL_BASE_FEE},
+        eip4895::Withdrawals,
+    };
     use alloy_genesis::{Genesis, GenesisAccount};
     use alloy_primitives::{keccak256, Address, PrimitiveSignature as Signature, B256};
     use assert_matches::assert_matches;
@@ -1390,7 +1389,7 @@ mod tests {
     use reth_node_types::FullNodePrimitives;
     use reth_primitives::{
         proofs::{calculate_receipt_root, calculate_transaction_root},
-        Account, BlockBody, Transaction, TransactionSigned, TransactionSignedEcRecovered,
+        Account, BlockBody, RecoveredTx, Transaction, TransactionSigned,
     };
     use reth_provider::{
         providers::ProviderNodeTypes,
@@ -1400,7 +1399,6 @@ mod tests {
         },
         ProviderFactory, StorageLocation,
     };
-    use reth_revm::primitives::AccountInfo;
     use reth_stages_api::StageCheckpoint;
     use reth_trie::{root::state_root_unhashed, StateRoot};
     use std::collections::HashMap;
@@ -1424,7 +1422,12 @@ mod tests {
     }
 
     fn setup_genesis<
-        N: ProviderNodeTypes<Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>>,
+        N: ProviderNodeTypes<
+            Primitives: FullNodePrimitives<
+                BlockBody = reth_primitives::BlockBody,
+                BlockHeader = reth_primitives::Header,
+            >,
+        >,
     >(
         factory: &ProviderFactory<N>,
         mut genesis: SealedBlock,
@@ -1569,7 +1572,7 @@ mod tests {
         }
 
         let single_tx_cost = U256::from(INITIAL_BASE_FEE * MIN_TRANSACTION_GAS);
-        let mock_tx = |nonce: u64| -> TransactionSignedEcRecovered {
+        let mock_tx = |nonce: u64| -> RecoveredTx {
             TransactionSigned::new_unhashed(
                 Transaction::Eip1559(TxEip1559 {
                     chain_id: chain_spec.chain.id(),
@@ -1586,7 +1589,7 @@ mod tests {
 
         let mock_block = |number: u64,
                           parent: Option<B256>,
-                          body: Vec<TransactionSignedEcRecovered>,
+                          body: Vec<RecoveredTx>,
                           num_of_signer_txs: u64|
          -> SealedBlockWithSenders {
             let signed_body =
@@ -1613,22 +1616,20 @@ mod tests {
                 number,
                 parent_hash: parent.unwrap_or_default(),
                 gas_used: body.len() as u64 * MIN_TRANSACTION_GAS,
-                gas_limit: chain_spec.max_gas_limit,
+                gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
                 mix_hash: B256::random(),
                 base_fee_per_gas: Some(INITIAL_BASE_FEE),
                 transactions_root,
                 receipts_root,
                 state_root: state_root_unhashed(HashMap::from([(
                     signer,
-                    (
-                        AccountInfo {
-                            balance: initial_signer_balance -
-                                (single_tx_cost * U256::from(num_of_signer_txs)),
-                            nonce: num_of_signer_txs,
-                            ..Default::default()
-                        },
-                        EMPTY_ROOT_HASH,
-                    ),
+                    Account {
+                        balance: initial_signer_balance -
+                            (single_tx_cost * U256::from(num_of_signer_txs)),
+                        nonce: num_of_signer_txs,
+                        ..Default::default()
+                    }
+                    .into_trie_account(EMPTY_ROOT_HASH),
                 )])),
                 ..Default::default()
             };
@@ -1880,7 +1881,12 @@ mod tests {
         );
 
         let provider = tree.externals.provider_factory.provider().unwrap();
-        let prefix_sets = exec5.hash_state_slow().construct_prefix_sets().freeze();
+        let prefix_sets = tree
+            .externals
+            .provider_factory
+            .hashed_post_state(exec5.state())
+            .construct_prefix_sets()
+            .freeze();
         let state_root =
             StateRoot::from_tx(provider.tx_ref()).with_prefix_sets(prefix_sets).root().unwrap();
         assert_eq!(state_root, block5.state_root);

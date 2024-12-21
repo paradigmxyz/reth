@@ -14,6 +14,9 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     // todo: make chain spec type generic over hardfork
     //type Hardfork: Clone + Copy + 'static;
 
+    /// The header type of the network.
+    type Header;
+
     /// Returns the [`Chain`] object this spec targets.
     fn chain(&self) -> Chain;
 
@@ -41,13 +44,10 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn display_hardforks(&self) -> Box<dyn Display>;
 
     /// The genesis header.
-    fn genesis_header(&self) -> &Header;
+    fn genesis_header(&self) -> &Self::Header;
 
     /// The genesis block specification.
     fn genesis(&self) -> &Genesis;
-
-    /// The block gas limit.
-    fn max_gas_limit(&self) -> u64;
 
     /// The bootnodes for the chain, if any.
     fn bootnodes(&self) -> Option<Vec<NodeRecord>>;
@@ -64,6 +64,8 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
 }
 
 impl EthChainSpec for ChainSpec {
+    type Header = Header;
+
     fn chain(&self) -> Chain {
         self.chain
     }
@@ -92,16 +94,12 @@ impl EthChainSpec for ChainSpec {
         Box::new(Self::display_hardforks(self))
     }
 
-    fn genesis_header(&self) -> &Header {
+    fn genesis_header(&self) -> &Self::Header {
         self.genesis_header()
     }
 
     fn genesis(&self) -> &Genesis {
         self.genesis()
-    }
-
-    fn max_gas_limit(&self) -> u64 {
-        self.max_gas_limit
     }
 
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {

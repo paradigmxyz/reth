@@ -18,7 +18,7 @@ reth-db-models.workspace = true
 reth-primitives = { workspace = true, features = ["reth-codec"] }
 reth-primitives-traits = { workspace = true, features = ["serde", "reth-codec"] }
 reth-prune-types.workspace = true
-reth-stages-types.workspace = true
+reth-stages-types = { workspace = true, features = ["reth-codec"] }
 reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 
@@ -29,6 +29,7 @@ alloy-consensus.workspace = true
 
 # codecs
 modular-bitfield.workspace = true
+roaring = "0.10.2"
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 serde = { workspace = true, default-features = false }
 
@@ -81,4 +82,4 @@ arbitrary = [
     "reth-stages-types/arbitrary",
     "alloy-consensus/arbitrary",
 ]
-optimism = ["reth-primitives/optimism", "reth-codecs/optimism"]
+optimism = ["reth-primitives/optimism", "reth-codecs/op"]

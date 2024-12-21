@@ -1,16 +1,17 @@
 //! System contract call functions.
 
 use crate::ConfigureEvm;
-use alloc::{boxed::Box, sync::Arc, vec};
-use alloy_consensus::Header;
-use alloy_eips::eip7685::Requests;
+use alloc::{boxed::Box, sync::Arc};
+use alloy_consensus::BlockHeader;
+use alloy_eips::{
+    eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE, eip7685::Requests,
+};
 use alloy_primitives::Bytes;
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::BlockExecutionError;
-use reth_primitives::Block;
 use revm::{Database, DatabaseCommit, Evm};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ResultAndState, B256};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, EvmState, B256};
 
 mod eip2935;
 mod eip4788;
@@ -19,15 +20,15 @@ mod eip7251;
 
 /// A hook that is called after each state change.
 pub trait OnStateHook {
-    /// Invoked with the result and state after each system call.
-    fn on_state(&mut self, state: &ResultAndState);
+    /// Invoked with the state after each system call.
+    fn on_state(&mut self, state: &EvmState);
 }
 
 impl<F> OnStateHook for F
 where
-    F: FnMut(&ResultAndState),
+    F: FnMut(&EvmState),
 {
-    fn on_state(&mut self, state: &ResultAndState) {
+    fn on_state(&mut self, state: &EvmState) {
         self(state)
     }
 }
@@ -38,7 +39,7 @@ where
 pub struct NoopHook;
 
 impl OnStateHook for NoopHook {
-    fn on_state(&mut self, _state: &ResultAndState) {}
+    fn on_state(&mut self, _state: &EvmState) {}
 }
 
 /// An ephemeral helper type for executing system calls.
@@ -89,11 +90,11 @@ where
 
 impl<EvmConfig, Chainspec> SystemCaller<EvmConfig, Chainspec>
 where
-    EvmConfig: ConfigureEvm<Header = Header>,
+    EvmConfig: ConfigureEvm,
     Chainspec: EthereumHardforks,
 {
     /// Apply pre execution changes.
-    pub fn apply_pre_execution_changes<DB, Ext>(
+    pub fn apply_pre_execution_changes<DB, Ext, Block>(
         &mut self,
         block: &Block,
         evm: &mut Evm<'_, Ext, DB>,
@@ -101,17 +102,18 @@ where
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
+        Block: reth_primitives_traits::Block<Header = EvmConfig::Header>,
     {
         self.apply_blockhashes_contract_call(
-            block.timestamp,
-            block.number,
-            block.parent_hash,
+            block.header().timestamp(),
+            block.header().number(),
+            block.header().parent_hash(),
             evm,
         )?;
         self.apply_beacon_root_contract_call(
-            block.timestamp,
-            block.number,
-            block.parent_beacon_block_root,
+            block.header().timestamp(),
+            block.header().number(),
+            block.header().parent_beacon_block_root(),
             evm,
         )?;
 
@@ -127,13 +129,21 @@ where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
     {
-        // todo
+        let mut requests = Requests::default();
+
         // Collect all EIP-7685 requests
         let withdrawal_requests = self.apply_withdrawal_requests_contract_call(evm)?;
+        if !withdrawal_requests.is_empty() {
+            requests.push_request_with_type(WITHDRAWAL_REQUEST_TYPE, withdrawal_requests);
+        }
 
         // Collect all EIP-7251 requests
         let consolidation_requests = self.apply_consolidation_requests_contract_call(evm)?;
-        Ok(Requests::new(vec![withdrawal_requests, consolidation_requests]))
+        if !consolidation_requests.is_empty() {
+            requests.push_request_with_type(CONSOLIDATION_REQUEST_TYPE, consolidation_requests);
+        }
+
+        Ok(requests)
     }
 
     /// Applies the pre-block call to the EIP-2935 blockhashes contract.
@@ -182,7 +192,7 @@ where
 
         if let Some(res) = result_and_state {
             if let Some(ref mut hook) = self.hook {
-                hook.on_state(&res);
+                hook.on_state(&res.state);
             }
             evm.context.evm.db.commit(res.state);
         }
@@ -237,7 +247,7 @@ where
 
         if let Some(res) = result_and_state {
             if let Some(ref mut hook) = self.hook {
-                hook.on_state(&res);
+                hook.on_state(&res.state);
             }
             evm.context.evm.db.commit(res.state);
         }
@@ -276,7 +286,7 @@ where
             eip7002::transact_withdrawal_requests_contract_call(&self.evm_config.clone(), evm)?;
 
         if let Some(ref mut hook) = self.hook {
-            hook.on_state(&result_and_state);
+            hook.on_state(&result_and_state.state);
         }
         evm.context.evm.db.commit(result_and_state.state);
 
@@ -314,7 +324,7 @@ where
             eip7251::transact_consolidation_requests_contract_call(&self.evm_config.clone(), evm)?;
 
         if let Some(ref mut hook) = self.hook {
-            hook.on_state(&result_and_state);
+            hook.on_state(&result_and_state.state);
         }
         evm.context.evm.db.commit(result_and_state.state);
 
@@ -322,7 +332,7 @@ where
     }
 
     /// Delegate to stored `OnStateHook`, noop if hook is `None`.
-    pub fn on_state(&mut self, state: &ResultAndState) {
+    pub fn on_state(&mut self, state: &EvmState) {
         if let Some(ref mut hook) = &mut self.hook {
             hook.on_state(state);
         }
