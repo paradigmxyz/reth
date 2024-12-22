@@ -27,6 +27,9 @@ alloy-primitives.workspace = true
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
 
+# optimism
+reth-optimism-primitives = { workspace = true, optional = true }
+
 # codecs
 modular-bitfield.workspace = true
 roaring = "0.10.2"
@@ -82,4 +85,5 @@ arbitrary = [
     "reth-stages-types/arbitrary",
     "alloy-consensus/arbitrary",
 ]
+op = ["dep:reth-optimism-primitives"]
 optimism = ["reth-primitives/optimism", "reth-codecs/op"]

@@ -128,8 +128,8 @@ pub async fn import_receipts_from_reader<N, F>(
     mut filter: F,
 ) -> eyre::Result<ImportReceiptsResult>
 where
-    N: ProviderNodeTypes<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
-    F: FnMut(u64, &mut Receipts) -> usize,
+    N: ProviderNodeTypes,
+    F: FnMut(u64, &mut N::Receipt) -> usize,
 {
     let static_file_provider = provider_factory.static_file_provider();
 
