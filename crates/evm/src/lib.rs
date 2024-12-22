@@ -34,7 +34,6 @@ use env::EvmEnv;
 #[cfg(feature = "std")]
 pub mod metrics;
 pub mod noop;
-pub mod provider;
 pub mod state_change;
 pub mod system_calls;
 #[cfg(any(test, feature = "test-utils"))]

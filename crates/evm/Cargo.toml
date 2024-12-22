@@ -24,8 +24,6 @@ reth-prune-types.workspace = true
 reth-revm.workspace = true
 reth-storage-errors.workspace = true
 
-reth-storage-api = { workspace = true, optional = true }
-
 revm.workspace = true
 revm-primitives.workspace = true
 
@@ -68,7 +66,6 @@ test-utils = [
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-revm/test-utils",
-	"dep:reth-storage-api",
     "revm/test-utils",
     "reth-prune-types/test-utils"
 ]

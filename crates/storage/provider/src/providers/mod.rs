@@ -4,11 +4,10 @@ use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, BlockchainTreePendingStateProvider, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
-    DatabaseProviderFactory, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider,
-    NodePrimitivesProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
-    ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, TreeViewer,
-    WithdrawalsProvider,
+    DatabaseProviderFactory, FullExecutionDataProvider, HeaderProvider, NodePrimitivesProvider,
+    ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
 use alloy_consensus::Header;
 use alloy_eips::{
@@ -26,7 +25,6 @@ use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubs
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::table::Value;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_node_types::{
     BlockTy, FullNodePrimitives, HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
     ReceiptTy, TxTy,
@@ -598,19 +596,6 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {
 
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
         self.database.provider()?.get_all_checkpoints()
-    }
-}
-
-impl<N: TreeNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
-    fn env_with_header<EvmConfig>(
-        &self,
-        header: &Header,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<EvmEnv>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        self.database.provider()?.env_with_header(header, evm_config)
     }
 }
 

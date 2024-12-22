@@ -464,7 +464,7 @@ mod tests {
     use reth_primitives::{Block, BlockBody, TransactionSigned};
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
-        BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
+        BlockReader, BlockReaderIdExt, ChainSpecProvider, StateProviderFactory,
     };
     use reth_rpc_eth_api::EthApiServer;
     use reth_rpc_eth_types::{
@@ -484,7 +484,6 @@ mod tests {
                 Header = reth_primitives::Header,
             > + BlockReader
             + ChainSpecProvider<ChainSpec = ChainSpec>
-            + EvmEnvProvider
             + StateProviderFactory
             + Unpin
             + Clone
