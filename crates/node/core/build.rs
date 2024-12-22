@@ -24,5 +24,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let not_on_tag = env::var("VERGEN_GIT_DESCRIBE")?.ends_with(&format!("-g{sha_short}"));
     let is_dev = is_dirty || not_on_tag;
     println!("cargo:rustc-env=RETH_VERSION_SUFFIX={}", if is_dev { "-dev" } else { "" });
+
+    // Set short SHA
+    println!("cargo:rustc-env=VERGEN_GIT_SHA_SHORT={}", &sha[..8]);
     Ok(())
 }
