@@ -407,7 +407,7 @@ where
                                     ActionSender { blockhash: block_hash, tx: Some(action_tx) };
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
-                                    let _permitx = rate_limiter.acquire().await;
+                                    let _permit = rate_limiter.acquire().await;
                                     // Only look in the database to prevent situations where we
                                     // looking up the tree is blocking
                                     let block_sender = provider
