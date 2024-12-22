@@ -252,7 +252,6 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
@@ -303,7 +302,6 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
     >,
     OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {

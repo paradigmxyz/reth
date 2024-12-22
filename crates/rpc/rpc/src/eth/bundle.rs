@@ -6,7 +6,6 @@ use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTra
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::PooledTransaction;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;
@@ -16,7 +15,9 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
 use reth_tasks::pool::BlockingTaskGuard;
-use reth_transaction_pool::{PoolPooledTx, PoolTransaction, PoolTx, TransactionPool};
+use reth_transaction_pool::{
+    EthBlobTransactionSidecar, EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
+};
 use revm::{
     db::{CacheDB, DatabaseCommit, DatabaseRef},
     primitives::{ResultAndState, TxEnv},
@@ -44,11 +45,7 @@ impl<Eth> EthBundle<Eth> {
 
 impl<Eth> EthBundle<Eth>
 where
-    Eth: EthTransactions<
-            Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
-        > + LoadPendingBlock
-        + Call
-        + 'static,
+    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
 {
     /// Simulates a bundle of transactions at the top of a given block number with the state of
     /// another (or the same) block. This can be used to simulate future blocks with the current
@@ -88,12 +85,11 @@ where
             .map(|tx| recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .map(|tx| tx.to_components())
             .collect::<Vec<_>>();
 
         // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob
         // transactions.
-        if transactions.iter().filter_map(|(tx, _)| tx.blob_gas_used()).sum::<u64>() >
+        if transactions.iter().filter_map(|tx| tx.blob_gas_used()).sum::<u64>() >
             MAX_BLOB_GAS_PER_BLOCK
         {
             return Err(EthApiError::InvalidParams(
@@ -185,18 +181,23 @@ where
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();
 
-                while let Some((tx, signer)) = transactions.next() {
-                    // Verify that the given blob data, commitments, and proofs are all valid for
-                    // this transaction.
-                    if let PooledTransaction::Eip4844(ref tx) = tx {
-                        tx.tx().validate_blob(EnvKzgSettings::Default.get()).map_err(|e| {
-                            Eth::Error::from_eth_err(EthApiError::InvalidParams(e.to_string()))
-                        })?;
-                    }
+                while let Some(tx) = transactions.next() {
+                    let signer = tx.signer();
+                    let tx = {
+                        let mut tx: <Eth::Pool as TransactionPool>::Transaction = tx.into();
 
-                    let tx: PoolPooledTx<Eth::Pool> = tx;
-                    let tx = PoolTx::<Eth::Pool>::pooled_into_consensus(tx);
-                    // let tx = PoolConsensusTx::<Eth::Pool>::Trafrom(tx);
+                        if let EthBlobTransactionSidecar::Present(sidecar) = tx.take_blob() {
+                            tx.validate_blob(&sidecar, EnvKzgSettings::Default.get()).map_err(
+                                |e| {
+                                    Eth::Error::from_eth_err(EthApiError::InvalidParams(
+                                        e.to_string(),
+                                    ))
+                                },
+                            )?;
+                        }
+
+                        tx.into_consensus()
+                    };
 
                     hasher.update(*tx.tx_hash());
                     let gas_price = tx.effective_gas_price(basefee);
@@ -278,11 +279,7 @@ where
 #[async_trait::async_trait]
 impl<Eth> EthCallBundleApiServer for EthBundle<Eth>
 where
-    Eth: EthTransactions<
-            Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
-        > + LoadPendingBlock
-        + Call
-        + 'static,
+    Eth: EthTransactions + LoadPendingBlock + Call + 'static,
 {
     async fn call_bundle(&self, request: EthCallBundle) -> RpcResult<EthCallBundleResponse> {
         Self::call_bundle(self, request).await.map_err(Into::into)
