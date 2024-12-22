@@ -19,8 +19,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedSender},
-    oneshot, Semaphore,
+    mpsc::{unbounded_channel, UnboundedSender}, oneshot, watch::error::SendError, Semaphore
 };
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -64,6 +63,33 @@ type HeaderLruCache<H, L> = MultiConsumerLruCache<B256, H, L, HeaderResponseSend
 #[derive(Debug)]
 pub struct EthStateCache<B: Block, R> {
     to_service: UnboundedSender<CacheAction<B, R>>,
+}
+
+pub struct ActionSender<B,R>{
+    blockhash: B256,
+    tx: Option<UnboundedSender<CacheAction<B,R>>>,
+}
+
+impl ActionSender<B,R>{
+    fn send_block(self, block_sender: Result<Option<Arc<SealedBlockWithSenders<<Provider as BlockReader>::Block>>>, ProviderError>){
+        let _ = self.tx.send(CacheAction::BlockWithSendersResult {
+            block_hash: self.blockhash,
+            res: block_sender,
+        });
+    }
+    fn send_receipts(self, receipts: Result<Option<Arc<Vec<<Provider as ReceiptProvider>::Receipt>>>, ProviderError>){
+        let _ = self.tx.send(CacheAction::ReceiptsResult { block_hash: self.blockhash, res: receipts });
+    }
+    fn send_header(self, header: Result<<Provider as HeaderProvider>::Header, ProviderError>){
+        let _ = self.tx.send(CacheAction::HeaderResult { block_hash: self.blockhash, res: Box::new(header) });
+    }
+}
+impl Drop for ActionSender<B,R>{
+    fn drop(){
+        if let Some(tx) = self.tx{
+            let _ = tx.send(Err("Sender Dropped".to_string()));
+        }
+    }
 }
 
 impl<B: Block, R> Clone for EthStateCache<B, R> {
@@ -359,9 +385,10 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
+                                let action_sender = ActionSender{blockhash: block_hash, tx: Some(action_tx)};
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
-                                    let _permit = rate_limiter.acquire().await;
+                                    let _permitx = rate_limiter.acquire().await;
                                     // Only look in the database to prevent situations where we
                                     // looking up the tree is blocking
                                     let block_sender = provider
@@ -370,10 +397,7 @@ where
                                             TransactionVariant::WithHash,
                                         )
                                         .map(|maybe_block| maybe_block.map(Arc::new));
-                                    let _ = action_tx.send(CacheAction::BlockWithSendersResult {
-                                        block_hash,
-                                        res: block_sender,
-                                    });
+                                    action_sender.send_block(block_sender);
                                 }));
                             }
                         }
@@ -389,6 +413,7 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
+                                let action_sender = ActionSender{blockhash: block_hash, tx: Some(action_tx)};
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
@@ -396,8 +421,7 @@ where
                                         .receipts_by_block(block_hash.into())
                                         .map(|maybe_receipts| maybe_receipts.map(Arc::new));
 
-                                    let _ = action_tx
-                                        .send(CacheAction::ReceiptsResult { block_hash, res });
+                                    action_sender.send_receipts(res);
                                 }));
                             }
                         }
@@ -414,6 +438,7 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
+                                let action_sender = ActionSender{blockhash: block_hash, tx: Some(action_tx)};
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
@@ -422,10 +447,7 @@ where
                                             ProviderError::HeaderNotFound(block_hash.into())
                                         })
                                     });
-                                    let _ = action_tx.send(CacheAction::HeaderResult {
-                                        block_hash,
-                                        res: Box::new(header),
-                                    });
+                                    action_sender.send_header(header);
                                 }));
                             }
                         }
