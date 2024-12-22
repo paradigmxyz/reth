@@ -1,6 +1,6 @@
 use crate::Nibbles;
+use alloc::{sync::Arc, vec::Vec};
 use alloy_primitives::map::{B256HashMap, B256HashSet};
-use std::sync::Arc;
 
 /// Collection of mutable prefix sets.
 #[derive(Clone, Default, Debug)]
@@ -209,7 +209,7 @@ impl PrefixSet {
 
 impl<'a> IntoIterator for &'a PrefixSet {
     type Item = &'a Nibbles;
-    type IntoIter = std::slice::Iter<'a, Nibbles>;
+    type IntoIter = core::slice::Iter<'a, Nibbles>;
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }

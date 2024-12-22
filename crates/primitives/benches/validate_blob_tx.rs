@@ -69,12 +69,10 @@ fn validate_blob_tx(
 
     // for now we just use the default SubPoolLimit
     group.bench_function(group_id, |b| {
+        let kzg_settings = kzg_settings.get();
         b.iter_with_setup(setup, |(tx, blob_sidecar)| {
-            if let Err(err) =
-                std::hint::black_box(tx.validate_blob(&blob_sidecar, kzg_settings.get()))
-            {
-                println!("Validation failed: {err:?}");
-            }
+            let r = tx.validate_blob(&blob_sidecar, kzg_settings);
+            (r, tx, blob_sidecar)
         });
     });
 }

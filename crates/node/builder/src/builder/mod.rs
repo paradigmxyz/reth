@@ -7,7 +7,7 @@ use crate::{
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
-    DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
+    BlockReaderFor, DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
 };
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
@@ -35,7 +35,7 @@ use reth_node_core::{
 };
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    BlockReader, ChainSpecProvider, FullProvider,
+    ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
@@ -658,8 +658,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 >,
             > + Unpin
             + 'static,
-        Node::Provider:
-            BlockReader<Receipt = N::Receipt, Block = N::Block, Header = N::BlockHeader>,
+        Node::Provider: BlockReaderFor<N>,
     {
         self.start_network_with(builder, pool, Default::default())
     }
@@ -685,8 +684,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                 >,
             > + Unpin
             + 'static,
-        Node::Provider:
-            BlockReader<Receipt = N::Receipt, Block = N::Block, Header = N::BlockHeader>,
+        Node::Provider: BlockReaderFor<N>,
     {
         let (handle, network, txpool, eth) = builder
             .transactions(pool, tx_config)

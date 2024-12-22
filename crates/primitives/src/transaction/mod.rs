@@ -1191,6 +1191,12 @@ impl From<RecoveredTx> for TransactionSigned {
     }
 }
 
+impl From<RecoveredTx<PooledTransaction>> for TransactionSigned {
+    fn from(recovered: RecoveredTx<PooledTransaction>) -> Self {
+        recovered.signed_transaction.into()
+    }
+}
+
 impl TryFrom<TransactionSigned> for PooledTransaction {
     type Error = TransactionConversionError;
 

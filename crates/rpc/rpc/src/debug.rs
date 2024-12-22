@@ -641,12 +641,9 @@ where
                 let mut witness_record = ExecutionWitnessRecord::default();
 
                 let _ = block_executor
-                    .execute_with_state_closure(
-                        (&(*block).clone().unseal(), block.difficulty()).into(),
-                        |statedb: &State<_>| {
-                            witness_record.record_executed_state(statedb);
-                        },
-                    )
+                    .execute_with_state_closure(&(*block).clone().unseal(), |statedb: &State<_>| {
+                        witness_record.record_executed_state(statedb);
+                    })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
                 let ExecutionWitnessRecord { hashed_state, codes, keys } = witness_record;

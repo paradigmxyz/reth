@@ -167,6 +167,8 @@ type PendingForkchoiceUpdate<PayloadAttributes> =
 /// # Panics
 ///
 /// If the future is polled more than once. Leads to undefined state.
+///
+/// Note: soon deprecated. See `reth_engine_service::EngineService`.
 #[must_use = "Future does nothing unless polled"]
 #[allow(missing_debug_implementations)]
 pub struct BeaconConsensusEngine<N, BT, Client>
@@ -2458,7 +2460,7 @@ mod tests {
                     .chain(MAINNET.chain)
                     .genesis(MAINNET.genesis.clone())
                     .london_activated()
-                    .paris_at_ttd(U256::from(3))
+                    .paris_at_ttd(U256::from(3), 3)
                     .build(),
             );
 

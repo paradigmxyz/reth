@@ -56,7 +56,7 @@ impl InnerTransport {
             reqwest::Client::builder().tls_built_in_root_certs(url.scheme() == "https");
         let mut headers = reqwest::header::HeaderMap::new();
 
-        // Add the JWT it to the headers if we can decode it.
+        // Add the JWT to the headers if we can decode it.
         let (auth, claims) =
             build_auth(jwt).map_err(|e| AuthenticatedTransportError::InvalidJwt(e.to_string()))?;
 
@@ -80,7 +80,7 @@ impl InnerTransport {
         url: Url,
         jwt: JwtSecret,
     ) -> Result<(Self, Claims), AuthenticatedTransportError> {
-        // Add the JWT it to the headers if we can decode it.
+        // Add the JWT to the headers if we can decode it.
         let (auth, claims) =
             build_auth(jwt).map_err(|e| AuthenticatedTransportError::InvalidJwt(e.to_string()))?;
 
@@ -114,9 +114,9 @@ pub struct AuthenticatedTransport {
     /// Also contains the current claims being used. This is used to determine whether or not we
     /// should create another client.
     inner_and_claims: Arc<RwLock<(InnerTransport, Claims)>>,
-    /// The current jwt being used. This is so we can recreate claims.
+    /// The current jwt is being used. This is so we can recreate claims.
     jwt: JwtSecret,
-    /// The current URL being used. This is so we can recreate the client if needed.
+    /// The current URL is being used. This is so we can recreate the client if needed.
     url: Url,
 }
 
@@ -209,7 +209,7 @@ fn build_auth(secret: JwtSecret) -> eyre::Result<(Authorization, Claims)> {
 pub struct AuthenticatedTransportConnect {
     /// The URL to connect to.
     url: Url,
-    /// The JWT secret used to authenticate the transport.
+    /// The JWT secret is used to authenticate the transport.
     jwt: JwtSecret,
 }
 

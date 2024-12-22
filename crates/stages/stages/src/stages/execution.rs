@@ -337,10 +337,6 @@ where
             // Fetch the block
             let fetch_block_start = Instant::now();
 
-            let td = provider
-                .header_td_by_number(block_number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-
             // we need the block's transactions but we don't need the transaction hashes
             let block = provider
                 .block_with_senders(block_number.into(), TransactionVariant::NoHash)?
@@ -356,7 +352,7 @@ where
             // Execute the block
             let execute_start = Instant::now();
 
-            self.metrics.metered_one((&block, td).into(), |input| {
+            self.metrics.metered_one(&block, |input| {
                 executor.execute_and_verify_one(input).map_err(|error| {
                     let header = block.header();
                     StageError::Block {

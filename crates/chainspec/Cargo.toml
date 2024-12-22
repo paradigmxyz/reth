@@ -51,7 +51,8 @@ std = [
 	"alloy-rlp/std",
 	"reth-ethereum-forks/std",
 	"derive_more/std",
-	"reth-network-peers/std"
+	"reth-network-peers/std",
+	"reth-trie-common/std"
 ]
 arbitrary = [
 	"alloy-chains/arbitrary",
