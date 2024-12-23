@@ -175,12 +175,14 @@ where
     Client: StateProviderFactory,
     Tx: EthPoolTransaction,
 {
-    /// Validates a single transaction.
+    /// Validates a single transaction using an optional cached state provider.
+    /// If no provider is passed, a new one will be created. This allows reusing
+    /// the same provider across multiple txs.
     fn validate_one_with_provider(
         &self,
         origin: TransactionOrigin,
         mut transaction: Tx,
-        provider: &mut Option<Box<dyn StateProvider>>,
+        state: &mut Option<Box<dyn StateProvider>>,
     ) -> TransactionValidationOutcome<Tx> {
         // Checks for tx_type
         match transaction.tx_type() {
@@ -351,13 +353,13 @@ where
         }
 
         // Get or create provider
-        let state = if let Some(provider) = provider {
-            provider
+        let state = if let Some(state) = state {
+            state
         } else {
             match self.client.latest() {
-                Ok(new_provider) => {
-                    *provider = Some(new_provider);
-                    provider.as_ref().unwrap()
+                Ok(new_state) => {
+                    *state = Some(new_state);
+                    state.as_ref().unwrap()
                 }
                 Err(err) => {
                     return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
