@@ -6,7 +6,7 @@
 //! cargo run -p bsc-p2p
 //! ```
 //!
-//! This launch the regular reth node overriding the engine api payload builder with our custom.
+//! This launches the regular reth node overriding the engine api payload builder with our custom.
 //!
 //! Credits to: <https://blog.merkle.io/blog/fastest-transaction-network-eth-polygon-bsc>
 
