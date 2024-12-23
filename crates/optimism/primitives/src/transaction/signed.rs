@@ -3,8 +3,8 @@
 use crate::OpTxType;
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, SignableTransaction, Transaction, TxEip1559, TxEip2930, TxEip7702,
-    TxLegacy, Typed2718,
+    transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930,
+    TxEip7702, TxLegacy, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -22,7 +22,7 @@ use core::{
 use derive_more::{AsRef, Deref};
 #[cfg(not(feature = "std"))]
 use once_cell::sync::OnceCell as OnceLock;
-use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
+use op_alloy_consensus::{OpPooledTransaction, OpTypedTransaction, TxDeposit};
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
 use reth_primitives::transaction::{recover_signer, recover_signer_unchecked};
@@ -415,6 +415,45 @@ impl Hash for OpTransactionSigned {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.signature.hash(state);
         self.transaction.hash(state);
+    }
+}
+
+impl From<Signed<TxEip7702>> for OpTransactionSigned {
+    fn from(value: Signed<TxEip7702>) -> Self {
+        let (tx, signature, hash) = value.into_parts();
+        Self { hash: hash.into(), signature, transaction: tx.into() }
+    }
+}
+
+impl From<Signed<TxEip1559>> for OpTransactionSigned {
+    fn from(value: Signed<TxEip1559>) -> Self {
+        let (tx, signature, hash) = value.into_parts();
+        Self { hash: hash.into(), signature, transaction: tx.into() }
+    }
+}
+
+impl From<Signed<TxEip2930>> for OpTransactionSigned {
+    fn from(value: Signed<TxEip2930>) -> Self {
+        let (tx, signature, hash) = value.into_parts();
+        Self { hash: hash.into(), signature, transaction: tx.into() }
+    }
+}
+
+impl From<Signed<TxLegacy>> for OpTransactionSigned {
+    fn from(value: Signed<TxLegacy>) -> Self {
+        let (tx, signature, hash) = value.into_parts();
+        Self { hash: hash.into(), signature, transaction: tx.into() }
+    }
+}
+
+impl From<OpPooledTransaction> for OpTransactionSigned {
+    fn from(tx: OpPooledTransaction) -> Self {
+        match tx {
+            OpPooledTransaction::Legacy(signed) => signed.into(),
+            OpPooledTransaction::Eip2930(signed) => signed.into(),
+            OpPooledTransaction::Eip1559(signed) => signed.into(),
+            OpPooledTransaction::Eip7702(signed) => signed.into(),
+        }
     }
 }
 
