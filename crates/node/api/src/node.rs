@@ -101,7 +101,7 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
     /// Handle to the beacon consensus engine.
     pub beacon_engine_handle:
-        BeaconConsensusEngineHandle<<N::Types as NodeTypesWithEngine>::Engine>,
+        BeaconConsensusEngineHandle<<N::Types as NodeTypesWithEngine>::Engine, <N::Types as NodeTypes>::Primitives>,
     /// JWT secret for the node.
     pub jwt_secret: JwtSecret,
 }

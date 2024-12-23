@@ -12,6 +12,7 @@ use reth_db_api::{
     Database,
 };
 use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder};
+use alloy_consensus::BlockHeader;
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
@@ -73,7 +74,7 @@ impl EngineNodeLauncher {
 
 impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Types: NodeTypesForProvider + NodeTypesWithEngine<Primitives = EthPrimitives>,
+    Types: NodeTypesForProvider + NodeTypesWithEngine,
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: FullNodeTypes<
         Types = Types,
@@ -385,12 +386,12 @@ where
                             ChainEvent::Handler(ev) => {
                                 if let Some(head) = ev.canonical_header() {
                                     let head_block = Head {
-                                        number: head.number,
+                                        number: head.number(),
                                         hash: head.hash(),
-                                        difficulty: head.difficulty,
-                                        timestamp: head.timestamp,
+                                        difficulty: head.difficulty(),
+                                        timestamp: head.timestamp(),
                                         total_difficulty: chainspec
-                                            .final_paris_total_difficulty(head.number)
+                                            .final_paris_total_difficulty(head.number())
                                             .unwrap_or_default(),
                                     };
                                     network_handle.update_status(head_block);
