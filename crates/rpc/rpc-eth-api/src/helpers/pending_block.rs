@@ -210,8 +210,8 @@ pub trait LoadPendingBlock:
     fn assemble_block(
         &self,
         block_env: &BlockEnv,
-        parent_hash: revm_primitives::B256,
-        state_root: revm_primitives::B256,
+        parent_hash: B256,
+        state_root: B256,
         transactions: Vec<ProviderTx<Self::Provider>>,
         receipts: &[ProviderReceipt<Self::Provider>],
     ) -> ProviderBlock<Self::Provider>;
@@ -220,8 +220,8 @@ pub trait LoadPendingBlock:
     fn assemble_block_and_receipts(
         &self,
         block_env: &BlockEnv,
-        parent_hash: revm_primitives::B256,
-        state_root: revm_primitives::B256,
+        parent_hash: B256,
+        state_root: B256,
         transactions: Vec<ProviderTx<Self::Provider>>,
         results: Vec<ExecutionResult>,
     ) -> (ProviderBlock<Self::Provider>, Vec<ProviderReceipt<Self::Provider>>) {
