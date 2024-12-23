@@ -215,10 +215,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
             let clean_input = ExecInput { target: Some(sealed_block.number), checkpoint: None };
             loop {
-                let clean_result = merkle_stage.execute(&provider_rw, clean_input);
-                assert!(clean_result.is_ok(), "Clean state root calculation failed");
-                if clean_result.unwrap().done {
-                    break
+                let clean_result = merkle_stage
+                    .execute(&provider_rw, clean_input)
+                    .map_err(|e| eyre::eyre!("Clean state root calculation failed: {}", e))?;
+                if clean_result.done {
+                    break;
                 }
             }
 
