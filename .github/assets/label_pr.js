@@ -10,8 +10,9 @@ function shouldIncludeLabel (label) {
 
 // Get the issue number from an issue link in the forms `<keyword> <issue url>` or `<keyword> #<issue number>`.
 function getIssueLink (repoUrl, body) {
-    const urlPattern = new RegExp(`(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved) ${repoUrl}/issues/(?<issue_number>\\d+)`, 'i')
-    const issuePattern = new RegExp(`(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved) \#(?<issue_number>\\d+)`, 'i')
+    const urlPattern = /(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved) https:\/\/repoUrl\/issues\/(?<issue_number>\d+)/i;
+const issuePattern = /(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved) \#(?<issue_number>\d+)/i;
+
 
     const urlRe = body.match(urlPattern);
     const issueRe = body.match(issuePattern);
