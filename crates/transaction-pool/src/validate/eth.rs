@@ -25,7 +25,7 @@ use alloy_eips::{
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{InvalidTransactionError, SealedBlock};
 use reth_primitives_traits::{BlockBody, GotExpected};
-use reth_storage_api::{AccountReader, StateProviderFactory};
+use reth_storage_api::{StateProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -80,7 +80,7 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+        self.inner.validate_batch(transactions)
     }
 }
 
@@ -175,11 +175,14 @@ where
     Client: StateProviderFactory,
     Tx: EthPoolTransaction,
 {
-    /// Validates a single transaction.
-    fn validate_one(
+    /// Validates a single transaction using an optional cached state provider.
+    /// If no provider is passed, a new one will be created. This allows reusing
+    /// the same provider across multiple txs.
+    fn validate_one_with_provider(
         &self,
         origin: TransactionOrigin,
         mut transaction: Tx,
+        maybe_state: &mut Option<Box<dyn StateProvider>>,
     ) -> TransactionValidationOutcome<Tx> {
         // Checks for tx_type
         match transaction.tx_type() {
@@ -349,11 +352,22 @@ where
             }
         }
 
-        let account = match self
-            .client
-            .latest()
-            .and_then(|state| state.basic_account(transaction.sender()))
-        {
+        // If we don't have a state provider yet, fetch the latest state
+        if maybe_state.is_none() {
+            match self.client.latest() {
+                Ok(new_state) => {
+                    *maybe_state = Some(new_state);
+                }
+                Err(err) => {
+                    return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
+                }
+            }
+        }
+
+        let state = maybe_state.as_deref().expect("provider is set");
+
+        // Use provider to get account info
+        let account = match state.basic_account(transaction.sender()) {
             Ok(account) => account.unwrap_or_default(),
             Err(err) => {
                 return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
@@ -368,11 +382,7 @@ where
         // transactions.
         if account.has_bytecode() {
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
-                match self
-                    .client
-                    .latest()
-                    .and_then(|state| state.bytecode_by_hash(account.get_bytecode_hash()))
-                {
+                match state.bytecode_by_hash(account.get_bytecode_hash()) {
                     Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
                     Err(err) => {
                         return TransactionValidationOutcome::Error(
@@ -477,6 +487,28 @@ where
                 TransactionOrigin::Private => false,
             },
         }
+    }
+
+    /// Validates a single transaction.
+    fn validate_one(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        let mut provider = None;
+        self.validate_one_with_provider(origin, transaction, &mut provider)
+    }
+
+    /// Validates all given transactions.
+    fn validate_batch(
+        &self,
+        transactions: Vec<(TransactionOrigin, Tx)>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        let mut provider = None;
+        transactions
+            .into_iter()
+            .map(|(origin, tx)| self.validate_one_with_provider(origin, tx, &mut provider))
+            .collect()
     }
 
     fn on_new_head_block<T: BlockHeader>(&self, new_tip_block: &T) {
