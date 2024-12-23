@@ -36,6 +36,7 @@ futures.workspace = true
 tracing.workspace = true
 
 # misc
+derive_more.workspace = true
 pin-project.workspace = true
 humantime.workspace = true
 derive_more.workspace = true

@@ -26,10 +26,9 @@ where
 
 // === impl BeaconConsensusEngineHandle ===
 
-impl<Engine, N> BeaconConsensusEngineHandle<Engine, N>
+impl<Engine> BeaconConsensusEngineHandle<Engine>
 where
     Engine: EngineTypes,
-    N: NodePrimitives
 {
     /// Creates a new beacon consensus engine handle.
     pub const fn new(to_engine: UnboundedSender<BeaconEngineMessage<Engine>>) -> Self {

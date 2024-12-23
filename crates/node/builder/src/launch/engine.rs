@@ -1,5 +1,6 @@
 //! Engine node related functionality.
 
+use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
@@ -12,7 +13,6 @@ use reth_db_api::{
     Database,
 };
 use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder};
-use alloy_consensus::BlockHeader;
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
