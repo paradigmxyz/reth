@@ -136,7 +136,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         block_env.basefee = U256::ZERO;
                     }
 
-                    let SimBlock { block_overrides, state_overrides, mut calls } = block;
+                    let SimBlock { block_overrides, state_overrides, calls } = block;
 
                     if let Some(block_overrides) = block_overrides {
                         apply_block_overrides(block_overrides, &mut db, &mut block_env);
@@ -151,26 +151,51 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         )
                     }
 
-                    // Resolve transactions, populate missing fields and enforce calls correctness.
-                    let transactions = simulate::resolve_transactions(
-                        &mut calls,
-                        validation,
-                        block_env.gas_limit.to(),
-                        cfg_env_with_handler_cfg.chain_id,
-                        &mut db,
-                        this.tx_resp_builder(),
-                    )?;
+                    let default_gas_limit = {
+                        let total_specified_gas = calls.iter().filter_map(|tx| tx.gas).sum::<u64>();
+                        let txs_without_gas_limit =
+                            calls.iter().filter(|tx| tx.gas.is_none()).count();
+
+                        if total_specified_gas > block_env.gas_limit.to() {
+                            return Err(EthApiError::Other(Box::new(
+                                EthSimulateError::BlockGasLimitExceeded,
+                            ))
+                            .into())
+                        }
+
+                        if txs_without_gas_limit > 0 {
+                            (block_env.gas_limit.to::<u64>() - total_specified_gas) /
+                                txs_without_gas_limit as u64
+                        } else {
+                            0
+                        }
+                    };
 
                     let mut calls = calls.into_iter().peekable();
-                    let mut senders = Vec::with_capacity(transactions.len());
+                    let mut transactions = Vec::with_capacity(calls.len());
+                    let mut senders = Vec::with_capacity(calls.len());
                     let mut results = Vec::with_capacity(calls.len());
 
-                    while let Some(tx) = calls.next() {
-                        let env = this.build_call_evm_env(
+                    while let Some(call) = calls.next() {
+                        let sender = call.from.unwrap_or_default();
+
+                        // Resolve transaction, populate missing fields and enforce calls
+                        // correctness.
+                        let tx = simulate::resolve_transaction(
+                            call,
+                            validation,
+                            default_gas_limit,
+                            cfg_env_with_handler_cfg.chain_id,
+                            &mut db,
+                            this.tx_resp_builder(),
+                        )?;
+
+                        let tx_env = this.evm_config().tx_env(&tx, sender);
+                        let env = EnvWithHandlerCfg::new_with_cfg_env(
                             cfg_env_with_handler_cfg.clone(),
                             block_env.clone(),
-                            tx,
-                        )?;
+                            tx_env,
+                        );
 
                         let (res, env) = {
                             if trace_transfers {
@@ -190,6 +215,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             db.commit(res.state);
                         }
 
+                        transactions.push(tx);
                         senders.push(env.tx.caller);
                         results.push(res.result);
                     }
