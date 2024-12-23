@@ -24,7 +24,6 @@ reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
-reth-rpc-types-compat.workspace = true
 reth-transaction-pool.workspace = true
 reth-stages-api.workspace = true
 
