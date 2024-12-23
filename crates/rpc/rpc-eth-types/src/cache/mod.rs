@@ -73,8 +73,8 @@ struct ActionSender<B: Block, R: Send + Sync> {
 }
 
 impl<R: Send + Sync, B: Block> ActionSender<B, R> {
-    fn new(blockhash: B256,tx: Option<UnboundedSender<CacheAction<B, R>>>) -> Self {
-        Self {blockhash,tx}
+    const fn new(blockhash: B256, tx: Option<UnboundedSender<CacheAction<B, R>>>) -> Self {
+        Self { blockhash, tx }
     }
     fn send_block(
         &mut self,
@@ -398,7 +398,7 @@ where
                         CacheAction::GetBlockWithSenders { block_hash, response_tx } => {
                             if let Some(block) = this.full_block_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(Some(block)));
-                                continue
+                                continue;
                             }
 
                             // block is not in the cache, request it if this is the first consumer
@@ -406,7 +406,8 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
-                                let mut action_sender = ActionSender::new(block_hash,Some(action_tx));
+                                let mut action_sender =
+                                    ActionSender::new(block_hash, Some(action_tx));
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
@@ -426,7 +427,7 @@ where
                             // check if block is cached
                             if let Some(receipts) = this.receipts_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(Some(receipts)));
-                                continue
+                                continue;
                             }
 
                             // block is not in the cache, request it if this is the first consumer
@@ -434,7 +435,8 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
-                                let mut action_sender = ActionSender::new(block_hash,Some(action_tx));
+                                let mut action_sender =
+                                    ActionSender::new(block_hash, Some(action_tx));
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
@@ -450,7 +452,7 @@ where
                             // check if the header is cached
                             if let Some(header) = this.headers_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(header));
-                                continue
+                                continue;
                             }
 
                             // header is not in the cache, request it if this is the first
@@ -459,7 +461,8 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
-                                let mut action_sender = ActionSender::new(block_hash,Some(action_tx));
+                                let mut action_sender =
+                                    ActionSender::new(block_hash, Some(action_tx));
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;

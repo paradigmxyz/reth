@@ -68,7 +68,7 @@ where
         let txs_without_gas_limit = txs.iter().filter(|tx| tx.gas.is_none()).count();
 
         if total_specified_gas > block_gas_limit {
-            return Err(EthApiError::Other(Box::new(EthSimulateError::BlockGasLimitExceeded)))
+            return Err(EthApiError::Other(Box::new(EthSimulateError::BlockGasLimitExceeded)));
         }
 
         if txs_without_gas_limit > 0 {
