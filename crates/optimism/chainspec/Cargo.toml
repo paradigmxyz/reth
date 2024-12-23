@@ -61,5 +61,6 @@ std = [
 	"once_cell/std",
 	"derive_more/std",
 	"reth-network-peers/std",
-	"thiserror/std"
+	"thiserror/std",
+	"op-alloy-consensus/std"
 ]
