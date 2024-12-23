@@ -33,6 +33,7 @@ reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
+reth-optimism-primitives.workspace = true
 
 # ethereum
 revm.workspace = true
@@ -57,5 +58,6 @@ optimism = [
 	"reth-optimism-evm/optimism",
 	"revm/optimism",
 	"reth-execution-types/optimism",
-	"reth-optimism-consensus/optimism"
+	"reth-optimism-consensus/optimism",
+	"reth-optimism-primitives/optimism"
 ]

@@ -107,7 +107,7 @@ where
             let tx_hash = self.rpc.inject_tx(raw_tx).await?;
             let (payload, eth_attr) = self.advance_block().await?;
             let block_hash = payload.block().hash();
-            let block_number = payload.block().number;
+            let block_number = payload.block().number();
             self.assert_new_block(tx_hash, block_hash, block_number).await?;
             chain.push((payload, eth_attr));
         }
