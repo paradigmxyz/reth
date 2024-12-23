@@ -61,15 +61,9 @@ type HeaderLruCache<H, L> = MultiConsumerLruCache<B256, H, L, HeaderResponseSend
 ///
 /// This is the frontend for the async caching service which manages cached data on a different
 /// task.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EthStateCache<B: Block, R> {
     to_service: UnboundedSender<CacheAction<B, R>>,
-}
-
-impl<B: Block, R> Clone for EthStateCache<B, R> {
-    fn clone(&self) -> Self {
-        Self { to_service: self.to_service.clone() }
-    }
 }
 
 impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
@@ -95,6 +89,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
             action_rx: UnboundedReceiverStream::new(rx),
             action_task_spawner,
             rate_limiter: Arc::new(Semaphore::new(max_concurrent_db_operations)),
+            latest_chain_change: None,
         };
         let cache = Self { to_service };
         (cache, service)
@@ -186,6 +181,18 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
         let _ = self.to_service.send(CacheAction::GetHeader { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
     }
+
+    /// Returns the most recent canonical block from the cache, if available.
+    /// Used to efficiently handle latest block requests and avoid race conditions during chain
+    /// reorgs.
+    /// Returns `None` if no canonical chain is tracked or during reorgs.
+    pub async fn latest_block_with_senders(
+        &self,
+    ) -> ProviderResult<Option<Arc<SealedBlockWithSenders<B>>>> {
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(CacheAction::GetLatestBlockWithSenders { response_tx });
+        rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
+    }
 }
 
 /// A task than manages caches for data required by the `eth` rpc implementation.
@@ -236,6 +243,8 @@ pub(crate) struct EthStateCacheService<
     action_task_spawner: Tasks,
     /// Rate limiter
     rate_limiter: Arc<Semaphore>,
+    /// Tracks latest canonical chain state for cache consistency
+    latest_chain_change: Option<ChainChange<Provider::Block, Provider::Receipt>>,
 }
 
 impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
@@ -348,6 +357,15 @@ where
                 }
                 Some(action) => {
                     match action {
+                        CacheAction::GetLatestBlockWithSenders { response_tx } => {
+                            let latest_block = this
+                                .latest_chain_change
+                                .as_ref()
+                                .and_then(|chain_change| chain_change.blocks.last())
+                                .cloned()
+                                .map(Arc::new);
+                            let _ = response_tx.send(Ok(latest_block));
+                        }
                         CacheAction::GetBlockWithSenders { block_hash, response_tx } => {
                             if let Some(block) = this.full_block_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(Some(block)));
@@ -458,7 +476,8 @@ where
                             }
                         }
                         CacheAction::CacheNewCanonicalChain { chain_change } => {
-                            for block in chain_change.blocks {
+                            this.latest_chain_change = Some(chain_change.clone());
+                            for block in chain_change.clone().blocks {
                                 this.on_new_block(block.hash(), Ok(Some(Arc::new(block))));
                             }
 
@@ -499,6 +518,9 @@ enum CacheAction<B: Block, R> {
         block_hash: B256,
         response_tx: BlockWithSendersResponseSender<B>,
     },
+    GetLatestBlockWithSenders {
+        response_tx: BlockWithSendersResponseSender<B>,
+    },
     GetHeader {
         block_hash: B256,
         response_tx: HeaderResponseSender<B::Header>,
@@ -527,12 +549,14 @@ enum CacheAction<B: Block, R> {
     },
 }
 
+#[derive(Clone, Debug)]
 struct BlockReceipts<R> {
     block_hash: B256,
     receipts: Vec<Option<R>>,
 }
 
 /// A change of the canonical chain
+#[derive(Debug, Clone)]
 struct ChainChange<B: Block, R> {
     blocks: Vec<SealedBlockWithSenders<B>>,
     receipts: Vec<BlockReceipts<R>>,
