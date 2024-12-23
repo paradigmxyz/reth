@@ -5,6 +5,8 @@ use alloy_primitives::{
     Address, Bloom, Bytes, B256,
 };
 use alloy_rlp::{Decodable, RlpDecodable};
+use op_alloy_consensus::OpDepositReceipt;
+use reth_optimism_primitives::OpReceipt;
 use reth_primitives::{Log, Receipt, TxType};
 use tokio_util::codec::Decoder;
 
@@ -24,10 +26,13 @@ use reth_downloaders::{file_client::FileClientError, receipt_file_client::Receip
 /// It's recommended to use [`with_capacity`](tokio_util::codec::FramedRead::with_capacity) to set
 /// the capacity of the framed reader to the size of the file.
 #[derive(Debug, Default)]
-pub struct HackReceiptFileCodec;
+pub struct HackReceiptFileCodec<R = Receipt>(core::marker::PhantomData<R>);
 
-impl Decoder for HackReceiptFileCodec {
-    type Item = Option<ReceiptWithBlockNumber>;
+impl<R> Decoder for HackReceiptFileCodec<R>
+where
+    R: TryFrom<HackReceipt, Error: Into<FileClientError>>,
+{
+    type Item = Option<ReceiptWithBlockNumber<R>>;
     type Error = FileClientError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -42,7 +47,15 @@ impl Decoder for HackReceiptFileCodec {
         src.advance(src.len() - buf_slice.len());
 
         Ok(Some(
-            receipt.map(|receipt| receipt.try_into().map_err(FileClientError::from)).transpose()?,
+            receipt
+                .map(|receipt| {
+                    let number = receipt.block_number;
+                    receipt
+                        .try_into()
+                        .map_err(Into::into)
+                        .map(|receipt| ReceiptWithBlockNumber { receipt, number })
+                })
+                .transpose()?,
         ))
     }
 }
@@ -73,23 +86,54 @@ pub struct HackReceipt {
 #[rlp(trailing)]
 struct HackReceiptContainer(Option<HackReceipt>);
 
-impl TryFrom<HackReceipt> for ReceiptWithBlockNumber {
+impl TryFrom<HackReceipt> for Receipt {
     type Error = &'static str;
+
     fn try_from(exported_receipt: HackReceipt) -> Result<Self, Self::Error> {
-        let HackReceipt {
-            tx_type, status, cumulative_gas_used, logs, block_number: number, ..
-        } = exported_receipt;
+        let HackReceipt { tx_type, status, cumulative_gas_used, logs, .. } = exported_receipt;
 
         #[allow(clippy::needless_update)]
-        let receipt = Receipt {
+        Ok(Self {
             tx_type: TxType::try_from(tx_type.to_be_bytes()[0])?,
             success: status != 0,
             cumulative_gas_used,
             logs,
             ..Default::default()
+        })
+    }
+}
+
+impl TryFrom<HackReceipt> for OpReceipt {
+    type Error = &'static str;
+
+    fn try_from(exported_receipt: HackReceipt) -> Result<Self, Self::Error> {
+        let Receipt {
+            tx_type,
+            success,
+            cumulative_gas_used,
+            logs,
+            deposit_nonce,
+            deposit_receipt_version,
+        } = exported_receipt.try_into()?;
+
+        let receipt = alloy_consensus::Receipt {
+            status: success.into(),
+            cumulative_gas_used: cumulative_gas_used as u128,
+            logs,
         };
 
-        Ok(Self { receipt, number })
+        match tx_type {
+            TxType::Legacy => Ok(Self::Legacy(receipt)),
+            TxType::Eip2930 => Ok(Self::Eip2930(receipt)),
+            TxType::Eip1559 => Ok(Self::Eip1559(receipt)),
+            TxType::Eip7702 => Ok(Self::Eip7702(receipt)),
+            TxType::Eip4844 => Err("EIP-4844 receipts are not supported for OP"),
+            TxType::Deposit => Ok(Self::Deposit(OpDepositReceipt {
+                inner: receipt,
+                deposit_nonce,
+                deposit_receipt_version,
+            })),
+        }
     }
 }
 
@@ -326,7 +370,7 @@ pub(crate) mod test {
 
         let encoded = &mut BytesMut::from(&receipt_1_to_3[..]);
 
-        let mut codec = HackReceiptFileCodec;
+        let mut codec = HackReceiptFileCodec::default();
 
         // test
 
