@@ -104,10 +104,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let this = self.clone();
             self.spawn_with_state_at_block(block, move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut gas_used = 0;
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
-                let mut gas_used = 0;
-                for block in block_state_calls {
+                let mut block_state_calls = block_state_calls.into_iter().peekable();
+                while let Some(block) = block_state_calls.next() {
                     // Increase number and timestamp for every new block
                     block_env.number += U256::from(1);
                     block_env.timestamp += U256::from(1);
@@ -183,7 +184,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             }
                         };
 
-                        if calls.peek().is_some() {
+                        if calls.peek().is_some() || block_state_calls.peek().is_some() {
                             // need to apply the state changes of this call before executing the
                             // next call
                             db.commit(res.state);
