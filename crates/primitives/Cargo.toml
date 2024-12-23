@@ -116,6 +116,8 @@ std = [
 	"reth-zstd-compressors?/std",
 	"secp256k1?/std",
 	"reth-trie-common/std",
+	"op-alloy-consensus?/std",
+	"op-alloy-rpc-types?/std",
 	"serde_json/std"
 ]
 reth-codec = [
