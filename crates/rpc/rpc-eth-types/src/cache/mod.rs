@@ -67,12 +67,15 @@ pub struct EthStateCache<B: Block, R> {
 }
 /// Drop aware sender struct
 #[derive(Debug)]
-pub struct ActionSender<B: Block, R: Send + Sync> {
+struct ActionSender<B: Block, R: Send + Sync> {
     blockhash: B256,
     tx: Option<UnboundedSender<CacheAction<B, R>>>,
 }
 
 impl<R: Send + Sync, B: Block> ActionSender<B, R> {
+    fn new(blockhash: B256,tx: Option<UnboundedSender<CacheAction<B, R>>>) -> Self {
+        Self {blockhash,tx}
+    }
     fn send_block(
         &mut self,
         block_sender: Result<Option<Arc<SealedBlockWithSenders<B>>>, ProviderError>,
@@ -403,8 +406,7 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
-                                let mut action_sender =
-                                    ActionSender { blockhash: block_hash, tx: Some(action_tx) };
+                                let mut action_sender = ActionSender::new(block_hash,Some(action_tx));
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
