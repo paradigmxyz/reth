@@ -10,7 +10,7 @@ use reth_primitives::{NodePrimitives, SealedBlockFor};
 /// Represents a built payload type that contains a built `SealedBlock` and can be converted into
 /// engine API execution payloads.
 pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
-    /// The node primitive types
+    /// The node's primitive types
     type Primitives: NodePrimitives;
 
     /// Returns the built block (sealed)
