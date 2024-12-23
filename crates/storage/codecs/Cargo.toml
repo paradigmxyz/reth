@@ -60,7 +60,8 @@ std = [
 	"alloy-genesis?/std",
 	"alloy-trie?/std",
 	"serde/std",
-	"op-alloy-consensus?/std"
+	"op-alloy-consensus?/std",
+	"serde_json/std"
 ]
 alloy = [
     "dep:alloy-consensus",
