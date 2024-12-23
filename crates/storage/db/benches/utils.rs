@@ -13,7 +13,7 @@ use std::{path::Path, sync::Arc};
 
 /// Path where the DB is initialized for benchmarks.
 #[allow(dead_code)]
-pub(crate) const BENCH_DB_PATH: &str = "/tmp/reth-benches";
+pub const BENCH_DB_PATH: &str = "/tmp/reth-benches";
 
 /// Used for `RandomRead` and `RandomWrite` benchmarks.
 #[allow(dead_code)]
