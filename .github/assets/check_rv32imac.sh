@@ -10,6 +10,7 @@ crates_to_check=(
     reth-optimism-forks
     reth-network-peers
     reth-trie-common
+    reth-chainspec
     # reth-evm
     # reth-primitives
     # reth-optimism-chainspec
