@@ -71,7 +71,8 @@ std = [
 	"reth-ethereum-forks/std",
 	"derive_more/std",
 	"reth-optimism-forks/std",
-	"thiserror/std"
+	"thiserror/std",
+	"op-alloy-consensus/std"
 ]
 optimism = [
 	"reth-primitives/optimism",
