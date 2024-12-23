@@ -5535,11 +5535,9 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-serde",
  "derive_more",
- "ethereum_ssz",
  "op-alloy-consensus",
  "op-alloy-protocol",
  "serde",
- "snap",
  "thiserror 2.0.9",
 ]
 

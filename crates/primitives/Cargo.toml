@@ -115,7 +115,9 @@ std = [
 	"derive_more/std",
 	"reth-zstd-compressors?/std",
 	"secp256k1?/std",
-	"reth-trie-common/std"
+	"reth-trie-common/std",
+	"op-alloy-consensus?/std",
+	"op-alloy-rpc-types?/std"
 ]
 reth-codec = [
 	"dep:reth-codecs",

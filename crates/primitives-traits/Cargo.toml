@@ -88,7 +88,8 @@ std = [
 	"k256/std",
 	"secp256k1?/std",
 	"thiserror/std",
-	"alloy-trie/std"
+	"alloy-trie/std",
+	"op-alloy-consensus?/std"
 ]
 secp256k1 = ["dep:secp256k1"]
 test-utils = [
