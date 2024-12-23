@@ -161,7 +161,7 @@ where
         .expect("transaction static files must exist before importing receipts");
 
     while let Some(file_client) =
-        reader.next_receipts_chunk::<ReceiptFileClient<_>, HackReceiptFileCodec>().await?
+        reader.next_receipts_chunk::<ReceiptFileClient<HackReceiptFileCodec>>().await?
     {
         if highest_block_receipts == highest_block_transactions {
             warn!(target: "reth::cli",  highest_block_receipts, highest_block_transactions, "Ignoring all other blocks in the file since we have reached the desired height");
