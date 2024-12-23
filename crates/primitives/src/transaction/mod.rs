@@ -36,7 +36,6 @@ pub use reth_primitives_traits::{
     FillTxEnv, WithEncoded,
 };
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
-use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
 pub use signature::{recover_signer, recover_signer_unchecked};
 #[cfg(feature = "std")]
