@@ -3173,7 +3173,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_in_memory_state_trait_impl() {
-        let blocks: Vec<_> = TestBlockBuilder::<EthPrimitives>::default().get_executed_blocks(0..10).collect();
+        let blocks: Vec<_> =
+            TestBlockBuilder::<EthPrimitives>::default().get_executed_blocks(0..10).collect();
         let test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
 
         for executed_block in blocks {
@@ -3301,7 +3302,8 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_insert_executed() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
-        let blocks: Vec<_> = TestBlockBuilder::<EthPrimitives>::default().get_executed_blocks(1..4).collect();
+        let blocks: Vec<_> =
+            TestBlockBuilder::<EthPrimitives>::default().get_executed_blocks(1..4).collect();
 
         tree_state.insert_executed(blocks[0].clone());
         tree_state.insert_executed(blocks[1].clone());
@@ -3367,7 +3369,8 @@ mod tests {
     async fn test_tree_state_remove_before() {
         let start_num_hash = BlockNumHash::default();
         let mut tree_state = TreeState::new(start_num_hash);
-        let blocks: Vec<_> = TestBlockBuilder::<EthPrimitives>::default().get_executed_blocks(1..6).collect();
+        let blocks: Vec<_> =
+            TestBlockBuilder::<EthPrimitives>::default().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
@@ -3417,7 +3420,8 @@ mod tests {
     async fn test_tree_state_remove_before_finalized() {
         let start_num_hash = BlockNumHash::default();
         let mut tree_state = TreeState::new(start_num_hash);
-        let blocks: Vec<_> = TestBlockBuilder::<EthPrimitives>::default().get_executed_blocks(1..6).collect();
+        let blocks: Vec<_> =
+            TestBlockBuilder::<EthPrimitives>::default().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
@@ -3467,7 +3471,8 @@ mod tests {
     async fn test_tree_state_remove_before_lower_finalized() {
         let start_num_hash = BlockNumHash::default();
         let mut tree_state = TreeState::new(start_num_hash);
-        let blocks: Vec<_> = TestBlockBuilder::<EthPrimitives>::default().get_executed_blocks(1..6).collect();
+        let blocks: Vec<_> =
+            TestBlockBuilder::<EthPrimitives>::default().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
