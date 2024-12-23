@@ -22,8 +22,8 @@ impl<N> LoadReceipt for OpEthApi<N>
 where
     Self: Send + Sync,
     N: FullNodeComponents<Types: NodeTypes<ChainSpec = OpChainSpec>>,
-    Self::Provider:
-        TransactionsProvider<Transaction = OpTransactionSigned> + ReceiptProvider<Receipt = OpReceipt>,
+    Self::Provider: TransactionsProvider<Transaction = OpTransactionSigned>
+        + ReceiptProvider<Receipt = OpReceipt>,
 {
     async fn build_transaction_receipt(
         &self,
@@ -223,7 +223,6 @@ impl OpReceiptBuilder {
                     }
                 }
             })?;
-
 
         let op_receipt_fields = OpReceiptFieldsBuilder::new(timestamp)
             .l1_block_info(chain_spec, transaction, l1_block_info)?

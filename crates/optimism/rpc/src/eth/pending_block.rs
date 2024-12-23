@@ -1,19 +1,16 @@
 //! Loads OP pending block for a RPC response.
 
 use crate::OpEthApi;
-use alloy_consensus::Eip658Value;
 use alloy_consensus::{
-    constants::EMPTY_WITHDRAWALS, proofs::calculate_transaction_root, Header, EMPTY_OMMER_ROOT_HASH,
+    constants::EMPTY_WITHDRAWALS, proofs::calculate_transaction_root, Eip658Value, Header,
+    Transaction as _, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE, BlockNumberOrTag};
 use alloy_primitives::{B256, U256};
-use op_alloy_consensus::OpTxType;
+use op_alloy_consensus::{OpDepositReceipt, OpTxType};
 use op_alloy_network::Network;
-use alloy_consensus::TxReceipt;
-use alloy_consensus::Transaction as _;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
-use op_alloy_consensus::OpDepositReceipt;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
 use reth_primitives::{logs_bloom, BlockBody, Receipt, SealedBlockWithSenders, TransactionSigned};
@@ -46,7 +43,10 @@ where
         > + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
-        Evm: ConfigureEvm<Header = ProviderHeader<Self::Provider>, Transaction = ProviderTx<Self::Provider>>,
+        Evm: ConfigureEvm<
+            Header = ProviderHeader<Self::Provider>,
+            Transaction = ProviderTx<Self::Provider>,
+        >,
     >,
 {
     #[inline]
@@ -61,7 +61,13 @@ where
     /// Returns the locally built pending block
     async fn local_pending_block(
         &self,
-    ) -> Result<Option<(SealedBlockWithSenders<ProviderBlock<Self::Provider>>, Vec<ProviderReceipt<Self::Provider>>)>, Self::Error> {
+    ) -> Result<
+        Option<(
+            SealedBlockWithSenders<ProviderBlock<Self::Provider>>,
+            Vec<ProviderReceipt<Self::Provider>>,
+        )>,
+        Self::Error,
+    > {
         // See: <https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375>
         let latest = self
             .provider()
