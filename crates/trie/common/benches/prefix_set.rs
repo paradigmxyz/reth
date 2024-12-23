@@ -59,12 +59,12 @@ pub fn prefix_set_lookups(c: &mut Criterion) {
         use implementations::*;
         prefix_set_bench::<BTreeAnyPrefixSet>(
             &mut group,
-            "`BTreeSet` with `Iterator::any` lookup",
+            "`BTreeSet` with `Iterator:any` lookup",
             test_data.clone(),
         );
         prefix_set_bench::<BTreeRangeLastCheckedPrefixSet>(
             &mut group,
-            "`BTreeSet` with `BTreeSet::range` lookup",
+            "`BTreeSet` with `BTreeSet:range` lookup",
             test_data.clone(),
         );
         prefix_set_bench::<VecCursorPrefixSet>(
