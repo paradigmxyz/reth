@@ -45,9 +45,6 @@ pub struct BitfinityResetEvmStateCommandBuilder {
     pub bitfinity: BitfinityResetEvmStateArgs,
 }
 
-const MAX_REQUEST_BYTES: usize = 750_000;
-const SPLIT_ADD_ACCOUNTS_REQUEST_BYTES: usize = 1_000_000;
-
 impl BitfinityResetEvmStateCommandBuilder {
     /// Build the command
     pub async fn build(self) -> eyre::Result<BitfinityResetEvmStateCommand> {
@@ -85,6 +82,8 @@ impl BitfinityResetEvmStateCommandBuilder {
             provider_factory,
             executor,
             self.bitfinity.parallel_requests,
+            self.bitfinity.max_request_bytes,
+            self.bitfinity.max_account_request_bytes,
         ))
     }
 }
@@ -95,6 +94,8 @@ pub struct BitfinityResetEvmStateCommand {
     provider_factory: BitfinityResetEvmProviderFactory,
     executor: Arc<dyn ResetStateExecutor>,
     parallel_requests: usize,
+    max_request_bytes: usize,
+    max_account_request_bytes: usize,
 }
 
 impl BitfinityResetEvmStateCommand {
@@ -103,8 +104,10 @@ impl BitfinityResetEvmStateCommand {
         provider_factory: BitfinityResetEvmProviderFactory,
         executor: Arc<dyn ResetStateExecutor>,
         parallel_requests: usize,
+        max_request_bytes: usize,
+        max_account_request_bytes: usize,
     ) -> Self {
-        Self { provider_factory, executor, parallel_requests: parallel_requests.max(1) }
+        Self { provider_factory, executor, parallel_requests: parallel_requests.max(1), max_request_bytes, max_account_request_bytes }
     }
 
     /// Execute the command
@@ -138,6 +141,8 @@ impl BitfinityResetEvmStateCommand {
                 async_channel::bounded(self.parallel_requests * 20);
             let mut task_handles = vec![];
 
+            let max_account_request_bytes = self.max_account_request_bytes;
+
             // We need to create a number of tasks that will send the account data to the EVM
             for _ in 0..self.parallel_requests {
                 let receiver = accounts_receiver.clone();
@@ -148,6 +153,7 @@ impl BitfinityResetEvmStateCommand {
                         let result = split_and_send_add_accout_request(
                             &executor,
                             accounts,
+                            max_account_request_bytes,
                             start,
                             plain_accounts_total_count,
                             &plain_accounts_recovered_count,
@@ -214,7 +220,7 @@ impl BitfinityResetEvmStateCommand {
                 accounts.data.insert((*address).into(), account);
                 debug!(target: "reth::cli", address=%address, "Storage tries recovered");
 
-                if accounts.estimate_byte_size() > MAX_REQUEST_BYTES {
+                if accounts.estimate_byte_size() > self.max_request_bytes {
                     let process_accounts = std::mem::replace(&mut accounts, AccountInfoMap::new());
                     accounts_sender.send(process_accounts).await?;
                 }
@@ -325,9 +331,6 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
                 }
             }
 
-            // if we reach here, we have failed to send the request. Last retry
-            client.reset_state(EvmResetState::AddAccounts(accounts.clone())).await??;
-
             Ok(())
         })
     }
@@ -349,12 +352,13 @@ impl<C: CanisterClient + Sync + 'static> ResetStateExecutor for EvmCanisterReset
 async fn split_and_send_add_accout_request(
     executor: &Arc<dyn ResetStateExecutor>,
     accounts: AccountInfoMap,
+    max_account_request_bytes: usize,
     process_start: std::time::Instant,
     total_accounts: usize,
     processed_accounts: &AtomicUsize,
 ) -> eyre::Result<()> {
     let accounts_data_len = accounts.data.len();
-    for account in split_add_account_request_data(SPLIT_ADD_ACCOUNTS_REQUEST_BYTES, accounts) {
+    for account in split_add_account_request_data(max_account_request_bytes, accounts) {
         executor.add_accounts(account).await?;
     }
 
