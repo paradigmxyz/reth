@@ -6,6 +6,7 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, TxNumber, U256};
 use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
+use reth_db::models::StoredBlockBodyIndices;
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_node_types::NodePrimitives;
@@ -32,6 +33,7 @@ pub(crate) struct StaticFileWriters<N> {
     headers: RwLock<Option<StaticFileProviderRW<N>>>,
     transactions: RwLock<Option<StaticFileProviderRW<N>>>,
     receipts: RwLock<Option<StaticFileProviderRW<N>>>,
+    block_meta: RwLock<Option<StaticFileProviderRW<N>>>,
 }
 
 impl<N> Default for StaticFileWriters<N> {
@@ -40,6 +42,7 @@ impl<N> Default for StaticFileWriters<N> {
             headers: Default::default(),
             transactions: Default::default(),
             receipts: Default::default(),
+            block_meta: Default::default(),
         }
     }
 }
@@ -54,6 +57,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             StaticFileSegment::Headers => self.headers.write(),
             StaticFileSegment::Transactions => self.transactions.write(),
             StaticFileSegment::Receipts => self.receipts.write(),
+            StaticFileSegment::BlockMeta => self.block_meta.write(),
         };
 
         if write_guard.is_none() {
@@ -64,7 +68,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
     }
 
     pub(crate) fn commit(&self) -> ProviderResult<()> {
-        for writer_lock in [&self.headers, &self.transactions, &self.receipts] {
+        for writer_lock in [&self.headers, &self.block_meta, &self.transactions, &self.receipts] {
             let mut writer = writer_lock.write();
             if let Some(writer) = writer.as_mut() {
                 writer.commit()?;
@@ -230,6 +234,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 StaticFileSegment::Receipts => {
                     self.prune_receipt_data(to_delete, last_block_number.expect("should exist"))?
                 }
+                StaticFileSegment::BlockMeta => todo!(), // TODO(joshie),
             }
         }
 
@@ -393,13 +398,10 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         let mut remaining_rows = num_rows;
         let segment = self.writer.user_header().segment();
         while remaining_rows > 0 {
-            let len = match segment {
-                StaticFileSegment::Headers => {
-                    self.writer.user_header().block_len().unwrap_or_default()
-                }
-                StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
-                    self.writer.user_header().tx_len().unwrap_or_default()
-                }
+            let len = if segment.is_block_based() {
+                self.writer.user_header().block_len().unwrap_or_default()
+            } else {
+                self.writer.user_header().tx_len().unwrap_or_default()
             };
 
             if remaining_rows >= len {
@@ -555,6 +557,45 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
+    /// Appends [`StoredBlockBodyIndices`] and any other two arbitrary types belonging to the block
+    /// body ([`reth_db::models::StoredBlockOmmers`] and
+    /// [`reth_db::models::StoredBlockWithdrawals`] on ethereum) to static file.
+    ///
+    /// It **CALLS** `increment_block()` since it's a block based segment.
+    pub fn append_block_meta<F1, F2>(
+        &mut self,
+        body_indices: &StoredBlockBodyIndices,
+        field1: &F1,
+        field2: &F2,
+        expected_block_number: BlockNumber,
+    ) -> ProviderResult<()>
+    where
+        N::BlockHeader: Compact,
+        F1: Compact,
+        F2: Compact,
+    {
+        let start = Instant::now();
+        self.ensure_no_queued_prune()?;
+
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::BlockMeta);
+
+        self.increment_block(expected_block_number)?;
+
+        self.append_column(body_indices)?;
+        self.append_column(field1)?;
+        self.append_column(field2)?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                StaticFileSegment::BlockMeta,
+                StaticFileProviderOperation::Append,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
+    }
+
     /// Appends transaction to static file.
     ///
     /// It **DOES NOT CALL** `increment_block()`, it should be handled elsewhere. There might be
@@ -679,6 +720,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Adds an instruction to prune `to_delete` headers during commit.
     pub fn prune_headers(&mut self, to_delete: u64) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Headers);
+        self.queue_prune(to_delete, None)
+    }
+
+    /// Adds an instruction to prune `to_delete` bloc_ meta rows during commit.
+    pub fn prune_block_meta(&mut self, to_delete: u64) -> ProviderResult<()> {
+        debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::BlockMeta);
         self.queue_prune(to_delete, None)
     }
 
