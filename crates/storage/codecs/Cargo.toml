@@ -59,7 +59,8 @@ std = [
 	"alloy-eips?/std",
 	"alloy-genesis?/std",
 	"alloy-trie?/std",
-	"serde/std"
+	"serde/std",
+	"op-alloy-consensus?/std"
 ]
 alloy = [
     "dep:alloy-consensus",

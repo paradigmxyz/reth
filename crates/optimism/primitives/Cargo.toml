@@ -64,7 +64,8 @@ std = [
 	"revm-primitives/std",
 	"secp256k1?/std",
 	"alloy-rlp/std",
-	"reth-zstd-compressors?/std"
+	"reth-zstd-compressors?/std",
+	"op-alloy-consensus/std"
 ]
 reth-codec = [
     "dep:reth-codecs",
