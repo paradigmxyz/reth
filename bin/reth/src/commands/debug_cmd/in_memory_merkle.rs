@@ -203,31 +203,21 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         // Compare updates
         let mut in_mem_mismatched = Vec::new();
         let mut incremental_mismatched = Vec::new();
-        let mut in_mem_updates_iter = in_memory_updates.account_nodes_ref().iter().peekable();
-        let mut incremental_updates_iter =
-            incremental_trie_updates.account_nodes_ref().iter().peekable();
+        let in_mem_updates_iter = in_memory_updates.account_nodes_ref().iter();
+        let incremental_updates_iter = incremental_trie_updates.account_nodes_ref().iter();
 
-        while in_mem_updates_iter.peek().is_some() || incremental_updates_iter.peek().is_some() {
-            match (in_mem_updates_iter.next(), incremental_updates_iter.next()) {
-                (Some(in_mem), Some(incr)) => {
-                    similar_asserts::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
-                    if in_mem.1 != incr.1 &&
-                        in_mem.0.len() > self.skip_node_depth.unwrap_or_default()
-                    {
-                        in_mem_mismatched.push(in_mem);
-                        incremental_mismatched.push(incr);
-                    }
-                }
-                (Some(in_mem), None) => {
-                    warn!(target: "reth::cli", next = ?in_mem, "In-memory trie updates have more entries");
-                }
-                (None, Some(incr)) => {
-                    tracing::warn!(target: "reth::cli", next = ?incr, "Incremental trie updates have more entries");
-                }
-                (None, None) => {
-                    tracing::info!(target: "reth::cli", "Exhausted all trie updates entries");
-                }
+        for (in_mem, incr) in in_mem_updates_iter.zip(incremental_updates_iter) {
+            similar_asserts::assert_eq!(in_mem.0, incr.0, "Nibbles don't match");
+            if in_mem.1 != incr.1 && in_mem.0.len() > self.skip_node_depth.unwrap_or_default() {
+                in_mem_mismatched.push(in_mem);
+                incremental_mismatched.push(incr);
             }
+        }
+
+        if !in_mem_mismatched.is_empty() {
+            warn!(target: "reth::cli", "In-memory trie updates have {} more entries", in_mem_mismatched.len());
+        } else if !incremental_mismatched.is_empty() {
+            warn!(target: "reth::cli", "Incremental trie updates have {} more entries", incremental_mismatched.len());
         }
 
         similar_asserts::assert_eq!(
