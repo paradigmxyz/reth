@@ -10,10 +10,10 @@ use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
-use reth_evm::env::EvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_provider::{
-    BlockIdReader, BlockNumReader, ChainSpecProvider, EvmEnvProvider as _, StateProvider,
-    StateProviderBox, StateProviderFactory,
+    BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
+    StateProviderFactory,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_transaction_pool::TransactionPool;
@@ -231,10 +231,8 @@ pub trait LoadState:
 
                 let header =
                     self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
-                let evm_env = self
-                    .provider()
-                    .env_with_header(&header, self.evm_config().clone())
-                    .map_err(Self::Error::from_eth_err)?;
+                let evm_env = self.evm_config().cfg_and_block_env(&header);
+
                 Ok((evm_env, block_hash.into()))
             }
         }

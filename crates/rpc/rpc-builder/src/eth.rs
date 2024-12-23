@@ -1,6 +1,6 @@
 use reth_evm::ConfigureEvm;
 use reth_primitives::NodePrimitives;
-use reth_provider::{BlockReader, CanonStateSubscriptions, EvmEnvProvider, StateProviderFactory};
+use reth_provider::{BlockReader, CanonStateSubscriptions, StateProviderFactory};
 use reth_rpc::{EthFilter, EthPubSub};
 use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::{
@@ -31,8 +31,7 @@ where
         + BlockReader<
             Block = <Events::Primitives as NodePrimitives>::Block,
             Receipt = <Events::Primitives as NodePrimitives>::Receipt,
-        > + EvmEnvProvider
-        + Clone
+        > + Clone
         + Unpin
         + 'static,
     Events: CanonStateSubscriptions + Clone + 'static,
