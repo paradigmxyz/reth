@@ -52,7 +52,8 @@ std = [
 	"reth-ethereum-forks/std",
 	"derive_more/std",
 	"reth-network-peers/std",
-	"reth-trie-common/std"
+	"reth-trie-common/std",
+	"serde_json/std"
 ]
 arbitrary = [
 	"alloy-chains/arbitrary",

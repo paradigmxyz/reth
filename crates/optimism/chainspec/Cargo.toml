@@ -62,5 +62,6 @@ std = [
 	"derive_more/std",
 	"reth-network-peers/std",
 	"thiserror/std",
+	"serde_json/std",
 	"op-alloy-consensus/std"
 ]
