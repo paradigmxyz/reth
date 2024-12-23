@@ -36,11 +36,7 @@ reth-optimism-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
 
 reth-chainspec.workspace = true
-reth-stages-types.workspace = true
 reth-node-events.workspace = true
-reth-network-p2p.workspace = true
-reth-errors.workspace = true
-reth-config.workspace = true
 reth-optimism-evm.workspace = true
 reth-cli.workspace = true
 reth-cli-runner.workspace = true
