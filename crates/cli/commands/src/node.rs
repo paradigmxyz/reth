@@ -5,7 +5,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
-use reth_db::{init_db, DatabaseEnv};
+use reth_db::{mdbx::init_db_for, DatabaseEnv};
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
@@ -17,6 +17,8 @@ use reth_node_core::{
     version,
 };
 use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
+
+use crate::common::CliNodeTypes;
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -137,7 +139,11 @@ impl<
     ///
     /// This transforms the node command into a node config and launches the node using the given
     /// closure.
-    pub async fn execute<L, Fut>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>, L, Fut>(
+        self,
+        ctx: CliContext,
+        launcher: L,
+    ) -> eyre::Result<()>
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
@@ -183,7 +189,9 @@ impl<
         let db_path = data_dir.db();
 
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
-        let database = Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics());
+        let database = Arc::new(
+            init_db_for::<_, N::Storage>(db_path.clone(), self.db.database_args())?.with_metrics(),
+        );
 
         if with_unused_ports {
             node_config = node_config.with_unused_ports();
