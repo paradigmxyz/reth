@@ -1,14 +1,14 @@
 //! Support for handling events emitted by node components.
 
 use crate::cl::ConsensusLayerHealthEvent;
-use alloy_consensus::constants::GWEI_TO_WEI;
+use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader};
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
 use reth_engine_primitives::ForkchoiceStatus;
 use reth_network_api::PeersInfo;
-use reth_primitives_traits::{format_gas, format_gas_throughput};
+use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
 use reth_prune_types::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileProducerEvent;
@@ -211,7 +211,10 @@ impl NodeState {
         }
     }
 
-    fn handle_consensus_engine_event(&mut self, event: BeaconConsensusEngineEvent) {
+    fn handle_consensus_engine_event<N: NodePrimitives>(
+        &mut self,
+        event: BeaconConsensusEngineEvent<N>,
+    ) {
         match event {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
@@ -248,28 +251,28 @@ impl NodeState {
             }
             BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
                 info!(
-                    number=block.number,
+                    number=block.number(),
                     hash=?block.hash(),
                     peers=self.num_connected_peers(),
-                    txs=block.body.transactions.len(),
-                    gas=%format_gas(block.header.gas_used),
-                    gas_throughput=%format_gas_throughput(block.header.gas_used, elapsed),
-                    full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
-                    base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas.unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
-                    blobs=block.header.blob_gas_used.unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
-                    excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
+                    txs=block.body.transactions().len(),
+                    gas=%format_gas(block.header.gas_used()),
+                    gas_throughput=%format_gas_throughput(block.header.gas_used(), elapsed),
+                    full=%format!("{:.1}%", block.header.gas_used() as f64 * 100.0 / block.header.gas_limit() as f64),
+                    base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
+                    blobs=block.header.blob_gas_used().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
+                    excess_blobs=block.header.excess_blob_gas().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     ?elapsed,
                     "Block added to canonical chain"
                 );
             }
             BeaconConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
-                self.latest_block = Some(head.number);
-                self.latest_block_time = Some(head.timestamp);
+                self.latest_block = Some(head.number());
+                self.latest_block_time = Some(head.timestamp());
 
-                info!(number=head.number, hash=?head.hash(), ?elapsed, "Canonical chain committed");
+                info!(number=head.number(), hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
             BeaconConsensusEngineEvent::ForkBlockAdded(block, elapsed) => {
-                info!(number=block.number, hash=?block.hash(), ?elapsed, "Block added to fork chain");
+                info!(number=block.number(), hash=?block.hash(), ?elapsed, "Block added to fork chain");
             }
         }
     }
@@ -350,12 +353,12 @@ struct CurrentStage {
 }
 
 /// A node event.
-#[derive(Debug)]
-pub enum NodeEvent {
+#[derive(Debug, derive_more::From)]
+pub enum NodeEvent<N: NodePrimitives> {
     /// A sync pipeline event.
     Pipeline(PipelineEvent),
     /// A consensus engine event.
-    ConsensusEngine(BeaconConsensusEngineEvent),
+    ConsensusEngine(BeaconConsensusEngineEvent<N>),
     /// A Consensus Layer health event.
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
     /// A pruner event
@@ -367,44 +370,14 @@ pub enum NodeEvent {
     Other(String),
 }
 
-impl From<PipelineEvent> for NodeEvent {
-    fn from(event: PipelineEvent) -> Self {
-        Self::Pipeline(event)
-    }
-}
-
-impl From<BeaconConsensusEngineEvent> for NodeEvent {
-    fn from(event: BeaconConsensusEngineEvent) -> Self {
-        Self::ConsensusEngine(event)
-    }
-}
-
-impl From<ConsensusLayerHealthEvent> for NodeEvent {
-    fn from(event: ConsensusLayerHealthEvent) -> Self {
-        Self::ConsensusLayerHealth(event)
-    }
-}
-
-impl From<PrunerEvent> for NodeEvent {
-    fn from(event: PrunerEvent) -> Self {
-        Self::Pruner(event)
-    }
-}
-
-impl From<StaticFileProducerEvent> for NodeEvent {
-    fn from(event: StaticFileProducerEvent) -> Self {
-        Self::StaticFileProducer(event)
-    }
-}
-
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
-pub async fn handle_events<E>(
+pub async fn handle_events<E, N: NodePrimitives>(
     peers_info: Option<Box<dyn PeersInfo>>,
     latest_block_number: Option<BlockNumber>,
     events: E,
 ) where
-    E: Stream<Item = NodeEvent> + Unpin,
+    E: Stream<Item = NodeEvent<N>> + Unpin,
 {
     let state = NodeState::new(peers_info, latest_block_number);
 
@@ -426,9 +399,9 @@ struct EventHandler<E> {
     info_interval: Interval,
 }
 
-impl<E> Future for EventHandler<E>
+impl<E, N: NodePrimitives> Future for EventHandler<E>
 where
-    E: Stream<Item = NodeEvent> + Unpin,
+    E: Stream<Item = NodeEvent<N>> + Unpin,
 {
     type Output = ();
 

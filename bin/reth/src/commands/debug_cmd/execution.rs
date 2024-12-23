@@ -24,6 +24,7 @@ use reth_network_api::NetworkInfo;
 use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthExecutorProvider;
+use reth_node_events::node::NodeEvent;
 use reth_provider::{
     providers::ProviderNodeTypes, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
 };
@@ -211,7 +212,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             reth_node_events::node::handle_events(
                 Some(Box::new(network)),
                 latest_block_number,
-                pipeline.events().map(Into::into),
+                pipeline.events().map(Into::<NodeEvent<N::Primitives>>::into),
             ),
         );
 
