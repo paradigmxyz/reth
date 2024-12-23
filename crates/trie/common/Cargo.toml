@@ -72,7 +72,8 @@ std = [
 	"nybbles/std",
 	"reth-primitives-traits/std",
 	"serde?/std",
-	"serde_with?/std"
+	"serde_with?/std",
+	"serde_json/std"
 ]
 eip1186 = [
     "alloy-rpc-types-eth/serde",
