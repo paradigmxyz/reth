@@ -61,21 +61,25 @@ pub fn prefix_set_lookups(c: &mut Criterion) {
             &mut group,
             "`BTreeSet` with `Iterator:any` lookup",
             test_data.clone(),
+            size,
         );
         prefix_set_bench::<BTreeRangeLastCheckedPrefixSet>(
             &mut group,
             "`BTreeSet` with `BTreeSet:range` lookup",
             test_data.clone(),
+            size,
         );
         prefix_set_bench::<VecCursorPrefixSet>(
             &mut group,
             "`Vec` with custom cursor lookup",
             test_data.clone(),
+            size,
         );
         prefix_set_bench::<VecBinarySearchPrefixSet>(
             &mut group,
             "`Vec` with binary search lookup",
             test_data.clone(),
+            size,
         );
     }
 }
@@ -84,6 +88,7 @@ fn prefix_set_bench<T>(
     group: &mut BenchmarkGroup<'_, WallTime>,
     description: &str,
     (preload, input, expected): (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>),
+    size: usize,
 ) where
     T: PrefixSetMutAbstraction,
     T::Frozen: PrefixSetAbstraction,
@@ -96,12 +101,7 @@ fn prefix_set_bench<T>(
         (prefix_set.freeze(), input.clone(), expected.clone())
     };
 
-    let group_id = format!(
-        "prefix set | preload size: {} | input size: {} | {}",
-        preload.len(),
-        input.len(),
-        description
-    );
+    let group_id = format!("prefix set | size: {size} | {description}");
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |(mut prefix_set, input, expected)| {
             for (idx, key) in input.into_iter().enumerate() {
@@ -120,12 +120,12 @@ fn generate_test_data(size: usize) -> (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>) {
 
     let vec_of_nibbles = |range| vec(any_with::<Nibbles>(range), size);
     let mut preload = vec_of_nibbles(32usize.into()).new_tree(&mut runner).unwrap().current();
-    preload.dedup();
     preload.sort();
+    preload.dedup();
 
     let mut input = vec_of_nibbles((0..=32usize).into()).new_tree(&mut runner).unwrap().current();
-    input.dedup();
     input.sort();
+    input.dedup();
 
     let expected = input
         .iter()
