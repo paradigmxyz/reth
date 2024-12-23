@@ -10,18 +10,21 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(all(feature = "optimism", not(feature = "scroll")))]
 
-use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{BlockHeader, Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{B64, U256};
 use reth_chainspec::EthereumHardforks;
-use reth_consensus::{Consensus, ConsensusError, HeaderValidator, PostExecutionInput};
+use reth_consensus::{
+    Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput,
+};
 use reth_consensus_common::validation::{
     validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
     validate_against_parent_hash_number, validate_against_parent_timestamp,
     validate_body_against_header, validate_cancun_gas, validate_header_base_fee,
-    validate_header_extradata, validate_header_gas, validate_shanghai_withdrawals,
+    validate_header_extra_data, validate_header_gas, validate_shanghai_withdrawals,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
+use reth_optimism_primitives::OpPrimitives;
 use reth_primitives::{BlockBody, BlockWithSenders, GotExpected, SealedBlock, SealedHeader};
 use std::{sync::Arc, time::SystemTime};
 
@@ -47,13 +50,23 @@ impl OpBeaconConsensus {
     }
 }
 
+impl FullConsensus<OpPrimitives> for OpBeaconConsensus {
+    fn validate_block_post_execution(
+        &self,
+        block: &BlockWithSenders,
+        input: PostExecutionInput<'_>,
+    ) -> Result<(), ConsensusError> {
+        validate_block_post_execution(block, &self.chain_spec, input.receipts)
+    }
+}
+
 impl Consensus for OpBeaconConsensus {
     fn validate_body_against_header(
         &self,
         body: &BlockBody,
         header: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        validate_body_against_header(body, header)
+        validate_body_against_header(body, header.header())
     }
 
     fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
@@ -81,14 +94,6 @@ impl Consensus for OpBeaconConsensus {
 
         Ok(())
     }
-
-    fn validate_block_post_execution(
-        &self,
-        block: &BlockWithSenders,
-        input: PostExecutionInput<'_>,
-    ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block, &self.chain_spec, input.receipts)
-    }
 }
 
 impl HeaderValidator for OpBeaconConsensus {
@@ -102,17 +107,40 @@ impl HeaderValidator for OpBeaconConsensus {
         header: &SealedHeader,
         parent: &SealedHeader,
     ) -> Result<(), ConsensusError> {
-        validate_against_parent_hash_number(header, parent)?;
+        validate_against_parent_hash_number(header.header(), parent)?;
 
         if self.chain_spec.is_bedrock_active_at_block(header.number) {
-            validate_against_parent_timestamp(header, parent)?;
+            validate_against_parent_timestamp(header.header(), parent.header())?;
         }
 
-        validate_against_parent_eip1559_base_fee(header, parent, &self.chain_spec)?;
+        // EIP1559 base fee validation
+        // <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation>
+        // > if Holocene is active in parent_header.timestamp, then the parameters from
+        // > parent_header.extraData are used.
+        if self.chain_spec.is_holocene_active_at_timestamp(parent.timestamp) {
+            let header_base_fee =
+                header.base_fee_per_gas().ok_or(ConsensusError::BaseFeeMissing)?;
+            let expected_base_fee = self
+                .chain_spec
+                .decode_holocene_base_fee(parent, header.timestamp)
+                .map_err(|_| ConsensusError::BaseFeeMissing)?;
+            if expected_base_fee != header_base_fee {
+                return Err(ConsensusError::BaseFeeDiff(GotExpected {
+                    expected: expected_base_fee,
+                    got: header_base_fee,
+                }))
+            }
+        } else {
+            validate_against_parent_eip1559_base_fee(
+                header.header(),
+                parent.header(),
+                &self.chain_spec,
+            )?;
+        }
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            validate_against_parent_4844(header, parent)?;
+            validate_against_parent_4844(header.header(), parent.header())?;
         }
 
         Ok(())
@@ -143,8 +171,8 @@ impl HeaderValidator for OpBeaconConsensus {
             // Block validation with respect to the parent should ensure that the block timestamp
             // is greater than its parent timestamp.
 
-            // validate header extradata for all networks post merge
-            validate_header_extradata(header)?;
+            // validate header extra data for all networks post merge
+            validate_header_extra_data(header)?;
 
             // mixHash is used instead of difficulty inside EVM
             // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty

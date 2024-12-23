@@ -1,5 +1,5 @@
 use reth_chainspec::{ChainSpecProvider, Head};
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_primitives::{transaction::FillTxEnv, TransactionSigned};
 use reth_revm::{inspector_handle_register, Database, Evm, GetInspector, TxEnv};
 use reth_scroll_chainspec::ScrollChainSpec;
@@ -63,10 +63,11 @@ impl ConfigureEvm for ScrollEvmConfig {
 }
 
 impl ConfigureEvmEnv for ScrollEvmConfig {
+    type Transaction = TransactionSigned;
     type Header = alloy_consensus::Header;
     type Error = Infallible;
 
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &Self::Transaction, sender: Address) {
         transaction.fill_tx_env(tx_env, sender);
     }
 
@@ -127,7 +128,7 @@ impl ConfigureEvmEnv for ScrollEvmConfig {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> Result<(CfgEnvWithHandlerCfg, BlockEnv), Self::Error> {
+    ) -> Result<EvmEnv, Self::Error> {
         // configure evm env based on parent block
         let cfg = CfgEnv::default().with_chain_id(self.chain_spec.chain().id());
 
@@ -162,7 +163,7 @@ impl ConfigureEvmEnv for ScrollEvmConfig {
             handler_cfg: HandlerCfg { spec_id, is_scroll: true },
         };
 
-        Ok((cfg_with_handler_cfg, block_env))
+        Ok((cfg_with_handler_cfg, block_env).into())
     }
 }
 
@@ -302,10 +303,11 @@ mod tests {
             timestamp: 1719994277,
             suggested_fee_recipient: Address::random(),
             prev_randao: B256::random(),
+            gas_limit: 10000000,
         };
 
         // get next cfg env and block env
-        let (cfg_env, block_env) = config.next_cfg_and_block_env(&header, attributes)?;
+        let (cfg_env, block_env) = config.next_cfg_and_block_env(&header, attributes)?.into();
 
         // verify cfg env
         assert_eq!(cfg_env.chain_id, Scroll as u64);

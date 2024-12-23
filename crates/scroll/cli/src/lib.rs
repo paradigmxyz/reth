@@ -15,6 +15,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::node::NoArgs;
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
+use reth_eth_wire::EthNetworkPrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::LogArgs,
@@ -133,9 +134,14 @@ where
                 runner.run_blocking_until_ctrl_c(command.execute::<ScrollNode>())
             }
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<ScrollNode, _, _>(ctx, ScrollExecutorProvider::scroll)
+                command.execute::<ScrollNode, _, _, EthNetworkPrimitives>(
+                    ctx,
+                    ScrollExecutorProvider::scroll,
+                )
             }),
-            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::P2P(command) => {
+                runner.run_until_ctrl_c(command.execute::<EthNetworkPrimitives>())
+            }
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Recover(command) => {
                 runner.run_command_until_exit(|ctx| command.execute::<ScrollNode>(ctx))

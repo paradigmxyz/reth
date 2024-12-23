@@ -1,3 +1,4 @@
+use alloy_consensus::BlockHeader;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
@@ -15,20 +16,21 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
+    env::EvmEnv,
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
 };
-use reth_primitives::{Block, BlockExt, SealedBlockWithSenders};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives::{BlockExt, NodePrimitives, ReceiptWithBloom, SealedBlockWithSenders};
+use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
 use reth_provider::{
-    BlockReaderIdExt, ChainSpecProvider, HeaderProvider, StateProofProvider, StateProviderFactory,
-    TransactionVariant,
+    BlockIdReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
+    ProviderBlock, ReceiptProviderIdExt, StateProofProvider, TransactionVariant,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
-    helpers::{EthApiSpec, EthTransactions, TraceExt},
-    EthApiTypes, FromEthApiError,
+    helpers::{EthTransactions, TraceExt},
+    EthApiTypes, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -46,22 +48,20 @@ use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
-pub struct DebugApi<Provider, Eth, BlockExecutor> {
-    inner: Arc<DebugApiInner<Provider, Eth, BlockExecutor>>,
+pub struct DebugApi<Eth, BlockExecutor> {
+    inner: Arc<DebugApiInner<Eth, BlockExecutor>>,
 }
 
 // === impl DebugApi ===
 
-impl<Provider, Eth, BlockExecutor> DebugApi<Provider, Eth, BlockExecutor> {
+impl<Eth, BlockExecutor> DebugApi<Eth, BlockExecutor> {
     /// Create a new instance of the [`DebugApi`]
     pub fn new(
-        provider: Provider,
         eth: Eth,
         blocking_task_guard: BlockingTaskGuard,
         block_executor: BlockExecutor,
     ) -> Self {
-        let inner =
-            Arc::new(DebugApiInner { provider, eth_api: eth, blocking_task_guard, block_executor });
+        let inner = Arc::new(DebugApiInner { eth_api: eth, blocking_task_guard, block_executor });
         Self { inner }
     }
 
@@ -71,17 +71,20 @@ impl<Provider, Eth, BlockExecutor> DebugApi<Provider, Eth, BlockExecutor> {
     }
 }
 
+impl<Eth: RpcNodeCore, BlockExecutor> DebugApi<Eth, BlockExecutor> {
+    /// Access the underlying provider.
+    pub fn provider(&self) -> &Eth::Provider {
+        self.inner.eth_api.provider()
+    }
+}
+
 // === impl DebugApi ===
 
-impl<Provider, Eth, BlockExecutor> DebugApi<Provider, Eth, BlockExecutor>
+impl<Eth, BlockExecutor> DebugApi<Eth, BlockExecutor>
 where
-    Provider: BlockReaderIdExt
-        + HeaderProvider
-        + ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + StateProviderFactory
-        + 'static,
     Eth: EthApiTypes + TraceExt + 'static,
-    BlockExecutor: BlockExecutorProvider,
+    BlockExecutor:
+        BlockExecutorProvider<Primitives: NodePrimitives<Block = ProviderBlock<Eth::Provider>>>,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -91,7 +94,7 @@ where
     /// Trace the entire block asynchronously
     async fn trace_block(
         &self,
-        block: Arc<SealedBlockWithSenders>,
+        block: Arc<SealedBlockWithSenders<ProviderBlock<Eth::Provider>>>,
         cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
@@ -99,8 +102,8 @@ where
         // replay all transactions of the block
         let this = self.clone();
         self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash.into(), move |state| {
-                let mut results = Vec::with_capacity(block.body.transactions.len());
+            .spawn_with_state_at_block(block.parent_hash().into(), move |state| {
+                let mut results = Vec::with_capacity(block.body.transactions().len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
@@ -108,7 +111,7 @@ where
                 let mut transactions = block.transactions_with_sender().enumerate().peekable();
                 let mut inspector = None;
                 while let Some((index, (signer, tx))) = transactions.next() {
-                    let tx_hash = tx.hash();
+                    let tx_hash = *tx.tx_hash();
 
                     let env = EnvWithHandlerCfg {
                         env: Env::boxed(
@@ -155,41 +158,45 @@ where
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
-        let block = Block::decode(&mut rlp_block.as_ref())
+        let block: ProviderBlock<Eth::Provider> = Decodable::decode(&mut rlp_block.as_ref())
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
 
-        let (cfg, block_env) = self.eth_api().evm_env_for_raw_block(&block.header).await?;
+        // Note: we assume the block has a valid height
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = self
+            .provider()
+            .env_with_header(block.header(), self.eth_api().evm_config().clone())
+            .map_err(Eth::Error::from_eth_err)?;
 
         // Depending on EIP-2 we need to recover the transactions differently
-        let senders = if self.inner.provider.chain_spec().is_homestead_active_at_block(block.number)
-        {
-            block
-                .body
-                .transactions
-                .iter()
-                .map(|tx| {
-                    tx.recover_signer()
-                        .ok_or(EthApiError::InvalidTransactionSignature)
-                        .map_err(Eth::Error::from_eth_err)
-                })
-                .collect::<Result<Vec<_>, Eth::Error>>()?
-        } else {
-            block
-                .body
-                .transactions
-                .iter()
-                .map(|tx| {
-                    tx.recover_signer_unchecked()
-                        .ok_or(EthApiError::InvalidTransactionSignature)
-                        .map_err(Eth::Error::from_eth_err)
-                })
-                .collect::<Result<Vec<_>, Eth::Error>>()?
-        };
+        let senders =
+            if self.provider().chain_spec().is_homestead_active_at_block(block.header().number()) {
+                block
+                    .body()
+                    .transactions()
+                    .iter()
+                    .map(|tx| {
+                        tx.recover_signer()
+                            .ok_or(EthApiError::InvalidTransactionSignature)
+                            .map_err(Eth::Error::from_eth_err)
+                    })
+                    .collect::<Result<Vec<_>, Eth::Error>>()?
+            } else {
+                block
+                    .body()
+                    .transactions()
+                    .iter()
+                    .map(|tx| {
+                        tx.recover_signer_unchecked()
+                            .ok_or(EthApiError::InvalidTransactionSignature)
+                            .map_err(Eth::Error::from_eth_err)
+                    })
+                    .collect::<Result<Vec<_>, Eth::Error>>()?
+            };
 
         self.trace_block(
             Arc::new(block.with_senders_unchecked(senders).seal_slow()),
-            cfg,
+            cfg_env_with_handler_cfg,
             block_env,
             opts,
         )
@@ -203,20 +210,20 @@ where
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         let block_hash = self
-            .inner
-            .provider
+            .provider()
             .block_hash_for_id(block_id)
             .map_err(Eth::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        let ((cfg, block_env, _), block) = futures::try_join!(
+        let ((evm_env, _), block) = futures::try_join!(
             self.eth_api().evm_env_at(block_hash.into()),
             self.eth_api().block_with_senders(block_hash.into()),
         )?;
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
         let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
 
-        self.trace_block(block, cfg, block_env, opts).await
+        self.trace_block(block, cfg_env_with_handler_cfg, block_env, opts).await
     }
 
     /// Trace the transaction according to the provided options.
@@ -231,11 +238,12 @@ where
             None => return Err(EthApiError::TransactionNotFound.into()),
             Some(res) => res,
         };
-        let (cfg, block_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
         // we need to get the state of the parent block because we're essentially replaying the
         // block the transaction is included in
-        let state_at: BlockId = block.parent_hash.into();
+        let state_at: BlockId = block.parent_hash().into();
         let block_hash = block.hash();
 
         let this = self.clone();
@@ -248,24 +256,29 @@ where
 
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-                this.eth_api().apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
+                this.eth_api().apply_pre_execution_changes(
+                    &block,
+                    &mut db,
+                    &cfg_env_with_handler_cfg,
+                    &block_env,
+                )?;
 
                 // replay all transactions prior to the targeted transaction
                 let index = this.eth_api().replay_transactions_until(
                     &mut db,
-                    cfg.clone(),
+                    cfg_env_with_handler_cfg.clone(),
                     block_env.clone(),
                     block_txs,
-                    tx.hash(),
+                    *tx.tx_hash(),
                 )?;
 
                 let env = EnvWithHandlerCfg {
                     env: Env::boxed(
-                        cfg.cfg_env.clone(),
+                        cfg_env_with_handler_cfg.cfg_env.clone(),
                         block_env,
                         this.eth_api().evm_config().tx_env(tx.as_signed(), tx.signer()),
                     ),
-                    handler_cfg: cfg.handler_cfg,
+                    handler_cfg: cfg_env_with_handler_cfg.handler_cfg,
                 };
 
                 this.trace_transaction(
@@ -275,7 +288,7 @@ where
                     Some(TransactionContext {
                         block_hash: Some(block_hash),
                         tx_index: Some(index),
-                        tx_hash: Some(tx.hash()),
+                        tx_hash: Some(*tx.tx_hash()),
                     }),
                     &mut None,
                 )
@@ -382,10 +395,22 @@ where
                                 // <https://github.com/rust-lang/rust/issues/100013>
                                 let db = db.0;
 
+                                let tx_info = TransactionInfo {
+                                    block_number: Some(
+                                        env.block.number.try_into().unwrap_or_default(),
+                                    ),
+                                    base_fee: Some(
+                                        env.block.basefee.try_into().unwrap_or_default(),
+                                    ),
+                                    hash: None,
+                                    block_hash: None,
+                                    index: None,
+                                };
+
                                 let (res, _) =
                                     this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                                 let frame = inspector
-                                    .try_into_mux_frame(&res, db)
+                                    .try_into_mux_frame(&res, db, tx_info)
                                     .map_err(Eth::Error::from_eth_err)?;
                                 Ok(frame.into())
                             })
@@ -427,7 +452,7 @@ where
                 GethDebugTracerType::JsTracer(code) => {
                     let config = tracer_config.into_json();
 
-                    let (_, _, at) = self.eth_api().evm_env_at(at).await?;
+                    let (_, at) = self.eth_api().evm_env_at(at).await?;
 
                     let res = self
                         .eth_api()
@@ -489,10 +514,11 @@ where
         let transaction_index = transaction_index.unwrap_or_default();
 
         let target_block = block_number.unwrap_or_default();
-        let ((cfg, mut block_env, _), block) = futures::try_join!(
+        let ((evm_env, _), block) = futures::try_join!(
             self.eth_api().evm_env_at(target_block),
             self.eth_api().block_with_senders(target_block),
         )?;
+        let EvmEnv { cfg_env_with_handler_cfg, mut block_env } = evm_env;
 
         let opts = opts.unwrap_or_default();
         let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
@@ -500,15 +526,15 @@ where
 
         // we're essentially replaying the transactions in the block here, hence we need the state
         // that points to the beginning of the block, which is the state at the parent block
-        let mut at = block.parent_hash;
+        let mut at = block.parent_hash();
         let mut replay_block_txs = true;
 
         // if a transaction index is provided, we need to replay the transactions until the index
-        let num_txs = transaction_index.index().unwrap_or(block.body.transactions.len());
+        let num_txs = transaction_index.index().unwrap_or_else(|| block.body.transactions().len());
         // but if all transactions are to be replayed, we can use the state at the block itself
         // this works with the exception of the PENDING block, because its state might not exist if
         // built locally
-        if !target_block.is_pending() && num_txs == block.body.transactions.len() {
+        if !target_block.is_pending() && num_txs == block.body.transactions().len() {
             at = block.hash();
             replay_block_txs = false;
         }
@@ -530,11 +556,11 @@ where
                     for (signer, tx) in transactions {
                         let env = EnvWithHandlerCfg {
                             env: Env::boxed(
-                                cfg.cfg_env.clone(),
+                                cfg_env_with_handler_cfg.cfg_env.clone(),
                                 block_env.clone(),
                                 this.eth_api().evm_config().tx_env(tx, *signer),
                             ),
-                            handler_cfg: cfg.handler_cfg,
+                            handler_cfg: cfg_env_with_handler_cfg.handler_cfg,
                         };
                         let (res, _) = this.eth_api().transact(&mut db, env)?;
                         db.commit(res.state);
@@ -557,7 +583,7 @@ where
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
                         let env = this.eth_api().prepare_call_env(
-                            cfg.clone(),
+                            cfg_env_with_handler_cfg.clone(),
                             block_env.clone(),
                             tx,
                             &mut db,
@@ -608,7 +634,7 @@ where
             .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
         self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash.into(), move |state_provider| {
+            .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
                 #[cfg(not(feature = "scroll"))]
                 let db = StateProviderDatabase::new(&state_provider);
                 #[cfg(feature = "scroll")]
@@ -619,7 +645,7 @@ where
 
                 let _ = block_executor
                     .execute_with_state_closure(
-                        (&(*block).clone().unseal(), block.difficulty).into(),
+                        (&(*block).clone().unseal(), block.difficulty()).into(),
                         |statedb: &State<_>| {
                             witness_record.record_executed_state(
                                 statedb,
@@ -662,6 +688,17 @@ where
         fused_inspector: &mut Option<TracingInspector>,
     ) -> Result<(GethTrace, revm_primitives::EvmState), Eth::Error> {
         let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
+
+        let tx_info = TransactionInfo {
+            hash: transaction_context.as_ref().map(|c| c.tx_hash).unwrap_or_default(),
+            index: transaction_context
+                .as_ref()
+                .map(|c| c.tx_index.map(|i| i as u64))
+                .unwrap_or_default(),
+            block_hash: transaction_context.as_ref().map(|c| c.block_hash).unwrap_or_default(),
+            block_number: Some(env.block.number.try_into().unwrap_or_default()),
+            base_fee: Some(env.block.basefee.try_into().unwrap_or_default()),
+        };
 
         if let Some(tracer) = tracer {
             return match tracer {
@@ -728,7 +765,7 @@ where
 
                         let (res, _) = self.eth_api().inspect(&mut *db, env, &mut inspector)?;
                         let frame = inspector
-                            .try_into_mux_frame(&res, db)
+                            .try_into_mux_frame(&res, db, tx_info)
                             .map_err(Eth::Error::from_eth_err)?;
                         return Ok((frame.into(), res.state))
                     }
@@ -743,14 +780,6 @@ where
                         );
 
                         let (res, env) = self.eth_api().inspect(db, env, &mut inspector)?;
-
-                        let tx_info = TransactionInfo {
-                            hash: transaction_context.unwrap().tx_hash,
-                            index: transaction_context.unwrap().tx_index.map(|index| index as u64),
-                            block_hash: transaction_context.unwrap().block_hash,
-                            block_number: Some(env.block.number.try_into().unwrap_or_default()),
-                            base_fee: Some(env.block.basefee.try_into().unwrap_or_default()),
-                        };
                         let frame: FlatCallFrame = inspector
                             .with_transaction_gas_limit(env.tx.gas_limit)
                             .into_parity_builder()
@@ -799,28 +828,25 @@ where
 }
 
 #[async_trait]
-impl<Provider, Eth, BlockExecutor> DebugApiServer for DebugApi<Provider, Eth, BlockExecutor>
+impl<Eth, BlockExecutor> DebugApiServer for DebugApi<Eth, BlockExecutor>
 where
-    Provider: BlockReaderIdExt<Block: Encodable, Receipt = reth_primitives::Receipt>
-        + HeaderProvider
-        + ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + StateProviderFactory
-        + 'static,
-    Eth: EthApiSpec + EthTransactions + TraceExt + 'static,
-    BlockExecutor: BlockExecutorProvider,
+    Eth: EthApiTypes + EthTransactions + TraceExt + 'static,
+    BlockExecutor:
+        BlockExecutorProvider<Primitives: NodePrimitives<Block = ProviderBlock<Eth::Provider>>>,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
         let header = match block_id {
-            BlockId::Hash(hash) => self.inner.provider.header(&hash.into()).to_rpc_result()?,
+            BlockId::Hash(hash) => self.provider().header(&hash.into()).to_rpc_result()?,
             BlockId::Number(number_or_tag) => {
                 let number = self
-                    .inner
-                    .provider
+                    .provider()
                     .convert_block_number(number_or_tag)
                     .to_rpc_result()?
-                    .ok_or_else(|| internal_rpc_err("Pending block not supported".to_string()))?;
-                self.inner.provider.header_by_number(number).to_rpc_result()?
+                    .ok_or_else(|| {
+                    internal_rpc_err("Pending block not supported".to_string())
+                })?;
+                self.provider().header_by_number(number).to_rpc_result()?
             }
         };
 
@@ -835,8 +861,7 @@ where
     /// Handler for `debug_getRawBlock`
     async fn raw_block(&self, block_id: BlockId) -> RpcResult<Bytes> {
         let block = self
-            .inner
-            .provider
+            .provider()
             .block_by_id(block_id)
             .to_rpc_result()?
             .ok_or(EthApiError::HeaderNotFound(block_id))?;
@@ -858,8 +883,7 @@ where
     /// Returns the bytes of the transaction for the given hash.
     async fn raw_transactions(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
         let block = self
-            .inner
-            .provider
+            .provider()
             .block_with_senders_by_id(block_id, TransactionVariant::NoHash)
             .to_rpc_result()?
             .unwrap_or_default();
@@ -869,13 +893,12 @@ where
     /// Handler for `debug_getRawReceipts`
     async fn raw_receipts(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
         Ok(self
-            .inner
-            .provider
+            .provider()
             .receipts_by_block_id(block_id)
             .to_rpc_result()?
             .unwrap_or_default()
             .into_iter()
-            .map(|receipt| receipt.with_bloom().encoded_2718().into())
+            .map(|receipt| ReceiptWithBloom::from(receipt).encoded_2718().into())
             .collect())
     }
 
@@ -1185,21 +1208,19 @@ where
     }
 }
 
-impl<Provider, Eth, BlockExecutor> std::fmt::Debug for DebugApi<Provider, Eth, BlockExecutor> {
+impl<Eth, BlockExecutor> std::fmt::Debug for DebugApi<Eth, BlockExecutor> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
 }
 
-impl<Provider, Eth, BlockExecutor> Clone for DebugApi<Provider, Eth, BlockExecutor> {
+impl<Eth, BlockExecutor> Clone for DebugApi<Eth, BlockExecutor> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
-struct DebugApiInner<Provider, Eth, BlockExecutor> {
-    /// The provider that can interact with the chain.
-    provider: Provider,
+struct DebugApiInner<Eth, BlockExecutor> {
     /// The implementation of `eth` API
     eth_api: Eth,
     // restrict the number of concurrent calls to blocking calls

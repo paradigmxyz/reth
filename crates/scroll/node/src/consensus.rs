@@ -2,7 +2,7 @@ use reth_consensus::noop::NoopConsensus;
 use reth_node_builder::{components::ConsensusBuilder, BuilderContext, FullNodeTypes};
 
 /// The consensus builder for Scroll.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ScrollConsensusBuilder;
 
 impl<Node: FullNodeTypes> ConsensusBuilder<Node> for ScrollConsensusBuilder {

@@ -16,6 +16,9 @@ reth-primitives.workspace = true
 # scroll
 reth-scroll-execution.workspace = true
 
+# ethereum
+revm.workspace = true
+
 alloy-sol-macro = "0.8.9"
 alloy-sol-types.workspace = true
 alloy-eips.workspace = true
@@ -25,6 +28,7 @@ eyre.workspace = true
 
 [features]
 optimism = [
-  "reth-primitives/optimism"
+	"reth-primitives/optimism",
+	"revm/optimism"
 ]
 scroll = []

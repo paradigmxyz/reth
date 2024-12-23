@@ -16,7 +16,7 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdates,
     walker::TrieWalker,
-    HashBuilder, Nibbles, StorageRoot, TrieAccount, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    HashBuilder, Nibbles, StorageRoot, TrieInput, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
@@ -121,10 +121,10 @@ where
                         trie_cursor_factory,
                         hashed_state,
                         hashed_address,
+                        prefix_set,
                         #[cfg(feature = "metrics")]
                         metrics,
                     )
-                    .with_prefix_set(prefix_set)
                     .calculate(retain_updates)?)
                 })();
                 let _ = tx.send(result);
@@ -179,6 +179,7 @@ where
                                 trie_cursor_factory.clone(),
                                 hashed_cursor_factory.clone(),
                                 hashed_address,
+                                Default::default(),
                                 #[cfg(feature = "metrics")]
                                 self.metrics.storage_trie.clone(),
                             )
@@ -191,7 +192,7 @@ where
                     }
 
                     account_rlp.clear();
-                    let account = TrieAccount::from((account, storage_root));
+                    let account = account.into_trie_account(storage_root);
                     account.encode(&mut account_rlp as &mut dyn BufMut);
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
                 }

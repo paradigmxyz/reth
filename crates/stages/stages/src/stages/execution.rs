@@ -1,5 +1,6 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::{BlockHeader, Header, Sealable};
+use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
@@ -11,7 +12,7 @@ use reth_evm::{
 };
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
-use reth_primitives::{SealedHeader, StaticFileSegment};
+use reth_primitives::StaticFileSegment;
 use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
@@ -66,7 +67,10 @@ use super::missing_static_data_error;
 ///   values to [`tables::PlainStorageState`]
 // false positive, we cannot derive it if !DB: Debug.
 #[allow(missing_debug_implementations)]
-pub struct ExecutionStage<E> {
+pub struct ExecutionStage<E>
+where
+    E: BlockExecutorProvider,
+{
     /// The stage's internal block executor
     executor_provider: E,
     /// The commit thresholds of the execution stage.
@@ -81,25 +85,28 @@ pub struct ExecutionStage<E> {
     /// Input for the post execute commit hook.
     /// Set after every [`ExecutionStage::execute`] and cleared after
     /// [`ExecutionStage::post_execute_commit`].
-    post_execute_commit_input: Option<Chain>,
+    post_execute_commit_input: Option<Chain<E::Primitives>>,
     /// Input for the post unwind commit hook.
     /// Set after every [`ExecutionStage::unwind`] and cleared after
     /// [`ExecutionStage::post_unwind_commit`].
-    post_unwind_commit_input: Option<Chain>,
+    post_unwind_commit_input: Option<Chain<E::Primitives>>,
     /// Handle to communicate with `ExEx` manager.
-    exex_manager_handle: ExExManagerHandle,
+    exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
 }
 
-impl<E> ExecutionStage<E> {
+impl<E> ExecutionStage<E>
+where
+    E: BlockExecutorProvider,
+{
     /// Create new execution stage with specified config.
     pub fn new(
         executor_provider: E,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
         prune_modes: PruneModes,
-        exex_manager_handle: ExExManagerHandle,
+        exex_manager_handle: ExExManagerHandle<E::Primitives>,
     ) -> Self {
         Self {
             external_clean_threshold,
@@ -258,11 +265,13 @@ impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
     E: BlockExecutorProvider,
     Provider: DBProvider
-        + BlockReader<Block = reth_primitives::Block>
-        + StaticFileProviderFactory
+        + BlockReader<
+            Block = <E::Primitives as NodePrimitives>::Block,
+            Header = <E::Primitives as NodePrimitives>::BlockHeader,
+        > + StaticFileProviderFactory
         + StatsReader
         + BlockHashReader
-        + StateWriter<Receipt = reth_primitives::Receipt>
+        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
         + StateCommitmentProvider,
 {
     /// Return the id of the stage
@@ -351,9 +360,15 @@ where
             let execute_start = Instant::now();
 
             self.metrics.metered_one((&block, td).into(), |input| {
-                executor.execute_and_verify_one(input).map_err(|error| StageError::Block {
-                    block: Box::new(SealedHeader::seal(block.header().clone())),
-                    error: BlockErrorKind::Execution(error),
+                executor.execute_and_verify_one(input).map_err(|error| {
+                    let header = block.header();
+                    StageError::Block {
+                        block: Box::new(BlockWithParent::new(
+                            header.parent_hash(),
+                            NumHash::new(header.number(), header.hash_slow()),
+                        )),
+                        error: BlockErrorKind::Execution(error),
+                    }
                 })
             })?;
 
@@ -376,7 +391,7 @@ where
             }
 
             stage_progress = block_number;
-            stage_checkpoint.progress.processed += block.gas_used();
+            stage_checkpoint.progress.processed += block.header().gas_used();
 
             // If we have ExExes we need to save the block in memory for later
             if self.exex_manager_handle.has_exexs() {
@@ -416,7 +431,7 @@ where
         if !blocks.is_empty() {
             let blocks = blocks.into_iter().map(|block| {
                 let hash = block.header().hash_slow();
-                block.seal(hash)
+                block.seal_unchecked(hash)
             });
 
             let previous_input =
@@ -515,7 +530,8 @@ where
                 stage_checkpoint.progress.processed -= provider
                     .block_by_number(block_number)?
                     .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?
-                    .gas_used;
+                    .header()
+                    .gas_used();
             }
         }
         let checkpoint = if let Some(stage_checkpoint) = stage_checkpoint {

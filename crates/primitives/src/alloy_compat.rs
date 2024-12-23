@@ -58,6 +58,7 @@ impl TryFrom<AnyRpcBlock> for Block {
             excess_blob_gas,
             parent_beacon_block_root,
             requests_hash,
+            target_blobs_per_block,
         } = block.header.inner;
 
         Ok(Self {
@@ -84,6 +85,7 @@ impl TryFrom<AnyRpcBlock> for Block {
                 excess_blob_gas,
                 parent_beacon_block_root,
                 requests_hash,
+                target_blobs_per_block,
             },
             body: BlockBody {
                 transactions,
@@ -125,13 +127,14 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
             }
             #[cfg(any(feature = "optimism", feature = "scroll"))]
             AnyTxEnvelope::Unknown(alloy_network::UnknownTxEnvelope { hash: _hash, inner }) => {
-                use alloy_consensus::Transaction as _;
+                use alloy_consensus::Typed2718;
 
                 match TryInto::<crate::TxType>::try_into(inner.ty())
                     .map_err(|e| ConversionError::Custom(e.to_string()))?
                 {
                     #[cfg(all(feature = "optimism", not(feature = "scroll")))]
                     crate::TxType::Deposit => {
+                        use alloy_consensus::Transaction as _;
                         let fields: op_alloy_rpc_types::OpTransactionFields = inner
                             .fields
                             .clone()
@@ -156,6 +159,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
                     }
                     #[cfg(all(feature = "scroll", not(feature = "optimism")))]
                     crate::TxType::L1Message => {
+                        use alloy_consensus::Transaction as _;
                         let fields =
                             inner
                                 .fields

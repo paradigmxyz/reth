@@ -245,7 +245,7 @@ RPC:
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
@@ -269,7 +269,7 @@ RPC:
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner]
 
       --ipcdisable
           Disable the IPC-RPC server
@@ -381,8 +381,8 @@ RPC State Cache:
 
           [default: 2000]
 
-      --rpc-cache.max-envs <MAX_ENVS>
-          Max number of bytes for cached env data
+      --rpc-cache.max-envs <MAX_HEADERS>
+          Max number of headers in cache
 
           [default: 1000]
 
@@ -458,7 +458,7 @@ TxPool:
 
           [default: 7]
 
-      --txpool.gas-limit <GAS_LIMIT>
+      --txpool.gas-limit <ENFORCED_GAS_LIMIT>
           The default enforced gas limit for transactions entering the pool
 
           [default: 30000000]
@@ -508,13 +508,13 @@ TxPool:
           [default: 200]
 
 Builder:
-      --builder.extradata <EXTRADATA>
+      --builder.extradata <EXTRA_DATA>
           Block extra data set by the payload builder
 
           [default: reth/<VERSION>/<OS>]
 
       --builder.gaslimit <GAS_LIMIT>
-          Target gas ceiling for built blocks
+          Target gas limit for built blocks
 
           [default: 30000000]
 

@@ -17,16 +17,16 @@ alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
 alloy-trie.workspace = true
 alloy-consensus.workspace = true
-alloy-genesis.workspace = true
-
 reth-primitives-traits.workspace = true
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, optional = true }
 
-# revm-primitives scroll re-export
-revm-primitives = { package = "reth-scroll-revm", path = "../../scroll/revm" }
+# scroll
 reth-scroll-primitives = { workspace = true, optional = true }
 
-bytes.workspace = true
+alloy-rpc-types-eth = { workspace = true, optional = true }
+alloy-serde = { workspace = true, optional = true }
+
+bytes = { workspace = true, optional = true }
 derive_more.workspace = true
 itertools.workspace = true
 nybbles = { workspace = true, features = ["rlp"] }
@@ -45,8 +45,12 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["serde"] }
+reth-codecs.workspace = true
+alloy-genesis.workspace = true
+
 alloy-primitives = { workspace = true, features = ["getrandom"] }
 alloy-trie = { workspace = true, features = ["arbitrary", "serde"] }
+bytes.workspace = true
 hash-db = "=0.15.2"
 plain_hasher = "0.2"
 arbitrary = { workspace = true, features = ["derive"] }
@@ -60,18 +64,26 @@ serde_with.workspace = true
 reth-scroll-primitives.workspace = true
 
 [features]
+eip1186 = [
+    "alloy-rpc-types-eth/serde",
+    "dep:alloy-serde",
+]
 serde = [
     "dep:serde",
-    "bytes/serde",
+    "bytes?/serde",
     "nybbles/serde",
     "smallvec/serde",
     "alloy-primitives/serde",
     "alloy-consensus/serde",
     "alloy-trie/serde",
-    "revm-primitives/serde",
+    "alloy-rpc-types-eth?/serde",
     "reth-primitives-traits/serde",
-    "reth-codecs/serde",
+    "reth-codecs?/serde",
     "reth-scroll-primitives?/serde"
+]
+reth-codec = [
+    "dep:reth-codecs",
+    "dep:bytes",
 ]
 serde-bincode-compat = [
     "serde",
@@ -85,24 +97,24 @@ test-utils = [
     "arbitrary",
     "reth-primitives-traits/test-utils",
     "reth-codecs/test-utils",
-	"revm-primitives/test-utils"
 ]
 arbitrary = [
-    "alloy-trie/arbitrary",
-    "dep:arbitrary",
-    "reth-primitives-traits/arbitrary",
-    "alloy-consensus/arbitrary",
-    "alloy-primitives/arbitrary",
-    "nybbles/arbitrary",
+	"dep:reth-codecs",
+	"alloy-trie/arbitrary",
+	"dep:arbitrary",
+    "alloy-serde?/arbitrary",
+	"reth-primitives-traits/arbitrary",
+	"alloy-consensus/arbitrary",
+	"alloy-primitives/arbitrary",
+	"nybbles/arbitrary",
     "smallvec/arbitrary",
-    "revm-primitives/arbitrary",
-    "reth-codecs/arbitrary",
+	"reth-codecs/arbitrary",
+	"alloy-rpc-types-eth?/arbitrary",
 	"reth-scroll-primitives?/arbitrary"
 ]
 scroll = [
 	"reth-primitives-traits/scroll",
 	"dep:reth-scroll-primitives",
-	"revm-primitives/scroll"
 ]
 
 [[bench]]

@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # revm
-revm = { version = "18.0.0", features = ["std"], default-features = false }
+revm = { version = "18.0.0", default-features = false }
 
 # scroll
 reth-scroll-primitives = { workspace = true, optional = true }
@@ -36,7 +36,7 @@ serde = [
 	"dep:serde",
 	"reth-scroll-primitives?/serde"
 ]
-scroll = ["revm/scroll-poseidon-codehash", "dep:reth-scroll-primitives"]
+scroll = ["revm/scroll-poseidon-codehash", "reth-scroll-primitives/poseidon"]
 test-utils = ["revm/test-utils"]
 std = [
 	"revm/std",

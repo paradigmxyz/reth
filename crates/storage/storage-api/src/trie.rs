@@ -1,14 +1,11 @@
-use alloy_primitives::{
-    map::{HashMap, HashSet},
-    Address, BlockNumber, Bytes, B256,
-};
+use alloy_primitives::{map::B256HashMap, Address, BlockNumber, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     prefix_set::TriePrefixSets,
     updates::{StorageTrieUpdates, TrieUpdates},
     AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage,
-    IntermediateStateRootState, MultiProof, StateRootProgress, StorageMultiProof, StorageProof,
-    TrieInput,
+    IntermediateStateRootState, MultiProof, MultiProofTargets, StateRootProgress,
+    StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// A type that can compute the state root of a given post state.
@@ -120,7 +117,7 @@ pub trait StateProofProvider: Send + Sync {
     fn multiproof(
         &self,
         input: TrieInput,
-        targets: HashMap<B256, HashSet<B256>>,
+        targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof>;
 
     /// Get trie witness for provided state.
@@ -128,7 +125,7 @@ pub trait StateProofProvider: Send + Sync {
         &self,
         input: TrieInput,
         target: HashedPostState,
-    ) -> ProviderResult<HashMap<B256, Bytes>>;
+    ) -> ProviderResult<B256HashMap<Bytes>>;
 }
 
 /// Trie Writer
@@ -150,7 +147,7 @@ pub trait StorageTrieWriter: Send + Sync {
     /// Returns the number of entries modified.
     fn write_storage_trie_updates(
         &self,
-        storage_tries: &HashMap<B256, StorageTrieUpdates>,
+        storage_tries: &B256HashMap<StorageTrieUpdates>,
     ) -> ProviderResult<usize>;
 
     /// Writes storage trie updates for the given hashed address.

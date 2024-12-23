@@ -4,6 +4,7 @@ use revm::{
     db::states::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     primitives::{Address, Bytecode, B256},
 };
+use std::vec::Vec;
 
 /// Code copy equivalent of the [`StateChangeset`] to accommodate for the [`ScrollAccountInfo`].
 #[derive(Debug)]

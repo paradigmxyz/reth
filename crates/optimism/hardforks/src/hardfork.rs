@@ -33,6 +33,8 @@ hardfork!(
         Granite,
         /// Holocene: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#holocene>
         Holocene,
+        /// Isthmus: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/isthmus/overview.md>
+        Isthmus,
     }
 );
 
@@ -159,6 +161,7 @@ impl OpHardfork {
                 Self::Fjord => Some(1716998400),
                 Self::Granite => Some(1723478400),
                 Self::Holocene => Some(1732633200),
+                Self::Isthmus => todo!(),
             },
         )
     }
@@ -193,7 +196,8 @@ impl OpHardfork {
                 Self::Ecotone => Some(1710374401),
                 Self::Fjord => Some(1720627201),
                 Self::Granite => Some(1726070401),
-                Self::Holocene => None,
+                Self::Holocene => Some(1736445601),
+                Self::Isthmus => todo!(),
             },
         )
     }
@@ -226,6 +230,7 @@ impl OpHardfork {
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
             (Self::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
+            (Self::Holocene.boxed(), ForkCondition::Timestamp(1736445601)),
         ])
     }
 
@@ -321,6 +326,7 @@ impl OpHardfork {
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
             (Self::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
+            (Self::Holocene.boxed(), ForkCondition::Timestamp(1736445601)),
         ])
     }
 }
@@ -357,7 +363,7 @@ mod tests {
     #[test]
     fn check_op_hardfork_from_str() {
         let hardfork_str =
-            ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe", "hOlOcEnE"];
+            ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe", "hOlOcEnE", "isthMUS"];
         let expected_hardforks = [
             OpHardfork::Bedrock,
             OpHardfork::Regolith,
@@ -366,6 +372,7 @@ mod tests {
             OpHardfork::Fjord,
             OpHardfork::Granite,
             OpHardfork::Holocene,
+            OpHardfork::Isthmus,
         ];
 
         let hardforks: Vec<OpHardfork> =

@@ -24,10 +24,11 @@ reth-prune-types.workspace = true
 reth-revm.workspace = true
 reth-storage-errors.workspace = true
 
-revm-primitives.workspace = true
+reth-storage-api = { workspace = true, optional = true }
 
 # scroll
 revm.workspace = true
+revm-primitives.workspace = true
 reth-scroll-execution.workspace = true
 
 # alloy
@@ -49,17 +50,18 @@ metrics-util = { workspace = true, features = ["debugging"] }
 [features]
 default = ["std"]
 std = [
-    "dep:metrics",
-    "dep:reth-metrics",
-    "reth-consensus/std",
-    "reth-primitives/std",
-    "reth-primitives-traits/std",
-    "reth-revm/std",
-    "alloy-eips/std",
-    "alloy-primitives/std",
-    "alloy-consensus/std",
-    "revm-primitives/std",
-    "revm/std",
+	"dep:metrics",
+	"dep:reth-metrics",
+	"reth-consensus/std",
+	"reth-primitives/std",
+	"reth-primitives-traits/std",
+	"reth-revm/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"alloy-consensus/std",
+	"revm-primitives/std",
+	"revm/std",
+	"reth-ethereum-forks/std"
 ]
 test-utils = [
     "dep:parking_lot",
@@ -68,6 +70,7 @@ test-utils = [
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-revm/test-utils",
+	"dep:reth-storage-api",
     "revm/test-utils",
     "reth-prune-types/test-utils",
     "reth-scroll-execution/test-utils"

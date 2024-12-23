@@ -1,6 +1,7 @@
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
+use alloy_trie::TrieAccount;
 use derive_more::Deref;
 use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, BytecodeDecodeError};
 
@@ -79,8 +80,25 @@ impl Account {
         self.bytecode_hash.unwrap_or(KECCAK_EMPTY)
     }
 
+    /// Converts the account into a trie account with the given storage root.
+    pub fn into_trie_account(self, storage_root: B256) -> TrieAccount {
+        let Self {
+            nonce,
+            balance,
+            bytecode_hash,
+            #[cfg(feature = "scroll")]
+                account_extension: _,
+        } = self;
+        TrieAccount {
+            nonce,
+            balance,
+            storage_root,
+            code_hash: bytecode_hash.unwrap_or(KECCAK_EMPTY),
+        }
+    }
+
     /// Convert an [`revm_primitives::shared::AccountInfo`] into an [`Account`]
-    pub fn from_account_info(info: revm_primitives::shared::AccountInfo) -> Self {
+    pub fn from_account_info(info: &revm_primitives::shared::AccountInfo) -> Self {
         Self {
             balance: info.balance,
             nonce: info.nonce,
@@ -137,7 +155,7 @@ impl Bytecode {
         Self(RevmBytecode::new_raw(bytes))
     }
 
-    /// Creates a new raw [`revm_primitives::Bytecode`].
+    /// Creates a new raw [`revm_primitives::primitives::Bytecode`].
     ///
     /// Returns an error on incorrect Bytecode format.
     #[inline]
@@ -241,11 +259,22 @@ impl From<&GenesisAccount> for Account {
 
 impl From<AccountInfo> for Account {
     fn from(revm_acc: AccountInfo) -> Self {
-        let code_hash = revm_acc.code_hash;
         Self {
             balance: revm_acc.balance,
             nonce: revm_acc.nonce,
-            bytecode_hash: (code_hash != KECCAK_EMPTY).then_some(code_hash),
+            bytecode_hash: (!revm_acc.is_empty_code_hash()).then_some(revm_acc.code_hash),
+            #[cfg(feature = "scroll")]
+            account_extension: Some((revm_acc.code_size, revm_acc.poseidon_code_hash).into()),
+        }
+    }
+}
+
+impl From<&AccountInfo> for Account {
+    fn from(revm_acc: &AccountInfo) -> Self {
+        Self {
+            balance: revm_acc.balance,
+            nonce: revm_acc.nonce,
+            bytecode_hash: (!revm_acc.is_empty_code_hash()).then_some(revm_acc.code_hash),
             #[cfg(feature = "scroll")]
             account_extension: Some((revm_acc.code_size, revm_acc.poseidon_code_hash).into()),
         }
@@ -294,7 +323,7 @@ impl From<Account> for revm_primitives::shared::AccountInfo {
 #[cfg(all(feature = "scroll", feature = "test-utils"))]
 impl From<revm_primitives::shared::AccountInfo> for Account {
     fn from(info: revm_primitives::shared::AccountInfo) -> Self {
-        Self::from_account_info(info)
+        Self::from_account_info(&info)
     }
 }
 

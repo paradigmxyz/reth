@@ -21,16 +21,25 @@ alloy-eips.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-trie.workspace = true
 
 # revm-primitives scroll re-export
-revm-primitives = { package = "reth-scroll-revm", path = "../scroll/revm", features = ["serde"] }
+revm-primitives = { package = "reth-scroll-revm", path = "../scroll/revm", features = ["serde"], default-features = false }
 reth-scroll-primitives = { workspace = true, optional = true }
+
+# op
+op-alloy-consensus = { workspace = true, optional = true }
+
+# crypto
+secp256k1 = { workspace = true, features = [
+	"recovery",
+], optional = true }
+k256.workspace = true
 
 # misc
 byteorder = { workspace = true, optional = true }
 bytes.workspace = true
 derive_more.workspace = true
-roaring = "0.10.2"
 serde_with = { workspace = true, optional = true }
 auto_impl.workspace = true
 
@@ -47,6 +56,11 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 alloy-primitives = { workspace = true, features = ["arbitrary"] }
 alloy-consensus = { workspace = true, features = ["arbitrary"] }
 
+secp256k1 = { workspace = true, features = [
+	"recovery",
+	"global-context",
+	"rand"
+] }
 bincode.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
@@ -64,8 +78,16 @@ std = [
 	"alloy-genesis/std",
 	"alloy-primitives/std",
 	"revm-primitives/std",
-	"serde?/std"
+	"serde?/std",
+	"serde_with?/std",
+	"alloy-rlp/std",
+	"bytes/std",
+	"derive_more/std",
+	"k256/std",
+	"secp256k1?/std",
+	"alloy-trie/std"
 ]
+secp256k1 = ["dep:secp256k1"]
 test-utils = [
 	"arbitrary",
 	"reth-codecs?/test-utils",
@@ -81,13 +103,18 @@ arbitrary = [
 	"alloy-eips/arbitrary",
 	"revm-primitives/arbitrary",
 	"reth-codecs?/arbitrary",
-	"reth-scroll-primitives?/arbitrary"
+	"reth-scroll-primitives?/arbitrary",
+	"secp256k1?/global-context",
+	"secp256k1?/rand",
+	"op-alloy-consensus?/arbitrary",
+	"alloy-trie/arbitrary"
 ]
 serde-bincode-compat = [
 	"serde",
 	"serde_with",
 	"alloy-consensus/serde-bincode-compat",
-	"alloy-eips/serde-bincode-compat"
+	"alloy-eips/serde-bincode-compat",
+	"op-alloy-consensus?/serde-bincode-compat"
 ]
 serde = [
 	"dep:serde",
@@ -97,16 +124,21 @@ serde = [
     "bytes/serde",
     "rand/serde",
     "reth-codecs?/serde",
-    "roaring/serde",
 	"revm-primitives/serde",
-	"reth-scroll-primitives?/serde"
+	"reth-scroll-primitives?/serde",
+	"op-alloy-consensus?/serde",
+	"k256/serde",
+	"secp256k1?/serde",
+	"alloy-trie/serde"
 ]
 reth-codec = [
 	"dep:reth-codecs",
 	"dep:modular-bitfield",
 	"dep:byteorder",
 ]
-
+op = [
+	"dep:op-alloy-consensus",
+]
 scroll = [
 	"reth-scroll-primitives",
 	"revm-primitives/scroll"

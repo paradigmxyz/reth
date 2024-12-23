@@ -14,11 +14,14 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
-    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
-    ConfigureEvm,
+    env::EvmEnv, state_change::post_block_withdrawals_balance_increments,
+    system_calls::SystemCaller, ConfigureEvm,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{proofs, Block, BlockBody, BlockExt, Receipt, Receipts};
+use reth_primitives::{
+    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, BlockExt, Receipt,
+    Receipts,
+};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     db::{states::bundle_state::BundleRetention, State},
@@ -107,7 +110,7 @@ where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
     Engine: EngineTypes,
     Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
-    Evm: ConfigureEvm<Header = Header>,
+    Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
     Spec: EthereumHardforks,
 {
     type Item = S::Item;
@@ -254,7 +257,7 @@ fn create_reorg_head<Provider, Evm, Spec>(
 ) -> RethResult<(ExecutionPayload, ExecutionPayloadSidecar)>
 where
     Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
-    Evm: ConfigureEvm<Header = Header>,
+    Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
     Spec: EthereumHardforks,
 {
     let chain_spec = payload_validator.chain_spec();
@@ -296,8 +299,13 @@ where
     let mut state = State::builder().with_database(&mut db).with_bundle_update().build();
 
     // Configure environments
-    let (cfg, block_env) = evm_config.cfg_and_block_env(&reorg_target.header, U256::MAX);
-    let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
+    let EvmEnv { cfg_env_with_handler_cfg, block_env } =
+        evm_config.cfg_and_block_env(&reorg_target.header, U256::MAX);
+    let env = EnvWithHandlerCfg::new_with_cfg_env(
+        cfg_env_with_handler_cfg,
+        block_env,
+        Default::default(),
+    );
     let mut evm = evm_config.evm_with_env(&mut state, env);
 
     // apply eip-4788 pre block contract call
@@ -413,13 +421,14 @@ where
 
             // Compute or add new fields
             transactions_root: proofs::calculate_transaction_root(&transactions),
-            receipts_root: outcome.receipts_root_slow(reorg_target.header.number).unwrap(),
+            receipts_root: outcome.ethereum_receipts_root(reorg_target.header.number).unwrap(),
             logs_bloom: outcome.block_logs_bloom(reorg_target.header.number).unwrap(),
-            requests_hash: None, // TODO(prague)
             gas_used: cumulative_gas_used,
             blob_gas_used: blob_gas_used.map(Into::into),
             excess_blob_gas: excess_blob_gas.map(Into::into),
             state_root: state_provider.state_root_from_state(hashed_state)?,
+            requests_hash: None,          // TODO(prague)
+            target_blobs_per_block: None, // TODO(prague)
         },
         body: BlockBody {
             transactions,

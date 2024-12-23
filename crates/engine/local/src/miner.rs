@@ -1,5 +1,6 @@
 //! Contains the implementation of the mining mode for the local engine.
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{TxHash, B256};
 use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar, ForkchoiceState};
 use eyre::OptionExt;
@@ -114,7 +115,7 @@ where
             to_engine,
             mode,
             payload_builder,
-            last_timestamp: latest_header.timestamp,
+            last_timestamp: latest_header.timestamp(),
             last_block_hashes: vec![latest_header.hash()],
         };
 
@@ -210,13 +211,12 @@ where
 
         let block = payload.block();
 
-        let cancun_fields = self
-            .provider
-            .chain_spec()
-            .is_cancun_active_at_timestamp(block.timestamp)
-            .then(|| CancunPayloadFields {
-                parent_beacon_block_root: block.parent_beacon_block_root.unwrap(),
-                versioned_hashes: block.body.blob_versioned_hashes().into_iter().copied().collect(),
+        let cancun_fields =
+            self.provider.chain_spec().is_cancun_active_at_timestamp(block.timestamp).then(|| {
+                CancunPayloadFields {
+                    parent_beacon_block_root: block.parent_beacon_block_root.unwrap(),
+                    versioned_hashes: block.body.blob_versioned_hashes_iter().copied().collect(),
+                }
             });
 
         let (tx, rx) = oneshot::channel();

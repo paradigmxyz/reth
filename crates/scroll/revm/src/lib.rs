@@ -2,6 +2,10 @@
 //! `code_size` and `poseidon_code_hash`, which are used during computation of the state root.
 
 #![warn(unused_crate_dependencies)]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(all(not(feature = "std"), feature = "scroll"))]
+extern crate alloc as std;
 
 #[cfg(feature = "serde")]
 use serde as _;

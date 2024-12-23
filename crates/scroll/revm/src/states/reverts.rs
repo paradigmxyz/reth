@@ -1,4 +1,5 @@
 use crate::states::{changes::ScrollPlainStateReverts, ScrollAccountInfo};
+use core::ops::{Deref, DerefMut};
 use reth_scroll_primitives::ScrollPostExecutionContext;
 use revm::{
     db::{
@@ -7,7 +8,7 @@ use revm::{
     },
     primitives::{map::HashMap, Address, U256},
 };
-use std::ops::{Deref, DerefMut};
+use std::vec::Vec;
 
 /// Code copy of a [`revm::db::states::reverts::Reverts`] compatible with the
 /// [`crate::states::ScrollBundleState`].

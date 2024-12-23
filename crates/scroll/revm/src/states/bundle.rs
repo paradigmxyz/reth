@@ -4,6 +4,7 @@ use crate::states::{
     reverts::ScrollReverts,
     ScrollAccountInfo, ScrollAccountInfoRevert, ScrollAccountRevert,
 };
+use core::ops::RangeInclusive;
 use reth_scroll_primitives::ScrollPostExecutionContext;
 use revm::{
     db::{
@@ -11,13 +12,13 @@ use revm::{
         AccountStatus, BundleState, OriginalValuesKnown, RevertToSlot,
     },
     primitives::{
-        map::{Entry, HashMap, HashSet},
+        map::{hash_map, Entry, HashMap, HashSet},
         Address, Bytecode, B256, KECCAK_EMPTY, U256,
     },
 };
 use std::{
-    collections::{hash_map, BTreeMap, BTreeSet},
-    ops::RangeInclusive,
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
 };
 
 /// A code copy of the [`BundleState`] modified with Scroll compatible fields.

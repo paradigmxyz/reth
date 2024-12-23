@@ -27,10 +27,10 @@ use reth_optimism_node::{
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_primitives::OpPrimitives;
 use reth_payload_util::{PayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed};
-use reth_primitives::{SealedBlock, Transaction, TransactionSigned, TransactionSignedEcRecovered};
+use reth_primitives::{RecoveredTx, SealedBlock, Transaction, TransactionSigned};
 use reth_provider::providers::BlockchainProvider2;
 use reth_tasks::TaskManager;
-use reth_transaction_pool::pool::BestPayloadTransactions;
+use reth_transaction_pool::{pool::BestPayloadTransactions, PoolTransaction};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -44,9 +44,11 @@ impl OpPayloadTransactions for CustomTxPriority {
         &self,
         pool: Pool,
         attr: reth_transaction_pool::BestTransactionsAttributes,
-    ) -> impl PayloadTransactions
+    ) -> impl PayloadTransactions<Transaction = TransactionSigned>
     where
-        Pool: reth_transaction_pool::TransactionPool,
+        Pool: reth_transaction_pool::TransactionPool<
+            Transaction: PoolTransaction<Consensus = TransactionSigned>,
+        >,
     {
         // Block composition:
         // 1. Best transactions from the pool (up to 250k gas)
@@ -64,7 +66,7 @@ impl OpPayloadTransactions for CustomTxPriority {
             ..Default::default()
         };
         let signature = sender.sign_transaction_sync(&mut end_of_block_tx).unwrap();
-        let end_of_block_tx = TransactionSignedEcRecovered::from_signed_transaction(
+        let end_of_block_tx = RecoveredTx::from_signed_transaction(
             TransactionSigned::new_unhashed(Transaction::Eip1559(end_of_block_tx), signature),
             sender.address(),
         );

@@ -56,7 +56,7 @@ BlockWithdrawals {
 }
 Transactions {
     u64 TxNumber "PK"
-    TransactionSignedNoHash Data
+    TransactionSigned Data
 }
 TransactionHashNumbers {
     B256 TxHash "PK"

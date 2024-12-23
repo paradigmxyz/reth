@@ -1,7 +1,4 @@
-use reth_scroll_primitives::{
-    poseidon::{hash_code, POSEIDON_EMPTY},
-    ScrollPostExecutionContext,
-};
+use reth_scroll_primitives::{poseidon::POSEIDON_EMPTY, ScrollPostExecutionContext};
 use revm::primitives::{AccountInfo, Bytecode, B256, KECCAK_EMPTY, U256};
 
 /// The Scroll account information. Code copy of [`AccountInfo`]. Provides additional `code_size`
@@ -150,12 +147,13 @@ impl ScrollAccountInfo {
         Self { balance, ..Default::default() }
     }
 
+    #[cfg(feature = "scroll")]
     /// Returns a [`ScrollAccountInfo`] with defaults for balance and nonce.
     /// Computes the Keccak and Poseidon hash of the provided bytecode.
     pub fn from_bytecode(bytecode: Bytecode) -> Self {
         let hash = bytecode.hash_slow();
         let code_size = bytecode.len() as u64;
-        let poseidon_code_hash = hash_code(bytecode.bytecode());
+        let poseidon_code_hash = reth_scroll_primitives::poseidon::hash_code(bytecode.bytecode());
 
         Self {
             balance: U256::ZERO,

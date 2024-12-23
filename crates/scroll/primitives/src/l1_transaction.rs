@@ -1,6 +1,7 @@
 //! Scroll L1 message transaction
 
-use alloy_consensus::Transaction;
+use alloy_consensus::{Transaction, Typed2718};
+use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718};
 use alloy_primitives::{
     private::alloy_rlp::{Encodable, Header},
     Address, Bytes, ChainId, PrimitiveSignature as Signature, TxKind, B256, U256,
@@ -123,6 +124,10 @@ impl TxL1Message {
         self.sender.encode(out);
     }
 
+    pub(crate) const fn tx_type(&self) -> u8 {
+        L1_MESSAGE_TRANSACTION_TYPE
+    }
+
     /// Create a RLP header for the transaction.
     fn rlp_header(&self) -> Header {
         Header { list: true, payload_length: self.rlp_encoded_fields_length() }
@@ -145,12 +150,6 @@ impl TxL1Message {
         self.rlp_encoded_length() + 1
     }
 
-    /// EIP-2718 encode the transaction.
-    pub fn eip2718_encode(&self, out: &mut dyn BufMut) {
-        out.put_u8(L1_MESSAGE_TRANSACTION_TYPE);
-        self.rlp_encode(out)
-    }
-
     /// Calculates the in-memory size of the [`TxL1Message`] transaction.
     #[inline]
     pub fn size(&self) -> usize {
@@ -160,6 +159,42 @@ impl TxL1Message {
             size_of::<U256>() + // value
             self.input.len() + // input
             size_of::<Address>() // sender
+    }
+}
+
+impl Typed2718 for TxL1Message {
+    fn ty(&self) -> u8 {
+        self.tx_type()
+    }
+}
+
+impl Encodable2718 for TxL1Message {
+    fn type_flag(&self) -> Option<u8> {
+        Some(self.tx_type())
+    }
+
+    fn encode_2718_len(&self) -> usize {
+        self.eip2718_encoded_length()
+    }
+
+    fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
+        out.put_u8(self.tx_type());
+        self.rlp_encode(out);
+    }
+}
+
+impl Decodable2718 for TxL1Message {
+    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
+        if ty != L1_MESSAGE_TRANSACTION_TYPE {
+            return Err(Eip2718Error::UnexpectedType(ty));
+        }
+        let tx = Self::rlp_decode(buf)?;
+        Ok(tx)
+    }
+
+    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
+        let tx = Self::decode(buf)?;
+        Ok(tx)
     }
 }
 
@@ -220,6 +255,10 @@ impl Transaction for TxL1Message {
         false
     }
 
+    fn is_create(&self) -> bool {
+        false
+    }
+
     fn kind(&self) -> TxKind {
         self.to()
     }
@@ -230,10 +269,6 @@ impl Transaction for TxL1Message {
 
     fn input(&self) -> &Bytes {
         &self.input
-    }
-
-    fn ty(&self) -> u8 {
-        L1_MESSAGE_TRANSACTION_TYPE
     }
 
     fn access_list(&self) -> Option<&alloy_eips::eip2930::AccessList> {
@@ -263,6 +298,7 @@ pub struct ScrollL1MessageTransactionFields {
 #[cfg(test)]
 mod tests {
     use super::TxL1Message;
+    use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{address, bytes, hex, Bytes, U256};
     use arbitrary::Arbitrary;
     use bytes::BytesMut;
@@ -295,7 +331,7 @@ mod tests {
         let bytes = Bytes::from_static(&hex!("7ef9015a830e76ab831e848094781e90f1c8fc4611c9b7497c3b47f99ef6969cbc80b901248ef1332e000000000000000000000000c186fa914353c44b2e33ebe05f21846f1048beda0000000000000000000000003bad7ad0728f9917d1bf08af5782dcbd516cdd96000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e76ab00000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000044493a4f84f464e58d4bfa93bcc57abfb14dbe1b8ff46cd132b5709aab227f269727943d2f000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000947885bcbd5cecef1336b5300fb5186a12ddd8c478"));
 
         let mut encoded = BytesMut::default();
-        tx.eip2718_encode(&mut encoded);
+        tx.encode_2718(&mut encoded);
 
         assert_eq!(encoded, bytes.as_ref())
     }

@@ -1,11 +1,14 @@
 //! Node specific implementations for Scroll.
 #![cfg(all(feature = "scroll", not(feature = "optimism")))]
 
-use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_node_builder::{
-    components::ComponentsBuilder, FullNodeTypes, Node, NodeAdapter, NodeComponentsBuilder,
+use reth_ethereum_engine_primitives::{
+    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
-use reth_node_types::{NodeTypesWithDB, NodeTypesWithEngine};
+use reth_node_builder::{
+    components::ComponentsBuilder,
+    node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
+    Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
+};
 use reth_primitives::EthPrimitives;
 use reth_scroll_chainspec::ScrollChainSpec;
 
@@ -39,16 +42,39 @@ mod types;
 #[derive(Clone, Debug)]
 pub struct ScrollNode;
 
+impl ScrollNode {
+    /// Returns a [`ComponentsBuilder`] configured for a regular Ethereum node.
+    pub fn components<Node>() -> ComponentsBuilder<
+        Node,
+        ScrollPoolBuilder,
+        ScrollPayloadBuilder,
+        ScrollNetworkBuilder,
+        ScrollExecutorBuilder,
+        ScrollConsensusBuilder,
+    >
+    where
+        Node: FullNodeTypes<
+            Types: NodeTypes<ChainSpec = ScrollChainSpec, Primitives = EthPrimitives>,
+        >,
+        <Node::Types as NodeTypesWithEngine>::Engine: PayloadTypes<
+            BuiltPayload = EthBuiltPayload,
+            PayloadAttributes = EthPayloadAttributes,
+            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+        >,
+    {
+        ComponentsBuilder::default()
+            .node_types::<Node>()
+            .pool(ScrollPoolBuilder)
+            .payload(ScrollPayloadBuilder)
+            .network(ScrollNetworkBuilder)
+            .executor(ScrollExecutorBuilder)
+            .consensus(ScrollConsensusBuilder)
+    }
+}
+
 impl<N> Node<N> for ScrollNode
 where
-    N: FullNodeTypes,
-    N::Types: NodeTypesWithDB
-        + NodeTypesWithEngine<
-            ChainSpec = ScrollChainSpec,
-            Primitives = EthPrimitives,
-            Engine = EthEngineTypes,
-            Storage = ScrollStorage,
-        >,
+    N: FullNodeTypes<Types = Self>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -64,13 +90,7 @@ where
     >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
-        ComponentsBuilder::default()
-            .node_types::<N>()
-            .pool(ScrollPoolBuilder)
-            .payload(ScrollPayloadBuilder)
-            .network(ScrollNetworkBuilder)
-            .executor(ScrollExecutorBuilder)
-            .consensus(ScrollConsensusBuilder)
+        Self::components()
     }
 
     fn add_ons(&self) -> Self::AddOns {

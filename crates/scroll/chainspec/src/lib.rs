@@ -181,6 +181,8 @@ pub struct ScrollChainSpec {
 }
 
 impl EthChainSpec for ScrollChainSpec {
+    type Header = Header;
+
     fn chain(&self) -> alloy_chains::Chain {
         self.inner.chain()
     }
@@ -217,10 +219,6 @@ impl EthChainSpec for ScrollChainSpec {
 
     fn genesis(&self) -> &Genesis {
         self.inner.genesis()
-    }
-
-    fn max_gas_limit(&self) -> u64 {
-        self.inner.max_gas_limit()
     }
 
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {

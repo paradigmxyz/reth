@@ -14,6 +14,7 @@ workspace = true
 # reth
 reth-primitives.workspace = true
 reth-errors.workspace = true
+reth-consensus-common.workspace = true
 reth-fs-util.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-engine-primitives.workspace = true

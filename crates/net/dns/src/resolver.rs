@@ -51,7 +51,7 @@ pub struct DnsResolver(TokioResolver);
 // === impl DnsResolver ===
 
 impl DnsResolver {
-    /// Create a new resolver by wrapping the given [`TokioResolver`]
+    /// Create a new resolver by wrapping the given [`TokioResolver`].
     pub const fn new(resolver: TokioResolver) -> Self {
         Self(resolver)
     }

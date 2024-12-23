@@ -1,17 +1,18 @@
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_node_builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes};
 use reth_node_types::NodeTypesWithEngine;
+use reth_primitives::EthPrimitives;
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_evm::{ScrollEvmConfig, ScrollExecutionStrategyFactory};
 
 /// Executor builder for Scroll.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ScrollExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for ScrollExecutorBuilder
 where
     Node: FullNodeTypes,
-    Node::Types: NodeTypesWithEngine<ChainSpec = ScrollChainSpec>,
+    Node::Types: NodeTypesWithEngine<ChainSpec = ScrollChainSpec, Primitives = EthPrimitives>,
 {
     type EVM = ScrollEvmConfig;
     type Executor = BasicBlockExecutorProvider<ScrollExecutionStrategyFactory>;
