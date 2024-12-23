@@ -434,8 +434,7 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
-                                let mut action_sender =
-                                    ActionSender { blockhash: block_hash, tx: Some(action_tx) };
+                                let mut action_sender = ActionSender::new(block_hash,Some(action_tx));
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
@@ -460,8 +459,7 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
-                                let mut action_sender =
-                                    ActionSender { blockhash: block_hash, tx: Some(action_tx) };
+                                let mut action_sender = ActionSender::new(block_hash,Some(action_tx));
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
