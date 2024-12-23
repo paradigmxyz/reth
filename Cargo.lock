@@ -828,7 +828,7 @@ dependencies = [
  "arrayvec",
  "derive_arbitrary",
  "derive_more",
- "nybbles 0.3.0",
+ "nybbles",
  "proptest",
  "proptest-derive",
  "serde",
@@ -5396,20 +5396,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nybbles"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55a62e678a89501192cc5ebf47dcbc656b608ae5e1c61c9251fe35230f119fe3"
-dependencies = [
- "alloy-rlp",
- "arbitrary",
- "const-hex",
- "proptest",
- "serde",
- "smallvec",
-]
-
-[[package]]
 name = "object"
 version = "0.36.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7747,7 +7733,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "nybbles 0.2.1",
+ "nybbles",
  "reth-consensus",
  "reth-prune-types",
  "reth-storage-errors",
@@ -9616,7 +9602,7 @@ dependencies = [
  "derive_more",
  "hash-db",
  "itertools 0.13.0",
- "nybbles 0.2.1",
+ "nybbles",
  "plain_hasher",
  "proptest",
  "proptest-arbitrary-interop",
