@@ -51,12 +51,14 @@ revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
+op-alloy-consensus.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 
 # misc
 clap.workspace = true
+derive_more.workspace = true
 serde.workspace = true
 eyre.workspace = true
 parking_lot.workspace = true
