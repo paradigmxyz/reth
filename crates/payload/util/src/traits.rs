@@ -21,3 +21,17 @@ pub trait PayloadTransactions {
     /// because this transaction won't be included in the block.
     fn mark_invalid(&mut self, sender: Address, nonce: u64);
 }
+
+/// [`PayloadTransactions`] implementation that produces nothing.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopPayloadTransactions<T>(core::marker::PhantomData<T>);
+
+impl<T> PayloadTransactions for NoopPayloadTransactions<T> {
+    type Transaction = T;
+
+    fn next(&mut self, _ctx: ()) -> Option<RecoveredTx<Self::Transaction>> {
+        None
+    }
+
+    fn mark_invalid(&mut self, _sender: Address, _nonce: u64) {}
+}

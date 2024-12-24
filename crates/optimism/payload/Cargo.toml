@@ -47,6 +47,7 @@ alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
 
 # misc
+derive_more.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
