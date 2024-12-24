@@ -50,7 +50,7 @@ arbitrary.workspace = true
 proptest.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "serde"]
 std = [
 	"reth-primitives-traits/std",
 	"reth-primitives/std",

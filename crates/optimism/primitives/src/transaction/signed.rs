@@ -25,10 +25,11 @@ use once_cell::sync::OnceCell as OnceLock;
 use op_alloy_consensus::{OpPooledTransaction, OpTypedTransaction, TxDeposit};
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
-use reth_primitives::transaction::{
-    recover_signer, recover_signer_unchecked, TransactionConversionError,
+use reth_primitives_traits::{
+    crypto::secp256k1::{recover_signer, recover_signer_unchecked},
+    transaction::error::TransactionConversionError,
+    InMemorySize, SignedTransaction,
 };
-use reth_primitives_traits::{InMemorySize, SignedTransaction};
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
 
