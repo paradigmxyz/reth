@@ -18,9 +18,9 @@ use reth_node_api::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
-use reth_optimism_primitives::{OpBlock};
+use reth_optimism_primitives::OpBlock;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{SealedBlockFor};
+use reth_primitives::SealedBlockFor;
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::sync::Arc;
 

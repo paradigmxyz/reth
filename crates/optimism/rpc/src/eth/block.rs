@@ -8,7 +8,7 @@ use reth_chainspec::ChainSpecProvider;
 use reth_node_api::BlockBody;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_primitives::{TransactionMeta};
+use reth_primitives::TransactionMeta;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_rpc_eth_api::{

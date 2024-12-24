@@ -23,7 +23,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt, OpTransactionSigned};
-use reth_primitives::{BlockWithSenders};
+use reth_primitives::BlockWithSenders;
 use reth_primitives_traits::SignedTransaction;
 use reth_revm::{Database, State};
 use revm_primitives::{db::DatabaseCommit, EnvWithHandlerCfg, ResultAndState};

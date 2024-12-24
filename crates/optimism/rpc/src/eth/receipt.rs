@@ -2,16 +2,14 @@
 
 use alloy_eips::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
-use op_alloy_consensus::{
-    OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope,
-};
+use op_alloy_consensus::{OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope};
 use op_alloy_rpc_types::{L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_primitives::{TransactionMeta};
+use reth_primitives::TransactionMeta;
 use reth_provider::{ChainSpecProvider, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};

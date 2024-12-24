@@ -24,9 +24,7 @@ use reth_consensus_common::validation::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpBlock, OpBlockBody, OpPrimitives, OpReceipt};
-use reth_primitives::{
-    BlockWithSenders, GotExpected, SealedBlockFor, SealedHeader,
-};
+use reth_primitives::{BlockWithSenders, GotExpected, SealedBlockFor, SealedHeader};
 use std::{sync::Arc, time::SystemTime};
 
 mod proof;

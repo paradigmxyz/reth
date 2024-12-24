@@ -11,9 +11,7 @@ use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGenera
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
-use reth_node_api::{
-    AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, TxTy,
-};
+use reth_node_api::{AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, TxTy};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,

@@ -23,8 +23,8 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BuiltPayload, FullNodeTypes, NodeTypesWithDBAdapter,
-    NodeTypesWithEngine, PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
+    BuiltPayload, FullNodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+    PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -32,7 +32,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_primitives::{EthereumHardforks};
+use reth_primitives::EthereumHardforks;
 use reth_provider::providers::{BlockchainProvider2, NodeTypesForProvider};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
