@@ -15,8 +15,8 @@ use reth_stages::{
     test_utils::{StorageKind, TestStageDB},
 };
 use reth_testing_utils::generators::{
-    random_block_range, random_changeset_range, random_contract_account_range, random_eoa_accounts,
-    BlockRangeParams,
+    self, random_block_range, random_changeset_range, random_contract_account_range,
+    random_eoa_accounts, BlockRangeParams,
 };
 use reth_trie::StateRoot;
 use std::{collections::BTreeMap, fs, path::Path};
@@ -27,7 +27,6 @@ mod constants;
 mod account_hashing;
 pub use account_hashing::*;
 use reth_stages_api::{ExecInput, Stage, UnwindInput};
-use reth_testing_utils::generators;
 use reth_trie_db::DatabaseStateRoot;
 
 pub(crate) type StageRange = (ExecInput, UnwindInput);
@@ -50,14 +49,14 @@ pub(crate) fn stage_unwind<
 
             // Clear previous run
             stage
-            .unwind(&provider, unwind)
-            .map_err(|e| {
-                format!(
-                    "{e}\nMake sure your test database at `{}` isn't too old and incompatible with newer stage changes.",
-                    db.factory.db_ref().path().display()
-                )
-            })
-            .unwrap();
+                .unwind(&provider, unwind)
+                .map_err(|e| {
+                    format!(
+                        "{e}\nMake sure your test database at `{}` isn't too old and incompatible with newer stage changes.",
+                        db.factory.db_ref().path().display()
+                    )
+                })
+                .unwrap();
 
             provider.commit().unwrap();
         })
