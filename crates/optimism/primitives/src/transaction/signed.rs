@@ -654,21 +654,7 @@ pub mod serde_bincode_compat {
         }
     }
 
-    /// Bincode-compatible [`super::TransactionSigned`] serde implementation.
-    ///
-    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
-    /// ```rust
-    /// use reth_primitives::{serde_bincode_compat, TransactionSigned};
-    /// use serde::{Deserialize, Serialize};
-    /// use serde_with::serde_as;
-    ///
-    /// #[serde_as]
-    /// #[derive(Serialize, Deserialize)]
-    /// struct Data {
-    ///     #[serde_as(as = "serde_bincode_compat::transaction::TransactionSigned")]
-    ///     transaction: TransactionSigned,
-    /// }
-    /// ```
+    /// Bincode-compatible [`super::OpTransactionSigned`] serde implementation.
     #[derive(Debug, Serialize, Deserialize)]
     pub struct OpTransactionSigned<'a> {
         hash: TxHash,
