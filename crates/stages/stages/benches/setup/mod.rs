@@ -33,7 +33,7 @@ pub(crate) type StageRange = (ExecInput, UnwindInput);
 
 pub(crate) fn stage_unwind<
     S: Clone
-    + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>,
+        + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>,
 >(
     stage: S,
     db: &TestStageDB,
@@ -66,7 +66,7 @@ pub(crate) fn stage_unwind<
 pub(crate) fn unwind_hashes<S>(stage: S, db: &TestStageDB, range: StageRange)
 where
     S: Clone
-    + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>,
+        + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>,
 {
     let (input, unwind) = range;
 
@@ -122,8 +122,8 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
             random_eoa_accounts(&mut rng, n_eoa),
             random_contract_account_range(&mut rng, &mut (0..n_contract)),
         ])
-            .into_iter()
-            .collect();
+        .into_iter()
+        .collect();
 
         let mut blocks = random_block_range(
             &mut rng,
@@ -195,7 +195,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
             let (head, _) = tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default();
             Ok(tx.put::<tables::HeaderTerminalDifficulties>(head, U256::from(0).into())?)
         })
-            .unwrap();
+        .unwrap();
     }
 
     db
