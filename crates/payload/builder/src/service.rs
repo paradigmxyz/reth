@@ -7,6 +7,7 @@ use crate::{
     metrics::PayloadBuilderServiceMetrics, traits::PayloadJobGenerator, KeepPayloadJobAlive,
     PayloadJob,
 };
+use alloy_consensus::BlockHeader;
 use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
@@ -284,7 +285,7 @@ where
             .find(|(_, job_id)| *job_id == id)
             .map(|(j, _)| j.best_payload().map(|p| p.into()));
         if let Some(Ok(ref best)) = res {
-            self.metrics.set_best_revenue(best.block().number, f64::from(best.fees()));
+            self.metrics.set_best_revenue(best.block().number(), f64::from(best.fees()));
         }
 
         res
@@ -318,7 +319,7 @@ where
                 payload_events.send(Events::BuiltPayload(payload.clone().into())).ok();
 
                 resolved_metrics
-                    .set_resolved_revenue(payload.block().number, f64::from(payload.fees()));
+                    .set_resolved_revenue(payload.block().number(), f64::from(payload.fees()));
             }
             res.map(|p| p.into())
         };

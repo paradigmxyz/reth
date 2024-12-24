@@ -14,6 +14,7 @@ use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayload
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::EthereumHardforks;
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_primitives::OpPrimitives;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{transaction::WithEncoded, SealedBlock, TransactionSigned};
@@ -186,6 +187,8 @@ impl OpBuiltPayload {
 }
 
 impl BuiltPayload for OpBuiltPayload {
+    type Primitives = OpPrimitives;
+
     fn block(&self) -> &SealedBlock {
         &self.block
     }
@@ -204,6 +207,8 @@ impl BuiltPayload for OpBuiltPayload {
 }
 
 impl BuiltPayload for &OpBuiltPayload {
+    type Primitives = OpPrimitives;
+
     fn block(&self) -> &SealedBlock {
         (**self).block()
     }

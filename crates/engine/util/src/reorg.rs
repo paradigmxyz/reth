@@ -437,7 +437,7 @@ where
     .seal_slow();
 
     Ok((
-        block_to_payload(reorg_block),
+        block_to_payload(reorg_block).0,
         // todo(onbjerg): how do we support execution requests?
         reorg_target
             .header

@@ -21,8 +21,8 @@ use reth_network_api::NetworkInfo;
 use reth_node_builder::EthApiBuilderCtx;
 use reth_provider::{
     BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    EvmEnvProvider, NodePrimitivesProvider, ProviderBlock, ProviderHeader, ProviderReceipt,
-    ProviderTx, StageCheckpointReader, StateProviderFactory,
+    NodePrimitivesProvider, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
+    StageCheckpointReader, StateProviderFactory,
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
@@ -203,7 +203,6 @@ where
     Self: LoadBlock<Provider = N::Provider>,
     N: OpNodeCore<
         Provider: BlockReaderIdExt
-                      + EvmEnvProvider
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
     >,

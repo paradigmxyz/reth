@@ -34,7 +34,7 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
 };
-use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
+use reth_node_events::{cl::ConsensusLayerHealthEvents, node, node::NodeEvent};
 use reth_provider::providers::{BlockchainProvider, NodeTypesForTree};
 use reth_rpc::eth::RpcNodeCore;
 use reth_tasks::TaskExecutor;
@@ -292,7 +292,7 @@ where
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select!(
-            pipeline_events.map(Into::into),
+            pipeline_events.map(Into::<NodeEvent<Types::Primitives>>::into),
             if ctx.node_config().debug.tip.is_none() && !ctx.is_dev() {
                 Either::Left(
                     ConsensusLayerHealthEvents::new(Box::new(ctx.blockchain_db().clone()))

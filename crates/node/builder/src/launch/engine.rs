@@ -213,8 +213,7 @@ where
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
         let event_sender = EventSender::default();
-        let beacon_engine_handle =
-            BeaconConsensusEngineHandle::new(consensus_engine_tx.clone(), event_sender.clone());
+        let beacon_engine_handle = BeaconConsensusEngineHandle::new(consensus_engine_tx.clone());
 
         // extract the jwt secret from the args if possible
         let jwt_secret = ctx.auth_jwt_secret()?;
@@ -271,7 +270,7 @@ where
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select!(
-            beacon_engine_handle.event_listener().map(Into::into),
+            event_sender.new_listener().map(Into::into),
             pipeline_events.map(Into::into),
             if ctx.node_config().debug.tip.is_none() && !ctx.is_dev() {
                 Either::Left(

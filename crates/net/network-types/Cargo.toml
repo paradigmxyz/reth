@@ -20,7 +20,7 @@ reth-ethereum-forks.workspace = true
 # misc
 serde = { workspace = true, optional = true }
 humantime-serde = { workspace = true, optional = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
 
 # misc
 tracing.workspace = true

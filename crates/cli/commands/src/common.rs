@@ -107,7 +107,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     /// Returns a [`ProviderFactory`] after executing consistency checks.
     ///
     /// If it's a read-write environment and an issue is found, it will attempt to heal (including a
-    /// pipeline unwind). Otherwise, it will print out an warning, advising the user to restart the
+    /// pipeline unwind). Otherwise, it will print out a warning, advising the user to restart the
     /// node to heal.
     fn create_provider_factory<N: CliNodeTypes>(
         &self,

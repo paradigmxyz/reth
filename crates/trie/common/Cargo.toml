@@ -15,7 +15,7 @@ workspace = true
 # alloy
 alloy-primitives.workspace = true
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
-alloy-trie.workspace = true
+alloy-trie = { workspace = true, features = ["ethereum"] }
 alloy-consensus.workspace = true
 reth-primitives-traits.workspace = true
 reth-codecs = { workspace = true, optional = true }
@@ -25,7 +25,7 @@ alloy-serde = { workspace = true, optional = true }
 
 bytes = { workspace = true, optional = true }
 derive_more.workspace = true
-itertools.workspace = true
+itertools= { workspace = true, features = ["use_alloc"] }
 nybbles = { workspace = true, features = ["rlp"] }
 
 # `serde` feature
@@ -72,7 +72,8 @@ std = [
 	"nybbles/std",
 	"reth-primitives-traits/std",
 	"serde?/std",
-	"serde_with?/std"
+	"serde_with?/std",
+	"serde_json/std"
 ]
 eip1186 = [
     "alloy-rpc-types-eth/serde",
