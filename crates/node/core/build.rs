@@ -29,22 +29,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-env=VERGEN_GIT_SHA_SHORT={}", &sha[..8]);
 
     // Set the build profile
-    let out_dir = env::var("OUT_DIR")?;
-    let profile = if out_dir.contains('/') {
-        // Unix-style paths
-        let parts: Vec<_> = out_dir.split('/').collect();
-        if parts.len() >= 4 {
-            parts[parts.len() - 4]
-        } else {
-            // Try Windows-style paths as fallback
-            let parts: Vec<_> = out_dir.split('\\').collect();
-            parts[parts.len() - 4]
-        }
-    } else {
-        // Windows-style paths
-        let parts: Vec<_> = out_dir.split('\\').collect();
-        parts[parts.len() - 4]
-    };
+    let profile = env::var("PROFILE")?;
     println!("cargo:rustc-env=RETH_BUILD_PROFILE={profile}");
 
     // Set formatted version strings
