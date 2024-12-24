@@ -22,7 +22,6 @@ use reth_provider::{
     StateRootProvider, TryIntoHistoricalStateProvider,
 };
 use reth_trie::{updates::TrieUpdates, TrieInput};
-use reth_trie_parallel::root::ParallelStateRoot;
 use std::{
     collections::BTreeMap,
     ops::{Deref, DerefMut},
@@ -228,13 +227,20 @@ impl AppendableChain {
                 let mut execution_outcome =
                     provider.block_execution_data_provider.execution_outcome().clone();
                 execution_outcome.extend(initial_execution_outcome.clone());
-                ParallelStateRoot::new(
+                #[cfg(feature = "scroll")]
+                let parallel_state_root = reth_scroll_state_commitment::ParallelStateRoot::new(
                     consistent_view,
                     TrieInput::from_state(provider.hashed_post_state(execution_outcome.state())),
-                )
-                .incremental_root_with_updates()
-                .map(|(root, updates)| (root, Some(updates)))
-                .map_err(ProviderError::from)?
+                );
+                #[cfg(not(feature = "scroll"))]
+                let parallel_state_root = reth_trie_parallel::root::ParallelStateRoot::new(
+                    consistent_view,
+                    TrieInput::from_state(provider.hashed_post_state(execution_outcome.state())),
+                );
+                parallel_state_root
+                    .incremental_root_with_updates()
+                    .map(|(root, updates)| (root, Some(updates)))
+                    .map_err(ProviderError::from)?
             } else {
                 let hashed_state = provider.hashed_post_state(initial_execution_outcome.state());
                 let state_root = provider.state_root_from_state(hashed_state)?;

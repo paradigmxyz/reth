@@ -39,6 +39,7 @@ reth-trie-sparse.workspace = true
 reth-trie.workspace = true
 
 # scroll
+reth-scroll-state-commitment = { workspace = true, optional = true }
 reth-scroll-storage = { workspace = true, optional = true }
 
 # alloy
@@ -125,8 +126,10 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-prune-types?/test-utils",
     "reth-trie-db/test-utils",
+    "reth-scroll-state-commitment?/test-utils"
 ]
 scroll = [
     "reth-scroll-primitives",
-    "reth-scroll-storage/scroll"
+    "reth-scroll-storage/scroll",
+    "reth-scroll-state-commitment/scroll"
 ]

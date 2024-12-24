@@ -35,6 +35,7 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
 # scroll
+reth-scroll-state-commitment = { workspace = true, optional = true }
 reth-scroll-storage = { workspace = true, optional = true }
 
 # common
@@ -82,7 +83,8 @@ test-utils = [
 	"reth-provider/test-utils",
 	"reth-trie-db/test-utils",
 	"reth-trie/test-utils",
-	"revm/test-utils"
+	"revm/test-utils",
+	"reth-scroll-state-commitment?/test-utils"
 ]
 optimism = [
 	"reth-primitives/optimism",
@@ -103,5 +105,6 @@ scroll = [
 	"reth-testing-utils/scroll",
 	"reth-trie/scroll",
 	"revm/scroll",
-	"reth-scroll-storage/scroll"
+	"reth-scroll-storage/scroll",
+	"reth-scroll-state-commitment/scroll"
 ]

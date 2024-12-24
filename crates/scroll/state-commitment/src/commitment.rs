@@ -8,7 +8,6 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, State
 pub struct BinaryMerklePatriciaTrie;
 
 impl StateCommitment for BinaryMerklePatriciaTrie {
-    type KeyHasher = PoseidonKeyHasher;
     type StateRoot<'a, TX: DbTx + 'a> =
         StateRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
     type StorageRoot<'a, TX: DbTx + 'a> =
@@ -23,4 +22,5 @@ impl StateCommitment for BinaryMerklePatriciaTrie {
         DatabaseTrieCursorFactory<'a, TX>,
         DatabaseHashedCursorFactory<'a, TX>,
     >;
+    type KeyHasher = PoseidonKeyHasher;
 }

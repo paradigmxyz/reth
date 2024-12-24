@@ -47,7 +47,7 @@ use reth_provider::{
 };
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use reth_trie_parallel::root::ParallelStateRootError;
 use revm_primitives::EvmState;
 use std::{
     cmp::Ordering,
@@ -2374,7 +2374,13 @@ where
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
-        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
+        #[cfg(feature = "scroll")]
+        let parallel_state_root =
+            reth_scroll_state_commitment::ParallelStateRoot::new(consistent_view, input);
+        #[cfg(not(feature = "scroll"))]
+        let parallel_state_root =
+            reth_trie_parallel::root::ParallelStateRoot::new(consistent_view, input);
+        parallel_state_root.incremental_root_with_updates()
     }
 
     /// Handles an error that occurred while inserting a block.

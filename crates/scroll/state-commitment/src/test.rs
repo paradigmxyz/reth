@@ -1,7 +1,8 @@
 #![allow(missing_docs)]
 
+use crate::{test_utils::b256_reverse_bits, ParallelStateRoot, PoseidonKeyHasher};
 use alloy_primitives::{Address, Uint, B256, U256};
-use proptest::{prelude::ProptestConfig, proptest};
+use proptest::{prelude::ProptestConfig, prop_assert_eq, proptest};
 use proptest_arbitrary_interop::arb;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRW},
@@ -9,15 +10,16 @@ use reth_db::{
     transaction::DbTxMut,
 };
 use reth_primitives::{Account, StorageEntry};
-use reth_provider::{test_utils::create_test_provider_factory, StorageTrieWriter, TrieWriter};
-use reth_scroll_state_commitment::{test_utils::*, PoseidonKeyHasher, StateRoot, StorageRoot};
-
-use reth_scroll_state_commitment::state_root_unsorted;
+use reth_provider::{
+    providers::ConsistentDbView, test_utils::create_test_provider_factory, StorageTrieWriter,
+    TrieWriter,
+};
+use reth_scroll_state_commitment::{state_root_unsorted, test_utils::*, StateRoot, StorageRoot};
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates,
-    BitsCompatibility, HashedPostState, HashedStorage, KeyHasher, Nibbles,
+    BitsCompatibility, HashedPostState, HashedStorage, KeyHasher, Nibbles, TrieInput,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory};
 use std::collections::BTreeMap;
@@ -32,10 +34,8 @@ proptest! {
         let init_state: BTreeMap<B256, Account> = init_state.into_iter().map(|(hashed_address, (nonce, balance, code))| {
             let hashed_address = b256_clear_last_byte(hashed_address);
             let balance = u256_clear_msb(balance);
-            #[cfg(feature = "scroll")]
             let account_extension = code.map( |(_, code_hash, code_size)| (code_size, b256_clear_first_byte(code_hash)).into()).or_else(|| Some(Default::default()));
             let account = Account { balance, nonce: nonce.into(), bytecode_hash: code.as_ref().map(|(code_hash, _, _)| *code_hash),
-                #[cfg(feature = "scroll")]
                 account_extension
             };
             (hashed_address, account)
@@ -45,7 +45,6 @@ proptest! {
                 let hashed_address = b256_clear_last_byte(hashed_address);
                 let account = update.map(|balance| Account {
                     balance: u256_clear_msb(balance),
-                    #[cfg(feature = "scroll")]
                     account_extension: Some(Default::default()),
                     ..Default::default() });
                 (hashed_address, account)
@@ -243,6 +242,154 @@ proptest! {
     }
 }
 
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 6, ..ProptestConfig::default()
+    })]
+
+    #[test]
+    fn test_parallel_state_root_database(
+        state: BTreeMap<Address, ((u32, U256, Option<(B256, B256, u64)>), BTreeMap<B256, U256>)>,
+    ) {
+        let factory = create_test_provider_factory();
+        let consistent_view = ConsistentDbView::new(factory.clone(), None);
+
+        let state = state
+            .into_iter()
+            .map(|(address, ((nonce, balance, code), storage))| {
+                let balance = u256_clear_msb(balance);
+                let account_extension = code
+                    .map(|(_, code_hash, code_size)| {
+                        (code_size, b256_clear_first_byte(code_hash)).into()
+                    })
+                    .or_else(|| Some(Default::default()));
+                let account = Account {
+                    balance,
+                    nonce: nonce.into(),
+                    bytecode_hash: code.as_ref().map(|(code_hash, _, _)| *code_hash),
+                    account_extension,
+                };
+                let storage = storage
+                    .into_iter()
+                    .map(|(slot, value)| {
+                        let slot = b256_clear_first_byte(slot);
+                        let hashed_slot = PoseidonKeyHasher::hash_key(slot);
+                        (hashed_slot, value)
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                let hashed_address = PoseidonKeyHasher::hash_key(address);
+                (hashed_address, (account, storage))
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        let mut hashed_storage_cursor = provider_rw.tx_ref().cursor_write::<tables::HashedStorages>().unwrap();
+        let mut hashed_account_cursor = provider_rw.tx_ref().cursor_write::<tables::HashedAccounts>().unwrap();
+
+        for (hashed_address, (account, storage)) in state.clone() {
+            for (hashed_slot, value) in storage {
+                hashed_storage_cursor.upsert(hashed_address, StorageEntry { key: hashed_slot, value }).unwrap();
+            }
+            hashed_account_cursor.upsert(hashed_address, account).unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        let expected_state_root = crate::test_utils::state_root(state.into_iter().map(
+            |(hashed_address, (account, storage))| {
+                (
+                    b256_reverse_bits(hashed_address),
+                    (
+                        account,
+                        storage.into_iter().map(|(hashed_slot, value)| {
+                            (b256_reverse_bits(hashed_slot), value)
+                        }),
+                    ),
+                )
+            },
+        ));
+
+        let got =
+            ParallelStateRoot::new(consistent_view, Default::default()).incremental_root().unwrap();
+
+        prop_assert_eq!(
+            expected_state_root,
+            got,
+            "expected_root = {:?}, computed_root = {:?}",
+            expected_state_root,
+            got
+        );
+    }
+
+    #[test]
+    fn test_parallel_state_root_memory(
+        state: BTreeMap<Address, ((u32, U256, Option<(B256, B256, u64)>), BTreeMap<B256, U256>)>,
+    ) {
+        let factory = create_test_provider_factory();
+        let consistent_view = ConsistentDbView::new(factory, None);
+        let mut hashed_state = HashedPostState::default();
+
+        let state = state
+            .into_iter()
+            .map(|(address, ((nonce, balance, code), storage))| {
+                let balance = u256_clear_msb(balance);
+                let account_extension = code
+                    .map(|(_, code_hash, code_size)| {
+                        (code_size, b256_clear_first_byte(code_hash)).into()
+                    })
+                    .or_else(|| Some(Default::default()));
+                let account = Account {
+                    balance,
+                    nonce: nonce.into(),
+                    bytecode_hash: code.as_ref().map(|(code_hash, _, _)| *code_hash),
+                    account_extension,
+                };
+                let storage = storage
+                    .into_iter()
+                    .map(|(slot, value)| {
+                        let slot = b256_clear_first_byte(slot);
+                        let hashed_slot = PoseidonKeyHasher::hash_key(slot);
+                        (hashed_slot, value)
+                    })
+                    .collect::<BTreeMap<_, _>>();
+                let hashed_storage = HashedStorage::from_iter(false, storage.clone().into_iter());
+                let hashed_address = PoseidonKeyHasher::hash_key(address);
+
+                // insert the account and storage in the hashed post state
+                hashed_state.accounts.insert(hashed_address, Some(account));
+                hashed_state.storages.insert(hashed_address, hashed_storage);
+
+                (hashed_address, (account, storage))
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        let expected_state_root = crate::test_utils::state_root(state.into_iter().map(
+            |(hashed_address, (account, storage))| {
+                (
+                    b256_reverse_bits(hashed_address),
+                    (
+                        account,
+                        storage.into_iter().map(|(hashed_slot, value)| {
+                            (b256_reverse_bits(hashed_slot), value)
+                        }),
+                    ),
+                )
+            },
+        ));
+
+        let trie_input = TrieInput::from_state(hashed_state);
+        let got =
+            ParallelStateRoot::new(consistent_view, trie_input).incremental_root().unwrap();
+
+        prop_assert_eq!(
+            expected_state_root,
+            got,
+            "expected_root = {:?}, computed_root = {:?}",
+            expected_state_root,
+            got
+        );
+    }
+}
+
 #[test]
 fn test_basic_state_root_with_updates_succeeds() {
     let address_1 = Address::with_last_byte(0);
@@ -250,19 +397,16 @@ fn test_basic_state_root_with_updates_succeeds() {
     let address_3 = Address::with_last_byte(7);
     let account_1 = Account {
         balance: Uint::from(1),
-        #[cfg(feature = "scroll")]
         account_extension: Some(Default::default()),
         ..Default::default()
     };
     let account_2 = Account {
         balance: Uint::from(2),
-        #[cfg(feature = "scroll")]
         account_extension: Some(Default::default()),
         ..Default::default()
     };
     let account_3 = Account {
         balance: Uint::from(3),
-        #[cfg(feature = "scroll")]
         account_extension: Some(Default::default()),
         ..Default::default()
     };
