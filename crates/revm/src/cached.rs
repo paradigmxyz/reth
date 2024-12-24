@@ -1,4 +1,5 @@
 //! Database adapters for payload building.
+use alloc::{vec, vec::Vec};
 use alloy_primitives::{
     map::{B256HashMap, Entry, HashMap},
     Address, BlockNumber, Bytes, StorageKey, StorageValue, B256, U256,
