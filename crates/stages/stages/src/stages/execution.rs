@@ -21,7 +21,6 @@ use reth_provider::{
     StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
 };
 use reth_prune_types::PruneModes;
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
     ExecutionCheckpoint, ExecutionStageThresholds, Stage, StageCheckpoint, StageError, StageId,
@@ -303,7 +302,7 @@ where
 
         self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
-        let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
+        let db = LatestStateProviderRef::new(provider);
         let mut executor = self.executor_provider.batch_executor(db);
         executor.set_tip(max_block);
         executor.set_prune_modes(prune_modes);

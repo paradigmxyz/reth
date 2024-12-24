@@ -2,7 +2,7 @@ use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
 use alloy_trie::TrieAccount;
-use derive_more::Deref;
+use derive_more::{Deref, From, Into};
 use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, BytecodeDecodeError};
 
 #[cfg(any(test, feature = "reth-codec"))]
@@ -75,7 +75,7 @@ impl Account {
 ///
 /// A wrapper around [`revm::primitives::Bytecode`][RevmBytecode] with encoding/decoding support.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deref)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deref, From, Into)]
 pub struct Bytecode(pub RevmBytecode);
 
 impl Bytecode {

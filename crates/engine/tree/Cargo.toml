@@ -29,7 +29,6 @@ reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
-reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-trie-parallel.workspace = true
@@ -114,7 +113,6 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-prune-types",
     "reth-prune-types?/test-utils",
-    "reth-revm/test-utils",
     "reth-stages-api/test-utils",
     "reth-stages/test-utils",
     "reth-static-file",

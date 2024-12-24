@@ -21,7 +21,6 @@ use reth_provider::{
     DBProvider, FullExecutionDataProvider, HashedPostStateProvider, ProviderError,
     StateRootProvider, TryIntoHistoricalStateProvider,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_trie::{updates::TrieUpdates, TrieInput};
 use reth_trie_parallel::root::ParallelStateRoot;
 use std::{
@@ -204,8 +203,7 @@ impl AppendableChain {
 
         let provider = BundleStateProvider::new(state_provider, bundle_state_data_provider);
 
-        let db = StateProviderDatabase::new(&provider);
-        let executor = externals.executor_factory.executor(db);
+        let executor = externals.executor_factory.executor(&provider);
         let block_hash = block.hash();
         let block = block.unseal();
 

@@ -19,7 +19,6 @@ reth-execution-errors.workspace = true
 reth-db.workspace = true
 reth-db-api.workspace = true
 reth-evm.workspace = true
-reth-revm.workspace = true
 reth-provider.workspace = true
 reth-execution-types.workspace = true
 reth-stages-api.workspace = true

@@ -23,6 +23,7 @@ reth-execution-types.workspace = true
 reth-prune-types.workspace = true
 reth-consensus.workspace = true
 reth-consensus-common.workspace = true
+reth-storage-api.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
