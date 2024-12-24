@@ -8,8 +8,7 @@ use crate::{
 };
 use alloy_consensus::Header;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
-use reth_db::transaction::{DbTx, DbTxMut};
+use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, TxTy};
@@ -36,11 +35,8 @@ use reth_optimism_rpc::{
     OpEthApi, SequencerClient,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{BlockBody, PooledTransaction, TransactionSigned};
-use reth_provider::{
-    providers::ChainStorage, BlockBodyReader, BlockBodyWriter, CanonStateSubscriptions,
-    ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput, StorageLocation,
-};
+use reth_primitives::{PooledTransaction, TransactionSigned};
+use reth_provider::{CanonStateSubscriptions, EthStorage};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -51,64 +47,7 @@ use reth_trie_db::MerklePatriciaTrie;
 use std::sync::Arc;
 
 /// Storage implementation for Optimism.
-#[derive(Debug, Default, Clone)]
-pub struct OpStorage(EthStorage);
-
-impl<Provider: DBProvider<Tx: DbTxMut>> BlockBodyWriter<Provider, BlockBody> for OpStorage {
-    fn write_block_bodies(
-        &self,
-        provider: &Provider,
-        bodies: Vec<(u64, Option<BlockBody>)>,
-        write_to: StorageLocation,
-    ) -> ProviderResult<()> {
-        self.0.write_block_bodies(provider, bodies, write_to)
-    }
-
-    fn remove_block_bodies_above(
-        &self,
-        provider: &Provider,
-        block: alloy_primitives::BlockNumber,
-        remove_from: StorageLocation,
-    ) -> ProviderResult<()> {
-        self.0.remove_block_bodies_above(provider, block, remove_from)
-    }
-}
-
-impl<Provider: DBProvider + ChainSpecProvider<ChainSpec: EthereumHardforks>>
-    BlockBodyReader<Provider> for OpStorage
-{
-    type Block = reth_primitives::Block;
-
-    fn read_block_bodies(
-        &self,
-        provider: &Provider,
-        inputs: Vec<ReadBodyInput<'_, Self::Block>>,
-    ) -> ProviderResult<Vec<BlockBody>> {
-        self.0.read_block_bodies(provider, inputs)
-    }
-}
-
-impl ChainStorage<OpPrimitives> for OpStorage {
-    fn reader<TX, Types>(
-        &self,
-    ) -> impl reth_provider::ChainStorageReader<reth_provider::DatabaseProvider<TX, Types>, OpPrimitives>
-    where
-        TX: DbTx + 'static,
-        Types: reth_provider::providers::NodeTypesForProvider<Primitives = OpPrimitives>,
-    {
-        self
-    }
-
-    fn writer<TX, Types>(
-        &self,
-    ) -> impl reth_provider::ChainStorageWriter<reth_provider::DatabaseProvider<TX, Types>, OpPrimitives>
-    where
-        TX: DbTxMut + DbTx + 'static,
-        Types: NodeTypes<Primitives = OpPrimitives>,
-    {
-        self
-    }
-}
+pub type OpStorage = EthStorage;
 
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
