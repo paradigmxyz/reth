@@ -1408,7 +1408,7 @@ mod tests {
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_multiple_blocks() {
         let mut parent_hash = B256::random();
-        let mut block_builder = TestBlockBuilder::default();
+        let mut block_builder = TestBlockBuilder::<EthPrimitives>::default();
         let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
 
         for i in 1..=3 {
@@ -1430,7 +1430,7 @@ mod tests {
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_with_pending_block() {
         let mut parent_hash = B256::random();
-        let mut block_builder = TestBlockBuilder::default();
+        let mut block_builder = TestBlockBuilder::<EthPrimitives>::default();
         let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
 
         for i in 1..=2 {
