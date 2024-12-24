@@ -47,14 +47,7 @@ pub const BUILD_PROFILE_NAME: &str = env!("RETH_BUILD_PROFILE");
 /// reth/v{major}.{minor}.{patch}-{sha1}/{target}
 /// ```
 /// e.g.: `reth/v0.1.0-alpha.1-428a6dc2f/aarch64-apple-darwin`
-pub(crate) const P2P_CLIENT_VERSION: &str = const_format::concatcp!(
-    "reth/v",
-    env!("CARGO_PKG_VERSION"),
-    "-",
-    VERGEN_GIT_SHA,
-    "/",
-    env!("VERGEN_CARGO_TARGET_TRIPLE")
-);
+pub(crate) const P2P_CLIENT_VERSION: &str = env!("RETH_P2P_CLIENT_VERSION");
 
 /// The default extra data used for payload building.
 ///

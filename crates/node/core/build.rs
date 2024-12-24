@@ -90,7 +90,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         )
     );
 
-    panic!("debug");
+    // The version information for reth formatted for P2P (devp2p).
+    // - The latest version from Cargo.toml
+    // - The target triple
+    //
+    // Example: reth/v0.1.0-alpha.1-428a6dc2f/aarch64-apple-darwin
+    println!(
+        "cargo:rustc-env=RETH_P2P_CLIENT_VERSION={}",
+        format!("reth/v{pkg_version}-{sha_short}/{}", env::var("VERGEN_CARGO_TARGET_TRIPLE")?)
+    );
 
     Ok(())
 }
