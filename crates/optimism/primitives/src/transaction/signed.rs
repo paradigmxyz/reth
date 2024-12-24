@@ -3,8 +3,8 @@
 use crate::OpTxType;
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, SignableTransaction, Transaction, TxEip1559, TxEip2930, TxEip7702,
-    TxLegacy, Typed2718,
+    transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930,
+    TxEip7702, TxLegacy, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -22,10 +22,12 @@ use core::{
 use derive_more::{AsRef, Deref};
 #[cfg(not(feature = "std"))]
 use once_cell::sync::OnceCell as OnceLock;
-use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
+use op_alloy_consensus::{OpPooledTransaction, OpTypedTransaction, TxDeposit};
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
-use reth_primitives::transaction::{recover_signer, recover_signer_unchecked};
+use reth_primitives::transaction::{
+    recover_signer, recover_signer_unchecked, TransactionConversionError,
+};
 use reth_primitives_traits::{FillTxEnv, InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, OptimismFields, TxEnv};
 #[cfg(feature = "std")]
@@ -418,6 +420,89 @@ impl Hash for OpTransactionSigned {
     }
 }
 
+#[cfg(feature = "reth-codec")]
+impl reth_codecs::Compact for OpTransactionSigned {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let start = buf.as_mut().len();
+
+        // Placeholder for bitflags.
+        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
+        buf.put_u8(0);
+
+        let sig_bit = self.signature.to_compact(buf) as u8;
+        let zstd_bit = self.transaction.input().len() >= 32;
+
+        let tx_bits = if zstd_bit {
+            let mut tmp = Vec::with_capacity(256);
+            if cfg!(feature = "std") {
+                reth_zstd_compressors::TRANSACTION_COMPRESSOR.with(|compressor| {
+                    let mut compressor = compressor.borrow_mut();
+                    let tx_bits = self.transaction.to_compact(&mut tmp);
+                    buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                    tx_bits as u8
+                })
+            } else {
+                let mut compressor = reth_zstd_compressors::create_tx_compressor();
+                let tx_bits = self.transaction.to_compact(&mut tmp);
+                buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                tx_bits as u8
+            }
+        } else {
+            self.transaction.to_compact(buf) as u8
+        };
+
+        // Replace bitflags with the actual values
+        buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
+
+        buf.as_mut().len() - start
+    }
+
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
+        // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
+        let bitflags = buf.get_u8() as usize;
+
+        let sig_bit = bitflags & 1;
+        let (signature, buf) = Signature::from_compact(buf, sig_bit);
+
+        let zstd_bit = bitflags >> 3;
+        let (transaction, buf) = if zstd_bit != 0 {
+            if cfg!(feature = "std") {
+                reth_zstd_compressors::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                    let mut decompressor = decompressor.borrow_mut();
+
+                    // TODO: enforce that zstd is only present at a "top" level type
+                    let transaction_type = (bitflags & 0b110) >> 1;
+                    let (transaction, _) = OpTypedTransaction::from_compact(
+                        decompressor.decompress(buf),
+                        transaction_type,
+                    );
+
+                    (transaction, buf)
+                })
+            } else {
+                let mut decompressor = reth_zstd_compressors::create_tx_decompressor();
+                let transaction_type = (bitflags & 0b110) >> 1;
+                let (transaction, _) = OpTypedTransaction::from_compact(
+                    decompressor.decompress(buf),
+                    transaction_type,
+                );
+
+                (transaction, buf)
+            }
+        } else {
+            let transaction_type = bitflags >> 1;
+            OpTypedTransaction::from_compact(buf, transaction_type)
+        };
+
+        (Self { signature, transaction, hash: Default::default() }, buf)
+    }
+}
+
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
@@ -461,4 +546,129 @@ fn signature_hash(tx: &OpTypedTransaction) -> B256 {
 /// Returns `true` if transaction is deposit transaction.
 pub const fn is_deposit(tx: &OpTypedTransaction) -> bool {
     matches!(tx, OpTypedTransaction::Deposit(_))
+}
+
+impl From<OpPooledTransaction> for OpTransactionSigned {
+    fn from(value: OpPooledTransaction) -> Self {
+        match value {
+            OpPooledTransaction::Legacy(tx) => tx.into(),
+            OpPooledTransaction::Eip2930(tx) => tx.into(),
+            OpPooledTransaction::Eip1559(tx) => tx.into(),
+            OpPooledTransaction::Eip7702(tx) => tx.into(),
+        }
+    }
+}
+
+impl<T: Into<OpTypedTransaction>> From<Signed<T>> for OpTransactionSigned {
+    fn from(value: Signed<T>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        let this = Self::new(tx.into(), sig);
+        this.hash.get_or_init(|| hash);
+        this
+    }
+}
+
+impl TryFrom<OpTransactionSigned> for OpPooledTransaction {
+    type Error = TransactionConversionError;
+
+    fn try_from(value: OpTransactionSigned) -> Result<Self, Self::Error> {
+        let hash = *value.tx_hash();
+        let OpTransactionSigned { hash: _, signature, transaction } = value;
+
+        match transaction {
+            OpTypedTransaction::Legacy(tx) => {
+                Ok(Self::Legacy(Signed::new_unchecked(tx, signature, hash)))
+            }
+            OpTypedTransaction::Eip2930(tx) => {
+                Ok(Self::Eip2930(Signed::new_unchecked(tx, signature, hash)))
+            }
+            OpTypedTransaction::Eip1559(tx) => {
+                Ok(Self::Eip1559(Signed::new_unchecked(tx, signature, hash)))
+            }
+            OpTypedTransaction::Eip7702(tx) => {
+                Ok(Self::Eip7702(Signed::new_unchecked(tx, signature, hash)))
+            }
+            OpTypedTransaction::Deposit(_) => Err(TransactionConversionError::UnsupportedForP2P),
+        }
+    }
+}
+
+/// Bincode-compatible transaction type serde implementations.
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    use alloy_consensus::transaction::serde_bincode_compat::{
+        TxEip1559, TxEip2930, TxEip7702, TxLegacy,
+    };
+    use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+    use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
+    use serde::{Deserialize, Serialize};
+
+    /// Bincode-compatible [`super::OpTypedTransaction`] serde implementation.
+    #[derive(Debug, Serialize, Deserialize)]
+    #[allow(missing_docs)]
+    enum OpTypedTransaction<'a> {
+        Legacy(TxLegacy<'a>),
+        Eip2930(TxEip2930<'a>),
+        Eip1559(TxEip1559<'a>),
+        Eip7702(TxEip7702<'a>),
+        Deposit(op_alloy_consensus::serde_bincode_compat::TxDeposit<'a>),
+    }
+
+    impl<'a> From<&'a super::OpTypedTransaction> for OpTypedTransaction<'a> {
+        fn from(value: &'a super::OpTypedTransaction) -> Self {
+            match value {
+                super::OpTypedTransaction::Legacy(tx) => Self::Legacy(TxLegacy::from(tx)),
+                super::OpTypedTransaction::Eip2930(tx) => Self::Eip2930(TxEip2930::from(tx)),
+                super::OpTypedTransaction::Eip1559(tx) => Self::Eip1559(TxEip1559::from(tx)),
+                super::OpTypedTransaction::Eip7702(tx) => Self::Eip7702(TxEip7702::from(tx)),
+                super::OpTypedTransaction::Deposit(tx) => {
+                    Self::Deposit(op_alloy_consensus::serde_bincode_compat::TxDeposit::from(tx))
+                }
+            }
+        }
+    }
+
+    impl<'a> From<OpTypedTransaction<'a>> for super::OpTypedTransaction {
+        fn from(value: OpTypedTransaction<'a>) -> Self {
+            match value {
+                OpTypedTransaction::Legacy(tx) => Self::Legacy(tx.into()),
+                OpTypedTransaction::Eip2930(tx) => Self::Eip2930(tx.into()),
+                OpTypedTransaction::Eip1559(tx) => Self::Eip1559(tx.into()),
+                OpTypedTransaction::Eip7702(tx) => Self::Eip7702(tx.into()),
+                OpTypedTransaction::Deposit(tx) => Self::Deposit(tx.into()),
+            }
+        }
+    }
+
+    /// Bincode-compatible [`super::OpTransactionSigned`] serde implementation.
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct OpTransactionSigned<'a> {
+        hash: TxHash,
+        signature: Signature,
+        transaction: OpTypedTransaction<'a>,
+    }
+
+    impl<'a> From<&'a super::OpTransactionSigned> for OpTransactionSigned<'a> {
+        fn from(value: &'a super::OpTransactionSigned) -> Self {
+            Self {
+                hash: *value.tx_hash(),
+                signature: value.signature,
+                transaction: OpTypedTransaction::from(&value.transaction),
+            }
+        }
+    }
+
+    impl<'a> From<OpTransactionSigned<'a>> for super::OpTransactionSigned {
+        fn from(value: OpTransactionSigned<'a>) -> Self {
+            Self {
+                hash: value.hash.into(),
+                signature: value.signature,
+                transaction: value.transaction.into(),
+            }
+        }
+    }
+
+    impl SerdeBincodeCompat for super::OpTransactionSigned {
+        type BincodeRepr<'a> = OpTransactionSigned<'a>;
+    }
 }
