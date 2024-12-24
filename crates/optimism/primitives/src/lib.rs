@@ -21,9 +21,13 @@ pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType};
 mod receipt;
 pub use receipt::OpReceipt;
 
+/// Optimism-specific block type.
 pub type OpBlock = reth_primitives::Block<OpTransactionSigned>;
+
+/// Optimism-specific block body type.
 pub type OpBlockBody = <OpBlock as Block>::Body;
 
+/// Primitive types for Optimism Node.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct OpPrimitives;
 

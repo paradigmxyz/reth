@@ -13,6 +13,7 @@ use reth_downloaders::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_node_builder::ReceiptTy;
+use reth_optimism_primitives::OpReceipt;
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives};

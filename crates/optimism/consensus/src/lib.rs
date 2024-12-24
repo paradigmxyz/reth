@@ -25,7 +25,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpBlock, OpBlockBody, OpPrimitives, OpReceipt};
 use reth_primitives::{
-    BlockBody, BlockWithSenders, GotExpected, SealedBlock, SealedBlockFor, SealedHeader,
+    BlockWithSenders, GotExpected, SealedBlockFor, SealedHeader,
 };
 use std::{sync::Arc, time::SystemTime};
 
