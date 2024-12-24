@@ -16,7 +16,7 @@ use reth_stages::{
     test_utils::{StorageKind, TestStageDB},
 };
 use reth_testing_utils::generators::{
-    self, random_block_range, random_changeset_range, random_contract_account_range,
+    random_block_range, random_changeset_range, random_contract_account_range,
     random_eoa_accounts, BlockRangeParams,
 };
 use reth_trie::StateRoot;

@@ -3,7 +3,7 @@
 #![allow(missing_docs)]
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use proptest::test_runner::{TestRng, TestRunner};
+use proptest::test_runner::TestRunner;
 use rand::Rng;
 use revm_primitives::{
     Account, AccountInfo, AccountStatus, Address, EvmState, EvmStorage, EvmStorageSlot, HashMap,

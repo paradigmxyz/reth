@@ -8,7 +8,7 @@ use criterion::{
 use pprof::criterion::{Output, PProfProfiler};
 use proptest::{
     arbitrary::Arbitrary,
-    prelude::{any_with, ProptestConfig},
+    prelude::{any_with},
     strategy::{Strategy, ValueTree},
     test_runner::{Config, RngAlgorithm, TestRng, TestRunner},
 };

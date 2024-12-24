@@ -4,8 +4,7 @@
 #![allow(missing_docs)]
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
-use proptest::test_runner::{TestRng, TestRunner};
-use rand::SeedableRng;
+use proptest::test_runner::TestRunner;
 use reth_engine_tree::tree::root::{StateRootConfig, StateRootTask};
 use reth_evm::system_calls::OnStateHook;
 use reth_primitives::{Account as RethAccount, StorageEntry};

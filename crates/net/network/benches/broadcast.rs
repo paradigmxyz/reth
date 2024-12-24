@@ -6,7 +6,6 @@ use alloy_primitives::{
 use criterion::*;
 use futures::StreamExt;
 use pprof::criterion::{Output, PProfProfiler};
-use rand::thread_rng;
 use reth_network::{test_utils::Testnet, NetworkEventListenerProvider};
 use reth_network_api::Peers;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
