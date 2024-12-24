@@ -16,8 +16,8 @@ use reth_stages::{
     test_utils::{StorageKind, TestStageDB},
 };
 use reth_testing_utils::generators::{
-    random_block_range, random_changeset_range, random_contract_account_range,
-    random_eoa_accounts, BlockRangeParams,
+    random_block_range, random_changeset_range, random_contract_account_range, random_eoa_accounts,
+    BlockRangeParams,
 };
 use reth_trie::StateRoot;
 use std::{collections::BTreeMap, fs, path::Path};
