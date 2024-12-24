@@ -12,7 +12,7 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
-    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256, U256,
+    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
 };
 use alloy_rlp::Header;
 use core::{
@@ -28,8 +28,7 @@ use proptest as _;
 use reth_primitives::transaction::{
     recover_signer, recover_signer_unchecked, TransactionConversionError,
 };
-use reth_primitives_traits::{FillTxEnv, InMemorySize, SignedTransaction};
-use revm_primitives::{AuthorizationList, OptimismFields, TxEnv};
+use reth_primitives_traits::{InMemorySize, SignedTransaction};
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
 
@@ -119,15 +118,16 @@ impl SignedTransaction for OpTransactionSigned {
     }
 }
 
-impl FillTxEnv for OpTransactionSigned {
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
+#[cfg(feature = "optimism")]
+impl reth_primitives_traits::FillTxEnv for OpTransactionSigned {
+    fn fill_tx_env(&self, tx_env: &mut revm_primitives::TxEnv, sender: Address) {
         let envelope = self.encoded_2718();
 
         tx_env.caller = sender;
         match &self.transaction {
             OpTypedTransaction::Legacy(tx) => {
                 tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.gas_price);
+                tx_env.gas_price = alloy_primitives::U256::from(tx.gas_price);
                 tx_env.gas_priority_fee = None;
                 tx_env.transact_to = tx.to;
                 tx_env.value = tx.value;
@@ -141,7 +141,7 @@ impl FillTxEnv for OpTransactionSigned {
             }
             OpTypedTransaction::Eip2930(tx) => {
                 tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.gas_price);
+                tx_env.gas_price = alloy_primitives::U256::from(tx.gas_price);
                 tx_env.gas_priority_fee = None;
                 tx_env.transact_to = tx.to;
                 tx_env.value = tx.value;
@@ -155,8 +155,9 @@ impl FillTxEnv for OpTransactionSigned {
             }
             OpTypedTransaction::Eip1559(tx) => {
                 tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
-                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
+                tx_env.gas_price = alloy_primitives::U256::from(tx.max_fee_per_gas);
+                tx_env.gas_priority_fee =
+                    Some(alloy_primitives::U256::from(tx.max_priority_fee_per_gas));
                 tx_env.transact_to = tx.to;
                 tx_env.value = tx.value;
                 tx_env.data = tx.input.clone();
@@ -169,8 +170,9 @@ impl FillTxEnv for OpTransactionSigned {
             }
             OpTypedTransaction::Eip7702(tx) => {
                 tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
-                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
+                tx_env.gas_price = alloy_primitives::U256::from(tx.max_fee_per_gas);
+                tx_env.gas_priority_fee =
+                    Some(alloy_primitives::U256::from(tx.max_priority_fee_per_gas));
                 tx_env.transact_to = tx.to.into();
                 tx_env.value = tx.value;
                 tx_env.data = tx.input.clone();
@@ -180,12 +182,12 @@ impl FillTxEnv for OpTransactionSigned {
                 tx_env.blob_hashes.clear();
                 tx_env.max_fee_per_blob_gas.take();
                 tx_env.authorization_list =
-                    Some(AuthorizationList::Signed(tx.authorization_list.clone()));
+                    Some(revm_primitives::AuthorizationList::Signed(tx.authorization_list.clone()));
             }
             OpTypedTransaction::Deposit(tx) => {
                 tx_env.access_list.clear();
                 tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::ZERO;
+                tx_env.gas_price = alloy_primitives::U256::ZERO;
                 tx_env.gas_priority_fee = None;
                 tx_env.transact_to = tx.to;
                 tx_env.value = tx.value;
@@ -194,7 +196,7 @@ impl FillTxEnv for OpTransactionSigned {
                 tx_env.nonce = None;
                 tx_env.authorization_list = None;
 
-                tx_env.optimism = OptimismFields {
+                tx_env.optimism = revm_primitives::OptimismFields {
                     source_hash: Some(tx.source_hash),
                     mint: tx.mint,
                     is_system_transaction: Some(tx.is_system_transaction),
@@ -204,7 +206,7 @@ impl FillTxEnv for OpTransactionSigned {
             }
         }
 
-        tx_env.optimism = OptimismFields {
+        tx_env.optimism = revm_primitives::OptimismFields {
             source_hash: None,
             mint: None,
             is_system_transaction: Some(false),
