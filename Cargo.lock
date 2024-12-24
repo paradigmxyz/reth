@@ -8508,6 +8508,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-signer-local",
  "clap",
+ "derive_more",
  "eyre",
  "futures",
  "op-alloy-consensus",
