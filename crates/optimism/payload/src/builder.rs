@@ -22,7 +22,7 @@ use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_payload_util::PayloadTransactions;
+use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{
     proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, BlockExt, Receipt,
     SealedHeader, TransactionSigned, TxType,
@@ -33,8 +33,7 @@ use reth_provider::{
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_transaction_pool::{
-    noop::NoopTransactionPool, pool::BestPayloadTransactions, BestTransactionsAttributes,
-    PoolTransaction, TransactionPool,
+    pool::BestPayloadTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
@@ -103,10 +102,9 @@ impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs> {
         self.compute_pending_block
     }
 }
-impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs>
+impl<EvmConfig, T> OpPayloadBuilder<EvmConfig, T>
 where
     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
-    Txs: OpPayloadTransactions,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -116,20 +114,22 @@ where
     /// Given build arguments including an Optimism client, transaction pool,
     /// and configuration, this function creates a transaction payload. Returns
     /// a result indicating success with the payload or an error in case of failure.
-    fn build_payload<Client, Pool>(
+    fn build_payload<'a, Client, Pool, Txs>(
         &self,
         args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
+        best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+        Txs: PayloadTransactions<Transaction = TransactionSigned>,
     {
         let evm_env = self
             .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
         let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
-        let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
+        let BuildArguments { client, pool: _, mut cached_reads, config, cancel, best_payload } =
+            args;
 
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
@@ -141,7 +141,7 @@ where
             best_payload,
         };
 
-        let builder = OpBuilder { pool, best: self.best_transactions.clone() };
+        let builder = OpBuilder::new(best);
 
         let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
@@ -159,12 +159,7 @@ where
         }
         .map(|out| out.with_cached_reads(cached_reads))
     }
-}
 
-impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs>
-where
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
-{
     /// Returns the configured [`EvmEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
     pub fn cfg_and_block_env(
@@ -213,7 +208,7 @@ where
         let state = StateProviderDatabase::new(state_provider);
         let mut state = State::builder().with_database(state).with_bundle_update().build();
 
-        let builder = OpBuilder { pool: NoopTransactionPool::default(), best: () };
+        let builder = OpBuilder::new(|_| NoopPayloadTransactions::default());
         builder.witness(&mut state, &ctx)
     }
 }
@@ -233,7 +228,8 @@ where
         &self,
         args: BuildArguments<Pool, Client, OpPayloadBuilderAttributes, OpBuiltPayload>,
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError> {
-        self.build_payload(args)
+        let pool = args.pool.clone();
+        self.build_payload(args, |attrs| self.best_transactions.best_transactions(pool, attrs))
     }
 
     fn on_missing_payload(
@@ -256,12 +252,14 @@ where
             client,
             config,
             // we use defaults here because for the empty payload we don't need to execute anything
-            pool: NoopTransactionPool::default(),
+            pool: (),
             cached_reads: Default::default(),
             cancel: Default::default(),
             best_payload: None,
         };
-        self.build_payload(args)?.into_payload().ok_or_else(|| PayloadBuilderError::MissingPayload)
+        self.build_payload(args, |_| NoopPayloadTransactions::default())?
+            .into_payload()
+            .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
 }
 
@@ -280,18 +278,22 @@ where
 ///
 /// And finally
 /// 5. build the block: compute all roots (txs, state)
-#[derive(Debug)]
-pub struct OpBuilder<Pool, Txs> {
-    /// The transaction pool
-    pool: Pool,
+#[derive(derive_more::Debug)]
+pub struct OpBuilder<'a, Txs> {
     /// Yields the best transaction to include if transactions from the mempool are allowed.
-    best: Txs,
+    #[debug(skip)]
+    best: Box<dyn FnOnce(BestTransactionsAttributes) -> Txs + 'a>,
 }
 
-impl<Pool, Txs> OpBuilder<Pool, Txs>
+impl<'a, Txs> OpBuilder<'a, Txs> {
+    fn new(best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a) -> Self {
+        Self { best: Box::new(best) }
+    }
+}
+
+impl<Txs> OpBuilder<'_, Txs>
 where
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
-    Txs: OpPayloadTransactions,
+    Txs: PayloadTransactions<Transaction = TransactionSigned>,
 {
     /// Executes the payload and returns the outcome.
     pub fn execute<EvmConfig, DB>(
@@ -303,7 +305,7 @@ where
         EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
         DB: Database<Error = ProviderError>,
     {
-        let Self { pool, best } = self;
+        let Self { best } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // 1. apply eip-4788 pre block contract call
@@ -317,8 +319,8 @@ where
 
         // 4. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
-            let best_txs = best.best_transactions(pool, ctx.best_transaction_attributes());
-            if ctx.execute_best_transactions::<_, Pool>(&mut info, state, best_txs)?.is_some() {
+            let best_txs = best(ctx.best_transaction_attributes());
+            if ctx.execute_best_transactions(&mut info, state, best_txs)?.is_some() {
                 return Ok(BuildOutcomeKind::Cancelled)
             }
 
@@ -838,7 +840,7 @@ where
     /// Executes the given best transactions and updates the execution info.
     ///
     /// Returns `Ok(Some(())` if the job was cancelled.
-    pub fn execute_best_transactions<DB, Pool>(
+    pub fn execute_best_transactions<DB>(
         &self,
         info: &mut ExecutionInfo,
         db: &mut State<DB>,
