@@ -13,6 +13,6 @@ alloy-rpc-types-beacon.workspace = true
 
 clap.workspace = true
 futures-util.workspace = true
-mev-share-sse = { version = "0.3.0", default-features = false }
+mev-share-sse = { version = "0.4.0", default-features = false }
 tokio = { workspace = true, features = ["time"] }
 tracing.workspace = true

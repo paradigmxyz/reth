@@ -2,12 +2,12 @@
 //!
 //! See also <https://github.com/ethereum/devp2p/blob/master/README.md>
 
+use alloy_primitives::bytes::BytesMut;
 use futures::Stream;
 use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
 use reth_network_api::{Direction, PeerId};
-use reth_primitives::BytesMut;
 use std::{
     fmt,
     net::SocketAddr,

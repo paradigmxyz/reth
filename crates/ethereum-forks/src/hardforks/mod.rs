@@ -2,15 +2,19 @@
 mod ethereum;
 pub use ethereum::EthereumHardforks;
 
-/// Optimism helper methods
-mod optimism;
-pub use optimism::OptimismHardforks;
-
-use crate::{ForkCondition, Hardfork};
+use crate::{ForkCondition, ForkFilter, ForkId, Hardfork, Head};
+#[cfg(feature = "std")]
 use rustc_hash::FxHashMap;
+#[cfg(feature = "std")]
+use std::collections::hash_map::Entry;
+
+#[cfg(not(feature = "std"))]
+use alloc::collections::btree_map::Entry;
+use alloc::{boxed::Box, vec::Vec};
 
 /// Generic trait over a set of ordered hardforks
-pub trait Hardforks: Default + Clone {
+#[auto_impl::auto_impl(&, Arc)]
+pub trait Hardforks: Clone {
     /// Retrieves [`ForkCondition`] from `fork`. If `fork` is not present, returns
     /// [`ForkCondition::Never`].
     fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition;
@@ -27,13 +31,25 @@ pub trait Hardforks: Default + Clone {
     fn is_fork_active_at_block<H: Hardfork>(&self, fork: H, block_number: u64) -> bool {
         self.fork(fork).active_at_block(block_number)
     }
+
+    /// Compute the [`ForkId`] for the given [`Head`] following eip-6122 spec
+    fn fork_id(&self, head: &Head) -> ForkId;
+
+    /// Returns the [`ForkId`] for the last fork.
+    fn latest_fork_id(&self) -> ForkId;
+
+    /// Creates a [`ForkFilter`] for the block described by [Head].
+    fn fork_filter(&self, head: Head) -> ForkFilter;
 }
 
 /// Ordered list of a chain hardforks that implement [`Hardfork`].
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct ChainHardforks {
     forks: Vec<(Box<dyn Hardfork>, ForkCondition)>,
+    #[cfg(feature = "std")]
     map: FxHashMap<&'static str, ForkCondition>,
+    #[cfg(not(feature = "std"))]
+    map: alloc::collections::BTreeMap<&'static str, ForkCondition>,
 }
 
 impl ChainHardforks {
@@ -59,12 +75,22 @@ impl ChainHardforks {
     /// Retrieves [`ForkCondition`] from `fork`. If `fork` is not present, returns
     /// [`ForkCondition::Never`].
     pub fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
-        self.get(fork).unwrap_or(ForkCondition::Never)
+        self.get(fork).unwrap_or_default()
     }
 
     /// Retrieves [`ForkCondition`] from `fork` if it exists, otherwise `None`.
     pub fn get<H: Hardfork>(&self, fork: H) -> Option<ForkCondition> {
         self.map.get(fork.name()).copied()
+    }
+
+    /// Retrieves the fork block number or timestamp from `fork` if it exists, otherwise `None`.
+    pub fn fork_block<H: Hardfork>(&self, fork: H) -> Option<u64> {
+        match self.fork(fork) {
+            ForkCondition::Block(block) => Some(block),
+            ForkCondition::TTD { fork_block, .. } => fork_block,
+            ForkCondition::Timestamp(ts) => Some(ts),
+            ForkCondition::Never => None,
+        }
     }
 
     /// Get an iterator of all hardforks with their respective activation conditions.
@@ -90,7 +116,7 @@ impl ChainHardforks {
     /// Inserts `fork` into list, updating with a new [`ForkCondition`] if it already exists.
     pub fn insert<H: Hardfork>(&mut self, fork: H, condition: ForkCondition) {
         match self.map.entry(fork.name()) {
-            std::collections::hash_map::Entry::Occupied(mut entry) => {
+            Entry::Occupied(mut entry) => {
                 *entry.get_mut() = condition;
                 if let Some((_, inner)) =
                     self.forks.iter_mut().find(|(inner, _)| inner.name() == fork.name())
@@ -98,7 +124,7 @@ impl ChainHardforks {
                     *inner = condition;
                 }
             }
-            std::collections::hash_map::Entry::Vacant(entry) => {
+            Entry::Vacant(entry) => {
                 entry.insert(condition);
                 self.forks.push((Box::new(fork), condition));
             }
@@ -109,16 +135,6 @@ impl ChainHardforks {
     pub fn remove<H: Hardfork>(&mut self, fork: H) {
         self.forks.retain(|(inner_fork, _)| inner_fork.name() != fork.name());
         self.map.remove(fork.name());
-    }
-}
-
-impl Hardforks for ChainHardforks {
-    fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
-        self.fork(fork)
-    }
-
-    fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
-        self.forks_iter()
     }
 }
 

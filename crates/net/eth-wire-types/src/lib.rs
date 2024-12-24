@@ -6,17 +6,19 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![allow(clippy::needless_lifetimes)] // side effect of optimism fields
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod status;
 pub use status::{Status, StatusBuilder};
 
 pub mod version;
-pub use version::EthVersion;
+pub use version::{EthVersion, ProtocolVersion};
 
 pub mod message;
 pub use message::{EthMessage, EthMessageID, ProtocolMessage};
+
+pub mod header;
+pub use header::*;
 
 pub mod blocks;
 pub use blocks::*;
@@ -32,3 +34,12 @@ pub use state::*;
 
 pub mod receipts;
 pub use receipts::*;
+
+pub mod disconnect_reason;
+pub use disconnect_reason::*;
+
+pub mod capability;
+pub use capability::*;
+
+pub mod primitives;
+pub use primitives::*;

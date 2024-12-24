@@ -4,6 +4,8 @@ Recover the node by deleting dangling storage tries
 
 ```bash
 $ reth recover storage-tries --help
+```
+```txt
 Usage: reth recover storage-tries [OPTIONS]
 
 Options:
@@ -33,7 +35,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static_files <PATH>
+      --datadir.static-files <PATH>
           The absolute path to store static files in.
 
       --config <FILE>
@@ -44,7 +46,7 @@ Datadir:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
+              mainnet, sepolia, holesky, dev
 
           [default: mainnet]
 
@@ -66,6 +68,15 @@ Database:
           Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
 
           [possible values: true, false]
+
+      --db.max-size <MAX_SIZE>
+          Maximum database size (e.g., 4TB, 8MB)
+
+      --db.growth-step <GROWTH_STEP>
+          Database growth step (e.g., 4GB, 4KB)
+
+      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
+          Read transaction timeout in seconds, 0 means no timeout
 
 Logging:
       --log.stdout.format <FORMAT>

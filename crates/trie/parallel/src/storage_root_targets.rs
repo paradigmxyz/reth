@@ -1,5 +1,5 @@
+use alloy_primitives::B256;
 use derive_more::{Deref, DerefMut};
-use reth_primitives::B256;
 use reth_trie::prefix_set::PrefixSet;
 use std::collections::HashMap;
 
@@ -36,7 +36,6 @@ impl IntoIterator for StorageRootTargets {
     }
 }
 
-#[cfg(feature = "parallel")]
 impl rayon::iter::IntoParallelIterator for StorageRootTargets {
     type Iter = rayon::collections::hash_map::IntoIter<B256, PrefixSet>;
     type Item = (B256, PrefixSet);

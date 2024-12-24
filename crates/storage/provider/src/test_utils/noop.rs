@@ -1,31 +1,50 @@
-use crate::{
-    traits::{BlockSource, ReceiptProvider},
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
-    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PruneCheckpointReader,
-    ReceiptProviderIdExt, RequestsProvider, StageCheckpointReader, StateProvider, StateProviderBox,
-    StateProviderFactory, StateRootProvider, TransactionVariant, TransactionsProvider,
-    WithdrawalsProvider,
+use std::{
+    ops::{RangeBounds, RangeInclusive},
+    path::PathBuf,
+    sync::Arc,
+};
+
+use alloy_consensus::Header;
+use alloy_eips::{
+    eip4895::{Withdrawal, Withdrawals},
+    BlockHashOrNumber, BlockId, BlockNumberOrTag,
+};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
+};
+use reth_chain_state::{
+    CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
+    ForkChoiceSubscriptions,
 };
 use reth_chainspec::{ChainInfo, ChainSpec, MAINNET};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
+use reth_errors::ProviderError;
 use reth_evm::ConfigureEvmEnv;
 use reth_primitives::{
-    Account, Address, Block, BlockHash, BlockHashOrNumber, BlockId, BlockNumber, BlockWithSenders,
-    Bytecode, Header, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, StorageKey,
-    StorageValue, TransactionMeta, TransactionSigned, TransactionSignedNoHash, TxHash, TxNumber,
-    Withdrawal, Withdrawals, B256, U256,
+    Account, Block, BlockWithSenders, Bytecode, EthPrimitives, Receipt, SealedBlock,
+    SealedBlockWithSenders, SealedHeader, TransactionMeta, TransactionSigned,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_errors::provider::ProviderResult;
-use reth_trie::{updates::TrieUpdates, AccountProof};
-use revm::{
-    db::BundleState,
-    primitives::{BlockEnv, CfgEnvWithHandlerCfg},
+use reth_storage_api::{
+    HashedPostStateProvider, NodePrimitivesProvider, StateProofProvider, StorageRootProvider,
 };
-use std::{
-    ops::{RangeBounds, RangeInclusive},
-    sync::Arc,
+use reth_storage_errors::provider::ProviderResult;
+use reth_trie::{
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof, TrieInput,
+};
+use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
+use tokio::sync::{broadcast, watch};
+
+use crate::{
+    providers::StaticFileProvider,
+    traits::{BlockSource, ReceiptProvider},
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
+    ChainSpecProvider, ChangeSetReader, EvmEnvProvider, HeaderProvider, PruneCheckpointReader,
+    ReceiptProviderIdExt, StageCheckpointReader, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRootProvider, StaticFileProviderFactory, TransactionVariant,
+    TransactionsProvider, WithdrawalsProvider,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -34,6 +53,8 @@ use std::{
 pub struct NoopProvider;
 
 impl ChainSpecProvider for NoopProvider {
+    type ChainSpec = ChainSpec;
+
     fn chain_spec(&self) -> Arc<ChainSpec> {
         MAINNET.clone()
     }
@@ -73,6 +94,8 @@ impl BlockNumReader for NoopProvider {
 }
 
 impl BlockReader for NoopProvider {
+    type Block = Block;
+
     fn find_block_by_hash(
         &self,
         hash: B256,
@@ -159,43 +182,45 @@ impl BlockReaderIdExt for NoopProvider {
 }
 
 impl BlockIdReader for NoopProvider {
-    fn pending_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>> {
+    fn pending_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
         Ok(None)
     }
 
-    fn safe_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>> {
+    fn safe_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
         Ok(None)
     }
 
-    fn finalized_block_num_hash(&self) -> ProviderResult<Option<reth_primitives::BlockNumHash>> {
+    fn finalized_block_num_hash(&self) -> ProviderResult<Option<alloy_eips::BlockNumHash>> {
         Ok(None)
     }
 }
 
 impl TransactionsProvider for NoopProvider {
+    type Transaction = TransactionSigned;
+
     fn transaction_id(&self, _tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         Ok(None)
     }
 
-    fn transaction_by_id(&self, _id: TxNumber) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_id(&self, _id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
         Ok(None)
     }
 
-    fn transaction_by_id_no_hash(
+    fn transaction_by_id_unhashed(
         &self,
         _id: TxNumber,
-    ) -> ProviderResult<Option<TransactionSignedNoHash>> {
+    ) -> ProviderResult<Option<Self::Transaction>> {
         Ok(None)
     }
 
-    fn transaction_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
+    fn transaction_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
         Ok(None)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         _hash: TxHash,
-    ) -> ProviderResult<Option<(TransactionSigned, TransactionMeta)>> {
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
         Ok(None)
     }
 
@@ -206,21 +231,21 @@ impl TransactionsProvider for NoopProvider {
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,
-    ) -> ProviderResult<Option<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
         Ok(None)
     }
 
     fn transactions_by_block_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> ProviderResult<Vec<Vec<TransactionSigned>>> {
+    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
         Ok(Vec::default())
     }
 
     fn transactions_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<reth_primitives::TransactionSignedNoHash>> {
+    ) -> ProviderResult<Vec<Self::Transaction>> {
         Ok(Vec::default())
     }
 
@@ -237,6 +262,7 @@ impl TransactionsProvider for NoopProvider {
 }
 
 impl ReceiptProvider for NoopProvider {
+    type Receipt = Receipt;
     fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Receipt>> {
         Ok(None)
     }
@@ -260,6 +286,8 @@ impl ReceiptProvider for NoopProvider {
 impl ReceiptProviderIdExt for NoopProvider {}
 
 impl HeaderProvider for NoopProvider {
+    type Header = Header;
+
     fn header(&self, _block_hash: &BlockHash) -> ProviderResult<Option<Header>> {
         Ok(None)
     }
@@ -309,15 +337,87 @@ impl ChangeSetReader for NoopProvider {
 }
 
 impl StateRootProvider for NoopProvider {
-    fn state_root(&self, _state: &BundleState) -> ProviderResult<B256> {
+    fn state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
+        Ok(B256::default())
+    }
+
+    fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
         Ok(B256::default())
     }
 
     fn state_root_with_updates(
         &self,
-        _bundle_state: &BundleState,
+        _state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
+    }
+
+    fn state_root_from_nodes_with_updates(
+        &self,
+        _input: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        Ok((B256::default(), TrieUpdates::default()))
+    }
+}
+
+impl StorageRootProvider for NoopProvider {
+    fn storage_root(
+        &self,
+        _address: Address,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        Ok(B256::default())
+    }
+
+    fn storage_proof(
+        &self,
+        _address: Address,
+        slot: B256,
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        Ok(reth_trie::StorageProof::new(slot))
+    }
+
+    fn storage_multiproof(
+        &self,
+        _address: Address,
+        _slots: &[B256],
+        _hashed_storage: HashedStorage,
+    ) -> ProviderResult<reth_trie::StorageMultiProof> {
+        Ok(reth_trie::StorageMultiProof::empty())
+    }
+}
+
+impl StateProofProvider for NoopProvider {
+    fn proof(
+        &self,
+        _input: TrieInput,
+        address: Address,
+        _slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        Ok(AccountProof::new(address))
+    }
+
+    fn multiproof(
+        &self,
+        _input: TrieInput,
+        _targets: HashMap<B256, HashSet<B256>>,
+    ) -> ProviderResult<MultiProof> {
+        Ok(MultiProof::default())
+    }
+
+    fn witness(
+        &self,
+        _input: TrieInput,
+        _target: HashedPostState,
+    ) -> ProviderResult<HashMap<B256, Bytes>> {
+        Ok(HashMap::default())
+    }
+}
+
+impl HashedPostStateProvider for NoopProvider {
+    fn hashed_post_state(&self, _bundle_state: &revm::db::BundleState) -> HashedPostState {
+        HashedPostState::default()
     }
 }
 
@@ -333,26 +433,9 @@ impl StateProvider for NoopProvider {
     fn bytecode_by_hash(&self, _code_hash: B256) -> ProviderResult<Option<Bytecode>> {
         Ok(None)
     }
-
-    fn proof(&self, address: Address, _keys: &[B256]) -> ProviderResult<AccountProof> {
-        Ok(AccountProof::new(address))
-    }
 }
 
 impl EvmEnvProvider for NoopProvider {
-    fn fill_env_at<EvmConfig>(
-        &self,
-        _cfg: &mut CfgEnvWithHandlerCfg,
-        _block_env: &mut BlockEnv,
-        _at: BlockHashOrNumber,
-        _evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv,
-    {
-        Ok(())
-    }
-
     fn fill_env_with_header<EvmConfig>(
         &self,
         _cfg: &mut CfgEnvWithHandlerCfg,
@@ -361,7 +444,7 @@ impl EvmEnvProvider for NoopProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }
@@ -373,7 +456,7 @@ impl EvmEnvProvider for NoopProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }
@@ -385,7 +468,7 @@ impl EvmEnvProvider for NoopProvider {
         _evm_config: EvmConfig,
     ) -> ProviderResult<()>
     where
-        EvmConfig: ConfigureEvmEnv,
+        EvmConfig: ConfigureEvmEnv<Header = Header>,
     {
         Ok(())
     }
@@ -394,6 +477,32 @@ impl EvmEnvProvider for NoopProvider {
 impl StateProviderFactory for NoopProvider {
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         Ok(Box::new(*self))
+    }
+
+    fn state_by_block_number_or_tag(
+        &self,
+        number_or_tag: BlockNumberOrTag,
+    ) -> ProviderResult<StateProviderBox> {
+        match number_or_tag {
+            BlockNumberOrTag::Latest => self.latest(),
+            BlockNumberOrTag::Finalized => {
+                // we can only get the finalized state by hash, not by num
+                let hash =
+                    self.finalized_block_hash()?.ok_or(ProviderError::FinalizedBlockNotFound)?;
+
+                // only look at historical state
+                self.history_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Safe => {
+                // we can only get the safe state by hash, not by num
+                let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
+
+                self.history_by_block_hash(hash)
+            }
+            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Pending => self.pending(),
+            BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
+        }
     }
 
     fn history_by_block_number(&self, _block: BlockNumber) -> ProviderResult<StateProviderBox> {
@@ -415,13 +524,6 @@ impl StateProviderFactory for NoopProvider {
     fn pending_state_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(*self)))
     }
-
-    fn pending_with_provider<'a>(
-        &'a self,
-        _bundle_state_data: Box<dyn crate::FullExecutionDataProvider + 'a>,
-    ) -> ProviderResult<StateProviderBox> {
-        Ok(Box::new(*self))
-    }
 }
 
 impl StageCheckpointReader for NoopProvider {
@@ -431,6 +533,10 @@ impl StageCheckpointReader for NoopProvider {
 
     fn get_stage_checkpoint_progress(&self, _id: StageId) -> ProviderResult<Option<Vec<u8>>> {
         Ok(None)
+    }
+
+    fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
+        Ok(Vec::new())
     }
 }
 
@@ -447,21 +553,45 @@ impl WithdrawalsProvider for NoopProvider {
     }
 }
 
-impl RequestsProvider for NoopProvider {
-    fn requests_by_block(
-        &self,
-        _id: BlockHashOrNumber,
-        _timestamp: u64,
-    ) -> ProviderResult<Option<reth_primitives::Requests>> {
-        Ok(None)
-    }
-}
-
 impl PruneCheckpointReader for NoopProvider {
     fn get_prune_checkpoint(
         &self,
         _segment: PruneSegment,
     ) -> ProviderResult<Option<PruneCheckpoint>> {
         Ok(None)
+    }
+
+    fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        Ok(Vec::new())
+    }
+}
+
+impl NodePrimitivesProvider for NoopProvider {
+    type Primitives = EthPrimitives;
+}
+
+impl StaticFileProviderFactory for NoopProvider {
+    fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
+        StaticFileProvider::read_only(PathBuf::default(), false).unwrap()
+    }
+}
+
+impl CanonStateSubscriptions for NoopProvider {
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications {
+        broadcast::channel(1).1
+    }
+}
+
+impl ForkChoiceSubscriptions for NoopProvider {
+    type Header = Header;
+
+    fn subscribe_safe_block(&self) -> ForkChoiceNotifications {
+        let (_, rx) = watch::channel(None);
+        ForkChoiceNotifications(rx)
+    }
+
+    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications {
+        let (_, rx) = watch::channel(None);
+        ForkChoiceNotifications(rx)
     }
 }

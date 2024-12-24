@@ -6,11 +6,11 @@ use reth_metrics::{metrics::Counter, Metrics};
 #[derive(Metrics)]
 #[metrics(scope = "payloads")]
 pub(crate) struct PayloadBuilderMetrics {
-    /// Number of active jobs
+    /// Total number of times an empty payload was returned because a built one was not ready.
     pub(crate) requested_empty_payload: Counter,
-    /// Total number of initiated payload build attempts
+    /// Total number of initiated payload build attempts.
     pub(crate) initiated_payload_builds: Counter,
-    /// Total number of failed payload build attempts
+    /// Total number of failed payload build attempts.
     pub(crate) failed_payload_builds: Counter,
 }
 

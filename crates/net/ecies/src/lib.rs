@@ -14,7 +14,7 @@ pub mod stream;
 pub mod util;
 
 mod error;
-pub use error::ECIESError;
+pub use error::{ECIESError, ECIESErrorImpl};
 
 pub mod codec;
 

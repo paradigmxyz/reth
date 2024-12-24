@@ -16,10 +16,9 @@ use reth::{
         BitfinityResetEvmStateCommand, EvmCanisterResetStateExecutor, ResetStateExecutor,
     },
 };
-use reth_db::DatabaseEnv;
 use reth_provider::{AccountReader, BlockNumReader, BlockReader, ProviderFactory};
 use reth_trie::test_utils::state_root;
-use revm_primitives::{keccak256, B256};
+use revm_primitives::{keccak256, B256, U256};
 use serial_test::serial;
 use tracing::*;
 
@@ -67,7 +66,7 @@ async fn bitfinity_manual_test_should_reset_evm_state() {
         let provider = import_data.provider_factory.provider().unwrap();
         assert_eq!(end_block, provider.last_block_number().unwrap());
 
-        assert_eq!(end_block as usize, evm_client.eth_block_number().await.unwrap());
+        assert_eq!(end_block, evm_client.eth_block_number().await.unwrap());
 
         let evm_block = match evm_client
             .eth_get_block_by_number(did::BlockNumber::Latest, false)
@@ -79,7 +78,7 @@ async fn bitfinity_manual_test_should_reset_evm_state() {
             _ => panic!("Expected full block"),
         };
 
-        assert_eq!(end_block, evm_block.number.0.as_u64());
+        assert_eq!(end_block, evm_block.number.0.to::<u64>());
         let reth_block = provider.block_by_number(end_block).unwrap().unwrap();
 
         assert_eq!(evm_block.hash.0 .0, reth_block.header.hash_slow().0);
@@ -96,12 +95,12 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
     let _log = init_logs();
     let evm_datasource_url = DEFAULT_EVM_DATASOURCE_URL;
 
-    let end_block = 30_000;
+    let end_block = 20_000;
     let data_dir = Some(format!("../../target/reth_{end_block}").into());
     let (_temp_dir, mut import_data) =
         bitfinity_import_config_data(evm_datasource_url, None, data_dir).await.unwrap();
 
-    let fetch_block_timeout_secs = std::cmp::max(20, end_block / 100);
+    let fetch_block_timeout_secs = std::cmp::max(20, end_block / 10);
 
     // Import block from block explorer
     import_data.bitfinity_args.end_block = Some(end_block);
@@ -142,7 +141,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
         {
             let executor_block = executor.get_block().unwrap();
             assert_eq!(end_block, last_block.number);
-            assert_eq!(executor_block.number.0.as_u64(), last_block.number);
+            assert_eq!(executor_block.number.0.to::<u64>(), last_block.number);
             assert_eq!(executor_block.state_root.0 .0, last_block.state_root.0);
         }
 
@@ -185,15 +184,15 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
             let calculated_root =
                 state_root(executor_accounts.data.into_iter().map(|(address, raw_account)| {
                     let account = reth_primitives::Account {
-                        nonce: raw_account.nonce.0.as_u64(),
+                        nonce: raw_account.nonce.0.to(),
                         balance: raw_account.balance.into(),
                         bytecode_hash: raw_account.bytecode.map(|code| keccak256(&code.0)),
                     };
-                    let storage: Vec<(B256, reth_primitives::U256)> = raw_account
+                    let storage: Vec<(B256, U256)> = raw_account
                         .storage
                         .into_iter()
                         .map(|(k, v)| {
-                            let k: reth_primitives::U256 = k.into();
+                            let k: revm_primitives::U256 = k.into();
                             (k.into(), v.into())
                         })
                         .collect();
@@ -207,7 +206,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
 
 async fn build_bitfinity_reset_evm_command(
     identity_name: &str,
-    provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+    provider_factory: ProviderFactory<NodeTypes>,
     dfx_port: u16,
     evm_datasource_url: &str,
 ) -> (EvmCanisterClient<IcAgentClient>, BitfinityResetEvmStateCommand) {

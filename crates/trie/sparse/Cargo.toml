@@ -1,0 +1,51 @@
+[package]
+name = "reth-trie-sparse"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Sparse MPT implementation"
+
+[lints]
+workspace = true
+
+
+[dependencies]
+# reth
+reth-primitives-traits.workspace = true
+reth-execution-errors.workspace = true
+reth-trie-common.workspace = true
+reth-tracing.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+
+# misc
+smallvec = { workspace = true, features = ["const_new"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
+reth-trie = { workspace = true, features = ["test-utils"] }
+reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-testing-utils.workspace = true
+
+arbitrary.workspace = true
+assert_matches.workspace = true
+criterion.workspace = true
+itertools.workspace = true
+pretty_assertions = "1.4"
+proptest-arbitrary-interop.workspace = true
+proptest.workspace = true
+rand.workspace = true
+
+[[bench]]
+name = "root"
+harness = false
+
+[[bench]]
+name = "rlp_node"
+harness = false

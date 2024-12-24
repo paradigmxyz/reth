@@ -14,6 +14,7 @@ pub struct RawTable<T: Table> {
 
 impl<T: Table> Table for RawTable<T> {
     const NAME: &'static str = T::NAME;
+    const DUPSORT: bool = false;
 
     type Key = RawKey<T::Key>;
     type Value = RawValue<T::Value>;
@@ -28,6 +29,7 @@ pub struct RawDupSort<T: DupSort> {
 
 impl<T: DupSort> Table for RawDupSort<T> {
     const NAME: &'static str = T::NAME;
+    const DUPSORT: bool = true;
 
     type Key = RawKey<T::Key>;
     type Value = RawValue<T::Value>;
@@ -96,8 +98,12 @@ impl<K: Key> Encode for RawKey<K> {
 
 // Decode
 impl<K: Key> Decode for RawKey<K> {
-    fn decode<B: AsRef<[u8]>>(key: B) -> Result<Self, DatabaseError> {
-        Ok(Self { key: key.as_ref().to_vec(), _phantom: std::marker::PhantomData })
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self { key: value.to_vec(), _phantom: std::marker::PhantomData })
+    }
+
+    fn decode_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
+        Ok(Self { key: value, _phantom: std::marker::PhantomData })
     }
 }
 
@@ -168,8 +174,8 @@ impl<V: Value> Compress for RawValue<V> {
 }
 
 impl<V: Value> Decompress for RawValue<V> {
-    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError> {
-        Ok(Self { value: value.as_ref().to_vec(), _phantom: std::marker::PhantomData })
+    fn decompress(value: &[u8]) -> Result<Self, DatabaseError> {
+        Ok(Self { value: value.to_vec(), _phantom: std::marker::PhantomData })
     }
 
     fn decompress_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {

@@ -1,11 +1,9 @@
 use super::{collect_history_indices, load_history_indices};
+use alloy_primitives::Address;
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db::tables;
-use reth_db_api::{database::Database, models::ShardedKey, table::Decode, transaction::DbTxMut};
-use reth_primitives::Address;
-use reth_provider::{
-    DatabaseProviderRW, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
-};
+use reth_db_api::{models::ShardedKey, table::Decode, transaction::DbTxMut};
+use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
@@ -44,7 +42,11 @@ impl Default for IndexAccountHistoryStage {
     }
 }
 
-impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
+impl<Provider> Stage<Provider> for IndexAccountHistoryStage
+where
+    Provider:
+        DBProvider<Tx: DbTxMut> + HistoryWriter + PruneCheckpointReader + PruneCheckpointWriter,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::IndexAccountHistory
@@ -53,7 +55,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     /// Execute the stage.
     fn execute(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
         if let Some((target_prunable_block, prune_mode)) = self
@@ -103,7 +105,7 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
         info!(target: "sync::stages::index_account_history::exec", ?first_sync, "Collecting indices");
         let collector =
             collect_history_indices::<_, tables::AccountChangeSets, tables::AccountsHistory, _>(
-                provider.tx_ref(),
+                provider,
                 range.clone(),
                 ShardedKey::new,
                 |(index, value)| (index, value.address),
@@ -112,11 +114,11 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
 
         info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
         load_history_indices::<_, tables::AccountsHistory, _>(
-            provider.tx_ref(),
+            provider,
             collector,
             first_sync,
             ShardedKey::new,
-            ShardedKey::<Address>::decode,
+            ShardedKey::<Address>::decode_owned,
             |key| key.key,
         )?;
 
@@ -126,13 +128,13 @@ impl<DB: Database> Stage<DB> for IndexAccountHistoryStage {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        provider.unwind_account_history_indices(range)?;
+        provider.unwind_account_history_indices_range(range)?;
 
         // from HistoryIndex higher than that number.
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
@@ -146,6 +148,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
+    use alloy_primitives::{address, BlockNumber, B256};
     use itertools::Itertools;
     use reth_db::BlockNumberList;
     use reth_db_api::{
@@ -156,11 +159,10 @@ mod tests {
         },
         transaction::DbTx,
     };
-    use reth_primitives::{address, BlockNumber, B256};
-    use reth_provider::providers::StaticFileWriter;
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block_range, random_changeset_range, random_contract_account_range},
+    use reth_provider::{providers::StaticFileWriter, DatabaseProviderFactory};
+    use reth_testing_utils::generators::{
+        self, random_block_range, random_changeset_range, random_contract_account_range,
+        BlockRangeParams,
     };
     use std::collections::BTreeMap;
 
@@ -179,7 +181,7 @@ mod tests {
     }
 
     fn list(list: &[u64]) -> BlockNumberList {
-        BlockNumberList::new(list).unwrap()
+        BlockNumberList::new(list.iter().copied()).unwrap()
     }
 
     fn cast(
@@ -217,7 +219,7 @@ mod tests {
                 .map(|block_number| StageCheckpoint { block_number, stage_checkpoint: None }),
         };
         let mut stage = IndexAccountHistoryStage::default();
-        let provider = db.factory.provider_rw().unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
         assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(run_to), done: true });
         provider.commit().unwrap();
@@ -230,7 +232,7 @@ mod tests {
             ..Default::default()
         };
         let mut stage = IndexAccountHistoryStage::default();
-        let provider = db.factory.provider_rw().unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.unwind(&provider, input).unwrap();
         assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(unwind_to) });
         provider.commit().unwrap();
@@ -477,7 +479,7 @@ mod tests {
             prune_mode: Some(PruneMode::Before(36)),
             ..Default::default()
         };
-        let provider = db.factory.provider_rw().unwrap();
+        let provider = db.factory.database_provider_rw().unwrap();
         let out = stage.execute(&provider, input).unwrap();
         assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(20000), done: true });
         provider.commit().unwrap();
@@ -538,7 +540,11 @@ mod tests {
                 .into_iter()
                 .collect::<BTreeMap<_, _>>();
 
-            let blocks = random_block_range(&mut rng, start..=end, B256::ZERO, 0..3);
+            let blocks = random_block_range(
+                &mut rng,
+                start..=end,
+                BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..3, ..Default::default() },
+            );
 
             let (changesets, _) = random_changeset_range(
                 &mut rng,
@@ -598,7 +604,7 @@ mod tests {
                         .collect::<Vec<Vec<_>>>();
                     let last_chunk = chunks.pop();
 
-                    chunks.into_iter().for_each(|list| {
+                    for list in chunks {
                         result.insert(
                             ShardedKey::new(
                                 address,
@@ -607,7 +613,7 @@ mod tests {
                             ),
                             list,
                         );
-                    });
+                    }
 
                     if let Some(last_list) = last_chunk {
                         result.insert(ShardedKey::new(address, u64::MAX), last_list);

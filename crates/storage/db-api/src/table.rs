@@ -38,11 +38,11 @@ pub trait Compress: Send + Sync + Sized + Debug {
 /// Trait that will transform the data to be read from the DB.
 pub trait Decompress: Send + Sync + Sized + Debug {
     /// Decompresses data coming from the database.
-    fn decompress<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError>;
+    fn decompress(value: &[u8]) -> Result<Self, DatabaseError>;
 
     /// Decompresses owned data coming from the database.
     fn decompress_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
-        Self::decompress(value)
+        Self::decompress(&value)
     }
 }
 
@@ -58,7 +58,12 @@ pub trait Encode: Send + Sync + Sized + Debug {
 /// Trait that will transform the data to be read from the DB.
 pub trait Decode: Send + Sync + Sized + Debug {
     /// Decodes data coming from the database.
-    fn decode<B: AsRef<[u8]>>(value: B) -> Result<Self, DatabaseError>;
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError>;
+
+    /// Decodes owned data coming from the database.
+    fn decode_owned(value: Vec<u8>) -> Result<Self, DatabaseError> {
+        Self::decode(&value)
+    }
 }
 
 /// Generic trait that enforces the database key to implement [`Encode`] and [`Decode`].
@@ -83,6 +88,9 @@ pub trait Table: Send + Sync + Debug + 'static {
     /// The table's name.
     const NAME: &'static str;
 
+    /// Whether the table is also a `DUPSORT` table.
+    const DUPSORT: bool;
+
     /// Key element of `Table`.
     ///
     /// Sorting should be taken into account when encoding this.
@@ -90,6 +98,15 @@ pub trait Table: Send + Sync + Debug + 'static {
 
     /// Value element of `Table`.
     type Value: Value;
+}
+
+/// Trait that provides object-safe access to the table's metadata.
+pub trait TableInfo: Send + Sync + Debug + 'static {
+    /// The table's name.
+    fn name(&self) -> &'static str;
+
+    /// Whether the table is a `DUPSORT` table.
+    fn is_dupsort(&self) -> bool;
 }
 
 /// Tuple with `T::Key` and `T::Value`.

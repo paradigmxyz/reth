@@ -14,15 +14,22 @@ workspace = true
 [dependencies]
 # reth
 reth-codecs.workspace = true
-reth-primitives.workspace = true
-reth-primitives-traits.workspace = true
+reth-db-models.workspace = true
+reth-primitives = { workspace = true, features = ["reth-codec"] }
+reth-primitives-traits = { workspace = true, features = ["serde", "reth-codec"] }
 reth-prune-types.workspace = true
+reth-stages-types = { workspace = true, features = ["reth-codec"] }
 reth-storage-errors.workspace = true
-reth-stages-types.workspace = true
 reth-trie-common.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-genesis.workspace = true
+alloy-consensus.workspace = true
 
 # codecs
 modular-bitfield.workspace = true
+roaring = "0.10.2"
 parity-scale-codec = { version = "3.2.1", features = ["bytes"] }
 serde = { workspace = true, default-features = false }
 
@@ -40,35 +47,39 @@ proptest = { workspace = true, optional = true }
 [dev-dependencies]
 # reth libs with arbitrary
 reth-primitives = { workspace = true, features = ["arbitrary"] }
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, features = ["test-utils"] }
 
 rand.workspace = true
-serde_json.workspace = true
 
 test-fuzz.workspace = true
-
-pprof = { workspace = true, features = [
-    "flamegraph",
-    "frame-pointer",
-    "criterion",
-] }
-criterion.workspace = true
-iai-callgrind.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-proptest-derive.workspace = true
-
-paste.workspace = true
-
-assert_matches.workspace = true
 
 [features]
-test-utils = ["arbitrary"]
+test-utils = [
+    "arbitrary",
+    "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-codecs/test-utils",
+    "reth-db-models/test-utils",
+    "reth-trie-common/test-utils",
+    "reth-prune-types/test-utils",
+    "reth-stages-types/test-utils",
+]
 arbitrary = [
     "reth-primitives/arbitrary",
+    "reth-db-models/arbitrary",
     "dep:arbitrary",
     "dep:proptest",
+    "reth-primitives-traits/arbitrary",
+    "reth-trie-common/arbitrary",
+    "alloy-primitives/arbitrary",
+    "parity-scale-codec/arbitrary",
+    "reth-codecs/arbitrary",
+    "reth-prune-types/arbitrary",
+    "reth-stages-types/arbitrary",
+    "alloy-consensus/arbitrary",
 ]
-optimism = ["reth-primitives/optimism"]
+optimism = ["reth-primitives/optimism", "reth-codecs/op"]

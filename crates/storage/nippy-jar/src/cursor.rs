@@ -1,10 +1,8 @@
 use crate::{
     compression::{Compression, Compressors, Zstd},
-    DataReader, InclusionFilter, NippyJar, NippyJarError, NippyJarHeader, PerfectHashingFunction,
-    RefRow,
+    DataReader, NippyJar, NippyJarError, NippyJarHeader, RefRow,
 };
 use std::{ops::Range, sync::Arc};
-use sucds::int_vectors::Access;
 use zstd::bulk::Decompressor;
 
 /// Simple cursor implementation to retrieve data from [`NippyJar`].
@@ -20,16 +18,17 @@ pub struct NippyJarCursor<'a, H = ()> {
     row: u64,
 }
 
-impl<'a, H: NippyJarHeader> std::fmt::Debug for NippyJarCursor<'a, H> {
+impl<H: NippyJarHeader> std::fmt::Debug for NippyJarCursor<'_, H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NippyJarCursor").field("config", &self.jar).finish_non_exhaustive()
     }
 }
 
 impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
+    /// Creates a new instance of [`NippyJarCursor`] for the given [`NippyJar`].
     pub fn new(jar: &'a NippyJar<H>) -> Result<Self, NippyJarError> {
         let max_row_size = jar.max_row_size;
-        Ok(NippyJarCursor {
+        Ok(Self {
             jar,
             reader: Arc::new(jar.open_data_reader()?),
             // Makes sure that we have enough buffer capacity to decompress any row of data.
@@ -38,12 +37,14 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
         })
     }
 
+    /// Creates a new instance of [`NippyJarCursor`] with the specified [`NippyJar`] and data
+    /// reader.
     pub fn with_reader(
         jar: &'a NippyJar<H>,
         reader: Arc<DataReader>,
     ) -> Result<Self, NippyJarError> {
         let max_row_size = jar.max_row_size;
-        Ok(NippyJarCursor {
+        Ok(Self {
             jar,
             reader,
             // Makes sure that we have enough buffer capacity to decompress any row of data.
@@ -65,35 +66,6 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
     /// Resets cursor to the beginning.
     pub fn reset(&mut self) {
         self.row = 0;
-    }
-
-    /// Returns a row, searching it by a key.
-    ///
-    /// **May return false positives.**
-    ///
-    /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
-    /// stored in file.
-    pub fn row_by_key(&mut self, key: &[u8]) -> Result<Option<RefRow<'_>>, NippyJarError> {
-        if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
-            // TODO: is it worth to parallelize both?
-
-            // May have false positives
-            if filter.contains(key)? {
-                // May have false positives
-                if let Some(row_index) = phf.get_index(key)? {
-                    self.row = self
-                        .jar
-                        .offsets_index
-                        .access(row_index as usize)
-                        .expect("built from same set") as u64;
-                    return self.next_row()
-                }
-            }
-        } else {
-            return Err(NippyJarError::UnsupportedFilterQuery)
-        }
-
-        Ok(None)
     }
 
     /// Returns a row by its number.
@@ -128,40 +100,6 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
                 })
                 .collect(),
         ))
-    }
-
-    /// Returns a row, searching it by a key using a
-    /// `mask` to only read certain columns from the row.
-    ///
-    /// **May return false positives.**
-    ///
-    /// Example usage would be querying a transactions file with a transaction hash which is **NOT**
-    /// stored in file.
-    pub fn row_by_key_with_cols(
-        &mut self,
-        key: &[u8],
-        mask: usize,
-    ) -> Result<Option<RefRow<'_>>, NippyJarError> {
-        if let (Some(filter), Some(phf)) = (&self.jar.filter, &self.jar.phf) {
-            // TODO: is it worth to parallelize both?
-
-            // May have false positives
-            if filter.contains(key)? {
-                // May have false positives
-                if let Some(row_index) = phf.get_index(key)? {
-                    self.row = self
-                        .jar
-                        .offsets_index
-                        .access(row_index as usize)
-                        .expect("built from same set") as u64;
-                    return self.next_row_with_cols(mask)
-                }
-            }
-        } else {
-            return Err(NippyJarError::UnsupportedFilterQuery)
-        }
-
-        Ok(None)
     }
 
     /// Returns a row by its number by using a `mask` to only read certain columns from the row.

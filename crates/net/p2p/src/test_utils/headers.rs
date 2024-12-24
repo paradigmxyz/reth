@@ -10,10 +10,12 @@ use crate::{
     },
     priority::Priority,
 };
+use alloy_consensus::Header;
 use futures::{Future, FutureExt, Stream, StreamExt};
 use reth_consensus::{test_utils::TestConsensus, Consensus};
+use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives::{Header, HeadersDirection, SealedHeader};
+use reth_primitives::SealedHeader;
 use std::{
     fmt,
     pin::Pin,
@@ -60,6 +62,8 @@ impl TestHeaderDownloader {
 }
 
 impl HeaderDownloader for TestHeaderDownloader {
+    type Header = Header;
+
     fn update_local_head(&mut self, _head: SealedHeader) {}
 
     fn update_sync_target(&mut self, _target: SyncTarget) {}
@@ -70,7 +74,7 @@ impl HeaderDownloader for TestHeaderDownloader {
 }
 
 impl Stream for TestHeaderDownloader {
-    type Item = HeadersDownloaderResult<Vec<SealedHeader>>;
+    type Item = HeadersDownloaderResult<Vec<SealedHeader>, Header>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -107,7 +111,7 @@ impl TestDownload {
             let request = HeadersRequest {
                 limit: self.limit,
                 direction: HeadersDirection::Rising,
-                start: reth_primitives::BlockHashOrNumber::Number(0), // ignored
+                start: 0u64.into(), // ignored
             };
             let client = self.client.clone();
             self.fut = Some(Box::pin(client.get_headers(request)));
@@ -141,8 +145,10 @@ impl Stream for TestDownload {
                 return Poll::Ready(None)
             }
 
-            let empty = SealedHeader::default();
-            if let Err(error) = this.consensus.validate_header_against_parent(&empty, &empty) {
+            let empty: SealedHeader = SealedHeader::default();
+            if let Err(error) =
+                <dyn Consensus<_>>::validate_header_against_parent(&this.consensus, &empty, &empty)
+            {
                 this.done = true;
                 return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
                     hash: empty.hash(),
@@ -155,7 +161,7 @@ impl Stream for TestDownload {
                 Ok(resp) => {
                     // Skip head and seal headers
                     let mut headers =
-                        resp.1.into_iter().skip(1).map(Header::seal_slow).collect::<Vec<_>>();
+                        resp.1.into_iter().skip(1).map(SealedHeader::seal).collect::<Vec<_>>();
                     headers.sort_unstable_by_key(|h| h.number);
                     headers.into_iter().for_each(|h| this.buffer.push(h));
                     this.done = true;
@@ -217,6 +223,7 @@ impl DownloadClient for TestHeadersClient {
 }
 
 impl HeadersClient for TestHeadersClient {
+    type Header = Header;
     type Output = TestHeadersFut;
 
     fn get_headers_with_priority(

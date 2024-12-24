@@ -9,31 +9,43 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-pub use alloy_chains::{Chain, ChainKind, NamedChain};
-pub use info::ChainInfo;
-pub use spec::{
-    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
-    ForkBaseFeeParams, DEV, GOERLI, HOLESKY, MAINNET, SEPOLIA,
-};
-#[cfg(feature = "optimism")]
-pub use spec::{BASE_MAINNET, BASE_SEPOLIA, OP_MAINNET, OP_SEPOLIA};
-
-#[cfg(not(feature = "std"))]
 extern crate alloc;
 
-// /// The config info module namely spec id.
-// pub mod config;
-/// The chain info module.
-mod info;
-
-/// The chain spec module.
-mod spec;
+use once_cell as _;
+#[cfg(not(feature = "std"))]
+pub(crate) use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
+#[cfg(feature = "std")]
+pub(crate) use std::sync::{LazyLock, OnceLock};
 
 /// Chain specific constants
 pub(crate) mod constants;
+pub use constants::MIN_TRANSACTION_GAS;
 
+mod api;
+/// The chain info module.
+mod info;
+/// The chain spec module.
+mod spec;
+
+pub use alloy_chains::{Chain, ChainKind, NamedChain};
 /// Re-export for convenience
 pub use reth_ethereum_forks::*;
+
+pub use api::EthChainSpec;
+pub use info::ChainInfo;
+#[cfg(any(test, feature = "test-utils"))]
+pub use spec::test_fork_ids;
+pub use spec::{
+    BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
+    DepositContract, ForkBaseFeeParams, DEV, HOLESKY, MAINNET, SEPOLIA,
+};
+
+/// Simple utility to create a thread-safe sync cell with a value set.
+pub fn once_cell_set<T>(value: T) -> OnceLock<T> {
+    let once = OnceLock::new();
+    let _ = once.set(value);
+    once
+}
 
 #[cfg(test)]
 mod tests {
@@ -50,8 +62,8 @@ mod tests {
 
     #[test]
     fn test_named_id() {
-        let chain = Chain::from_named(NamedChain::Goerli);
-        assert_eq!(chain.id(), 5);
+        let chain = Chain::from_named(NamedChain::Holesky);
+        assert_eq!(chain.id(), 17000);
     }
 
     #[test]
@@ -77,9 +89,9 @@ mod tests {
 
     #[test]
     fn test_into_u256() {
-        let chain = Chain::from_named(NamedChain::Goerli);
+        let chain = Chain::from_named(NamedChain::Holesky);
         let n: U256 = U256::from(chain.id());
-        let expected = U256::from(5);
+        let expected = U256::from(17000);
 
         assert_eq!(n, expected);
     }

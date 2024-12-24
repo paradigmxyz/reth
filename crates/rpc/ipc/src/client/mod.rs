@@ -90,7 +90,7 @@ impl IpcClientBuilder {
     /// use jsonrpsee::{core::client::ClientT, rpc_params};
     /// use reth_ipc::client::IpcClientBuilder;
     ///
-    /// # async fn run_client() -> Result<(), Box<dyn std::error::Error +  Send + Sync>> {
+    /// # async fn run_client() -> Result<(), Box<dyn core::error::Error +  Send + Sync>> {
     /// let client = IpcClientBuilder::default().build("/tmp/my-uds").await?;
     /// let response: String = client.request("say_hello", rpc_params![]).await?;
     /// # Ok(()) }
@@ -136,10 +136,9 @@ pub enum IpcError {
 
 #[cfg(test)]
 mod tests {
-    use interprocess::local_socket::ListenerOptions;
-
     use super::*;
     use crate::server::dummy_name;
+    use interprocess::local_socket::ListenerOptions;
 
     #[tokio::test]
     async fn test_connect() {

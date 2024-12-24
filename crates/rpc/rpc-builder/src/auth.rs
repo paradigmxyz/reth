@@ -1,5 +1,3 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-
 use crate::error::{RpcError, ServerKind};
 use http::header::AUTHORIZATION;
 use jsonrpsee::{
@@ -9,13 +7,14 @@ use jsonrpsee::{
     Methods,
 };
 use reth_engine_primitives::EngineTypes;
-use reth_rpc_api::*;
+use reth_rpc_api::servers::*;
 use reth_rpc_eth_types::EthSubscriptionIdProvider;
 use reth_rpc_layer::{
     secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, JwtAuthValidator,
     JwtSecret,
 };
 use reth_rpc_server_types::constants;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tower::layer::util::Identity;
 
 pub use jsonrpsee::server::ServerBuilder;
@@ -199,7 +198,7 @@ impl AuthRpcModule {
     /// Create a new `AuthRpcModule` with the given `engine_api`.
     pub fn new<EngineApi, EngineT>(engine: EngineApi) -> Self
     where
-        EngineT: EngineTypes + 'static,
+        EngineT: EngineTypes,
         EngineApi: EngineApiServer<EngineT>,
     {
         let mut module = RpcModule::new(());
@@ -220,6 +219,30 @@ impl AuthRpcModule {
         other: impl Into<Methods>,
     ) -> Result<bool, RegisterMethodError> {
         self.module_mut().merge(other.into()).map(|_| true)
+    }
+
+    /// Removes the method with the given name from the configured authenticated methods.
+    ///
+    /// Returns `true` if the method was found and removed, `false` otherwise.
+    pub fn remove_auth_method(&mut self, method_name: &'static str) -> bool {
+        self.module_mut().remove_method(method_name).is_some()
+    }
+
+    /// Removes the given methods from the configured authenticated methods.
+    pub fn remove_auth_methods(&mut self, methods: impl IntoIterator<Item = &'static str>) {
+        for name in methods {
+            self.remove_auth_method(name);
+        }
+    }
+
+    /// Replace the given [Methods] in the configured authenticated methods.
+    pub fn replace_auth_methods(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, RegisterMethodError> {
+        let other = other.into();
+        self.remove_auth_methods(other.method_names());
+        self.merge_auth_methods(other)
     }
 
     /// Convenience function for starting a server

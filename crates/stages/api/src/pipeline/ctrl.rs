@@ -1,17 +1,17 @@
+use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::BlockNumber;
-use reth_primitives_traits::SealedHeader;
 
 /// Determines the control flow during pipeline execution.
 ///
 /// See [`Pipeline::run_loop`](crate::Pipeline::run_loop) for more information.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ControlFlow {
     /// An unwind was requested and must be performed before continuing.
     Unwind {
         /// The block to unwind to.
         target: BlockNumber,
         /// The block that caused the unwind.
-        bad_block: Box<SealedHeader>,
+        bad_block: Box<BlockWithParent>,
     },
     /// The pipeline made progress.
     Continue {

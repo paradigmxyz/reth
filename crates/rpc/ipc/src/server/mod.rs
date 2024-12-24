@@ -32,10 +32,7 @@ use tower::{layer::util::Identity, Layer, Service};
 use tracing::{debug, instrument, trace, warn, Instrument};
 // re-export so can be used during builder setup
 use crate::{
-    server::{
-        connection::IpcConnDriver,
-        rpc_service::{RpcService, RpcServiceCfg},
-    },
+    server::{connection::IpcConnDriver, rpc_service::RpcServiceCfg},
     stream_codec::StreamCodec,
 };
 use tokio::sync::mpsc;
@@ -45,6 +42,8 @@ use tower::layer::{util::Stack, LayerFn};
 mod connection;
 mod ipc;
 mod rpc_service;
+
+pub use rpc_service::RpcService;
 
 /// Ipc Server implementation
 ///
@@ -73,7 +72,7 @@ where
             Service: Service<
                 String,
                 Response = Option<String>,
-                Error = Box<dyn std::error::Error + Send + Sync + 'static>,
+                Error = Box<dyn core::error::Error + Send + Sync + 'static>,
                 Future: Send + Unpin,
             > + Send,
         > + Send
@@ -87,7 +86,7 @@ where
     /// ```
     /// use jsonrpsee::RpcModule;
     /// use reth_ipc::server::Builder;
-    /// async fn run_server() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /// async fn run_server() -> Result<(), Box<dyn core::error::Error + Send + Sync>> {
     ///     let server = Builder::default().build("/tmp/my-uds".into());
     ///     let mut module = RpcModule::new(());
     ///     module.register_method("say_hello", |_, _, _| "lo")?;
@@ -367,7 +366,7 @@ where
     /// response will be emitted via the `method_sink`.
     type Response = Option<String>;
 
-    type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+    type Error = Box<dyn core::error::Error + Send + Sync + 'static>;
 
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -442,7 +441,7 @@ fn process_connection<'b, RpcMiddleware, HttpMiddleware>(
     + Service<
         String,
         Response = Option<String>,
-        Error = Box<dyn std::error::Error + Send + Sync + 'static>,
+        Error = Box<dyn core::error::Error + Send + Sync + 'static>,
     >,
     <<HttpMiddleware as Layer<TowerServiceNoHttp<RpcMiddleware>>>::Service as Service<String>>::Future:
     Send + Unpin,
@@ -497,7 +496,7 @@ async fn to_ipc_service<S, T>(
     rx: mpsc::Receiver<String>,
 ) where
     S: Service<String, Response = Option<String>> + Send + 'static,
-    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Error: Into<Box<dyn core::error::Error + Send + Sync>>,
     S::Future: Send + Unpin,
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -791,6 +790,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 }
 
 #[cfg(test)]
+#[allow(missing_docs)]
 pub fn dummy_name() -> String {
     let num: u64 = rand::Rng::gen(&mut rand::thread_rng());
     if cfg!(windows) {
@@ -823,7 +823,7 @@ mod tests {
     async fn pipe_from_stream_with_bounded_buffer(
         pending: PendingSubscriptionSink,
         stream: BroadcastStream<usize>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(), Box<dyn core::error::Error + Send + Sync>> {
         let sink = pending.accept().await.unwrap();
         let closed = sink.closed();
 

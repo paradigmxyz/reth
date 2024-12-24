@@ -1,16 +1,11 @@
-use reth_chainspec::ChainSpec;
-use reth_primitives::{
-    revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg},
-    Address, Header, SealedBlock, Withdrawals, B256, U256,
+use alloy_eips::{
+    eip4895::{Withdrawal, Withdrawals},
+    eip7685::Requests,
 };
-use reth_rpc_types::{
-    engine::{OptimismPayloadAttributes, PayloadAttributes as EthPayloadAttributes, PayloadId},
-    Withdrawal,
-};
-
-use crate::{
-    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-};
+use alloy_primitives::{Address, B256, U256};
+use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
+use reth_chain_state::ExecutedBlock;
+use reth_primitives::SealedBlock;
 
 /// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into
 /// engine API execution payloads.
@@ -20,6 +15,14 @@ pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
 
     /// Returns the fees collected for the built block
     fn fees(&self) -> U256;
+
+    /// Returns the entire execution data for the built block, if available.
+    fn executed_block(&self) -> Option<ExecutedBlock> {
+        None
+    }
+
+    /// Returns the EIP-7865 requests for the payload if any.
+    fn requests(&self) -> Option<Requests>;
 }
 
 /// This can be implemented by types that describe a currently running payload job.
@@ -31,14 +34,15 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
     /// [`PayloadBuilderAttributes::try_new`].
     type RpcPayloadAttributes;
     /// The error type used in [`PayloadBuilderAttributes::try_new`].
-    type Error: std::error::Error;
+    type Error: core::error::Error;
 
     /// Creates a new payload builder for the given parent block and the attributes.
     ///
-    /// Derives the unique [`PayloadId`] for the given parent and attributes
+    /// Derives the unique [`PayloadId`] for the given parent, attributes and version.
     fn try_new(
         parent: B256,
         rpc_payload_attributes: Self::RpcPayloadAttributes,
+        version: u8,
     ) -> Result<Self, Self::Error>
     where
         Self: Sized;
@@ -63,21 +67,6 @@ pub trait PayloadBuilderAttributes: Send + Sync + std::fmt::Debug {
 
     /// Returns the withdrawals for the running payload job.
     fn withdrawals(&self) -> &Withdrawals;
-
-    /// Returns the configured [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the targeted payload
-    /// (that has the `parent` as its parent).
-    ///
-    /// The `chain_spec` is used to determine the correct chain id and hardfork for the payload
-    /// based on its timestamp.
-    ///
-    /// Block related settings are derived from the `parent` block and the configured attributes.
-    ///
-    /// NOTE: This is only intended for beacon consensus (after merge).
-    fn cfg_and_block_env(
-        &self,
-        chain_spec: &ChainSpec,
-        parent: &Header,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv);
 }
 
 /// The execution payload attribute type the CL node emits via the engine API.
@@ -95,14 +84,6 @@ pub trait PayloadAttributes:
 
     /// Return the parent beacon block root for the payload attributes.
     fn parent_beacon_block_root(&self) -> Option<B256>;
-
-    /// Ensures that the payload attributes are valid for the given [`ChainSpec`] and
-    /// [`EngineApiMessageVersion`].
-    fn ensure_well_formed_attributes(
-        &self,
-        chain_spec: &ChainSpec,
-        version: EngineApiMessageVersion,
-    ) -> Result<(), EngineObjectValidationError>;
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -117,17 +98,10 @@ impl PayloadAttributes for EthPayloadAttributes {
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.parent_beacon_block_root
     }
-
-    fn ensure_well_formed_attributes(
-        &self,
-        chain_spec: &ChainSpec,
-        version: EngineApiMessageVersion,
-    ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, self.into())
-    }
 }
 
-impl PayloadAttributes for OptimismPayloadAttributes {
+#[cfg(feature = "op")]
+impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
     fn timestamp(&self) -> u64 {
         self.payload_attributes.timestamp
     }
@@ -139,20 +113,10 @@ impl PayloadAttributes for OptimismPayloadAttributes {
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.payload_attributes.parent_beacon_block_root
     }
+}
 
-    fn ensure_well_formed_attributes(
-        &self,
-        chain_spec: &ChainSpec,
-        version: EngineApiMessageVersion,
-    ) -> Result<(), EngineObjectValidationError> {
-        validate_version_specific_fields(chain_spec, version, self.into())?;
-
-        if self.gas_limit.is_none() && chain_spec.is_optimism() {
-            return Err(EngineObjectValidationError::InvalidParams(
-                "MissingGasLimitInPayloadAttributes".to_string().into(),
-            ))
-        }
-
-        Ok(())
-    }
+/// A builder that can return the current payload attribute.
+pub trait PayloadAttributesBuilder<Attributes>: Send + Sync + 'static {
+    /// Return a new payload attribute from the builder.
+    fn build(&self, timestamp: u64) -> Attributes;
 }

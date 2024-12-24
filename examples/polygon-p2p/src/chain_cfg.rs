@@ -1,8 +1,9 @@
+use alloy_primitives::{b256, B256};
 use reth_chainspec::{
-    BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition,
+    once_cell_set, BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition,
 };
 use reth_discv4::NodeRecord;
-use reth_primitives::{b256, Head, B256};
+use reth_primitives::Head;
 
 use std::sync::Arc;
 
@@ -15,7 +16,8 @@ pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
         chain: Chain::from_id(137),
         // <https://github.com/maticnetwork/bor/blob/d521b8e266b97efe9c8fdce8167e9dd77b04637d/builder/files/genesis-mainnet-v1.json>
         genesis: serde_json::from_str(include_str!("./genesis.json")).expect("deserialize genesis"),
-        genesis_hash: Some(GENESIS),
+        genesis_hash: once_cell_set(GENESIS),
+        genesis_header: Default::default(),
         paris_block_and_final_difficulty: None,
         hardforks: ChainHardforks::new(vec![
             (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
@@ -27,6 +29,7 @@ pub(crate) fn polygon_chain_spec() -> Arc<ChainSpec> {
         ]),
         deposit_contract: None,
         base_fee_params: reth_chainspec::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+        max_gas_limit: 30_000_000,
         prune_delete_limit: 0,
         bitfinity_evm_url: Default::default(),
     }

@@ -18,7 +18,7 @@ pub use rpc_state_cache::RpcStateCacheArgs;
 
 /// DebugArgs struct for debugging purposes
 mod debug;
-pub use debug::DebugArgs;
+pub use debug::{DebugArgs, InvalidBlockHookType, InvalidBlockSelection};
 
 /// DatabaseArgs struct for configuring the database
 mod database;
@@ -26,10 +26,7 @@ pub use database::DatabaseArgs;
 
 /// LogArgs struct for configuring the logger
 mod log;
-pub use log::{ColorMode, LogArgs};
-
-mod secret_key;
-pub use secret_key::{get_secret_key, SecretKeyError};
+pub use log::{ColorMode, LogArgs, Verbosity};
 
 /// `PayloadBuilderArgs` struct for configuring the payload builder
 mod payload_builder;
@@ -63,6 +60,5 @@ pub use datadir_args::DatadirArgs;
 mod benchmark_args;
 pub use benchmark_args::BenchmarkArgs;
 
-pub mod utils;
-
+mod error;
 pub mod types;

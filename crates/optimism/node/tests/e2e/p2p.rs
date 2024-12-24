@@ -1,6 +1,6 @@
-use crate::utils::{advance_chain, setup};
-use reth::blockchain_tree::error::BlockchainTreeError;
-use reth_rpc_types::engine::PayloadStatusEnum;
+use alloy_rpc_types_engine::PayloadStatusEnum;
+use futures::StreamExt;
+use reth_optimism_node::utils::{advance_chain, setup};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -27,11 +27,25 @@ async fn can_sync() -> eyre::Result<()> {
     // On second node, sync optimistically up to block number 88a
     second_node
         .engine_api
+        .update_optimistic_forkchoice(canonical_chain[tip_index - reorg_depth - 1])
+        .await?;
+    second_node
+        .wait_block(
+            (tip - reorg_depth - 1) as u64,
+            canonical_chain[tip_index - reorg_depth - 1],
+            true,
+        )
+        .await?;
+    // We send FCU twice to ensure that pool receives canonical chain update on the second FCU
+    // This is required because notifications are not sent during backfill sync
+    second_node
+        .engine_api
         .update_optimistic_forkchoice(canonical_chain[tip_index - reorg_depth])
         .await?;
     second_node
         .wait_block((tip - reorg_depth) as u64, canonical_chain[tip_index - reorg_depth], true)
         .await?;
+    second_node.engine_api.canonical_stream.next().await.unwrap();
 
     // On third node, sync optimistically up to block number 90a
     third_node.engine_api.update_optimistic_forkchoice(canonical_chain[tip_index]).await?;
@@ -51,7 +65,6 @@ async fn can_sync() -> eyre::Result<()> {
             side_payload_chain[0].0.clone(),
             side_payload_chain[0].1.clone(),
             PayloadStatusEnum::Valid,
-            Default::default(),
         )
         .await;
 
@@ -76,12 +89,11 @@ async fn can_sync() -> eyre::Result<()> {
             canonical_payload_chain[tip_index - reorg_depth + 1].0.clone(),
             canonical_payload_chain[tip_index - reorg_depth + 1].1.clone(),
             PayloadStatusEnum::Invalid {
-                validation_error: BlockchainTreeError::PendingBlockIsFinalized {
-                    last_finalized: (tip - reorg_depth) as u64 + 1,
-                }
-                .to_string(),
+                validation_error: format!(
+                    "block number is lower than the last finalized block number {}",
+                    (tip - reorg_depth) as u64 + 1
+                ),
             },
-            Default::default(),
         )
         .await;
 

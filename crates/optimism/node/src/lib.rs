@@ -1,4 +1,7 @@
 //! Standalone crate for Optimism-specific Reth configuration and builder types.
+//!
+//! # features
+//! - `js-tracer`: Enable the `JavaScript` tracer for the `debug_trace` endpoints
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -15,17 +18,19 @@ pub mod args;
 /// Exports optimism-specific implementations of the [`EngineTypes`](reth_node_api::EngineTypes)
 /// trait.
 pub mod engine;
-pub use engine::OptimismEngineTypes;
+pub use engine::OpEngineTypes;
 
 pub mod node;
-pub use node::OptimismNode;
+pub use node::OpNode;
 
 pub mod txpool;
 
-pub mod rpc;
+/// Helpers for running test node instances.
+#[cfg(feature = "test-utils")]
+pub mod utils;
 
 pub use reth_optimism_payload_builder::{
-    OptimismBuiltPayload, OptimismPayloadBuilder, OptimismPayloadBuilderAttributes,
+    OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes,
 };
 
-pub use reth_evm_optimism::*;
+pub use reth_optimism_evm::*;

@@ -259,10 +259,10 @@ impl<D> From<PathBuf> for MaybePlatformPath<D> {
 /// Wrapper type around `PlatformPath` that includes a `Chain`, used for separating reth data for
 /// different networks.
 ///
-/// If the chain is either mainnet, goerli, or sepolia, then the path will be:
+/// If the chain is either mainnet, sepolia, or holesky, then the path will be:
 ///  * mainnet: `<DIR>/mainnet`
-///  * goerli: `<DIR>/goerli`
 ///  * sepolia: `<DIR>/sepolia`
+///  * holesky: `<DIR>/holesky`
 ///
 /// Otherwise, the path will be dependent on the chain ID:
 ///  * `<DIR>/<CHAIN_ID>`
@@ -295,7 +295,7 @@ impl<D> ChainPath<D> {
     pub fn static_files(&self) -> PathBuf {
         let datadir_args = &self.2;
         if let Some(static_files_path) = &datadir_args.static_files_path {
-            static_files_path.to_path_buf()
+            static_files_path.clone()
         } else {
             self.data_dir().join("static_files")
         }
@@ -343,6 +343,18 @@ impl<D> ChainPath<D> {
     pub fn jwt(&self) -> PathBuf {
         self.data_dir().join("jwt.hex")
     }
+
+    /// Returns the path to the invalid block hooks directory for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/invalid_block_hooks`
+    pub fn invalid_block_hooks(&self) -> PathBuf {
+        self.data_dir().join("invalid_block_hooks")
+    }
+
+    /// Returns the path to the ExEx WAL directory for this chain.
+    pub fn exex_wal(&self) -> PathBuf {
+        self.data_dir().join("exex/wal")
+    }
 }
 
 impl<D> AsRef<Path> for ChainPath<D> {
@@ -383,10 +395,6 @@ mod tests {
 
     #[test]
     fn test_maybe_testnet_datadir_path() {
-        let path = MaybePlatformPath::<DataDirPath>::default();
-        let path = path.unwrap_or_chain_default(Chain::goerli(), DatadirArgs::default());
-        assert!(path.as_ref().ends_with("reth/goerli"), "{path:?}");
-
         let path = MaybePlatformPath::<DataDirPath>::default();
         let path = path.unwrap_or_chain_default(Chain::holesky(), DatadirArgs::default());
         assert!(path.as_ref().ends_with("reth/holesky"), "{path:?}");

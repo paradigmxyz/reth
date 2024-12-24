@@ -1,17 +1,25 @@
-use crate::node::FullNode;
-use reth_node_api::FullNodeComponents;
 use std::fmt;
 
+use reth_node_api::{FullNodeComponents, NodeAddOns};
+
+use crate::node::FullNode;
+
 /// Container for all the configurable hook functions.
-pub(crate) struct NodeHooks<Node: FullNodeComponents> {
-    pub(crate) on_component_initialized: Box<dyn OnComponentInitializedHook<Node>>,
-    pub(crate) on_node_started: Box<dyn OnNodeStartedHook<Node>>,
-    pub(crate) _marker: std::marker::PhantomData<Node>,
+pub struct NodeHooks<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
+    /// Hook to run once core components are initialized.
+    pub on_component_initialized: Box<dyn OnComponentInitializedHook<Node>>,
+    /// Hook to run once the node is started.
+    pub on_node_started: Box<dyn OnNodeStartedHook<Node, AddOns>>,
+    _marker: std::marker::PhantomData<Node>,
 }
 
-impl<Node: FullNodeComponents> NodeHooks<Node> {
+impl<Node, AddOns> NodeHooks<Node, AddOns>
+where
+    Node: FullNodeComponents,
+    AddOns: NodeAddOns<Node>,
+{
     /// Creates a new, empty [`NodeHooks`] instance for the given node type.
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             on_component_initialized: Box::<()>::default(),
             on_node_started: Box::<()>::default(),
@@ -41,7 +49,7 @@ impl<Node: FullNodeComponents> NodeHooks<Node> {
     /// Sets the hook that is run once the node has started.
     pub(crate) fn set_on_node_started<F>(&mut self, hook: F) -> &mut Self
     where
-        F: OnNodeStartedHook<Node> + 'static,
+        F: OnNodeStartedHook<Node, AddOns> + 'static,
     {
         self.on_node_started = Box::new(hook);
         self
@@ -51,19 +59,27 @@ impl<Node: FullNodeComponents> NodeHooks<Node> {
     #[allow(unused)]
     pub(crate) fn on_node_started<F>(mut self, hook: F) -> Self
     where
-        F: OnNodeStartedHook<Node> + 'static,
+        F: OnNodeStartedHook<Node, AddOns> + 'static,
     {
         self.set_on_node_started(hook);
         self
     }
 }
 
-impl<Node: FullNodeComponents> Default for NodeHooks<Node> {
+impl<Node, AddOns> Default for NodeHooks<Node, AddOns>
+where
+    Node: FullNodeComponents,
+    AddOns: NodeAddOns<Node>,
+{
     fn default() -> Self {
         Self::new()
     }
 }
-impl<Node: FullNodeComponents> fmt::Debug for NodeHooks<Node> {
+impl<Node, AddOns> fmt::Debug for NodeHooks<Node, AddOns>
+where
+    Node: FullNodeComponents,
+    AddOns: NodeAddOns<Node>,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("NodeHooks")
             .field("on_component_initialized", &"...")
@@ -90,19 +106,20 @@ where
 }
 
 /// A helper trait that is run once the node is started.
-pub trait OnNodeStartedHook<Node: FullNodeComponents>: Send {
+pub trait OnNodeStartedHook<Node: FullNodeComponents, AddOns: NodeAddOns<Node>>: Send {
     /// Consumes the event hook and runs it.
     ///
     /// If this returns an error, the node launch will be aborted.
-    fn on_event(self: Box<Self>, node: FullNode<Node>) -> eyre::Result<()>;
+    fn on_event(self: Box<Self>, node: FullNode<Node, AddOns>) -> eyre::Result<()>;
 }
 
-impl<Node, F> OnNodeStartedHook<Node> for F
+impl<Node, AddOns, F> OnNodeStartedHook<Node, AddOns> for F
 where
     Node: FullNodeComponents,
-    F: FnOnce(FullNode<Node>) -> eyre::Result<()> + Send,
+    AddOns: NodeAddOns<Node>,
+    F: FnOnce(FullNode<Node, AddOns>) -> eyre::Result<()> + Send,
 {
-    fn on_event(self: Box<Self>, node: FullNode<Node>) -> eyre::Result<()> {
+    fn on_event(self: Box<Self>, node: FullNode<Node, AddOns>) -> eyre::Result<()> {
         (*self)(node)
     }
 }
@@ -113,8 +130,12 @@ impl<Node> OnComponentInitializedHook<Node> for () {
     }
 }
 
-impl<Node: FullNodeComponents> OnNodeStartedHook<Node> for () {
-    fn on_event(self: Box<Self>, _node: FullNode<Node>) -> eyre::Result<()> {
+impl<Node, AddOns> OnNodeStartedHook<Node, AddOns> for ()
+where
+    Node: FullNodeComponents,
+    AddOns: NodeAddOns<Node>,
+{
+    fn on_event(self: Box<Self>, _node: FullNode<Node, AddOns>) -> eyre::Result<()> {
         Ok(())
     }
 }

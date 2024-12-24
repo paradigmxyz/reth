@@ -4,6 +4,8 @@ Create a diff between two database tables or two entire databases
 
 ```bash
 $ reth db diff --help
+```
+```txt
 Usage: reth db diff [OPTIONS] --secondary-datadir <SECONDARY_DATADIR> --output <OUTPUT>
 
 Options:
@@ -42,6 +44,15 @@ Database:
           Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
 
           [possible values: true, false]
+
+      --db.max-size <MAX_SIZE>
+          Maximum database size (e.g., 4TB, 8MB)
+
+      --db.growth-step <GROWTH_STEP>
+          Database growth step (e.g., 4GB, 4KB)
+
+      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
+          Read transaction timeout in seconds, 0 means no timeout
 
       --table <TABLE>
           The table name to diff. If not specified, all tables are diffed.

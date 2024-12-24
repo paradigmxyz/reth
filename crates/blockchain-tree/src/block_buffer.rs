@@ -1,7 +1,10 @@
 use crate::metrics::BlockBufferMetrics;
+use alloy_consensus::BlockHeader;
+use alloy_primitives::{BlockHash, BlockNumber};
 use reth_network::cache::LruCache;
-use reth_primitives::{BlockHash, BlockNumber, SealedBlockWithSenders};
-use std::collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet};
+use reth_node_types::Block;
+use reth_primitives::SealedBlockWithSenders;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Contains the tree of pending blocks that cannot be executed due to missing parent.
 /// It allows to store unconnected blocks for potential future inclusion.
@@ -15,9 +18,9 @@ use std::collections::{btree_map, hash_map, BTreeMap, HashMap, HashSet};
 /// Note: Buffer is limited by number of blocks that it can contain and eviction of the block
 /// is done by last recently used block.
 #[derive(Debug)]
-pub struct BlockBuffer {
+pub struct BlockBuffer<B: Block = reth_primitives::Block> {
     /// All blocks in the buffer stored by their block hash.
-    pub(crate) blocks: HashMap<BlockHash, SealedBlockWithSenders>,
+    pub(crate) blocks: HashMap<BlockHash, SealedBlockWithSenders<B>>,
     /// Map of any parent block hash (even the ones not currently in the buffer)
     /// to the buffered children.
     /// Allows connecting buffered blocks by parent.
@@ -34,7 +37,7 @@ pub struct BlockBuffer {
     pub(crate) metrics: BlockBufferMetrics,
 }
 
-impl BlockBuffer {
+impl<B: Block> BlockBuffer<B> {
     /// Create new buffer with max limit of blocks
     pub fn new(limit: u32) -> Self {
         Self {
@@ -47,41 +50,42 @@ impl BlockBuffer {
     }
 
     /// Return reference to buffered blocks
-    pub const fn blocks(&self) -> &HashMap<BlockHash, SealedBlockWithSenders> {
+    pub const fn blocks(&self) -> &HashMap<BlockHash, SealedBlockWithSenders<B>> {
         &self.blocks
     }
 
     /// Return reference to the requested block.
-    pub fn block(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
+    pub fn block(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders<B>> {
         self.blocks.get(hash)
     }
 
     /// Return a reference to the lowest ancestor of the given block in the buffer.
-    pub fn lowest_ancestor(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders> {
+    pub fn lowest_ancestor(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders<B>> {
         let mut current_block = self.blocks.get(hash)?;
-        while let Some(parent) = self.blocks.get(&current_block.parent_hash) {
+        while let Some(parent) = self.blocks.get(&current_block.parent_hash()) {
             current_block = parent;
         }
         Some(current_block)
     }
 
     /// Insert a correct block inside the buffer.
-    pub fn insert_block(&mut self, block: SealedBlockWithSenders) {
+    pub fn insert_block(&mut self, block: SealedBlockWithSenders<B>) {
         let hash = block.hash();
 
-        self.parent_to_child.entry(block.parent_hash).or_default().insert(hash);
-        self.earliest_blocks.entry(block.number).or_default().insert(hash);
+        self.parent_to_child.entry(block.parent_hash()).or_default().insert(hash);
+        self.earliest_blocks.entry(block.number()).or_default().insert(hash);
         self.blocks.insert(hash, block);
 
         if let (_, Some(evicted_hash)) = self.lru.insert_and_get_evicted(hash) {
             // evict the block if limit is hit
             if let Some(evicted_block) = self.remove_block(&evicted_hash) {
                 // evict the block if limit is hit
-                self.remove_from_parent(evicted_block.parent_hash, &evicted_hash);
+                self.remove_from_parent(evicted_block.parent_hash(), &evicted_hash);
             }
         }
         self.metrics.blocks.set(self.blocks.len() as f64);
     }
+
     /// Removes the given block from the buffer and also all the children of the block.
     ///
     /// This is used to get all the blocks that are dependent on the block that is included.
@@ -91,11 +95,12 @@ impl BlockBuffer {
     pub fn remove_block_with_children(
         &mut self,
         parent_hash: &BlockHash,
-    ) -> Vec<SealedBlockWithSenders> {
-        // remove parent block if present
-        let mut removed = self.remove_block(parent_hash).into_iter().collect::<Vec<_>>();
-
-        removed.extend(self.remove_children(vec![*parent_hash]));
+    ) -> Vec<SealedBlockWithSenders<B>> {
+        let removed = self
+            .remove_block(parent_hash)
+            .into_iter()
+            .chain(self.remove_children(vec![*parent_hash]))
+            .collect();
         self.metrics.blocks.set(self.blocks.len() as f64);
         removed
     }
@@ -125,10 +130,10 @@ impl BlockBuffer {
 
     /// Remove block entry
     fn remove_from_earliest_blocks(&mut self, number: BlockNumber, hash: &BlockHash) {
-        if let btree_map::Entry::Occupied(mut entry) = self.earliest_blocks.entry(number) {
-            entry.get_mut().remove(hash);
-            if entry.get().is_empty() {
-                entry.remove();
+        if let Some(entry) = self.earliest_blocks.get_mut(&number) {
+            entry.remove(hash);
+            if entry.is_empty() {
+                self.earliest_blocks.remove(&number);
             }
         }
     }
@@ -136,29 +141,29 @@ impl BlockBuffer {
     /// Remove from parent child connection. This method does not remove children.
     fn remove_from_parent(&mut self, parent_hash: BlockHash, hash: &BlockHash) {
         // remove from parent to child connection, but only for this block parent.
-        if let hash_map::Entry::Occupied(mut entry) = self.parent_to_child.entry(parent_hash) {
-            entry.get_mut().remove(hash);
+        if let Some(entry) = self.parent_to_child.get_mut(&parent_hash) {
+            entry.remove(hash);
             // if set is empty remove block entry.
-            if entry.get().is_empty() {
-                entry.remove();
+            if entry.is_empty() {
+                self.parent_to_child.remove(&parent_hash);
             }
-        };
+        }
     }
 
     /// Removes block from inner collections.
     /// This method will only remove the block if it's present inside `self.blocks`.
     /// The block might be missing from other collections, the method will only ensure that it has
     /// been removed.
-    fn remove_block(&mut self, hash: &BlockHash) -> Option<SealedBlockWithSenders> {
+    fn remove_block(&mut self, hash: &BlockHash) -> Option<SealedBlockWithSenders<B>> {
         let block = self.blocks.remove(hash)?;
-        self.remove_from_earliest_blocks(block.number, hash);
-        self.remove_from_parent(block.parent_hash, hash);
+        self.remove_from_earliest_blocks(block.number(), hash);
+        self.remove_from_parent(block.parent_hash(), hash);
         self.lru.remove(hash);
         Some(block)
     }
 
     /// Remove all children and their descendants for the given blocks and return them.
-    fn remove_children(&mut self, parent_hashes: Vec<BlockHash>) -> Vec<SealedBlockWithSenders> {
+    fn remove_children(&mut self, parent_hashes: Vec<BlockHash>) -> Vec<SealedBlockWithSenders<B>> {
         // remove all parent child connection and all the child children blocks that are connected
         // to the discarded parent blocks.
         let mut remove_parent_children = parent_hashes;
@@ -182,16 +187,16 @@ impl BlockBuffer {
 #[cfg(test)]
 mod tests {
     use crate::BlockBuffer;
-    use reth_primitives::{BlockHash, BlockNumHash, SealedBlockWithSenders};
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block, Rng},
-    };
+    use alloy_eips::BlockNumHash;
+    use alloy_primitives::BlockHash;
+    use reth_primitives::SealedBlockWithSenders;
+    use reth_testing_utils::generators::{self, random_block, BlockParams, Rng};
     use std::collections::HashMap;
 
     /// Create random block with specified number and parent hash.
     fn create_block<R: Rng>(rng: &mut R, number: u64, parent: BlockHash) -> SealedBlockWithSenders {
-        let block = random_block(rng, number, Some(parent), None, None);
+        let block =
+            random_block(rng, number, BlockParams { parent: Some(parent), ..Default::default() });
         block.seal_with_senders().unwrap()
     }
 

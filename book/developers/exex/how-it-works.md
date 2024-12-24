@@ -23,4 +23,4 @@ event to signify what blocks have been processed. This event is used by Reth to 
 
 An ExEx will only receive notifications for block numbers greater than the block in the most recently emitted `FinishedHeight` event.
 
-To clarify: if an ExEx emits `ExExEvent::FinishedHeight(0)` it will receive notifications for any `block_number > 0`.
+To clarify: if an ExEx emits `ExExEvent::FinishedHeight` for `block #0` it will receive notifications for any `block_number > 0`.

@@ -1,6 +1,6 @@
 use crate::engine::hooks::EngineHookError;
+use alloy_rpc_types_engine::ForkchoiceUpdateError;
 use reth_errors::{DatabaseError, RethError};
-use reth_rpc_types::engine::ForkchoiceUpdateError;
 use reth_stages_api::PipelineError;
 
 /// Beacon engine result.
@@ -57,12 +57,12 @@ pub enum BeaconForkChoiceUpdateError {
     EngineUnavailable,
     /// An internal error occurred, not necessarily related to the update.
     #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
+    Internal(Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl BeaconForkChoiceUpdateError {
     /// Create a new internal error.
-    pub fn internal<E: std::error::Error + Send + Sync + 'static>(e: E) -> Self {
+    pub fn internal<E: core::error::Error + Send + Sync + 'static>(e: E) -> Self {
         Self::Internal(Box::new(e))
     }
 }
@@ -75,29 +75,5 @@ impl From<RethError> for BeaconForkChoiceUpdateError {
 impl From<DatabaseError> for BeaconForkChoiceUpdateError {
     fn from(e: DatabaseError) -> Self {
         Self::internal(e)
-    }
-}
-
-/// Represents all error cases when handling a new payload.
-///
-/// This represents all possible error cases that must be returned as JSON RCP errors back to the
-/// beacon node.
-#[derive(Debug, thiserror::Error)]
-pub enum BeaconOnNewPayloadError {
-    /// Thrown when the engine task is unavailable/stopped.
-    #[error("beacon consensus engine task stopped")]
-    EngineUnavailable,
-    /// Thrown when a block has blob transactions, but is not after the Cancun fork.
-    #[error("block has blob transactions, but is not after the Cancun fork")]
-    PreCancunBlockWithBlobTransactions,
-    /// An internal error occurred, not necessarily related to the payload.
-    #[error(transparent)]
-    Internal(Box<dyn std::error::Error + Send + Sync>),
-}
-
-impl BeaconOnNewPayloadError {
-    /// Create a new internal error.
-    pub fn internal<E: std::error::Error + Send + Sync + 'static>(e: E) -> Self {
-        Self::Internal(Box::new(e))
     }
 }

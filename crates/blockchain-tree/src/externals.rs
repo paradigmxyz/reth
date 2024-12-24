@@ -1,15 +1,19 @@
 //! Blockchain tree externals.
 
-use reth_consensus::Consensus;
-use reth_db::{static_file::HeaderMask, tables};
-use reth_db_api::{cursor::DbCursorRO, database::Database, transaction::DbTx};
-use reth_primitives::{BlockHash, BlockNumber, StaticFileSegment};
+use alloy_primitives::{BlockHash, BlockNumber};
+use reth_consensus::FullConsensus;
+use reth_db::{static_file::BlockHashMask, tables};
+use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
+use reth_node_types::NodeTypesWithDB;
+use reth_primitives::StaticFileSegment;
 use reth_provider::{
-    FinalizedBlockReader, FinalizedBlockWriter, ProviderFactory, StaticFileProviderFactory,
-    StatsReader,
+    providers::ProviderNodeTypes, ChainStateBlockReader, ChainStateBlockWriter, ProviderFactory,
+    StaticFileProviderFactory, StatsReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use std::{collections::BTreeMap, sync::Arc};
+
+pub use reth_provider::providers::{NodeTypesForTree, TreeNodeTypes};
 
 /// A container for external components.
 ///
@@ -19,29 +23,28 @@ use std::{collections::BTreeMap, sync::Arc};
 /// - A handle to the database
 /// - A handle to the consensus engine
 /// - The executor factory to execute blocks with
-/// - The chain spec
 #[derive(Debug)]
-pub struct TreeExternals<DB, E> {
+pub struct TreeExternals<N: NodeTypesWithDB, E> {
     /// The provider factory, used to commit the canonical chain, or unwind it.
-    pub(crate) provider_factory: ProviderFactory<DB>,
+    pub(crate) provider_factory: ProviderFactory<N>,
     /// The consensus engine.
-    pub(crate) consensus: Arc<dyn Consensus>,
+    pub(crate) consensus: Arc<dyn FullConsensus>,
     /// The executor factory to execute blocks with.
     pub(crate) executor_factory: E,
 }
 
-impl<DB, E> TreeExternals<DB, E> {
+impl<N: ProviderNodeTypes, E> TreeExternals<N, E> {
     /// Create new tree externals.
     pub fn new(
-        provider_factory: ProviderFactory<DB>,
-        consensus: Arc<dyn Consensus>,
+        provider_factory: ProviderFactory<N>,
+        consensus: Arc<dyn FullConsensus>,
         executor_factory: E,
     ) -> Self {
         Self { provider_factory, consensus, executor_factory }
     }
 }
 
-impl<DB: Database, E> TreeExternals<DB, E> {
+impl<N: ProviderNodeTypes, E> TreeExternals<N, E> {
     /// Fetches the latest canonical block hashes by walking backwards from the head.
     ///
     /// Returns the hashes sorted by increasing block numbers
@@ -74,7 +77,7 @@ impl<DB: Database, E> TreeExternals<DB, E> {
             hashes.extend(range.clone().zip(static_file_provider.fetch_range_with_predicate(
                 StaticFileSegment::Headers,
                 range,
-                |cursor, number| cursor.get_one::<HeaderMask<BlockHash>>(number.into()),
+                |cursor, number| cursor.get_one::<BlockHashMask>(number.into()),
                 |_| true,
             )?));
         }
@@ -85,7 +88,9 @@ impl<DB: Database, E> TreeExternals<DB, E> {
         Ok(hashes)
     }
 
-    pub(crate) fn fetch_latest_finalized_block_number(&self) -> ProviderResult<BlockNumber> {
+    pub(crate) fn fetch_latest_finalized_block_number(
+        &self,
+    ) -> ProviderResult<Option<BlockNumber>> {
         self.provider_factory.provider()?.last_finalized_block_number()
     }
 

@@ -46,7 +46,7 @@ fn to_quantity(val: u128) -> SubscriptionId<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::U128;
+    use alloy_primitives::U128;
 
     #[test]
     fn test_id_provider_quantity() {

@@ -1,31 +1,26 @@
-use std::{
-    cmp::Ordering,
-    task::{ready, Context, Poll},
-};
-
+use super::missing_static_data_error;
 use futures_util::TryStreamExt;
-use tracing::*;
-
-use reth_db::tables;
-use reth_db_api::{
-    cursor::{DbCursorRO, DbCursorRW},
-    database::Database,
-    models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
-    transaction::DbTxMut,
-};
+use reth_codecs::Compact;
+use reth_db::{tables, transaction::DbTx};
+use reth_db_api::{cursor::DbCursorRO, transaction::DbTxMut};
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
-use reth_primitives::{StaticFileSegment, TxNumber};
+use reth_primitives::StaticFileSegment;
+use reth_primitives_traits::{Block, BlockBody, BlockHeader};
 use reth_provider::{
-    providers::{StaticFileProvider, StaticFileWriter},
-    BlockReader, DatabaseProviderRW, HeaderProvider, ProviderError, StatsReader,
+    providers::StaticFileWriter, BlockReader, BlockWriter, DBProvider, ProviderError,
+    StaticFileProviderFactory, StatsReader, StorageLocation,
 };
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
 use reth_storage_errors::provider::ProviderResult;
+use std::{
+    cmp::Ordering,
+    task::{ready, Context, Poll},
+};
+use tracing::*;
 
-// TODO(onbjerg): Metrics and events (gradual status for e.g. CLI)
 /// The body stage downloads block bodies.
 ///
 /// The body stage downloads block bodies for all block headers stored locally in storage.
@@ -61,7 +56,7 @@ pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
     downloader: D,
     /// Block response buffer.
-    buffer: Option<Vec<BlockResponse>>,
+    buffer: Option<Vec<BlockResponse<D::Header, D::Body>>>,
 }
 
 impl<D: BodyDownloader> BodyStage<D> {
@@ -69,9 +64,95 @@ impl<D: BodyDownloader> BodyStage<D> {
     pub const fn new(downloader: D) -> Self {
         Self { downloader, buffer: None }
     }
+
+    /// Ensures that static files and database are in sync.
+    fn ensure_consistency<Provider>(
+        &self,
+        provider: &Provider,
+        unwind_block: Option<u64>,
+    ) -> Result<(), StageError>
+    where
+        Provider: DBProvider<Tx: DbTxMut> + BlockReader + StaticFileProviderFactory,
+    {
+        // Get id for the next tx_num of zero if there are no transactions.
+        let next_tx_num = provider
+            .tx_ref()
+            .cursor_read::<tables::TransactionBlocks>()?
+            .last()?
+            .map(|(id, _)| id + 1)
+            .unwrap_or_default();
+
+        let static_file_provider = provider.static_file_provider();
+
+        // Make sure Transactions static file is at the same height. If it's further, this
+        // input execution was interrupted previously and we need to unwind the static file.
+        let next_static_file_tx_num = static_file_provider
+            .get_highest_static_file_tx(StaticFileSegment::Transactions)
+            .map(|id| id + 1)
+            .unwrap_or_default();
+
+        match next_static_file_tx_num.cmp(&next_tx_num) {
+            // If static files are ahead, we are currently unwinding the stage or we didn't reach
+            // the database commit in a previous stage run. So, our only solution is to unwind the
+            // static files and proceed from the database expected height.
+            Ordering::Greater => {
+                let highest_db_block =
+                    provider.tx_ref().entries::<tables::BlockBodyIndices>()? as u64;
+                let mut static_file_producer =
+                    static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
+                static_file_producer
+                    .prune_transactions(next_static_file_tx_num - next_tx_num, highest_db_block)?;
+                // Since this is a database <-> static file inconsistency, we commit the change
+                // straight away.
+                static_file_producer.commit()?;
+            }
+            // If static files are behind, then there was some corruption or loss of files. This
+            // error will trigger an unwind, that will bring the database to the same height as the
+            // static files.
+            Ordering::Less => {
+                // If we are already in the process of unwind, this might be fine because we will
+                // fix the inconsistency right away.
+                if let Some(unwind_to) = unwind_block {
+                    let next_tx_num_after_unwind = provider
+                        .tx_ref()
+                        .get::<tables::BlockBodyIndices>(unwind_to)?
+                        .map(|b| b.next_tx_num())
+                        .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?;
+
+                    // This means we need a deeper unwind.
+                    if next_tx_num_after_unwind > next_static_file_tx_num {
+                        return Err(missing_static_data_error(
+                            next_static_file_tx_num.saturating_sub(1),
+                            &static_file_provider,
+                            provider,
+                            StaticFileSegment::Transactions,
+                        )?)
+                    }
+                } else {
+                    return Err(missing_static_data_error(
+                        next_static_file_tx_num.saturating_sub(1),
+                        &static_file_provider,
+                        provider,
+                        StaticFileSegment::Transactions,
+                    )?)
+                }
+            }
+            Ordering::Equal => {}
+        }
+
+        Ok(())
+    }
 }
 
-impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
+impl<Provider, D> Stage<Provider> for BodyStage<D>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + StaticFileProviderFactory
+        + StatsReader
+        + BlockReader
+        + BlockWriter<Block: Block<Header = D::Header, Body = D::Body>>,
+    D: BodyDownloader<Header: BlockHeader, Body: BlockBody<Transaction: Compact>>,
+{
     /// Return the id of the stage
     fn id(&self) -> StageId {
         StageId::Bodies
@@ -107,150 +188,29 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
 
     /// Download block bodies from the last checkpoint for this stage up until the latest synced
     /// header, limited by the stage's batch size.
-    fn execute(
-        &mut self,
-        provider: &DatabaseProviderRW<DB>,
-        input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
         let (from_block, to_block) = input.next_block_range().into_inner();
 
-        // Cursors used to write bodies, ommers and transactions
-        let tx = provider.tx_ref();
-        let mut block_indices_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
-        let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
-        let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
-        let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
-        let mut requests_cursor = tx.cursor_write::<tables::BlockRequests>()?;
+        self.ensure_consistency(provider, None)?;
 
-        // Get id for the next tx_num of zero if there are no transactions.
-        let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
-
-        let static_file_provider = provider.static_file_provider();
-        let mut static_file_producer =
-            static_file_provider.get_writer(from_block, StaticFileSegment::Transactions)?;
-
-        // Make sure Transactions static file is at the same height. If it's further, this
-        // input execution was interrupted previously and we need to unwind the static file.
-        let next_static_file_tx_num = static_file_provider
-            .get_highest_static_file_tx(StaticFileSegment::Transactions)
-            .map(|id| id + 1)
-            .unwrap_or_default();
-
-        match next_static_file_tx_num.cmp(&next_tx_num) {
-            // If static files are ahead, then we didn't reach the database commit in a previous
-            // stage run. So, our only solution is to unwind the static files and proceed from the
-            // database expected height.
-            Ordering::Greater => {
-                static_file_producer
-                    .prune_transactions(next_static_file_tx_num - next_tx_num, from_block - 1)?;
-                // Since this is a database <-> static file inconsistency, we commit the change
-                // straight away.
-                static_file_producer.commit()?;
-            }
-            // If static files are behind, then there was some corruption or loss of files. This
-            // error will trigger an unwind, that will bring the database to the same height as the
-            // static files.
-            Ordering::Less => {
-                return Err(missing_static_data_error(
-                    next_static_file_tx_num.saturating_sub(1),
-                    static_file_provider,
-                    provider,
-                )?)
-            }
-            Ordering::Equal => {}
-        }
-
-        debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, start_tx_id = next_tx_num, "Commencing sync");
+        debug!(target: "sync::stages::bodies", stage_progress = from_block, target = to_block, "Commencing sync");
 
         let buffer = self.buffer.take().ok_or(StageError::MissingDownloadBuffer)?;
         trace!(target: "sync::stages::bodies", bodies_len = buffer.len(), "Writing blocks");
-        let mut highest_block = from_block;
-        for response in buffer {
-            // Write block
-            let block_number = response.block_number();
+        let highest_block = buffer.last().map(|r| r.block_number()).unwrap_or(from_block);
 
-            let block_indices = StoredBlockBodyIndices {
-                first_tx_num: next_tx_num,
-                tx_count: match &response {
-                    BlockResponse::Full(block) => block.body.len() as u64,
-                    BlockResponse::Empty(_) => 0,
-                },
-            };
-
-            // Increment block on static file header.
-            if block_number > 0 {
-                let appended_block_number = static_file_producer
-                    .increment_block(StaticFileSegment::Transactions, block_number)?;
-
-                if appended_block_number != block_number {
-                    // This scenario indicates a critical error in the logic of adding new
-                    // items. It should be treated as an `expect()` failure.
-                    return Err(StageError::InconsistentBlockNumber {
-                        segment: StaticFileSegment::Transactions,
-                        database: block_number,
-                        static_file: appended_block_number,
-                    })
-                }
-            }
-
-            match response {
-                BlockResponse::Full(block) => {
-                    // write transaction block index
-                    if !block.body.is_empty() {
-                        tx_block_cursor.append(block_indices.last_tx_num(), block.number)?;
-                    }
-
-                    // Write transactions
-                    for transaction in block.body {
-                        let appended_tx_number = static_file_producer
-                            .append_transaction(next_tx_num, transaction.into())?;
-
-                        if appended_tx_number != next_tx_num {
-                            // This scenario indicates a critical error in the logic of adding new
-                            // items. It should be treated as an `expect()` failure.
-                            return Err(StageError::InconsistentTxNumber {
-                                segment: StaticFileSegment::Transactions,
-                                database: next_tx_num,
-                                static_file: appended_tx_number,
-                            })
-                        }
-
-                        // Increment transaction id for each transaction.
-                        next_tx_num += 1;
-                    }
-
-                    // Write ommers if any
-                    if !block.ommers.is_empty() {
-                        ommers_cursor
-                            .append(block_number, StoredBlockOmmers { ommers: block.ommers })?;
-                    }
-
-                    // Write withdrawals if any
-                    if let Some(withdrawals) = block.withdrawals {
-                        if !withdrawals.is_empty() {
-                            withdrawals_cursor
-                                .append(block_number, StoredBlockWithdrawals { withdrawals })?;
-                        }
-                    }
-
-                    // Write requests if any
-                    if let Some(requests) = block.requests {
-                        if !requests.0.is_empty() {
-                            requests_cursor.append(block_number, requests)?;
-                        }
-                    }
-                }
-                BlockResponse::Empty(_) => {}
-            };
-
-            // insert block meta
-            block_indices_cursor.append(block_number, block_indices)?;
-
-            highest_block = block_number;
-        }
+        // Write bodies to database.
+        provider.append_block_bodies(
+            buffer
+                .into_iter()
+                .map(|response| (response.block_number(), response.into_body()))
+                .collect(),
+            // We are writing transactions directly to static files.
+            StorageLocation::StaticFiles,
+        )?;
 
         // The stage is "done" if:
         // - We got fewer blocks than our target
@@ -266,77 +226,13 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     /// Unwind the stage.
     fn unwind(
         &mut self,
-        provider: &DatabaseProviderRW<DB>,
+        provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
         self.buffer.take();
 
-        let static_file_provider = provider.static_file_provider();
-        let tx = provider.tx_ref();
-        // Cursors to unwind bodies, ommers
-        let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
-        let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
-        let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
-        let mut requests_cursor = tx.cursor_write::<tables::BlockRequests>()?;
-        // Cursors to unwind transitions
-        let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
-
-        let mut rev_walker = body_cursor.walk_back(None)?;
-        while let Some((number, block_meta)) = rev_walker.next().transpose()? {
-            if number <= input.unwind_to {
-                break
-            }
-
-            // Delete the ommers entry if any
-            if ommers_cursor.seek_exact(number)?.is_some() {
-                ommers_cursor.delete_current()?;
-            }
-
-            // Delete the withdrawals entry if any
-            if withdrawals_cursor.seek_exact(number)?.is_some() {
-                withdrawals_cursor.delete_current()?;
-            }
-
-            // Delete the requests entry if any
-            if requests_cursor.seek_exact(number)?.is_some() {
-                requests_cursor.delete_current()?;
-            }
-
-            // Delete all transaction to block values.
-            if !block_meta.is_empty() &&
-                tx_block_cursor.seek_exact(block_meta.last_tx_num())?.is_some()
-            {
-                tx_block_cursor.delete_current()?;
-            }
-
-            // Delete the current body value
-            rev_walker.delete_current()?;
-        }
-
-        let mut static_file_producer =
-            static_file_provider.latest_writer(StaticFileSegment::Transactions)?;
-
-        // Unwind from static files. Get the current last expected transaction from DB, and match it
-        // on static file
-        let db_tx_num =
-            body_cursor.last()?.map(|(_, block_meta)| block_meta.last_tx_num()).unwrap_or_default();
-        let static_file_tx_num: u64 = static_file_provider
-            .get_highest_static_file_tx(StaticFileSegment::Transactions)
-            .unwrap_or_default();
-
-        // If there are more transactions on database, then we are missing static file data and we
-        // need to unwind further.
-        if db_tx_num > static_file_tx_num {
-            return Err(missing_static_data_error(
-                static_file_tx_num,
-                static_file_provider,
-                provider,
-            )?)
-        }
-
-        // Unwinds static file
-        static_file_producer
-            .prune_transactions(static_file_tx_num.saturating_sub(db_tx_num), input.unwind_to)?;
+        self.ensure_consistency(provider, Some(input.unwind_to))?;
+        provider.remove_bodies_above(input.unwind_to, StorageLocation::Both)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)
@@ -345,43 +241,13 @@ impl<DB: Database, D: BodyDownloader> Stage<DB> for BodyStage<D> {
     }
 }
 
-fn missing_static_data_error<DB: Database>(
-    last_tx_num: TxNumber,
-    static_file_provider: &StaticFileProvider,
-    provider: &DatabaseProviderRW<DB>,
-) -> Result<StageError, ProviderError> {
-    let mut last_block = static_file_provider
-        .get_highest_static_file_block(StaticFileSegment::Transactions)
-        .unwrap_or_default();
-
-    // To be extra safe, we make sure that the last tx num matches the last block from its indices.
-    // If not, get it.
-    loop {
-        if let Some(indices) = provider.block_body_indices(last_block)? {
-            if indices.last_tx_num() <= last_tx_num {
-                break
-            }
-        }
-        if last_block == 0 {
-            break
-        }
-        last_block -= 1;
-    }
-
-    let missing_block = Box::new(provider.sealed_header(last_block + 1)?.unwrap_or_default());
-
-    Ok(StageError::MissingStaticFileData {
-        block: missing_block,
-        segment: StaticFileSegment::Transactions,
-    })
-}
-
 // TODO(alexey): ideally, we want to measure Bodies stage progress in bytes, but it's hard to know
 //  beforehand how many bytes we need to download. So the good solution would be to measure the
 //  progress in gas as a proxy to size. Execution stage uses a similar approach.
-fn stage_checkpoint<DB: Database>(
-    provider: &DatabaseProviderRW<DB>,
-) -> ProviderResult<EntitiesCheckpoint> {
+fn stage_checkpoint<Provider>(provider: &Provider) -> ProviderResult<EntitiesCheckpoint>
+where
+    Provider: StatsReader + StaticFileProviderFactory,
+{
     Ok(EntitiesCheckpoint {
         processed: provider.count_entries::<tables::BlockBodyIndices>()? as u64,
         // Count only static files entries. If we count the database entries too, we may have
@@ -393,17 +259,14 @@ fn stage_checkpoint<DB: Database>(
 
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
-
-    use reth_provider::StaticFileProviderFactory;
-    use reth_stages_api::StageUnitCheckpoint;
-    use test_utils::*;
-
+    use super::*;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
-
-    use super::*;
+    use assert_matches::assert_matches;
+    use reth_provider::StaticFileProviderFactory;
+    use reth_stages_api::StageUnitCheckpoint;
+    use test_utils::*;
 
     stage_test_suite_ext!(BodyTestRunner, body);
 
@@ -619,8 +482,10 @@ mod tests {
                 UnwindStageTestRunner,
             },
         };
+        use alloy_consensus::{BlockHeader, Header};
+        use alloy_primitives::{BlockNumber, TxNumber, B256};
         use futures_util::Stream;
-        use reth_db::{static_file::HeaderMask, tables, test_utils::TempDatabase, DatabaseEnv};
+        use reth_db::{static_file::HeaderWithHashMask, tables};
         use reth_db_api::{
             cursor::DbCursorRO,
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
@@ -633,24 +498,19 @@ mod tests {
             },
             error::DownloadResult,
         };
-        use reth_primitives::{
-            BlockBody, BlockHash, BlockNumber, Header, SealedBlock, SealedHeader,
-            StaticFileSegment, TxNumber, B256,
-        };
+        use reth_primitives::{BlockBody, SealedBlock, SealedHeader, StaticFileSegment};
         use reth_provider::{
-            providers::StaticFileWriter, HeaderProvider, ProviderFactory,
-            StaticFileProviderFactory, TransactionsProvider,
+            providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, HeaderProvider,
+            ProviderFactory, StaticFileProviderFactory, TransactionsProvider,
         };
         use reth_stages_api::{ExecInput, ExecOutput, UnwindInput};
-        use reth_testing_utils::{
-            generators,
-            generators::{random_block_range, random_signed_tx},
+        use reth_testing_utils::generators::{
+            self, random_block_range, random_signed_tx, BlockRangeParams,
         };
         use std::{
             collections::{HashMap, VecDeque},
             ops::RangeInclusive,
             pin::Pin,
-            sync::Arc,
             task::{Context, Poll},
         };
 
@@ -659,15 +519,7 @@ mod tests {
 
         /// A helper to create a collection of block bodies keyed by their hash.
         pub(crate) fn body_by_hash(block: &SealedBlock) -> (B256, BlockBody) {
-            (
-                block.hash(),
-                BlockBody {
-                    transactions: block.body.clone(),
-                    ommers: block.ommers.clone(),
-                    withdrawals: block.withdrawals.clone(),
-                    requests: block.requests.clone(),
-                },
-            )
+            (block.hash(), block.body.clone())
         }
 
         /// A helper struct for running the [`BodyStage`].
@@ -721,7 +573,15 @@ mod tests {
                 let mut rng = generators::rng();
 
                 // Static files do not support gaps in headers, so we need to generate 0 to end
-                let blocks = random_block_range(&mut rng, 0..=end, GENESIS_HASH, 0..2);
+                let blocks = random_block_range(
+                    &mut rng,
+                    0..=end,
+                    BlockRangeParams {
+                        parent: Some(GENESIS_HASH),
+                        tx_count: 0..2,
+                        ..Default::default()
+                    },
+                );
                 self.db.insert_headers_with_td(blocks.iter().map(|block| &block.header))?;
                 if let Some(progress) = blocks.get(start as usize) {
                     // Insert last progress data
@@ -732,16 +592,14 @@ mod tests {
 
                         let body = StoredBlockBodyIndices {
                             first_tx_num: 0,
-                            tx_count: progress.body.len() as u64,
+                            tx_count: progress.body.transactions.len() as u64,
                         };
 
                         static_file_producer.set_block_range(0..=progress.number);
 
                         body.tx_num_range().try_for_each(|tx_num| {
                             let transaction = random_signed_tx(&mut rng);
-                            static_file_producer
-                                .append_transaction(tx_num, transaction.into())
-                                .map(drop)
+                            static_file_producer.append_transaction(tx_num, &transaction).map(drop)
                         })?;
 
                         if body.tx_count != 0 {
@@ -756,7 +614,7 @@ mod tests {
                         if !progress.ommers_hash_is_empty() {
                             tx.put::<tables::BlockOmmers>(
                                 progress.number,
-                                StoredBlockOmmers { ommers: progress.ommers.clone() },
+                                StoredBlockOmmers { ommers: progress.body.ommers.clone() },
                             )?;
                         }
 
@@ -887,7 +745,7 @@ mod tests {
         /// A [`BodyDownloader`] that is backed by an internal [`HashMap`] for testing.
         #[derive(Debug)]
         pub(crate) struct TestBodyDownloader {
-            provider_factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
+            provider_factory: ProviderFactory<MockNodeTypesWithDB>,
             responses: HashMap<B256, BlockBody>,
             headers: VecDeque<SealedHeader>,
             batch_size: u64,
@@ -895,7 +753,7 @@ mod tests {
 
         impl TestBodyDownloader {
             pub(crate) fn new(
-                provider_factory: ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>,
+                provider_factory: ProviderFactory<MockNodeTypesWithDB>,
                 responses: HashMap<B256, BlockBody>,
                 batch_size: u64,
             ) -> Self {
@@ -904,6 +762,9 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
+            type Header = Header;
+            type Body = BlockBody;
+
             fn set_download_range(
                 &mut self,
                 range: RangeInclusive<BlockNumber>,
@@ -913,10 +774,10 @@ mod tests {
                 for header in static_file_provider.fetch_range_iter(
                     StaticFileSegment::Headers,
                     *range.start()..*range.end() + 1,
-                    |cursor, number| cursor.get_two::<HeaderMask<Header, BlockHash>>(number.into()),
+                    |cursor, number| cursor.get_two::<HeaderWithHashMask<Header>>(number.into()),
                 )? {
                     let (header, hash) = header?;
-                    self.headers.push_back(header.seal(hash));
+                    self.headers.push_back(SealedHeader::new(header, hash));
                 }
 
                 Ok(())
@@ -924,7 +785,7 @@ mod tests {
         }
 
         impl Stream for TestBodyDownloader {
-            type Item = BodyDownloaderResult;
+            type Item = BodyDownloaderResult<Header, BlockBody>;
             fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 let this = self.get_mut();
 
@@ -932,20 +793,15 @@ mod tests {
                     return Poll::Ready(None)
                 }
 
-                let mut response = Vec::default();
+                let mut response =
+                    Vec::with_capacity(std::cmp::min(this.headers.len(), this.batch_size as usize));
                 while let Some(header) = this.headers.pop_front() {
                     if header.is_empty() {
                         response.push(BlockResponse::Empty(header))
                     } else {
                         let body =
                             this.responses.remove(&header.hash()).expect("requested unknown body");
-                        response.push(BlockResponse::Full(SealedBlock {
-                            header,
-                            body: body.transactions,
-                            ommers: body.ommers,
-                            withdrawals: body.withdrawals,
-                            requests: body.requests,
-                        }));
+                        response.push(BlockResponse::Full(SealedBlock { header, body }));
                     }
 
                     if response.len() as u64 >= this.batch_size {

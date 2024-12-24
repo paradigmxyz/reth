@@ -68,10 +68,10 @@ impl EngineHooksController {
                     "Polled running hook with db write access"
                 );
 
-                if !result.event.is_finished() {
-                    self.active_db_write_hook = Some(hook);
-                } else {
+                if result.event.is_finished() {
                     self.hooks.push_back(hook);
+                } else {
+                    self.active_db_write_hook = Some(hook);
                 }
 
                 return Poll::Ready(Ok(result))
@@ -156,9 +156,8 @@ impl EngineHooksController {
             );
 
             return Poll::Ready(Ok(result))
-        } else {
-            debug!(target: "consensus::engine::hooks", hook = hook.name(), "Next hook is not ready");
         }
+        debug!(target: "consensus::engine::hooks", hook = hook.name(), "Next hook is not ready");
 
         Poll::Pending
     }

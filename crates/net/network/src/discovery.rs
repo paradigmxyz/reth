@@ -3,8 +3,6 @@
 use crate::{
     cache::LruMap,
     error::{NetworkError, ServiceKind},
-    manager::DiscoveredEvent,
-    peers::PeerAddr,
 };
 use enr::Enr;
 use futures::StreamExt;
@@ -13,8 +11,10 @@ use reth_discv5::{DiscoveredPeer, Discv5};
 use reth_dns_discovery::{
     DnsDiscoveryConfig, DnsDiscoveryHandle, DnsDiscoveryService, DnsNodeRecordUpdate, DnsResolver,
 };
+use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
+use reth_network_api::{DiscoveredEvent, DiscoveryEvent};
 use reth_network_peers::{NodeRecord, PeerId};
-use reth_primitives::{EnrForkIdEntry, ForkId};
+use reth_network_types::PeerAddr;
 use secp256k1::SecretKey;
 use std::{
     collections::VecDeque,
@@ -194,6 +194,11 @@ impl Discovery {
         }
     }
 
+    /// Returns discv5 handle.
+    pub fn discv5(&self) -> Option<Discv5> {
+        self.discv5.clone()
+    }
+
     /// Add a node to the discv4 table.
     pub(crate) fn add_discv5_node(&self, enr: Enr<SecretKey>) -> Result<(), NetworkError> {
         if let Some(discv5) = &self.discv5 {
@@ -207,6 +212,10 @@ impl Discovery {
     fn on_node_record_update(&mut self, record: NodeRecord, fork_id: Option<ForkId>) {
         let peer_id = record.id;
         let tcp_addr = record.tcp_addr();
+        if tcp_addr.port() == 0 {
+            // useless peer for p2p
+            return
+        }
         let udp_addr = record.udp_addr();
         let addr = PeerAddr::new(tcp_addr, Some(udp_addr));
         _ =
@@ -324,15 +333,6 @@ impl Discovery {
             discovery_listeners: Default::default(),
         }
     }
-}
-
-/// Events produced by the [`Discovery`] manager.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DiscoveryEvent {
-    /// Discovered a node
-    NewNode(DiscoveredEvent),
-    /// Retrieved a [`ForkId`] from the peer via ENR request, See <https://eips.ethereum.org/EIPS/eip-868>
-    EnrForkId(PeerId, ForkId),
 }
 
 #[cfg(test)]

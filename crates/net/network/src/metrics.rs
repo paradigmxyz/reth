@@ -83,6 +83,10 @@ pub struct NetworkMetrics {
 pub struct SessionManagerMetrics {
     /// Number of successful outgoing dial attempts.
     pub(crate) total_dial_successes: Counter,
+    /// Number of dropped outgoing peer messages.
+    pub(crate) total_outgoing_peer_messages_dropped: Counter,
+    /// Number of queued outgoing messages
+    pub(crate) queued_outgoing_messages: Gauge,
 }
 
 /// Metrics for the [`TransactionsManager`](crate::transactions::TransactionsManager).
@@ -342,14 +346,31 @@ pub struct AnnouncedTxTypesMetrics {
 
     /// Histogram for tracking frequency of EIP-4844 transaction type
     pub(crate) eip4844: Histogram,
+
+    /// Histogram for tracking frequency of EIP-7702 transaction type
+    pub(crate) eip7702: Histogram,
 }
 
+/// Counts the number of transactions by their type in a block or collection.
+///
+/// This struct keeps track of the count of different transaction types
+/// as defined by various Ethereum Improvement Proposals (EIPs).
 #[derive(Debug, Default)]
 pub struct TxTypesCounter {
+    /// Count of legacy transactions (pre-EIP-2718).
     pub(crate) legacy: usize,
+
+    /// Count of transactions conforming to EIP-2930 (Optional access lists).
     pub(crate) eip2930: usize,
+
+    /// Count of transactions conforming to EIP-1559 (Fee market change).
     pub(crate) eip1559: usize,
+
+    /// Count of transactions conforming to EIP-4844 (Shard Blob Transactions).
     pub(crate) eip4844: usize,
+
+    /// Count of transactions conforming to EIP-7702 (Restricted Storage Windows).
+    pub(crate) eip7702: usize,
 }
 
 impl TxTypesCounter {
@@ -368,6 +389,9 @@ impl TxTypesCounter {
             TxType::Eip4844 => {
                 self.eip4844 += 1;
             }
+            TxType::Eip7702 => {
+                self.eip7702 += 1;
+            }
             _ => {}
         }
     }
@@ -381,5 +405,6 @@ impl AnnouncedTxTypesMetrics {
         self.eip2930.record(tx_types_counter.eip2930 as f64);
         self.eip1559.record(tx_types_counter.eip1559 as f64);
         self.eip4844.record(tx_types_counter.eip4844 as f64);
+        self.eip7702.record(tx_types_counter.eip7702 as f64);
     }
 }

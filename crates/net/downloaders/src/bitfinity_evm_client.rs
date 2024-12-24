@@ -1,3 +1,6 @@
+use alloy_eips::BlockHashOrNumber;
+use alloy_genesis::{ChainConfig, Genesis, GenesisAccount};
+use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
 use candid::Principal;
 use did::certified::CertifiedResult;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
@@ -8,7 +11,8 @@ use ic_certification::{Certificate, HashTree, LookupResult};
 use itertools::Either;
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use reth_chainspec::{
-    BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks, ChainSpec, EthereumHardfork,
+    once_cell_set, BaseFeeParams, BaseFeeParamsKind, Chain, ChainHardforks, ChainSpec,
+    EthereumHardfork,
 };
 
 use alloy_rlp::Decodable;
@@ -16,19 +20,15 @@ use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     error::RequestError,
-    headers::client::{HeadersClient, HeadersFut, HeadersRequest},
+    headers::client::{HeadersClient, HeadersDirection, HeadersFut, HeadersRequest},
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::{
-    ruint::Uint, BlockBody, BlockHash, BlockHashOrNumber, BlockNumber, ChainConfig, ForkCondition,
-    Genesis, GenesisAccount, Header, HeadersDirection, B256, U256,
-};
-use rlp::Encodable;
+use reth_primitives::{BlockBody, ForkCondition, Header, TransactionSigned};
 use serde_json::json;
 
-use std::time::Duration;
 use std::{self, cmp::min, collections::HashMap};
+use std::{sync::OnceLock, time::Duration};
 use thiserror::Error;
 
 use backon::{ExponentialBuilder, Retryable};
@@ -117,6 +117,8 @@ impl BitfinityEvmClient {
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
 
+        info!(target: "downloaders::bitfinity_evm_client", "Latest remote block: {latest_remote_block}");
+
         let mut end_block =
             min(end_block.unwrap_or(latest_remote_block), start_block + max_blocks - 1);
 
@@ -130,7 +132,7 @@ impl BitfinityEvmClient {
             let count = std::cmp::min(batch_size as u64, end_block + 1 - begin_block);
             let last_block = begin_block + count - 1;
 
-            debug!(target: "downloaders::bitfinity_evm_client", "Fetching blocks from {} to {}", begin_block, last_block);
+            info!(target: "downloaders::bitfinity_evm_client", "Fetching blocks from {} to {}", begin_block, last_block);
 
             let blocks_to_fetch = (begin_block..=last_block).map(Into::into).collect::<Vec<_>>();
 
@@ -149,29 +151,29 @@ impl BitfinityEvmClient {
                 .map(did::Block::<did::Transaction>::from)
                 .collect::<Vec<_>>();
 
-            trace!(target: "downloaders::bitfinity_evm_client", blocks = full_blocks.len(), "Fetched blocks");
+            info!(target: "downloaders::bitfinity_evm_client", blocks = full_blocks.len(), "Fetched blocks");
 
             for block in full_blocks {
                 if let Some(block_checker) = &block_checker {
                     block_checker.check_block(&block)?;
                 }
                 let header =
-                    reth_primitives::Block::decode(&mut block.rlp_bytes().to_vec().as_slice())?;
+                    reth_primitives::Header::decode(&mut block.header_rlp_encoded().as_slice())?;
+
+                let mut body = reth_primitives::BlockBody::default();
+                for tx in block.transactions {
+                    let decoded_tx =
+                        TransactionSigned::decode(&mut tx.rlp_encoded_2718().to_vec().as_slice())?;
+                    body.transactions.push(decoded_tx);
+                }
 
                 let block_hash = header.hash_slow();
 
-                headers.insert(header.number, header.header.clone());
+                headers.insert(header.number, header.clone());
                 hash_to_number.insert(block_hash, header.number);
-                bodies.insert(
-                    block_hash,
-                    BlockBody {
-                        transactions: header.body,
-                        ommers: header.ommers,
-                        withdrawals: header.withdrawals,
-                        requests: header.requests,
-                    },
-                );
+                bodies.insert(block_hash, body);
             }
+            info!(target: "downloaders::bitfinity_evm_client", blocks = headers.len(), "Decoded blocks");
         }
 
         info!(blocks = headers.len(), "Initialized remote client");
@@ -266,10 +268,7 @@ impl BitfinityEvmClient {
                         k,
                         v
                     );
-                    (
-                        k.0.into(),
-                        GenesisAccount { balance: Uint::from_limbs(v.0), ..Default::default() },
-                    )
+                    (k.0, GenesisAccount { balance: v.0, ..Default::default() })
                 },
             );
 
@@ -286,7 +285,7 @@ impl BitfinityEvmClient {
             eip150_block: Some(0),
             eip155_block: Some(0),
             eip158_block: Some(0),
-            terminal_total_difficulty: Some(Uint::ZERO),
+            terminal_total_difficulty: Some(U256::ZERO),
             ..Default::default()
         };
 
@@ -294,9 +293,10 @@ impl BitfinityEvmClient {
 
         let spec = ChainSpec {
             chain,
-            genesis_hash: genesis_block.hash.map(|h| h.0.into()),
+            genesis_hash: once_cell_set(genesis_block.hash.0),
+            genesis_header: OnceLock::new(),
             genesis,
-            paris_block_and_final_difficulty: Some((0, Uint::ZERO)),
+            paris_block_and_final_difficulty: Some((0, U256::ZERO)),
             hardforks: ChainHardforks::new(vec![
                 (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
                 (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
@@ -317,6 +317,7 @@ impl BitfinityEvmClient {
             deposit_contract: None,
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: 0,
+            max_gas_limit: 0,
             bitfinity_evm_url: Some(rpc),
         };
 
@@ -351,7 +352,7 @@ impl BitfinityEvmClient {
 
         // Helper closure to create and test a client connection
         let try_connect = move |url: String| {
-            let backoff = backoff.clone();
+            let backoff = backoff;
             let client = EthJsonRpcClient::new(ReqwestClient::new(url));
 
             async move {
@@ -412,19 +413,11 @@ impl BlockCertificateChecker {
             .get_last_certified_block()
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
-        Ok(Self {
-            certified_data: CertifiedResult {
-                data: did::Block::from(certified_data.data),
-                certificate: certified_data.certificate,
-                witness: certified_data.witness,
-            },
-            evmc_principal,
-            ic_root_key,
-        })
+        Ok(Self { certified_data, evmc_principal, ic_root_key })
     }
 
     fn get_block_number(&self) -> u64 {
-        self.certified_data.data.number.0.as_u64()
+        self.certified_data.data.number.as_u64()
     }
 
     fn check_block(&self, block: &did::Block<did::Transaction>) -> Result<(), RemoteClientError> {
@@ -483,6 +476,7 @@ impl BlockCertificateChecker {
 
 impl HeadersClient for BitfinityEvmClient {
     type Output = HeadersFut;
+    type Header = Header;
 
     fn get_headers_with_priority(
         &self,
@@ -533,6 +527,7 @@ impl HeadersClient for BitfinityEvmClient {
 
 impl BodiesClient for BitfinityEvmClient {
     type Output = BodiesFut;
+    type Body = BlockBody;
 
     fn get_block_bodies_with_priority(
         &self,

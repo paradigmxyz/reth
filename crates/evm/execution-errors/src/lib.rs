@@ -9,24 +9,22 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(not(feature = "std"))]
 extern crate alloc;
 
+use alloc::{boxed::Box, string::String};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use reth_consensus::ConsensusError;
 use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
 use revm_primitives::EVMError;
-
-#[cfg(not(feature = "std"))]
-use alloc::{boxed::Box, string::String};
+use thiserror::Error;
 
 pub mod trie;
-pub use trie::{StateRootError, StorageRootError};
+pub use trie::*;
 
 /// Transaction validation errors
-#[derive(thiserror_no_std::Error, Debug, Clone, PartialEq, Eq)]
+#[derive(Error, PartialEq, Eq, Clone, Debug)]
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
     #[error("EVM reported invalid transaction ({hash}): {error}")]
@@ -34,7 +32,6 @@ pub enum BlockValidationError {
         /// The hash of the transaction
         hash: B256,
         /// The EVM error.
-        #[source]
         error: Box<EVMError<ProviderError>>,
     },
     /// Error when recovering the sender for a transaction
@@ -47,7 +44,9 @@ pub enum BlockValidationError {
     #[error(transparent)]
     StateRoot(#[from] StateRootError),
     /// Error when transaction gas limit exceeds available block gas
-    #[error("transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}")]
+    #[error(
+        "transaction gas limit {transaction_gas_limit} is more than blocks available gas {block_available_gas}"
+    )]
     TransactionGasLimitMoreThanAvailableBlockGas {
         /// The transaction's gas limit
         transaction_gas_limit: u64,
@@ -70,7 +69,9 @@ pub enum BlockValidationError {
     #[error("EIP-4788 parent beacon block root missing for active Cancun block")]
     MissingParentBeaconBlockRoot,
     /// Error for Cancun genesis block when parent beacon block root is not zero
-    #[error("the parent beacon block root is not zero for Cancun genesis block: {parent_beacon_block_root}")]
+    #[error(
+        "the parent beacon block root is not zero for Cancun genesis block: {parent_beacon_block_root}"
+    )]
     CancunGenesisParentBeaconBlockRootNotZero {
         /// The beacon block root
         parent_beacon_block_root: B256,
@@ -85,11 +86,14 @@ pub enum BlockValidationError {
         /// The error message.
         message: String,
     },
-    /// Provider error during the [EIP-2935] block hash account loading.
+    /// EVM error during [EIP-2935] blockhash contract call.
     ///
     /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
-    #[error(transparent)]
-    BlockHashAccountLoadingFailed(#[from] ProviderError),
+    #[error("failed to apply blockhash contract call: {message}")]
+    BlockHashContractCall {
+        /// The error message.
+        message: String,
+    },
     /// EVM error during withdrawal requests contract call [EIP-7002]
     ///
     /// [EIP-7002]: https://eips.ethereum.org/EIPS/eip-7002
@@ -98,37 +102,79 @@ pub enum BlockValidationError {
         /// The error message.
         message: String,
     },
+    /// EVM error during consolidation requests contract call [EIP-7251]
+    ///
+    /// [EIP-7251]: https://eips.ethereum.org/EIPS/eip-7251
+    #[error("failed to apply consolidation requests contract call: {message}")]
+    ConsolidationRequestsContractCall {
+        /// The error message.
+        message: String,
+    },
     /// Error when decoding deposit requests from receipts [EIP-6110]
     ///
     /// [EIP-6110]: https://eips.ethereum.org/EIPS/eip-6110
-    #[error("failed to decode deposit requests from receipts: {0}")]
+    #[error("failed to decode deposit requests from receipts: {_0}")]
     DepositRequestDecode(String),
 }
 
 /// `BlockExecutor` Errors
-#[derive(thiserror_no_std::Error, Debug)]
+#[derive(Error, Debug)]
 pub enum BlockExecutionError {
-    /// Validation error, transparently wrapping `BlockValidationError`
+    /// Validation error, transparently wrapping [`BlockValidationError`]
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
-    /// Pruning error, transparently wrapping `PruneSegmentError`
-    #[error(transparent)]
-    Pruning(#[from] PruneSegmentError),
-    /// Consensus error, transparently wrapping `ConsensusError`
+    /// Consensus error, transparently wrapping [`ConsensusError`]
     #[error(transparent)]
     Consensus(#[from] ConsensusError),
-    /// Transaction error on revert with inner details
-    #[error("transaction error on revert: {inner}")]
-    CanonicalRevert {
-        /// The inner error message
-        inner: String,
-    },
-    /// Transaction error on commit with inner details
-    #[error("transaction error on commit: {inner}")]
-    CanonicalCommit {
-        /// The inner error message.
-        inner: String,
-    },
+    /// Internal, i.e. non consensus or validation related Block Executor Errors
+    #[error(transparent)]
+    Internal(#[from] InternalBlockExecutionError),
+}
+
+impl BlockExecutionError {
+    /// Create a new [`BlockExecutionError::Internal`] variant, containing a
+    /// [`InternalBlockExecutionError::Other`] error.
+    #[cfg(feature = "std")]
+    pub fn other<E>(error: E) -> Self
+    where
+        E: core::error::Error + Send + Sync + 'static,
+    {
+        Self::Internal(InternalBlockExecutionError::other(error))
+    }
+
+    /// Create a new [`BlockExecutionError::Internal`] variant, containing a
+    /// [`InternalBlockExecutionError::Other`] error with the given message.
+    #[cfg(feature = "std")]
+    pub fn msg(msg: impl std::fmt::Display) -> Self {
+        Self::Internal(InternalBlockExecutionError::msg(msg))
+    }
+
+    /// Returns the inner `BlockValidationError` if the error is a validation error.
+    pub const fn as_validation(&self) -> Option<&BlockValidationError> {
+        match self {
+            Self::Validation(err) => Some(err),
+            _ => None,
+        }
+    }
+
+    /// Returns `true` if the error is a state root error.
+    pub const fn is_state_root_error(&self) -> bool {
+        matches!(self, Self::Validation(BlockValidationError::StateRoot(_)))
+    }
+}
+
+impl From<ProviderError> for BlockExecutionError {
+    fn from(error: ProviderError) -> Self {
+        InternalBlockExecutionError::from(error).into()
+    }
+}
+
+/// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
+#[derive(Error, Debug)]
+pub enum InternalBlockExecutionError {
+    /// Pruning error, transparently wrapping [`PruneSegmentError`]
+    #[error(transparent)]
+    Pruning(#[from] PruneSegmentError),
     /// Error when appending chain on fork is not possible
     #[error(
         "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
@@ -143,44 +189,23 @@ pub enum BlockExecutionError {
     #[error(transparent)]
     LatestBlock(#[from] ProviderError),
     /// Arbitrary Block Executor Errors
-    #[cfg(feature = "std")]
     #[error(transparent)]
-    Other(Box<dyn std::error::Error + Send + Sync>),
+    Other(Box<dyn core::error::Error + Send + Sync>),
 }
 
-impl BlockExecutionError {
-    /// Create a new `BlockExecutionError::Other` variant.
+impl InternalBlockExecutionError {
+    /// Create a new [`InternalBlockExecutionError::Other`] variant.
     #[cfg(feature = "std")]
     pub fn other<E>(error: E) -> Self
     where
-        E: std::error::Error + Send + Sync + 'static,
+        E: core::error::Error + Send + Sync + 'static,
     {
         Self::Other(Box::new(error))
     }
 
-    /// Create a new [`BlockExecutionError::Other`] from a given message.
+    /// Create a new [`InternalBlockExecutionError::Other`] from a given message.
     #[cfg(feature = "std")]
     pub fn msg(msg: impl std::fmt::Display) -> Self {
         Self::Other(msg.to_string().into())
-    }
-
-    /// Returns the inner `BlockValidationError` if the error is a validation error.
-    pub const fn as_validation(&self) -> Option<&BlockValidationError> {
-        match self {
-            Self::Validation(err) => Some(err),
-            _ => None,
-        }
-    }
-
-    /// Returns `true` if the error is fatal.
-    ///
-    /// This represents an unrecoverable database related error.
-    pub const fn is_fatal(&self) -> bool {
-        matches!(self, Self::CanonicalCommit { .. } | Self::CanonicalRevert { .. })
-    }
-
-    /// Returns `true` if the error is a state root error.
-    pub const fn is_state_root_error(&self) -> bool {
-        matches!(self, Self::Validation(BlockValidationError::StateRoot(_)))
     }
 }

@@ -1,15 +1,18 @@
 //! Commonly used `NodeRecord` type for peers.
 
-use std::{
+use crate::PeerId;
+use alloc::{
+    format,
+    string::{String, ToString},
+};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
+use core::{
     fmt,
     fmt::Write,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     num::ParseIntError,
     str::FromStr,
 };
-
-use crate::PeerId;
-use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 #[cfg(feature = "secp256k1")]
@@ -33,10 +36,10 @@ use enr::Enr;
 pub struct NodeRecord {
     /// The Address of a node.
     pub address: IpAddr,
-    /// TCP port of the port that accepts connections.
-    pub tcp_port: u16,
     /// UDP discovery port.
     pub udp_port: u16,
+    /// TCP port of the port that accepts connections.
+    pub tcp_port: u16,
     /// Public key of the discovery service
     pub id: PeerId,
 }
@@ -197,6 +200,15 @@ impl FromStr for NodeRecord {
 }
 
 #[cfg(feature = "secp256k1")]
+impl TryFrom<Enr<secp256k1::SecretKey>> for NodeRecord {
+    type Error = NodeRecordParseError;
+
+    fn try_from(enr: Enr<secp256k1::SecretKey>) -> Result<Self, Self::Error> {
+        (&enr).try_into()
+    }
+}
+
+#[cfg(feature = "secp256k1")]
 impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
     type Error = NodeRecordParseError;
 
@@ -222,11 +234,10 @@ impl TryFrom<&Enr<secp256k1::SecretKey>> for NodeRecord {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy_rlp::Decodable;
     use rand::{thread_rng, Rng, RngCore};
     use std::net::Ipv6Addr;
-
-    use super::*;
 
     #[test]
     fn test_mapped_ipv6() {

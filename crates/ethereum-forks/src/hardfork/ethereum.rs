@@ -1,4 +1,5 @@
 use crate::{hardfork, ChainHardforks, ForkCondition, Hardfork};
+use alloc::{boxed::Box, format, string::String};
 use alloy_chains::Chain;
 use alloy_primitives::{uint, U256};
 use core::{
@@ -48,6 +49,8 @@ hardfork!(
         Cancun,
         /// Prague: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/prague.md>
         Prague,
+        /// Osaka: <https://eips.ethereum.org/EIPS/eip-7607>
+        Osaka,
     }
 );
 
@@ -355,29 +358,6 @@ impl EthereumHardfork {
             ),
             (Self::Shanghai, ForkCondition::Timestamp(1681338455)),
             (Self::Cancun, ForkCondition::Timestamp(1710338135)),
-        ]
-    }
-
-    /// Ethereum goerli list of hardforks.
-    pub const fn goerli() -> [(Self, ForkCondition); 14] {
-        [
-            (Self::Frontier, ForkCondition::Block(0)),
-            (Self::Homestead, ForkCondition::Block(0)),
-            (Self::Dao, ForkCondition::Block(0)),
-            (Self::Tangerine, ForkCondition::Block(0)),
-            (Self::SpuriousDragon, ForkCondition::Block(0)),
-            (Self::Byzantium, ForkCondition::Block(0)),
-            (Self::Constantinople, ForkCondition::Block(0)),
-            (Self::Petersburg, ForkCondition::Block(0)),
-            (Self::Istanbul, ForkCondition::Block(1561651)),
-            (Self::Berlin, ForkCondition::Block(4460644)),
-            (Self::London, ForkCondition::Block(5062605)),
-            (
-                Self::Paris,
-                ForkCondition::TTD { fork_block: None, total_difficulty: uint!(10_790_000_U256) },
-            ),
-            (Self::Shanghai, ForkCondition::Timestamp(1678832736)),
-            (Self::Cancun, ForkCondition::Timestamp(1705473120)),
         ]
     }
 

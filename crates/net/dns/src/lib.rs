@@ -21,7 +21,7 @@ use crate::{
 };
 pub use config::DnsDiscoveryConfig;
 use enr::Enr;
-use error::ParseDnsEntryError;
+pub use error::ParseDnsEntryError;
 use reth_ethereum_forks::{EnrForkIdEntry, ForkId};
 use reth_network_peers::{pk2id, NodeRecord};
 use schnellru::{ByLength, LruMap};

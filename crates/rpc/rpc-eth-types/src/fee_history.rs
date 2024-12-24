@@ -6,23 +6,24 @@ use std::{
     sync::{atomic::Ordering::SeqCst, Arc},
 };
 
+use alloy_consensus::{BlockHeader, Transaction, TxReceipt};
+use alloy_eips::eip1559::calc_next_block_base_fee;
+use alloy_primitives::B256;
+use alloy_rpc_types_eth::TxGasAndReward;
 use futures::{
     future::{Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
 use metrics::atomics::AtomicU64;
-use reth_chainspec::ChainSpec;
-use reth_primitives::{
-    basefee::calc_next_block_base_fee,
-    eip4844::{calc_blob_gasprice, calculate_excess_blob_gas},
-    Receipt, SealedBlock, TransactionSigned, B256,
-};
-use reth_provider::{BlockReaderIdExt, CanonStateNotification, ChainSpecProvider};
-use reth_rpc_types::TxGasAndReward;
+use reth_chain_state::CanonStateNotification;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
+use reth_primitives::{NodePrimitives, SealedBlock};
+use reth_primitives_traits::BlockBody;
+use reth_rpc_server_types::constants::gas_oracle::MAX_HEADER_HISTORY;
+use reth_storage_api::BlockReaderIdExt;
+use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
 use serde::{Deserialize, Serialize};
 use tracing::trace;
-
-use reth_rpc_server_types::constants::gas_oracle::MAX_HEADER_HISTORY;
 
 use super::{EthApiError, EthStateCache};
 
@@ -36,13 +37,12 @@ pub struct FeeHistoryCache {
 
 impl FeeHistoryCache {
     /// Creates new `FeeHistoryCache` instance, initialize it with the more recent data, set bounds
-    pub fn new(eth_cache: EthStateCache, config: FeeHistoryCacheConfig) -> Self {
+    pub fn new(config: FeeHistoryCacheConfig) -> Self {
         let inner = FeeHistoryCacheInner {
             lower_bound: Default::default(),
             upper_bound: Default::default(),
             config,
             entries: Default::default(),
-            eth_cache,
         };
         Self { inner: Arc::new(inner) }
     }
@@ -73,25 +73,28 @@ impl FeeHistoryCache {
     }
 
     /// Insert block data into the cache.
-    async fn insert_blocks<I>(&self, blocks: I)
+    async fn insert_blocks<'a, I, H, B, R>(&self, blocks: I)
     where
-        I: IntoIterator<Item = (SealedBlock, Arc<Vec<Receipt>>)>,
+        H: BlockHeader + 'a,
+        B: BlockBody,
+        R: TxReceipt,
+        I: IntoIterator<Item = (&'a SealedBlock<H, B>, Arc<Vec<R>>)>,
     {
         let mut entries = self.inner.entries.write().await;
 
         let percentiles = self.predefined_percentiles();
         // Insert all new blocks and calculate approximated rewards
         for (block, receipts) in blocks {
-            let mut fee_history_entry = FeeHistoryEntry::new(&block);
+            let mut fee_history_entry = FeeHistoryEntry::new(block);
             fee_history_entry.rewards = calculate_reward_percentiles_for_block(
                 &percentiles,
                 fee_history_entry.gas_used,
                 fee_history_entry.base_fee_per_gas,
-                &block.body,
+                block.body.transactions(),
                 &receipts,
             )
             .unwrap_or_default();
-            entries.insert(block.number, fee_history_entry);
+            entries.insert(block.number(), fee_history_entry);
         }
 
         // enforce bounds by popping the oldest entries
@@ -168,7 +171,7 @@ impl FeeHistoryCache {
 }
 
 /// Settings for the [`FeeHistoryCache`].
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeeHistoryCacheConfig {
     /// Max number of blocks in cache.
@@ -200,18 +203,20 @@ struct FeeHistoryCacheInner {
     config: FeeHistoryCacheConfig,
     /// Stores the entries of the cache
     entries: tokio::sync::RwLock<BTreeMap<u64, FeeHistoryEntry>>,
-    eth_cache: EthStateCache,
 }
 
 /// Awaits for new chain events and directly inserts them into the cache so they're available
 /// immediately before they need to be fetched from disk.
-pub async fn fee_history_cache_new_blocks_task<St, Provider>(
+pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
     fee_history_cache: FeeHistoryCache,
     mut events: St,
     provider: Provider,
+    cache: EthStateCache<N::Block, N::Receipt>,
 ) where
-    St: Stream<Item = CanonStateNotification> + Unpin + 'static,
-    Provider: BlockReaderIdExt + ChainSpecProvider + 'static,
+    St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
+    Provider:
+        BlockReaderIdExt<Block = N::Block, Receipt = N::Receipt> + ChainSpecProvider + 'static,
+    N: NodePrimitives,
 {
     // We're listening for new blocks emitted when the node is in live sync.
     // If the node transitions to stage sync, we need to fetch the missing blocks
@@ -224,12 +229,7 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
                 trace!(target: "rpc::fee", ?block_number, "Fetching missing block for fee history cache");
                 if let Ok(Some(hash)) = provider.block_hash(block_number) {
                     // fetch missing block
-                    fetch_missing_block = fee_history_cache
-                        .inner
-                        .eth_cache
-                        .get_block_and_receipts(hash)
-                        .boxed()
-                        .fuse();
+                    fetch_missing_block = cache.get_block_and_receipts(hash).boxed().fuse();
                 }
             }
         }
@@ -237,7 +237,9 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
         tokio::select! {
             res = &mut fetch_missing_block =>  {
                 if let Ok(res) = res {
-                    fee_history_cache.insert_blocks(res.into_iter()).await;
+                    fee_history_cache.insert_blocks(res.as_ref()
+                        .map(|(b, r)| (&b.block, r.clone()))
+                        .into_iter()).await;
                 }
             }
             event = events.next() =>  {
@@ -245,11 +247,12 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
                      // the stream ended, we are done
                     break;
                 };
-                let (blocks, receipts): (Vec<_>, Vec<_>) = event
-                    .committed()
+
+                let committed = event.committed();
+                let (blocks, receipts): (Vec<_>, Vec<_>) = committed
                     .blocks_and_receipts()
                     .map(|(block, receipts)| {
-                        (block.block.clone(), Arc::new(receipts.iter().flatten().cloned().collect::<Vec<_>>()))
+                        (&block.block, Arc::new(receipts.iter().flatten().cloned().collect::<Vec<_>>()))
                     })
                     .unzip();
                 fee_history_cache.insert_blocks(blocks.into_iter().zip(receipts)).await;
@@ -266,13 +269,17 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider>(
 /// the corresponding rewards for the transactions at each percentile.
 ///
 /// The results are returned as a vector of U256 values.
-pub fn calculate_reward_percentiles_for_block(
+pub fn calculate_reward_percentiles_for_block<T, R>(
     percentiles: &[f64],
     gas_used: u64,
     base_fee_per_gas: u64,
-    transactions: &[TransactionSigned],
-    receipts: &[Receipt],
-) -> Result<Vec<u128>, EthApiError> {
+    transactions: &[T],
+    receipts: &[R],
+) -> Result<Vec<u128>, EthApiError>
+where
+    T: Transaction,
+    R: TxReceipt,
+{
     let mut transactions = transactions
         .iter()
         .zip(receipts)
@@ -283,12 +290,12 @@ pub fn calculate_reward_percentiles_for_block(
             // While we will sum up the gas again later, it is worth
             // noting that the order of the transactions will be different,
             // so the sum will also be different for each receipt.
-            let gas_used = receipt.cumulative_gas_used - *previous_gas;
-            *previous_gas = receipt.cumulative_gas_used;
+            let gas_used = receipt.cumulative_gas_used() - *previous_gas;
+            *previous_gas = receipt.cumulative_gas_used();
 
             Some(TxGasAndReward {
-                gas_used,
-                reward: tx.effective_tip_per_gas(Some(base_fee_per_gas)).unwrap_or_default(),
+                gas_used: gas_used as u64,
+                reward: tx.effective_tip_per_gas(base_fee_per_gas).unwrap_or_default(),
             })
         })
         .collect::<Vec<_>>();
@@ -302,7 +309,7 @@ pub fn calculate_reward_percentiles_for_block(
     // the percentiles are monotonically increasing.
     let mut tx_index = 0;
     let mut cumulative_gas_used = transactions.first().map(|tx| tx.gas_used).unwrap_or_default();
-    let mut rewards_in_block = Vec::new();
+    let mut rewards_in_block = Vec::with_capacity(percentiles.len());
     for percentile in percentiles {
         // Empty blocks should return in a zero row
         if transactions.is_empty() {
@@ -357,31 +364,31 @@ impl FeeHistoryEntry {
     /// Creates a new entry from a sealed block.
     ///
     /// Note: This does not calculate the rewards for the block.
-    pub fn new(block: &SealedBlock) -> Self {
+    pub fn new<H: BlockHeader, B: BlockBody>(block: &SealedBlock<H, B>) -> Self {
         Self {
-            base_fee_per_gas: block.base_fee_per_gas.unwrap_or_default(),
-            gas_used_ratio: block.gas_used as f64 / block.gas_limit as f64,
-            base_fee_per_blob_gas: block.blob_fee(),
-            blob_gas_used_ratio: block.blob_gas_used() as f64 /
-                reth_primitives::constants::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
-            excess_blob_gas: block.excess_blob_gas,
-            blob_gas_used: block.blob_gas_used,
-            gas_used: block.gas_used,
+            base_fee_per_gas: block.base_fee_per_gas().unwrap_or_default(),
+            gas_used_ratio: block.gas_used() as f64 / block.gas_limit() as f64,
+            base_fee_per_blob_gas: block.excess_blob_gas().map(calc_blob_gasprice),
+            blob_gas_used_ratio: block.body.blob_gas_used() as f64 /
+                alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
+            excess_blob_gas: block.excess_blob_gas(),
+            blob_gas_used: block.blob_gas_used(),
+            gas_used: block.gas_used(),
             header_hash: block.hash(),
-            gas_limit: block.gas_limit,
+            gas_limit: block.gas_limit(),
             rewards: Vec::new(),
-            timestamp: block.timestamp,
+            timestamp: block.timestamp(),
         }
     }
 
     /// Returns the base fee for the next block according to the EIP-1559 spec.
-    pub fn next_block_base_fee(&self, chain_spec: &ChainSpec) -> u64 {
+    pub fn next_block_base_fee(&self, chain_spec: impl EthChainSpec) -> u64 {
         calc_next_block_base_fee(
-            self.gas_used as u128,
-            self.gas_limit as u128,
-            self.base_fee_per_gas as u128,
+            self.gas_used,
+            self.gas_limit,
+            self.base_fee_per_gas,
             chain_spec.base_fee_params_at_timestamp(self.timestamp),
-        ) as u64
+        )
     }
 
     /// Returns the blob fee for the next block according to the EIP-4844 spec.
@@ -397,6 +404,6 @@ impl FeeHistoryEntry {
     ///
     /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
     pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
-        Some(calculate_excess_blob_gas(self.excess_blob_gas?, self.blob_gas_used?))
+        Some(calc_excess_blob_gas(self.excess_blob_gas?, self.blob_gas_used?))
     }
 }

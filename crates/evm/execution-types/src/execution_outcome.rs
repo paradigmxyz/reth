@@ -1,13 +1,32 @@
-use reth_primitives::{
-    logs_bloom, Account, Address, BlockNumber, Bloom, Bytecode, Log, Receipt, Receipts, Requests,
-    StorageEntry, B256, U256,
-};
-use reth_trie::HashedPostState;
+use crate::BlockExecutionOutput;
+use alloy_eips::eip7685::Requests;
+use alloy_primitives::{logs_bloom, Address, BlockNumber, Bloom, Log, B256, U256};
+use reth_primitives::Receipts;
+use reth_primitives_traits::{receipt::ReceiptExt, Account, Bytecode, Receipt, StorageEntry};
+use reth_trie::{HashedPostState, KeyHasher};
 use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,
 };
 use std::collections::HashMap;
+
+/// Represents a changed account
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChangedAccount {
+    /// The address of the account.
+    pub address: Address,
+    /// Account nonce.
+    pub nonce: u64,
+    /// Account balance.
+    pub balance: U256,
+}
+
+impl ChangedAccount {
+    /// Creates a new [`ChangedAccount`] with the given address and 0 balance and nonce.
+    pub const fn empty(address: Address) -> Self {
+        Self { address, nonce: 0, balance: U256::ZERO }
+    }
+}
 
 /// Represents the outcome of block execution, including post-execution changes and reverts.
 ///
@@ -15,7 +34,7 @@ use std::collections::HashMap;
 /// blocks, capturing the resulting state, receipts, and requests following the execution.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ExecutionOutcome {
+pub struct ExecutionOutcome<T = reth_primitives::Receipt> {
     /// Bundle state with reverts.
     pub bundle: BundleState,
     /// The collection of receipts.
@@ -23,7 +42,7 @@ pub struct ExecutionOutcome {
     /// The inner vector stores receipts ordered by transaction number.
     ///
     /// If receipt is None it means it is pruned.
-    pub receipts: Receipts,
+    pub receipts: Receipts<T>,
     /// First block of bundle state.
     pub first_block: BlockNumber,
     /// The collection of EIP-7685 requests.
@@ -45,14 +64,14 @@ pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
 /// Type used to initialize revms reverts.
 pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
 
-impl ExecutionOutcome {
+impl<T> ExecutionOutcome<T> {
     /// Creates a new `ExecutionOutcome`.
     ///
     /// This constructor initializes a new `ExecutionOutcome` instance with the provided
     /// bundle state, receipts, first block number, and EIP-7685 requests.
     pub const fn new(
         bundle: BundleState,
-        receipts: Receipts,
+        receipts: Receipts<T>,
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
@@ -66,8 +85,8 @@ impl ExecutionOutcome {
     pub fn new_init(
         state_init: BundleStateInit,
         revert_init: RevertsInit,
-        contracts_init: Vec<(B256, Bytecode)>,
-        receipts: Receipts,
+        contracts_init: impl IntoIterator<Item = (B256, Bytecode)>,
+        receipts: Receipts<T>,
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
@@ -128,7 +147,7 @@ impl ExecutionOutcome {
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address).map(|a| a.info.clone().map(Into::into))
+        self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
     }
 
     /// Get storage if value is known.
@@ -145,12 +164,12 @@ impl ExecutionOutcome {
 
     /// Returns [`HashedPostState`] for this execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
-    pub fn hash_state_slow(&self) -> HashedPostState {
-        HashedPostState::from_bundle_state(&self.bundle.state)
+    pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
+        HashedPostState::from_bundle_state::<KH>(&self.bundle.state)
     }
 
     /// Transform block number to the index of block.
-    fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
+    pub fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
             return None
         }
@@ -161,56 +180,29 @@ impl ExecutionOutcome {
         Some(index as usize)
     }
 
-    /// Returns an iterator over all block logs.
-    pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> {
-        let index = self.block_number_to_index(block_number)?;
-        Some(self.receipts[index].iter().filter_map(|r| Some(r.as_ref()?.logs.iter())).flatten())
-    }
-
-    /// Return blocks logs bloom
-    pub fn block_logs_bloom(&self, block_number: BlockNumber) -> Option<Bloom> {
-        Some(logs_bloom(self.logs(block_number)?))
-    }
-
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
-    pub fn receipts_root_slow(&self, _block_number: BlockNumber) -> Option<B256> {
-        #[cfg(feature = "optimism")]
-        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
-        #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(self.block_number_to_index(_block_number)?)
-    }
-
-    /// Returns the receipt root for all recorded receipts.
-    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
-    /// of receipt. This is a expensive operation.
-    #[cfg(feature = "optimism")]
-    pub fn optimism_receipts_root_slow(
+    pub fn generic_receipts_root_slow(
         &self,
         block_number: BlockNumber,
-        chain_spec: &reth_chainspec::ChainSpec,
-        timestamp: u64,
+        f: impl FnOnce(&[&T]) -> B256,
     ) -> Option<B256> {
-        self.receipts.optimism_root_slow(
-            self.block_number_to_index(block_number)?,
-            chain_spec,
-            timestamp,
-        )
+        self.receipts.root_slow(self.block_number_to_index(block_number)?, f)
     }
 
     /// Returns reference to receipts.
-    pub const fn receipts(&self) -> &Receipts {
+    pub const fn receipts(&self) -> &Receipts<T> {
         &self.receipts
     }
 
     /// Returns mutable reference to receipts.
-    pub fn receipts_mut(&mut self) -> &mut Receipts {
+    pub fn receipts_mut(&mut self) -> &mut Receipts<T> {
         &mut self.receipts
     }
 
     /// Return all block receipts
-    pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[Option<Receipt>] {
+    pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[Option<T>] {
         let Some(index) = self.block_number_to_index(block_number) else { return &[] };
         &self.receipts[index]
     }
@@ -262,7 +254,10 @@ impl ExecutionOutcome {
     /// # Panics
     ///
     /// If the target block number is not included in the state block range.
-    pub fn split_at(self, at: BlockNumber) -> (Option<Self>, Self) {
+    pub fn split_at(self, at: BlockNumber) -> (Option<Self>, Self)
+    where
+        T: Clone,
+    {
         if at == self.first_block {
             return (None, self)
         }
@@ -314,7 +309,7 @@ impl ExecutionOutcome {
     }
 
     /// Create a new instance with updated receipts.
-    pub fn with_receipts(mut self, receipts: Receipts) -> Self {
+    pub fn with_receipts(mut self, receipts: Receipts<T>) -> Self {
         self.receipts = receipts;
         self
     }
@@ -324,17 +319,70 @@ impl ExecutionOutcome {
         self.requests = requests;
         self
     }
+
+    /// Returns an iterator over all changed accounts from the `ExecutionOutcome`.
+    ///
+    /// This method filters the accounts to return only those that have undergone changes
+    /// and maps them into `ChangedAccount` instances, which include the address, nonce, and
+    /// balance.
+    pub fn changed_accounts(&self) -> impl Iterator<Item = ChangedAccount> + '_ {
+        self.accounts_iter().filter_map(|(addr, acc)| acc.map(|acc| (addr, acc))).map(
+            |(address, acc)| ChangedAccount { address, nonce: acc.nonce, balance: acc.balance },
+        )
+    }
+}
+
+impl<T: Receipt<Log = Log>> ExecutionOutcome<T> {
+    /// Returns an iterator over all block logs.
+    pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> {
+        let index = self.block_number_to_index(block_number)?;
+        Some(self.receipts[index].iter().filter_map(|r| Some(r.as_ref()?.logs().iter())).flatten())
+    }
+
+    /// Return blocks logs bloom
+    pub fn block_logs_bloom(&self, block_number: BlockNumber) -> Option<Bloom> {
+        Some(logs_bloom(self.logs(block_number)?))
+    }
+
+    /// Returns the receipt root for all recorded receipts.
+    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
+    /// of receipt. This is a expensive operation.
+    pub fn receipts_root_slow(&self, _block_number: BlockNumber) -> Option<B256>
+    where
+        T: ReceiptExt,
+    {
+        #[cfg(feature = "optimism")]
+        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
+        #[cfg(not(feature = "optimism"))]
+        self.receipts.root_slow(self.block_number_to_index(_block_number)?, T::receipts_root)
+    }
+}
+
+impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
+    fn from(value: (BlockExecutionOutput<T>, BlockNumber)) -> Self {
+        Self {
+            bundle: value.0.state,
+            receipts: Receipts::from(value.0.receipts),
+            first_block: value.1,
+            requests: vec![value.0.requests],
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::{eip6110::DepositRequest, eip7002::WithdrawalRequest};
-    use alloy_primitives::{FixedBytes, LogData};
-    use reth_primitives::{Address, Receipts, Request, Requests, TxType, B256};
-    use std::collections::HashMap;
+    #[cfg(not(feature = "optimism"))]
+    use alloy_primitives::bytes;
+    #[cfg(not(feature = "optimism"))]
+    use alloy_primitives::LogData;
+    use alloy_primitives::{Address, B256};
+    use reth_primitives::Receipts;
+    #[cfg(not(feature = "optimism"))]
+    use reth_primitives::TxType;
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_initialisation() {
         // Create a new BundleState object with initial data
         let bundle = BundleState::new(
@@ -345,41 +393,16 @@ mod tests {
 
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
             })]],
         };
 
-        // Create a Requests object with a vector of requests, including DepositRequest and
-        // WithdrawalRequest
-        let requests = vec![Requests(vec![
-            Request::DepositRequest(DepositRequest {
-                pubkey: FixedBytes::<48>::from([1; 48]),
-                withdrawal_credentials: B256::from([0; 32]),
-                amount: 1111,
-                signature: FixedBytes::<96>::from([2; 96]),
-                index: 222,
-            }),
-            Request::DepositRequest(DepositRequest {
-                pubkey: FixedBytes::<48>::from([23; 48]),
-                withdrawal_credentials: B256::from([0; 32]),
-                amount: 34343,
-                signature: FixedBytes::<96>::from([43; 96]),
-                index: 1212,
-            }),
-            Request::WithdrawalRequest(WithdrawalRequest {
-                source_address: Address::from([1; 20]),
-                validator_pubkey: FixedBytes::<48>::from([10; 48]),
-                amount: 72,
-            }),
-        ])];
+        // Create a Requests object with a vector of requests
+        let requests = vec![Requests::new(vec![bytes!("dead"), bytes!("beef"), bytes!("beebee")])];
 
         // Define the first block number
         let first_block = 123;
@@ -400,16 +423,16 @@ mod tests {
         );
 
         // Create a BundleStateInit object and insert initial data
-        let mut state_init: BundleStateInit = HashMap::new();
+        let mut state_init: BundleStateInit = HashMap::default();
         state_init
             .insert(Address::new([2; 20]), (None, Some(Account::default()), HashMap::default()));
 
         // Create a HashMap for account reverts and insert initial data
-        let mut revert_inner: HashMap<Address, AccountRevertInit> = HashMap::new();
+        let mut revert_inner: HashMap<Address, AccountRevertInit> = HashMap::default();
         revert_inner.insert(Address::new([2; 20]), (None, vec![]));
 
         // Create a RevertsInit object and insert the revert_inner data
-        let mut revert_init: RevertsInit = HashMap::new();
+        let mut revert_init: RevertsInit = HashMap::default();
         revert_init.insert(123, revert_inner);
 
         // Assert that creating a new ExecutionOutcome using the new_init method matches
@@ -428,18 +451,15 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_block_number_to_index() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
             })]],
         };
 
@@ -466,18 +486,15 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_get_logs() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
             })]],
         };
 
@@ -501,18 +518,15 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_receipts_by_block() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
             })]],
         };
 
@@ -534,37 +548,30 @@ mod tests {
         // Assert that the receipts for block number 123 match the expected receipts
         assert_eq!(
             receipts_by_block,
-            vec![&Some(Receipt {
+            vec![&Some(reth_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
             })]
         );
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_receipts_len() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
+            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
             })]],
         };
 
         // Create an empty Receipts object
-        let receipts_empty = Receipts { receipt_vec: vec![] };
+        let receipts_empty: Receipts = Receipts { receipt_vec: vec![] };
 
         // Define the first block number
         let first_block = 123;
@@ -600,17 +607,14 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_revert_to() {
         // Create a random receipt object
-        let receipt = Receipt {
+        let receipt = reth_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: Some(18),
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: Some(34),
         };
 
         // Create a Receipts object with a vector of receipt vectors
@@ -621,17 +625,12 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a DepositRequest object with specific attributes.
-        let request = Request::DepositRequest(DepositRequest {
-            pubkey: FixedBytes::<48>::from([1; 48]),
-            withdrawal_credentials: B256::from([0; 32]),
-            amount: 1111,
-            signature: FixedBytes::<96>::from([2; 96]),
-            index: 222,
-        });
+        // Create a request.
+        let request = bytes!("deadbeef");
 
         // Create a vector of Requests containing the request.
-        let requests = vec![Requests(vec![request]), Requests(vec![request])];
+        let requests =
+            vec![Requests::new(vec![request.clone()]), Requests::new(vec![request.clone()])];
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
@@ -645,7 +644,7 @@ mod tests {
         assert_eq!(exec_res.receipts, Receipts { receipt_vec: vec![vec![Some(receipt)]] });
 
         // Assert that the requests are properly cut after reverting to the initial block number.
-        assert_eq!(exec_res.requests, vec![Requests(vec![request])]);
+        assert_eq!(exec_res.requests, vec![Requests::new(vec![request])]);
 
         // Assert that the revert_to method returns false when attempting to revert to a block
         // number greater than the initial block number.
@@ -657,33 +656,24 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_extend_execution_outcome() {
         // Create a Receipt object with specific attributes.
-        let receipt = Receipt {
+        let receipt = reth_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: Some(18),
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: Some(34),
         };
 
         // Create a Receipts object containing the receipt.
         let receipts = Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] };
 
-        // Create a DepositRequest object with specific attributes.
-        let request = Request::DepositRequest(DepositRequest {
-            pubkey: FixedBytes::<48>::from([1; 48]),
-            withdrawal_credentials: B256::from([0; 32]),
-            amount: 1111,
-            signature: FixedBytes::<96>::from([2; 96]),
-            index: 222,
-        });
+        // Create a request.
+        let request = bytes!("deadbeef");
 
         // Create a vector of Requests containing the request.
-        let requests = vec![Requests(vec![request])];
+        let requests = vec![Requests::new(vec![request.clone()])];
 
         // Define the initial block number.
         let first_block = 123;
@@ -703,24 +693,21 @@ mod tests {
                 receipts: Receipts {
                     receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]]
                 },
-                requests: vec![Requests(vec![request]), Requests(vec![request])],
+                requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
                 first_block: 123,
             }
         );
     }
 
     #[test]
+    #[cfg(not(feature = "optimism"))]
     fn test_split_at_execution_outcome() {
         // Create a random receipt object
-        let receipt = Receipt {
+        let receipt = reth_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: Some(18),
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: Some(34),
         };
 
         // Create a Receipts object with a vector of receipt vectors
@@ -735,18 +722,15 @@ mod tests {
         // Define the first block number
         let first_block = 123;
 
-        // Create a DepositRequest object with specific attributes.
-        let request = Request::DepositRequest(DepositRequest {
-            pubkey: FixedBytes::<48>::from([1; 48]),
-            withdrawal_credentials: B256::from([0; 32]),
-            amount: 1111,
-            signature: FixedBytes::<96>::from([2; 96]),
-            index: 222,
-        });
+        // Create a request.
+        let request = bytes!("deadbeef");
 
         // Create a vector of Requests containing the request.
-        let requests =
-            vec![Requests(vec![request]), Requests(vec![request]), Requests(vec![request])];
+        let requests = vec![
+            Requests::new(vec![request.clone()]),
+            Requests::new(vec![request.clone()]),
+            Requests::new(vec![request.clone()]),
+        ];
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
@@ -760,7 +744,7 @@ mod tests {
         let lower_execution_outcome = ExecutionOutcome {
             bundle: Default::default(),
             receipts: Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] },
-            requests: vec![Requests(vec![request])],
+            requests: vec![Requests::new(vec![request.clone()])],
             first_block,
         };
 
@@ -770,7 +754,7 @@ mod tests {
             receipts: Receipts {
                 receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
             },
-            requests: vec![Requests(vec![request]), Requests(vec![request])],
+            requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
             first_block: 124,
         };
 
@@ -780,5 +764,76 @@ mod tests {
 
         // Assert that splitting at the first block number returns None for the lower outcome
         assert_eq!(exec_res.clone().split_at(123), (None, exec_res));
+    }
+
+    #[test]
+    fn test_changed_accounts() {
+        // Set up some sample accounts
+        let address1 = Address::random();
+        let address2 = Address::random();
+        let address3 = Address::random();
+
+        // Set up account info with some changes
+        let account_info1 =
+            AccountInfo { nonce: 1, balance: U256::from(100), code_hash: B256::ZERO, code: None };
+        let account_info2 =
+            AccountInfo { nonce: 2, balance: U256::from(200), code_hash: B256::ZERO, code: None };
+
+        // Set up the bundle state with these accounts
+        let mut bundle_state = BundleState::default();
+        bundle_state.state.insert(
+            address1,
+            BundleAccount {
+                info: Some(account_info1),
+                storage: Default::default(),
+                original_info: Default::default(),
+                status: Default::default(),
+            },
+        );
+        bundle_state.state.insert(
+            address2,
+            BundleAccount {
+                info: Some(account_info2),
+                storage: Default::default(),
+                original_info: Default::default(),
+                status: Default::default(),
+            },
+        );
+
+        // Unchanged account
+        bundle_state.state.insert(
+            address3,
+            BundleAccount {
+                info: None,
+                storage: Default::default(),
+                original_info: Default::default(),
+                status: Default::default(),
+            },
+        );
+
+        let execution_outcome: ExecutionOutcome = ExecutionOutcome {
+            bundle: bundle_state,
+            receipts: Receipts::default(),
+            first_block: 0,
+            requests: vec![],
+        };
+
+        // Get the changed accounts
+        let changed_accounts: Vec<ChangedAccount> = execution_outcome.changed_accounts().collect();
+
+        // Assert that the changed accounts match the expected ones
+        assert_eq!(changed_accounts.len(), 2);
+
+        assert!(changed_accounts.contains(&ChangedAccount {
+            address: address1,
+            nonce: 1,
+            balance: U256::from(100)
+        }));
+
+        assert!(changed_accounts.contains(&ChangedAccount {
+            address: address2,
+            nonce: 2,
+            balance: U256::from(200)
+        }));
     }
 }

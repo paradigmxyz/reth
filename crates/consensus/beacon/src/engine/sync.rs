@@ -4,15 +4,15 @@ use crate::{
     engine::metrics::EngineSyncMetrics, BeaconConsensusEngineEvent,
     ConsensusEngineLiveSyncProgress, EthBeaconConsensus,
 };
+use alloy_consensus::Header;
+use alloy_primitives::{BlockNumber, B256};
 use futures::FutureExt;
-use reth_chainspec::ChainSpec;
-use reth_db_api::database::Database;
 use reth_network_p2p::{
-    bodies::client::BodiesClient,
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
-    headers::client::HeadersClient,
+    EthBlockClient,
 };
-use reth_primitives::{BlockNumber, SealedBlock, B256};
+use reth_primitives::{BlockBody, EthPrimitives, NodePrimitives, SealedBlock};
+use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
 use reth_tokio_util::EventSender;
@@ -32,10 +32,10 @@ use tracing::trace;
 /// Caution: If the pipeline is running, this type will not emit blocks downloaded from the network
 /// [`EngineSyncEvent::FetchedFullBlock`] until the pipeline is idle to prevent commits to the
 /// database while the pipeline is still active.
-pub(crate) struct EngineSyncController<DB, Client>
+pub(crate) struct EngineSyncController<N, Client>
 where
-    DB: Database,
-    Client: HeadersClient + BodiesClient,
+    N: ProviderNodeTypes,
+    Client: EthBlockClient,
 {
     /// A downloader that can download full blocks from the network.
     full_block_client: FullBlockClient<Client>,
@@ -43,7 +43,7 @@ where
     pipeline_task_spawner: Box<dyn TaskSpawner>,
     /// The current state of the pipeline.
     /// The pipeline is used for large ranges.
-    pipeline_state: PipelineState<DB>,
+    pipeline_state: PipelineState<N>,
     /// Pending target block for the pipeline to sync
     pending_pipeline_target: Option<PipelineTarget>,
     /// In-flight full block requests in progress.
@@ -62,18 +62,18 @@ where
     metrics: EngineSyncMetrics,
 }
 
-impl<DB, Client> EngineSyncController<DB, Client>
+impl<N, Client> EngineSyncController<N, Client>
 where
-    DB: Database + 'static,
-    Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+    N: ProviderNodeTypes,
+    Client: EthBlockClient + 'static,
 {
     /// Create a new instance
     pub(crate) fn new(
-        pipeline: Pipeline<DB>,
+        pipeline: Pipeline<N>,
         client: Client,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         max_block: Option<BlockNumber>,
-        chain_spec: Arc<ChainSpec>,
+        chain_spec: Arc<N::ChainSpec>,
         event_sender: EventSender<BeaconConsensusEngineEvent>,
     ) -> Self {
         Self {
@@ -219,8 +219,7 @@ where
     ///
     /// Note: this is mainly for debugging purposes.
     pub(crate) fn has_reached_max_block(&self, progress: BlockNumber) -> bool {
-        let has_reached_max_block =
-            self.max_block.map(|target| progress >= target).unwrap_or_default();
+        let has_reached_max_block = self.max_block.is_some_and(|target| progress >= target);
         if has_reached_max_block {
             trace!(
                 target: "consensus::engine::sync",
@@ -347,25 +346,33 @@ where
 
 /// A wrapper type around [`SealedBlock`] that implements the [Ord] trait by block number.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct OrderedSealedBlock(SealedBlock);
+struct OrderedSealedBlock<H = Header, B = BlockBody>(SealedBlock<H, B>);
 
-impl PartialOrd for OrderedSealedBlock {
+impl<H, B> PartialOrd for OrderedSealedBlock<H, B>
+where
+    H: reth_primitives_traits::BlockHeader + 'static,
+    B: reth_primitives_traits::BlockBody + 'static,
+{
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl Ord for OrderedSealedBlock {
+impl<H, B> Ord for OrderedSealedBlock<H, B>
+where
+    H: reth_primitives_traits::BlockHeader + 'static,
+    B: reth_primitives_traits::BlockBody + 'static,
+{
     fn cmp(&self, other: &Self) -> Ordering {
-        self.0.number.cmp(&other.0.number)
+        self.0.number().cmp(&other.0.number())
     }
 }
 
 /// The event type emitted by the [`EngineSyncController`].
 #[derive(Debug)]
-pub(crate) enum EngineSyncEvent {
+pub(crate) enum EngineSyncEvent<N: NodePrimitives = EthPrimitives> {
     /// A full block has been downloaded from the network.
-    FetchedFullBlock(SealedBlock),
+    FetchedFullBlock(SealedBlock<N::BlockHeader, N::BlockBody>),
     /// Pipeline started syncing
     ///
     /// This is none if the pipeline is triggered without a specific target.
@@ -395,14 +402,14 @@ pub(crate) enum EngineSyncEvent {
 /// running, it acquires the write lock over the database. This means that we cannot forward to the
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
-enum PipelineState<DB: Database> {
+enum PipelineState<N: ProviderNodeTypes> {
     /// Pipeline is idle.
-    Idle(Option<Pipeline<DB>>),
+    Idle(Option<Pipeline<N>>),
     /// Pipeline is running and waiting for a response
-    Running(oneshot::Receiver<PipelineWithResult<DB>>),
+    Running(oneshot::Receiver<PipelineWithResult<N>>),
 }
 
-impl<DB: Database> PipelineState<DB> {
+impl<N: ProviderNodeTypes> PipelineState<N> {
     /// Returns `true` if the state matches idle.
     const fn is_idle(&self) -> bool {
         matches!(self, Self::Idle(_))
@@ -412,14 +419,15 @@ impl<DB: Database> PipelineState<DB> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
     use assert_matches::assert_matches;
     use futures::poll;
-    use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_db::{mdbx::DatabaseEnv, test_utils::TempDatabase};
+    use reth_chainspec::{ChainSpec, ChainSpecBuilder, MAINNET};
     use reth_network_p2p::{either::Either, test_utils::TestFullBlockClient};
-    use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, BlockBody, Header, SealedHeader};
+    use reth_primitives::{BlockBody, SealedHeader};
     use reth_provider::{
-        test_utils::create_test_provider_factory_with_chain_spec, ExecutionOutcome,
+        test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
+        ExecutionOutcome,
     };
     use reth_prune_types::PruneModes;
     use reth_stages::{test_utils::TestStages, ExecOutput, StageError};
@@ -469,12 +477,12 @@ mod tests {
         }
 
         /// Builds the pipeline.
-        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<Arc<TempDatabase<DatabaseEnv>>> {
+        fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<MockNodeTypesWithDB> {
             reth_tracing::init_test_tracing();
 
             // Setup pipeline
             let (tip_tx, _tip_rx) = watch::channel(B256::default());
-            let mut pipeline = Pipeline::builder()
+            let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
                 .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
                 .with_tip_sender(tip_tx);
 
@@ -516,14 +524,14 @@ mod tests {
         }
 
         /// Builds the sync controller.
-        fn build<DB>(
+        fn build<N>(
             self,
-            pipeline: Pipeline<DB>,
-            chain_spec: Arc<ChainSpec>,
-        ) -> EngineSyncController<DB, Either<Client, TestFullBlockClient>>
+            pipeline: Pipeline<N>,
+            chain_spec: Arc<N::ChainSpec>,
+        ) -> EngineSyncController<N, Either<Client, TestFullBlockClient>>
         where
-            DB: Database + 'static,
-            Client: HeadersClient + BodiesClient + Clone + Unpin + 'static,
+            N: ProviderNodeTypes,
+            Client: EthBlockClient + 'static,
         {
             let client = self
                 .client
@@ -600,7 +608,7 @@ mod tests {
             header.parent_hash = hash;
             header.number += 1;
             header.timestamp += 1;
-            sealed_header = header.seal_slow();
+            sealed_header = SealedHeader::seal(header);
             client.insert(sealed_header.clone(), body.clone());
         }
     }
@@ -618,10 +626,10 @@ mod tests {
         let client = TestFullBlockClient::default();
         let header = Header {
             base_fee_per_gas: Some(7),
-            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            gas_limit: chain_spec.max_gas_limit,
             ..Default::default()
-        }
-        .seal_slow();
+        };
+        let header = SealedHeader::seal(header);
         insert_headers_into_client(&client, header, 0..10);
 
         // set up a pipeline

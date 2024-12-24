@@ -12,12 +12,19 @@ description = "traits and commonly used types for p2p and network communication"
 workspace = true
 
 [dependencies]
+# reth
 reth-primitives.workspace = true
-reth-network-api.workspace = true
+reth-primitives-traits.workspace = true
 reth-eth-wire-types.workspace = true
 reth-consensus.workspace = true
 reth-network-peers.workspace = true
+reth-network-types.workspace = true
 reth-storage-errors.workspace = true
+
+# ethereum
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
 
 # async
 futures.workspace = true
@@ -25,9 +32,8 @@ tokio = { workspace = true, features = ["sync"] }
 
 # misc
 auto_impl.workspace = true
-thiserror.workspace = true
 tracing.workspace = true
-
+derive_more.workspace = true
 parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -37,4 +43,21 @@ parking_lot.workspace = true
 tokio = { workspace = true, features = ["full"] }
 
 [features]
-test-utils = ["reth-consensus/test-utils", "parking_lot"]
+default = ["std"]
+test-utils = [
+	"reth-consensus/test-utils",
+	"parking_lot",
+	"reth-network-types/test-utils",
+	"reth-primitives/test-utils",
+	"reth-primitives-traits/test-utils"
+]
+std = [
+	"reth-consensus/std",
+	"reth-primitives/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"reth-primitives-traits/std",
+	"alloy-consensus/std",
+	"derive_more/std",
+	"reth-network-peers/std"
+]

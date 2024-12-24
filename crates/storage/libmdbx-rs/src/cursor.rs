@@ -59,19 +59,18 @@ where
     }
 
     /// Returns an iterator over the raw key value slices.
-    #[allow(clippy::needless_lifetimes)]
-    pub fn iter_slices<'a>(&'a self) -> IntoIter<'a, K, Cow<'a, [u8]>, Cow<'a, [u8]>> {
+    pub fn iter_slices<'a>(self) -> IntoIter<K, Cow<'a, [u8]>, Cow<'a, [u8]>> {
         self.into_iter()
     }
 
     /// Returns an iterator over database items.
     #[allow(clippy::should_implement_trait)]
-    pub fn into_iter<Key, Value>(&self) -> IntoIter<'_, K, Key, Value>
+    pub fn into_iter<Key, Value>(self) -> IntoIter<K, Key, Value>
     where
         Key: TableObject,
         Value: TableObject,
     {
-        IntoIter::new(self.clone(), MDBX_NEXT, MDBX_NEXT)
+        IntoIter::new(self, MDBX_NEXT, MDBX_NEXT)
     }
 
     /// Retrieves a key/data pair from the cursor. Depending on the cursor op,
@@ -101,10 +100,10 @@ where
                 assert_ne!(data_ptr, data_val.iov_base);
                 let key_out = {
                     // MDBX wrote in new key
-                    if key_ptr != key_val.iov_base {
-                        Some(Key::decode_val::<K>(txn, key_val)?)
-                    } else {
+                    if key_ptr == key_val.iov_base {
                         None
+                    } else {
+                        Some(Key::decode_val::<K>(txn, key_val)?)
                     }
                 };
                 let data_out = Value::decode_val::<K>(txn, data_val)?;
@@ -486,7 +485,11 @@ where
     K: TransactionKind,
 {
     fn drop(&mut self) {
-        self.txn.txn_execute(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) }).unwrap()
+        // To be able to close a cursor of a timed out transaction, we need to renew it first.
+        // Hence the usage of `txn_execute_renew_on_timeout` here.
+        let _ = self
+            .txn
+            .txn_execute_renew_on_timeout(|_| unsafe { ffi::mdbx_cursor_close(self.cursor) });
     }
 }
 
@@ -504,7 +507,7 @@ unsafe impl<K> Sync for Cursor<K> where K: TransactionKind {}
 
 /// An iterator over the key/value pairs in an MDBX database.
 #[derive(Debug)]
-pub enum IntoIter<'cur, K, Key, Value>
+pub enum IntoIter<K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
@@ -531,11 +534,11 @@ where
         /// The next and subsequent operations to perform.
         next_op: ffi::MDBX_cursor_op,
 
-        _marker: PhantomData<(&'cur (), Key, Value)>,
+        _marker: PhantomData<(Key, Value)>,
     },
 }
 
-impl<'cur, K, Key, Value> IntoIter<'cur, K, Key, Value>
+impl<K, Key, Value> IntoIter<K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
@@ -543,11 +546,11 @@ where
 {
     /// Creates a new iterator backed by the given cursor.
     fn new(cursor: Cursor<K>, op: ffi::MDBX_cursor_op, next_op: ffi::MDBX_cursor_op) -> Self {
-        IntoIter::Ok { cursor, op, next_op, _marker: Default::default() }
+        Self::Ok { cursor, op, next_op, _marker: Default::default() }
     }
 }
 
-impl<'cur, K, Key, Value> Iterator for IntoIter<'cur, K, Key, Value>
+impl<K, Key, Value> Iterator for IntoIter<K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
@@ -642,7 +645,7 @@ where
     }
 }
 
-impl<'cur, K, Key, Value> Iterator for Iter<'cur, K, Key, Value>
+impl<K, Key, Value> Iterator for Iter<'_, K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
@@ -732,7 +735,7 @@ where
     }
 }
 
-impl<'cur, K, Key, Value> fmt::Debug for IterDup<'cur, K, Key, Value>
+impl<K, Key, Value> fmt::Debug for IterDup<'_, K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
@@ -743,13 +746,13 @@ where
     }
 }
 
-impl<'cur, K, Key, Value> Iterator for IterDup<'cur, K, Key, Value>
+impl<K, Key, Value> Iterator for IterDup<'_, K, Key, Value>
 where
     K: TransactionKind,
     Key: TableObject,
     Value: TableObject,
 {
-    type Item = IntoIter<'cur, K, Key, Value>;
+    type Item = IntoIter<K, Key, Value>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {

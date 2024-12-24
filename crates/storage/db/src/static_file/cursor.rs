@@ -1,14 +1,18 @@
 use super::mask::{ColumnSelectorOne, ColumnSelectorThree, ColumnSelectorTwo};
+use alloy_primitives::B256;
 use derive_more::{Deref, DerefMut};
 use reth_db_api::table::Decompress;
 use reth_nippy_jar::{DataReader, NippyJar, NippyJarCursor};
-use reth_primitives::{static_file::SegmentHeader, B256};
+use reth_primitives::static_file::SegmentHeader;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::sync::Arc;
 
 /// Cursor of a static file segment.
 #[derive(Debug, Deref, DerefMut)]
 pub struct StaticFileCursor<'a>(NippyJarCursor<'a, SegmentHeader>);
+
+/// Type alias for column results with optional values.
+type ColumnResult<T> = ProviderResult<Option<T>>;
 
 impl<'a> StaticFileCursor<'a> {
     /// Returns a new [`StaticFileCursor`].
@@ -36,7 +40,7 @@ impl<'a> StaticFileCursor<'a> {
         }
 
         let row = match key_or_num {
-            KeyOrNumber::Key(k) => self.row_by_key_with_cols(k, mask),
+            KeyOrNumber::Key(_) => unimplemented!(),
             KeyOrNumber::Number(n) => match self.jar().user_header().start() {
                 Some(offset) => {
                     if offset > n {
@@ -56,7 +60,7 @@ impl<'a> StaticFileCursor<'a> {
     pub fn get_one<M: ColumnSelectorOne>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
-    ) -> ProviderResult<Option<M::FIRST>> {
+    ) -> ColumnResult<M::FIRST> {
         let row = self.get(key_or_num, M::MASK)?;
 
         match row {
@@ -69,7 +73,7 @@ impl<'a> StaticFileCursor<'a> {
     pub fn get_two<M: ColumnSelectorTwo>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
-    ) -> ProviderResult<Option<(M::FIRST, M::SECOND)>> {
+    ) -> ColumnResult<(M::FIRST, M::SECOND)> {
         let row = self.get(key_or_num, M::MASK)?;
 
         match row {
@@ -79,11 +83,10 @@ impl<'a> StaticFileCursor<'a> {
     }
 
     /// Gets three column values from a row.
-    #[allow(clippy::type_complexity)]
     pub fn get_three<M: ColumnSelectorThree>(
         &mut self,
         key_or_num: KeyOrNumber<'_>,
-    ) -> ProviderResult<Option<(M::FIRST, M::SECOND, M::THIRD)>> {
+    ) -> ColumnResult<(M::FIRST, M::SECOND, M::THIRD)> {
         let row = self.get(key_or_num, M::MASK)?;
 
         match row {
@@ -112,7 +115,7 @@ impl<'a> From<&'a B256> for KeyOrNumber<'a> {
     }
 }
 
-impl<'a> From<u64> for KeyOrNumber<'a> {
+impl From<u64> for KeyOrNumber<'_> {
     fn from(value: u64) -> Self {
         KeyOrNumber::Number(value)
     }

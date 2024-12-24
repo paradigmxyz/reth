@@ -1,7 +1,7 @@
 //! Support types for updating the pool.
 
 use crate::{identifier::TransactionId, pool::state::SubPool};
-use reth_primitives::TxHash;
+use alloy_primitives::TxHash;
 
 /// A change of the transaction's location
 ///
@@ -25,4 +25,10 @@ pub(crate) enum Destination {
     Discard,
     /// Move transaction to pool
     Pool(SubPool),
+}
+
+impl From<SubPool> for Destination {
+    fn from(sub_pool: SubPool) -> Self {
+        Self::Pool(sub_pool)
+    }
 }

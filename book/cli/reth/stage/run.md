@@ -4,6 +4,8 @@ Run a single stage.
 
 ```bash
 $ reth stage run --help
+```
+```txt
 Usage: reth stage run [OPTIONS] --from <FROM> --to <TO> <STAGE>
 
 Options:
@@ -33,7 +35,7 @@ Datadir:
 
           [default: default]
 
-      --datadir.static_files <PATH>
+      --datadir.static-files <PATH>
           The absolute path to store static files in.
 
       --config <FILE>
@@ -44,7 +46,7 @@ Datadir:
           Possible values are either a built-in chain or the path to a chain specification file.
 
           Built-in chains:
-              mainnet, sepolia, goerli, holesky, dev
+              mainnet, sepolia, holesky, dev
 
           [default: mainnet]
 
@@ -66,6 +68,15 @@ Database:
           Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
 
           [possible values: true, false]
+
+      --db.max-size <MAX_SIZE>
+          Maximum database size (e.g., 4TB, 8MB)
+
+      --db.growth-step <GROWTH_STEP>
+          Database growth step (e.g., 4GB, 4KB)
+
+      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
+          Read transaction timeout in seconds, 0 means no timeout
 
       --metrics <SOCKET>
           Enable Prometheus metrics.
@@ -123,6 +134,9 @@ Networking:
       --enable-discv5-discovery
           Enable Discv5 discovery
 
+      --disable-nat
+          Disable Nat discovery
+
       --discovery.addr <DISCOVERY_ADDR>
           The UDP address to use for devp2p peer discovery version 4
 
@@ -140,26 +154,26 @@ Networking:
           The UDP IPv6 address to use for devp2p peer discovery version 5. Overwritten by `RLPx` address, if it's also IPv6
 
       --discovery.v5.port <DISCOVERY_V5_PORT>
-          The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discv5.addr` is set
+          The UDP IPv4 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv4, or `--discovery.v5.addr` is set
 
-          [default: 9000]
+          [default: 9200]
 
       --discovery.v5.port.ipv6 <DISCOVERY_V5_PORT_IPV6>
-          The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discv5.addr.ipv6` is set
+          The UDP IPv6 port to use for devp2p peer discovery version 5. Not used unless `--addr` is IPv6, or `--discovery.addr.ipv6` is set
 
-          [default: 9000]
+          [default: 9200]
 
       --discovery.v5.lookup-interval <DISCOVERY_V5_LOOKUP_INTERVAL>
           The interval in seconds at which to carry out periodic lookup queries, for the whole run of the program
 
           [default: 60]
 
-      --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_bootstrap_lookup_interval>
+      --discovery.v5.bootstrap.lookup-interval <DISCOVERY_V5_BOOTSTRAP_LOOKUP_INTERVAL>
           The interval in seconds at which to carry out boost lookup queries, for a fixed number of times, at bootstrap
 
           [default: 5]
 
-      --discovery.v5.bootstrap.lookup-countdown <DISCOVERY_V5_bootstrap_lookup_countdown>
+      --discovery.v5.bootstrap.lookup-countdown <DISCOVERY_V5_BOOTSTRAP_LOOKUP_COUNTDOWN>
           The number of times to carry out boost lookup queries at bootstrap
 
           [default: 100]
@@ -220,6 +234,28 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound requests. default: 30
 
+      --max-tx-reqs <COUNT>
+          Max concurrent `GetPooledTransactions` requests.
+
+          [default: 130]
+
+      --max-tx-reqs-peer <COUNT>
+          Max concurrent `GetPooledTransactions` requests per peer.
+
+          [default: 1]
+
+      --max-seen-tx-history <COUNT>
+          Max number of seen transactions to remember per peer.
+
+          Default is 320 transaction hashes.
+
+          [default: 320]
+
+      --max-pending-imports <COUNT>
+          Max number of transactions to import concurrently.
+
+          [default: 4096]
+
       --pooled-tx-response-soft-limit <BYTES>
           Experimental, for usage in research. Sets the max accumulated byte size of transactions
           to pack in one response.
@@ -241,6 +277,16 @@ Networking:
           Default is 128 KiB.
 
           [default: 131072]
+
+      --max-tx-pending-fetch <COUNT>
+          Max capacity of cache of hashes for transactions pending fetch.
+
+          [default: 25600]
+
+      --net-if.experimental <IF_NAME>
+          Name of network interface used to communicate with peers.
+
+          If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
 
 Logging:
       --log.stdout.format <FORMAT>

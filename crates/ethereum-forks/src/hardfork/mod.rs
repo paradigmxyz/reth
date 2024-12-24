@@ -3,9 +3,6 @@ mod macros;
 mod ethereum;
 pub use ethereum::EthereumHardfork;
 
-mod optimism;
-pub use optimism::OptimismHardfork;
-
 mod dev;
 pub use dev::DEV_HARDFORKS;
 
@@ -14,9 +11,6 @@ use core::{
     hash::{Hash, Hasher},
 };
 use dyn_clone::DynClone;
-
-#[cfg(not(feature = "std"))]
-use alloc::{format, string::String};
 
 /// Generic hardfork trait.
 #[auto_impl::auto_impl(&, Box)]
@@ -50,7 +44,6 @@ impl Hash for dyn Hardfork + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hardfork::optimism::OptimismHardfork;
     use std::str::FromStr;
 
     #[test]
@@ -98,23 +91,6 @@ mod tests {
 
         let hardforks: Vec<EthereumHardfork> =
             hardfork_str.iter().map(|h| EthereumHardfork::from_str(h).unwrap()).collect();
-
-        assert_eq!(hardforks, expected_hardforks);
-    }
-
-    #[test]
-    fn check_op_hardfork_from_str() {
-        let hardfork_str = ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD"];
-        let expected_hardforks = [
-            OptimismHardfork::Bedrock,
-            OptimismHardfork::Regolith,
-            OptimismHardfork::Canyon,
-            OptimismHardfork::Ecotone,
-            OptimismHardfork::Fjord,
-        ];
-
-        let hardforks: Vec<OptimismHardfork> =
-            hardfork_str.iter().map(|h| OptimismHardfork::from_str(h).unwrap()).collect();
 
         assert_eq!(hardforks, expected_hardforks);
     }

@@ -3,9 +3,9 @@
 use crate::{
     lockfile::StorageLock,
     metrics::DatabaseEnvMetrics,
-    tables::{self, TableType, Tables},
+    tables::{self, Tables},
     utils::default_page_size,
-    DatabaseError,
+    DatabaseError, TableSet,
 };
 use eyre::Context;
 use metrics::{gauge, Label};
@@ -13,7 +13,7 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
-    models::client_version::ClientVersion,
+    models::ClientVersion,
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{
@@ -23,7 +23,7 @@ use reth_libmdbx::{
 use reth_storage_errors::db::LogLevel;
 use reth_tracing::tracing::error;
 use std::{
-    ops::Deref,
+    ops::{Deref, Range},
     path::Path,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -33,8 +33,14 @@ use tx::Tx;
 pub mod cursor;
 pub mod tx;
 
-const GIGABYTE: usize = 1024 * 1024 * 1024;
-const TERABYTE: usize = GIGABYTE * 1024;
+/// 1 KB in bytes
+pub const KILOBYTE: usize = 1024;
+/// 1 MB in bytes
+pub const MEGABYTE: usize = KILOBYTE * 1024;
+/// 1 GB in bytes
+pub const GIGABYTE: usize = MEGABYTE * 1024;
+/// 1 TB in bytes
+pub const TERABYTE: usize = GIGABYTE * 1024;
 
 /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`), but we limit it to slightly below that
 const DEFAULT_MAX_READERS: u64 = 32_000;
@@ -60,10 +66,12 @@ impl DatabaseEnvKind {
 }
 
 /// Arguments for database initialization.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct DatabaseArguments {
     /// Client version that accesses the database.
     client_version: ClientVersion,
+    /// Database geometry settings.
+    geometry: Geometry<Range<usize>>,
     /// Database log level. If [None], the default value is used.
     log_level: Option<LogLevel>,
     /// Maximum duration of a read transaction. If [None], the default value is used.
@@ -91,15 +99,43 @@ pub struct DatabaseArguments {
     exclusive: Option<bool>,
 }
 
+impl Default for DatabaseArguments {
+    fn default() -> Self {
+        Self::new(ClientVersion::default())
+    }
+}
+
 impl DatabaseArguments {
     /// Create new database arguments with given client version.
-    pub const fn new(client_version: ClientVersion) -> Self {
+    pub fn new(client_version: ClientVersion) -> Self {
         Self {
             client_version,
+            geometry: Geometry {
+                size: Some(0..(4 * TERABYTE)),
+                growth_step: Some(4 * GIGABYTE as isize),
+                shrink_threshold: Some(0),
+                page_size: Some(PageSize::Set(default_page_size())),
+            },
             log_level: None,
             max_read_transaction_duration: None,
             exclusive: None,
         }
+    }
+
+    /// Sets the upper size limit of the db environment, the maximum database size in bytes.
+    pub const fn with_geometry_max_size(mut self, max_size: Option<usize>) -> Self {
+        if let Some(max_size) = max_size {
+            self.geometry.size = Some(0..max_size);
+        }
+        self
+    }
+
+    /// Configures the database growth step in bytes.
+    pub const fn with_growth_step(mut self, growth_step: Option<usize>) -> Self {
+        if let Some(growth_step) = growth_step {
+            self.geometry.growth_step = Some(growth_step as isize);
+        }
+        self
     }
 
     /// Set the log level.
@@ -147,7 +183,7 @@ impl Database for DatabaseEnv {
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
         Tx::new_with_metrics(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.metrics.as_ref().cloned(),
+            self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
     }
@@ -155,7 +191,7 @@ impl Database for DatabaseEnv {
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
         Tx::new_with_metrics(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
-            self.metrics.as_ref().cloned(),
+            self.metrics.clone(),
         )
         .map_err(|e| DatabaseError::InitTx(e.into()))
     }
@@ -256,10 +292,9 @@ impl DatabaseEnv {
         args: DatabaseArguments,
     ) -> Result<Self, DatabaseError> {
         let _lock_file = if kind.is_rw() {
-            Some(
-                StorageLock::try_acquire(path)
-                    .map_err(|err| DatabaseError::Other(err.to_string()))?,
-            )
+            StorageLock::try_acquire(path)
+                .map_err(|err| DatabaseError::Other(err.to_string()))?
+                .into()
         } else {
             None
         };
@@ -279,15 +314,7 @@ impl DatabaseEnv {
         // environment creation.
         debug_assert!(Tables::ALL.len() <= 256, "number of tables exceed max dbs");
         inner_env.set_max_dbs(256);
-        inner_env.set_geometry(Geometry {
-            // Maximum database size of 4 terabytes
-            size: Some(0..(4 * TERABYTE)),
-            // We grow the database in increments of 4 gigabytes
-            growth_step: Some(4 * GIGABYTE as isize),
-            // The database never shrinks
-            shrink_threshold: Some(0),
-            page_size: Some(PageSize::Set(default_page_size())),
-        });
+        inner_env.set_geometry(args.geometry);
 
         fn is_current_process(id: u32) -> bool {
             #[cfg(unix)]
@@ -417,15 +444,18 @@ impl DatabaseEnv {
         self
     }
 
-    /// Creates all the defined tables, if necessary.
+    /// Creates all the tables defined in [`Tables`], if necessary.
     pub fn create_tables(&self) -> Result<(), DatabaseError> {
+        self.create_tables_for::<Tables>()
+    }
+
+    /// Creates all the tables defined in the given [`TableSet`], if necessary.
+    pub fn create_tables_for<TS: TableSet>(&self) -> Result<(), DatabaseError> {
         let tx = self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
 
-        for table in Tables::ALL {
-            let flags = match table.table_type() {
-                TableType::Table => DatabaseFlags::default(),
-                TableType::DupSort => DatabaseFlags::DUP_SORT,
-            };
+        for table in TS::tables() {
+            let flags =
+                if table.is_dupsort() { DatabaseFlags::DUP_SORT } else { DatabaseFlags::default() };
 
             tx.create_db(Some(table.name()), flags)
                 .map_err(|e| DatabaseError::CreateTable(e.into()))?;
@@ -476,14 +506,15 @@ mod tests {
         test_utils::*,
         AccountChangeSets,
     };
+    use alloy_consensus::Header;
+    use alloy_primitives::{Address, B256, U256};
     use reth_db_api::{
         cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
-        models::{AccountBeforeTx, ShardedKey},
+        models::{AccountBeforeTx, IntegerList, ShardedKey},
         table::{Encode, Table},
     };
     use reth_libmdbx::Error;
-    use reth_primitives::{Account, Address, Header, StorageEntry, B256, U256};
-    use reth_primitives_traits::IntegerList;
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
     use std::str::FromStr;
     use tempfile::TempDir;
@@ -1318,7 +1349,7 @@ mod tests {
 
         for i in 1..5 {
             let key = ShardedKey::new(real_key, i * 100);
-            let list: IntegerList = vec![i * 100u64].into();
+            let list = IntegerList::new_pre_sorted([i * 100u64]);
 
             db.update(|tx| tx.put::<AccountsHistory>(key.clone(), list.clone()).expect(""))
                 .unwrap();
@@ -1339,7 +1370,7 @@ mod tests {
                 .expect("should be able to retrieve it.");
 
             assert_eq!(ShardedKey::new(real_key, 200), key);
-            let list200: IntegerList = vec![200u64].into();
+            let list200 = IntegerList::new_pre_sorted([200u64]);
             assert_eq!(list200, list);
         }
         // Seek greatest index
@@ -1356,7 +1387,7 @@ mod tests {
                 .expect("should be able to retrieve it.");
 
             assert_eq!(ShardedKey::new(real_key, 400), key);
-            let list400: IntegerList = vec![400u64].into();
+            let list400 = IntegerList::new_pre_sorted([400u64]);
             assert_eq!(list400, list);
         }
     }

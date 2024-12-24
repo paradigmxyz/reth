@@ -1,128 +1,68 @@
 //! Traits for configuring a node.
 
-use crate::{primitives::NodePrimitives, ConfigureEvm, EngineTypes};
-use reth_db_api::{
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-};
+use crate::ConfigureEvm;
+use alloy_rpc_types_engine::JwtSecret;
+use reth_beacon_consensus::BeaconConsensusEngineHandle;
+use reth_consensus::FullConsensus;
 use reth_evm::execute::BlockExecutorProvider;
-use reth_network::NetworkHandle;
-use reth_payload_builder::PayloadBuilderHandle;
+use reth_network_api::FullNetwork;
+use reth_node_core::node_config::NodeConfig;
+use reth_node_types::{HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine, TxTy};
+use reth_payload_builder_primitives::PayloadBuilder;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
-use reth_transaction_pool::TransactionPool;
-use std::marker::PhantomData;
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use std::{future::Future, marker::PhantomData};
 
-/// The type that configures the essential types of an ethereum like node.
-///
-/// This includes the primitive types of a node, the engine API types for communication with the
-/// consensus layer.
-///
-/// This trait is intended to be stateless and only define the types of the node.
-pub trait NodeTypes: Send + Sync + Unpin + 'static {
-    /// The node's primitive types, defining basic operations and structures.
-    type Primitives: NodePrimitives;
-    /// The node's engine types, defining the interaction with the consensus engine.
-    type Engine: EngineTypes;
-}
-
-/// A [`NodeTypes`] type builder
-#[derive(Default, Debug)]
-pub struct AnyNodeTypes<P = (), E = ()>(PhantomData<P>, PhantomData<E>);
-
-impl<P, E> AnyNodeTypes<P, E> {
-    /// Sets the `Primitives` associated type.
-    pub const fn primitives<T>(self) -> AnyNodeTypes<T, E> {
-        AnyNodeTypes::<T, E>(PhantomData::<T>, PhantomData::<E>)
-    }
-
-    /// Sets the `Engine` associated type.
-    pub const fn engine<T>(self) -> AnyNodeTypes<P, T> {
-        AnyNodeTypes::<P, T>(PhantomData::<P>, PhantomData::<T>)
-    }
-}
-
-impl<P, E> NodeTypes for AnyNodeTypes<P, E>
-where
-    P: NodePrimitives + Send + Sync + Unpin + 'static,
-    E: EngineTypes + Send + Sync + Unpin + 'static,
-{
-    type Primitives = P;
-
-    type Engine = E;
-}
-
-/// A helper trait that is downstream of the [`NodeTypes`] trait and adds stateful components to the
-/// node.
+/// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds stateful
+/// components to the node.
 ///
 /// Its types are configured by node internally and are not intended to be user configurable.
-pub trait FullNodeTypes: NodeTypes + 'static {
-    /// Underlying database type used by the node to store and retrieve data.
-    type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
+pub trait FullNodeTypes: Send + Sync + Unpin + 'static {
+    /// Node's types with the database.
+    type Types: NodeTypesWithDB + NodeTypesWithEngine;
     /// The provider type used to interact with the node.
-    type Provider: FullProvider<Self::DB>;
+    type Provider: FullProvider<Self::Types>;
 }
 
 /// An adapter type that adds the builtin provider type to the user configured node types.
 #[derive(Debug)]
-pub struct FullNodeTypesAdapter<Types, DB, Provider> {
+pub struct FullNodeTypesAdapter<Types, Provider> {
     /// An instance of the user configured node types.
     pub types: PhantomData<Types>,
-    /// The database type used by the node.
-    pub db: PhantomData<DB>,
     /// The provider type used by the node.
     pub provider: PhantomData<Provider>,
 }
 
-impl<Types, DB, Provider> FullNodeTypesAdapter<Types, DB, Provider> {
-    /// Create a new adapter with the configured types.
-    pub fn new() -> Self {
-        Self { types: Default::default(), db: Default::default(), provider: Default::default() }
-    }
-}
-
-impl<Types, DB, Provider> Default for FullNodeTypesAdapter<Types, DB, Provider> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<Types, DB, Provider> Clone for FullNodeTypesAdapter<Types, DB, Provider> {
-    fn clone(&self) -> Self {
-        Self { types: self.types, db: self.db, provider: self.provider }
-    }
-}
-
-impl<Types, DB, Provider> NodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
+impl<Types, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, Provider>
 where
-    Types: NodeTypes,
-    DB: Send + Sync + Unpin + 'static,
-    Provider: Send + Sync + Unpin + 'static,
+    Types: NodeTypesWithDB + NodeTypesWithEngine,
+    Provider: FullProvider<Types>,
 {
-    type Primitives = Types::Primitives;
-    type Engine = Types::Engine;
-}
-
-impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
-where
-    Types: NodeTypes,
-    Provider: FullProvider<DB>,
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-{
-    type DB = DB;
+    type Types = Types;
     type Provider = Provider;
 }
 
 /// Encapsulates all types and components of the node.
 pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// The transaction pool of the node.
-    type Pool: TransactionPool + Unpin;
+    type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Types>>> + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm;
+    type Evm: ConfigureEvm<Header = HeaderTy<Self::Types>, Transaction = TxTy<Self::Types>>;
 
     /// The type that knows how to execute blocks.
-    type Executor: BlockExecutorProvider;
+    type Executor: BlockExecutorProvider<Primitives = <Self::Types as NodeTypes>::Primitives>;
+
+    /// The consensus type of the node.
+    type Consensus: FullConsensus<<Self::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static;
+
+    /// Network API.
+    type Network: FullNetwork;
+
+    /// Builds new blocks.
+    type PayloadBuilder: PayloadBuilder<PayloadType = <Self::Types as NodeTypesWithEngine>::Engine>
+        + Clone;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
@@ -133,15 +73,52 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Returns the node's executor type.
     fn block_executor(&self) -> &Self::Executor;
 
+    /// Returns the node's consensus type.
+    fn consensus(&self) -> &Self::Consensus;
+
+    /// Returns the handle to the network
+    fn network(&self) -> &Self::Network;
+
+    /// Returns the handle to the payload builder service.
+    fn payload_builder(&self) -> &Self::PayloadBuilder;
+
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;
 
-    /// Returns the handle to the network
-    fn network(&self) -> &NetworkHandle;
-
-    /// Returns the handle to the payload builder service.
-    fn payload_builder(&self) -> &PayloadBuilderHandle<Self::Engine>;
-
-    /// Returns the task executor.
+    /// Returns handle to runtime.
     fn task_executor(&self) -> &TaskExecutor;
+}
+
+/// Context passed to [`NodeAddOns::launch_add_ons`],
+#[derive(Debug, Clone)]
+pub struct AddOnsContext<'a, N: FullNodeComponents> {
+    /// Node with all configured components.
+    pub node: N,
+    /// Node configuration.
+    pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
+    /// Handle to the beacon consensus engine.
+    pub beacon_engine_handle:
+        BeaconConsensusEngineHandle<<N::Types as NodeTypesWithEngine>::Engine>,
+    /// JWT secret for the node.
+    pub jwt_secret: JwtSecret,
+}
+
+/// Customizable node add-on types.
+pub trait NodeAddOns<N: FullNodeComponents>: Send {
+    /// Handle to add-ons.
+    type Handle: Send + Sync + Clone;
+
+    /// Configures and launches the add-ons.
+    fn launch_add_ons(
+        self,
+        ctx: AddOnsContext<'_, N>,
+    ) -> impl Future<Output = eyre::Result<Self::Handle>> + Send;
+}
+
+impl<N: FullNodeComponents> NodeAddOns<N> for () {
+    type Handle = ();
+
+    async fn launch_add_ons(self, _components: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
+        Ok(())
+    }
 }

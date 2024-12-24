@@ -1,9 +1,9 @@
+use crate::proof::calculate_receipt_root_optimism;
+use alloy_consensus::TxReceipt;
+use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::{
-    gas_spent_by_transactions, proofs::calculate_receipt_root_optimism, BlockWithSenders, Bloom,
-    GotExpected, Receipt, B256,
-};
+use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected, Receipt};
 
 /// Validate a block with regard to execution results:
 ///
@@ -58,7 +58,7 @@ fn verify_receipts(
         calculate_receipt_root_optimism(&receipts_with_bloom, chain_spec, timestamp);
 
     // Calculate header logs bloom.
-    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom);
+    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom());
 
     compare_receipts_root_and_logs_bloom(
         receipts_root,

@@ -1,6 +1,9 @@
 //! Command for debugging block building.
-use crate::macros::block_executor;
+use alloy_consensus::TxEip4844;
+use alloy_eips::{eip2718::Encodable2718, eip4844::BlobTransactionSidecar};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::Decodable;
+use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
 use eyre::Context;
 use reth_basic_payload_builder::{
@@ -10,32 +13,38 @@ use reth_beacon_consensus::EthBeaconConsensus;
 use reth_blockchain_tree::{
     BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
 };
-use reth_cli_commands::common::{AccessRights, Environment, EnvironmentArgs};
+use reth_chainspec::ChainSpec;
+use reth_cli::chainspec::ChainSpecParser;
+use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
-use reth_consensus::Consensus;
-use reth_db::DatabaseEnv;
+use reth_consensus::{Consensus, FullConsensus};
 use reth_errors::RethResult;
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
+use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
-use reth_node_api::PayloadBuilderAttributes;
-use reth_payload_builder::database::CachedReads;
+use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
+use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_primitives::{
-    constants::eip4844::LoadKzgSettingsError, revm_primitives::KzgSettings, Address,
-    BlobTransaction, BlobTransactionSidecar, Bytes, PooledTransactionsElement, SealedBlock,
-    SealedBlockWithSenders, Transaction, TransactionSigned, TxEip4844, B256, U256,
+    BlobTransaction, BlockExt, PooledTransactionsElement, SealedBlockFor, SealedBlockWithSenders,
+    SealedHeader, Transaction, TransactionSigned,
 };
 use reth_provider::{
-    providers::BlockchainProvider, BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider,
-    ProviderFactory, StageCheckpointReader, StateProviderFactory,
+    providers::{BlockchainProvider, ProviderNodeTypes},
+    BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
+    StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::{database::StateProviderDatabase, primitives::EnvKzgSettings};
-use reth_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
+use reth_revm::{
+    cached::CachedReads,
+    database::StateProviderDatabase,
+    primitives::{EnvKzgSettings, KzgSettings},
+};
 use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
     TransactionPool, TransactionValidationTaskExecutor,
 };
+use reth_trie::StateRoot;
+use reth_trie_db::DatabaseStateRoot;
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
 
@@ -43,9 +52,9 @@ use tracing::*;
 /// This debug routine requires that the node is positioned at the block before the target.
 /// The script will then parse the block and attempt to build a similar one.
 #[derive(Debug, Parser)]
-pub struct Command {
+pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
-    env: EnvironmentArgs,
+    env: EnvironmentArgs<C>,
 
     /// Overrides the KZG trusted setup by reading from the supplied file.
     #[arg(long, value_name = "PATH")]
@@ -74,14 +83,14 @@ pub struct Command {
     blobs_bundle_path: Option<PathBuf>,
 }
 
-impl Command {
+impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Fetches the best block block from the database.
     ///
     /// If the database is empty, returns the genesis block.
-    fn lookup_best_block(
+    fn lookup_best_block<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
-        factory: ProviderFactory<Arc<DatabaseEnv>>,
-    ) -> RethResult<Arc<SealedBlock>> {
+        factory: ProviderFactory<N>,
+    ) -> RethResult<Arc<SealedBlockFor<BlockTy<N>>>> {
         let provider = factory.provider()?;
 
         let best_number =
@@ -103,7 +112,9 @@ impl Command {
     fn kzg_settings(&self) -> eyre::Result<EnvKzgSettings> {
         if let Some(ref trusted_setup_file) = self.trusted_setup_file {
             let trusted_setup = KzgSettings::load_trusted_setup_file(trusted_setup_file)
-                .map_err(LoadKzgSettingsError::KzgError)?;
+                .wrap_err_with(|| {
+                    format!("Failed to load trusted setup file: {:?}", trusted_setup_file)
+                })?;
             Ok(EnvKzgSettings::Custom(Arc::new(trusted_setup)))
         } else {
             Ok(EnvKzgSettings::Default)
@@ -111,18 +122,21 @@ impl Command {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute(self, ctx: CliContext) -> eyre::Result<()> {
-        let Environment { provider_factory, .. } = self.env.init(AccessRights::RW)?;
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+        self,
+        ctx: CliContext,
+    ) -> eyre::Result<()> {
+        let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
-        let consensus: Arc<dyn Consensus> =
+        let consensus: Arc<dyn FullConsensus> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
-        let executor = block_executor!(provider_factory.chain_spec());
+        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         // configure blockchain tree
         let tree_externals =
             TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
-        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default(), None)?;
+        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
         let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // fetch the best block from the database
@@ -165,13 +179,13 @@ impl Command {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
             let transaction = TransactionSigned::decode(&mut &Bytes::from_str(tx_bytes)?[..])?
                 .into_ecrecovered()
-                .ok_or(eyre::eyre!("failed to recover tx"))?;
+                .ok_or_else(|| eyre::eyre!("failed to recover tx"))?;
 
             let encoded_length = match &transaction.transaction {
                 Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
-                    let blobs_bundle = blobs_bundle.as_mut().ok_or(eyre::eyre!(
-                        "encountered a blob tx. `--blobs-bundle-path` must be provided"
-                    ))?;
+                    let blobs_bundle = blobs_bundle.as_mut().ok_or_else(|| {
+                        eyre::eyre!("encountered a blob tx. `--blobs-bundle-path` must be provided")
+                    })?;
 
                     let sidecar: BlobTransactionSidecar =
                         blobs_bundle.pop_sidecar(blob_versioned_hashes.len());
@@ -184,14 +198,14 @@ impl Command {
                     )
                     .expect("should not fail to convert blob tx if it is already eip4844");
                     let pooled = PooledTransactionsElement::BlobTransaction(tx);
-                    let encoded_length = pooled.length_without_header();
+                    let encoded_length = pooled.encode_2718_len();
 
                     // insert the blob into the store
-                    blob_store.insert(transaction.hash, sidecar)?;
+                    blob_store.insert(transaction.hash(), sidecar)?;
 
                     encoded_length
                 }
-                _ => transaction.length_without_header(),
+                _ => transaction.encode_2718_len(),
             };
 
             debug!(target: "reth::cli", ?transaction, "Adding transaction to the pool");
@@ -210,26 +224,17 @@ impl Command {
             suggested_fee_recipient: self.suggested_fee_recipient,
             // TODO: add support for withdrawals
             withdrawals: None,
+            target_blobs_per_block: None,
+            max_blobs_per_block: None,
         };
         let payload_config = PayloadConfig::new(
-            Arc::clone(&best_block),
+            Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
             Bytes::default(),
-            #[cfg(feature = "optimism")]
-            reth_node_optimism::OptimismPayloadBuilderAttributes::try_new(
-                best_block.hash(),
-                reth_rpc_types::engine::OptimismPayloadAttributes {
-                    payload_attributes: payload_attrs,
-                    transactions: None,
-                    no_tx_pool: None,
-                    gas_limit: None,
-                },
-            )?,
-            #[cfg(not(feature = "optimism"))]
             reth_payload_builder::EthPayloadBuilderAttributes::try_new(
                 best_block.hash(),
                 payload_attrs,
+                EngineApiMessageVersion::default() as u8,
             )?,
-            provider_factory.chain_spec(),
         );
 
         let args = BuildArguments::new(
@@ -241,15 +246,9 @@ impl Command {
             None,
         );
 
-        #[cfg(feature = "optimism")]
-        let payload_builder = reth_node_optimism::OptimismPayloadBuilder::new(
-            provider_factory.chain_spec(),
-            reth_node_optimism::OptimismEvmConfig::default(),
-        )
-        .compute_pending_block();
-
-        #[cfg(not(feature = "optimism"))]
-        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::default();
+        let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            EthEvmConfig::new(provider_factory.chain_spec()),
+        );
 
         match payload_builder.try_build(args)? {
             BuildOutcome::Better { payload, .. } => {
@@ -262,26 +261,24 @@ impl Command {
 
                 let senders = block.senders().expect("sender recovery failed");
                 let block_with_senders =
-                    SealedBlockWithSenders::new(block.clone(), senders).unwrap();
+                    SealedBlockWithSenders::<BlockTy<N>>::new(block.clone(), senders).unwrap();
 
-                let db = StateProviderDatabase::new(blockchain_db.latest()?);
-                let executor = block_executor!(provider_factory.chain_spec()).executor(db);
+                let state_provider = blockchain_db.latest()?;
+                let db = StateProviderDatabase::new(&state_provider);
+                let executor =
+                    EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
-                let BlockExecutionOutput { state, receipts, requests, .. } =
+                let block_execution_output =
                     executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
-                let execution_outcome = ExecutionOutcome::new(
-                    state,
-                    receipts.into(),
-                    block.number,
-                    vec![requests.into()],
-                );
-
+                let execution_outcome =
+                    ExecutionOutcome::from((block_execution_output, block.number));
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");
 
-                let hashed_post_state = execution_outcome.hash_state_slow();
-                let (state_root, trie_updates) = execution_outcome
-                    .hash_state_slow()
-                    .state_root_with_updates(provider_factory.provider()?.tx_ref())?;
+                let hashed_post_state = state_provider.hashed_post_state(execution_outcome.state());
+                let (state_root, trie_updates) = StateRoot::overlay_root_with_updates(
+                    provider_factory.provider()?.tx_ref(),
+                    hashed_post_state.clone(),
+                )?;
 
                 if state_root != block_with_senders.state_root {
                     eyre::bail!(
@@ -296,9 +293,8 @@ impl Command {
                 provider_rw.append_blocks_with_state(
                     Vec::from([block_with_senders]),
                     execution_outcome,
-                    hashed_post_state,
+                    hashed_post_state.into_sorted(),
                     trie_updates,
-                    None,
                 )?;
                 info!(target: "reth::cli", "Successfully appended built block");
             }

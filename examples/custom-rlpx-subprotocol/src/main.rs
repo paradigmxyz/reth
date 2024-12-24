@@ -7,15 +7,18 @@
 //! ```
 //!
 //! This launch a regular reth node with a custom rlpx subprotocol.
+
+mod subprotocol;
+
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+
 use reth::builder::NodeHandle;
 use reth_network::{
-    config::SecretKey, protocol::IntoRlpxSubProtocol, NetworkConfig, NetworkManager,
-    NetworkProtocols,
+    config::SecretKey, protocol::IntoRlpxSubProtocol, EthNetworkPrimitives, NetworkConfig,
+    NetworkManager, NetworkProtocols,
 };
-use reth_network_api::NetworkInfo;
+use reth_network_api::{test_utils::PeersHandleProvider, NetworkInfo};
 use reth_node_ethereum::EthereumNode;
-use reth_provider::test_utils::NoopProvider;
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use subprotocol::{
     connection::CustomCommand,
     protocol::{
@@ -25,8 +28,6 @@ use subprotocol::{
 };
 use tokio::sync::{mpsc, oneshot};
 use tracing::info;
-
-mod subprotocol;
 
 fn main() -> eyre::Result<()> {
     reth::cli::Cli::parse_args().run(|builder, _args| async move {
@@ -49,10 +50,10 @@ fn main() -> eyre::Result<()> {
             .listener_addr(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)))
             .disable_discovery()
             .add_rlpx_sub_protocol(custom_rlpx_handler_2.into_rlpx_sub_protocol())
-            .build(NoopProvider::default());
+            .build_with_noop_provider(node.chain_spec());
 
         // spawn the second network instance
-        let subnetwork = NetworkManager::new(net_cfg).await?;
+        let subnetwork = NetworkManager::<EthNetworkPrimitives>::new(net_cfg).await?;
         let subnetwork_peer_id = *subnetwork.peer_id();
         let subnetwork_peer_addr = subnetwork.local_addr();
         let subnetwork_handle = subnetwork.peers_handle();

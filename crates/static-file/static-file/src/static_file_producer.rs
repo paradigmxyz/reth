@@ -4,14 +4,16 @@ use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use reth_db_api::database::Database;
+use reth_codecs::Compact;
+use reth_db::table::Value;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileWriter, ProviderFactory, StageCheckpointReader as _,
-    StaticFileProviderFactory,
+    providers::StaticFileWriter, BlockReader, ChainStateBlockReader, DBProvider,
+    DatabaseProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::StageId;
-use reth_static_file_types::HighestStaticFiles;
+use reth_static_file_types::{HighestStaticFiles, StaticFileTargets};
 use reth_storage_errors::provider::ProviderResult;
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
@@ -25,22 +27,29 @@ use tracing::{debug, trace};
 pub type StaticFileProducerResult = ProviderResult<StaticFileTargets>;
 
 /// The [`StaticFileProducer`] instance itself with the result of [`StaticFileProducerInner::run`]
-pub type StaticFileProducerWithResult<DB> = (StaticFileProducer<DB>, StaticFileProducerResult);
+pub type StaticFileProducerWithResult<Provider> =
+    (StaticFileProducer<Provider>, StaticFileProducerResult);
 
 /// Static File producer. It's a wrapper around [`StaticFileProducer`] that allows to share it
 /// between threads.
-#[derive(Debug, Clone)]
-pub struct StaticFileProducer<DB>(Arc<Mutex<StaticFileProducerInner<DB>>>);
+#[derive(Debug)]
+pub struct StaticFileProducer<Provider>(Arc<Mutex<StaticFileProducerInner<Provider>>>);
 
-impl<DB: Database> StaticFileProducer<DB> {
+impl<Provider> StaticFileProducer<Provider> {
     /// Creates a new [`StaticFileProducer`].
-    pub fn new(provider_factory: ProviderFactory<DB>, prune_modes: PruneModes) -> Self {
-        Self(Arc::new(Mutex::new(StaticFileProducerInner::new(provider_factory, prune_modes))))
+    pub fn new(provider: Provider, prune_modes: PruneModes) -> Self {
+        Self(Arc::new(Mutex::new(StaticFileProducerInner::new(provider, prune_modes))))
     }
 }
 
-impl<DB> Deref for StaticFileProducer<DB> {
-    type Target = Arc<Mutex<StaticFileProducerInner<DB>>>;
+impl<Provider> Clone for StaticFileProducer<Provider> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<Provider> Deref for StaticFileProducer<Provider> {
+    type Target = Arc<Mutex<StaticFileProducerInner<Provider>>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -50,9 +59,9 @@ impl<DB> Deref for StaticFileProducer<DB> {
 /// Static File producer routine. See [`StaticFileProducerInner::run`] for more detailed
 /// description.
 #[derive(Debug)]
-pub struct StaticFileProducerInner<DB> {
+pub struct StaticFileProducerInner<Provider> {
     /// Provider factory
-    provider_factory: ProviderFactory<DB>,
+    provider: Provider,
     /// Pruning configuration for every part of the data that can be pruned. Set by user, and
     /// needed in [`StaticFileProducerInner`] to prevent attempting to move prunable data to static
     /// files. See [`StaticFileProducerInner::get_static_file_targets`].
@@ -60,45 +69,32 @@ pub struct StaticFileProducerInner<DB> {
     event_sender: EventSender<StaticFileProducerEvent>,
 }
 
-/// Static File targets, per data segment, measured in [`BlockNumber`].
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct StaticFileTargets {
-    headers: Option<RangeInclusive<BlockNumber>>,
-    receipts: Option<RangeInclusive<BlockNumber>>,
-    transactions: Option<RangeInclusive<BlockNumber>>,
-}
-
-impl StaticFileTargets {
-    /// Returns `true` if any of the targets are [Some].
-    pub const fn any(&self) -> bool {
-        self.headers.is_some() || self.receipts.is_some() || self.transactions.is_some()
-    }
-
-    // Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
-    // highest static_file.
-    fn is_contiguous_to_highest_static_files(&self, static_files: HighestStaticFiles) -> bool {
-        [
-            (self.headers.as_ref(), static_files.headers),
-            (self.receipts.as_ref(), static_files.receipts),
-            (self.transactions.as_ref(), static_files.transactions),
-        ]
-        .iter()
-        .all(|(target_block_range, highest_static_fileted_block)| {
-            target_block_range.map_or(true, |target_block_range| {
-                *target_block_range.start() ==
-                    highest_static_fileted_block.map_or(0, |highest_static_fileted_block| {
-                        highest_static_fileted_block + 1
-                    })
-            })
-        })
+impl<Provider> StaticFileProducerInner<Provider> {
+    fn new(provider: Provider, prune_modes: PruneModes) -> Self {
+        Self { provider, prune_modes, event_sender: Default::default() }
     }
 }
 
-impl<DB: Database> StaticFileProducerInner<DB> {
-    fn new(provider_factory: ProviderFactory<DB>, prune_modes: PruneModes) -> Self {
-        Self { provider_factory, prune_modes, event_sender: Default::default() }
+impl<Provider> StaticFileProducerInner<Provider>
+where
+    Provider: StaticFileProviderFactory + DatabaseProviderFactory<Provider: ChainStateBlockReader>,
+{
+    /// Returns the last finalized block number on disk.
+    pub fn last_finalized_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        self.provider.database_provider_ro()?.last_finalized_block_number()
     }
+}
 
+impl<Provider> StaticFileProducerInner<Provider>
+where
+    Provider: StaticFileProviderFactory
+        + DatabaseProviderFactory<
+            Provider: StaticFileProviderFactory<
+                Primitives: NodePrimitives<SignedTx: Value + Compact, BlockHeader: Value + Compact>,
+            > + StageCheckpointReader
+                          + BlockReader,
+        >,
+{
     /// Listen for events on the `static_file_producer`.
     pub fn events(&self) -> EventStream<StaticFileProducerEvent> {
         self.event_sender.new_listener()
@@ -108,8 +104,8 @@ impl<DB: Database> StaticFileProducerInner<DB> {
     ///
     /// For each [Some] target in [`StaticFileTargets`], initializes a corresponding [Segment] and
     /// runs it with the provided block range using [`reth_provider::providers::StaticFileProvider`]
-    /// and a read-only database transaction from [`ProviderFactory`]. All segments are run in
-    /// parallel.
+    /// and a read-only database transaction from [`DatabaseProviderFactory`]. All segments are run
+    /// in parallel.
     ///
     /// NOTE: it doesn't delete the data from database, and the actual deleting (aka pruning) logic
     /// lives in the `prune` crate.
@@ -120,7 +116,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
         }
 
         debug_assert!(targets.is_contiguous_to_highest_static_files(
-            self.provider_factory.static_file_provider().get_highest_static_files()
+            self.provider.static_file_provider().get_highest_static_files()
         ));
 
         self.event_sender.notify(StaticFileProducerEvent::Started { targets: targets.clone() });
@@ -128,7 +124,8 @@ impl<DB: Database> StaticFileProducerInner<DB> {
         debug!(target: "static_file", ?targets, "StaticFileProducer started");
         let start = Instant::now();
 
-        let mut segments = Vec::<(Box<dyn Segment<DB>>, RangeInclusive<BlockNumber>)>::new();
+        let mut segments =
+            Vec::<(Box<dyn Segment<Provider::Provider>>, RangeInclusive<BlockNumber>)>::new();
 
         if let Some(block_range) = targets.transactions.clone() {
             segments.push((Box::new(segments::Transactions), block_range));
@@ -146,8 +143,8 @@ impl<DB: Database> StaticFileProducerInner<DB> {
 
             // Create a new database transaction on every segment to prevent long-lived read-only
             // transactions
-            let provider = self.provider_factory.provider()?.disable_long_read_transaction_safety();
-            segment.copy_to_static_files(provider, self.provider_factory.static_file_provider(), block_range.clone())?;
+            let provider = self.provider.database_provider_ro()?.disable_long_read_transaction_safety();
+            segment.copy_to_static_files(provider,  block_range.clone())?;
 
             let elapsed = start.elapsed(); // TODO(alexey): track in metrics
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, ?elapsed, "Finished StaticFileProducer segment");
@@ -155,9 +152,9 @@ impl<DB: Database> StaticFileProducerInner<DB> {
             Ok(())
         })?;
 
-        self.provider_factory.static_file_provider().commit()?;
+        self.provider.static_file_provider().commit()?;
         for (segment, block_range) in segments {
-            self.provider_factory
+            self.provider
                 .static_file_provider()
                 .update_index(segment.segment(), Some(*block_range.end()))?;
         }
@@ -176,7 +173,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
     ///
     /// Returns highest block numbers for all static file segments.
     pub fn copy_to_static_files(&self) -> ProviderResult<HighestStaticFiles> {
-        let provider = self.provider_factory.provider()?;
+        let provider = self.provider.database_provider_ro()?;
         let stages_checkpoints = [StageId::Headers, StageId::Execution, StageId::Bodies]
             .into_iter()
             .map(|stage| provider.get_stage_checkpoint(stage).map(|c| c.map(|c| c.block_number)))
@@ -200,8 +197,7 @@ impl<DB: Database> StaticFileProducerInner<DB> {
         &self,
         finalized_block_numbers: HighestStaticFiles,
     ) -> ProviderResult<StaticFileTargets> {
-        let highest_static_files =
-            self.provider_factory.static_file_provider().get_highest_static_files();
+        let highest_static_files = self.provider.static_file_provider().get_highest_static_files();
 
         let targets = StaticFileTargets {
             headers: finalized_block_numbers.headers.and_then(|finalized_block_number| {
@@ -257,29 +253,29 @@ mod tests {
     };
     use alloy_primitives::{B256, U256};
     use assert_matches::assert_matches;
-    use reth_db::{test_utils::TempDatabase, DatabaseEnv};
     use reth_db_api::{database::Database, transaction::DbTx};
     use reth_provider::{
-        providers::StaticFileWriter, ProviderError, ProviderFactory, StaticFileProviderFactory,
+        providers::StaticFileWriter, test_utils::MockNodeTypesWithDB, ProviderError,
+        ProviderFactory, StaticFileProviderFactory,
     };
     use reth_prune_types::PruneModes;
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_static_file_types::{HighestStaticFiles, StaticFileSegment};
-    use reth_testing_utils::{
-        generators,
-        generators::{random_block_range, random_receipt},
+    use reth_testing_utils::generators::{
+        self, random_block_range, random_receipt, BlockRangeParams,
     };
-    use std::{
-        sync::{mpsc::channel, Arc},
-        time::Duration,
-    };
+    use std::{sync::mpsc::channel, time::Duration};
     use tempfile::TempDir;
 
-    fn setup() -> (ProviderFactory<Arc<TempDatabase<DatabaseEnv>>>, TempDir) {
+    fn setup() -> (ProviderFactory<MockNodeTypesWithDB>, TempDir) {
         let mut rng = generators::rng();
         let db = TestStageDB::default();
 
-        let blocks = random_block_range(&mut rng, 0..=3, B256::ZERO, 2..3);
+        let blocks = random_block_range(
+            &mut rng,
+            0..=3,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
         // Unwind headers from static_files and manually insert them into the database, so we're
         // able to check that static_file_producer works
@@ -291,15 +287,15 @@ mod tests {
         static_file_writer.commit().expect("prune headers");
 
         let tx = db.factory.db_ref().tx_mut().expect("init tx");
-        blocks.iter().for_each(|block| {
+        for block in &blocks {
             TestStageDB::insert_header(None, &tx, &block.header, U256::ZERO)
                 .expect("insert block header");
-        });
+        }
         tx.commit().expect("commit tx");
 
         let mut receipts = Vec::new();
         for block in &blocks {
-            for transaction in &block.body {
+            for transaction in &block.body.transactions {
                 receipts
                     .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
             }

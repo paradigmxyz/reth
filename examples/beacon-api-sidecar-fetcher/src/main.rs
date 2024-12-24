@@ -18,17 +18,21 @@ use std::{
     net::{IpAddr, Ipv4Addr},
 };
 
+use alloy_primitives::B256;
 use clap::Parser;
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use mined_sidecar::MinedSidecarStream;
-use reth::{builder::NodeHandle, cli::Cli, primitives::B256, providers::CanonStateSubscriptions};
+use reth::{
+    builder::NodeHandle, chainspec::EthereumChainSpecParser, cli::Cli,
+    providers::CanonStateSubscriptions,
+};
 use reth_node_ethereum::EthereumNode;
 
 pub mod mined_sidecar;
 
 fn main() {
-    Cli::<BeaconSidecarConfig>::parse()
-        .run(|builder, args| async move {
+    Cli::<EthereumChainSpecParser, BeaconSidecarConfig>::parse()
+        .run(|builder, beacon_config| async move {
             // launch the node
             let NodeHandle { node, node_exit_future, bitfinity_import: _ } =
                 builder.node(EthereumNode::default()).launch().await?;
@@ -38,27 +42,30 @@ fn main() {
 
             let pool = node.pool.clone();
 
-            let mut sidecar_stream = MinedSidecarStream {
-                events: notifications,
-                pool,
-                beacon_config: args,
-                client: reqwest::Client::new(),
-                pending_requests: FuturesUnordered::new(),
-                queued_actions: VecDeque::new(),
-            };
+            node.task_executor.spawn(async move {
+                let mut sidecar_stream = MinedSidecarStream {
+                    events: notifications,
+                    pool,
+                    beacon_config,
+                    client: reqwest::Client::new(),
+                    pending_requests: FuturesUnordered::new(),
+                    queued_actions: VecDeque::new(),
+                };
 
-            while let Some(result) = sidecar_stream.next().await {
-                match result {
-                    Ok(blob_transaction) => {
-                        // Handle successful transaction
-                        println!("Processed BlobTransaction: {:?}", blob_transaction);
-                    }
-                    Err(e) => {
-                        // Handle errors specifically
-                        eprintln!("Failed to process transaction: {:?}", e);
+                while let Some(result) = sidecar_stream.next().await {
+                    match result {
+                        Ok(blob_transaction) => {
+                            // Handle successful transaction
+                            println!("Processed BlobTransaction: {:?}", blob_transaction);
+                        }
+                        Err(e) => {
+                            // Handle errors specifically
+                            eprintln!("Failed to process transaction: {:?}", e);
+                        }
                     }
                 }
-            }
+            });
+
             node_exit_future.await
         })
         .unwrap();

@@ -39,8 +39,8 @@ pub mod tx_manager {
 
     /// Default limit for number of transactions to keep track of for a single peer.
     ///
-    /// Default is 10 KiB.
-    pub const DEFAULT_CAPACITY_CACHE_SEEN_BY_PEER: u32 = 10 * 1024;
+    /// Default is 320 transaction hashes.
+    pub const DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER: u32 = 10 * 1024 / 32;
 
     /// Default maximum pending pool imports to tolerate.
     ///
@@ -51,8 +51,8 @@ pub mod tx_manager {
 
     /// Default limit for number of bad imports to keep track of.
     ///
-    /// Default is 10 KiB.
-    pub const DEFAULT_CAPACITY_CACHE_BAD_IMPORTS: u32 = 100 * 1024;
+    /// Default is 100 KiB, i.e. 3 200 transaction hashes.
+    pub const DEFAULT_MAX_COUNT_BAD_IMPORTS: u32 = 100 * 1024 / 32;
 }
 
 /// Constants used by [`TransactionFetcher`](super::TransactionFetcher).
@@ -81,8 +81,8 @@ pub mod tx_fetcher {
 
     /* ==================== RETRIES ==================== */
 
-    /// Default maximum request retires per [`TxHash`](reth_primitives::TxHash). Note, this is
-    /// reset should the [`TxHash`](reth_primitives::TxHash) re-appear in an announcement after it
+    /// Default maximum request retires per [`TxHash`](alloy_primitives::TxHash). Note, this is
+    /// reset should the [`TxHash`](alloy_primitives::TxHash) re-appear in an announcement after it
     /// has been evicted from the hashes pending fetch cache, i.e. the counter is restarted. If
     /// this happens, it is likely a very popular transaction, that should and can indeed be
     /// fetched hence this behaviour is favourable.

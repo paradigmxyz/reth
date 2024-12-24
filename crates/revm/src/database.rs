@@ -1,6 +1,7 @@
 use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue};
+use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
-use reth_primitives::{Account, Address, B256, U256};
+use reth_primitives::Account;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{
     db::DatabaseRef,
@@ -8,26 +9,26 @@ use revm::{
     Database,
 };
 
-/// A helper trait responsible for providing that necessary state for the EVM execution.
+/// A helper trait responsible for providing state necessary for EVM execution.
 ///
-/// This servers as the data layer for [Database].
+/// This serves as the data layer for [`Database`].
 pub trait EvmStateProvider: Send + Sync {
     /// Get basic account information.
     ///
-    /// Returns `None` if the account doesn't exist.
+    /// Returns [`None`] if the account doesn't exist.
     fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>>;
 
-    /// Get the hash of the block with the given number. Returns `None` if no block with this number
-    /// exists.
+    /// Get the hash of the block with the given number. Returns [`None`] if no block with this
+    /// number exists.
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>>;
 
-    /// Get account code by its hash
+    /// Get account code by hash.
     fn bytecode_by_hash(
         &self,
         code_hash: B256,
     ) -> ProviderResult<Option<reth_primitives::Bytecode>>;
 
-    /// Get storage of given account.
+    /// Get storage of the given account.
     fn storage(
         &self,
         account: Address,
@@ -78,6 +79,12 @@ impl<DB> StateProviderDatabase<DB> {
     }
 }
 
+impl<DB> AsRef<DB> for StateProviderDatabase<DB> {
+    fn as_ref(&self) -> &DB {
+        self
+    }
+}
+
 impl<DB> Deref for StateProviderDatabase<DB> {
     type Target = DB;
 
@@ -100,29 +107,29 @@ impl<DB: EvmStateProvider> Database for StateProviderDatabase<DB> {
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        DatabaseRef::basic_ref(self, address)
+        self.basic_ref(address)
     }
 
     /// Retrieves the bytecode associated with a given code hash.
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        DatabaseRef::code_by_hash_ref(self, code_hash)
+        self.code_by_hash_ref(code_hash)
     }
 
     /// Retrieves the storage value at a specific index for a given address.
     ///
     /// Returns `Ok` with the storage value, or the default value if not found.
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        DatabaseRef::storage_ref(self, address, index)
+        self.storage_ref(address, index)
     }
 
     /// Retrieves the block hash for a given block number.
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
     /// Note: It safely casts the `number` to `u64`.
-    fn block_hash(&mut self, number: U256) -> Result<B256, Self::Error> {
-        DatabaseRef::block_hash_ref(self, number)
+    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
+        self.block_hash_ref(number)
     }
 }
 
@@ -154,11 +161,8 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Retrieves the block hash for a given block number.
     ///
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
-    fn block_hash_ref(&self, number: U256) -> Result<B256, Self::Error> {
+    fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         // Get the block hash or default hash with an attempt to convert U256 block number to u64
-        Ok(self
-            .0
-            .block_hash(number.try_into().map_err(|_| Self::Error::BlockNumberOverflow(number))?)?
-            .unwrap_or_default())
+        Ok(self.0.block_hash(number)?.unwrap_or_default())
     }
 }

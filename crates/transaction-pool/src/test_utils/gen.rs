@@ -1,11 +1,10 @@
 use crate::EthPooledTransaction;
+use alloy_consensus::{TxEip1559, TxEip4844, TxLegacy};
+use alloy_eips::{eip1559::MIN_PROTOCOL_BASE_FEE, eip2718::Encodable2718, eip2930::AccessList};
+use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use rand::Rng;
 use reth_chainspec::MAINNET;
-use reth_primitives::{
-    constants::MIN_PROTOCOL_BASE_FEE, sign_message, AccessList, Address, Bytes, Transaction,
-    TransactionSigned, TryFromRecoveredTransaction, TxEip1559, TxEip4844, TxKind, TxLegacy, B256,
-    U256,
-};
+use reth_primitives::{sign_message, Transaction, TransactionSigned};
 
 /// A generator for transactions for testing purposes.
 #[derive(Debug)]
@@ -99,16 +98,13 @@ impl<R: Rng> TransactionGenerator<R> {
 
     /// Generates and returns a pooled EIP-1559 transaction with a random signer.
     pub fn gen_eip1559_pooled(&mut self) -> EthPooledTransaction {
-        EthPooledTransaction::try_from_recovered_transaction(
-            self.gen_eip1559().into_ecrecovered().unwrap(),
-        )
-        .unwrap()
+        self.gen_eip1559().into_ecrecovered().unwrap().try_into().unwrap()
     }
 
     /// Generates and returns a pooled EIP-4844 transaction with a random signer.
     pub fn gen_eip4844_pooled(&mut self) -> EthPooledTransaction {
         let tx = self.gen_eip4844().into_ecrecovered().unwrap();
-        let encoded_length = tx.length_without_header();
+        let encoded_length = tx.encode_2718_len();
         EthPooledTransaction::new(tx, encoded_length)
     }
 }
@@ -185,7 +181,6 @@ impl TransactionBuilder {
                 gas_limit: self.gas_limit,
                 max_fee_per_gas: self.max_fee_per_gas,
                 max_priority_fee_per_gas: self.max_priority_fee_per_gas,
-                placeholder: None,
                 to: match self.to {
                     TxKind::Call(to) => to,
                     TxKind::Create => Address::default(),
@@ -204,7 +199,7 @@ impl TransactionBuilder {
     /// Signs the provided transaction using the specified signer and returns a signed transaction.
     fn signed(transaction: Transaction, signer: B256) -> TransactionSigned {
         let signature = sign_message(signer, transaction.signature_hash()).unwrap();
-        TransactionSigned::from_transaction_and_signature(transaction, signature)
+        TransactionSigned::new_unhashed(transaction, signature)
     }
 
     /// Sets the signer for the transaction builder.

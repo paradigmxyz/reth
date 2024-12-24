@@ -1,6 +1,6 @@
 //! Command that initializes the node by importing a chain from a remote EVM node.
 
-use crate::{dirs::DataDirPath, macros::block_executor, version::SHORT_VERSION};
+use crate::{dirs::DataDirPath, version::SHORT_VERSION};
 use futures::{Stream, StreamExt};
 use lightspeed_scheduler::{job::Job, scheduler::Scheduler, JobExecutor};
 use reth_beacon_consensus::EthBeaconConsensus;
@@ -8,18 +8,19 @@ use reth_chainspec::ChainSpec;
 use reth_config::{config::EtlConfig, Config};
 use reth_db::DatabaseEnv;
 
+use alloy_primitives::B256;
 use reth_consensus::Consensus;
-use reth_db::database::Database;
-use reth_downloaders::bitfinity_evm_client::RpcClientConfig;
 use reth_downloaders::{
-    bitfinity_evm_client::{BitfinityEvmClient, CertificateCheckSettings},
+    bitfinity_evm_client::{BitfinityEvmClient, CertificateCheckSettings, RpcClientConfig},
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_exex::ExExManagerHandle;
+use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_core::{args::BitfinityImportArgs, dirs::ChainPath};
+use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_events::node::NodeEvent;
-use reth_primitives::B256;
+use reth_primitives::SealedHeader;
 use reth_provider::providers::BlockchainProvider;
 use reth_provider::{
     BlockNumReader, CanonChainTracker, ChainSpecProvider, DatabaseProviderFactory, HeaderProvider,
@@ -51,9 +52,9 @@ pub struct BitfinityImportCommand {
     /// Bitfinity Related Args
     bitfinity: BitfinityImportArgs,
 
-    provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
+    provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
 
-    blockchain_provider: BlockchainProvider<Arc<DatabaseEnv>>,
+    blockchain_provider: BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
 }
 
 /// Manually implement `Debug` for `ImportCommand` because `BlockchainProvider` doesn't implement it.
@@ -68,6 +69,8 @@ impl std::fmt::Debug for BitfinityImportCommand {
     }
 }
 
+type TypedPipeline = Pipeline<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>;
+
 impl BitfinityImportCommand {
     /// Create a new `ImportCommand` with the given arguments.
     pub fn new(
@@ -75,14 +78,16 @@ impl BitfinityImportCommand {
         datadir: ChainPath<DataDirPath>,
         chain: Arc<ChainSpec>,
         bitfinity: BitfinityImportArgs,
-        provider_factory: ProviderFactory<Arc<DatabaseEnv>>,
-        blockchain_provider: BlockchainProvider<Arc<DatabaseEnv>>,
+        provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+        blockchain_provider: BlockchainProvider<
+            NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
+        >,
     ) -> Self {
         // add network name to data dir
         let config_path = config.unwrap_or_else(|| datadir.config());
 
         info!(target: "reth::cli - BitfinityImportCommand", path = ?config_path, "Configuration loaded");
-        let mut config: Config = confy::load_path(config_path)
+        let mut config = Config::from_path(config_path)
             .expect("Failed to load BitfinityImportCommand configuration");
 
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
@@ -194,6 +199,8 @@ impl BitfinityImportCommand {
         match provider.header_by_number(chain_info.best_number)? {
             Some(header) => {
                 let sealed_header = header.seal(chain_info.best_hash);
+                let hash = sealed_header.seal();
+                let sealed_header = SealedHeader::new(sealed_header.into_inner(), hash);
                 self.blockchain_provider.set_canonical_head(sealed_header.clone());
                 self.blockchain_provider.set_finalized(sealed_header.clone());
                 self.blockchain_provider.set_safe(sealed_header);
@@ -203,16 +210,17 @@ impl BitfinityImportCommand {
         }
     }
 
-    fn build_import_pipeline<DB, C>(
+    fn build_import_pipeline<C>(
         &self,
         config: &Config,
-        provider_factory: ProviderFactory<DB>,
+        provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
         consensus: &Arc<C>,
         remote_client: Arc<BitfinityEvmClient>,
-        static_file_producer: StaticFileProducer<DB>,
-    ) -> eyre::Result<(Pipeline<DB>, impl Stream<Item = NodeEvent>)>
+        static_file_producer: StaticFileProducer<
+            ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+        >,
+    ) -> eyre::Result<(TypedPipeline, impl Stream<Item = NodeEvent>)>
     where
-        DB: Database + Clone + Unpin + 'static,
         C: Consensus + 'static,
     {
         if !remote_client.has_canonical_blocks() {
@@ -228,46 +236,47 @@ impl BitfinityImportCommand {
             .into_task();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let executor = block_executor!(provider_factory.chain_spec());
+        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
 
         let max_block = remote_client.max_block().unwrap_or(0);
-        let pipeline = Pipeline::builder()
-            .with_tip_sender(tip_tx)
-            // we want to sync all blocks the file client provides or 0 if empty
-            .with_max_block(max_block)
-            .add_stages(
-                DefaultStages::new(
-                    provider_factory.clone(),
-                    tip_rx,
-                    consensus.clone(),
-                    header_downloader,
-                    body_downloader,
-                    executor.clone(),
-                    config.stages.clone(),
-                    PruneModes::default(),
+        let pipeline =
+            Pipeline::<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>::builder()
+                .with_tip_sender(tip_tx)
+                // we want to sync all blocks the file client provides or 0 if empty
+                .with_max_block(max_block)
+                .add_stages(
+                    DefaultStages::new(
+                        provider_factory.clone(),
+                        tip_rx,
+                        consensus.clone(),
+                        header_downloader,
+                        body_downloader,
+                        executor.clone(),
+                        config.stages.clone(),
+                        PruneModes::default(),
+                    )
+                    .set(SenderRecoveryStage {
+                        commit_threshold: config.stages.sender_recovery.commit_threshold,
+                    })
+                    .set(ExecutionStage::new(
+                        executor,
+                        ExecutionStageThresholds {
+                            max_blocks: config.stages.execution.max_blocks,
+                            max_changes: config.stages.execution.max_changes,
+                            max_cumulative_gas: config.stages.execution.max_cumulative_gas,
+                            max_duration: config.stages.execution.max_duration,
+                        },
+                        config
+                            .stages
+                            .merkle
+                            .clean_threshold
+                            .max(config.stages.account_hashing.clean_threshold)
+                            .max(config.stages.storage_hashing.clean_threshold),
+                        config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
+                        ExExManagerHandle::empty(),
+                    )),
                 )
-                .set(SenderRecoveryStage {
-                    commit_threshold: config.stages.sender_recovery.commit_threshold,
-                })
-                .set(ExecutionStage::new(
-                    executor,
-                    ExecutionStageThresholds {
-                        max_blocks: config.stages.execution.max_blocks,
-                        max_changes: config.stages.execution.max_changes,
-                        max_cumulative_gas: config.stages.execution.max_cumulative_gas,
-                        max_duration: config.stages.execution.max_duration,
-                    },
-                    config
-                        .stages
-                        .merkle
-                        .clean_threshold
-                        .max(config.stages.account_hashing.clean_threshold)
-                        .max(config.stages.storage_hashing.clean_threshold),
-                    config.prune.clone().map(|prune| prune.segments).unwrap_or_default(),
-                    ExExManagerHandle::empty(),
-                )),
-            )
-            .build(provider_factory, static_file_producer);
+                .build(provider_factory, static_file_producer);
 
         let events = pipeline.events().map(Into::into);
 

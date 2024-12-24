@@ -11,13 +11,14 @@ use crate::{
     },
     valid_payload::{call_forkchoice_updated, call_new_payload},
 };
+use alloy_primitives::B256;
 use alloy_provider::Provider;
 use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives::{Block, B256};
+use reth_primitives::{Block, BlockExt};
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
 use tracing::{debug, info};
@@ -36,47 +37,29 @@ pub struct Command {
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        let cloned_args = self.benchmark.clone();
         let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
-            BenchContext::new(&cloned_args, self.rpc_url).await?;
+            BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
             while benchmark_mode.contains(next_block) {
-                let block_res = block_provider.get_block_by_number(next_block.into(), true).await;
+                let block_res =
+                    block_provider.get_block_by_number(next_block.into(), true.into()).await;
                 let block = block_res.unwrap().unwrap();
-                let block = match block.header.hash {
-                    Some(block_hash) => {
-                        // we can reuse the hash in the response
-                        Block::try_from(block).unwrap().seal(block_hash)
-                    }
-                    None => {
-                        // we don't have the hash, so let's just hash it
-                        Block::try_from(block).unwrap().seal_slow()
-                    }
-                };
-
+                let block_hash = block.header.hash;
+                let block = Block::try_from(block).unwrap().seal(block_hash);
                 let head_block_hash = block.hash();
-                let safe_block_hash =
-                    block_provider.get_block_by_number((block.number - 32).into(), false);
+                let safe_block_hash = block_provider
+                    .get_block_by_number(block.number.saturating_sub(32).into(), false.into());
 
-                let finalized_block_hash =
-                    block_provider.get_block_by_number((block.number - 64).into(), false);
+                let finalized_block_hash = block_provider
+                    .get_block_by_number(block.number.saturating_sub(64).into(), false.into());
 
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
-                let safe_block_hash = safe
-                    .unwrap()
-                    .expect("finalized block exists")
-                    .header
-                    .hash
-                    .expect("finalized block has hash");
-                let finalized_block_hash = finalized
-                    .unwrap()
-                    .expect("finalized block exists")
-                    .header
-                    .hash
-                    .expect("finalized block has hash");
+                let safe_block_hash = safe.unwrap().expect("finalized block exists").header.hash;
+                let finalized_block_hash =
+                    finalized.unwrap().expect("finalized block exists").header.hash;
 
                 next_block += 1;
                 sender
@@ -92,12 +75,13 @@ impl Command {
 
         while let Some((block, head, safe, finalized)) = receiver.recv().await {
             // just put gas used here
-            let gas_used = block.header.gas_used;
+            let gas_used = block.gas_used;
             let block_number = block.header.number;
 
             let versioned_hashes: Vec<B256> =
-                block.blob_versioned_hashes().into_iter().copied().collect();
-            let (payload, parent_beacon_block_root) = block_to_payload(block);
+                block.body.blob_versioned_hashes().into_iter().copied().collect();
+            let parent_beacon_block_root = block.parent_beacon_block_root;
+            let payload = block_to_payload(block);
 
             debug!(?block_number, "Sending payload",);
 
@@ -125,7 +109,8 @@ impl Command {
             // calculate the total duration and the fcu latency, record
             let total_latency = start.elapsed();
             let fcu_latency = total_latency - new_payload_result.latency;
-            let combined_result = CombinedResult { new_payload_result, fcu_latency, total_latency };
+            let combined_result =
+                CombinedResult { block_number, new_payload_result, fcu_latency, total_latency };
 
             // current duration since the start of the benchmark
             let current_duration = total_benchmark_duration.elapsed();

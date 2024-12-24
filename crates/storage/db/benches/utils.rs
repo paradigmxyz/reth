@@ -1,20 +1,23 @@
+#![allow(missing_docs)]
+#![cfg(feature = "test-utils")]
+
+use alloy_primitives::Bytes;
 use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv};
 use reth_db_api::{
-    database::Database,
     table::{Compress, Encode, Table, TableRow},
     transaction::DbTxMut,
+    Database,
 };
 use reth_fs_util as fs;
-use reth_primitives::Bytes;
 use std::{path::Path, sync::Arc};
 
 /// Path where the DB is initialized for benchmarks.
 #[allow(dead_code)]
-const BENCH_DB_PATH: &str = "/tmp/reth-benches";
+pub(crate) const BENCH_DB_PATH: &str = "/tmp/reth-benches";
 
 /// Used for `RandomRead` and `RandomWrite` benchmarks.
 #[allow(dead_code)]
-const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 64];
+pub(crate) const RANDOM_INDEXES: [usize; 10] = [23, 2, 42, 5, 3, 99, 54, 0, 33, 64];
 
 /// Returns bench vectors in the format: `Vec<(Key, EncodedKey, Value, CompressedValue)>`.
 #[allow(dead_code)]
@@ -23,13 +26,11 @@ where
     T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
 {
+    let path =
+        format!("{}/../../../testdata/micro/db/{}.json", env!("CARGO_MANIFEST_DIR"), T::NAME);
     let list: Vec<TableRow<T>> = serde_json::from_reader(std::io::BufReader::new(
-        std::fs::File::open(format!(
-            "{}/../../../testdata/micro/db/{}.json",
-            env!("CARGO_MANIFEST_DIR"),
-            T::NAME
-        ))
-        .expect("Test vectors not found. They can be generated from the workspace by calling `cargo run --bin reth -- test-vectors tables`."),
+        std::fs::File::open(&path)
+        .unwrap_or_else(|_| panic!("Test vectors not found. They can be generated from the workspace by calling `cargo run --bin reth --features dev -- test-vectors tables`: {:?}", path))
     ))
     .unwrap();
 

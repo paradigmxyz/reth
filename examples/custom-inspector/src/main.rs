@@ -10,12 +10,15 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_eips::BlockNumberOrTag;
+use alloy_primitives::Address;
+use alloy_rpc_types_eth::state::EvmOverrides;
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
     builder::NodeHandle,
+    chainspec::EthereumChainSpecParser,
     cli::Cli,
-    primitives::{Address, BlockNumberOrTag, IntoRecoveredTransaction},
     revm::{
         inspector_handle_register,
         interpreter::{Interpreter, OpCode},
@@ -25,10 +28,9 @@ use reth::{
     transaction_pool::TransactionPool,
 };
 use reth_node_ethereum::node::EthereumNode;
-use reth_rpc_types::state::EvmOverrides;
 
 fn main() {
-    Cli::<RethCliTxpoolExt>::parse()
+    Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             // launch the node
             let NodeHandle { mut node, node_exit_future, bitfinity_import: _ } =
@@ -38,7 +40,7 @@ fn main() {
             let mut pending_transactions = node.pool.new_pending_pool_transactions_listener();
 
             // get an instance of the `trace_` API handler
-            let eth_api = node.rpc_registry.eth_api();
+            let eth_api = node.rpc_registry.eth_api().clone();
 
             println!("Spawning trace task!");
 
@@ -52,8 +54,7 @@ fn main() {
                     if let Some(recipient) = tx.to() {
                         if args.is_match(&recipient) {
                             // convert the pool transaction
-                            let call_request =
-                                transaction_to_call_request(tx.to_recovered_transaction());
+                            let call_request = transaction_to_call_request(tx.to_consensus());
 
                             let result = eth_api
                                 .spawn_with_call_at(
