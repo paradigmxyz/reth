@@ -16,16 +16,16 @@ use alloy_primitives::{
     map::{DefaultHashBuilder, HashMap},
     Address, BlockNumber,
 };
-use core::fmt::Display;
 use reth_consensus::ConsensusError;
 use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt};
 use reth_prune_types::PruneModes;
-use reth_revm::batch::BlockBatchRecord;
+use reth_revm::{batch::BlockBatchRecord, StateProviderDatabase};
+use reth_storage_api::StateProvider;
 use revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
     State,
 };
-use revm_primitives::{db::Database, Account, AccountStatus, EvmState};
+use revm_primitives::{Account, AccountStatus, EvmState};
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
@@ -60,7 +60,7 @@ pub trait Executor<DB> {
         state: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        F: FnMut(&State<DB>);
+        F: FnMut(&State<StateProviderDatabase<DB>>);
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
     /// the EVM state after execution.
@@ -149,7 +149,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     ///
     /// It is not expected to validate the state trie root, this must be done by the caller using
     /// the returned state.
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
+    type Executor<DB: StateProvider>: for<'a> Executor<
         DB,
         Input<'a> = &'a BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
         Output = BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>,
@@ -157,7 +157,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     >;
 
     /// An executor that can execute a batch of blocks given a database.
-    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
+    type BatchExecutor<DB: StateProvider>: for<'a> BatchExecutor<
         DB,
         Input<'a> = &'a BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
         Output = ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>,
@@ -169,7 +169,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// This is used to execute a single block and get the changed state.
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>;
+        DB: StateProvider;
 
     /// Creates a new batch executor with the given database and pruning modes.
     ///
@@ -177,7 +177,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// during historical sync which involves executing multiple blocks in sequence.
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>;
+        DB: StateProvider;
 }
 
 /// Helper type for the output of executing a block.
@@ -192,7 +192,7 @@ pub struct ExecuteOutput<R = Receipt> {
 /// Defines the strategy for executing a single block.
 pub trait BlockExecutionStrategy {
     /// Database this strategy operates on.
-    type DB: Database;
+    type DB: StateProvider;
 
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;
@@ -223,10 +223,10 @@ pub trait BlockExecutionStrategy {
     ) -> Result<Requests, Self::Error>;
 
     /// Returns a reference to the current state.
-    fn state_ref(&self) -> &State<Self::DB>;
+    fn state_ref(&self) -> &State<StateProviderDatabase<Self::DB>>;
 
     /// Returns a mutable reference to the current state.
-    fn state_mut(&mut self) -> &mut State<Self::DB>;
+    fn state_mut(&mut self) -> &mut State<StateProviderDatabase<Self::DB>>;
 
     /// Sets a hook to be called after each state change during execution.
     fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
@@ -254,7 +254,7 @@ pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
     type Primitives: NodePrimitives;
 
     /// Associated strategy type.
-    type Strategy<DB: Database<Error: Into<ProviderError> + Display>>: BlockExecutionStrategy<
+    type Strategy<DB: StateProvider>: BlockExecutionStrategy<
         DB = DB,
         Primitives = Self::Primitives,
         Error = BlockExecutionError,
@@ -263,7 +263,7 @@ pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
     /// Creates a strategy using the give database.
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>;
+        DB: StateProvider;
 }
 
 impl<F> Clone for BasicBlockExecutorProvider<F>
@@ -294,15 +294,13 @@ where
 {
     type Primitives = F::Primitives;
 
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
-        BasicBlockExecutor<F::Strategy<DB>>;
+    type Executor<DB: StateProvider> = BasicBlockExecutor<F::Strategy<DB>>;
 
-    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
-        BasicBatchExecutor<F::Strategy<DB>>;
+    type BatchExecutor<DB: StateProvider> = BasicBatchExecutor<F::Strategy<DB>>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: StateProvider,
     {
         let strategy = self.strategy_factory.create_strategy(db);
         BasicBlockExecutor::new(strategy)
@@ -310,7 +308,7 @@ where
 
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: StateProvider,
     {
         let strategy = self.strategy_factory.create_strategy(db);
         let batch_record = BlockBatchRecord::default();
@@ -336,7 +334,7 @@ impl<S> BasicBlockExecutor<S> {
 impl<S, DB> Executor<DB> for BasicBlockExecutor<S>
 where
     S: BlockExecutionStrategy<DB = DB>,
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: StateProvider,
 {
     type Input<'a> = &'a BlockWithSenders<<S::Primitives as NodePrimitives>::Block>;
     type Output = BlockExecutionOutput<<S::Primitives as NodePrimitives>::Receipt>;
@@ -361,7 +359,7 @@ where
         mut state: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        F: FnMut(&State<DB>),
+        F: FnMut(&State<StateProviderDatabase<DB>>),
     {
         self.strategy.apply_pre_execution_changes(block)?;
         let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
@@ -423,7 +421,7 @@ where
 impl<S, DB> BatchExecutor<DB> for BasicBatchExecutor<S>
 where
     S: BlockExecutionStrategy<DB = DB, Error = BlockExecutionError>,
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: StateProvider,
 {
     type Input<'a> = &'a BlockWithSenders<<S::Primitives as NodePrimitives>::Block>;
     type Output = ExecutionOutcome<<S::Primitives as NodePrimitives>::Receipt>;
@@ -480,10 +478,10 @@ where
 /// Zero balance increments are ignored and won't create state entries.
 pub fn balance_increment_state<DB>(
     balance_increments: &HashMap<Address, u128, DefaultHashBuilder>,
-    state: &mut State<DB>,
+    state: &mut State<StateProviderDatabase<DB>>,
 ) -> Result<EvmState, BlockExecutionError>
 where
-    DB: Database,
+    DB: StateProvider,
 {
     let mut load_account = |address: &Address| -> Result<(Address, Account), BlockExecutionError> {
         let cache_account = state.load_cache_account(*address).map_err(|_| {
@@ -518,7 +516,7 @@ mod tests {
     use core::marker::PhantomData;
     use reth_chainspec::{ChainSpec, MAINNET};
     use reth_primitives::EthPrimitives;
-    use revm::db::{CacheDB, EmptyDBTyped};
+    use reth_storage_api::noop::NoopProvider;
     use revm_primitives::{address, bytes, AccountInfo, TxEnv, KECCAK_EMPTY};
     use std::sync::Arc;
 
@@ -527,19 +525,19 @@ mod tests {
 
     impl BlockExecutorProvider for TestExecutorProvider {
         type Primitives = EthPrimitives;
-        type Executor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
-        type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
+        type Executor<DB: StateProvider> = TestExecutor<DB>;
+        type BatchExecutor<DB: StateProvider> = TestExecutor<DB>;
 
         fn executor<DB>(&self, _db: DB) -> Self::Executor<DB>
         where
-            DB: Database<Error: Into<ProviderError> + Display>,
+            DB: StateProvider,
         {
             TestExecutor(PhantomData)
         }
 
         fn batch_executor<DB>(&self, _db: DB) -> Self::BatchExecutor<DB>
         where
-            DB: Database<Error: Into<ProviderError> + Display>,
+            DB: StateProvider,
         {
             TestExecutor(PhantomData)
         }
@@ -562,7 +560,7 @@ mod tests {
             _: F,
         ) -> Result<Self::Output, Self::Error>
         where
-            F: FnMut(&State<DB>),
+            F: FnMut(&State<StateProviderDatabase<DB>>),
         {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
@@ -610,7 +608,7 @@ mod tests {
         // factory can use them in a real use case.
         _chain_spec: Arc<ChainSpec>,
         _evm_config: EvmConfig,
-        state: State<DB>,
+        state: State<StateProviderDatabase<DB>>,
         execute_transactions_result: ExecuteOutput<Receipt>,
         apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
@@ -625,15 +623,14 @@ mod tests {
 
     impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
         type Primitives = EthPrimitives;
-        type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
-            TestExecutorStrategy<DB, TestEvmConfig>;
+        type Strategy<DB: StateProvider> = TestExecutorStrategy<DB, TestEvmConfig>;
 
         fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
         where
-            DB: Database<Error: Into<ProviderError> + Display>,
+            DB: StateProvider,
         {
             let state = State::builder()
-                .with_database(db)
+                .with_database(StateProviderDatabase(db))
                 .with_bundle_update()
                 .without_state_clear()
                 .build();
@@ -653,7 +650,7 @@ mod tests {
 
     impl<DB> BlockExecutionStrategy for TestExecutorStrategy<DB, TestEvmConfig>
     where
-        DB: Database,
+        DB: StateProvider,
     {
         type DB = DB;
         type Primitives = EthPrimitives;
@@ -681,11 +678,11 @@ mod tests {
             Ok(self.apply_post_execution_changes_result.clone())
         }
 
-        fn state_ref(&self) -> &State<DB> {
+        fn state_ref(&self) -> &State<StateProviderDatabase<DB>> {
             &self.state
         }
 
-        fn state_mut(&mut self) -> &mut State<DB> {
+        fn state_mut(&mut self) -> &mut State<StateProviderDatabase<DB>> {
             &mut self.state
         }
 
@@ -711,7 +708,7 @@ mod tests {
     #[test]
     fn test_provider() {
         let provider = TestExecutorProvider;
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = NoopProvider::default();
         let executor = provider.executor(db);
         let _ = executor.execute(&Default::default());
     }
@@ -734,7 +731,7 @@ mod tests {
             finish_result: expected_finish_result.clone(),
         };
         let provider = BasicBlockExecutorProvider::new(strategy_factory);
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = NoopProvider::default();
         let executor = provider.executor(db);
         let result = executor.execute(&Default::default());
 
@@ -757,14 +754,14 @@ mod tests {
             finish_result: BundleState::default(),
         };
         let provider = BasicBlockExecutorProvider::new(strategy_factory);
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
+        let db = NoopProvider::default();
 
         // if we want to apply tx env overrides the executor must be mut.
         let mut executor = provider.executor(db);
-        // execute consumes the executor, so we can only call it once.
         executor.init(Box::new(|tx_env: &mut TxEnv| {
             tx_env.nonce.take();
         }));
+        // execute consumes the executor, so we can only call it once.
         let result = executor.execute(&Default::default());
         assert!(result.is_ok());
     }
@@ -773,9 +770,10 @@ mod tests {
         addr: Address,
         balance: u128,
         nonce: u64,
-    ) -> State<CacheDB<EmptyDBTyped<BlockExecutionError>>> {
-        let db = CacheDB::<EmptyDBTyped<BlockExecutionError>>::default();
-        let mut state = State::builder().with_database(db).with_bundle_update().build();
+    ) -> State<StateProviderDatabase<NoopProvider>> {
+        let db = NoopProvider::default();
+        let mut state =
+            State::builder().with_database(StateProviderDatabase(db)).with_bundle_update().build();
 
         let account_info = AccountInfo {
             balance: U256::from(balance),
@@ -802,7 +800,7 @@ mod tests {
     #[test]
     fn test_balance_increment_state_empty_increments_map() {
         let mut state = State::builder()
-            .with_database(CacheDB::<EmptyDBTyped<BlockExecutionError>>::default())
+            .with_database(StateProviderDatabase(NoopProvider::default()))
             .with_bundle_update()
             .build();
 
