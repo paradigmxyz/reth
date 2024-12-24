@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-codecs.workspace = true
 reth-db-models.workspace = true
+reth-optimism-primitives = { workspace = true, optional = true }
 reth-primitives = { workspace = true, features = ["reth-codec"] }
 reth-primitives-traits = { workspace = true, features = ["serde", "reth-codec"] }
 reth-prune-types.workspace = true
@@ -69,17 +70,23 @@ test-utils = [
     "reth-stages-types/test-utils",
 ]
 arbitrary = [
-    "reth-primitives/arbitrary",
-    "reth-db-models/arbitrary",
-    "dep:arbitrary",
-    "dep:proptest",
-    "reth-primitives-traits/arbitrary",
-    "reth-trie-common/arbitrary",
-    "alloy-primitives/arbitrary",
-    "parity-scale-codec/arbitrary",
-    "reth-codecs/arbitrary",
-    "reth-prune-types/arbitrary",
-    "reth-stages-types/arbitrary",
-    "alloy-consensus/arbitrary",
+	"reth-primitives/arbitrary",
+	"reth-db-models/arbitrary",
+	"dep:arbitrary",
+	"dep:proptest",
+	"reth-primitives-traits/arbitrary",
+	"reth-trie-common/arbitrary",
+	"alloy-primitives/arbitrary",
+	"parity-scale-codec/arbitrary",
+	"reth-codecs/arbitrary",
+	"reth-prune-types/arbitrary",
+	"reth-stages-types/arbitrary",
+	"alloy-consensus/arbitrary",
+	"reth-optimism-primitives?/arbitrary"
 ]
-optimism = ["reth-primitives/optimism", "reth-codecs/op"]
+optimism = [
+	"reth-primitives/optimism",
+	"reth-codecs/op",
+	"reth-optimism-primitives?/optimism"
+]
+op = ["dep:reth-optimism-primitives", "reth-codecs/op"]
