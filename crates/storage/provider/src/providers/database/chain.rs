@@ -1,8 +1,6 @@
 use crate::{providers::NodeTypesForProvider, DatabaseProvider};
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_node_types::{FullNodePrimitives, FullSignedTx};
-use reth_primitives::{EthPrimitives, NodePrimitives, TransactionSigned};
-use reth_primitives_traits::SignedTransaction;
 use reth_storage_api::{ChainStorageReader, ChainStorageWriter, EthStorage};
 
 /// Trait that provides access to implementations of [`ChainStorage`]

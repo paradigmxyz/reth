@@ -8,6 +8,7 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
+use reth_primitives::TransactionSigned;
 use reth_primitives_traits::{Block, BlockBody, FullNodePrimitives, SignedTransaction};
 use reth_storage_errors::provider::ProviderResult;
 
@@ -79,7 +80,7 @@ impl<T, Provider, Primitives: FullNodePrimitives> ChainStorageReader<Provider, P
 
 /// Ethereum storage implementation.
 #[derive(Debug, Clone, Copy)]
-pub struct EthStorage<T>(std::marker::PhantomData<T>);
+pub struct EthStorage<T = TransactionSigned>(std::marker::PhantomData<T>);
 
 impl<T> Default for EthStorage<T> {
     fn default() -> Self {
