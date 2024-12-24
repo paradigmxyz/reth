@@ -9291,7 +9291,6 @@ dependencies = [
  "num-traits",
  "paste",
  "pprof",
- "proptest",
  "rand 0.8.5",
  "rayon",
  "reth-chainspec",
