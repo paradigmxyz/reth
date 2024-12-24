@@ -17,7 +17,6 @@ use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
-pub use reth_primitives_traits::FillTxEnv;
 use core::hash::{Hash, Hasher};
 use derive_more::{AsRef, Deref};
 pub use meta::TransactionMeta;
@@ -34,7 +33,7 @@ pub use reth_primitives_traits::{
     transaction::error::{
         InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
     },
-    WithEncoded,
+    FillTxEnv, WithEncoded,
 };
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
