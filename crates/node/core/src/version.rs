@@ -31,39 +31,7 @@ pub const VERGEN_CARGO_FEATURES: &str = env!("VERGEN_CARGO_FEATURES");
 pub const SHORT_VERSION: &str = env!("RETH_SHORT_VERSION");
 
 /// The long version information for reth.
-///
-/// - The latest version from Cargo.toml
-/// - The long SHA of the latest commit.
-/// - The build datetime
-/// - The build features
-/// - The build profile
-///
-/// # Example:
-///
-/// ```text
-/// Version: 0.1.0
-/// Commit SHA: defa64b2
-/// Build Timestamp: 2023-05-19T01:47:19.815651705Z
-/// Build Features: jemalloc
-/// Build Profile: maxperf
-/// ```
-pub const LONG_VERSION: &str = const_format::concatcp!(
-    "Version: ",
-    env!("CARGO_PKG_VERSION"),
-    env!("RETH_VERSION_SUFFIX"),
-    "\n",
-    "Commit SHA: ",
-    VERGEN_GIT_SHA_LONG,
-    "\n",
-    "Build Timestamp: ",
-    env!("VERGEN_BUILD_TIMESTAMP"),
-    "\n",
-    "Build Features: ",
-    env!("VERGEN_CARGO_FEATURES"),
-    "\n",
-    "Build Profile: ",
-    BUILD_PROFILE_NAME
-);
+pub const LONG_VERSION: &str = env!("RETH_LONG_VERSION");
 
 /// The build profile name.
 pub const BUILD_PROFILE_NAME: &str = env!("RETH_BUILD_PROFILE");

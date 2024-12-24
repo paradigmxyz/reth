@@ -59,6 +59,37 @@ fn main() -> Result<(), Box<dyn Error>> {
         format!("{pkg_version}{version_suffix} ({sha_short})")
     );
 
+    // LONG_VERSION
+    // The long version information for reth.
+    //
+    // - The latest version from Cargo.toml + version suffix (if any)
+    // - The full SHA of the latest commit
+    // - The build datetime
+    // - The build features
+    // - The build profile
+    //
+    // Example:
+    //
+    // ```text
+    // Version: 0.1.0
+    // Commit SHA: defa64b2
+    // Build Timestamp: 2023-05-19T01:47:19.815651705Z
+    // Build Features: jemalloc
+    // Build Profile: maxperf
+    // ```
+    println!(
+        "cargo:rustc-env=RETH_LONG_VERSION={}",
+        format!(
+            "Version: {pkg_version}{version_suffix}\n\
+             Commit SHA: {sha}\n\
+             Build Timestamp: {}\n\
+             Build Features: {}\n\
+             Build Profile: {profile}",
+            env::var("VERGEN_BUILD_TIMESTAMP")?,
+            env::var("VERGEN_CARGO_FEATURES")?,
+        )
+    );
+
     panic!("debug");
 
     Ok(())
