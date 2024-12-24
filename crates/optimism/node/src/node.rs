@@ -8,8 +8,7 @@ use crate::{
 };
 use alloy_consensus::Header;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
-use reth_db::transaction::{DbTx, DbTxMut};
+use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, TxTy};
@@ -36,11 +35,8 @@ use reth_optimism_rpc::{
     OpEthApi, SequencerClient,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{BlockBody, PooledTransaction, TransactionSigned};
-use reth_provider::{
-    providers::ChainStorage, BlockBodyReader, BlockBodyWriter, CanonStateSubscriptions,
-    ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput, StorageLocation,
-};
+use reth_primitives::{PooledTransaction, TransactionSigned};
+use reth_provider::{CanonStateSubscriptions, EthStorage};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
