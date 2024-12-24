@@ -7,7 +7,7 @@ use alloy_trie::root::ordered_trie_root_with_encoder;
 use reth_chainspec::ChainSpec;
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_primitives::OpReceipt;
-use reth_primitives::{Receipt, ReceiptWithBloom};
+use reth_primitives::{ReceiptWithBloom};
 
 /// Calculates the receipt root for a header.
 pub(crate) fn calculate_receipt_root_optimism(

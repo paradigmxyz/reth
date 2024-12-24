@@ -17,7 +17,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{OpBlock, OpPrimitives, OpTransactionSigned};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{transaction::WithEncoded, SealedBlock, SealedBlockFor, TransactionSigned};
+use reth_primitives::{transaction::WithEncoded, SealedBlockFor};
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };

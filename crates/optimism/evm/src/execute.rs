@@ -5,7 +5,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{Eip658Value, Header, Receipt, Transaction as _};
 use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
-use op_alloy_consensus::{DepositTransaction, OpDepositReceipt, OpTxType};
+use op_alloy_consensus::{OpDepositReceipt, OpTxType};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_evm::{
@@ -23,7 +23,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt, OpTransactionSigned};
-use reth_primitives::{BlockWithSenders, TransactionSigned, TxType};
+use reth_primitives::{BlockWithSenders};
 use reth_primitives_traits::SignedTransaction;
 use reth_revm::{Database, State};
 use revm_primitives::{db::DatabaseCommit, EnvWithHandlerCfg, ResultAndState};

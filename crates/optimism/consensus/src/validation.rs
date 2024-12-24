@@ -1,10 +1,10 @@
 use crate::proof::calculate_receipt_root_optimism;
-use alloy_consensus::{ReceiptWithBloom, TxReceipt};
+use alloy_consensus::{TxReceipt};
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_optimism_primitives::{OpBlock, OpReceipt};
-use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected, Receipt};
+use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected};
 
 /// Validate a block with regard to execution results:
 ///
