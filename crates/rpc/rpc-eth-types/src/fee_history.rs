@@ -105,7 +105,7 @@ impl FeeHistoryCache {
         if entries.len() == 0 {
             self.inner.upper_bound.store(0, SeqCst);
             self.inner.lower_bound.store(0, SeqCst);
-            return;
+            return
         }
 
         let upper_bound = *entries.last_entry().expect("Contains at least one entry").key();
@@ -152,7 +152,7 @@ impl FeeHistoryCache {
                 .collect::<Vec<_>>();
 
             if result.is_empty() {
-                return None;
+                return None
             }
 
             Some(result)
@@ -245,7 +245,7 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
             event = events.next() =>  {
                 let Some(event) = event else {
                      // the stream ended, we are done
-                    break;
+                    break
                 };
 
                 let committed = event.committed();
@@ -314,7 +314,7 @@ where
         // Empty blocks should return in a zero row
         if transactions.is_empty() {
             rewards_in_block.push(0);
-            continue;
+            continue
         }
 
         let threshold = (gas_used as f64 * percentile / 100.) as u64;
