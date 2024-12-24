@@ -31,7 +31,17 @@ pub const VERGEN_CARGO_FEATURES: &str = env!("VERGEN_CARGO_FEATURES");
 pub const SHORT_VERSION: &str = env!("RETH_SHORT_VERSION");
 
 /// The long version information for reth.
-pub const LONG_VERSION: &str = env!("RETH_LONG_VERSION");
+pub const LONG_VERSION: &str = concat!(
+    env!("RETH_LONG_VERSION_0"),
+    "\n",
+    env!("RETH_LONG_VERSION_1"),
+    "\n",
+    env!("RETH_LONG_VERSION_2"),
+    "\n",
+    env!("RETH_LONG_VERSION_3"),
+    "\n",
+    env!("RETH_LONG_VERSION_4")
+);
 
 /// The build profile name.
 pub const BUILD_PROFILE_NAME: &str = env!("RETH_BUILD_PROFILE");

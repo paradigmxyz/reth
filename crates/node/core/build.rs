@@ -62,18 +62,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Build Features: jemalloc
     // Build Profile: maxperf
     // ```
+    println!("cargo:rustc-env=RETH_LONG_VERSION_0=Version: {pkg_version}{version_suffix}");
+    println!("cargo:rustc-env=RETH_LONG_VERSION_1=Commit SHA: {sha}");
     println!(
-        "cargo:rustc-env=RETH_LONG_VERSION={}",
-        format!(
-            "Version: {pkg_version}{version_suffix}\n\
-             Commit SHA: {sha}\n\
-             Build Timestamp: {}\n\
-             Build Features: {}\n\
-             Build Profile: {profile}",
-            env::var("VERGEN_BUILD_TIMESTAMP")?,
-            env::var("VERGEN_CARGO_FEATURES")?,
-        )
+        "cargo:rustc-env=RETH_LONG_VERSION_2=Build Timestamp: {}",
+        env::var("VERGEN_BUILD_TIMESTAMP")?
     );
+    println!(
+        "cargo:rustc-env=RETH_LONG_VERSION_3=Build Features: {}",
+        env::var("VERGEN_CARGO_FEATURES")?
+    );
+    println!("cargo:rustc-env=RETH_LONG_VERSION_4=Build Profile: {profile}");
 
     // The version information for reth formatted for P2P (devp2p).
     // - The latest version from Cargo.toml
