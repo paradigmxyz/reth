@@ -8,9 +8,9 @@ use criterion::{
 use pprof::criterion::{Output, PProfProfiler};
 use proptest::{
     arbitrary::Arbitrary,
-    prelude::{any_with, ProptestConfig},
+    prelude::any_with,
     strategy::{Strategy, ValueTree},
-    test_runner::TestRunner,
+    test_runner::{Config, RngAlgorithm, TestRng, TestRunner},
 };
 use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv, TransactionHashNumbers};
 use reth_db_api::{
@@ -21,7 +21,6 @@ use reth_db_api::{
 };
 use reth_fs_util as fs;
 use std::hint::black_box;
-
 mod utils;
 use utils::*;
 
@@ -164,7 +163,11 @@ where
     .no_shrink()
     .boxed();
 
-    let mut runner = TestRunner::new(ProptestConfig::default());
+    // Use a deterministic TestRunner
+    let mut runner = TestRunner::new_with_rng(
+        Config::default(),
+        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
+    );
     let mut preload = strategy.new_tree(&mut runner).unwrap().current();
     let mut input = strategy.new_tree(&mut runner).unwrap().current();
 

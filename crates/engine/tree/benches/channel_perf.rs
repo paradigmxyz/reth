@@ -3,6 +3,8 @@
 #![allow(missing_docs)]
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use proptest::test_runner::TestRunner;
+use rand::Rng;
 use revm_primitives::{
     Account, AccountInfo, AccountStatus, Address, EvmState, EvmStorage, EvmStorageSlot, HashMap,
     B256, U256,
@@ -11,6 +13,8 @@ use std::{hint::black_box, thread};
 
 /// Creates a mock state with the specified number of accounts for benchmarking
 fn create_bench_state(num_accounts: usize) -> EvmState {
+    let mut runner = TestRunner::deterministic();
+    let mut rng = runner.rng().clone();
     let mut state_changes = HashMap::default();
 
     for i in 0..num_accounts {
@@ -21,14 +25,14 @@ fn create_bench_state(num_accounts: usize) -> EvmState {
             info: AccountInfo {
                 balance: U256::from(100),
                 nonce: 10,
-                code_hash: B256::random(),
+                code_hash: B256::from_slice(&rng.gen::<[u8; 32]>()),
                 code: Default::default(),
             },
             storage,
             status: AccountStatus::Loaded,
         };
 
-        let address = Address::random();
+        let address = Address::with_last_byte(i as u8);
         state_changes.insert(address, account);
     }
 
