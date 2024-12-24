@@ -23,13 +23,13 @@ use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
     EthApi,
 };
-use reth_rpc_api::eth::helpers::AddDevSigners;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
     RpcModuleBuilder, RpcRegistryInner, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
+use reth_rpc_eth_api::helpers::AddDevSigners;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use std::sync::Arc;

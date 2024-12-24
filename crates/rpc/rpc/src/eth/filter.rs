@@ -14,9 +14,9 @@ use reth_provider::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderError, ProviderReceipt,
 };
+use reth_rpc_api::EthFilterApiServer;
 use reth_rpc_eth_api::{
-    EthApiTypes, EthFilterApiServer, FullEthApiTypes, RpcNodeCoreExt, RpcTransaction,
-    TransactionCompat,
+    EthApiTypes, FullEthApiTypes, RpcNodeCoreExt, RpcTransaction, TransactionCompat,
 };
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},

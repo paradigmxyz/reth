@@ -169,6 +169,7 @@ pub mod rpc {
     /// Re-exported from `reth_rpc_api`.
     pub mod api {
         pub use reth_rpc_api::*;
+        pub use reth_rpc_eth_api as eth;
     }
     /// Re-exported from `reth_rpc::eth`.
     pub mod eth {

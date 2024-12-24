@@ -18,6 +18,7 @@ mod admin;
 mod anvil;
 mod debug;
 mod engine;
+mod eth;
 mod ganache;
 mod hardhat;
 mod mev;
@@ -40,6 +41,7 @@ pub mod servers {
         admin::AdminApiServer,
         debug::{DebugApiServer, DebugExecutionWitnessApiServer},
         engine::{EngineApiServer, EngineEthApiServer},
+        eth::filter::EthFilterApiServer,
         mev::{MevFullApiServer, MevSimApiServer},
         miner::MinerApiServer,
         net::NetApiServer,
@@ -52,8 +54,7 @@ pub mod servers {
         web3::Web3ApiServer,
     };
     pub use reth_rpc_eth_api::{
-        self as eth, EthApiServer, EthBundleApiServer, EthCallBundleApiServer, EthFilterApiServer,
-        EthPubSubApiServer,
+        EthApiServer, EthBundleApiServer, EthCallBundleApiServer, EthPubSubApiServer,
     };
 }
 
@@ -69,6 +70,7 @@ pub mod clients {
         anvil::AnvilApiClient,
         debug::{DebugApiClient, DebugExecutionWitnessApiClient},
         engine::{EngineApiClient, EngineEthApiClient},
+        eth::filter::EthFilterApiClient,
         ganache::GanacheApiClient,
         hardhat::HardhatApiClient,
         mev::{MevFullApiClient, MevSimApiClient},
@@ -82,7 +84,5 @@ pub mod clients {
         validation::BlockSubmissionValidationApiClient,
         web3::Web3ApiClient,
     };
-    pub use reth_rpc_eth_api::{
-        EthApiClient, EthBundleApiClient, EthCallBundleApiClient, EthFilterApiClient,
-    };
+    pub use reth_rpc_eth_api::{EthApiClient, EthBundleApiClient, EthCallBundleApiClient};
 }
