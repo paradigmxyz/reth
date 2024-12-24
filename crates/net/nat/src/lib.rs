@@ -35,7 +35,7 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 ///
 /// Taken from: <https://stackoverflow.com/questions/3253701/get-public-external-ip-address>
 const EXTERNAL_IP_APIS: &[&str] =
-    &["http://ipinfo.io/ip", "http://icanhazip.com", "http://ifconfig.me"];
+    &["https://ipinfo.io/ip", "https://icanhazip.com", "https://ifconfig.me"];
 
 /// All builtin resolvers.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Default, Hash)]
