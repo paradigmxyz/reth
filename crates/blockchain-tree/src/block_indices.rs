@@ -11,7 +11,7 @@ use std::collections::{btree_map, hash_map, BTreeMap, BTreeSet, HashMap, HashSet
 
 /// Internal indices of the blocks and chains.
 ///
-/// This is main connection between blocks, chains and canonical chain.
+/// This is the main connection between blocks, chains and canonical chain.
 ///
 /// It contains a list of canonical block hashes, forks to child blocks, and a mapping of block hash
 /// to chain ID.

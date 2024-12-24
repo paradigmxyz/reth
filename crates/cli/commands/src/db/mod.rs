@@ -69,14 +69,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let db_path = data_dir.db();
         let static_files_path = data_dir.static_files();
 
-        // ensure the provided datadir exist
+        // ensure the provided datadir exists
         eyre::ensure!(
             data_dir.data_dir().is_dir(),
             "Datadir does not exist: {:?}",
             data_dir.data_dir()
         );
 
-        // ensure the provided database exist
+        // ensure the provided database exists
         eyre::ensure!(db_path.is_dir(), "Database does not exist: {:?}", db_path);
 
         match self.command {
