@@ -1,6 +1,7 @@
 #![allow(unreachable_pub)]
 use alloy_primitives::{Address, B256, U256};
 use itertools::concat;
+use proptest::test_runner::{RngAlgorithm, TestRng};
 use reth_db::{tables, test_utils::TempDatabase, Database, DatabaseEnv};
 use reth_db_api::{
     cursor::DbCursorRO,
@@ -107,7 +108,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
     let n_contract = 31;
 
     // rng
-    let mut rng = generators::rng();
+    let mut rng = TestRng::deterministic_rng(RngAlgorithm::ChaCha);
 
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join("txs-bench");
     let exists = path.exists();

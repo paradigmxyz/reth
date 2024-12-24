@@ -24,6 +24,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 dashmap = { workspace = true, features = ["inline"], optional = true }
+proptest.workspace = true
 
 [features]
 default = []

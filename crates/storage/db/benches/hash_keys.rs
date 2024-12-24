@@ -10,7 +10,7 @@ use proptest::{
     arbitrary::Arbitrary,
     prelude::{any_with, ProptestConfig},
     strategy::{Strategy, ValueTree},
-    test_runner::{TestRunner, TestRng, Config}
+    test_runner::{Config, RngAlgorithm, TestRng, TestRunner},
 };
 use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv, TransactionHashNumbers};
 use reth_db_api::{
@@ -21,8 +21,6 @@ use reth_db_api::{
 };
 use reth_fs_util as fs;
 use std::hint::black_box;
-use proptest::test_runner::RngAlgorithm;
-
 mod utils;
 use utils::*;
 
@@ -166,7 +164,10 @@ where
     .boxed();
 
     // Use a deterministic TestRunner
-    let mut runner = TestRunner::new_with_rng(Config::default(), TestRng::deterministic_rng(RngAlgorithm::ChaCha));
+    let mut runner = TestRunner::new_with_rng(
+        Config::default(),
+        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
+    );
     let mut preload = strategy.new_tree(&mut runner).unwrap().current();
     let mut input = strategy.new_tree(&mut runner).unwrap().current();
 

@@ -1,5 +1,8 @@
 #![allow(missing_docs)]
-use alloy_primitives::U256;
+use alloy_primitives::{
+    private::proptest::test_runner::{RngAlgorithm, TestRng},
+    U256,
+};
 use criterion::*;
 use futures::StreamExt;
 use pprof::criterion::{Output, PProfProfiler};
@@ -49,7 +52,9 @@ pub fn broadcast_ingress_bench(c: &mut Criterion) {
                         }
 
                         // prepare some transactions
-                        let mut gen = TransactionGenerator::new(thread_rng());
+                        let mut gen = TransactionGenerator::new(TestRng::deterministic_rng(
+                            RngAlgorithm::ChaCha,
+                        ));
                         let num_broadcasts = 10;
                         for _ in 0..num_broadcasts {
                             for _ in 0..2 {
