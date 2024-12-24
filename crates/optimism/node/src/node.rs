@@ -6,15 +6,13 @@ use crate::{
     txpool::{OpTransactionPool, OpTransactionValidator},
     OpEngineTypes,
 };
-use alloy_consensus::Header;
 use op_alloy_consensus::OpPooledTransaction;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
-use reth_db::transaction::{DbTx, DbTxMut};
+use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, EngineValidator, FullNodeComponents, HeaderTy, NodeAddOns, TxTy,
+    AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -39,10 +37,9 @@ use reth_optimism_rpc::{
     OpEthApi, SequencerClient,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{BlockBody, PooledTransaction, TransactionSigned};
 use reth_provider::{
-    providers::ChainStorage, BlockBodyReader, BlockBodyWriter, CanonStateSubscriptions,
-    ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput, StorageLocation,
+    CanonStateSubscriptions,
+    EthStorage,
 };
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -199,7 +196,6 @@ where
             Engine = OpEngineTypes,
         >,
     >,
-    OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
 
@@ -249,7 +245,6 @@ where
             Engine = OpEngineTypes,
         >,
     >,
-    OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type EthApi = OpEthApi<N>;
 

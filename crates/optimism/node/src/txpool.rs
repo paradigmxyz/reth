@@ -12,7 +12,7 @@ use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_primitives::{OpBlock, OpTransactionSigned};
 use reth_primitives::{
     transaction::TransactionConversionError, GotExpected, InvalidTransactionError, RecoveredTx,
-    SealedBlock, TransactionSigned,
+    SealedBlock,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};

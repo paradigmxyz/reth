@@ -706,7 +706,7 @@ where
     }
 }
 
-impl<N: NodeTypesWithDB<Primitives = EthPrimitives>> CanonStateSubscriptions
+impl<N: ProviderNodeTypes> CanonStateSubscriptions
     for BlockchainProvider2<N>
 {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives> {

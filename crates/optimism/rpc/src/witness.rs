@@ -10,7 +10,7 @@ use reth_evm::ConfigureEvm;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_payload_builder::OpPayloadBuilder;
 use reth_optimism_primitives::OpTransactionSigned;
-use reth_primitives::{SealedHeader, TransactionSigned};
+use reth_primitives::{SealedHeader};
 use reth_provider::{BlockReaderIdExt, ProviderError, ProviderResult, StateProviderFactory};
 pub use reth_rpc_api::DebugExecutionWitnessApiServer;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};

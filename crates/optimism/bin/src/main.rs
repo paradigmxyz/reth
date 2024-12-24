@@ -51,10 +51,7 @@ fn main() {
                     handle.node_exit_future.await
                 }
                 true => {
-                    let handle =
-                        builder.node(OpNode::new(rollup_args.clone())).launch().await?;
-
-                    handle.node_exit_future.await
+                    Ok(())
                 }
             }
         })

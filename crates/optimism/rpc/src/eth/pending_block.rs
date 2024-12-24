@@ -13,7 +13,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
-use reth_primitives::{logs_bloom, BlockBody, Receipt, SealedBlockWithSenders, TransactionSigned};
+use reth_primitives::{logs_bloom, BlockBody, SealedBlockWithSenders};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderHeader,
     ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
