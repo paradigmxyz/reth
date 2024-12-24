@@ -17,7 +17,6 @@ use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
-pub use compat::FillTxEnv;
 use core::hash::{Hash, Hasher};
 use derive_more::{AsRef, Deref};
 pub use meta::TransactionMeta;
@@ -34,7 +33,7 @@ pub use reth_primitives_traits::{
     transaction::error::{
         InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
     },
-    WithEncoded,
+    FillTxEnv, WithEncoded,
 };
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
@@ -50,7 +49,6 @@ pub mod signature;
 pub mod util;
 
 pub(crate) mod access_list;
-mod compat;
 mod meta;
 mod pooled;
 mod tx_type;
@@ -1028,6 +1026,9 @@ impl SignedTransaction for TransactionSigned {
 
 impl reth_primitives_traits::FillTxEnv for TransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
+        #[cfg(feature = "optimism")]
+        let envelope = alloy_eips::eip2718::Encodable2718::encoded_2718(self);
+
         tx_env.caller = sender;
         match self.as_ref() {
             Transaction::Legacy(tx) => {
@@ -1102,7 +1103,36 @@ impl reth_primitives_traits::FillTxEnv for TransactionSigned {
                     Some(AuthorizationList::Signed(tx.authorization_list.clone()));
             }
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => {}
+            Transaction::Deposit(tx) => {
+                tx_env.access_list.clear();
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = U256::ZERO;
+                tx_env.gas_priority_fee = None;
+                tx_env.transact_to = tx.to;
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = None;
+                tx_env.nonce = None;
+                tx_env.authorization_list = None;
+
+                tx_env.optimism = revm_primitives::OptimismFields {
+                    source_hash: Some(tx.source_hash),
+                    mint: tx.mint,
+                    is_system_transaction: Some(tx.is_system_transaction),
+                    enveloped_tx: Some(envelope.into()),
+                };
+                return;
+            }
+        }
+
+        #[cfg(feature = "optimism")]
+        if !self.is_deposit() {
+            tx_env.optimism = revm_primitives::OptimismFields {
+                source_hash: None,
+                mint: None,
+                is_system_transaction: Some(false),
+                enveloped_tx: Some(envelope.into()),
+            }
         }
     }
 }
