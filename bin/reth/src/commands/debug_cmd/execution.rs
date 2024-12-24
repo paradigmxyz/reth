@@ -25,6 +25,7 @@ use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthExecutorProvider;
 use reth_node_events::node::NodeEvent;
+use reth_primitives::EthPrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
 };
@@ -59,7 +60,7 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec> + CliNodeTypes, Client>(
+    fn build_pipeline<N, Client>(
         &self,
         config: &Config,
         client: Client,
@@ -69,6 +70,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     ) -> eyre::Result<Pipeline<N>>
     where
+        N: ProviderNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives> + CliNodeTypes,
         Client: EthBlockClient + 'static,
     {
         // building network downloaders using the fetch client
@@ -117,7 +119,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         Ok(pipeline)
     }
 
-    async fn build_network<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    async fn build_network<
+        N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>,
+    >(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
@@ -161,7 +165,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `execution-debug` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {

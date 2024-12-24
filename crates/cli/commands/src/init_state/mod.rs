@@ -6,11 +6,11 @@ use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db_common::init::init_from_state_dump;
+use reth_node_api::NodePrimitives;
 use reth_primitives::SealedHeader;
 use reth_provider::{
     BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
 };
-
 use std::{io::BufReader, path::PathBuf, str::FromStr};
 use tracing::info;
 
@@ -67,7 +67,13 @@ pub struct InitStateCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateCommand<C> {
     /// Execute the `init` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
+    pub async fn execute<N>(self) -> eyre::Result<()>
+    where
+        N: CliNodeTypes<
+            ChainSpec = C::ChainSpec,
+            Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>,
+        >,
+    {
         info!(target: "reth::cli", "Reth init-state starting");
 
         let Environment { config, provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;

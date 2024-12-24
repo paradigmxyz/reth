@@ -15,7 +15,7 @@ use reth_downloaders::file_client::{
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpExecutorProvider;
-use reth_optimism_primitives::bedrock::is_dup_tx;
+use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives};
 use reth_provider::{ChainSpecProvider, StageCheckpointReader};
 use reth_prune::PruneModes;
 use reth_stages::StageId;
@@ -43,7 +43,9 @@ pub struct ImportOpCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
     /// Execute `import` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = OpPrimitives>>(
+        self,
+    ) -> eyre::Result<()> {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 
         info!(target: "reth::cli",
