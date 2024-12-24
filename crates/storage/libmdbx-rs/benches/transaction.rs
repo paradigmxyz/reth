@@ -56,7 +56,7 @@ fn bench_get_rand_raw(c: &mut Criterion) {
                 }
                 black_box(i);
             })
-                .unwrap();
+            .unwrap();
         })
     });
 }
