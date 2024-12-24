@@ -2,7 +2,6 @@
 mod utils;
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use proptest::test_runner::{RngAlgorithm, TestRng};
 use rand::{prelude::SliceRandom, SeedableRng};
 use rand_xorshift::XorShiftRng;
 use reth_libmdbx::{ffi::*, ObjectLength, WriteFlags};
@@ -16,8 +15,7 @@ fn bench_get_rand(c: &mut Criterion) {
     let db = txn.open_db(None).unwrap();
 
     let mut keys: Vec<String> = (0..n).map(get_key).collect();
-    let mut rng = TestRng::deterministic_rng(RngAlgorithm::XorShift);
-    keys.shuffle(&mut rng);
+    keys.shuffle(&mut XorShiftRng::from_seed(Default::default()));
 
     c.bench_function("bench_get_rand", |b| {
         b.iter(|| {
@@ -58,7 +56,7 @@ fn bench_get_rand_raw(c: &mut Criterion) {
                 }
                 black_box(i);
             })
-            .unwrap();
+                .unwrap();
         })
     });
 }
@@ -73,8 +71,7 @@ fn bench_put_rand(c: &mut Criterion) {
     let db = txn.commit_and_rebind_open_dbs().unwrap().2.remove(0);
 
     let mut items: Vec<(String, String)> = (0..n).map(|n| (get_key(n), get_data(n))).collect();
-    let mut rng = TestRng::deterministic_rng(RngAlgorithm::XorShift);
-    items.shuffle(&mut rng);
+    items.shuffle(&mut XorShiftRng::from_seed(Default::default()));
 
     c.bench_function("bench_put_rand", |b| {
         b.iter(|| {

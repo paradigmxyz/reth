@@ -7921,7 +7921,6 @@ dependencies = [
  "indexmap 2.7.0",
  "parking_lot",
  "pprof",
- "proptest",
  "rand 0.8.5",
  "rand_xorshift",
  "reth-mdbx-sys",
