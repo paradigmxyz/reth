@@ -74,7 +74,7 @@ impl EngineNodeLauncher {
 
 impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Types: NodeTypesForProvider + NodeTypesWithEngine,
+    Types: NodeTypesForProvider + NodeTypesWithEngine<Primitives = EthPrimitives>,
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: FullNodeTypes<
         Types = Types,

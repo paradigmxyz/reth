@@ -26,8 +26,7 @@ use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_api::{
-    FullNodePrimitives, FullNodeTypes, NodePrimitives, NodeTypes, NodeTypesWithDB,
-    NodeTypesWithDBAdapter,
+    FullNodePrimitives, FullNodeTypes, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter,
 };
 use reth_node_core::{
     args::InvalidBlockHookType,
@@ -46,7 +45,7 @@ use reth_node_metrics::{
     server::{MetricServer, MetricServerConfig},
     version::VersionInfo,
 };
-use reth_primitives::{Head, TransactionSigned};
+use reth_primitives::Head;
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
     BlockHashReader, BlockNumReader, ChainSpecProvider, ProviderError, ProviderFactory,
