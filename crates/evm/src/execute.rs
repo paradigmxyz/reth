@@ -56,7 +56,7 @@ pub trait Executor<DB> {
     /// the EVM state after execution.
     fn execute_with_state_closure<F>(
         self,
-        block: Self::Input<'_>,
+        input: Self::Input<'_>,
         state: F,
     ) -> Result<Self::Output, Self::Error>
     where
