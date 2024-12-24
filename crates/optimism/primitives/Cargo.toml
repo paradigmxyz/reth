@@ -94,6 +94,13 @@ serde = [
     "revm-primitives/serde",
     "secp256k1?/serde",
 ]
+serde-bincode-compat = [
+	"alloy-consensus/serde-bincode-compat",
+	"alloy-eips/serde-bincode-compat",
+	"op-alloy-consensus/serde-bincode-compat",
+	"reth-primitives/serde-bincode-compat",
+	"reth-primitives-traits/serde-bincode-compat"
+]
 arbitrary = [
     "dep:arbitrary",
     "dep:secp256k1",
