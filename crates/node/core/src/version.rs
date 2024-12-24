@@ -28,22 +28,7 @@ pub const VERGEN_CARGO_TARGET_TRIPLE: &str = env!("VERGEN_CARGO_TARGET_TRIPLE");
 pub const VERGEN_CARGO_FEATURES: &str = env!("VERGEN_CARGO_FEATURES");
 
 /// The short version information for reth.
-///
-/// - The latest version from Cargo.toml
-/// - The short SHA of the latest commit.
-///
-/// # Example
-///
-/// ```text
-/// 0.1.0 (defa64b2)
-/// ```
-pub const SHORT_VERSION: &str = const_format::concatcp!(
-    env!("CARGO_PKG_VERSION"),
-    env!("RETH_VERSION_SUFFIX"),
-    " (",
-    VERGEN_GIT_SHA,
-    ")"
-);
+pub const SHORT_VERSION: &str = env!("RETH_SHORT_VERSION");
 
 /// The long version information for reth.
 ///
@@ -81,19 +66,7 @@ pub const LONG_VERSION: &str = const_format::concatcp!(
 );
 
 /// The build profile name.
-pub const BUILD_PROFILE_NAME: &str = {
-    // Derived from https://stackoverflow.com/questions/73595435/how-to-get-profile-from-cargo-toml-in-build-rs-or-at-runtime
-    // We split on the path separator of the *host* machine, which may be different from
-    // `std::path::MAIN_SEPARATOR_STR`.
-    const OUT_DIR: &str = env!("OUT_DIR");
-    let unix_parts = const_format::str_split!(OUT_DIR, '/');
-    if unix_parts.len() >= 4 {
-        unix_parts[unix_parts.len() - 4]
-    } else {
-        let win_parts = const_format::str_split!(OUT_DIR, '\\');
-        win_parts[win_parts.len() - 4]
-    }
-};
+pub const BUILD_PROFILE_NAME: &str = env!("RETH_BUILD_PROFILE");
 
 /// The version information for reth formatted for P2P (devp2p).
 ///
