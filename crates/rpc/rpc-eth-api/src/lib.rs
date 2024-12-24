@@ -14,17 +14,17 @@
 
 pub mod bundle;
 pub mod core;
+pub mod ext;
 pub mod filter;
 pub mod helpers;
 pub mod node;
 pub mod pubsub;
 pub mod types;
-pub mod ext;
 
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
 pub use core::{EthApiServer, FullEthApiServer};
-pub use filter::EthFilterApiServer;
 pub use ext::L2EthApiExtServer;
+pub use filter::EthFilterApiServer;
 pub use node::{RpcNodeCore, RpcNodeCoreExt};
 pub use pubsub::EthPubSubApiServer;
 pub use reth_rpc_eth_types::error::{
@@ -38,8 +38,8 @@ pub use bundle::{EthBundleApiClient, EthCallBundleApiClient};
 #[cfg(feature = "client")]
 pub use core::EthApiClient;
 #[cfg(feature = "client")]
-pub use filter::EthFilterApiClient;
-#[cfg(feature = "client")]
 pub use ext::L2EthApiExtClient;
+#[cfg(feature = "client")]
+pub use filter::EthFilterApiClient;
 
 use reth_trie_common as _;
