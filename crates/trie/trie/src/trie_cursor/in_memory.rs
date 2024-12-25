@@ -72,28 +72,6 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
         }
     }
 
-    fn seek_inner(
-        &mut self,
-        key: Nibbles,
-        exact: bool,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let in_memory = self.in_memory_cursor.seek(&key);
-        if exact && in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
-            return Ok(in_memory)
-        }
-
-        // Reposition the cursor to the first greater or equal node that wasn't removed.
-        let mut db_entry = self.cursor.seek(key.clone())?;
-        while db_entry.as_ref().is_some_and(|entry| self.removed_nodes.contains(&entry.0)) {
-            db_entry = self.cursor.next()?;
-        }
-
-        // Compare two entries and return the lowest.
-        // If seek is exact, filter the entry for exact key match.
-        Ok(compare_trie_node_entries(in_memory, db_entry)
-            .filter(|(nibbles, _)| !exact || nibbles == &key))
-    }
-
     fn next_inner(
         &mut self,
         last: Nibbles,
@@ -119,16 +97,38 @@ impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let entry = self.seek_inner(key, true)?;
-        self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
-        Ok(entry)
+        let in_memory = self.in_memory_cursor.seek(&key);
+        if in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
+            self.last_key = Some(key);
+            return Ok(in_memory)
+        }
+        let db_entry = self.cursor.seek_exact(key.clone())?;
+        if db_entry.as_ref().is_some_and(|entry| !self.removed_nodes.contains(&entry.0)) {
+            self.last_key = Some(key);
+            return Ok(db_entry)
+        }
+        self.last_key = None;
+        return Ok(None);
     }
 
     fn seek(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let entry = self.seek_inner(key, false)?;
+        let in_memory = self.in_memory_cursor.seek(&key);
+        if in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
+            self.last_key = Some(key);
+            return Ok(in_memory)
+        }
+
+        // Reposition the cursor to the first greater or equal node that wasn't removed.
+        let mut db_entry = self.cursor.seek(key.clone())?;
+        while db_entry.as_ref().is_some_and(|entry| self.removed_nodes.contains(&entry.0)) {
+            db_entry = self.cursor.next()?;
+        }
+
+        // Compare two entries and return the lowest.
+        let entry = compare_trie_node_entries(in_memory, db_entry);
         self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
         Ok(entry)
     }
@@ -196,33 +196,6 @@ impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
 }
 
 impl<C: TrieCursor> InMemoryStorageTrieCursor<'_, C> {
-    fn seek_inner(
-        &mut self,
-        key: Nibbles,
-        exact: bool,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.seek(&key));
-        if self.storage_trie_cleared ||
-            (exact && in_memory.as_ref().is_some_and(|entry| entry.0 == key))
-        {
-            return Ok(in_memory.filter(|(nibbles, _)| !exact || nibbles == &key))
-        }
-
-        // Reposition the cursor to the first greater or equal node that wasn't removed.
-        let mut db_entry = self.cursor.seek(key.clone())?;
-        while db_entry
-            .as_ref()
-            .is_some_and(|entry| self.removed_nodes.as_ref().is_some_and(|r| r.contains(&entry.0)))
-        {
-            db_entry = self.cursor.next()?;
-        }
-
-        // Compare two entries and return the lowest.
-        // If seek is exact, filter the entry for exact key match.
-        Ok(compare_trie_node_entries(in_memory, db_entry)
-            .filter(|(nibbles, _)| !exact || nibbles == &key))
-    }
-
     fn next_inner(
         &mut self,
         last: Nibbles,
@@ -250,16 +223,56 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let entry = self.seek_inner(key, true)?;
-        self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
-        Ok(entry)
+        let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.seek(&key));
+        if in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
+            self.last_key = Some(key);
+            return Ok(in_memory);
+        }
+        if self.storage_trie_cleared {
+            self.last_key = None;
+            return Ok(None);
+        }
+
+        // Reposition the cursor to the first greater or equal node that wasn't removed.
+        let db_entry = self.cursor.seek_exact(key.clone())?;
+        if db_entry
+            .as_ref()
+            .is_some_and(|entry| !self.removed_nodes.as_ref().is_some_and(|r| r.contains(&entry.0)))
+        {
+            self.last_key = Some(key);
+            return Ok(db_entry);
+        }
+
+        self.last_key = None;
+        return Ok(None);
     }
 
     fn seek(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let entry = self.seek_inner(key, false)?;
+        let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.seek(&key));
+        if in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
+            self.last_key = Some(key);
+            return Ok(in_memory);
+        }
+        if self.storage_trie_cleared {
+            self.last_key = in_memory.as_ref().map(|(nibbles, _)| nibbles.clone());
+            return Ok(in_memory);
+        }
+
+        // Reposition the cursor to the first greater or equal node that wasn't removed.
+        let mut db_entry = self.cursor.seek(key.clone())?;
+        while db_entry
+            .as_ref()
+            .is_some_and(|entry| self.removed_nodes.as_ref().is_some_and(|r| r.contains(&entry.0)))
+        {
+            db_entry = self.cursor.next()?;
+        }
+
+        // Compare two entries and return the lowest.
+        // If seek is exact, filter the entry for exact key match.
+        let entry = compare_trie_node_entries(in_memory, db_entry);
         self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
         Ok(entry)
     }
