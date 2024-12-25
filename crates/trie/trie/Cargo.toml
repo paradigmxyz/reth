@@ -68,12 +68,14 @@ serde = [
     "alloy-trie/serde",
     "alloy-eips/serde",
     "revm/serde",
+    "reth-primitives-traits/serde",
     "reth-trie-common/serde",
 ]
 test-utils = [
     "triehash",
     "revm/test-utils",
     "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-trie-sparse/test-utils",
     "reth-stages-types/test-utils",
