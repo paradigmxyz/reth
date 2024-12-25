@@ -35,7 +35,7 @@ pub use reth_primitives_traits::{
     transaction::error::{
         InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
     },
-    WithEncoded, MaybeIntoParallelIterator
+    MaybeIntoParallelIterator, WithEncoded,
 };
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
@@ -75,8 +75,7 @@ pub static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
 /// Expected number of transactions where we can expect a speed-up by recovering the senders in
 /// parallel.
 #[cfg(not(feature = "rayon"))]
-pub static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
-    LazyLock::new(|| usize::MAX);
+pub static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> = LazyLock::new(|| usize::MAX);
 
 /// A raw transaction.
 ///

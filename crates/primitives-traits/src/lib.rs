@@ -95,7 +95,10 @@ pub use node::{BodyTy, FullNodePrimitives, HeaderTy, NodePrimitives, ReceiptTy};
 
 /// Helper trait that requires rayon since `rayon` feature is enabled.
 #[cfg(feature = "rayon")]
-pub trait MaybeIntoParallelIterator: rayon::iter::IntoParallelIterator<Item = <Self as MaybeIntoParallelIterator>::Item> + IntoIterator<Item = <Self as MaybeIntoParallelIterator>::Item> {
+pub trait MaybeIntoParallelIterator:
+    rayon::iter::IntoParallelIterator<Item = <Self as MaybeIntoParallelIterator>::Item>
+    + IntoIterator<Item = <Self as MaybeIntoParallelIterator>::Item>
+{
     /// The type of the elements being iterated over.
     type Item;
 }
@@ -108,14 +111,16 @@ pub trait MaybeIntoParallelIterator: IntoIterator {
 
 #[cfg(feature = "rayon")]
 impl<T> MaybeIntoParallelIterator for T
-    where
-        T: rayon::iter::IntoParallelIterator<Item = <T as IntoIterator>::Item> + IntoIterator,
+where
+    T: rayon::iter::IntoParallelIterator<Item = <T as IntoIterator>::Item> + IntoIterator,
 {
     type Item = <T as IntoIterator>::Item;
-
 }
 #[cfg(not(feature = "rayon"))]
-impl<T> MaybeIntoParallelIterator for T where T: core::iter::IntoIterator {
+impl<T> MaybeIntoParallelIterator for T
+where
+    T: core::iter::IntoIterator,
+{
     fn into_par_iter(self) -> Self::IntoIter {
         self.into_iter()
     }
