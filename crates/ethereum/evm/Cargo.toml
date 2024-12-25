@@ -53,5 +53,6 @@ std = [
 	"revm-primitives/std",
 	"secp256k1/std",
 	"reth-ethereum-forks/std",
-	"serde_json/std"
+	"serde_json/std",
+	"reth-primitives-traits/std"
 ]
