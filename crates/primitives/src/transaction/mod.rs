@@ -29,12 +29,13 @@ use op_alloy_consensus::DepositTransaction;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::TxDeposit;
 pub use pooled::PooledTransactionsElementEcRecovered;
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+#[cfg(feature = "rayon")]
+use rayon::iter::ParallelIterator;
 pub use reth_primitives_traits::{
     transaction::error::{
         InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
     },
-    WithEncoded,
+    WithEncoded, MaybeIntoParallelIterator
 };
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
@@ -63,12 +64,19 @@ pub use tx_type::{
 
 /// Expected number of transactions where we can expect a speed-up by recovering the senders in
 /// parallel.
+#[cfg(feature = "rayon")]
 pub static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
     LazyLock::new(|| match rayon::current_num_threads() {
         0..=1 => usize::MAX,
         2..=8 => 10,
         _ => 5,
     });
+
+/// Expected number of transactions where we can expect a speed-up by recovering the senders in
+/// parallel.
+#[cfg(not(feature = "rayon"))]
+pub static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
+    LazyLock::new(|| usize::MAX);
 
 /// A raw transaction.
 ///
@@ -919,7 +927,7 @@ impl TransactionSigned {
     /// [`Self::recover_signer`].
     pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
+        T: MaybeIntoParallelIterator<Item = &'a Self> + Send,
     {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer()).collect()
@@ -935,7 +943,7 @@ impl TransactionSigned {
     /// [`Self::recover_signer_unchecked`].
     pub fn recover_signers_unchecked<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
     where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self>,
+        T: MaybeIntoParallelIterator<Item = &'a Self>,
     {
         if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
             txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
@@ -1870,7 +1878,7 @@ pub mod serde_bincode_compat {
 pub fn recover_signers<'a, I, T>(txes: I, num_txes: usize) -> Option<Vec<Address>>
 where
     T: SignedTransaction,
-    I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,
+    I: MaybeIntoParallelIterator<Item = &'a T> + Send,
 {
     if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
         txes.into_iter().map(|tx| tx.recover_signer()).collect()
@@ -1886,7 +1894,7 @@ where
 pub fn recover_signers_unchecked<'a, I, T>(txes: I, num_txes: usize) -> Option<Vec<Address>>
 where
     T: SignedTransaction,
-    I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,
+    I: MaybeIntoParallelIterator<Item = &'a T> + Send,
 {
     if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
         txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()

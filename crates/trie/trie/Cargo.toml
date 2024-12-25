@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-execution-errors.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-sparse.workspace = true
@@ -33,7 +34,7 @@ alloy-trie.workspace = true
 tracing.workspace = true
 
 # misc
-rayon.workspace = true
+rayon = { workspace = true, optional = true }
 auto_impl.workspace = true
 itertools.workspace = true
 
@@ -60,6 +61,7 @@ criterion.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
+rayon = ["dep:rayon", "reth-primitives/rayon", "reth-primitives-traits/rayon"]
 serde = [
     "alloy-primitives/serde",
     "alloy-consensus/serde",

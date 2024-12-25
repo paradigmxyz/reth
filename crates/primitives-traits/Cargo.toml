@@ -37,6 +37,7 @@ k256.workspace = true
 byteorder = { workspace = true, optional = true }
 bytes.workspace = true
 derive_more.workspace = true
+rayon = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
 auto_impl.workspace = true
 thiserror.workspace = true
@@ -133,6 +134,9 @@ serde = [
 	"k256/serde",
 	"secp256k1?/serde",
 	"alloy-trie/serde"
+]
+rayon = [
+	"dep:rayon",
 ]
 reth-codec = [
 	"dep:reth-codecs",

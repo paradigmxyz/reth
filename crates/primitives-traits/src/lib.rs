@@ -93,6 +93,34 @@ pub use size::InMemorySize;
 pub mod node;
 pub use node::{BodyTy, FullNodePrimitives, HeaderTy, NodePrimitives, ReceiptTy};
 
+/// Helper trait that requires rayon since `rayon` feature is enabled.
+#[cfg(feature = "rayon")]
+pub trait MaybeIntoParallelIterator: rayon::iter::IntoParallelIterator<Item = <Self as MaybeIntoParallelIterator>::Item> + IntoIterator<Item = <Self as MaybeIntoParallelIterator>::Item> {
+    /// The type of the elements being iterated over.
+    type Item;
+}
+/// Noop. Helper trait that would require rayon implementation if `rayon` feature were enabled.
+#[cfg(not(feature = "rayon"))]
+pub trait MaybeIntoParallelIterator: IntoIterator {
+    /// Noop implementation for `rayon` feature disabled.
+    fn into_par_iter(self) -> Self::IntoIter;
+}
+
+#[cfg(feature = "rayon")]
+impl<T> MaybeIntoParallelIterator for T
+    where
+        T: rayon::iter::IntoParallelIterator<Item = <T as IntoIterator>::Item> + IntoIterator,
+{
+    type Item = <T as IntoIterator>::Item;
+
+}
+#[cfg(not(feature = "rayon"))]
+impl<T> MaybeIntoParallelIterator for T where T: core::iter::IntoIterator {
+    fn into_par_iter(self) -> Self::IntoIter {
+        self.into_iter()
+    }
+}
+
 /// Helper trait that requires de-/serialize implementation since `serde` feature is enabled.
 #[cfg(feature = "serde")]
 pub trait MaybeSerde: serde::Serialize + for<'de> serde::Deserialize<'de> {}
