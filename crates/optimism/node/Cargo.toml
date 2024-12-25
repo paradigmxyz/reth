@@ -72,7 +72,7 @@ alloy-genesis = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-optimism-node = { workspace = true, features = ["test-utils"] }
+reth-optimism-node = { workspace = true, features = ["test-utils", "reth-codec"] }
 reth-db.workspace = true
 reth-node-core.workspace = true
 reth-node-builder = { workspace = true, features = ["test-utils"] }
