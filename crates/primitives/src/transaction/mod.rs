@@ -2186,14 +2186,14 @@ mod tests {
         assert_eq!(data.as_slice(), b.as_slice());
     }
 
-    #[cfg(feature = "secp256k1")]
+    #[cfg(all(feature = "secp256k1", feature = "rayon"))]
     proptest::proptest! {
         #![proptest_config(proptest::prelude::ProptestConfig::with_cases(1))]
 
         #[test]
         fn test_parallel_recovery_order(txes in proptest::collection::vec(
             proptest_arbitrary_interop::arb::<Transaction>(),
-            *crate::transaction::PARALLEL_SENDER_RECOVERY_THRESHOLD * 5
+            *crate::transaction::PARALLEL_SENDER_RECOVERY_THRESHOLD.saturating_mul(5)
         )) {
             let mut rng =rand::thread_rng();
             let secp = secp256k1::Secp256k1::new();
