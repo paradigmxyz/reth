@@ -33,7 +33,7 @@ impl EtherscanBlockProvider {
     /// are supported.
     pub async fn load_block(&self, block_number_or_tag: BlockNumberOrTag) -> eyre::Result<Block> {
         let tag = match block_number_or_tag {
-            BlockNumberOrTag::Number(num) => format!("{num:x}"),
+            BlockNumberOrTag::Number(num) => format!("{num:#02x}"),
             tag => tag.to_string(),
         };
         let block: EtherscanBlockResponse = self
