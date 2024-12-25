@@ -24,6 +24,11 @@ impl TrieInput {
         Self { nodes, state, prefix_sets }
     }
 
+    /// Get sizes
+    pub fn sizes(&self) -> ((usize, usize), (usize, usize)) {
+        (self.nodes.sizes(), self.state.sizes())
+    }
+
     /// Create new trie input from in-memory state. The prefix sets will be constructed and
     /// set automatically.
     pub fn from_state(state: HashedPostState) -> Self {

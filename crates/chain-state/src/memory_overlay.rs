@@ -139,9 +139,14 @@ macro_rules! impl_state_provider {
                 &self,
                 mut input: TrieInput,
             ) -> ProviderResult<(B256, TrieUpdates)> {
+                let t = std::time::Instant::now();
                 let MemoryOverlayTrieState { nodes, state } = self.trie_state().clone();
+                let size_0 = input.sizes();
                 input.prepend_cached(nodes, state);
-                self.historical.state_root_from_nodes_with_updates(input)
+                let size_1 = input.sizes();
+                let result = self.historical.state_root_from_nodes_with_updates(input);
+                tracing::warn!("8a8183ac-fc8e-4745-8935-1bcc0af909e8 state_root_with_updates: in_memory.len()={:?} t={:?} size_0={:?} size_1={:?}", self.in_memory.len(), t.elapsed().as_millis(), size_0, size_1);
+                result
             }
         }
 

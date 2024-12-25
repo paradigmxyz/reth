@@ -19,6 +19,14 @@ pub struct TrieUpdates {
 }
 
 impl TrieUpdates {
+    /// Return sizes
+    pub fn sizes(&self) -> (usize, usize) {
+        (
+            self.account_nodes.len() + self.removed_nodes.len(),
+            self.storage_tries.values().map(|v| v.len()).sum(),
+        )
+    }
+
     /// Returns `true` if the updates are empty.
     pub fn is_empty(&self) -> bool {
         self.account_nodes.is_empty() &&

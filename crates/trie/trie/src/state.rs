@@ -24,6 +24,11 @@ pub struct HashedPostState {
 }
 
 impl HashedPostState {
+    /// Get sizes
+    pub fn sizes(&self) -> (usize, usize) {
+        (self.accounts.len(), self.storages.values().map(|v| v.storage.len()).sum())
+    }
+
     /// Initialize [`HashedPostState`] from bundle state.
     /// Hashes all changed accounts and storage entries that are currently stored in the bundle
     /// state.
