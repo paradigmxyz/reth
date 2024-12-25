@@ -35,7 +35,6 @@ use reth_optimism_rpc::{
     OpEthApi, SequencerClient,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{PooledTransaction, TransactionSigned};
 use reth_provider::{CanonStateSubscriptions, EthStorage};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
