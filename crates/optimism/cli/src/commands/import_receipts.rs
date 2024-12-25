@@ -265,6 +265,9 @@ pub struct ImportReceiptsResult {
 mod test {
     use alloy_primitives::hex;
     use reth_db_common::init::init_genesis;
+    use reth_optimism_chainspec::OP_MAINNET;
+    use reth_optimism_node::OpNode;
+    use reth_provider::test_utils::create_test_provider_factory_with_node_types;
     use reth_stages::test_utils::TestStageDB;
     use tempfile::tempfile;
     use tokio::{
@@ -299,11 +302,10 @@ mod test {
         init_genesis(&db.factory).unwrap();
 
         // todo: where does import command init receipts ? probably somewhere in pipeline
-
+        let provider_factory =
+            create_test_provider_factory_with_node_types::<OpNode>(OP_MAINNET.clone());
         let ImportReceiptsResult { total_decoded_receipts, total_filtered_out_dup_txns } =
-            import_receipts_from_reader(&TestStageDB::default().factory, reader, |_, _| 0)
-                .await
-                .unwrap();
+            import_receipts_from_reader(&provider_factory, reader, |_, _| 0).await.unwrap();
 
         assert_eq!(total_decoded_receipts, 3);
         assert_eq!(total_filtered_out_dup_txns, 0);

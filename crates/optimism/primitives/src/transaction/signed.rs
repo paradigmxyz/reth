@@ -68,7 +68,7 @@ impl OpTransactionSigned {
     }
 
     /// Returns whether this transaction is a deposit.
-    pub fn is_deposit(&self) -> bool {
+    pub const fn is_deposit(&self) -> bool {
         matches!(self.transaction, OpTypedTransaction::Deposit(_))
     }
 }

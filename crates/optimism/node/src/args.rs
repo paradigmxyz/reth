@@ -45,10 +45,6 @@ pub struct RollupArgs {
     #[arg(long = "engine.experimental", default_value = "false")]
     pub experimental: bool,
 
-    /// Enable the legacy engine on reth binary
-    #[arg(long = "engine.legacy", default_value = "false")]
-    pub legacy: bool,
-
     /// Configure persistence threshold for engine experimental.
     #[arg(long = "engine.persistence-threshold", conflicts_with = "legacy", default_value_t = DEFAULT_PERSISTENCE_THRESHOLD)]
     pub persistence_threshold: u64,
@@ -67,7 +63,6 @@ impl Default for RollupArgs {
             compute_pending_block: false,
             discovery_v4: false,
             experimental: false,
-            legacy: false,
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
         }

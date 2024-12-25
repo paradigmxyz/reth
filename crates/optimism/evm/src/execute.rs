@@ -322,11 +322,11 @@ mod tests {
     use alloy_primitives::{
         b256, Address, PrimitiveSignature as Signature, StorageKey, StorageValue, U256,
     };
-    use op_alloy_consensus::TxDeposit;
+    use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::execute::{BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider};
     use reth_optimism_chainspec::OpChainSpecBuilder;
-    use reth_primitives::{Account, Block, BlockBody, Transaction, TransactionSigned};
+    use reth_primitives::{Account, Block, BlockBody};
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
     };
@@ -389,8 +389,8 @@ mod tests {
 
         let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().regolith_activated().build());
 
-        let tx = TransactionSigned::new_unhashed(
-            Transaction::Eip1559(TxEip1559 {
+        let tx = OpTransactionSigned::new_unhashed(
+            OpTypedTransaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
                 gas_limit: MIN_TRANSACTION_GAS,
@@ -400,8 +400,8 @@ mod tests {
             Signature::test_signature(),
         );
 
-        let tx_deposit = TransactionSigned::new_unhashed(
-            Transaction::Deposit(op_alloy_consensus::TxDeposit {
+        let tx_deposit = OpTransactionSigned::new_unhashed(
+            OpTypedTransaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
                 gas_limit: MIN_TRANSACTION_GAS,
@@ -433,13 +433,12 @@ mod tests {
         let tx_receipt = receipts[0][0].as_ref().unwrap();
         let deposit_receipt = receipts[0][1].as_ref().unwrap();
 
-        // deposit_receipt_version is not present in pre canyon transactions
-        assert!(deposit_receipt.deposit_receipt_version.is_none());
-        assert!(tx_receipt.deposit_receipt_version.is_none());
-
+        assert!(!matches!(tx_receipt, OpReceipt::Deposit(_)));
         // deposit_nonce is present only in deposit transactions
-        assert!(deposit_receipt.deposit_nonce.is_some());
-        assert!(tx_receipt.deposit_nonce.is_none());
+        let OpReceipt::Deposit(receipt) = deposit_receipt else { panic!("expected deposit") };
+        assert!(receipt.deposit_nonce.is_none());
+        // deposit_receipt_version is not present in pre canyon transactions
+        assert!(receipt.deposit_receipt_version.is_none());
     }
 
     #[test]
@@ -464,8 +463,8 @@ mod tests {
 
         let chain_spec = Arc::new(OpChainSpecBuilder::base_mainnet().canyon_activated().build());
 
-        let tx = TransactionSigned::new_unhashed(
-            Transaction::Eip1559(TxEip1559 {
+        let tx = OpTransactionSigned::new_unhashed(
+            OpTypedTransaction::Eip1559(TxEip1559 {
                 chain_id: chain_spec.chain.id(),
                 nonce: 0,
                 gas_limit: MIN_TRANSACTION_GAS,
@@ -475,8 +474,8 @@ mod tests {
             Signature::test_signature(),
         );
 
-        let tx_deposit = TransactionSigned::new_unhashed(
-            Transaction::Deposit(op_alloy_consensus::TxDeposit {
+        let tx_deposit = OpTransactionSigned::new_unhashed(
+            OpTypedTransaction::Deposit(op_alloy_consensus::TxDeposit {
                 from: addr,
                 to: addr.into(),
                 gas_limit: MIN_TRANSACTION_GAS,
@@ -509,11 +508,13 @@ mod tests {
         let deposit_receipt = receipts[0][1].as_ref().unwrap();
 
         // deposit_receipt_version is set to 1 for post canyon deposit transactions
+        assert!(!matches!(tx_receipt, OpReceipt::Deposit(_)));
+        let OpReceipt::Deposit(deposit_receipt) = deposit_receipt else {
+            panic!("expected deposit")
+        };
         assert_eq!(deposit_receipt.deposit_receipt_version, Some(1));
-        assert!(tx_receipt.deposit_receipt_version.is_none());
 
         // deposit_nonce is present only in deposit transactions
         assert!(deposit_receipt.deposit_nonce.is_some());
-        assert!(tx_receipt.deposit_nonce.is_none());
     }
 }

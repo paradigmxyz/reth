@@ -14,7 +14,6 @@ extern crate alloc;
 pub mod bedrock;
 pub mod transaction;
 
-use reth_primitives::NodePrimitives;
 use reth_primitives_traits::Block;
 pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType};
 
@@ -31,7 +30,8 @@ pub type OpBlockBody = <OpBlock as Block>::Body;
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct OpPrimitives;
 
-impl NodePrimitives for OpPrimitives {
+#[cfg(feature = "optimism")]
+impl reth_primitives::NodePrimitives for OpPrimitives {
     type Block = OpBlock;
     type BlockHeader = alloy_consensus::Header;
     type BlockBody = OpBlockBody;

@@ -157,7 +157,7 @@ where
 
         // Create an empty signature for the transaction.
         let signature = Signature::new(Default::default(), Default::default(), false);
-        Ok(OpTransactionSigned::new_unhashed(tx.into(), signature))
+        Ok(OpTransactionSigned::new_unhashed(tx, signature))
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
