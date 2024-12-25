@@ -8,8 +8,10 @@ use alloy_primitives::{
     Address, B256, U256,
 };
 use itertools::Itertools;
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+#[cfg(feature = "rayon")]
+use rayon::iter::ParallelIterator;
 use reth_primitives::Account;
+use reth_primitives_traits::MaybeIntoParallelIterator;
 use reth_trie_common::KeyHasher;
 use revm::db::{states::CacheAccount, AccountStatus, BundleAccount};
 use std::borrow::Cow;
@@ -28,7 +30,7 @@ impl HashedPostState {
     /// Hashes all changed accounts and storage entries that are currently stored in the bundle
     /// state.
     pub fn from_bundle_state<'a, KH: KeyHasher>(
-        state: impl IntoParallelIterator<Item = (&'a Address, &'a BundleAccount)>,
+        state: impl MaybeIntoParallelIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
         let hashed = state
             .into_par_iter()
@@ -55,7 +57,7 @@ impl HashedPostState {
     /// Initialize [`HashedPostState`] from cached state.
     /// Hashes all changed accounts and storage entries that are currently stored in cache.
     pub fn from_cache_state<'a, KH: KeyHasher>(
-        state: impl IntoParallelIterator<Item = (&'a Address, &'a CacheAccount)>,
+        state: impl MaybeIntoParallelIterator<Item = (&'a Address, &'a CacheAccount)>,
     ) -> Self {
         let hashed = state
             .into_par_iter()

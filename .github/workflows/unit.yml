@@ -27,11 +27,11 @@ jobs:
       matrix:
         include:
           - type: ethereum
-            args: --features "asm-keccak ethereum" --locked
+            args: --features "asm-keccak ethereum rayon" --locked
             partition: 1
             total_partitions: 2
           - type: ethereum
-            args: --features "asm-keccak ethereum" --locked
+            args: --features "asm-keccak ethereum rayon" --locked
             partition: 2
             total_partitions: 2
           - type: optimism
