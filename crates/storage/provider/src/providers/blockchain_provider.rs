@@ -748,7 +748,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider2<N> {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         self.consistent_provider()?.basic_account(address)
     }
 }

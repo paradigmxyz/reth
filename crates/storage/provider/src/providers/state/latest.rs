@@ -43,8 +43,8 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
 
 impl<Provider: DBProvider> AccountReader for LatestStateProviderRef<'_, Provider> {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        self.tx().get::<tables::PlainAccountState>(address).map_err(Into::into)
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        self.tx().get_by_encoded_key::<tables::PlainAccountState>(address).map_err(Into::into)
     }
 }
 

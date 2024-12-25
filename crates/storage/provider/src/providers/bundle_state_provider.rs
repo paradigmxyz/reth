@@ -68,9 +68,9 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> BlockHashReader
 }
 
 impl<SP: StateProvider, EDP: ExecutionDataProvider> AccountReader for BundleStateProvider<SP, EDP> {
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if let Some(account) =
-            self.block_execution_data_provider.execution_outcome().account(&address)
+            self.block_execution_data_provider.execution_outcome().account(address)
         {
             Ok(account)
         } else {

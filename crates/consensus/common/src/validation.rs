@@ -396,7 +396,7 @@ mod tests {
     }
 
     impl AccountReader for Provider {
-        fn basic_account(&self, _address: Address) -> ProviderResult<Option<Account>> {
+        fn basic_account(&self, _address: &Address) -> ProviderResult<Option<Account>> {
             Ok(self.account)
         }
     }

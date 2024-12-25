@@ -96,9 +96,9 @@ impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N>
 }
 
 impl<N: NodePrimitives> AccountReader for MemoryOverlayStateProviderRef<'_, N> {
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         for block in &self.in_memory {
-            if let Some(account) = block.execution_output.account(&address) {
+            if let Some(account) = block.execution_output.account(address) {
                 return Ok(account);
             }
         }
