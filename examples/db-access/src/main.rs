@@ -234,8 +234,8 @@ fn state_provider_example<T: StateProvider + AccountReader>(provider: T) -> eyre
     let storage_key = B256::random();
 
     // Can get account / storage state with simple point queries
-    let _account = provider.basic_account(address)?;
-    let _code = provider.account_code(address)?;
+    let _account = provider.basic_account(&address)?;
+    let _code = provider.account_code(&address)?;
     let _storage = provider.storage(address, storage_key)?;
     // TODO: unimplemented.
     // let _proof = provider.proof(address, &[])?;

@@ -1019,7 +1019,7 @@ mod tests {
     }
 
     impl AccountReader for MockStateProvider {
-        fn basic_account(&self, _address: Address) -> ProviderResult<Option<Account>> {
+        fn basic_account(&self, _address: &Address) -> ProviderResult<Option<Account>> {
             Ok(None)
         }
     }

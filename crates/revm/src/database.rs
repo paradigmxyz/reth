@@ -16,7 +16,7 @@ pub trait EvmStateProvider: Send + Sync {
     /// Get basic account information.
     ///
     /// Returns [`None`] if the account doesn't exist.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>>;
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>>;
 
     /// Get the hash of the block with the given number. Returns [`None`] if no block with this
     /// number exists.
@@ -38,7 +38,7 @@ pub trait EvmStateProvider: Send + Sync {
 
 // Blanket implementation of EvmStateProvider for any type that implements StateProvider.
 impl<T: reth_storage_api::StateProvider> EvmStateProvider for T {
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         <T as reth_storage_api::AccountReader>::basic_account(self, address)
     }
 
@@ -141,7 +141,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(self.basic_account(address)?.map(Into::into))
+        Ok(self.basic_account(&address)?.map(Into::into))
     }
 
     /// Retrieves the bytecode associated with a given code hash.
