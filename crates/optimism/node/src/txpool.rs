@@ -1,18 +1,28 @@
 //! OP transaction pool types
-use alloy_consensus::{BlockHeader, Transaction};
+use alloy_consensus::{
+    BlobTransactionSidecar, BlobTransactionValidationError, BlockHeader, Transaction, Typed2718,
+};
 use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::{Address, TxHash, TxKind, U256};
+use op_alloy_consensus::OpTypedTransaction;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpec;
 use reth_node_api::{Block, BlockBody};
 use reth_optimism_evm::RethL1BlockInfo;
-use reth_primitives::{GotExpected, InvalidTransactionError, SealedBlock, TransactionSigned};
+use reth_optimism_primitives::OpTransactionSigned;
+use reth_primitives::{
+    transaction::TransactionConversionError, GotExpected, InvalidTransactionError, RecoveredTx,
+    SealedBlock, TransactionSigned,
+};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_revm::L1BlockInfo;
 use reth_transaction_pool::{
-    CoinbaseTipOrdering, EthPoolTransaction, EthPooledTransaction, EthTransactionValidator, Pool,
-    TransactionOrigin, TransactionValidationOutcome, TransactionValidationTaskExecutor,
-    TransactionValidator,
+    CoinbaseTipOrdering, EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction,
+    EthTransactionValidator, Pool, PoolTransaction, TransactionOrigin,
+    TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
+use revm::primitives::{AccessList, KzgSettings};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -24,6 +34,167 @@ pub type OpTransactionPool<Client, S> = Pool<
     CoinbaseTipOrdering<EthPooledTransaction>,
     S,
 >;
+
+/// Pool transaction for OP.
+#[derive(Debug, Clone, derive_more::Deref)]
+pub struct OpPooledTransaction(EthPooledTransaction<OpTransactionSigned>);
+
+impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for OpPooledTransaction {
+    fn from(tx: RecoveredTx<op_alloy_consensus::OpPooledTransaction>) -> Self {
+        let encoded_len = tx.encode_2718_len();
+        let tx = tx.map_transaction(|tx| tx.into());
+        Self(EthPooledTransaction::new(tx, encoded_len))
+    }
+}
+
+impl TryFrom<RecoveredTx<OpTransactionSigned>> for OpPooledTransaction {
+    type Error = TransactionConversionError;
+
+    fn try_from(value: RecoveredTx<OpTransactionSigned>) -> Result<Self, Self::Error> {
+        let (tx, signer) = value.to_components();
+        let pooled: RecoveredTx<op_alloy_consensus::OpPooledTransaction> =
+            RecoveredTx::from_signed_transaction(tx.try_into()?, signer);
+        Ok(pooled.into())
+    }
+}
+
+impl From<OpPooledTransaction> for RecoveredTx<OpTransactionSigned> {
+    fn from(value: OpPooledTransaction) -> Self {
+        value.0.transaction
+    }
+}
+
+impl PoolTransaction for OpPooledTransaction {
+    type TryFromConsensusError = <Self as TryFrom<RecoveredTx<Self::Consensus>>>::Error;
+    type Consensus = OpTransactionSigned;
+    type Pooled = op_alloy_consensus::OpPooledTransaction;
+
+    fn clone_into_consensus(&self) -> RecoveredTx<Self::Consensus> {
+        self.transaction().clone()
+    }
+
+    fn try_consensus_into_pooled(
+        tx: RecoveredTx<Self::Consensus>,
+    ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
+        let (tx, signer) = tx.to_components();
+        Ok(RecoveredTx::from_signed_transaction(tx.try_into()?, signer))
+    }
+
+    fn hash(&self) -> &TxHash {
+        self.transaction.tx_hash()
+    }
+
+    fn sender(&self) -> Address {
+        self.transaction.signer()
+    }
+
+    fn sender_ref(&self) -> &Address {
+        self.transaction.signer_ref()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.transaction.nonce()
+    }
+
+    fn cost(&self) -> &U256 {
+        &self.cost
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.transaction.gas_limit()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.transaction.transaction.max_fee_per_gas()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.transaction.access_list()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.transaction.transaction.max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.transaction.max_fee_per_blob_gas()
+    }
+
+    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        self.transaction.effective_tip_per_gas(base_fee)
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.transaction.priority_fee_or_price()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.transaction.kind()
+    }
+
+    fn is_create(&self) -> bool {
+        self.transaction.is_create()
+    }
+
+    fn input(&self) -> &[u8] {
+        self.transaction.input()
+    }
+
+    fn size(&self) -> usize {
+        self.transaction.transaction.input().len()
+    }
+
+    fn tx_type(&self) -> u8 {
+        self.transaction.ty()
+    }
+
+    fn encoded_length(&self) -> usize {
+        self.encoded_length
+    }
+
+    fn chain_id(&self) -> Option<u64> {
+        self.transaction.chain_id()
+    }
+}
+
+impl EthPoolTransaction for OpPooledTransaction {
+    fn take_blob(&mut self) -> EthBlobTransactionSidecar {
+        EthBlobTransactionSidecar::None
+    }
+
+    fn blob_count(&self) -> usize {
+        0
+    }
+
+    fn try_into_pooled_eip4844(
+        self,
+        _sidecar: Arc<BlobTransactionSidecar>,
+    ) -> Option<RecoveredTx<Self::Pooled>> {
+        None
+    }
+
+    fn try_from_eip4844(
+        _tx: RecoveredTx<Self::Consensus>,
+        _sidecar: BlobTransactionSidecar,
+    ) -> Option<Self> {
+        None
+    }
+
+    fn validate_blob(
+        &self,
+        _sidecar: &BlobTransactionSidecar,
+        _settings: &KzgSettings,
+    ) -> Result<(), BlobTransactionValidationError> {
+        Err(BlobTransactionValidationError::NotBlobTransaction(self.tx_type()))
+    }
+
+    fn authorization_count(&self) -> usize {
+        match &self.transaction.transaction {
+            OpTypedTransaction::Eip7702(tx) => tx.authorization_list.len(),
+            _ => 0,
+        }
+    }
+}
 
 /// Validator for Optimism transactions.
 #[derive(Debug, Clone)]

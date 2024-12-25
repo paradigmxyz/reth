@@ -1192,20 +1192,20 @@ pub trait EthPoolTransaction: PoolTransaction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EthPooledTransaction<T = TransactionSigned> {
     /// `EcRecovered` transaction, the consensus format.
-    pub(crate) transaction: RecoveredTx<T>,
+    pub transaction: RecoveredTx<T>,
 
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
     /// max_blob_fee_per_gas * blob_gas_used`.
-    pub(crate) cost: U256,
+    pub cost: U256,
 
     /// This is the RLP length of the transaction, computed when the transaction is added to the
     /// pool.
-    pub(crate) encoded_length: usize,
+    pub encoded_length: usize,
 
     /// The blob side car for this transaction
-    pub(crate) blob_sidecar: EthBlobTransactionSidecar,
+    pub blob_sidecar: EthBlobTransactionSidecar,
 }
 
 impl<T: SignedTransaction> EthPooledTransaction<T> {
