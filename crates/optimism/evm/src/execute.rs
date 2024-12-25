@@ -435,10 +435,12 @@ mod tests {
 
         assert!(!matches!(tx_receipt, OpReceipt::Deposit(_)));
         // deposit_nonce is present only in deposit transactions
-        let OpReceipt::Deposit(receipt) = deposit_receipt else { panic!("expected deposit") };
-        assert!(receipt.deposit_nonce.is_none());
+        let OpReceipt::Deposit(deposit_receipt) = deposit_receipt else {
+            panic!("expected deposit")
+        };
+        assert!(deposit_receipt.deposit_nonce.is_some());
         // deposit_receipt_version is not present in pre canyon transactions
-        assert!(receipt.deposit_receipt_version.is_none());
+        assert!(deposit_receipt.deposit_receipt_version.is_none());
     }
 
     #[test]
