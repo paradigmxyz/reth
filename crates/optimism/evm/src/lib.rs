@@ -18,7 +18,7 @@ use alloy_primitives::{Address, U256};
 use op_alloy_consensus::EIP1559ParamError;
 use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
-use reth_primitives::{transaction::FillTxEnv, Head, TransactionSigned};
+use reth_primitives::{transaction::FillTxEnv, TransactionSigned};
 use reth_revm::{
     inspector_handle_register,
     primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
@@ -111,18 +111,7 @@ impl ConfigureEvmEnv for OpEvmConfig {
     }
 
     fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
-        let spec_id = revm_spec(
-            self.chain_spec(),
-            &Head {
-                number: header.number,
-                timestamp: header.timestamp,
-                difficulty: header.difficulty,
-                // NOTE: this does not matter within revm_spec as it uses paris hardfork block
-                // activation
-                total_difficulty: U256::MIN,
-                hash: Default::default(),
-            },
-        );
+        let spec_id = revm_spec(self.chain_spec(), header);
 
         cfg_env.chain_id = self.chain_spec.chain().id();
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
