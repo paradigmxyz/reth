@@ -2193,7 +2193,7 @@ mod tests {
         #[test]
         fn test_parallel_recovery_order(txes in proptest::collection::vec(
             proptest_arbitrary_interop::arb::<Transaction>(),
-            *crate::transaction::PARALLEL_SENDER_RECOVERY_THRESHOLD.saturating_mul(5)
+            crate::transaction::PARALLEL_SENDER_RECOVERY_THRESHOLD.saturating_mul(5)
         )) {
             let mut rng =rand::thread_rng();
             let secp = secp256k1::Secp256k1::new();
