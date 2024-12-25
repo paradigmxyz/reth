@@ -249,21 +249,21 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> AccountRea
     for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        match self.account_history_lookup(address)? {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        match self.account_history_lookup(*address)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(self
                 .tx()
                 .cursor_dup_read::<tables::AccountChangeSets>()?
-                .seek_by_key_subkey(changeset_block_number, address)?
-                .filter(|acc| acc.address == address)
+                .seek_by_key_subkey(changeset_block_number, *address)?
+                .filter(|acc| &acc.address == address)
                 .ok_or(ProviderError::AccountChangesetNotFound {
                     block_number: changeset_block_number,
-                    address,
+                    address: *address,
                 })?
                 .info),
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
-                Ok(self.tx().get::<tables::PlainAccountState>(address)?)
+                Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
             }
         }
     }
@@ -633,43 +633,46 @@ mod tests {
         let db = factory.provider().unwrap();
 
         // run
-        assert_eq!(HistoricalStateProviderRef::new(&db, 1).basic_account(ADDRESS), Ok(None));
+        assert_eq!(HistoricalStateProviderRef::new(&db, 1).basic_account(&ADDRESS), Ok(None));
         assert_eq!(
-            HistoricalStateProviderRef::new(&db, 2).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 2).basic_account(&ADDRESS),
             Ok(Some(acc_at3))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&db, 3).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 3).basic_account(&ADDRESS),
             Ok(Some(acc_at3))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&db, 4).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 4).basic_account(&ADDRESS),
             Ok(Some(acc_at7))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&db, 7).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 7).basic_account(&ADDRESS),
             Ok(Some(acc_at7))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&db, 9).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 9).basic_account(&ADDRESS),
             Ok(Some(acc_at10))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&db, 10).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 10).basic_account(&ADDRESS),
             Ok(Some(acc_at10))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&db, 11).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 11).basic_account(&ADDRESS),
             Ok(Some(acc_at15))
         );
         assert_eq!(
-            HistoricalStateProviderRef::new(&db, 16).basic_account(ADDRESS),
+            HistoricalStateProviderRef::new(&db, 16).basic_account(&ADDRESS),
             Ok(Some(acc_plain))
         );
 
-        assert_eq!(HistoricalStateProviderRef::new(&db, 1).basic_account(HIGHER_ADDRESS), Ok(None));
         assert_eq!(
-            HistoricalStateProviderRef::new(&db, 1000).basic_account(HIGHER_ADDRESS),
+            HistoricalStateProviderRef::new(&db, 1).basic_account(&HIGHER_ADDRESS),
+            Ok(None)
+        );
+        assert_eq!(
+            HistoricalStateProviderRef::new(&db, 1000).basic_account(&HIGHER_ADDRESS),
             Ok(Some(higher_acc_plain))
         );
     }

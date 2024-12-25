@@ -361,12 +361,12 @@ mod tests {
 
         // Check plain state
         assert_eq!(
-            provider.basic_account(address_a).expect("Could not read account state"),
+            provider.basic_account(&address_a).expect("Could not read account state"),
             Some(reth_account_a),
             "Account A state is wrong"
         );
         assert_eq!(
-            provider.basic_account(address_b).expect("Could not read account state"),
+            provider.basic_account(&address_b).expect("Could not read account state"),
             Some(reth_account_b_changed),
             "Account B state is wrong"
         );
@@ -422,7 +422,7 @@ mod tests {
 
         // Check new plain state for account B
         assert_eq!(
-            provider.basic_account(address_b).expect("Could not read account state"),
+            provider.basic_account(&address_b).expect("Could not read account state"),
             None,
             "Account B should be deleted"
         );

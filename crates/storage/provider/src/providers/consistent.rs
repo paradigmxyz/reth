@@ -234,7 +234,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             let AccountBeforeTx { info: old_info, address } = account_before;
             match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
-                    let new_info = state_provider.basic_account(address)?;
+                    let new_info = state_provider.basic_account(&address)?;
                     entry.insert((old_info, new_info, HashMap::new()));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
@@ -252,7 +252,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             // get account state or insert from plain state.
             let account_state = match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
-                    let present_info = state_provider.basic_account(address)?;
+                    let present_info = state_provider.basic_account(&address)?;
                     entry.insert((present_info, present_info, HashMap::new()))
                 }
                 hash_map::Entry::Occupied(entry) => entry.into_mut(),
@@ -1441,7 +1441,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
 
 impl<N: ProviderNodeTypes> AccountReader for ConsistentProvider<N> {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         // use latest state provider
         let state_provider = self.latest_ref()?;
         state_provider.basic_account(address)

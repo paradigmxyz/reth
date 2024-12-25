@@ -40,7 +40,7 @@ pub trait StateProvider:
     /// Get account code by its address.
     ///
     /// Returns `None` if the account doesn't exist or account is not a contract
-    fn account_code(&self, addr: Address) -> ProviderResult<Option<Bytecode>> {
+    fn account_code(&self, addr: &Address) -> ProviderResult<Option<Bytecode>> {
         // Get basic account information
         // Returns None if acc doesn't exist
         let acc = match self.basic_account(addr)? {
@@ -63,7 +63,7 @@ pub trait StateProvider:
     /// Get account balance by its address.
     ///
     /// Returns `None` if the account doesn't exist
-    fn account_balance(&self, addr: Address) -> ProviderResult<Option<U256>> {
+    fn account_balance(&self, addr: &Address) -> ProviderResult<Option<U256>> {
         // Get basic account information
         // Returns None if acc doesn't exist
         match self.basic_account(addr)? {
@@ -75,7 +75,7 @@ pub trait StateProvider:
     /// Get account nonce by its address.
     ///
     /// Returns `None` if the account doesn't exist
-    fn account_nonce(&self, addr: Address) -> ProviderResult<Option<u64>> {
+    fn account_nonce(&self, addr: &Address) -> ProviderResult<Option<u64>> {
         // Get basic account information
         // Returns None if acc doesn't exist
         match self.basic_account(addr)? {

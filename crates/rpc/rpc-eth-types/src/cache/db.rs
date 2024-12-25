@@ -106,7 +106,7 @@ impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper<'_> {
 impl reth_storage_api::AccountReader for StateProviderTraitObjWrapper<'_> {
     fn basic_account(
         &self,
-        address: revm_primitives::Address,
+        address: &revm_primitives::Address,
     ) -> reth_errors::ProviderResult<Option<reth_primitives::Account>> {
         self.0.basic_account(address)
     }
@@ -163,21 +163,21 @@ impl StateProvider for StateProviderTraitObjWrapper<'_> {
 
     fn account_code(
         &self,
-        addr: revm_primitives::Address,
+        addr: &revm_primitives::Address,
     ) -> reth_errors::ProviderResult<Option<reth_primitives::Bytecode>> {
         self.0.account_code(addr)
     }
 
     fn account_balance(
         &self,
-        addr: revm_primitives::Address,
+        addr: &revm_primitives::Address,
     ) -> reth_errors::ProviderResult<Option<U256>> {
         self.0.account_balance(addr)
     }
 
     fn account_nonce(
         &self,
-        addr: revm_primitives::Address,
+        addr: &revm_primitives::Address,
     ) -> reth_errors::ProviderResult<Option<u64>> {
         self.0.account_nonce(addr)
     }

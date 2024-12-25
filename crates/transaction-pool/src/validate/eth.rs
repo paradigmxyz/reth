@@ -367,7 +367,7 @@ where
         let state = maybe_state.as_deref().expect("provider is set");
 
         // Use provider to get account info
-        let account = match state.basic_account(transaction.sender()) {
+        let account = match state.basic_account(transaction.sender_ref()) {
             Ok(account) => account.unwrap_or_default(),
             Err(err) => {
                 return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
