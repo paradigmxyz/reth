@@ -298,7 +298,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
 impl TestBlockBuilder {
     /// Creates a `TestBlockBuilder` configured for Ethereum primitives.
-    pub fn eth() -> Self{
+    pub fn eth() -> Self {
         Self::default()
     }
 }
