@@ -35,7 +35,7 @@ pub trait StateProvider:
     ) -> ProviderResult<Option<StorageValue>>;
 
     /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>>;
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>>;
 
     /// Get account code by its address.
     ///
@@ -53,7 +53,7 @@ pub trait StateProvider:
                 return Ok(None)
             }
             // Get the code from the code hash
-            return self.bytecode_by_hash(code_hash)
+            return self.bytecode_by_hash(&code_hash)
         }
 
         // Return `None` if no code hash is set
