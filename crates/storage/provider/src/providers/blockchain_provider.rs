@@ -1408,7 +1408,7 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Generate a random block to initialise the blockchain provider.
-        let mut test_block_builder = TestBlockBuilder::<EthPrimitives>::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
         let block_1 = test_block_builder.generate_random_block(0, B256::ZERO);
         let block_hash_1 = block_1.hash();
 
