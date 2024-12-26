@@ -298,8 +298,8 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
 impl TestBlockBuilder {
     /// Creates a `TestBlockBuilder` configured for Ethereum primitives.
-    pub fn eth() -> TestBlockBuilder<EthPrimitives> {
-        TestBlockBuilder::<EthPrimitives>::default()
+    pub fn eth() -> Self{
+        Self::default()
     }
 }
 /// A test `ChainEventSubscriptions`
