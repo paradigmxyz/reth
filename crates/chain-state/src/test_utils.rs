@@ -294,10 +294,12 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         execution_outcome.with_receipts(Receipts::from(receipts))
     }
+}
 
-    /// Creates a TestBlockBuilder configured for Ethereum primitives.
+impl TestBlockBuilder {
+    /// Creates a `TestBlockBuilder` configured for Ethereum primitives.
     pub fn eth() -> TestBlockBuilder<EthPrimitives> {
-        TestBlockBuilder::eth()
+        TestBlockBuilder::<EthPrimitives>::default()
     }
 }
 /// A test `ChainEventSubscriptions`
