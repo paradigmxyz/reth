@@ -41,7 +41,7 @@ pub struct EngineArgs {
     pub memory_block_buffer_target: u64,
 
     /// Enable state root task
-    #[arg(long = "engine.state-root-task", conflicts_with = "legacy", default_value = "false")]
+    #[arg(long = "engine.state-root-task", conflicts_with = "legacy")]
     pub state_root_task: bool,
 }
 
