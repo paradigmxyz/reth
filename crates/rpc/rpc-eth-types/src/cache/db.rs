@@ -156,7 +156,7 @@ impl StateProvider for StateProviderTraitObjWrapper<'_> {
 
     fn bytecode_by_hash(
         &self,
-        code_hash: B256,
+        code_hash: &B256,
     ) -> reth_errors::ProviderResult<Option<reth_primitives::Bytecode>> {
         self.0.bytecode_by_hash(code_hash)
     }

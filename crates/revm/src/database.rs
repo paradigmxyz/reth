@@ -25,7 +25,7 @@ pub trait EvmStateProvider: Send + Sync {
     /// Get account code by hash.
     fn bytecode_by_hash(
         &self,
-        code_hash: B256,
+        code_hash: &B256,
     ) -> ProviderResult<Option<reth_primitives::Bytecode>>;
 
     /// Get storage of the given account.
@@ -48,7 +48,7 @@ impl<T: reth_storage_api::StateProvider> EvmStateProvider for T {
 
     fn bytecode_by_hash(
         &self,
-        code_hash: B256,
+        code_hash: &B256,
     ) -> ProviderResult<Option<reth_primitives::Bytecode>> {
         <T as reth_storage_api::StateProvider>::bytecode_by_hash(self, code_hash)
     }
@@ -148,7 +148,7 @@ impl<DB: EvmStateProvider> DatabaseRef for StateProviderDatabase<DB> {
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.bytecode_by_hash(code_hash)?.unwrap_or_default().0)
+        Ok(self.bytecode_by_hash(&code_hash)?.unwrap_or_default().0)
     }
 
     /// Retrieves the storage value at a specific index for a given address.
