@@ -380,9 +380,9 @@ where
         //
         // Any other case means that the account is not an EOA, and should not be able to send
         // transactions.
-        if account.has_bytecode() {
+        if let Some(code_hash) = &account.bytecode_hash {
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
-                match state.bytecode_by_hash(account.get_bytecode_hash()) {
+                match state.bytecode_by_hash(code_hash) {
                     Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
                     Err(err) => {
                         return TransactionValidationOutcome::Error(
