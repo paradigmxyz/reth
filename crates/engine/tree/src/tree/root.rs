@@ -105,13 +105,13 @@ pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
-    ProofCalculated(Box<ProofCalculated>),
+    ProofCalculated(ProofCalculated),
     /// Error during proof calculation
     ProofCalculationError(ProviderError),
     /// State root calculation completed
     RootCalculated {
         /// The updated sparse trie
-        trie: Box<SparseStateTrie<BPF>>,
+        trie: SparseStateTrie<BPF>,
         /// Time taken to calculate the root
         elapsed: Duration,
     },
@@ -273,7 +273,7 @@ pub struct StateRootTask<'env, Factory, BPF: BlindedProviderFactory> {
     proof_sequencer: ProofSequencer,
     /// The sparse trie used for the state root calculation. If [`None`], then update is in
     /// progress.
-    sparse_trie: Option<Box<SparseStateTrie<BPF>>>,
+    sparse_trie: Option<SparseStateTrie<BPF>>,
     /// Reference to the shared thread pool for parallel proof generation
     thread_pool: &'env rayon::ThreadPool,
 }
@@ -307,7 +307,7 @@ where
             tx,
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
-            sparse_trie: Some(Box::new(SparseStateTrie::new(blinded_provider).with_updates(true))),
+            sparse_trie: Some(SparseStateTrie::new(blinded_provider).with_updates(true)),
             thread_pool,
         }
     }
@@ -408,12 +408,12 @@ where
             match result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
-                        Box::new(ProofCalculated {
+                        ProofCalculated {
                             state_update: hashed_state_update,
                             targets: proof_targets,
                             proof,
                             sequence_number: proof_sequence_number,
-                        }),
+                        },
                     ));
                 }
                 Err(error) => {
@@ -751,11 +751,11 @@ fn update_sparse_trie<
     SBP: BlindedProvider<Error = SparseTrieError> + Send + Sync,
     BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP> + Send + Sync,
 >(
-    mut trie: Box<SparseStateTrie<BPF>>,
+    mut trie: SparseStateTrie<BPF>,
     multiproof: MultiProof,
     targets: MultiProofTargets,
     state: HashedPostState,
-) -> SparseStateTrieResult<(Box<SparseStateTrie<BPF>>, Duration)> {
+) -> SparseStateTrieResult<(SparseStateTrie<BPF>, Duration)> {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
 
