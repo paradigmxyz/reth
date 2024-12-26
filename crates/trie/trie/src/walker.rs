@@ -212,7 +212,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         }
 
         // Create a new CursorSubNode and push it to the stack.
-        let subnode = CursorSubNode::new(key, Some(node));
+        let subnode = CursorSubNode::new(key.clone(), Some(node));
         let nibble = subnode.nibble();
         self.stack.push(subnode);
         self.update_skip_node();
@@ -220,7 +220,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
         if !self.can_skip_current_node || nibble != -1 {
-            if let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?) {
+            if let Some(keys) = self.removed_keys.as_mut() {
                 keys.insert(key);
             }
         }

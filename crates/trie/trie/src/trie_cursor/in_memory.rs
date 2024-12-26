@@ -55,8 +55,6 @@ pub struct InMemoryAccountTrieCursor<'a, C> {
     in_memory_cursor: ForwardInMemoryCursor<'a, Nibbles, BranchNodeCompact>,
     /// Collection of removed trie nodes.
     removed_nodes: &'a HashSet<Nibbles>,
-    /// Last key returned by the cursor.
-    last_key: Option<Nibbles>,
 }
 
 impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
@@ -68,27 +66,7 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
             cursor,
             in_memory_cursor,
             removed_nodes: &trie_updates.removed_nodes,
-            last_key: None,
         }
-    }
-
-    fn next_inner(
-        &mut self,
-        last: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let in_memory = self.in_memory_cursor.first_after(&last);
-
-        // Reposition the cursor to the first greater or equal node that wasn't removed.
-        let mut db_entry = self.cursor.seek(last.clone())?;
-        while db_entry
-            .as_ref()
-            .is_some_and(|entry| entry.0 < last || self.removed_nodes.contains(&entry.0))
-        {
-            db_entry = self.cursor.next()?;
-        }
-
-        // Compare two entries and return the lowest.
-        Ok(compare_trie_node_entries(in_memory, db_entry))
     }
 }
 
@@ -99,15 +77,12 @@ impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let in_memory = self.in_memory_cursor.seek(&key);
         if in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
-            self.last_key = Some(key);
             return Ok(in_memory)
         }
         let db_entry = self.cursor.seek_exact(key.clone())?;
         if db_entry.as_ref().is_some_and(|entry| !self.removed_nodes.contains(&entry.0)) {
-            self.last_key = Some(key);
             return Ok(db_entry)
         }
-        self.last_key = None;
         return Ok(None);
     }
 
@@ -117,7 +92,6 @@ impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let in_memory = self.in_memory_cursor.seek(&key);
         if in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
-            self.last_key = Some(key);
             return Ok(in_memory)
         }
 
@@ -129,28 +103,15 @@ impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
 
         // Compare two entries and return the lowest.
         let entry = compare_trie_node_entries(in_memory, db_entry);
-        self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
         Ok(entry)
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let next = match &self.last_key {
-            Some(last) => {
-                let entry = self.next_inner(last.clone())?;
-                self.last_key = entry.as_ref().map(|entry| entry.0.clone());
-                entry
-            }
-            // no previous entry was found
-            None => None,
-        };
-        Ok(next)
+        unreachable!();
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        match &self.last_key {
-            Some(key) => Ok(Some(key.clone())),
-            None => self.cursor.current(),
-        }
+        unreachable!();
     }
 }
 
@@ -169,8 +130,6 @@ pub struct InMemoryStorageTrieCursor<'a, C> {
     removed_nodes: Option<&'a HashSet<Nibbles>>,
     /// The flag indicating whether the storage trie was cleared.
     storage_trie_cleared: bool,
-    /// Last key returned by the cursor.
-    last_key: Option<Nibbles>,
 }
 
 impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
@@ -190,31 +149,7 @@ impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
             in_memory_cursor,
             removed_nodes,
             storage_trie_cleared,
-            last_key: None,
         }
-    }
-}
-
-impl<C: TrieCursor> InMemoryStorageTrieCursor<'_, C> {
-    fn next_inner(
-        &mut self,
-        last: Nibbles,
-    ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.first_after(&last));
-        if self.storage_trie_cleared {
-            return Ok(in_memory)
-        }
-
-        // Reposition the cursor to the first greater or equal node that wasn't removed.
-        let mut db_entry = self.cursor.seek(last.clone())?;
-        while db_entry.as_ref().is_some_and(|entry| {
-            entry.0 < last || self.removed_nodes.as_ref().is_some_and(|r| r.contains(&entry.0))
-        }) {
-            db_entry = self.cursor.next()?;
-        }
-
-        // Compare two entries and return the lowest.
-        Ok(compare_trie_node_entries(in_memory, db_entry))
     }
 }
 
@@ -225,11 +160,9 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.seek(&key));
         if in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
-            self.last_key = Some(key);
             return Ok(in_memory);
         }
         if self.storage_trie_cleared {
-            self.last_key = None;
             return Ok(None);
         }
 
@@ -239,11 +172,9 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
             .as_ref()
             .is_some_and(|entry| !self.removed_nodes.as_ref().is_some_and(|r| r.contains(&entry.0)))
         {
-            self.last_key = Some(key);
             return Ok(db_entry);
         }
 
-        self.last_key = None;
         return Ok(None);
     }
 
@@ -253,11 +184,9 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.seek(&key));
         if in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
-            self.last_key = Some(key);
             return Ok(in_memory);
         }
         if self.storage_trie_cleared {
-            self.last_key = in_memory.as_ref().map(|(nibbles, _)| nibbles.clone());
             return Ok(in_memory);
         }
 
@@ -273,28 +202,15 @@ impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
         // Compare two entries and return the lowest.
         // If seek is exact, filter the entry for exact key match.
         let entry = compare_trie_node_entries(in_memory, db_entry);
-        self.last_key = entry.as_ref().map(|(nibbles, _)| nibbles.clone());
         Ok(entry)
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let next = match &self.last_key {
-            Some(last) => {
-                let entry = self.next_inner(last.clone())?;
-                self.last_key = entry.as_ref().map(|entry| entry.0.clone());
-                entry
-            }
-            // no previous entry was found
-            None => None,
-        };
-        Ok(next)
+        unreachable!();
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        match &self.last_key {
-            Some(key) => Ok(Some(key.clone())),
-            None => self.cursor.current(),
-        }
+        unreachable!();
     }
 }
 
