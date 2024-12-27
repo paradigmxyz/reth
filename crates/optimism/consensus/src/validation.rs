@@ -3,16 +3,17 @@ use alloy_consensus::TxReceipt;
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected, Receipt};
+use reth_optimism_primitives::{OpBlock, OpReceipt};
+use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected};
 
 /// Validate a block with regard to execution results:
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
 pub fn validate_block_post_execution(
-    block: &BlockWithSenders,
+    block: &BlockWithSenders<OpBlock>,
     chain_spec: &ChainSpec,
-    receipts: &[Receipt],
+    receipts: &[OpReceipt],
 ) -> Result<(), ConsensusError> {
     // Before Byzantium, receipts contained state root that would mean that expensive
     // operation as hashing that is required for state root got calculated in every
@@ -33,10 +34,10 @@ pub fn validate_block_post_execution(
 
     // Check if gas used matches the value set in header.
     let cumulative_gas_used =
-        receipts.last().map(|receipt| receipt.cumulative_gas_used).unwrap_or(0);
-    if block.gas_used != cumulative_gas_used {
+        receipts.last().map(|receipt| receipt.cumulative_gas_used()).unwrap_or(0);
+    if block.gas_used as u128 != cumulative_gas_used {
         return Err(ConsensusError::BlockGasUsed {
-            gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
+            gas: GotExpected { got: cumulative_gas_used as u64, expected: block.gas_used },
             gas_spent_by_tx: gas_spent_by_transactions(receipts),
         })
     }
@@ -48,12 +49,12 @@ pub fn validate_block_post_execution(
 fn verify_receipts(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
-    receipts: &[Receipt],
+    receipts: &[OpReceipt],
     chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> Result<(), ConsensusError> {
     // Calculate receipts root.
-    let receipts_with_bloom = receipts.iter().cloned().map(Receipt::with_bloom).collect::<Vec<_>>();
+    let receipts_with_bloom = receipts.iter().cloned().map(Into::into).collect::<Vec<_>>();
     let receipts_root =
         calculate_receipt_root_optimism(&receipts_with_bloom, chain_spec, timestamp);
 

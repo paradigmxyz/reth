@@ -23,8 +23,8 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BlockTy, BuiltPayload, EngineValidator, FullNodeTypes, NodeTypesWithDBAdapter,
-    NodeTypesWithEngine, PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
+    BuiltPayload, FullNodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+    PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -32,7 +32,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_primitives::{EthPrimitives, EthereumHardforks};
+use reth_primitives::EthereumHardforks;
 use reth_provider::providers::{BlockchainProvider2, NodeTypesForProvider};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -74,7 +74,7 @@ impl EngineNodeLauncher {
 
 impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Types: NodeTypesForProvider + NodeTypesWithEngine<Primitives = EthPrimitives>,
+    Types: NodeTypesForProvider + NodeTypesWithEngine,
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: FullNodeTypes<
         Types = Types,
@@ -83,11 +83,7 @@ where
     >,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-        + EngineValidatorAddOn<
-            NodeAdapter<T, CB::Components>,
-            Validator: EngineValidator<Types::Engine, Block = BlockTy<Types>>,
-        >,
-
+        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
         <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
@@ -157,13 +153,13 @@ where
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
             .maybe_skip_new_payload(node_config.debug.skip_new_payload)
-            .maybe_reorg(
-                ctx.blockchain_db().clone(),
-                ctx.components().evm_config().clone(),
-                reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
-                node_config.debug.reorg_frequency,
-                node_config.debug.reorg_depth,
-            )
+            // .maybe_reorg(
+            //     ctx.blockchain_db().clone(),
+            //     ctx.components().evm_config().clone(),
+            //     reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
+            //     node_config.debug.reorg_frequency,
+            //     node_config.debug.reorg_depth,
+            // )
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine
             // during this run.

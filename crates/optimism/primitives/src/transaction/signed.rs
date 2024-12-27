@@ -66,6 +66,11 @@ impl OpTransactionSigned {
     pub fn new_unhashed(transaction: OpTypedTransaction, signature: Signature) -> Self {
         Self { hash: Default::default(), signature, transaction }
     }
+
+    /// Returns whether this transaction is a deposit.
+    pub const fn is_deposit(&self) -> bool {
+        matches!(self.transaction, OpTypedTransaction::Deposit(_))
+    }
 }
 
 impl SignedTransaction for OpTransactionSigned {

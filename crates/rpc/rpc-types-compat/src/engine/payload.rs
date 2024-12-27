@@ -207,7 +207,9 @@ pub fn block_to_payload_v3<T: Encodable2718>(
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadFieldV2`]
-pub fn convert_block_to_payload_field_v2(value: SealedBlock) -> ExecutionPayloadFieldV2 {
+pub fn convert_block_to_payload_field_v2<T: Encodable2718>(
+    value: SealedBlock<Header, BlockBody<T>>,
+) -> ExecutionPayloadFieldV2 {
     // if there are withdrawals, return V2
     if value.body.withdrawals.is_some() {
         ExecutionPayloadFieldV2::V2(block_to_payload_v2(value))

@@ -14,10 +14,10 @@ use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayload
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::EthereumHardforks;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_primitives::OpPrimitives;
+use reth_optimism_primitives::{OpBlock, OpPrimitives, OpTransactionSigned};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{transaction::WithEncoded, SealedBlock, TransactionSigned};
+use reth_primitives::{transaction::WithEncoded, SealedBlockFor};
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
@@ -32,7 +32,7 @@ pub struct OpPayloadBuilderAttributes {
     pub no_tx_pool: bool,
     /// Decoded transactions and the original EIP-2718 encoded bytes as received in the payload
     /// attributes.
-    pub transactions: Vec<WithEncoded<TransactionSigned>>,
+    pub transactions: Vec<WithEncoded<OpTransactionSigned>>,
     /// The gas limit for the generated payload
     pub gas_limit: Option<u64>,
     /// EIP-1559 parameters for the generated payload
@@ -71,8 +71,7 @@ impl PayloadBuilderAttributes for OpPayloadBuilderAttributes {
             .into_iter()
             .map(|data| {
                 let mut buf = data.as_ref();
-                let tx =
-                    TransactionSigned::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
+                let tx = Decodable2718::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
 
                 if !buf.is_empty() {
                     return Err(alloy_rlp::Error::UnexpectedLength);
@@ -136,9 +135,9 @@ pub struct OpBuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// The built block
-    pub(crate) block: Arc<SealedBlock>,
+    pub(crate) block: Arc<SealedBlockFor<OpBlock>>,
     /// Block execution data for the payload, if any.
-    pub(crate) executed_block: Option<ExecutedBlock>,
+    pub(crate) executed_block: Option<ExecutedBlock<OpPrimitives>>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
@@ -156,11 +155,11 @@ impl OpBuiltPayload {
     /// Initializes the payload with the given initial block.
     pub const fn new(
         id: PayloadId,
-        block: Arc<SealedBlock>,
+        block: Arc<SealedBlockFor<OpBlock>>,
         fees: U256,
         chain_spec: Arc<OpChainSpec>,
         attributes: OpPayloadBuilderAttributes,
-        executed_block: Option<ExecutedBlock>,
+        executed_block: Option<ExecutedBlock<OpPrimitives>>,
     ) -> Self {
         Self { id, block, executed_block, fees, sidecars: Vec::new(), chain_spec, attributes }
     }
@@ -171,7 +170,7 @@ impl OpBuiltPayload {
     }
 
     /// Returns the built block(sealed)
-    pub fn block(&self) -> &SealedBlock {
+    pub fn block(&self) -> &SealedBlockFor<OpBlock> {
         &self.block
     }
 
@@ -189,7 +188,7 @@ impl OpBuiltPayload {
 impl BuiltPayload for OpBuiltPayload {
     type Primitives = OpPrimitives;
 
-    fn block(&self) -> &SealedBlock {
+    fn block(&self) -> &SealedBlockFor<OpBlock> {
         &self.block
     }
 
@@ -197,7 +196,7 @@ impl BuiltPayload for OpBuiltPayload {
         self.fees
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlock> {
+    fn executed_block(&self) -> Option<ExecutedBlock<OpPrimitives>> {
         self.executed_block.clone()
     }
 
@@ -209,7 +208,7 @@ impl BuiltPayload for OpBuiltPayload {
 impl BuiltPayload for &OpBuiltPayload {
     type Primitives = OpPrimitives;
 
-    fn block(&self) -> &SealedBlock {
+    fn block(&self) -> &SealedBlockFor<OpBlock> {
         (**self).block()
     }
 
@@ -217,7 +216,7 @@ impl BuiltPayload for &OpBuiltPayload {
         (**self).fees()
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlock> {
+    fn executed_block(&self) -> Option<ExecutedBlock<OpPrimitives>> {
         self.executed_block.clone()
     }
 

@@ -2,15 +2,18 @@
 
 use crate::OpEthApi;
 use alloy_consensus::{
-    constants::EMPTY_WITHDRAWALS, proofs::calculate_transaction_root, Header, EMPTY_OMMER_ROOT_HASH,
+    constants::EMPTY_WITHDRAWALS, proofs::calculate_transaction_root, Eip658Value, Header,
+    Transaction as _, TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE, BlockNumberOrTag};
 use alloy_primitives::{B256, U256};
+use op_alloy_consensus::{OpDepositReceipt, OpTxType};
 use op_alloy_network::Network;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_primitives::{logs_bloom, BlockBody, Receipt, SealedBlockWithSenders, TransactionSigned};
+use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
+use reth_primitives::{logs_bloom, BlockBody, SealedBlockWithSenders};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderHeader,
     ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
@@ -33,14 +36,17 @@ where
         >,
     N: RpcNodeCore<
         Provider: BlockReaderIdExt<
-            Transaction = reth_primitives::TransactionSigned,
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
+            Transaction = OpTransactionSigned,
+            Block = OpBlock,
+            Receipt = OpReceipt,
             Header = reth_primitives::Header,
         > + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
-        Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+        Evm: ConfigureEvm<
+            Header = ProviderHeader<Self::Provider>,
+            Transaction = ProviderTx<Self::Provider>,
+        >,
     >,
 {
     #[inline]
@@ -55,7 +61,13 @@ where
     /// Returns the locally built pending block
     async fn local_pending_block(
         &self,
-    ) -> Result<Option<(SealedBlockWithSenders, Vec<Receipt>)>, Self::Error> {
+    ) -> Result<
+        Option<(
+            SealedBlockWithSenders<ProviderBlock<Self::Provider>>,
+            Vec<ProviderReceipt<Self::Provider>>,
+        )>,
+        Self::Error,
+    > {
         // See: <https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375>
         let latest = self
             .provider()
@@ -97,7 +109,7 @@ where
             timestamp,
         );
 
-        let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| &r.logs));
+        let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| r.logs()));
         let is_cancun = chain_spec.is_cancun_active_at_timestamp(timestamp);
         let is_prague = chain_spec.is_prague_active_at_timestamp(timestamp);
         let is_shanghai = chain_spec.is_shanghai_active_at_timestamp(timestamp);
@@ -118,7 +130,7 @@ where
             number: block_env.number.to::<u64>(),
             gas_limit: block_env.gas_limit.to::<u64>(),
             difficulty: U256::ZERO,
-            gas_used: receipts.last().map(|r| r.cumulative_gas_used).unwrap_or_default(),
+            gas_used: receipts.last().map(|r| r.cumulative_gas_used()).unwrap_or_default() as u64,
             blob_gas_used: is_cancun.then(|| {
                 transactions.iter().map(|tx| tx.blob_gas_used().unwrap_or_default()).sum::<u64>()
             }),
@@ -142,13 +154,22 @@ where
         result: ExecutionResult,
         cumulative_gas_used: u64,
     ) -> reth_provider::ProviderReceipt<Self::Provider> {
-        #[allow(clippy::needless_update)]
-        Receipt {
-            tx_type: tx.tx_type(),
-            success: result.is_success(),
-            cumulative_gas_used,
+        let receipt = alloy_consensus::Receipt {
+            status: Eip658Value::Eip658(result.is_success()),
+            cumulative_gas_used: cumulative_gas_used as u128,
             logs: result.into_logs().into_iter().collect(),
-            ..Default::default()
+        };
+
+        match tx.tx_type() {
+            OpTxType::Legacy => OpReceipt::Legacy(receipt),
+            OpTxType::Eip2930 => OpReceipt::Eip2930(receipt),
+            OpTxType::Eip1559 => OpReceipt::Eip1559(receipt),
+            OpTxType::Eip7702 => OpReceipt::Eip7702(receipt),
+            OpTxType::Deposit => OpReceipt::Deposit(OpDepositReceipt {
+                inner: receipt,
+                deposit_nonce: None,
+                deposit_receipt_version: None,
+            }),
         }
     }
 }

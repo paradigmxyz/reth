@@ -12,9 +12,10 @@ use reth_downloaders::{
     receipt_file_client::ReceiptFileClient,
 };
 use reth_execution_types::ExecutionOutcome;
+use reth_node_builder::ReceiptTy;
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives};
+use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives, OpReceipt};
 use reth_primitives::{NodePrimitives, Receipts};
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, DatabaseProviderFactory,
@@ -63,7 +64,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportReceiptsOpCommand<C> {
             provider_factory,
             self.path,
             self.chunk_len,
-            |first_block, receipts: &mut Receipts| {
+            |first_block, receipts| {
                 let mut total_filtered_out_dup_txns = 0;
                 for (index, receipts_for_block) in receipts.iter_mut().enumerate() {
                     if is_dup_tx(first_block + index as u64) {
@@ -87,12 +88,9 @@ pub async fn import_receipts_from_file<N, P, F>(
     filter: F,
 ) -> eyre::Result<()>
 where
-    N: ProviderNodeTypes<
-        ChainSpec = OpChainSpec,
-        Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>,
-    >,
+    N: ProviderNodeTypes<ChainSpec = OpChainSpec, Primitives: NodePrimitives<Receipt = OpReceipt>>,
     P: AsRef<Path>,
-    F: FnMut(u64, &mut Receipts) -> usize,
+    F: FnMut(u64, &mut Receipts<OpReceipt>) -> usize,
 {
     for stage in StageId::ALL {
         let checkpoint = provider_factory.database_provider_ro()?.get_stage_checkpoint(stage)?;
@@ -128,8 +126,8 @@ pub async fn import_receipts_from_reader<N, F>(
     mut filter: F,
 ) -> eyre::Result<ImportReceiptsResult>
 where
-    N: ProviderNodeTypes<Primitives: NodePrimitives<Receipt = reth_primitives::Receipt>>,
-    F: FnMut(u64, &mut Receipts) -> usize,
+    N: ProviderNodeTypes<Primitives: NodePrimitives<Receipt = OpReceipt>>,
+    F: FnMut(u64, &mut Receipts<ReceiptTy<N>>) -> usize,
 {
     let static_file_provider = provider_factory.static_file_provider();
 
@@ -163,7 +161,7 @@ where
         .expect("transaction static files must exist before importing receipts");
 
     while let Some(file_client) =
-        reader.next_receipts_chunk::<ReceiptFileClient<HackReceiptFileCodec>>().await?
+        reader.next_receipts_chunk::<ReceiptFileClient<HackReceiptFileCodec<OpReceipt>>>().await?
     {
         if highest_block_receipts == highest_block_transactions {
             warn!(target: "reth::cli",  highest_block_receipts, highest_block_transactions, "Ignoring all other blocks in the file since we have reached the desired height");
@@ -267,6 +265,9 @@ pub struct ImportReceiptsResult {
 mod test {
     use alloy_primitives::hex;
     use reth_db_common::init::init_genesis;
+    use reth_optimism_chainspec::OP_MAINNET;
+    use reth_optimism_node::OpNode;
+    use reth_provider::test_utils::create_test_provider_factory_with_node_types;
     use reth_stages::test_utils::TestStageDB;
     use tempfile::tempfile;
     use tokio::{
@@ -301,11 +302,10 @@ mod test {
         init_genesis(&db.factory).unwrap();
 
         // todo: where does import command init receipts ? probably somewhere in pipeline
-
+        let provider_factory =
+            create_test_provider_factory_with_node_types::<OpNode>(OP_MAINNET.clone());
         let ImportReceiptsResult { total_decoded_receipts, total_filtered_out_dup_txns } =
-            import_receipts_from_reader(&TestStageDB::default().factory, reader, |_, _| 0)
-                .await
-                .unwrap();
+            import_receipts_from_reader(&provider_factory, reader, |_, _| 0).await.unwrap();
 
         assert_eq!(total_decoded_receipts, 3);
         assert_eq!(total_filtered_out_dup_txns, 0);

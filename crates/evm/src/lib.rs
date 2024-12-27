@@ -20,7 +20,7 @@ extern crate alloc;
 use crate::builder::RethEvmBuilder;
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use reth_primitives_traits::BlockHeader;
+use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{Database, Evm, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv};
 
@@ -119,7 +119,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     type Header: BlockHeader;
 
     /// The transaction type.
-    type Transaction;
+    type Transaction: SignedTransaction;
 
     /// The error type that is returned by [`Self::next_cfg_and_block_env`].
     type Error: core::error::Error + Send + Sync;

@@ -4,17 +4,17 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
-use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, Sealable, B256};
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use eyre::Ok;
 use futures_util::Future;
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
-use reth_node_api::{Block, EngineTypes, FullNodeComponents};
+use reth_node_api::{Block, BlockTy, EngineTypes, FullNodeComponents};
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes, NodeTypesWithEngine};
+use reth_node_core::primitives::SignedTransaction;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::EthPrimitives;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateSubscriptions, StageCheckpointReader,
 };
@@ -25,7 +25,7 @@ use tokio_stream::StreamExt;
 use url::Url;
 
 /// An helper struct to handle node actions
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations, clippy::complexity)]
 pub struct NodeTestContext<Node, AddOns>
 where
     Node: FullNodeComponents,
@@ -41,6 +41,7 @@ where
     pub engine_api: EngineApiTestContext<
         <Node::Types as NodeTypesWithEngine>::Engine,
         <Node::Types as NodeTypes>::ChainSpec,
+        <Node::Types as NodeTypes>::Primitives,
     >,
     /// Context for testing RPC features.
     pub rpc: RpcTestContext<Node, AddOns::EthApi>,
@@ -50,11 +51,7 @@ impl<Node, Engine, AddOns> NodeTestContext<Node, AddOns>
 where
     Engine: EngineTypes,
     Node: FullNodeComponents,
-    Node::Types: NodeTypesWithEngine<
-        ChainSpec: EthereumHardforks,
-        Engine = Engine,
-        Primitives = EthPrimitives,
-    >,
+    Node::Types: NodeTypesWithEngine<ChainSpec: EthereumHardforks, Engine = Engine>,
     Node::Network: PeersHandleProvider,
     AddOns: RethRpcAddOns<Node>,
 {
@@ -97,7 +94,7 @@ where
     where
         Engine::ExecutionPayloadEnvelopeV3: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
         Engine::ExecutionPayloadEnvelopeV4: From<Engine::BuiltPayload> + PayloadEnvelopeExt,
-        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = reth_primitives::Block>>
+        AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
             + EthTransactions
             + TraceExt,
     {
@@ -236,7 +233,7 @@ where
         // pool is actually present in the canonical block
         let head = self.engine_api.canonical_stream.next().await.unwrap();
         let tx = head.tip().transactions().first();
-        assert_eq!(tx.unwrap().hash().as_slice(), tip_tx_hash.as_slice());
+        assert_eq!(tx.unwrap().tx_hash().as_slice(), tip_tx_hash.as_slice());
 
         loop {
             // wait for the block to commit
