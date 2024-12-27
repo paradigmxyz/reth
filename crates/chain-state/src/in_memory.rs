@@ -1389,8 +1389,7 @@ mod tests {
 
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_single_block() {
-        let block = TestBlockBuilder::<EthPrimitives>::default()
-            .get_executed_block_with_number(1, B256::random());
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::random());
         let hash = block.block().hash();
         let mut blocks = HashMap::default();
         blocks.insert(hash, Arc::new(BlockState::new(block)));
@@ -1408,7 +1407,7 @@ mod tests {
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_multiple_blocks() {
         let mut parent_hash = B256::random();
-        let mut block_builder = TestBlockBuilder::default();
+        let mut block_builder = TestBlockBuilder::eth();
         let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
 
         for i in 1..=3 {
@@ -1430,7 +1429,7 @@ mod tests {
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_with_pending_block() {
         let mut parent_hash = B256::random();
-        let mut block_builder = TestBlockBuilder::default();
+        let mut block_builder = TestBlockBuilder::<EthPrimitives>::eth();
         let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
 
         for i in 1..=2 {

@@ -3105,8 +3105,7 @@ mod tests {
     fn test_tree_persist_block_batch() {
         let tree_config = TreeConfig::default();
         let chain_spec = MAINNET.clone();
-        let mut test_block_builder =
-            TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
+        let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
         // we need more than tree_config.persistence_threshold() +1 blocks to
         // trigger the persistence task.
@@ -3140,8 +3139,7 @@ mod tests {
     async fn test_tree_persist_blocks() {
         let tree_config = TreeConfig::default();
         let chain_spec = MAINNET.clone();
-        let mut test_block_builder =
-            TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
+        let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
         // we need more than tree_config.persistence_threshold() +1 blocks to
         // trigger the persistence task.
@@ -3173,7 +3171,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_in_memory_state_trait_impl() {
-        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(0..10).collect();
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..10).collect();
         let test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
 
         for executed_block in blocks {
@@ -3200,7 +3198,7 @@ mod tests {
     #[tokio::test]
     async fn test_engine_request_during_backfill() {
         let tree_config = TreeConfig::default();
-        let blocks: Vec<_> = TestBlockBuilder::default()
+        let blocks: Vec<_> = TestBlockBuilder::eth()
             .get_executed_blocks(0..tree_config.persistence_threshold())
             .collect();
         let mut test_harness = TestHarness::new(MAINNET.clone())
@@ -3301,7 +3299,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_insert_executed() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
-        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..4).collect();
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
         tree_state.insert_executed(blocks[0].clone());
         tree_state.insert_executed(blocks[1].clone());
@@ -3327,7 +3325,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_insert_executed_with_reorg() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
-        let mut test_block_builder = TestBlockBuilder::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -3367,7 +3365,7 @@ mod tests {
     async fn test_tree_state_remove_before() {
         let start_num_hash = BlockNumHash::default();
         let mut tree_state = TreeState::new(start_num_hash);
-        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..6).collect();
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
@@ -3417,7 +3415,7 @@ mod tests {
     async fn test_tree_state_remove_before_finalized() {
         let start_num_hash = BlockNumHash::default();
         let mut tree_state = TreeState::new(start_num_hash);
-        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..6).collect();
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
@@ -3467,7 +3465,7 @@ mod tests {
     async fn test_tree_state_remove_before_lower_finalized() {
         let start_num_hash = BlockNumHash::default();
         let mut tree_state = TreeState::new(start_num_hash);
-        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..6).collect();
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
@@ -3517,7 +3515,7 @@ mod tests {
     async fn test_tree_state_on_new_head() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
-        let mut test_block_builder = TestBlockBuilder::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
 
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
 
@@ -3569,7 +3567,7 @@ mod tests {
 
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
-        let mut test_block_builder = TestBlockBuilder::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
 
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..5).collect();
 
@@ -3636,7 +3634,7 @@ mod tests {
     async fn test_get_canonical_blocks_to_persist() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
-        let mut test_block_builder = TestBlockBuilder::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
 
         let canonical_head_number = 9;
         let blocks: Vec<_> =
@@ -3691,8 +3689,7 @@ mod tests {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec.clone());
 
-        let mut test_block_builder =
-            TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
+        let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..5).collect();
         test_harness = test_harness.with_blocks(blocks);
