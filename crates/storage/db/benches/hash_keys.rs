@@ -61,12 +61,12 @@ fn measure_table_insertion<T>(group: &mut BenchmarkGroup<'_, WallTime>, size: us
 where
     T: Table,
     T::Key: Default
-    + Clone
-    + for<'de> serde::Deserialize<'de>
-    + Arbitrary
-    + serde::Serialize
-    + Ord
-    + std::hash::Hash,
+        + Clone
+        + for<'de> serde::Deserialize<'de>
+        + Arbitrary
+        + serde::Serialize
+        + Ord
+        + std::hash::Hash,
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de> + Arbitrary + serde::Serialize,
 {
     let bench_db_path = Path::new(BENCH_DB_PATH);
@@ -113,7 +113,7 @@ where
                         let _ = tx.put::<T>(key.clone(), value.clone());
                     }
                 })
-                    .unwrap();
+                .unwrap();
             }
 
             (unsorted_input, db)
@@ -161,8 +161,8 @@ where
         )),
         size,
     )
-        .no_shrink()
-        .boxed();
+    .no_shrink()
+    .boxed();
 
     let mut runner = TestRunner::new(ProptestConfig::default());
     let mut preload = strategy.new_tree(&mut runner).unwrap().current();
@@ -268,5 +268,5 @@ where
                 .unwrap()
         );
     })
-        .unwrap();
+    .unwrap();
 }
