@@ -820,7 +820,7 @@ where
             let receipt = alloy_consensus::Receipt {
                 status: Eip658Value::Eip658(result.is_success()),
                 cumulative_gas_used: info.cumulative_gas_used as u128,
-                logs: result.into_logs().into_iter().map(Into::into).collect(),
+                logs: result.into_logs().into_iter().collect(),
             };
 
             // Push transaction changeset and calculate header bloom filter for receipt.
@@ -931,7 +931,7 @@ where
             let receipt = alloy_consensus::Receipt {
                 status: Eip658Value::Eip658(result.is_success()),
                 cumulative_gas_used: info.cumulative_gas_used as u128,
-                logs: result.into_logs().into_iter().map(Into::into).collect(),
+                logs: result.into_logs().into_iter().collect(),
             };
 
             // Push transaction changeset and calculate header bloom filter for receipt.
