@@ -8,9 +8,9 @@ use criterion::{
 use pprof::criterion::{Output, PProfProfiler};
 use proptest::{
     arbitrary::Arbitrary,
-    prelude::any_with,
+    prelude::{any_with, ProptestConfig},
     strategy::{Strategy, ValueTree},
-    test_runner::{Config, RngAlgorithm, TestRng, TestRunner},
+    test_runner::TestRunner,
 };
 use reth_db::{test_utils::create_test_rw_db_with_path, DatabaseEnv, TransactionHashNumbers};
 use reth_db_api::{
@@ -21,6 +21,7 @@ use reth_db_api::{
 };
 use reth_fs_util as fs;
 use std::hint::black_box;
+
 mod utils;
 use utils::*;
 
@@ -60,12 +61,12 @@ fn measure_table_insertion<T>(group: &mut BenchmarkGroup<'_, WallTime>, size: us
 where
     T: Table,
     T::Key: Default
-        + Clone
-        + for<'de> serde::Deserialize<'de>
-        + Arbitrary
-        + serde::Serialize
-        + Ord
-        + std::hash::Hash,
+    + Clone
+    + for<'de> serde::Deserialize<'de>
+    + Arbitrary
+    + serde::Serialize
+    + Ord
+    + std::hash::Hash,
     T::Value: Default + Clone + for<'de> serde::Deserialize<'de> + Arbitrary + serde::Serialize,
 {
     let bench_db_path = Path::new(BENCH_DB_PATH);
@@ -112,7 +113,7 @@ where
                         let _ = tx.put::<T>(key.clone(), value.clone());
                     }
                 })
-                .unwrap();
+                    .unwrap();
             }
 
             (unsorted_input, db)
@@ -160,14 +161,10 @@ where
         )),
         size,
     )
-    .no_shrink()
-    .boxed();
+        .no_shrink()
+        .boxed();
 
-    // Use a deterministic TestRunner
-    let mut runner = TestRunner::new_with_rng(
-        Config::default(),
-        TestRng::deterministic_rng(RngAlgorithm::ChaCha),
-    );
+    let mut runner = TestRunner::new(ProptestConfig::default());
     let mut preload = strategy.new_tree(&mut runner).unwrap().current();
     let mut input = strategy.new_tree(&mut runner).unwrap().current();
 
@@ -271,5 +268,5 @@ where
                 .unwrap()
         );
     })
-    .unwrap();
+        .unwrap();
 }
