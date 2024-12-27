@@ -5,12 +5,12 @@ use crate::{
     error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
-use alloy_consensus::{Header, Transaction, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{Eip658Value, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
-use op_alloy_consensus::DepositTransaction;
+use op_alloy_consensus::{OpDepositReceipt, OpTxType};
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
@@ -20,12 +20,13 @@ use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{
-    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, BlockExt, Receipt,
-    SealedHeader, TransactionSigned, TxType,
+    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, BlockExt,
+    SealedHeader, TxType,
 };
 use reth_provider::{
     HashedPostStateProvider, ProviderError, StateProofProvider, StateProviderFactory,
@@ -104,7 +105,7 @@ impl<EvmConfig, Txs> OpPayloadBuilder<EvmConfig, Txs> {
 }
 impl<EvmConfig, T> OpPayloadBuilder<EvmConfig, T>
 where
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
     /// Payload attributes by the sequencer. If the `no_tx_pool` argument is passed in
@@ -121,7 +122,7 @@ where
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-        Txs: PayloadTransactions<Transaction = TransactionSigned>,
+        Txs: PayloadTransactions<Transaction = OpTransactionSigned>,
     {
         let evm_env = self
             .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
@@ -217,8 +218,8 @@ where
 impl<Pool, Client, EvmConfig, Txs> PayloadBuilder<Pool, Client> for OpPayloadBuilder<EvmConfig, Txs>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = EvmConfig::Transaction>>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
     Txs: OpPayloadTransactions,
 {
     type Attributes = OpPayloadBuilderAttributes;
@@ -293,7 +294,7 @@ impl<'a, Txs> OpBuilder<'a, Txs> {
 
 impl<Txs> OpBuilder<'_, Txs>
 where
-    Txs: PayloadTransactions<Transaction = TransactionSigned>,
+    Txs: PayloadTransactions<Transaction = OpTransactionSigned>,
 {
     /// Executes the payload and returns the outcome.
     pub fn execute<EvmConfig, DB>(
@@ -302,7 +303,7 @@ where
         ctx: &OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<BuildOutcomeKind<ExecutedPayload>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
         DB: Database<Error = ProviderError>,
     {
         let Self { best } = self;
@@ -347,7 +348,7 @@ where
         ctx: OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload>, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateRootProvider + HashedPostStateProvider,
     {
@@ -360,7 +361,7 @@ where
         let block_number = ctx.block_number();
         let execution_outcome = ExecutionOutcome::new(
             state.take_bundle(),
-            vec![info.receipts].into(),
+            info.receipts.into(),
             block_number,
             Vec::new(),
         );
@@ -437,7 +438,7 @@ where
         debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header, "sealed built block");
 
         // create the executed block data
-        let executed = ExecutedBlock {
+        let executed: ExecutedBlock<OpPrimitives> = ExecutedBlock {
             block: sealed_block.clone(),
             senders: Arc::new(info.executed_senders),
             execution_output: Arc::new(execution_outcome),
@@ -473,7 +474,7 @@ where
         ctx: &OpPayloadBuilderCtx<EvmConfig>,
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
-        EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+        EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateProofProvider,
     {
@@ -490,22 +491,22 @@ pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
     /// Returns an iterator that yields the transaction in the order they should get included in the
     /// new payload.
     fn best_transactions<
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = OpTransactionSigned>>,
     >(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> impl PayloadTransactions<Transaction = TransactionSigned>;
+    ) -> impl PayloadTransactions<Transaction = OpTransactionSigned>;
 }
 
 impl OpPayloadTransactions for () {
     fn best_transactions<
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = OpTransactionSigned>>,
     >(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> impl PayloadTransactions<Transaction = TransactionSigned> {
+    ) -> impl PayloadTransactions<Transaction = OpTransactionSigned> {
         BestPayloadTransactions::new(pool.best_transactions_with_attributes(attr))
     }
 }
@@ -523,11 +524,11 @@ pub struct ExecutedPayload {
 #[derive(Default, Debug)]
 pub struct ExecutionInfo {
     /// All executed transactions (unrecovered).
-    pub executed_transactions: Vec<TransactionSigned>,
+    pub executed_transactions: Vec<OpTransactionSigned>,
     /// The recovered senders for the executed transactions.
     pub executed_senders: Vec<Address>,
     /// The transaction receipts
-    pub receipts: Vec<Option<Receipt>>,
+    pub receipts: Vec<OpReceipt>,
     /// All gas used so far
     pub cumulative_gas_used: u64,
     /// Tracks fees from executed mempool transactions
@@ -708,7 +709,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
 
 impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+    EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
 {
     /// apply eip-4788 pre block contract call
     pub fn apply_pre_beacon_root_contract_call<DB>(
@@ -816,18 +817,28 @@ where
             // add gas used by the transaction to cumulative gas used, before creating the receipt
             info.cumulative_gas_used += gas_used;
 
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            info.receipts.push(Some(Receipt {
-                tx_type: sequencer_tx.tx_type(),
-                success: result.is_success(),
-                cumulative_gas_used: info.cumulative_gas_used,
+            let receipt = alloy_consensus::Receipt {
+                status: Eip658Value::Eip658(result.is_success()),
+                cumulative_gas_used: info.cumulative_gas_used as u128,
                 logs: result.into_logs().into_iter().collect(),
-                deposit_nonce: depositor.map(|account| account.nonce),
-                // The deposit receipt version was introduced in Canyon to indicate an update to how
-                // receipt hashes should be computed when set. The state transition process
-                // ensures this is only set for post-Canyon deposit transactions.
-                deposit_receipt_version: self.is_canyon_active().then_some(1),
-            }));
+            };
+
+            // Push transaction changeset and calculate header bloom filter for receipt.
+            info.receipts.push(match sequencer_tx.tx_type() {
+                OpTxType::Legacy => OpReceipt::Legacy(receipt),
+                OpTxType::Eip2930 => OpReceipt::Eip2930(receipt),
+                OpTxType::Eip1559 => OpReceipt::Eip1559(receipt),
+                OpTxType::Eip7702 => OpReceipt::Eip7702(receipt),
+                OpTxType::Deposit => OpReceipt::Deposit(OpDepositReceipt {
+                    inner: receipt,
+                    deposit_nonce: depositor.map(|account| account.nonce),
+                    // The deposit receipt version was introduced in Canyon to indicate an update to
+                    // how receipt hashes should be computed when set. The state
+                    // transition process ensures this is only set for
+                    // post-Canyon deposit transactions.
+                    deposit_receipt_version: self.is_canyon_active().then_some(1),
+                }),
+            });
 
             // append sender and transaction to the respective lists
             info.executed_senders.push(sequencer_tx.signer());
@@ -844,7 +855,7 @@ where
         &self,
         info: &mut ExecutionInfo,
         db: &mut State<DB>,
-        mut best_txs: impl PayloadTransactions<Transaction = TransactionSigned>,
+        mut best_txs: impl PayloadTransactions<Transaction = EvmConfig::Transaction>,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
@@ -917,15 +928,24 @@ where
             // receipt
             info.cumulative_gas_used += gas_used;
 
-            // Push transaction changeset and calculate header bloom filter for receipt.
-            info.receipts.push(Some(Receipt {
-                tx_type: tx.tx_type(),
-                success: result.is_success(),
-                cumulative_gas_used: info.cumulative_gas_used,
+            let receipt = alloy_consensus::Receipt {
+                status: Eip658Value::Eip658(result.is_success()),
+                cumulative_gas_used: info.cumulative_gas_used as u128,
                 logs: result.into_logs().into_iter().collect(),
-                deposit_nonce: None,
-                deposit_receipt_version: None,
-            }));
+            };
+
+            // Push transaction changeset and calculate header bloom filter for receipt.
+            info.receipts.push(match tx.tx_type() {
+                OpTxType::Legacy => OpReceipt::Legacy(receipt),
+                OpTxType::Eip2930 => OpReceipt::Eip2930(receipt),
+                OpTxType::Eip1559 => OpReceipt::Eip1559(receipt),
+                OpTxType::Eip7702 => OpReceipt::Eip7702(receipt),
+                OpTxType::Deposit => OpReceipt::Deposit(OpDepositReceipt {
+                    inner: receipt,
+                    deposit_nonce: None,
+                    deposit_receipt_version: None,
+                }),
+            });
 
             // update add to total fees
             let miner_fee = tx

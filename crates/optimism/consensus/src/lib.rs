@@ -23,8 +23,8 @@ use reth_consensus_common::validation::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::{BlockBody, BlockWithSenders, GotExpected, SealedBlock, SealedHeader};
+use reth_optimism_primitives::{OpBlock, OpBlockBody, OpPrimitives, OpReceipt};
+use reth_primitives::{BlockWithSenders, GotExpected, SealedBlockFor, SealedHeader};
 use std::{sync::Arc, time::SystemTime};
 
 mod proof;
@@ -52,23 +52,26 @@ impl OpBeaconConsensus {
 impl FullConsensus<OpPrimitives> for OpBeaconConsensus {
     fn validate_block_post_execution(
         &self,
-        block: &BlockWithSenders,
-        input: PostExecutionInput<'_>,
+        block: &BlockWithSenders<OpBlock>,
+        input: PostExecutionInput<'_, OpReceipt>,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec, input.receipts)
     }
 }
 
-impl Consensus for OpBeaconConsensus {
+impl Consensus<Header, OpBlockBody> for OpBeaconConsensus {
     fn validate_body_against_header(
         &self,
-        body: &BlockBody,
+        body: &OpBlockBody,
         header: &SealedHeader,
     ) -> Result<(), ConsensusError> {
         validate_body_against_header(body, header.header())
     }
 
-    fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(
+        &self,
+        block: &SealedBlockFor<OpBlock>,
+    ) -> Result<(), ConsensusError> {
         // Check ommers hash
         let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.body.ommers);
         if block.header.ommers_hash != ommers_hash {
