@@ -49,14 +49,14 @@ pub(crate) fn stage_unwind<
 
             // Clear previous run
             stage
-                .unwind(&provider, unwind)
-                .map_err(|e| {
-                    format!(
-                        "{e}\nMake sure your test database at `{}` isn't too old and incompatible with newer stage changes.",
-                        db.factory.db_ref().path().display()
-                    )
-                })
-                .unwrap();
+            .unwind(&provider, unwind)
+            .map_err(|e| {
+                format!(
+                    "{e}\nMake sure your test database at `{}` isn't too old and incompatible with newer stage changes.",
+                    db.factory.db_ref().path().display()
+                )
+            })
+            .unwrap();
 
             provider.commit().unwrap();
         })
