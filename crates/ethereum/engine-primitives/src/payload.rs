@@ -181,7 +181,7 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
                 // Spec:
                 // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
                 should_override_builder: false,
-                blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+                blobs_bundle: sidecars.into(),
             },
             execution_requests: requests.unwrap_or_default(),
         }

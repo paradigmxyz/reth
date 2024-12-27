@@ -1,7 +1,10 @@
 use alloy_consensus::Transaction;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3};
+use alloy_rpc_types_engine::{
+    ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV2,
+    ExecutionPayloadV3,
+};
 use alloy_rpc_types_eth::{Block, BlockTransactions};
 use reth_node_api::EngineTypes;
 use reth_rpc_builder::auth::AuthServerHandle;
@@ -85,7 +88,7 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
         };
 
         while let Some(block) = block_stream.recv().await {
-            let payload = block_to_execution_payload_v3(block);
+            let payload = block_to_execution_payload(block);
 
             let block_hash = payload.block_hash();
             let block_number = payload.block_number();
@@ -93,12 +96,25 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
             previous_block_hashes.push(block_hash);
 
             // Send new events to execution client
-            let _ = reth_rpc_api::EngineApiClient::<T>::new_payload_v3(
-                &execution_client,
-                payload.execution_payload_v3,
-                payload.versioned_hashes,
-                payload.parent_beacon_block_root,
-            )
+            let fut = match payload.execution_payload {
+                ExecutionPayload::V1(v1) => {
+                    reth_rpc_api::EngineApiClient::<T>::new_payload_v1(&execution_client, v1)
+                }
+                ExecutionPayload::V2(v2) => reth_rpc_api::EngineApiClient::<T>::new_payload_v2(
+                    &execution_client,
+                    ExecutionPayloadInputV2 {
+                        execution_payload: v2.payload_inner,
+                        withdrawals: Some(v2.withdrawals),
+                    },
+                ),
+                ExecutionPayload::V3(v3) => reth_rpc_api::EngineApiClient::<T>::new_payload_v3(
+                    &execution_client,
+                    v3,
+                    payload.versioned_hashes,
+                    payload.parent_beacon_block_root.unwrap(),
+                ),
+            };
+            let _ = fut
             .await
                 .inspect_err(|err|  {
                     warn!(target: "consensus::debug-client", %err, %block_hash,  %block_number, "failed to submit new payload to execution client");
@@ -151,26 +167,34 @@ impl<P: BlockProvider + Clone> DebugConsensusClient<P> {
 /// Cancun "new payload" event.
 #[derive(Debug)]
 pub struct ExecutionNewPayload {
-    pub execution_payload_v3: ExecutionPayloadV3,
+    pub execution_payload: ExecutionPayload,
     pub versioned_hashes: Vec<B256>,
-    pub parent_beacon_block_root: B256,
+    pub parent_beacon_block_root: Option<B256>,
 }
 
 impl ExecutionNewPayload {
     /// Get block hash from block in the payload
     pub const fn block_hash(&self) -> B256 {
-        self.execution_payload_v3.payload_inner.payload_inner.block_hash
+        match self.execution_payload {
+            ExecutionPayload::V1(ref v1) => v1.block_hash,
+            ExecutionPayload::V2(ref v2) => v2.payload_inner.block_hash,
+            ExecutionPayload::V3(ref v3) => v3.payload_inner.payload_inner.block_hash,
+        }
     }
 
     /// Get block number from block in the payload
     pub const fn block_number(&self) -> u64 {
-        self.execution_payload_v3.payload_inner.payload_inner.block_number
+        match self.execution_payload {
+            ExecutionPayload::V1(ref v1) => v1.block_number,
+            ExecutionPayload::V2(ref v2) => v2.payload_inner.block_number,
+            ExecutionPayload::V3(ref v3) => v3.payload_inner.payload_inner.block_number,
+        }
     }
 }
 
 /// Convert a block from RPC / Etherscan to params for an execution client's "new payload"
 /// method. Assumes that the block contains full transactions.
-pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
+pub fn block_to_execution_payload(block: Block) -> ExecutionNewPayload {
     let transactions = match &block.transactions {
         BlockTransactions::Full(txs) => txs.clone(),
         // Empty array gets deserialized as BlockTransactions::Hashes.
@@ -188,36 +212,44 @@ pub fn block_to_execution_payload_v3(block: Block) -> ExecutionNewPayload {
         .copied()
         .collect();
 
-    let payload: ExecutionPayloadV3 = ExecutionPayloadV3 {
-        payload_inner: ExecutionPayloadV2 {
-            payload_inner: ExecutionPayloadV1 {
-                parent_hash: block.header.parent_hash,
-                fee_recipient: block.header.beneficiary,
-                state_root: block.header.state_root,
-                receipts_root: block.header.receipts_root,
-                logs_bloom: block.header.logs_bloom,
-                prev_randao: block.header.mix_hash,
-                block_number: block.header.number,
-                gas_limit: block.header.gas_limit,
-                gas_used: block.header.gas_used,
-                timestamp: block.header.timestamp,
-                extra_data: block.header.extra_data.clone(),
-                base_fee_per_gas: block.header.base_fee_per_gas.unwrap().try_into().unwrap(),
-                block_hash: block.header.hash,
-                transactions: transactions
-                    .into_iter()
-                    .map(|tx| tx.inner.encoded_2718().into())
-                    .collect(),
-            },
+    let payload_v1 = ExecutionPayloadV1 {
+        parent_hash: block.header.parent_hash,
+        fee_recipient: block.header.beneficiary,
+        state_root: block.header.state_root,
+        receipts_root: block.header.receipts_root,
+        logs_bloom: block.header.logs_bloom,
+        prev_randao: block.header.mix_hash,
+        block_number: block.header.number,
+        gas_limit: block.header.gas_limit,
+        gas_used: block.header.gas_used,
+        timestamp: block.header.timestamp,
+        extra_data: block.header.extra_data.clone(),
+        base_fee_per_gas: block.header.base_fee_per_gas.unwrap().try_into().unwrap(),
+        block_hash: block.header.hash,
+        transactions: transactions.into_iter().map(|tx| tx.inner.encoded_2718().into()).collect(),
+    };
+
+    let payload = if block.withdrawals.is_none() {
+        ExecutionPayload::V1(payload_v1)
+    } else if block.header.blob_gas_used.is_none() {
+        ExecutionPayload::V2(ExecutionPayloadV2 {
+            payload_inner: payload_v1,
             withdrawals: block.withdrawals.clone().unwrap_or_default().into_inner(),
-        },
-        blob_gas_used: block.header.blob_gas_used.unwrap(),
-        excess_blob_gas: block.header.excess_blob_gas.unwrap(),
+        })
+    } else {
+        ExecutionPayload::V3(ExecutionPayloadV3 {
+            payload_inner: ExecutionPayloadV2 {
+                payload_inner: payload_v1,
+                withdrawals: block.withdrawals.clone().unwrap_or_default().into_inner(),
+            },
+            blob_gas_used: block.header.blob_gas_used.unwrap(),
+            excess_blob_gas: block.header.excess_blob_gas.unwrap(),
+        })
     };
 
     ExecutionNewPayload {
-        execution_payload_v3: payload,
+        execution_payload: payload,
         versioned_hashes,
-        parent_beacon_block_root: block.header.parent_beacon_block_root.unwrap(),
+        parent_beacon_block_root: block.header.parent_beacon_block_root,
     }
 }

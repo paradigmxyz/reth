@@ -1049,9 +1049,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
             StaticFileSegment::Headers,
             to_range(range),
             |static_file, range, _| static_file.headers_range(range),
-            |range, _| {
-                self.cursor_read_collect::<tables::Headers<Self::Header>>(range).map_err(Into::into)
-            },
+            |range, _| self.cursor_read_collect::<tables::Headers<Self::Header>>(range),
             |_| true,
         )
     }
@@ -1127,9 +1125,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, 
             StaticFileSegment::Headers,
             start..end,
             |static_file, range, _| static_file.canonical_hashes_range(range.start, range.end),
-            |range, _| {
-                self.cursor_read_collect::<tables::CanonicalHeaders>(range).map_err(Into::into)
-            },
+            |range, _| self.cursor_read_collect::<tables::CanonicalHeaders>(range),
             |_| true,
         )
     }
@@ -1524,7 +1520,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.cursor_read_collect::<tables::TransactionSenders>(range).map_err(Into::into)
+        self.cursor_read_collect::<tables::TransactionSenders>(range)
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
@@ -1577,10 +1573,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
             StaticFileSegment::Receipts,
             to_range(range),
             |static_file, range, _| static_file.receipts_by_tx_range(range),
-            |range, _| {
-                self.cursor_read_collect::<tables::Receipts<Self::Receipt>>(range)
-                    .map_err(Into::into)
-            },
+            |range, _| self.cursor_read_collect::<tables::Receipts<Self::Receipt>>(range),
             |_| true,
         )
     }

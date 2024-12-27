@@ -9426,6 +9426,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-scroll-engine"
+version = "1.1.4"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-rlp",
+ "alloy-rpc-types-engine",
+ "reth-primitives",
+ "reth-scroll-chainspec",
+ "reth-scroll-forks",
+]
+
+[[package]]
 name = "reth-scroll-evm"
 version = "1.1.4"
 dependencies = [
@@ -9492,12 +9505,12 @@ dependencies = [
  "reth-provider",
  "reth-rpc",
  "reth-scroll-chainspec",
+ "reth-scroll-engine",
  "reth-scroll-evm",
  "reth-scroll-state-commitment",
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-db",
- "tokio",
 ]
 
 [[package]]

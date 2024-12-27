@@ -1,3 +1,4 @@
+use alloy_primitives::{Sealable, U256};
 use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError};
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_node_api::PayloadValidator;
@@ -7,8 +8,15 @@ use reth_node_builder::{
     PayloadOrAttributes,
 };
 use reth_node_types::NodeTypesWithEngine;
-use reth_primitives::{Block, EthPrimitives, SealedBlock, SealedBlockFor};
+use reth_primitives::{Block, BlockExt, EthPrimitives, SealedBlockFor};
 use reth_scroll_chainspec::ScrollChainSpec;
+use reth_scroll_engine::try_into_block;
+use std::sync::Arc;
+
+/// The block difficulty for in turn signing in the Clique consensus.
+const CLIQUE_IN_TURN_DIFFICULTY: U256 = U256::from_limbs([2, 0, 0, 0]);
+/// The block difficulty for out of turn signing in the Clique consensus.
+const CLIQUE_NO_TURN_DIFFICULTY: U256 = U256::from_limbs([1, 0, 0, 0]);
 
 /// Builder for [`ScrollEngineValidator`].
 #[derive(Debug, Default, Clone, Copy)]
@@ -22,20 +30,23 @@ where
         Engine = EthEngineTypes,
     >,
     Node: FullNodeComponents<Types = Types>,
-    NoopEngineValidator: EngineValidator<Types::Engine>,
+    ScrollEngineValidator: EngineValidator<Types::Engine>,
 {
-    type Validator = NoopEngineValidator;
+    type Validator = ScrollEngineValidator;
 
-    async fn build(self, _ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
-        Ok(NoopEngineValidator)
+    async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
+        let chainspec = ctx.config.chain.clone();
+        Ok(ScrollEngineValidator { chainspec })
     }
 }
 
-/// Noop engine validator used as default for Scroll.
+/// Scroll engine validator.
 #[derive(Debug, Clone)]
-pub struct NoopEngineValidator;
+pub struct ScrollEngineValidator {
+    chainspec: Arc<ScrollChainSpec>,
+}
 
-impl<Types> EngineValidator<Types> for NoopEngineValidator
+impl<Types> EngineValidator<Types> for ScrollEngineValidator
 where
     Types: EngineTypes<PayloadAttributes = EthPayloadAttributes>,
 {
@@ -56,14 +67,38 @@ where
     }
 }
 
-impl PayloadValidator for NoopEngineValidator {
+impl PayloadValidator for ScrollEngineValidator {
     type Block = Block;
 
     fn ensure_well_formed_payload(
         &self,
-        _payload: ExecutionPayload,
-        _sidecar: ExecutionPayloadSidecar,
+        payload: ExecutionPayload,
+        sidecar: ExecutionPayloadSidecar,
     ) -> Result<SealedBlockFor<Self::Block>, PayloadError> {
-        Ok(SealedBlock::default())
+        let expected_hash = payload.block_hash();
+
+        // First parse the block
+        let mut block = try_into_block(payload, &sidecar, self.chainspec.clone())?;
+
+        // Seal the block with the in-turn difficulty and return if hashes match
+        block.header.difficulty = CLIQUE_IN_TURN_DIFFICULTY;
+        let sealed_block_in_turn = block.seal_ref_slow();
+        if sealed_block_in_turn.hash() == expected_hash {
+            let hash = sealed_block_in_turn.hash();
+            return Ok(block.seal(hash))
+        }
+
+        // Seal the block with the no-turn difficulty and return if hashes match
+        block.header.difficulty = CLIQUE_NO_TURN_DIFFICULTY;
+        let sealed_block_no_turn = block.seal_ref_slow();
+        if sealed_block_no_turn.hash() == expected_hash {
+            let hash = sealed_block_no_turn.hash();
+            return Ok(block.seal(hash))
+        }
+
+        Err(PayloadError::BlockHash {
+            execution: sealed_block_no_turn.hash(),
+            consensus: expected_hash,
+        })
     }
 }

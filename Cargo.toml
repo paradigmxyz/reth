@@ -106,6 +106,7 @@ members = [
     "crates/scroll/chainspec",
     "crates/scroll/cli",
     "crates/scroll/consensus",
+    "crates/scroll/engine",
     "crates/scroll/evm",
     "crates/scroll/execution",
     "crates/scroll/hardforks",
@@ -423,6 +424,7 @@ reth-rpc-types-compat = { path = "crates/rpc/rpc-types-compat" }
 reth-scroll-chainspec = { path = "crates/scroll/chainspec" }
 reth-scroll-cli = { path = "crates/scroll/cli" }
 reth-scroll-consensus = { path = "crates/scroll/consensus" }
+reth-scroll-engine = { path = "crates/scroll/engine" }
 reth-scroll-evm = { path = "crates/scroll/evm" }
 reth-scroll-execution = { path = "crates/scroll/execution" }
 reth-scroll-forks = { path = "crates/scroll/hardforks" }
