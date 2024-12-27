@@ -40,3 +40,4 @@ optimism = [
 [[bin]]
 name = "scroll-reth"
 path = "src/main.rs"
+required-features = ["scroll"]
