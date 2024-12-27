@@ -358,7 +358,7 @@ where
             tx_type: tx.tx_type(),
             success: exec_result.result.is_success(),
             cumulative_gas_used,
-            logs: exec_result.result.into_logs().into_iter().map(Into::into).collect(),
+            logs: exec_result.result.into_logs().into_iter().collect(),
             ..Default::default()
         }));
 
@@ -422,8 +422,8 @@ where
             receipts_root: outcome.ethereum_receipts_root(reorg_target.header.number).unwrap(),
             logs_bloom: outcome.block_logs_bloom(reorg_target.header.number).unwrap(),
             gas_used: cumulative_gas_used,
-            blob_gas_used: blob_gas_used.map(Into::into),
-            excess_blob_gas: excess_blob_gas.map(Into::into),
+            blob_gas_used,
+            excess_blob_gas,
             state_root: state_provider.state_root(hashed_state)?,
             requests_hash: None,          // TODO(prague)
             target_blobs_per_block: None, // TODO(prague)

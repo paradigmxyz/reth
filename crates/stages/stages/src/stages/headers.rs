@@ -526,10 +526,7 @@ mod tests {
 
                             // validate the header total difficulty
                             td += header.difficulty;
-                            assert_eq!(
-                                provider.header_td_by_number(block_num)?.map(Into::into),
-                                Some(td)
-                            );
+                            assert_eq!(provider.header_td_by_number(block_num)?, Some(td));
                         }
                     }
                     _ => self.check_no_header_entry_above(initial_checkpoint)?,

@@ -821,7 +821,7 @@ where
                 tx_type: sequencer_tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used: info.cumulative_gas_used,
-                logs: result.into_logs().into_iter().map(Into::into).collect(),
+                logs: result.into_logs().into_iter().collect(),
                 deposit_nonce: depositor.map(|account| account.nonce),
                 // The deposit receipt version was introduced in Canyon to indicate an update to how
                 // receipt hashes should be computed when set. The state transition process
@@ -922,7 +922,7 @@ where
                 tx_type: tx.tx_type(),
                 success: result.is_success(),
                 cumulative_gas_used: info.cumulative_gas_used,
-                logs: result.into_logs().into_iter().map(Into::into).collect(),
+                logs: result.into_logs().into_iter().collect(),
                 deposit_nonce: None,
                 deposit_receipt_version: None,
             }));

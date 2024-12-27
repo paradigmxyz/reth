@@ -917,14 +917,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
             id.into(),
             |provider| provider.transaction_by_id(id),
             |tx_index, _, block_state| {
-                Ok(block_state
-                    .block_ref()
-                    .block()
-                    .body
-                    .transactions()
-                    .get(tx_index)
-                    .cloned()
-                    .map(Into::into))
+                Ok(block_state.block_ref().block().body.transactions().get(tx_index).cloned())
             },
         )
     }
@@ -937,14 +930,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
             id.into(),
             |provider| provider.transaction_by_id_unhashed(id),
             |tx_index, _, block_state| {
-                Ok(block_state
-                    .block_ref()
-                    .block()
-                    .body
-                    .transactions()
-                    .get(tx_index)
-                    .cloned()
-                    .map(Into::into))
+                Ok(block_state.block_ref().block().body.transactions().get(tx_index).cloned())
             },
         )
     }
