@@ -36,6 +36,7 @@ serde = { workspace = true, optional = true }
 
 # misc
 derive_more = { workspace = true, features = ["deref", "from", "into", "constructor"] }
+once_cell.workspace = true
 rand = { workspace = true, optional = true }
 
 # test
@@ -65,12 +66,12 @@ std = [
 	"secp256k1?/std",
 	"alloy-rlp/std",
 	"reth-zstd-compressors?/std",
-	"op-alloy-consensus/std"
+	"op-alloy-consensus/std",
+	"once_cell/std"
 ]
 reth-codec = [
     "dep:reth-codecs",
     "std",
-    "rand",
     "dep:proptest",
     "dep:arbitrary",
     "reth-primitives/reth-codec",
