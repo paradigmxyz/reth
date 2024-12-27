@@ -29,7 +29,8 @@ use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_primitives::{
-    BlockExt, SealedBlockFor, SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
+    BlockExt, EthPrimitives, SealedBlockFor, SealedBlockWithSenders, SealedHeader, Transaction,
+    TransactionSigned,
 };
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -121,7 +122,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {

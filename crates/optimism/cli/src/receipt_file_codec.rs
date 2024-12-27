@@ -25,8 +25,14 @@ use reth_downloaders::{file_client::FileClientError, receipt_file_client::Receip
 ///
 /// It's recommended to use [`with_capacity`](tokio_util::codec::FramedRead::with_capacity) to set
 /// the capacity of the framed reader to the size of the file.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct HackReceiptFileCodec<R = Receipt>(core::marker::PhantomData<R>);
+
+impl<R> Default for HackReceiptFileCodec<R> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
 
 impl<R> Decoder for HackReceiptFileCodec<R>
 where

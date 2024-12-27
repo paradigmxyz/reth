@@ -2,21 +2,26 @@ use crate::{OpBuiltPayload, OpNode as OtherOpNode, OpPayloadBuilderAttributes};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
-use reth_e2e_test_utils::{transaction::TransactionTestContext, wallet::Wallet, NodeHelperType};
+use reth_e2e_test_utils::{
+    transaction::TransactionTestContext, wallet::Wallet, NodeHelperType, TmpDB,
+};
+use reth_node_api::NodeTypesWithDBAdapter;
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_payload_builder::EthPayloadBuilderAttributes;
+use reth_provider::providers::BlockchainProvider2;
 use reth_tasks::TaskManager;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Optimism Node Helper type
-pub(crate) type OpNode = NodeHelperType<OtherOpNode>;
+pub(crate) type OpNode =
+    NodeHelperType<OtherOpNode, BlockchainProvider2<NodeTypesWithDBAdapter<OtherOpNode, TmpDB>>>;
 
 /// Creates the initial setup with `num_nodes` of the node config, started and connected.
 pub async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {
     let genesis: Genesis =
         serde_json::from_str(include_str!("../tests/assets/genesis.json")).unwrap();
-    reth_e2e_test_utils::setup(
+    reth_e2e_test_utils::setup_engine(
         num_nodes,
         Arc::new(OpChainSpecBuilder::base_mainnet().genesis(genesis).ecotone_activated().build()),
         false,

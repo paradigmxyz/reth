@@ -21,7 +21,7 @@ use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_api::{BlockTy, NodePrimitives};
 use reth_node_ethereum::EthExecutorProvider;
-use reth_primitives::BlockExt;
+use reth_primitives::{BlockExt, EthPrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, AccountExtReader, ChainSpecProvider, DatabaseProviderFactory,
     HashedPostStateProvider, HashingWriter, LatestStateProviderRef, OriginalValuesKnown,
@@ -88,7 +88,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {

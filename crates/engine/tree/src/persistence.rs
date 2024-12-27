@@ -336,7 +336,7 @@ mod tests {
         reth_tracing::init_test_tracing();
         let persistence_handle = default_persistence_handle();
         let block_number = 0;
-        let mut test_block_builder = TestBlockBuilder::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
         let executed =
             test_block_builder.get_executed_block_with_number(block_number, B256::random());
         let block_hash = executed.block().hash();
@@ -361,7 +361,7 @@ mod tests {
         reth_tracing::init_test_tracing();
         let persistence_handle = default_persistence_handle();
 
-        let mut test_block_builder = TestBlockBuilder::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
         let blocks = test_block_builder.get_executed_blocks(0..5).collect::<Vec<_>>();
         let last_hash = blocks.last().unwrap().block().hash();
         let (tx, rx) = oneshot::channel();
@@ -377,7 +377,7 @@ mod tests {
         let persistence_handle = default_persistence_handle();
 
         let ranges = [0..1, 1..2, 2..4, 4..5];
-        let mut test_block_builder = TestBlockBuilder::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
         for range in ranges {
             let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
             let last_hash = blocks.last().unwrap().block().hash();

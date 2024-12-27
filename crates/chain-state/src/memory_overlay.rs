@@ -96,9 +96,9 @@ impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N>
 }
 
 impl<N: NodePrimitives> AccountReader for MemoryOverlayStateProviderRef<'_, N> {
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         for block in &self.in_memory {
-            if let Some(account) = block.execution_output.account(&address) {
+            if let Some(account) = block.execution_output.account(address) {
                 return Ok(account);
             }
         }
@@ -228,9 +228,9 @@ impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
         self.historical.storage(address, storage_key)
     }
 
-    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         for block in &self.in_memory {
-            if let Some(contract) = block.execution_output.bytecode(&code_hash) {
+            if let Some(contract) = block.execution_output.bytecode(code_hash) {
                 return Ok(Some(contract));
             }
         }

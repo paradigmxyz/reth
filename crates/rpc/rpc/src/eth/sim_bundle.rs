@@ -171,8 +171,7 @@ where
             while idx < body.len() {
                 match &body[idx] {
                     BundleItem::Tx { tx, can_revert } => {
-                        let recovered_tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)
-                            .map_err(EthApiError::from)?;
+                        let recovered_tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?;
                         let (tx, signer) = recovered_tx.to_components();
                         let tx: PoolConsensusTx<Eth::Pool> =
                             <Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus(tx);

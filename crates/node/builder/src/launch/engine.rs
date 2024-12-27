@@ -1,5 +1,6 @@
 //! Engine node related functionality.
 
+use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
@@ -385,12 +386,12 @@ where
                             ChainEvent::Handler(ev) => {
                                 if let Some(head) = ev.canonical_header() {
                                     let head_block = Head {
-                                        number: head.number,
+                                        number: head.number(),
                                         hash: head.hash(),
-                                        difficulty: head.difficulty,
-                                        timestamp: head.timestamp,
+                                        difficulty: head.difficulty(),
+                                        timestamp: head.timestamp(),
                                         total_difficulty: chainspec
-                                            .final_paris_total_difficulty(head.number)
+                                            .final_paris_total_difficulty(head.number())
                                             .unwrap_or_default(),
                                     };
                                     network_handle.update_status(head_block);

@@ -6,6 +6,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::CliNodeTypes;
 use reth_cli_runner::CliContext;
 use reth_node_ethereum::EthEngineTypes;
+use reth_primitives::EthPrimitives;
 
 mod build_block;
 mod execution;
@@ -37,7 +38,9 @@ pub enum Subcommands<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     /// Execute `debug` command
-    pub async fn execute<N: CliNodeTypes<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>>(
+    pub async fn execute<
+        N: CliNodeTypes<Engine = EthEngineTypes, Primitives = EthPrimitives, ChainSpec = C::ChainSpec>,
+    >(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {

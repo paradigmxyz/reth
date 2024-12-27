@@ -15,7 +15,6 @@ use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
     dirs::{ChainPath, DataDirPath},
 };
-use reth_primitives::EthPrimitives;
 use reth_provider::{
     providers::{NodeTypesForProvider, StaticFileProvider},
     ProviderFactory, StaticFileProviderFactory,
@@ -198,11 +197,5 @@ impl AccessRights {
 
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`](reth_node_builder::NodeTypes) in CLI.
-pub trait CliNodeTypes:
-    NodeTypesWithEngine + NodeTypesForProvider<Primitives = EthPrimitives>
-{
-}
-impl<N> CliNodeTypes for N where
-    N: NodeTypesWithEngine + NodeTypesForProvider<Primitives = EthPrimitives>
-{
-}
+pub trait CliNodeTypes: NodeTypesWithEngine + NodeTypesForProvider {}
+impl<N> CliNodeTypes for N where N: NodeTypesWithEngine + NodeTypesForProvider {}

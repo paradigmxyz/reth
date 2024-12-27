@@ -14,6 +14,7 @@ use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayload
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::EthereumHardforks;
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_primitives::OpPrimitives;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{transaction::WithEncoded, SealedBlock, TransactionSigned};
@@ -186,6 +187,8 @@ impl OpBuiltPayload {
 }
 
 impl BuiltPayload for OpBuiltPayload {
+    type Primitives = OpPrimitives;
+
     fn block(&self) -> &SealedBlock {
         &self.block
     }
@@ -204,6 +207,8 @@ impl BuiltPayload for OpBuiltPayload {
 }
 
 impl BuiltPayload for &OpBuiltPayload {
+    type Primitives = OpPrimitives;
+
     fn block(&self) -> &SealedBlock {
         (**self).block()
     }
@@ -262,7 +267,7 @@ impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
-            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            blobs_bundle: sidecars.into_iter().collect::<Vec<_>>().into(),
             parent_beacon_block_root,
         }
     }
@@ -289,7 +294,7 @@ impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
-            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            blobs_bundle: sidecars.into_iter().collect::<Vec<_>>().into(),
             parent_beacon_block_root,
             execution_requests: vec![],
         }

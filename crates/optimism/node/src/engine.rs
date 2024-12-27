@@ -12,13 +12,15 @@ use reth_node_api::{
         EngineObjectValidationError, MessageValidationKind, PayloadOrAttributes, PayloadTypes,
         VersionSpecificValidationError,
     },
-    validate_version_specific_fields, EngineTypes, EngineValidator, PayloadValidator,
+    validate_version_specific_fields, BuiltPayload, EngineTypes, EngineValidator, NodePrimitives,
+    PayloadValidator,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Block, SealedBlockFor};
+use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::sync::Arc;
 
 /// The types used in the optimism beacon consensus engine.
@@ -36,7 +38,8 @@ impl<T: PayloadTypes> PayloadTypes for OpEngineTypes<T> {
 
 impl<T: PayloadTypes> EngineTypes for OpEngineTypes<T>
 where
-    T::BuiltPayload: TryInto<ExecutionPayloadV1>
+    T::BuiltPayload: BuiltPayload<Primitives: NodePrimitives<Block = reth_primitives::Block>>
+        + TryInto<ExecutionPayloadV1>
         + TryInto<ExecutionPayloadEnvelopeV2>
         + TryInto<OpExecutionPayloadEnvelopeV3>
         + TryInto<OpExecutionPayloadEnvelopeV4>,
@@ -45,6 +48,14 @@ where
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
+
+    fn block_to_payload(
+        block: SealedBlockFor<
+            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
+        >,
+    ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
+        block_to_payload(block)
+    }
 }
 
 /// A default payload type for [`OpEngineTypes`]

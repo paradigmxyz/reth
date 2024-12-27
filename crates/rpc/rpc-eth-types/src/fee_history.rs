@@ -245,7 +245,7 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
             event = events.next() =>  {
                 let Some(event) = event else {
                      // the stream ended, we are done
-                    break;
+                    break
                 };
 
                 let committed = event.committed();

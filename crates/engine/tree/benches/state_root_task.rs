@@ -121,7 +121,7 @@ fn setup_provider(
             // other updates
             let should_process = match account.status {
                 AccountStatus::SelfDestructed => {
-                    provider_rw.basic_account(*address).ok().flatten().is_some()
+                    provider_rw.basic_account(address).ok().flatten().is_some()
                 }
                 _ => true,
             };

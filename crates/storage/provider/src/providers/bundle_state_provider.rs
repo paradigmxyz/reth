@@ -68,9 +68,9 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> BlockHashReader
 }
 
 impl<SP: StateProvider, EDP: ExecutionDataProvider> AccountReader for BundleStateProvider<SP, EDP> {
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if let Some(account) =
-            self.block_execution_data_provider.execution_outcome().account(&address)
+            self.block_execution_data_provider.execution_outcome().account(address)
         {
             Ok(account)
         } else {
@@ -210,9 +210,9 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProvider for BundleStat
         self.state_provider.storage(account, storage_key)
     }
 
-    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if let Some(bytecode) =
-            self.block_execution_data_provider.execution_outcome().bytecode(&code_hash)
+            self.block_execution_data_provider.execution_outcome().bytecode(code_hash)
         {
             return Ok(Some(bytecode))
         }
