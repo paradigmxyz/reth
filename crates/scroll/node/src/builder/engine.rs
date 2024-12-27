@@ -11,7 +11,7 @@ use reth_primitives::{Block, EthPrimitives, SealedBlock, SealedBlockFor};
 use reth_scroll_chainspec::ScrollChainSpec;
 
 /// Builder for [`ScrollEngineValidator`].
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct ScrollEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for ScrollEngineValidatorBuilder

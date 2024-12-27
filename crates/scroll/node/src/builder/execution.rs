@@ -6,7 +6,7 @@ use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_evm::{ScrollEvmConfig, ScrollExecutionStrategyFactory};
 
 /// Executor builder for Scroll.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy)]
 pub struct ScrollExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for ScrollExecutorBuilder

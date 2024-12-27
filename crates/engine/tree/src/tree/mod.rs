@@ -36,8 +36,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
-    EthPrimitives, GotExpected, NodePrimitives, SealedBlockFor, SealedBlockWithSenders,
-    SealedHeader,
+    EthPrimitives, NodePrimitives, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
 };
 use reth_primitives_traits::Block;
 use reth_provider::{
@@ -2287,6 +2286,9 @@ where
             state_provider.state_root_from_state_with_updates(hashed_state.clone())?
         };
 
+        #[cfg(feature = "skip-state-root-validation")]
+        let _ = state_root;
+        #[cfg(not(feature = "skip-state-root-validation"))]
         if state_root != block.header().state_root() {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(
@@ -2296,7 +2298,11 @@ where
                 Some((&trie_output, state_root)),
             );
             return Err(ConsensusError::BodyStateRootDiff(
-                GotExpected { got: state_root, expected: block.header().state_root() }.into(),
+                reth_primitives::GotExpected {
+                    got: state_root,
+                    expected: block.header().state_root(),
+                }
+                .into(),
             )
             .into())
         }

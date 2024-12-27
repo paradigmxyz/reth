@@ -133,3 +133,6 @@ scroll = [
     "reth-scroll-storage/scroll",
     "reth-scroll-state-commitment/scroll"
 ]
+skip-state-root-validation = [
+    "reth-stages/skip-state-root-validation"
+]

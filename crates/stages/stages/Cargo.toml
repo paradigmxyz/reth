@@ -137,6 +137,7 @@ scroll = [
     "reth-scroll-storage/scroll",
     "reth-scroll-primitives"
 ]
+skip-state-root-validation = []
 
 [[bench]]
 name = "criterion"

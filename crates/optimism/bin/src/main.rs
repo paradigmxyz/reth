@@ -1,20 +1,18 @@
 #![allow(missing_docs, rustdoc::missing_crate_level_docs)]
 #![cfg_attr(feature = "scroll", allow(unused_crate_dependencies))]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(all(feature = "optimism", not(feature = "scroll")))]
-
-use clap::Parser;
-use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher, Node};
-use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
-use reth_optimism_node::{args::RollupArgs, OpNode};
-use reth_provider::providers::BlockchainProvider2;
-
-use tracing as _;
 
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
 
+// The `optimism` feature must be enabled to use this crate.
+#[cfg(all(feature = "optimism", not(feature = "scroll")))]
 fn main() {
+    use clap::Parser;
+    use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher, Node};
+    use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
+    use reth_optimism_node::{args::RollupArgs, OpNode};
+    use reth_provider::providers::BlockchainProvider2;
+    use tracing as _;
     reth_cli_util::sigsegv_handler::install();
 
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
@@ -63,4 +61,10 @@ fn main() {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
     }
+}
+
+#[cfg(not(all(feature = "optimism", not(feature = "scroll"))))]
+fn main() {
+    eprintln!("Optimism feature is not enabled");
+    std::process::exit(1);
 }

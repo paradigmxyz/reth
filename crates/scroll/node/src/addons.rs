@@ -1,4 +1,4 @@
-use crate::engine::ScrollEngineValidatorBuilder;
+use crate::ScrollEngineValidatorBuilder;
 use reth_network::NetworkHandle;
 use reth_node_builder::{rpc::RpcAddOns, FullNodeComponents, FullNodeTypes};
 use reth_rpc::EthApi;

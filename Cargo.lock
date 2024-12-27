@@ -9496,6 +9496,7 @@ dependencies = [
  "reth-scroll-state-commitment",
  "reth-tracing",
  "reth-transaction-pool",
+ "reth-trie-db",
  "tokio",
 ]
 
@@ -10513,6 +10514,18 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scroll-reth"
+version = "1.1.4"
+dependencies = [
+ "clap",
+ "reth-cli-util",
+ "reth-node-builder",
+ "reth-provider",
+ "reth-scroll-cli",
+ "reth-scroll-node",
+]
+
+[[package]]
+name = "scroll-reth-mpt"
 version = "1.1.4"
 dependencies = [
  "clap",
