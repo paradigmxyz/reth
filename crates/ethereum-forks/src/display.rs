@@ -123,7 +123,7 @@ impl core::fmt::Display for DisplayHardforks {
         format(
             "Pre-merge hard forks (block based)",
             &self.pre_merge,
-            self.with_merge.is_empty(),
+            self.with_merge.is_empty() && self.post_merge.is_empty(),
             f,
         )?;
 
