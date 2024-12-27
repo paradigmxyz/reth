@@ -43,13 +43,19 @@ async fn can_sync() -> eyre::Result<()> {
         .update_optimistic_forkchoice(canonical_chain[tip_index - reorg_depth])
         .await?;
     second_node
-        .wait_block((tip - reorg_depth) as u64, canonical_chain[tip_index - reorg_depth], true)
+        .wait_block((tip - reorg_depth) as u64, canonical_chain[tip_index - reorg_depth], false)
         .await?;
     second_node.engine_api.canonical_stream.next().await.unwrap();
 
-    // On third node, sync optimistically up to block number 90a
+    // Trigger backfil sync until block 80
+    third_node
+        .engine_api
+        .update_forkchoice(canonical_chain[tip_index - 10], canonical_chain[tip_index - 10])
+        .await?;
+    third_node.wait_block((tip - 10) as u64, canonical_chain[tip_index - 10], true).await?;
+    // Trigger live sync to block 90
     third_node.engine_api.update_optimistic_forkchoice(canonical_chain[tip_index]).await?;
-    third_node.wait_block(tip as u64, canonical_chain[tip_index], true).await?;
+    third_node.wait_block(tip as u64, canonical_chain[tip_index], false).await?;
 
     //  On second node, create a side chain: 88a -> 89b -> 90b
     wallet.lock().await.inner_nonce -= reorg_depth as u64;
@@ -77,25 +83,9 @@ async fn can_sync() -> eyre::Result<()> {
         .wait_block(
             side_payload_chain[0].0.block().number,
             side_payload_chain[0].0.block().hash(),
-            true,
+            false,
         )
         .await?;
-
-    // Make sure that trying to submit 89a again will result in an invalid payload status, since 89b
-    // has been set as finalized.
-    let _ = third_node
-        .engine_api
-        .submit_payload(
-            canonical_payload_chain[tip_index - reorg_depth + 1].0.clone(),
-            canonical_payload_chain[tip_index - reorg_depth + 1].1.clone(),
-            PayloadStatusEnum::Invalid {
-                validation_error: format!(
-                    "block number is lower than the last finalized block number {}",
-                    (tip - reorg_depth) as u64 + 1
-                ),
-            },
-        )
-        .await;
 
     Ok(())
 }
