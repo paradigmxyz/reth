@@ -66,7 +66,7 @@ pub(crate) fn stage_unwind<
 pub(crate) fn unwind_hashes<S>(stage: S, db: &TestStageDB, range: StageRange)
 where
     S: Clone
-    + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>,
+        + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>,
 {
     let (input, unwind) = range;
 
