@@ -949,7 +949,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
 
 impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider<N> {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         self.database.provider()?.basic_account(address)
     }
 }

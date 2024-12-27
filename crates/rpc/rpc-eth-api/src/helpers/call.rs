@@ -351,15 +351,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let state_overrides = state_override.take();
                     let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                    let env = this
-                        .prepare_call_env(
-                            cfg_env_with_handler_cfg.clone(),
-                            block_env.clone(),
-                            tx,
-                            &mut db,
-                            overrides,
-                        )
-                        .map(Into::into)?;
+                    let env = this.prepare_call_env(
+                        cfg_env_with_handler_cfg.clone(),
+                        block_env.clone(),
+                        tx,
+                        &mut db,
+                        overrides,
+                    )?;
                     let (res, _) = this.transact(&mut db, env)?;
 
                     match ensure_success(res.result) {

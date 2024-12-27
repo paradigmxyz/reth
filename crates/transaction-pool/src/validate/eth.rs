@@ -367,7 +367,7 @@ where
         let state = maybe_state.as_deref().expect("provider is set");
 
         // Use provider to get account info
-        let account = match state.basic_account(transaction.sender()) {
+        let account = match state.basic_account(transaction.sender_ref()) {
             Ok(account) => account.unwrap_or_default(),
             Err(err) => {
                 return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
@@ -380,9 +380,9 @@ where
         //
         // Any other case means that the account is not an EOA, and should not be able to send
         // transactions.
-        if account.has_bytecode() {
+        if let Some(code_hash) = &account.bytecode_hash {
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
-                match state.bytecode_by_hash(account.get_bytecode_hash()) {
+                match state.bytecode_by_hash(code_hash) {
                     Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
                     Err(err) => {
                         return TransactionValidationOutcome::Error(

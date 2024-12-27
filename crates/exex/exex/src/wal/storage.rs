@@ -119,7 +119,7 @@ where
     ) -> impl Iterator<Item = eyre::Result<(u32, u64, ExExNotification<N>)>> + '_ {
         range.map(move |id| {
             let (notification, size) =
-                self.read_notification(id)?.ok_or_eyre("notification {id} not found")?;
+                self.read_notification(id)?.ok_or_eyre(format!("notification {id} not found"))?;
 
             Ok((id, size, notification))
         })
