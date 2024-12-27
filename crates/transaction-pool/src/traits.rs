@@ -1133,11 +1133,9 @@ pub trait PoolTransaction:
         &self,
         max_init_code_size: usize,
     ) -> Result<(), InvalidPoolTransactionError> {
-        if self.is_create() && self.input().len() > max_init_code_size {
-            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
-                self.size(),
-                max_init_code_size,
-            ))
+        let input_len = self.input().len();
+        if self.is_create() && input_len > max_init_code_size {
+            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(input_len, max_init_code_size))
         } else {
             Ok(())
         }
