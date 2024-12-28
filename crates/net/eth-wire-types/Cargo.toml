@@ -60,7 +60,8 @@ std = [
 	"reth-primitives/std",
 	"reth-primitives-traits/std",
 	"serde?/std",
-	"thiserror/std"
+	"thiserror/std",
+	"reth-chainspec/std"
 ]
 arbitrary = [
 	"reth-primitives/arbitrary",
