@@ -2,6 +2,7 @@
 //! types.
 
 use crate::HeadersDirection;
+use alloc::vec::Vec;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};

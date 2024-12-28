@@ -1,5 +1,6 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
 
+use alloc::vec::Vec;
 use alloy_consensus::{RlpDecodableReceipt, RlpEncodableReceipt};
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
