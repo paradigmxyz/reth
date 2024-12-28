@@ -28,9 +28,21 @@ impl OnStateHook for MeteredStateHook {
             .collect::<Vec<_>>()
             .len();
 
+        // Track sload and sstore operations
+        let sload_count = state.values()
+            .map(|account| account.storage.iter().filter(|slot| slot.is_loaded()).count())
+            .sum::<usize>();
+        let sstore_count = state.values()
+            .map(|account| account.storage.iter().filter(|slot| slot.is_changed()).count())
+            .sum::<usize>();
+
         self.metrics.accounts_loaded_histogram.record(accounts as f64);
         self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
         self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
+        
+        // Record sload and sstore metrics
+        self.metrics.sload_operations_histogram.record(sload_count as f64);
+        self.metrics.sstore_operations_histogram.record(sstore_count as f64);
 
         // Call the original state hook
         self.inner_hook.on_state(state);
@@ -38,7 +50,6 @@ impl OnStateHook for MeteredStateHook {
 }
 
 /// Executor metrics.
-// TODO(onbjerg): add sload/sstore
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.execution")]
 pub struct ExecutorMetrics {
@@ -65,6 +76,11 @@ pub struct ExecutorMetrics {
     pub storage_slots_updated_histogram: Histogram,
     /// The Histogram for number of bytecodes updated when executing the latest block.
     pub bytecodes_updated_histogram: Histogram,
+
+    /// The Histogram for number of SLOAD operations during block execution.
+    pub sload_operations_histogram: Histogram,
+    /// The Histogram for number of SSTORE operations during block execution.
+    pub sstore_operations_histogram: Histogram,
 }
 
 impl ExecutorMetrics {
@@ -291,5 +307,68 @@ mod tests {
 
         let actual_output = rx.try_recv().unwrap();
         assert_eq!(actual_output, expected_output);
+    }
+
+    #[test]
+    fn test_sload_sstore_metrics_recorded() {
+        let snapshotter = setup_test_recorder();
+        let metrics = ExecutorMetrics::default();
+        let input = BlockWithSenders::default();
+
+        // Create a mock state with loaded and changed storage slots
+        let state = {
+            let mut state = EvmState::default();
+            let storage = EvmStorage::from_iter([
+                (U256::from(1), EvmStorageSlot::new(U256::from(2)).with_status(true, false)), // loaded
+                (U256::from(2), EvmStorageSlot::new(U256::from(3)).with_status(false, true)), // changed
+                (U256::from(3), EvmStorageSlot::new(U256::from(4)).with_status(true, true))   // both
+            ]);
+            state.insert(
+                Default::default(),
+                Account {
+                    info: AccountInfo {
+                        balance: U256::from(100),
+                        nonce: 10,
+                        code_hash: B256::random(),
+                        code: Default::default(),
+                    },
+                    storage,
+                    status: AccountStatus::Loaded,
+                },
+            );
+            state
+        };
+
+        let (tx, _rx) = mpsc::channel();
+        let state_hook = Box::new(ChannelStateHook { sender: tx, output: 42 });
+
+        let executor = MockExecutor { state };
+        let _result = metrics.execute_metered(executor, &input, state_hook).unwrap();
+
+        let snapshot = snapshotter.snapshot().into_vec();
+
+        let mut sload_recorded = false;
+        let mut sstore_recorded = false;
+
+        for metric in snapshot {
+            let metric_name = metric.0.key().name();
+            if metric_name == "sync.execution.sload_operations_histogram" {
+                if let DebugValue::Histogram(vs) = metric.3 {
+                    let sload_count = vs.iter().filter(|v| v.into_inner() > 0.0).count();
+                    assert!(sload_count > 0, "sload operations not recorded");
+                    sload_recorded = true;
+                }
+            }
+            if metric_name == "sync.execution.sstore_operations_histogram" {
+                if let DebugValue::Histogram(vs) = metric.3 {
+                    let sstore_count = vs.iter().filter(|v| v.into_inner() > 0.0).count();
+                    assert!(sstore_count > 0, "sstore operations not recorded");
+                    sstore_recorded = true;
+                }
+            }
+        }
+
+        assert!(sload_recorded, "sload metrics not found");
+        assert!(sstore_recorded, "sstore metrics not found");
     }
 }
