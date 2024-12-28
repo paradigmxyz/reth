@@ -1,84 +1,90 @@
-#![allow(missing_docs, unreachable_pub)]
-use alloy_primitives::B256;
-use criterion::{criterion_group, criterion_main, Criterion};
+#![allow(missing_docs)]
+use criterion::{
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
+};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
-use proptest_arbitrary_interop::arb;
-use reth_primitives::{Receipt, ReceiptWithBloom};
-use reth_trie::triehash::KeccakHasher;
+use reth_transaction_pool::{blob_tx_priority, fee_delta};
 use std::hint::black_box;
 
-/// Benchmarks different implementations of the root calculation.
-pub fn trie_root_benchmark(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Receipts root calculation");
+fn generate_test_data_fee_delta() -> (u128, u128) {
+    let config = ProptestConfig::default();
+    let mut runner = TestRunner::new(config);
+    prop::arbitrary::any::<(u128, u128)>().new_tree(&mut runner).unwrap().current()
+}
 
-    for size in [10, 100, 1_000] {
-        let group_name =
-            |description: &str| format!("receipts root | size: {size} | {description}");
+fn generate_test_data_priority() -> (u128, u128, u128, u128) {
+    let config = ProptestConfig::default();
+    let mut runner = TestRunner::new(config);
+    prop::arbitrary::any::<(u128, u128, u128, u128)>().new_tree(&mut runner).unwrap().current()
+}
 
-        let receipts = &generate_test_data(size)[..];
-        assert_eq!(trie_hash_ordered_trie_root(receipts), hash_builder_root(receipts));
+fn priority_bench(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    description: &str,
+    input_data: (u128, u128, u128, u128),
+) {
+    let group_id = format!("txpool | {description}");
 
-        group.bench_function(group_name("triehash::ordered_trie_root"), |b| {
-            b.iter(|| trie_hash_ordered_trie_root(black_box(receipts)));
+    group.bench_function(group_id, |b| {
+        b.iter(|| {
+            black_box(blob_tx_priority(
+                black_box(input_data.0),
+                black_box(input_data.1),
+                black_box(input_data.2),
+                black_box(input_data.3),
+            ));
         });
+    });
+}
 
-        group.bench_function(group_name("HashBuilder"), |b| {
-            b.iter(|| hash_builder_root(black_box(receipts)));
+fn fee_jump_bench(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    description: &str,
+    input_data: (u128, u128),
+) {
+    let group_id = format!("txpool | {description}");
+
+    group.bench_function(group_id, |b| {
+        b.iter(|| {
+            black_box(fee_delta(black_box(input_data.0), black_box(input_data.1)));
         });
-    }
+    });
 }
 
-fn generate_test_data(size: usize) -> Vec<ReceiptWithBloom<Receipt>> {
-    prop::collection::vec(arb::<ReceiptWithBloom<Receipt>>(), size)
-        .new_tree(&mut TestRunner::new(ProptestConfig {
-            rng_algorithm: prop::test_runner::RngAlgorithm::ChaCha,
-            seed: 12345,
-            ..Default::default()
-        }))
-        .unwrap()
-        .current()
+fn blob_priority_calculation(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Blob priority calculation");
+    let fee_jump_input = generate_test_data_fee_delta();
+
+    // Unstable sorting of unsorted collection
+    fee_jump_bench(&mut group, "BenchmarkDynamicFeeJumpCalculation", fee_jump_input);
+
+    let blob_priority_input = generate_test_data_priority();
+
+    // BinaryHeap that is resorted on each update
+    priority_bench(&mut group, "BenchmarkPriorityCalculation", blob_priority_input);
 }
 
-criterion_group! {
-    name = benches;
-    config = Criterion::default();
-    targets = trie_root_benchmark
+fn criterion_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("priority");
+    group.sample_size(10);
+
+    let config = ProptestConfig {
+        rng_algorithm: prop::test_runner::RngAlgorithm::ChaCha,
+        seed: 12345,
+        ..Default::default()
+    };
+
+    let mut group = c.benchmark_group("Blob priority calculation");
+    let fee_jump_input = generate_test_data_fee_delta();
+
+    // Unstable sorting of unsorted collection
+    fee_jump_bench(&mut group, "BenchmarkDynamicFeeJumpCalculation", fee_jump_input);
+
+    let blob_priority_input = generate_test_data_priority();
+
+    // BinaryHeap that is resorted on each update
+    priority_bench(&mut group, "BenchmarkPriorityCalculation", blob_priority_input);
 }
-criterion_main!(benches);
 
-mod implementations {
-    use super::*;
-    use alloy_eips::eip2718::Encodable2718;
-    use alloy_rlp::Encodable;
-    use alloy_trie::root::adjust_index_for_rlp;
-    use reth_primitives::Receipt;
-    use reth_trie_common::{HashBuilder, Nibbles};
-
-    pub fn trie_hash_ordered_trie_root(receipts: &[ReceiptWithBloom<Receipt>]) -> B256 {
-        triehash::ordered_trie_root::<KeccakHasher, _>(
-            receipts.iter().map(|receipt_with_bloom| receipt_with_bloom.encoded_2718()),
-        )
-    }
-
-    pub fn hash_builder_root(receipts: &[ReceiptWithBloom<Receipt>]) -> B256 {
-        let mut index_buffer = Vec::new();
-        let mut value_buffer = Vec::new();
-
-        let mut hb = HashBuilder::default();
-        let receipts_len = receipts.len();
-        for i in 0..receipts_len {
-            let index = adjust_index_for_rlp(i, receipts_len);
-
-            index_buffer.clear();
-            index.encode(&mut index_buffer);
-
-            value_buffer.clear();
-            receipts[index].encode_2718(&mut value_buffer);
-
-            hb.add_leaf(Nibbles::unpack(&index_buffer), &value_buffer);
-        }
-
-        hb.root()
-    }
-}
-use implementations::*;
+criterion_group!(priority, blob_priority_calculation);
+criterion_main!(priority);
