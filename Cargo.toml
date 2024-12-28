@@ -309,7 +309,7 @@ reth-bench = { path = "bin/reth-bench" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-blockchain-tree-api = { path = "crates/blockchain-tree-api" }
 reth-chain-state = { path = "crates/chain-state" }
-reth-chainspec = { path = "crates/chainspec" }
+reth-chainspec = { path = "crates/chainspec", default-features = false }
 reth-cli = { path = "crates/cli/cli" }
 reth-cli-commands = { path = "crates/cli/commands" }
 reth-cli-runner = { path = "crates/cli/runner" }
