@@ -20,18 +20,19 @@ extern crate alloc;
 use core::convert::Infallible;
 
 use alloc::{sync::Arc, vec::Vec};
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
-use reth_chainspec::{ChainSpec, Head};
+use reth_chainspec::ChainSpec;
 use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
-use reth_primitives::{transaction::FillTxEnv, TransactionSigned};
+use reth_primitives::TransactionSigned;
+use reth_primitives_traits::transaction::execute::FillTxEnv;
 use revm_primitives::{
     AnalysisKind, BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, SpecId, TxEnv,
 };
 
 mod config;
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
-pub use config::{revm_spec, revm_spec_by_timestamp_after_merge};
+pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
 use reth_ethereum_forks::EthereumHardfork;
 
 pub mod execute;
@@ -110,17 +111,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 
     fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Header) {
-        let spec_id = config::revm_spec(
-            self.chain_spec(),
-            &Head {
-                number: header.number,
-                timestamp: header.timestamp,
-                difficulty: header.difficulty,
-                // NOTE: this does nothing within revm_spec
-                total_difficulty: U256::MIN,
-                hash: Default::default(),
-            },
-        );
+        let spec_id = config::revm_spec(self.chain_spec(), header);
 
         cfg_env.chain_id = self.chain_spec.chain().id();
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
@@ -137,7 +128,11 @@ impl ConfigureEvmEnv for EthEvmConfig {
         let cfg = CfgEnv::default().with_chain_id(self.chain_spec.chain().id());
 
         // ensure we're not missing any timestamp based hardforks
-        let spec_id = revm_spec_by_timestamp_after_merge(&self.chain_spec, attributes.timestamp);
+        let spec_id = revm_spec_by_timestamp_and_block_number(
+            &self.chain_spec,
+            attributes.timestamp,
+            parent.number() + 1,
+        );
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)

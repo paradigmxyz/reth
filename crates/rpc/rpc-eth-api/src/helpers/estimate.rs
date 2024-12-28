@@ -87,7 +87,7 @@ pub trait EstimateCall: Call {
         // Optimize for simple transfer transactions, potentially reducing the gas estimate.
         if env.tx.data.is_empty() {
             if let TransactTo::Call(to) = env.tx.transact_to {
-                if let Ok(code) = db.db.account_code(to) {
+                if let Ok(code) = db.db.account_code(&to) {
                     let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
                     if no_code_callee {
                         // If the tx is a simple transfer (call to an account with no code) we can

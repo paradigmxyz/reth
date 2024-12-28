@@ -2020,27 +2020,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
-name = "const_format"
-version = "0.2.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "126f97965c8ad46d6d9163268ff28432e8f6a1196a55578867832e3049df63dd"
-dependencies = [
- "const_format_proc_macros",
- "konst",
-]
-
-[[package]]
-name = "const_format_proc_macros"
-version = "0.2.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d57c2eccfb16dbac1f4e61e206105db5820c9d26c3c472bc17c774259ef7744"
-dependencies = [
- "proc-macro2",
- "quote",
- "unicode-xid",
-]
-
-[[package]]
 name = "convert_case"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4660,21 +4639,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "konst"
-version = "0.2.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "330f0e13e6483b8c34885f7e6c9f19b1a7bd449c673fbb948a51c99d66ef74f4"
-dependencies = [
- "konst_macro_rules",
-]
-
-[[package]]
-name = "konst_macro_rules"
-version = "0.2.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
-
-[[package]]
 name = "kqueue"
 version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5535,11 +5499,9 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-serde",
  "derive_more",
- "ethereum_ssz",
  "op-alloy-consensus",
  "op-alloy-protocol",
  "serde",
- "snap",
  "thiserror 2.0.9",
 ]
 
@@ -7053,6 +7015,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-codecs",
  "reth-db-models",
+ "reth-optimism-primitives",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-prune-types",
@@ -7330,7 +7293,6 @@ dependencies = [
  "reth-payload-primitives",
  "reth-provider",
  "reth-prune",
- "reth-rpc-types-compat",
  "reth-stages-api",
  "reth-transaction-pool",
  "tokio",
@@ -7697,7 +7659,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-revm",
- "reth-storage-api",
  "reth-storage-errors",
  "revm",
  "revm-primitives",
@@ -7719,6 +7680,7 @@ dependencies = [
  "reth-evm",
  "reth-execution-types",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-revm",
  "reth-testing-utils",
  "revm-primitives",
@@ -8151,6 +8113,7 @@ dependencies = [
 name = "reth-node-builder"
 version = "1.1.4"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types",
@@ -8220,7 +8183,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "clap",
- "const_format",
  "derive_more",
  "dirs-next",
  "eyre",
@@ -8319,6 +8281,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
+ "derive_more",
  "futures",
  "humantime",
  "pin-project",
@@ -8408,16 +8371,13 @@ dependencies = [
  "reth-cli",
  "reth-cli-commands",
  "reth-cli-runner",
- "reth-config",
  "reth-consensus",
  "reth-db",
  "reth-db-api",
  "reth-db-common",
  "reth-downloaders",
- "reth-errors",
  "reth-execution-types",
  "reth-fs-util",
- "reth-network-p2p",
  "reth-node-builder",
  "reth-node-core",
  "reth-node-events",
@@ -8430,7 +8390,6 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-stages",
- "reth-stages-types",
  "reth-static-file",
  "reth-static-file-types",
  "reth-tracing",
@@ -8449,6 +8408,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-trie",
+ "op-alloy-consensus",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
@@ -8514,6 +8474,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-signer-local",
  "clap",
+ "derive_more",
  "eyre",
  "futures",
  "op-alloy-consensus",
@@ -8547,6 +8508,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-rpc-server-types",
+ "reth-rpc-types-compat",
  "reth-tasks",
  "reth-tracing",
  "reth-transaction-pool",
@@ -8567,6 +8529,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-debug",
  "alloy-rpc-types-engine",
+ "derive_more",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "reth-basic-payload-builder",
@@ -8578,6 +8541,7 @@ dependencies = [
  "reth-optimism-consensus",
  "reth-optimism-evm",
  "reth-optimism-forks",
+ "reth-optimism-primitives",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
@@ -8605,6 +8569,7 @@ dependencies = [
  "bytes",
  "derive_more",
  "modular-bitfield",
+ "once_cell",
  "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
@@ -8649,6 +8614,7 @@ dependencies = [
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-rpc",
  "reth-rpc-api",
@@ -9128,7 +9094,6 @@ dependencies = [
  "reth-chainspec",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
- "reth-evm",
  "reth-metrics",
  "reth-payload-builder",
  "reth-payload-builder-primitives",

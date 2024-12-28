@@ -9,7 +9,7 @@ use alloy_rpc_types_engine::{
 };
 use reth_chain_state::ExecutedBlock;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::SealedBlock;
+use reth_primitives::{EthPrimitives, SealedBlock};
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
@@ -89,6 +89,8 @@ impl EthBuiltPayload {
 }
 
 impl BuiltPayload for EthBuiltPayload {
+    type Primitives = EthPrimitives;
+
     fn block(&self) -> &SealedBlock {
         &self.block
     }
@@ -107,6 +109,8 @@ impl BuiltPayload for EthBuiltPayload {
 }
 
 impl BuiltPayload for &EthBuiltPayload {
+    type Primitives = EthPrimitives;
+
     fn block(&self) -> &SealedBlock {
         (**self).block()
     }
@@ -166,24 +170,9 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
 
 impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
     fn from(value: EthBuiltPayload) -> Self {
-        let EthBuiltPayload { block, fees, sidecars, requests, .. } = value;
-
         Self {
-            envelope_inner: ExecutionPayloadEnvelopeV3 {
-                execution_payload: block_to_payload_v3(Arc::unwrap_or_clone(block)),
-                block_value: fees,
-                // From the engine API spec:
-                //
-                // > Client software **MAY** use any heuristics to decide whether to set
-                // `shouldOverrideBuilder` flag or not. If client software does not implement any
-                // heuristic this flag **SHOULD** be set to `false`.
-                //
-                // Spec:
-                // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
-                should_override_builder: false,
-                blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
-            },
-            execution_requests: requests.unwrap_or_default(),
+            execution_requests: value.requests.clone().unwrap_or_default(),
+            envelope_inner: value.into(),
         }
     }
 }

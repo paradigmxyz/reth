@@ -535,7 +535,7 @@ where
         Err(err) => return Err(Box::new((addresses.collect(), err))),
     };
     for addr in addresses {
-        if let Ok(maybe_acc) = state.basic_account(addr) {
+        if let Ok(maybe_acc) = state.basic_account(&addr) {
             let acc = maybe_acc
                 .map(|acc| ChangedAccount { address: addr, nonce: acc.nonce, balance: acc.balance })
                 .unwrap_or_else(|| ChangedAccount::empty(addr));

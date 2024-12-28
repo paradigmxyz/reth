@@ -341,7 +341,7 @@ where
             tx_type: tx.tx_type(),
             success: result.is_success(),
             cumulative_gas_used,
-            logs: result.into_logs().into_iter().map(Into::into).collect(),
+            logs: result.into_logs().into_iter().collect(),
             ..Default::default()
         }));
 
@@ -469,8 +469,8 @@ where
         gas_used: cumulative_gas_used,
         extra_data: builder_config.extra_data,
         parent_beacon_block_root: attributes.parent_beacon_block_root,
-        blob_gas_used: blob_gas_used.map(Into::into),
-        excess_blob_gas: excess_blob_gas.map(Into::into),
+        blob_gas_used,
+        excess_blob_gas,
         requests_hash,
         target_blobs_per_block: None,
     };

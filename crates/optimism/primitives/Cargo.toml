@@ -23,7 +23,7 @@ alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rlp.workspace = true
 alloy-eips.workspace = true
-revm-primitives.workspace = true
+revm-primitives = { workspace = true, optional = true }
 secp256k1 = { workspace = true, optional = true }
 
 # op
@@ -36,6 +36,7 @@ serde = { workspace = true, optional = true }
 
 # misc
 derive_more = { workspace = true, features = ["deref", "from", "into", "constructor"] }
+once_cell.workspace = true
 rand = { workspace = true, optional = true }
 
 # test
@@ -50,7 +51,7 @@ arbitrary.workspace = true
 proptest.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "serde"]
 std = [
 	"reth-primitives-traits/std",
 	"reth-primitives/std",
@@ -61,15 +62,16 @@ std = [
 	"serde?/std",
 	"bytes?/std",
 	"derive_more/std",
-	"revm-primitives/std",
+	"revm-primitives?/std",
 	"secp256k1?/std",
 	"alloy-rlp/std",
-	"reth-zstd-compressors?/std"
+	"reth-zstd-compressors?/std",
+	"op-alloy-consensus/std",
+	"once_cell/std"
 ]
 reth-codec = [
     "dep:reth-codecs",
     "std",
-    "rand",
     "dep:proptest",
     "dep:arbitrary",
     "reth-primitives/reth-codec",
@@ -90,8 +92,15 @@ serde = [
     "reth-codecs?/serde",
     "op-alloy-consensus/serde",
     "rand?/serde",
-    "revm-primitives/serde",
+    "revm-primitives?/serde",
     "secp256k1?/serde",
+]
+serde-bincode-compat = [
+	"alloy-consensus/serde-bincode-compat",
+	"alloy-eips/serde-bincode-compat",
+	"op-alloy-consensus/serde-bincode-compat",
+	"reth-primitives/serde-bincode-compat",
+	"reth-primitives-traits/serde-bincode-compat"
 ]
 arbitrary = [
     "dep:arbitrary",
@@ -103,10 +112,11 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
-    "revm-primitives/arbitrary",
+    "revm-primitives?/arbitrary",
     "rand",
 ]
 optimism = [
+    "dep:revm-primitives",
 	"revm-primitives/optimism",
 	"reth-primitives/optimism"
 ]

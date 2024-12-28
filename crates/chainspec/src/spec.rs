@@ -296,11 +296,11 @@ impl ChainSpec {
             timestamp: self.genesis.timestamp,
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,
-            base_fee_per_gas: base_fee_per_gas.map(Into::into),
+            base_fee_per_gas,
             withdrawals_root,
             parent_beacon_block_root,
-            blob_gas_used: blob_gas_used.map(Into::into),
-            excess_blob_gas: excess_blob_gas.map(Into::into),
+            blob_gas_used,
+            excess_blob_gas,
             requests_hash,
             ..Default::default()
         }
