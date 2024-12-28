@@ -5,6 +5,7 @@
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::test_runner::TestRunner;
+use rand::Rng;
 use reth_engine_tree::tree::root::{StateRootConfig, StateRootTask};
 use reth_evm::system_calls::OnStateHook;
 use reth_primitives::{Account as RethAccount, StorageEntry};
@@ -13,7 +14,6 @@ use reth_provider::{
     test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
     AccountReader, HashingWriter, ProviderFactory,
 };
-use reth_testing_utils::generators::Rng;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
     trie_cursor::InMemoryTrieCursorFactory, TrieInput,
