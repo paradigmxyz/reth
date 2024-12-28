@@ -2,11 +2,7 @@
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use proptest::{
-    prelude::*,
-    strategy::ValueTree,
-    test_runner::{TestRunner},
-};
+use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     Nibbles,
