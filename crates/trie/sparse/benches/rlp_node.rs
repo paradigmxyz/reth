@@ -10,13 +10,17 @@ use reth_trie::Nibbles;
 use reth_trie_sparse::RevealedSparseTrie;
 
 fn update_rlp_node_level(c: &mut Criterion) {
-    let mut rng = generators::rng();
+    let mut rng = generators::rng_with_seed(12345);
 
     let mut group = c.benchmark_group("update rlp node level");
     group.sample_size(20);
 
     for size in [100_000] {
-        let mut runner = TestRunner::new(ProptestConfig::default());
+        let mut runner = TestRunner::new(ProptestConfig {
+            rng_algorithm: prop::test_runner::RngAlgorithm::ChaCha,
+            seed: 12345,
+            ..Default::default()
+        });
         let state = proptest::collection::hash_map(any::<B256>(), any::<U256>(), size)
             .new_tree(&mut runner)
             .unwrap()
