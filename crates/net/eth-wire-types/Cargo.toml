@@ -46,6 +46,8 @@ proptest-arbitrary-interop.workspace = true
 rand.workspace = true
 
 [features]
+default = ["std"]
+std = []
 arbitrary = [
 	"reth-primitives/arbitrary",
 	"alloy-chains/arbitrary",
