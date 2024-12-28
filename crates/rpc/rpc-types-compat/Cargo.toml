@@ -29,4 +29,5 @@ serde.workspace = true
 jsonrpsee-types.workspace = true
 
 [dev-dependencies]
+alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
 serde_json.workspace = true
