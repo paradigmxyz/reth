@@ -22,7 +22,7 @@ reth-ethereum-forks.workspace = true
 # ethereum
 alloy-chains = { workspace = true, features = ["rlp"] }
 alloy-eips.workspace = true
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["map"] }
 alloy-rlp = { workspace = true, features = ["derive"] }
 alloy-consensus.workspace = true
 
@@ -46,6 +46,22 @@ proptest-arbitrary-interop.workspace = true
 rand.workspace = true
 
 [features]
+default = ["std"]
+std = [
+	"alloy-chains/std",
+	"alloy-consensus/std",
+	"alloy-eips/std",
+	"alloy-genesis/std",
+	"alloy-primitives/std",
+	"alloy-rlp/std",
+	"bytes/std",
+	"derive_more/std",
+	"reth-ethereum-forks/std",
+	"reth-primitives/std",
+	"reth-primitives-traits/std",
+	"serde?/std",
+	"thiserror/std"
+]
 arbitrary = [
 	"reth-primitives/arbitrary",
 	"alloy-chains/arbitrary",

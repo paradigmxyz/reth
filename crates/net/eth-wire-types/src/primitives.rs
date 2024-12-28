@@ -2,9 +2,9 @@
 
 use alloy_consensus::{RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_rlp::{Decodable, Encodable};
+use core::fmt::Debug;
 use reth_primitives::NodePrimitives;
 use reth_primitives_traits::{Block, BlockBody, BlockHeader, SignedTransaction};
-use std::fmt::Debug;
 
 /// Abstraction over primitive types which might appear in network messages. See
 /// [`crate::EthMessage`] for more context.
