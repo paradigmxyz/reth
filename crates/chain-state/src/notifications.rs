@@ -63,13 +63,12 @@ impl<N: NodePrimitives> Stream for CanonStateNotificationStream<N> {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
-            return match ready!(self.as_mut().project().st.poll_next(cx)) {
-                Some(Ok(notification)) => Poll::Ready(Some(notification)),
+            match ready!(self.as_mut().project().st.poll_next(cx)) {
+                Some(Ok(notification)) => return Poll::Ready(Some(notification)),
                 Some(Err(err)) => {
                     debug!(%err, "canonical state notification stream lagging behind");
-                    continue
                 }
-                None => Poll::Ready(None),
+                None => return Poll::Ready(None),
             }
         }
     }
