@@ -7,7 +7,9 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
+use alloy_provider::{ProviderBuilder, RootProvider};
 use alloy_rpc_types::engine::ClientVersionV1;
+use alloy_transport_http::reqwest;
 use futures::TryFutureExt;
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineValidator, FullNodeComponents, NodeAddOns, NodeTypes,
@@ -308,6 +310,16 @@ pub struct RpcHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub rpc_server_handles: RethRpcServerHandles,
     /// Configured RPC modules.
     pub rpc_registry: RpcRegistry<Node, EthApi>,
+}
+
+impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcHandle<Node, EthApi> {
+    /// Returns an alloy provider from the rpc handle
+    pub fn new_alloy_provider(
+        &self,
+    ) -> Result<RootProvider<alloy_transport_http::Http<reqwest::Client>>, eyre::Error> {
+        let rpc_url = self.rpc_server_handles.rpc.http_url().unwrap().parse()?;
+        Ok(ProviderBuilder::new().on_http(rpc_url))
+    }
 }
 
 impl<Node: FullNodeComponents, EthApi: EthApiTypes> Deref for RpcHandle<Node, EthApi> {
