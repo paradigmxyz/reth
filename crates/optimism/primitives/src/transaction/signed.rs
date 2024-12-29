@@ -71,6 +71,11 @@ impl OpTransactionSigned {
     pub const fn is_deposit(&self) -> bool {
         matches!(self.transaction, OpTypedTransaction::Deposit(_))
     }
+
+    /// Returns length of calldata that was given with the transaction.
+    pub fn calldata_size(&self) -> u64 {
+        self.transaction.input().len() as u64
+    }
 }
 
 impl SignedTransaction for OpTransactionSigned {
