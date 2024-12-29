@@ -55,7 +55,7 @@ pub enum BlockchainTreeError {
 }
 
 /// Canonical Errors
-#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum CanonicalError {
     /// Error originating from validation operations.
     #[error(transparent)]
@@ -167,7 +167,7 @@ impl std::fmt::Debug for InsertBlockError {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to insert block (hash={}, number={}, parent_hash={}): {kind}", 
+#[error("Failed to insert block (hash={}, number={}, parent_hash={}): {kind}",
         .block.hash(),
         .block.number,
         .block.parent_hash)]

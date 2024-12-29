@@ -360,12 +360,12 @@ mod tests {
         cursor.insert(key, Default::default()).unwrap();
         provider_rw.commit().unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             db.factory
                 .static_file_provider()
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), false),
             Ok(expected)
-        );
+        ));
     }
 
     #[test]
@@ -373,10 +373,10 @@ mod tests {
         let db = seed_data(90).unwrap();
         let db_provider = db.factory.database_provider_ro().unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             db.factory.static_file_provider().check_consistency(&db_provider, false),
             Ok(None)
-        );
+        ));
     }
 
     #[test]
