@@ -292,7 +292,7 @@ impl<'a, Txs> OpBuilder<'a, Txs> {
         best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
         config: OpBuilderConfig,
     ) -> Self {
-        Self { best: Box::new(best) }
+        Self { best: Box::new(best), config }
     }
 }
 
