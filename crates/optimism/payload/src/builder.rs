@@ -804,11 +804,11 @@ where
                     match err {
                         EVMError::Transaction(err) => {
                             trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                            continue;
+                            continue
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err));
+                            return Err(PayloadBuilderError::EvmExecutionError(err))
                         }
                     }
                 }
