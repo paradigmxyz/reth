@@ -397,6 +397,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.clone_into_consensus()
     }
 
+    /// Length of calldata that was given with the transaction.
+    pub fn calldata_size(&self) -> u64 {
+        self.transaction.input().len() as u64
+    }
+
     /// Determines whether a candidate transaction (`maybe_replacement`) is underpriced compared to
     /// an existing transaction in the pool.
     ///

@@ -142,7 +142,7 @@ where
             best_payload,
         };
 
-        let builder = OpBuilder::new(best);
+        let builder = OpBuilder::new(best, self.config);
 
         let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
@@ -284,10 +284,14 @@ pub struct OpBuilder<'a, Txs> {
     /// Yields the best transaction to include if transactions from the mempool are allowed.
     #[debug(skip)]
     best: Box<dyn FnOnce(BestTransactionsAttributes) -> Txs + 'a>,
+    config: OpBuilderConfig,
 }
 
 impl<'a, Txs> OpBuilder<'a, Txs> {
-    fn new(best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a) -> Self {
+    fn new(
+        best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
+        config: OpBuilderConfig,
+    ) -> Self {
         Self { best: Box::new(best) }
     }
 }
@@ -321,7 +325,8 @@ where
         // 4. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
             let best_txs = best(ctx.best_transaction_attributes());
-            if ctx.execute_best_transactions(&mut info, state, best_txs)?.is_some() {
+            let da_config = self.config.da_config;
+            if ctx.execute_best_transactions(&mut info, state, best_txs, da_config)?.is_some() {
                 return Ok(BuildOutcomeKind::Cancelled)
             }
 
@@ -799,11 +804,11 @@ where
                     match err {
                         EVMError::Transaction(err) => {
                             trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                            continue
+                            continue;
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
+                            return Err(PayloadBuilderError::EvmExecutionError(err));
                         }
                     }
                 }
@@ -856,6 +861,7 @@ where
         info: &mut ExecutionInfo,
         db: &mut State<DB>,
         mut best_txs: impl PayloadTransactions<Transaction = EvmConfig::Transaction>,
+        da_config: OpDAConfig,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
@@ -869,6 +875,9 @@ where
             TxEnv::default(),
         );
         let mut evm = self.evm_config.evm_with_env(&mut *db, env);
+
+        // Track cumulative size to throttle the block
+        let mut cumulative_da_size: u64 = 0;
 
         while let Some(tx) = best_txs.next(()) {
             // ensure we still have capacity for this transaction
@@ -885,6 +894,23 @@ where
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue
             }
+
+            // check if calldata is smaller than max DA tx limit
+            if tx.calldata_size() > da_config.max_da_tx_size {
+                // if above limit, we throttle and mark the tx invalid
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
+                continue
+            }
+
+            // check if calldata with the current cumulative size is bigger than block limit size
+            if tx.calldata_size() + cumulative_da_size > da_config.max_da_block_size {
+                // if above limit, we throttle and mark the tx invalid and continue
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
+                continue
+            }
+
+            // Update cumulative DA size
+            cumulative_da_size += tx_da_size;
 
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
