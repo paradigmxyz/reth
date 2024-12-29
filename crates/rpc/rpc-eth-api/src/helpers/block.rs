@@ -91,21 +91,24 @@ pub trait EthBlocks: LoadBlock {
                     .map(|block| block.body.transactions().len()))
             }
 
-            let block_hash = match self
-                .provider()
-                .block_hash_for_id(block_id)
-                .map_err(Self::Error::from_eth_err)?
-            {
-                Some(block_hash) => block_hash,
-                None => return Ok(None),
+            let maybe_block = if block_id.is_latest() {
+                self.cache().latest_block_with_senders().await.map_err(Self::Error::from_eth_err)?
+            } else {
+                match self
+                    .provider()
+                    .block_hash_for_id(block_id)
+                    .map_err(Self::Error::from_eth_err)?
+                {
+                    Some(block_hash) => self
+                        .cache()
+                        .get_sealed_block_with_senders(block_hash)
+                        .await
+                        .map_err(Self::Error::from_eth_err)?,
+                    None => None,
+                }
             };
 
-            Ok(self
-                .cache()
-                .get_sealed_block_with_senders(block_hash)
-                .await
-                .map_err(Self::Error::from_eth_err)?
-                .map(|b| b.body.transactions().len()))
+            Ok(maybe_block.map(|b| b.body.transactions().len()))
         }
     }
 
@@ -240,20 +243,25 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
                     None => Ok(None),
                 };
             }
-
-            let block_hash = match self
-                .provider()
-                .block_hash_for_id(block_id)
-                .map_err(Self::Error::from_eth_err)?
-            {
-                Some(block_hash) => block_hash,
-                None => return Ok(None),
+            let maybe_block = if block_id.is_latest() {
+                self.cache().latest_block_with_senders().await.map_err(Self::Error::from_eth_err)?
+            } else {
+                // If not latest, get block by hash
+                match self
+                    .provider()
+                    .block_hash_for_id(block_id)
+                    .map_err(Self::Error::from_eth_err)?
+                {
+                    Some(block_hash) => self
+                        .cache()
+                        .get_sealed_block_with_senders(block_hash)
+                        .await
+                        .map_err(Self::Error::from_eth_err)?,
+                    None => None,
+                }
             };
 
-            self.cache()
-                .get_sealed_block_with_senders(block_hash)
-                .await
-                .map_err(Self::Error::from_eth_err)
+            Ok(maybe_block)
         }
     }
 }
