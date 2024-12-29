@@ -1,7 +1,7 @@
 //! Optimism payload builder implementation.
 
 use crate::{
-    config::OpBuilderConfig,
+    config::{OpBuilderConfig,OpDAConfig},
     error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
@@ -142,7 +142,7 @@ where
             best_payload,
         };
 
-        let builder = OpBuilder::new(best, self.config);
+        let builder = OpBuilder::new(best, self.config.clone());
 
         let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
@@ -209,7 +209,7 @@ where
         let state = StateProviderDatabase::new(state_provider);
         let mut state = State::builder().with_database(state).with_bundle_update().build();
 
-        let builder = OpBuilder::new(|_| NoopPayloadTransactions::default());
+        let builder = OpBuilder::new(|_| NoopPayloadTransactions::default(), self.confing.clone());
         builder.witness(&mut state, &ctx)
     }
 }
@@ -310,7 +310,7 @@ where
         EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
         DB: Database<Error = ProviderError>,
     {
-        let Self { best } = self;
+        let Self { best, config } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // 1. apply eip-4788 pre block contract call
@@ -910,7 +910,7 @@ where
             }
 
             // Update cumulative DA size
-            cumulative_da_size += tx_da_size;
+            cumulative_da_size += tx.calldata_size();
 
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
