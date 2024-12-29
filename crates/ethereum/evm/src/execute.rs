@@ -1,7 +1,7 @@
 //! Ethereum block execution strategy.
 
 use crate::{
-    dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDFORK_ACCOUNTS},
+    dao_fork::{DAO_HARDFORK_ACCOUNTS, DAO_HARDFORK_BENEFICIARY},
     EthEvmConfig,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
