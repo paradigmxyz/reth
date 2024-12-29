@@ -700,6 +700,9 @@ Engine:
 
           [default: 2]
 
+      --engine.state-root-task
+          Enable state root task
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
