@@ -326,21 +326,21 @@ where
         if !ctx.attributes().no_tx_pool {
             let best_txs = best(ctx.best_transaction_attributes());
             if ctx
-            .execute_best_transactions(
-                &mut info,
-                state, 
-                best_txs, 
-                self.config.da_config.clone()
-            )?
-            .is_some() 
+                .execute_best_transactions(
+                    &mut info,
+                    state,
+                    best_txs,
+                    self.config.da_config.clone(),
+                )?
+                .is_some()
             {
-                return Ok(BuildOutcomeKind::Cancelled)
+                return Ok(BuildOutcomeKind::Cancelled);
             }
 
             // check if the new payload is even more valuable
             if !ctx.is_better_payload(info.total_fees) {
                 // can skip building the block
-                return Ok(BuildOutcomeKind::Aborted { fees: info.total_fees })
+                return Ok(BuildOutcomeKind::Aborted { fees: info.total_fees });
             }
         }
 
@@ -903,17 +903,17 @@ where
             }
 
             // check if calldata is smaller than max DA tx limit
-            let exceeds_tx_size = 
+            let exceeds_tx_size =
                 da_config.max_da_tx_size().is_some_and(|max| tx.calldata_size() > max);
             // check if calldata with the current cumulative size is bigger than block limit size
-            let exceeds_block_size = 
-                da_config.max_da_block_size()
+            let exceeds_block_size = da_config
+                .max_da_block_size()
                 .is_some_and(|max| tx.calldata_size() + cumulative_da_size > max);
 
             // if above limit, we throttle and mark the tx invalid
             if exceeds_tx_size || exceeds_block_size {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue
+                continue;
             }
 
             // Update cumulative DA size
