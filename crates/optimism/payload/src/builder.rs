@@ -209,7 +209,7 @@ where
         let state = StateProviderDatabase::new(state_provider);
         let mut state = State::builder().with_database(state).with_bundle_update().build();
 
-        let builder = OpBuilder::new(|_| NoopPayloadTransactions::default(), self.confing.clone());
+        let builder = OpBuilder::new(|_| NoopPayloadTransactions::default(), self.config.clone());
         builder.witness(&mut state, &ctx)
     }
 }
@@ -310,7 +310,7 @@ where
         EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
         DB: Database<Error = ProviderError>,
     {
-        let Self { best, config } = self;
+        let Self { best, config: _ } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // 1. apply eip-4788 pre block contract call
@@ -325,8 +325,7 @@ where
         // 4. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
             let best_txs = best(ctx.best_transaction_attributes());
-            let da_config = self.config.da_config;
-            if ctx.execute_best_transactions(&mut info, state, best_txs, da_config)?.is_some() {
+            if ctx.execute_best_transactions(&mut info, state, best_txs, self.config.da_config.clone())?.is_some() {
                 return Ok(BuildOutcomeKind::Cancelled)
             }
 
@@ -896,15 +895,12 @@ where
             }
 
             // check if calldata is smaller than max DA tx limit
-            if tx.calldata_size() > da_config.max_da_tx_size {
-                // if above limit, we throttle and mark the tx invalid
-                best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue
-            }
-
+            let exceeds_tx_size = da_config.max_da_tx_size().map_or(false, |max| tx.calldata_size() > max);
             // check if calldata with the current cumulative size is bigger than block limit size
-            if tx.calldata_size() + cumulative_da_size > da_config.max_da_block_size {
-                // if above limit, we throttle and mark the tx invalid and continue
+            let exceeds_block_size = da_config.max_da_block_size().map_or(false, |max| tx.calldata_size() + cumulative_da_size > max);
+
+            // if above limit, we throttle and mark the tx invalid
+            if exceeds_tx_size || exceeds_block_size {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue
             }
