@@ -233,8 +233,7 @@ use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::NodePrimitives;
 use reth_provider::{
     AccountReader, BlockReader, CanonStateSubscriptions, ChainSpecProvider, ChangeSetReader,
-    EvmEnvProvider, FullRpcProvider, ProviderBlock, ProviderHeader, ProviderReceipt,
-    StateProviderFactory,
+    FullRpcProvider, ProviderBlock, ProviderHeader, ProviderReceipt, StateProviderFactory,
 };
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthBundle, MinerApi, NetApi, OtterscanApi, RPCApi, RethApi,
@@ -403,7 +402,7 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
         provider: P,
     ) -> RpcModuleBuilder<P, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus>
     where
-        P: BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+        P: BlockReader + StateProviderFactory + 'static,
     {
         let Self { pool, network, executor, events, evm_config, block_executor, consensus, .. } =
             self;
@@ -1004,8 +1003,7 @@ where
         + BlockReader<
             Block = <Events::Primitives as NodePrimitives>::Block,
             Receipt = <Events::Primitives as NodePrimitives>::Receipt,
-        > + EvmEnvProvider
-        + Clone
+        > + Clone
         + Unpin
         + 'static,
     Pool: Send + Sync + Clone + 'static,

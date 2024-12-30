@@ -8,7 +8,8 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use reth_primitives_traits::{Block, BlockBody, FullNodePrimitives};
+use reth_primitives::TransactionSigned;
+use reth_primitives_traits::{Block, BlockBody, FullNodePrimitives, SignedTransaction};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Trait that implements how block bodies are written to the storage.
@@ -78,17 +79,24 @@ impl<T, Provider, Primitives: FullNodePrimitives> ChainStorageReader<Provider, P
 }
 
 /// Ethereum storage implementation.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct EthStorage;
+#[derive(Debug, Clone, Copy)]
+pub struct EthStorage<T = TransactionSigned>(std::marker::PhantomData<T>);
 
-impl<Provider> BlockBodyWriter<Provider, reth_primitives::BlockBody> for EthStorage
+impl<T> Default for EthStorage<T> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<Provider, T> BlockBodyWriter<Provider, reth_primitives::BlockBody<T>> for EthStorage<T>
 where
     Provider: DBProvider<Tx: DbTxMut>,
+    T: SignedTransaction,
 {
     fn write_block_bodies(
         &self,
         provider: &Provider,
-        bodies: Vec<(u64, Option<reth_primitives::BlockBody>)>,
+        bodies: Vec<(u64, Option<reth_primitives::BlockBody<T>>)>,
         _write_to: StorageLocation,
     ) -> ProviderResult<()> {
         let mut ommers_cursor = provider.tx_ref().cursor_write::<tables::BlockOmmers>()?;
@@ -128,11 +136,12 @@ where
     }
 }
 
-impl<Provider> BlockBodyReader<Provider> for EthStorage
+impl<Provider, T> BlockBodyReader<Provider> for EthStorage<T>
 where
     Provider: DBProvider + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    T: SignedTransaction,
 {
-    type Block = reth_primitives::Block;
+    type Block = reth_primitives::Block<T>;
 
     fn read_block_bodies(
         &self,

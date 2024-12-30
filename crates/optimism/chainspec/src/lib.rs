@@ -203,7 +203,7 @@ impl OpChainSpec {
         parent: &Header,
         timestamp: u64,
     ) -> Result<u64, EIP1559ParamError> {
-        let (denominator, elasticity) = decode_holocene_extra_data(&parent.extra_data)?;
+        let (elasticity, denominator) = decode_holocene_extra_data(&parent.extra_data)?;
         let base_fee = if elasticity == 0 && denominator == 0 {
             parent
                 .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
@@ -470,7 +470,7 @@ mod tests {
     use std::sync::Arc;
 
     use alloy_genesis::{ChainConfig, Genesis};
-    use alloy_primitives::{b256, Bytes};
+    use alloy_primitives::{b256, hex, Bytes};
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
     use reth_optimism_forks::{OpHardfork, OpHardforks};
@@ -1089,5 +1089,22 @@ mod tests {
                     .unwrap_or_default()
             )
         );
+    }
+
+    // <https://sepolia.basescan.org/block/19773628>
+    #[test]
+    fn test_get_base_fee_holocene_extra_data_set_base_sepolia() {
+        let op_chain_spec = BASE_SEPOLIA.clone();
+        let parent = Header {
+            base_fee_per_gas: Some(507),
+            gas_used: 4847634,
+            gas_limit: 60000000,
+            extra_data: hex!("00000000fa0000000a").into(),
+            timestamp: 1735315544,
+            ..Default::default()
+        };
+
+        let base_fee = op_chain_spec.next_block_base_fee(&parent, 1735315546).unwrap();
+        assert_eq!(base_fee, U256::from(507));
     }
 }

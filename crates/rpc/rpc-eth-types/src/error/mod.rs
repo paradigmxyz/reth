@@ -408,10 +408,8 @@ pub enum RpcInvalidTransactionError {
     #[error("blob transaction missing blob hashes")]
     BlobTransactionMissingBlobHashes,
     /// Blob transaction has too many blobs
-    #[error("blob transaction exceeds max blobs per block; got {have}, max {max}")]
+    #[error("blob transaction exceeds max blobs per block; got {have}")]
     TooManyBlobs {
-        /// The maximum number of blobs allowed.
-        max: usize,
         /// The number of blobs in the transaction.
         have: usize,
     },
@@ -522,7 +520,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobGasPriceGreaterThanMax => Self::BlobFeeCapTooLow,
             InvalidTransaction::EmptyBlobs => Self::BlobTransactionMissingBlobHashes,
             InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
-            InvalidTransaction::TooManyBlobs { max, have } => Self::TooManyBlobs { max, have },
+            InvalidTransaction::TooManyBlobs { have } => Self::TooManyBlobs { have },
             InvalidTransaction::BlobCreateTransaction => Self::BlobTransactionIsCreate,
             InvalidTransaction::EofCrateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
             InvalidTransaction::AuthorizationListNotSupported => {

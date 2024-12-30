@@ -277,7 +277,7 @@ impl ChainSpec {
             if self.is_cancun_active_at_timestamp(self.genesis.timestamp) {
                 let blob_gas_used = self.genesis.blob_gas_used.unwrap_or(0);
                 let excess_blob_gas = self.genesis.excess_blob_gas.unwrap_or(0);
-                (Some(B256::ZERO), Some(blob_gas_used as u64), Some(excess_blob_gas as u64))
+                (Some(B256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
             } else {
                 (None, None, None)
             };
@@ -296,11 +296,11 @@ impl ChainSpec {
             timestamp: self.genesis.timestamp,
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,
-            base_fee_per_gas: base_fee_per_gas.map(Into::into),
+            base_fee_per_gas,
             withdrawals_root,
             parent_beacon_block_root,
-            blob_gas_used: blob_gas_used.map(Into::into),
-            excess_blob_gas: excess_blob_gas.map(Into::into),
+            blob_gas_used,
+            excess_blob_gas,
             requests_hash,
             ..Default::default()
         }

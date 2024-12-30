@@ -2,10 +2,10 @@ use crate::EthVersion;
 use alloy_chains::{Chain, NamedChain};
 use alloy_primitives::{hex, B256, U256};
 use alloy_rlp::{RlpDecodable, RlpEncodable};
+use core::fmt::{Debug, Display};
 use reth_chainspec::{EthChainSpec, Hardforks, MAINNET};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_ethereum_forks::{EthereumHardfork, ForkId, Head};
-use std::fmt::{Debug, Display};
 
 /// The status message is used in the eth protocol handshake to ensure that peers are on the same
 /// network and are following the same fork.
@@ -71,7 +71,7 @@ impl Status {
 }
 
 impl Display for Status {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let hexed_blockhash = hex::encode(self.blockhash);
         let hexed_genesis = hex::encode(self.genesis);
         write!(
@@ -88,7 +88,7 @@ impl Display for Status {
 }
 
 impl Debug for Status {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let hexed_blockhash = hex::encode(self.blockhash);
         let hexed_genesis = hex::encode(self.genesis);
         if f.alternate() {

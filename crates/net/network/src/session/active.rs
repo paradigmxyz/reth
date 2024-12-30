@@ -24,7 +24,7 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
     capability::RawCapabilityMessage,
-    errors::{EthHandshakeError, EthStreamError, P2PStreamError},
+    errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, RequestPair},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives,
 };
@@ -390,11 +390,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
     /// Starts the disconnect process
     fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), EthStreamError> {
-        self.conn
-            .inner_mut()
-            .start_disconnect(reason)
-            .map_err(P2PStreamError::from)
-            .map_err(Into::into)
+        Ok(self.conn.inner_mut().start_disconnect(reason)?)
     }
 
     /// Flushes the disconnect message and emits the corresponding message

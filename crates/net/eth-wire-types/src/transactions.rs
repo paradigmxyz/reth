@@ -1,5 +1,6 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 
+use alloc::vec::Vec;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};

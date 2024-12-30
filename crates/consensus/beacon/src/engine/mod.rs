@@ -299,7 +299,7 @@ where
         hooks: EngineHooks,
     ) -> RethResult<(Self, BeaconConsensusEngineHandle<N::Engine>)> {
         let event_sender = EventSender::default();
-        let handle = BeaconConsensusEngineHandle::new(to_engine, event_sender.clone());
+        let handle = BeaconConsensusEngineHandle::new(to_engine);
         let sync = EngineSyncController::new(
             pipeline,
             client,

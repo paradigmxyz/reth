@@ -21,6 +21,7 @@ reth-payload-primitives.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 
 # alloy
+alloy-consensus.workspace = true
 alloy-primitives = { workspace = true, optional = true }
 alloy-rpc-types = { workspace = true, features = ["engine"] }
 

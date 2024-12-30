@@ -1,5 +1,6 @@
 //! Engine node related functionality.
 
+use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_beacon_consensus::{
     hooks::{EngineHooks, StaticFileHook},
@@ -22,8 +23,8 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BlockTy, BuiltPayload, EngineValidator, FullNodeTypes, NodeTypesWithDBAdapter,
-    NodeTypesWithEngine, PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
+    BuiltPayload, FullNodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+    PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -31,7 +32,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_primitives::{EthPrimitives, EthereumHardforks};
+use reth_primitives::EthereumHardforks;
 use reth_provider::providers::{BlockchainProvider2, NodeTypesForProvider};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -73,7 +74,7 @@ impl EngineNodeLauncher {
 
 impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
-    Types: NodeTypesForProvider + NodeTypesWithEngine<Primitives = EthPrimitives>,
+    Types: NodeTypesForProvider + NodeTypesWithEngine,
     DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
     T: FullNodeTypes<
         Types = Types,
@@ -82,11 +83,7 @@ where
     >,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-        + EngineValidatorAddOn<
-            NodeAdapter<T, CB::Components>,
-            Validator: EngineValidator<Types::Engine, Block = BlockTy<Types>>,
-        >,
-
+        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
         <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
@@ -156,13 +153,13 @@ where
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
             .maybe_skip_new_payload(node_config.debug.skip_new_payload)
-            .maybe_reorg(
-                ctx.blockchain_db().clone(),
-                ctx.components().evm_config().clone(),
-                reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
-                node_config.debug.reorg_frequency,
-                node_config.debug.reorg_depth,
-            )
+            // .maybe_reorg(
+            //     ctx.blockchain_db().clone(),
+            //     ctx.components().evm_config().clone(),
+            //     reth_payload_validator::ExecutionPayloadValidator::new(ctx.chain_spec()),
+            //     node_config.debug.reorg_frequency,
+            //     node_config.debug.reorg_depth,
+            // )
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine
             // during this run.
@@ -213,8 +210,7 @@ where
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
         let event_sender = EventSender::default();
-        let beacon_engine_handle =
-            BeaconConsensusEngineHandle::new(consensus_engine_tx.clone(), event_sender.clone());
+        let beacon_engine_handle = BeaconConsensusEngineHandle::new(consensus_engine_tx.clone());
 
         // extract the jwt secret from the args if possible
         let jwt_secret = ctx.auth_jwt_secret()?;
@@ -271,7 +267,7 @@ where
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select!(
-            beacon_engine_handle.event_listener().map(Into::into),
+            event_sender.new_listener().map(Into::into),
             pipeline_events.map(Into::into),
             if ctx.node_config().debug.tip.is_none() && !ctx.is_dev() {
                 Either::Left(
@@ -386,12 +382,12 @@ where
                             ChainEvent::Handler(ev) => {
                                 if let Some(head) = ev.canonical_header() {
                                     let head_block = Head {
-                                        number: head.number,
+                                        number: head.number(),
                                         hash: head.hash(),
-                                        difficulty: head.difficulty,
-                                        timestamp: head.timestamp,
+                                        difficulty: head.difficulty(),
+                                        timestamp: head.timestamp(),
                                         total_difficulty: chainspec
-                                            .final_paris_total_difficulty(head.number)
+                                            .final_paris_total_difficulty(head.number())
                                             .unwrap_or_default(),
                                     };
                                     network_handle.update_status(head_block);

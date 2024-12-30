@@ -22,6 +22,7 @@ use reth_network_api::NetworkInfo;
 use reth_node_api::{EngineApiMessageVersion, NodePrimitives, NodeTypesWithDBAdapter};
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_primitives::EthPrimitives;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
@@ -87,7 +88,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug replay-engine` command
-    pub async fn execute<N: CliNodeTypes<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>>(
+    pub async fn execute<
+        N: CliNodeTypes<Engine = EthEngineTypes, Primitives = EthPrimitives, ChainSpec = C::ChainSpec>,
+    >(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {

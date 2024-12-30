@@ -28,6 +28,7 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
         header: SealedHeader::seal(transformed.header),
         body: transformed.body,
     })
+    .0
 }
 
 #[test]
