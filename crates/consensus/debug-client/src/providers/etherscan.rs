@@ -7,6 +7,10 @@ use serde::Deserialize;
 use std::time::Duration;
 use tokio::{sync::mpsc, time::interval};
 
+/// Query parameters for the Etherscan API.
+const STATIC_QUERY_PARAMS: &[(&str, &str)] =
+    &[("module", "proxy"), ("action", "eth_getBlockByNumber"), ("boolean", "true")];
+
 /// Block provider that fetches new blocks from Etherscan API.
 #[derive(Debug, Clone)]
 pub struct EtherscanBlockProvider {
@@ -36,20 +40,12 @@ impl EtherscanBlockProvider {
             BlockNumberOrTag::Number(num) => format!("{num:#02x}"),
             tag => tag.to_string(),
         };
-        let block: EtherscanBlockResponse = self
-            .http_client
-            .get(&self.base_url)
-            .query(&[
-                ("module", "proxy"),
-                ("action", "eth_getBlockByNumber"),
-                ("tag", &tag),
-                ("boolean", "true"),
-                ("apikey", &self.api_key),
-            ])
-            .send()
-            .await?
-            .json()
-            .await?;
+
+        let mut query_params = STATIC_QUERY_PARAMS.to_vec();
+        query_params.push(("tag", &tag));
+        query_params.push(("apikey", &self.api_key));
+        let block: EtherscanBlockResponse =
+            self.http_client.get(&self.base_url).query(&query_params).send().await?.json().await?;
         Ok(block.result)
     }
 }
