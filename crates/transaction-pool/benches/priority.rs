@@ -50,9 +50,6 @@ fn fee_jump_bench(
 }
 
 fn blob_priority_calculation(c: &mut Criterion) {
-    let mut group = c.benchmark_group("priority");
-    group.sample_size(10);
-
     let mut group = c.benchmark_group("Blob priority calculation");
     let fee_jump_input = generate_test_data_fee_delta();
 
