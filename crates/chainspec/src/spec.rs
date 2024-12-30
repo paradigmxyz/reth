@@ -223,6 +223,11 @@ impl Default for ChainSpec {
 }
 
 impl ChainSpec {
+    /// Converts the given [`Genesis`] into a [`ChainSpec`].
+    pub fn from_genesis(genesis: Genesis) -> Self {
+        genesis.into()
+    }
+
     /// Get information about the chain itself
     pub const fn chain(&self) -> Chain {
         self.chain
