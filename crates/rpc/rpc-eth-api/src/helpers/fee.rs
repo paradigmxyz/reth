@@ -1,6 +1,7 @@
 //! Loads fee history from database. Helper trait for `eth_` fee and transaction RPC methods.
 
 use alloy_consensus::BlockHeader;
+use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
 use futures::Future;
@@ -166,7 +167,7 @@ pub trait EthFees: LoadFee {
                 for header in &headers {
                     base_fee_per_gas.push(header.base_fee_per_gas().unwrap_or_default() as u128);
                     gas_used_ratio.push(header.gas_used() as f64 / header.gas_limit() as f64);
-                    base_fee_per_blob_gas.push(header.blob_fee().unwrap_or_default());
+                    base_fee_per_blob_gas.push(header.blob_fee(BlobParams::cancun()).unwrap_or_default());
                     blob_gas_used_ratio.push(
                         header.blob_gas_used().unwrap_or_default() as f64
                             / alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
@@ -207,7 +208,7 @@ pub trait EthFees: LoadFee {
 
                 // Same goes for the `base_fee_per_blob_gas`:
                 // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
-                base_fee_per_blob_gas.push(last_header.next_block_blob_fee().unwrap_or_default());
+                base_fee_per_blob_gas.push(last_header.next_block_blob_fee(BlobParams::cancun()).unwrap_or_default());
             };
 
             Ok(FeeHistory {
@@ -332,7 +333,7 @@ pub trait LoadFee: LoadBlock {
         async move {
             self.block_with_senders(BlockNumberOrTag::Latest.into())
                 .await?
-                .and_then(|h| h.next_block_blob_fee())
+                .and_then(|h| h.next_block_blob_fee(BlobParams::cancun()))
                 .ok_or(EthApiError::ExcessBlobGasNotSet.into())
                 .map(U256::from)
         }

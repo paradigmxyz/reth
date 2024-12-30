@@ -86,7 +86,6 @@ pub fn try_payload_v1_to_block<T: Decodable2718>(
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
         difficulty: Default::default(),
         nonce: Default::default(),
-        target_blobs_per_block: None,
     };
 
     Ok(Block { header, body: BlockBody { transactions, ..Default::default() } })
@@ -132,14 +131,9 @@ pub fn block_to_payload<T: SignedTransaction>(
         None
     };
 
-    let prague = if let Some(requests_hash) = value.requests_hash {
-        Some(PraguePayloadFields {
-            requests: RequestsOrHash::Hash(requests_hash),
-            target_blobs_per_block: value.target_blobs_per_block.unwrap_or_default(),
-        })
-    } else {
-        None
-    };
+    let prague = value
+        .requests_hash
+        .map(|requests_hash| PraguePayloadFields { requests: RequestsOrHash::Hash(requests_hash) });
 
     let sidecar = match (cancun, prague) {
         (Some(cancun), Some(prague)) => ExecutionPayloadSidecar::v4(cancun, prague),

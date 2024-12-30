@@ -6,7 +6,6 @@ use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
 use reth_primitives::{Receipt, TransactionMeta, TransactionSigned, TxType};
 use reth_primitives_traits::SignedTransaction;
-use revm_primitives::calc_blob_gasprice;
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
 pub fn build_receipt<R, T, E>(
@@ -38,7 +37,8 @@ where
 
     let blob_gas_used = transaction.blob_gas_used();
     // Blob gas price should only be present if the transaction is a blob transaction
-    let blob_gas_price = blob_gas_used.and_then(|_| meta.excess_blob_gas.map(calc_blob_gasprice));
+    let blob_gas_price = blob_gas_used
+        .and_then(|_| meta.excess_blob_gas.map(alloy_eips::eip4844::calc_blob_gasprice));
     let logs_bloom = receipt.bloom();
 
     // get number of logs in the block
@@ -87,7 +87,7 @@ where
         effective_gas_price: transaction.effective_gas_price(meta.base_fee),
         // EIP-4844 fields
         blob_gas_price,
-        blob_gas_used: blob_gas_used.map(u128::from),
+        blob_gas_used,
         authorization_list: transaction.authorization_list().map(|l| l.to_vec()),
     })
 }

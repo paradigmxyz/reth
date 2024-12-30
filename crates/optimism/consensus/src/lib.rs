@@ -10,6 +10,7 @@
 #![cfg(feature = "optimism")]
 
 use alloy_consensus::{BlockHeader, Header, EMPTY_OMMER_ROOT_HASH};
+use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B64, U256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{
@@ -142,7 +143,7 @@ impl HeaderValidator for OpBeaconConsensus {
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            validate_against_parent_4844(header.header(), parent.header())?;
+            validate_against_parent_4844(header.header(), parent.header(), BlobParams::cancun())?;
         }
 
         Ok(())

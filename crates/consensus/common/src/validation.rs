@@ -4,12 +4,12 @@ use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader, EMPTY_OMM
 use alloy_eips::{
     calc_next_block_base_fee,
     eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
+    eip7840::BlobParams,
 };
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives::SealedBlock;
 use reth_primitives_traits::{BlockBody, GotExpected, SealedHeader};
-use revm_primitives::calc_excess_blob_gas;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
@@ -313,6 +313,7 @@ pub fn validate_against_parent_timestamp<H: BlockHeader>(
 pub fn validate_against_parent_4844<H: BlockHeader>(
     header: &H,
     parent: &H,
+    blob_params: BlobParams,
 ) -> Result<(), ConsensusError> {
     // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
     //
@@ -329,7 +330,7 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
     let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
     let expected_excess_blob_gas =
-        calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
+        blob_params.next_block_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
     if expected_excess_blob_gas != excess_blob_gas {
         return Err(ConsensusError::ExcessBlobGasDiff {
             diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
@@ -509,7 +510,6 @@ mod tests {
             excess_blob_gas: None,
             parent_beacon_block_root: None,
             requests_hash: None,
-            target_blobs_per_block: None,
         };
         // size: 0x9b5
 
