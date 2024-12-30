@@ -809,11 +809,14 @@ mod tests {
                 storage_history_block_number: Some(2),
             },
         );
-        assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::MaybeInPlainState));
-        assert_eq!(
+        assert!(matches!(
+            provider.account_history_lookup(ADDRESS),
+            Ok(HistoryInfo::MaybeInPlainState)
+        ));
+        assert!(matches!(
             provider.storage_history_lookup(ADDRESS, STORAGE),
             Ok(HistoryInfo::MaybeInPlainState)
-        );
+        ));
 
         // provider block_number == lowest available block number,
         // i.e. state at provider block is available
