@@ -1,5 +1,5 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{bytes, Address, B256};
+use alloy_primitives::{bytes, Address, B256, U256};
 use alloy_provider::{
     network::{
         Ethereum, EthereumWallet, NetworkWallet, TransactionBuilder, TransactionBuilder7702,
@@ -26,8 +26,6 @@ pub(crate) fn eth_payload_attributes(timestamp: u64) -> EthPayloadBuilderAttribu
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
-        target_blobs_per_block: None,
-        max_blobs_per_block: None,
     };
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
@@ -92,7 +90,7 @@ where
             if tx_type == TxType::Eip7702 {
                 let signer = signers.choose(rng).unwrap();
                 let auth = Authorization {
-                    chain_id: provider.get_chain_id().await?,
+                    chain_id: U256::from(provider.get_chain_id().await?),
                     address: *call_destinations.choose(rng).unwrap(),
                     nonce: provider
                         .get_transaction_count(signer.address())

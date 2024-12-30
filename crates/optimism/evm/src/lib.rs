@@ -14,6 +14,7 @@ extern crate alloc;
 
 use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::Header;
+use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, U256};
 use op_alloy_consensus::EIP1559ParamError;
 use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
@@ -135,9 +136,9 @@ impl ConfigureEvmEnv for OpEvmConfig {
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)
         let blob_excess_gas_and_price = parent
-            .next_block_excess_blob_gas()
+            .next_block_excess_blob_gas(BlobParams::cancun())
             .or_else(|| (spec_id.is_enabled_in(SpecId::CANCUN)).then_some(0))
-            .map(BlobExcessGasAndPrice::new);
+            .map(|gas| BlobExcessGasAndPrice::new(gas, false));
 
         let block_env = BlockEnv {
             number: U256::from(parent.number + 1),

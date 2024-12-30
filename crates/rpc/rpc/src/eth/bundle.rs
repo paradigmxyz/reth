@@ -1,6 +1,7 @@
 //! `Eth` bundle implementation and helpers.
 
 use alloy_consensus::{BlockHeader, Transaction as _};
+use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
 use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
@@ -22,7 +23,7 @@ use revm::{
     db::{CacheDB, DatabaseCommit, DatabaseRef},
     primitives::{ResultAndState, TxEnv},
 };
-use revm_primitives::{EnvKzgSettings, EnvWithHandlerCfg, SpecId, MAX_BLOB_GAS_PER_BLOCK};
+use revm_primitives::{EnvKzgSettings, EnvWithHandlerCfg, SpecId};
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.
@@ -90,7 +91,7 @@ where
         // Validate that the bundle does not contain more than MAX_BLOB_NUMBER_PER_BLOCK blob
         // transactions.
         if transactions.iter().filter_map(|tx| tx.blob_gas_used()).sum::<u64>() >
-            MAX_BLOB_GAS_PER_BLOCK
+            MAX_DATA_GAS_PER_BLOCK
         {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::Eip4844BlobGasExceeded.to_string(),
@@ -317,8 +318,7 @@ pub enum EthBundleError {
     /// Thrown if the bundle does not contain a block number, or block number is 0.
     #[error("bundle missing blockNumber")]
     BundleMissingBlockNumber,
-    /// Thrown when the blob gas usage of the blob transactions in a bundle exceed
-    /// [`MAX_BLOB_GAS_PER_BLOCK`].
-    #[error("blob gas usage exceeds the limit of {MAX_BLOB_GAS_PER_BLOCK} gas per block.")]
+    /// Thrown when the blob gas usage of the blob transactions in a bundle exceed the maximum.
+    #[error("blob gas usage exceeds the limit of {MAX_DATA_GAS_PER_BLOCK} gas per block.")]
     Eip4844BlobGasExceeded,
 }

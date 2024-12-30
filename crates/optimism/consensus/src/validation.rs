@@ -35,9 +35,9 @@ pub fn validate_block_post_execution(
     // Check if gas used matches the value set in header.
     let cumulative_gas_used =
         receipts.last().map(|receipt| receipt.cumulative_gas_used()).unwrap_or(0);
-    if block.gas_used as u128 != cumulative_gas_used {
+    if block.gas_used != cumulative_gas_used {
         return Err(ConsensusError::BlockGasUsed {
-            gas: GotExpected { got: cumulative_gas_used as u64, expected: block.gas_used },
+            gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
             gas_spent_by_tx: gas_spent_by_transactions(receipts),
         })
     }

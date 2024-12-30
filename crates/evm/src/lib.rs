@@ -157,11 +157,11 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header);
 
     /// Fill [`BlockEnv`] field according to the chain spec and given header
-    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, after_merge: bool) {
+    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, spec_id: SpecId) {
         block_env.number = U256::from(header.number());
         block_env.coinbase = header.beneficiary();
         block_env.timestamp = U256::from(header.timestamp());
-        if after_merge {
+        if spec_id >= SpecId::MERGE {
             block_env.prevrandao = header.mix_hash();
             block_env.difficulty = U256::ZERO;
         } else {
@@ -173,7 +173,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 
         // EIP-4844 excess blob gas of this block, introduced in Cancun
         if let Some(excess_blob_gas) = header.excess_blob_gas() {
-            block_env.set_blob_excess_gas_and_price(excess_blob_gas);
+            block_env.set_blob_excess_gas_and_price(excess_blob_gas, spec_id >= SpecId::PRAGUE);
         }
     }
 
@@ -196,8 +196,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         header: &Self::Header,
     ) {
         self.fill_cfg_env(cfg, header);
-        let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
-        self.fill_block_env(block_env, header, after_merge);
+        self.fill_block_env(block_env, header, cfg.handler_cfg.spec_id);
     }
 
     /// Returns the configured [`EvmEnv`] for `parent + 1` block.

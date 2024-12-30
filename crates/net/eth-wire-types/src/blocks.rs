@@ -260,7 +260,6 @@ mod tests {
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
                     requests_hash: None,
-                    target_blobs_per_block: None,
                 },
             ]),
         }.encode(&mut data);
@@ -296,7 +295,6 @@ mod tests {
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
                     requests_hash: None,
-                    target_blobs_per_block: None,
                 },
             ]),
         };
@@ -397,7 +395,6 @@ mod tests {
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
                             requests_hash: None,
-                            target_blobs_per_block: None,
                         },
                     ],
                     withdrawals: None,
@@ -473,7 +470,6 @@ mod tests {
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
                             requests_hash: None,
-                            target_blobs_per_block: None,
                         },
                     ],
                     withdrawals: None,

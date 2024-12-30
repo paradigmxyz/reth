@@ -130,7 +130,7 @@ where
             number: block_env.number.to::<u64>(),
             gas_limit: block_env.gas_limit.to::<u64>(),
             difficulty: U256::ZERO,
-            gas_used: receipts.last().map(|r| r.cumulative_gas_used()).unwrap_or_default() as u64,
+            gas_used: receipts.last().map(|r| r.cumulative_gas_used()).unwrap_or_default(),
             blob_gas_used: is_cancun.then(|| {
                 transactions.iter().map(|tx| tx.blob_gas_used().unwrap_or_default()).sum::<u64>()
             }),
@@ -138,7 +138,6 @@ where
             extra_data: Default::default(),
             parent_beacon_block_root: is_cancun.then_some(B256::ZERO),
             requests_hash: is_prague.then_some(EMPTY_REQUESTS_HASH),
-            target_blobs_per_block: None,
         };
 
         // seal the block
@@ -156,7 +155,7 @@ where
     ) -> reth_provider::ProviderReceipt<Self::Provider> {
         let receipt = alloy_consensus::Receipt {
             status: Eip658Value::Eip658(result.is_success()),
-            cumulative_gas_used: cumulative_gas_used as u128,
+            cumulative_gas_used,
             logs: result.into_logs().into_iter().collect(),
         };
 

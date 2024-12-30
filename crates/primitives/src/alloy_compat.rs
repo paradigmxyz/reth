@@ -58,7 +58,6 @@ impl TryFrom<AnyRpcBlock> for Block {
             excess_blob_gas,
             parent_beacon_block_root,
             requests_hash,
-            target_blobs_per_block,
         } = block.header.inner;
 
         Ok(Self {
@@ -85,7 +84,6 @@ impl TryFrom<AnyRpcBlock> for Block {
                 excess_blob_gas,
                 parent_beacon_block_root,
                 requests_hash,
-                target_blobs_per_block,
             },
             body: BlockBody {
                 transactions,
@@ -104,6 +102,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
 
         let WithOtherFields { inner: tx, other: _ } = tx;
 
+        #[allow(unreachable_patterns)]
         let (transaction, signature, hash) = match tx.inner {
             AnyTxEnvelope::Ethereum(TxEnvelope::Legacy(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();

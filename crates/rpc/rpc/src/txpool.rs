@@ -108,7 +108,7 @@ where
                 TxpoolInspectSummary {
                     to: tx.to(),
                     value: tx.value(),
-                    gas: tx.gas_limit() as u128,
+                    gas: tx.gas_limit(),
                     gas_price: tx.max_fee_per_gas(),
                 },
             );
