@@ -7364,6 +7364,7 @@ dependencies = [
  "derive_more",
  "futures",
  "metrics",
+ "proptest",
  "rand 0.8.5",
  "rayon",
  "reth-beacon-consensus",
