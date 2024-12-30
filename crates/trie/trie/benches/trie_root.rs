@@ -30,11 +30,7 @@ pub fn trie_root_benchmark(c: &mut Criterion) {
 
 fn generate_test_data(size: usize) -> Vec<ReceiptWithBloom<Receipt>> {
     prop::collection::vec(arb::<ReceiptWithBloom<Receipt>>(), size)
-        .new_tree(&mut TestRunner::new(ProptestConfig {
-            rng_algorithm: prop::test_runner::RngAlgorithm::ChaCha,
-            seed: 12345,
-            ..Default::default()
-        }))
+        .new_tree(&mut TestRunner::deterministic())
         .unwrap()
         .current()
 }
