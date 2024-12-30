@@ -19,7 +19,7 @@ use reth_codecs_derive::add_arbitrary_tests;
 #[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[add_arbitrary_tests(crate, compact)]
 pub(crate) struct Authorization {
-    chain_id: u64,
+    chain_id: U256,
     address: Address,
     nonce: u64,
 }
@@ -80,7 +80,7 @@ mod tests {
     #[test]
     fn test_roundtrip_compact_authorization_list_item() {
         let authorization = AlloyAuthorization {
-            chain_id: 1u64,
+            chain_id: U256::from(1),
             address: address!("dac17f958d2ee523a2206206994597c13d831ec7"),
             nonce: 1,
         }

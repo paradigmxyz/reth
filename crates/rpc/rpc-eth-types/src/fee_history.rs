@@ -21,7 +21,6 @@ use reth_primitives::{NodePrimitives, SealedBlock};
 use reth_primitives_traits::BlockBody;
 use reth_rpc_server_types::constants::gas_oracle::MAX_HEADER_HISTORY;
 use reth_storage_api::BlockReaderIdExt;
-use revm_primitives::{calc_blob_gasprice, calc_excess_blob_gas};
 use serde::{Deserialize, Serialize};
 use tracing::trace;
 
@@ -294,7 +293,7 @@ where
             *previous_gas = receipt.cumulative_gas_used();
 
             Some(TxGasAndReward {
-                gas_used: gas_used as u64,
+                gas_used,
                 reward: tx.effective_tip_per_gas(base_fee_per_gas).unwrap_or_default(),
             })
         })
@@ -368,7 +367,9 @@ impl FeeHistoryEntry {
         Self {
             base_fee_per_gas: block.base_fee_per_gas().unwrap_or_default(),
             gas_used_ratio: block.gas_used() as f64 / block.gas_limit() as f64,
-            base_fee_per_blob_gas: block.excess_blob_gas().map(calc_blob_gasprice),
+            base_fee_per_blob_gas: block
+                .excess_blob_gas()
+                .map(alloy_eips::eip4844::calc_blob_gasprice),
             blob_gas_used_ratio: block.body.blob_gas_used() as f64 /
                 alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
             excess_blob_gas: block.excess_blob_gas(),
@@ -397,13 +398,13 @@ impl FeeHistoryEntry {
     ///
     /// See also [`Self::next_block_excess_blob_gas`]
     pub fn next_block_blob_fee(&self) -> Option<u128> {
-        self.next_block_excess_blob_gas().map(calc_blob_gasprice)
+        self.next_block_excess_blob_gas().map(alloy_eips::eip4844::calc_blob_gasprice)
     }
 
     /// Calculate excess blob gas for the next block according to the EIP-4844 spec.
     ///
     /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
     pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
-        Some(calc_excess_blob_gas(self.excess_blob_gas?, self.blob_gas_used?))
+        Some(alloy_eips::eip4844::calc_excess_blob_gas(self.excess_blob_gas?, self.blob_gas_used?))
     }
 }

@@ -233,7 +233,7 @@ where
                 // Success flag was added in `EIP-658: Embedding transaction status code in
                 // receipts`.
                 status: Eip658Value::Eip658(result.is_success()),
-                cumulative_gas_used: cumulative_gas_used as u128,
+                cumulative_gas_used,
                 logs: result.into_logs(),
             };
 

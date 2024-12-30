@@ -242,8 +242,6 @@ mod test {
                 suggested_fee_recipient: Address::ZERO,
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
-                target_blobs_per_block: None,
-                max_blobs_per_block: None,
             },
         }
     }

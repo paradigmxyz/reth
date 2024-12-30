@@ -421,7 +421,6 @@ where
             blob_gas_used,
             excess_blob_gas,
             requests_hash: None,
-            target_blobs_per_block: None,
         };
 
         // seal the block
@@ -819,7 +818,7 @@ where
 
             let receipt = alloy_consensus::Receipt {
                 status: Eip658Value::Eip658(result.is_success()),
-                cumulative_gas_used: info.cumulative_gas_used as u128,
+                cumulative_gas_used: info.cumulative_gas_used,
                 logs: result.into_logs().into_iter().collect(),
             };
 
@@ -930,7 +929,7 @@ where
 
             let receipt = alloy_consensus::Receipt {
                 status: Eip658Value::Eip658(result.is_success()),
-                cumulative_gas_used: info.cumulative_gas_used as u128,
+                cumulative_gas_used: info.cumulative_gas_used,
                 logs: result.into_logs().into_iter().collect(),
             };
 
