@@ -173,7 +173,6 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 
         // EIP-4844 excess blob gas of this block, introduced in Cancun
         if let Some(excess_blob_gas) = header.excess_blob_gas() {
-            // TODO(mattsse): need hardfork info here
             block_env.set_blob_excess_gas_and_price(excess_blob_gas, spec_id >= SpecId::PRAGUE);
         }
     }
