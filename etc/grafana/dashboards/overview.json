@@ -1746,7 +1746,7 @@
           "refId": "B"
         }
       ],
-      "title": "Number of  transactions",
+      "title": "Number of transactions",
       "type": "timeseries"
     },
     {
