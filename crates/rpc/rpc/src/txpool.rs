@@ -103,15 +103,7 @@ where
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
             let tx = tx.clone_into_consensus();
-            entry.insert(
-                tx.nonce().to_string(),
-                TxpoolInspectSummary {
-                    to: tx.to(),
-                    value: tx.value(),
-                    gas: tx.gas_limit(),
-                    gas_price: tx.max_fee_per_gas(),
-                },
-            );
+            entry.insert(tx.nonce().to_string(), tx.into_signed().into());
         }
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();
