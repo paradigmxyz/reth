@@ -17,7 +17,6 @@ pub type Block<T = TransactionSigned> = alloy_consensus::Block<T>;
 
 pub type BlockBody<T = TransactionSigned> = alloy_consensus::BlockBody<T>;
 
-
 // /// Ethereum full block.
 // ///
 // /// Withdrawals can be optionally included at the end of the RLP encoded message.
@@ -155,7 +154,8 @@ pub type BlockBody<T = TransactionSigned> = alloy_consensus::BlockBody<T>;
 //             .collect::<arbitrary::Result<Vec<_>>>()?;
 //
 //         // then generate up to 2 ommers
-//         let ommers = (0..2).map(|_| Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
+//         let ommers = (0..2).map(|_|
+// Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
 //
 //         Ok(Self {
 //             header: u.arbitrary()?,
@@ -716,8 +716,6 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
-    use alloy_consensus::serde_bincode_compat::Header;
-    use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::Address;
     use reth_primitives_traits::{
         serde_bincode_compat::{SealedHeader, SerdeBincodeCompat},
@@ -726,70 +724,8 @@ pub(super) mod serde_bincode_compat {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
-    /// Bincode-compatible [`super::BlockBody`] serde implementation.
-    ///
-    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
-    /// ```rust
-    /// use reth_primitives::{serde_bincode_compat, BlockBody};
-    /// use serde::{Deserialize, Serialize};
-    /// use serde_with::serde_as;
-    ///
-    /// #[serde_as]
-    /// #[derive(Serialize, Deserialize)]
-    /// struct Data {
-    ///     #[serde_as(as = "serde_bincode_compat::BlockBody")]
-    ///     body: BlockBody,
-    /// }
-    /// ```
-    #[derive(derive_more::Debug, Serialize, Deserialize)]
-    #[debug(bound())]
-    pub struct BlockBody<'a, T: SerdeBincodeCompat = super::TransactionSigned> {
-        transactions: Vec<T::BincodeRepr<'a>>,
-        ommers: Vec<Header<'a>>,
-        withdrawals: Cow<'a, Option<Withdrawals>>,
-    }
-
-    impl<'a, T: SerdeBincodeCompat> From<&'a super::BlockBody<T>> for BlockBody<'a, T> {
-        fn from(value: &'a super::BlockBody<T>) -> Self {
-            Self {
-                transactions: value.transactions.iter().map(Into::into).collect(),
-                ommers: value.ommers.iter().map(Into::into).collect(),
-                withdrawals: Cow::Borrowed(&value.withdrawals),
-            }
-        }
-    }
-
-    impl<'a, T: SerdeBincodeCompat> From<BlockBody<'a, T>> for super::BlockBody<T> {
-        fn from(value: BlockBody<'a, T>) -> Self {
-            Self {
-                transactions: value.transactions.into_iter().map(Into::into).collect(),
-                ommers: value.ommers.into_iter().map(Into::into).collect(),
-                withdrawals: value.withdrawals.into_owned(),
-            }
-        }
-    }
-
-    impl SerializeAs<super::BlockBody> for BlockBody<'_> {
-        fn serialize_as<S>(source: &super::BlockBody, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            BlockBody::from(source).serialize(serializer)
-        }
-    }
-
-    impl<'de> DeserializeAs<'de, super::BlockBody> for BlockBody<'de> {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::BlockBody, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            BlockBody::deserialize(deserializer).map(Into::into)
-        }
-    }
-
-    impl<T: SerdeBincodeCompat> SerdeBincodeCompat for super::BlockBody<T> {
-        type BincodeRepr<'a> = BlockBody<'a, T>;
-    }
+    pub type BlockBody<'a, T = super::TransactionSigned> =
+        reth_primitives_traits::serde_bincode_compat::BlockBody<'a, T>;
 
     /// Bincode-compatible [`super::SealedBlock`] serde implementation.
     ///
@@ -923,7 +859,6 @@ pub(super) mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, BlockBody, SealedBlock, SealedBlockWithSenders};
-
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_testing_utils::generators;
