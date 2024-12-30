@@ -1,7 +1,7 @@
 //! Ethereum block execution strategy.
 
 use crate::{
-    dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
+    dao_fork::{DAO_HARDFORK_ACCOUNTS, DAO_HARDFORK_BENEFICIARY},
     EthEvmConfig,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
@@ -255,7 +255,7 @@ where
             // drain balances from hardcoded addresses.
             let drained_balance: u128 = self
                 .state
-                .drain_balances(DAO_HARDKFORK_ACCOUNTS)
+                .drain_balances(DAO_HARDFORK_ACCOUNTS)
                 .map_err(|_| BlockValidationError::IncrementBalanceFailed)?
                 .into_iter()
                 .sum();
