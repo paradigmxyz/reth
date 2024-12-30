@@ -69,12 +69,17 @@ impl Default for BlockRangeParams {
 /// If `SEED` is not set, a random seed is used.
 pub fn rng() -> StdRng {
     if let Ok(seed) = std::env::var("SEED") {
-        let mut hasher = DefaultHasher::new();
-        hasher.write(seed.as_bytes());
-        StdRng::seed_from_u64(hasher.finish())
+        rng_with_seed(seed.as_bytes())
     } else {
         StdRng::from_rng(thread_rng()).expect("could not build rng")
     }
+}
+
+/// Returns a random number generator from a specific seed, as bytes.
+pub fn rng_with_seed(seed: &[u8]) -> StdRng {
+    let mut hasher = DefaultHasher::new();
+    hasher.write(seed);
+    StdRng::seed_from_u64(hasher.finish())
 }
 
 /// Generates a range of random [`SealedHeader`]s.
