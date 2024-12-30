@@ -82,6 +82,7 @@ reth-static-file.workspace = true
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
 reth-trie-db.workspace = true
+proptest.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
