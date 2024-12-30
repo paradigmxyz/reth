@@ -214,7 +214,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
 }
 
 fn generate_test_data(size: usize) -> B256HashMap<U256> {
-    let mut runner = TestRunner::new(ProptestConfig::default());
+    let mut runner = TestRunner::deterministic();
     proptest::collection::hash_map(any::<B256>(), any::<U256>(), size)
         .new_tree(&mut runner)
         .unwrap()
