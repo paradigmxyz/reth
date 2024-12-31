@@ -18,8 +18,7 @@ use reth_primitives::{
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
-    collections::{hash_map::DefaultHasher, BTreeMap},
-    hash::Hasher,
+    collections::BTreeMap,
     ops::{Range, RangeInclusive},
 };
 
@@ -77,9 +76,9 @@ pub fn rng() -> StdRng {
 
 /// Returns a random number generator from a specific seed, as bytes.
 pub fn rng_with_seed(seed: &[u8]) -> StdRng {
-    let mut hasher = DefaultHasher::new();
-    hasher.write(seed);
-    StdRng::seed_from_u64(hasher.finish())
+    let mut seed_bytes = [0u8; 32];
+    seed_bytes[..seed.len().min(32)].copy_from_slice(seed);
+    StdRng::from_seed(seed_bytes)
 }
 
 /// Generates a range of random [`SealedHeader`]s.

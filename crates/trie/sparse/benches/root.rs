@@ -169,6 +169,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                     trie_updates.finalize(hb, node_iter.walker.take_removed_keys());
                                 }
                             }
+                            (storage, storage_updates, trie_updates)
                         },
                     )
                 });
@@ -205,6 +206,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                 }
                                 sparse.root().unwrap();
                             }
+                            sparse
                         },
                     )
                 });

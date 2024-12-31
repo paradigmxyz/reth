@@ -2,6 +2,7 @@
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
+use prop::test_runner::TestRng;
 use proptest::{
     prelude::*,
     strategy::ValueTree,
@@ -116,7 +117,8 @@ fn generate_test_data(size: usize) -> (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>) {
     use prop::collection::vec;
 
     let config = ProptestConfig { result_cache: basic_result_cache, ..Default::default() };
-    let mut runner = TestRunner::new(config);
+    let rng = TestRng::deterministic_rng(config.rng_algorithm);
+    let mut runner = TestRunner::new_with_rng(config, rng);
 
     let vec_of_nibbles = |range| vec(any_with::<Nibbles>(range), size);
     let mut preload = vec_of_nibbles(32usize.into()).new_tree(&mut runner).unwrap().current();

@@ -10,7 +10,7 @@ use reth_trie::Nibbles;
 use reth_trie_sparse::RevealedSparseTrie;
 
 fn update_rlp_node_level(c: &mut Criterion) {
-    let mut rng = generators::rng_with_seed(&12345_u16.to_be_bytes());
+    let mut rng = generators::rng();
     let mut group = c.benchmark_group("update rlp node level");
     group.sample_size(20);
 
