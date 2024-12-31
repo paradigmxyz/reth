@@ -1,7 +1,7 @@
 //! Some payload tests
 
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{Bytes, U256};
+use alloy_primitives::Bytes;
 use alloy_rlp::{Decodable, Error as RlpError};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadBodyV1, ExecutionPayloadSidecar, ExecutionPayloadV1,
@@ -13,7 +13,7 @@ use reth_rpc_types_compat::engine::payload::{
     block_to_payload, block_to_payload_v1, convert_to_payload_body_v1,
 };
 use reth_testing_utils::generators::{
-    self, random_block, random_block_range, random_header, BlockParams, BlockRangeParams, Rng,
+    self, random_block, random_block_range, BlockParams, BlockRangeParams, Rng,
 };
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
@@ -55,7 +55,7 @@ fn payload_body_roundtrip() {
 }
 
 #[test]
-fn payload_validation() {
+fn payload_validation_conversion() {
     let mut rng = generators::rng();
     let parent = rng.gen();
     let block = random_block(
@@ -110,39 +110,4 @@ fn payload_validation() {
     });
     let payload_with_invalid_txs = payload_with_invalid_txs.try_into_block::<TransactionSigned>();
     assert_matches!(payload_with_invalid_txs, Err(PayloadError::Decode(RlpError::InputTooShort)));
-
-    // Non empty ommers
-    let block_with_ommers = transform_block(block.clone(), |mut b| {
-        b.body.ommers.push(random_header(&mut rng, 100, None).unseal());
-        b
-    });
-    assert_matches!(
-        block_with_ommers.clone().try_into_block_with_sidecar::<TransactionSigned>(&ExecutionPayloadSidecar::none()),
-        Err(PayloadError::BlockHash { consensus, .. })
-            if consensus == block_with_ommers.block_hash()
-    );
-
-    // None zero difficulty
-    let block_with_difficulty = transform_block(block.clone(), |mut b| {
-        b.header.difficulty = U256::from(1);
-        b
-    });
-    assert_matches!(
-        block_with_difficulty.clone().try_into_block_with_sidecar::<TransactionSigned>(&ExecutionPayloadSidecar::none()),
-        Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_difficulty.block_hash()
-    );
-
-    // None zero nonce
-    let block_with_nonce = transform_block(block.clone(), |mut b| {
-        b.header.nonce = 1u64.into();
-        b
-    });
-    assert_matches!(
-        block_with_nonce.clone().try_into_block_with_sidecar::<TransactionSigned>(&ExecutionPayloadSidecar::none()),
-        Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_nonce.block_hash()
-    );
-
-    // Valid block
-    let valid_block = block;
-    assert_matches!(TryInto::<SealedBlock>::try_into(valid_block), Ok(_));
 }

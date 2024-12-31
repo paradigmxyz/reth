@@ -3,13 +3,13 @@
 
 use alloy_consensus::Header;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, eip7685::RequestsOrHash};
-use alloy_primitives::{B256, U256};
+use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV2, ExecutionPayloadV3, PayloadError, PraguePayloadFields,
+    ExecutionPayloadV2, ExecutionPayloadV3, PraguePayloadFields,
 };
-use reth_primitives::{Block, BlockBody, BlockExt, SealedBlock};
+use reth_primitives::{BlockBody, SealedBlock};
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 
 /// Converts [`SealedBlock`] to [`ExecutionPayload`]
@@ -114,27 +114,6 @@ pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayload
     }
 }
 
-/// Takes the expected block hash and [`Block`], validating the block and converting it into a
-/// [`SealedBlock`].
-///
-/// If the provided block hash does not match the block hash computed from the provided block, this
-/// returns [`PayloadError::BlockHash`].
-#[inline]
-pub fn validate_block_hash(
-    expected_block_hash: B256,
-    block: Block,
-) -> Result<SealedBlock, PayloadError> {
-    let sealed_block = block.seal_slow();
-    if expected_block_hash != sealed_block.hash() {
-        return Err(PayloadError::BlockHash {
-            execution: sealed_block.hash(),
-            consensus: expected_block_hash,
-        })
-    }
-
-    Ok(sealed_block)
-}
-
 /// Converts [`Block`] to [`ExecutionPayloadBodyV1`]
 pub fn convert_to_payload_body_v1(
     value: impl reth_primitives_traits::Block,
@@ -169,7 +148,7 @@ pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPaylo
 
 #[cfg(test)]
 mod tests {
-    use super::{block_to_payload_v3, validate_block_hash};
+    use super::block_to_payload_v3;
     use alloy_primitives::{b256, hex, Bytes, U256};
     use alloy_rpc_types_engine::{
         CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
@@ -394,10 +373,12 @@ mod tests {
 
         // convert into block
         let block = payload
-            .try_into_block_with_sidecar(&ExecutionPayloadSidecar::v3(cancun_fields))
+            .try_into_block_with_sidecar::<TransactionSigned>(&ExecutionPayloadSidecar::v3(
+                cancun_fields,
+            ))
             .unwrap();
 
         // Ensure the actual hash is calculated if we set the fields to what they should be
-        validate_block_hash(block_hash_with_blob_fee_fields, block).unwrap();
+        assert_eq!(block_hash_with_blob_fee_fields, block.header.hash_slow());
     }
 }
