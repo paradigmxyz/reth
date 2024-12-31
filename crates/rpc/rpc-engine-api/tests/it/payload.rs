@@ -11,7 +11,6 @@ use assert_matches::assert_matches;
 use reth_primitives::{proofs, Block, SealedBlock, SealedHeader, TransactionSigned};
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload, block_to_payload_v1, convert_to_payload_body_v1, try_into_sealed_block,
-    try_payload_v1_to_block,
 };
 use reth_testing_utils::generators::{
     self, random_block, random_block_range, random_header, BlockParams, BlockRangeParams, Rng,
@@ -108,8 +107,7 @@ fn payload_validation() {
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
         *tx = Bytes::new();
     });
-    let payload_with_invalid_txs =
-        try_payload_v1_to_block::<TransactionSigned>(payload_with_invalid_txs);
+    let payload_with_invalid_txs = payload_with_invalid_txs.try_into_block::<TransactionSigned>();
     assert_matches!(payload_with_invalid_txs, Err(PayloadError::Decode(RlpError::InputTooShort)));
 
     // Non empty ommers

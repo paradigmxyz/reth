@@ -19,7 +19,6 @@ reth-primitives-traits.workspace = true
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
-alloy-rlp.workspace = true
 alloy-rpc-types-eth = { workspace = true, default-features = false, features = ["serde"] }
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true

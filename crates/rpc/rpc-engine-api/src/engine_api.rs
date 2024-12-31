@@ -26,9 +26,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives::EthereumHardfork;
 use reth_rpc_api::EngineApiServer;
-use reth_rpc_types_compat::engine::payload::{
-    convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
-};
+use reth_rpc_types_compat::engine::payload::convert_to_payload_body_v1;
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -176,7 +174,7 @@ where
         &self,
         payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = convert_payload_input_v2_to_payload(payload);
+        let payload = payload.into_payload();
         let payload_or_attrs =
             PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload, None,
