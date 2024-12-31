@@ -907,7 +907,7 @@ mod tests {
             transactions_writer.increment_block(block.number)?;
             receipts_writer.increment_block(block.number)?;
 
-            for (tx, receipt) in block.body.transactions().iter().zip(receipts) {
+            for (tx, receipt) in block.body().transactions().zip(receipts) {
                 transactions_writer.append_transaction(tx_num, tx)?;
                 receipts_writer.append_receipt(tx_num, receipt)?;
                 tx_num += 1;

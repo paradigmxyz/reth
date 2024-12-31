@@ -3,66 +3,25 @@ use crate::{
     RecoveredTx, SealedHeader, TransactionSigned,
 };
 use alloc::vec::Vec;
-use alloy_consensus::{Header, Typed2718};
+use alloy_consensus::Header;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
-use reth_primitives_traits::{BlockBody as _, InMemorySize, SignedTransaction, Transaction};
+use reth_primitives_traits::{BlockBody as _, InMemorySize, SignedTransaction};
 use serde::{Deserialize, Serialize};
 
 /// Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 25))]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref)]
-pub struct Block<T = TransactionSigned> {
-    /// Block header.
-    #[deref]
-    pub header: Header,
-    /// Block body.
-    pub body: BlockBody<T>,
-}
+pub type Block<T = TransactionSigned> = alloy_consensus::Block<T>;
 
-impl<T> Default for Block<T> {
-    fn default() -> Self {
-        Self { header: Default::default(), body: Default::default() }
-    }
-}
-
-impl<T> reth_primitives_traits::Block for Block<T>
-where
-    T: SignedTransaction,
-{
-    type Header = Header;
-    type Body = BlockBody<T>;
-
-    fn new(header: Self::Header, body: Self::Body) -> Self {
-        Self { header, body }
-    }
-
-    fn header(&self) -> &Self::Header {
-        &self.header
-    }
-
-    fn body(&self) -> &Self::Body {
-        &self.body
-    }
-
-    fn split(self) -> (Self::Header, Self::Body) {
-        (self.header, self.body)
-    }
-}
-
-impl<T: InMemorySize> InMemorySize for Block<T> {
-    /// Calculates a heuristic for the in-memory size of the [`Block`].
-    #[inline]
-    fn size(&self) -> usize {
-        self.header.size() + self.body.size()
-    }
-}
+/// A response to `GetBlockBodies`, containing bodies if any bodies were found.
+///
+/// Withdrawals can be optionally included at the end of the RLP encoded message.
+pub type BlockBody<T = TransactionSigned> = alloy_consensus::BlockBody<T>;
 
 /// We need to implement RLP traits manually because we currently don't have a way to flatten
 /// [`BlockBody`] into [`Block`].
@@ -102,29 +61,10 @@ mod block_rlp {
         }
     }
 
-    impl<T: Decodable> Decodable for Block<T> {
-        fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
-            let Helper { header, transactions, ommers, withdrawals } = Helper::decode(b)?;
-            Ok(Self { header, body: BlockBody { transactions, ommers, withdrawals } })
-        }
-    }
-
     impl Decodable for SealedBlock {
         fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
             let Helper { header, transactions, ommers, withdrawals } = Helper::decode(b)?;
             Ok(Self { header, body: BlockBody { transactions, ommers, withdrawals } })
-        }
-    }
-
-    impl<T: Encodable> Encodable for Block<T> {
-        fn encode(&self, out: &mut dyn bytes::BufMut) {
-            let helper: HelperRef<'_, _, _> = self.into();
-            helper.encode(out)
-        }
-
-        fn length(&self) -> usize {
-            let helper: HelperRef<'_, _, _> = self.into();
-            helper.length()
         }
     }
 
@@ -138,24 +78,6 @@ mod block_rlp {
             let helper: HelperRef<'_, _, _> = self.into();
             helper.length()
         }
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for Block {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        // first generate up to 100 txs
-        let transactions = (0..100)
-            .map(|_| TransactionSigned::arbitrary(u))
-            .collect::<arbitrary::Result<Vec<_>>>()?;
-
-        // then generate up to 2 ommers
-        let ommers = (0..2).map(|_| Header::arbitrary(u)).collect::<arbitrary::Result<Vec<_>>>()?;
-
-        Ok(Self {
-            header: u.arbitrary()?,
-            body: BlockBody { transactions, ommers, withdrawals: u.arbitrary()? },
-        })
     }
 }
 
@@ -565,154 +487,10 @@ impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
     }
 }
 
-/// A response to `GetBlockBodies`, containing bodies if any bodies were found.
-///
-/// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp, 10))]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, RlpDecodable)]
-#[rlp(trailing)]
-pub struct BlockBody<T = TransactionSigned> {
-    /// Transactions in the block
-    pub transactions: Vec<T>,
-    /// Uncle headers for the given block
-    pub ommers: Vec<Header>,
-    /// Withdrawals in the block.
-    pub withdrawals: Option<Withdrawals>,
-}
-
-impl<T> Default for BlockBody<T> {
-    fn default() -> Self {
-        Self {
-            transactions: Default::default(),
-            ommers: Default::default(),
-            withdrawals: Default::default(),
-        }
-    }
-}
-
-impl BlockBody {
-    /// Create a [`Block`] from the body and its header.
-    pub const fn into_block(self, header: Header) -> Block {
-        Block { header, body: self }
-    }
-
-    /// Returns an iterator over all blob versioned hashes from the block body.
-    #[inline]
-    pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
-        self.eip4844_transactions_iter()
-            .filter_map(|tx| tx.as_eip4844().map(|blob_tx| &blob_tx.blob_versioned_hashes))
-            .flatten()
-    }
-}
-
-impl<T> BlockBody<T> {
-    /// Calculate the ommers root for the block body.
-    pub fn calculate_ommers_root(&self) -> B256 {
-        crate::proofs::calculate_ommers_root(&self.ommers)
-    }
-
-    /// Calculate the withdrawals root for the block body, if withdrawals exist. If there are no
-    /// withdrawals, this will return `None`.
-    pub fn calculate_withdrawals_root(&self) -> Option<B256> {
-        self.withdrawals.as_ref().map(|w| crate::proofs::calculate_withdrawals_root(w))
-    }
-}
-
-impl<T: Transaction> BlockBody<T> {
-    /// Returns whether or not the block body contains any blob transactions.
-    #[inline]
-    pub fn has_eip4844_transactions(&self) -> bool {
-        self.transactions.iter().any(|tx| tx.is_eip4844())
-    }
-
-    /// Returns whether or not the block body contains any EIP-7702 transactions.
-    #[inline]
-    pub fn has_eip7702_transactions(&self) -> bool {
-        self.transactions.iter().any(|tx| tx.is_eip7702())
-    }
-
-    /// Returns an iterator over all blob transactions of the block
-    #[inline]
-    pub fn eip4844_transactions_iter(&self) -> impl Iterator<Item = &T> + '_ {
-        self.transactions.iter().filter(|tx| tx.is_eip4844())
-    }
-}
-
-impl<T: InMemorySize> InMemorySize for BlockBody<T> {
-    /// Calculates a heuristic for the in-memory size of the [`BlockBody`].
-    #[inline]
-    fn size(&self) -> usize {
-        self.transactions.iter().map(T::size).sum::<usize>() +
-            self.transactions.capacity() * core::mem::size_of::<T>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() +
-            self.ommers.capacity() * core::mem::size_of::<Header>() +
-            self.withdrawals
-                .as_ref()
-                .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
-    }
-}
-
-impl<T> reth_primitives_traits::BlockBody for BlockBody<T>
-where
-    T: SignedTransaction,
-{
-    type Transaction = T;
-    type OmmerHeader = Header;
-
-    fn transactions(&self) -> &[Self::Transaction] {
-        &self.transactions
-    }
-
-    fn into_transactions(self) -> Vec<Self::Transaction> {
-        self.transactions
-    }
-
-    fn withdrawals(&self) -> Option<&Withdrawals> {
-        self.withdrawals.as_ref()
-    }
-
-    fn ommers(&self) -> Option<&[Self::OmmerHeader]> {
-        Some(&self.ommers)
-    }
-}
-
-impl From<Block> for BlockBody {
-    fn from(block: Block) -> Self {
-        Self {
-            transactions: block.body.transactions,
-            ommers: block.body.ommers,
-            withdrawals: block.body.withdrawals,
-        }
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for BlockBody {
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        // first generate up to 100 txs
-        let transactions = (0..100)
-            .map(|_| TransactionSigned::arbitrary(u))
-            .collect::<arbitrary::Result<Vec<_>>>()?;
-
-        // then generate up to 2 ommers
-        let ommers = (0..2)
-            .map(|_| {
-                let header = Header::arbitrary(u)?;
-
-                Ok(header)
-            })
-            .collect::<arbitrary::Result<Vec<_>>>()?;
-
-        Ok(Self { transactions, ommers, withdrawals: u.arbitrary()? })
-    }
-}
-
 /// Bincode-compatible block type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
-    use alloy_consensus::serde_bincode_compat::Header;
-    use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::Address;
     use reth_primitives_traits::{
         serde_bincode_compat::{SealedHeader, SerdeBincodeCompat},
@@ -722,69 +500,8 @@ pub(super) mod serde_bincode_compat {
     use serde_with::{DeserializeAs, SerializeAs};
 
     /// Bincode-compatible [`super::BlockBody`] serde implementation.
-    ///
-    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
-    /// ```rust
-    /// use reth_primitives::{serde_bincode_compat, BlockBody};
-    /// use serde::{Deserialize, Serialize};
-    /// use serde_with::serde_as;
-    ///
-    /// #[serde_as]
-    /// #[derive(Serialize, Deserialize)]
-    /// struct Data {
-    ///     #[serde_as(as = "serde_bincode_compat::BlockBody")]
-    ///     body: BlockBody,
-    /// }
-    /// ```
-    #[derive(derive_more::Debug, Serialize, Deserialize)]
-    #[debug(bound())]
-    pub struct BlockBody<'a, T: SerdeBincodeCompat = super::TransactionSigned> {
-        transactions: Vec<T::BincodeRepr<'a>>,
-        ommers: Vec<Header<'a>>,
-        withdrawals: Cow<'a, Option<Withdrawals>>,
-    }
-
-    impl<'a, T: SerdeBincodeCompat> From<&'a super::BlockBody<T>> for BlockBody<'a, T> {
-        fn from(value: &'a super::BlockBody<T>) -> Self {
-            Self {
-                transactions: value.transactions.iter().map(Into::into).collect(),
-                ommers: value.ommers.iter().map(Into::into).collect(),
-                withdrawals: Cow::Borrowed(&value.withdrawals),
-            }
-        }
-    }
-
-    impl<'a, T: SerdeBincodeCompat> From<BlockBody<'a, T>> for super::BlockBody<T> {
-        fn from(value: BlockBody<'a, T>) -> Self {
-            Self {
-                transactions: value.transactions.into_iter().map(Into::into).collect(),
-                ommers: value.ommers.into_iter().map(Into::into).collect(),
-                withdrawals: value.withdrawals.into_owned(),
-            }
-        }
-    }
-
-    impl SerializeAs<super::BlockBody> for BlockBody<'_> {
-        fn serialize_as<S>(source: &super::BlockBody, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            BlockBody::from(source).serialize(serializer)
-        }
-    }
-
-    impl<'de> DeserializeAs<'de, super::BlockBody> for BlockBody<'de> {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::BlockBody, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            BlockBody::deserialize(deserializer).map(Into::into)
-        }
-    }
-
-    impl<T: SerdeBincodeCompat> SerdeBincodeCompat for super::BlockBody<T> {
-        type BincodeRepr<'a> = BlockBody<'a, T>;
-    }
+    pub type BlockBody<'a, T = super::TransactionSigned> =
+        reth_primitives_traits::serde_bincode_compat::BlockBody<'a, T>;
 
     /// Bincode-compatible [`super::SealedBlock`] serde implementation.
     ///
@@ -918,7 +635,6 @@ pub(super) mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, BlockBody, SealedBlock, SealedBlockWithSenders};
-
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_testing_utils::generators;
