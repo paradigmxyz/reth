@@ -5,7 +5,7 @@ use criterion::{
 use proptest::{
     prelude::*,
     strategy::ValueTree,
-    test_runner::{basic_result_cache, RngAlgorithm, TestRng, TestRunner},
+    test_runner::{basic_result_cache, TestRng, TestRunner},
 };
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
@@ -115,13 +115,9 @@ fn prefix_set_bench<T>(
 fn generate_test_data(size: usize) -> (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>) {
     use prop::collection::vec;
 
-    let config = ProptestConfig {
-        result_cache: basic_result_cache,
-        rng_algorithm: RngAlgorithm::ChaCha,
-        ..Default::default()
-    };
-    let mut runner =
-        TestRunner::new_with_rng(config, TestRng::deterministic_rng(RngAlgorithm::ChaCha));
+    let config = ProptestConfig { result_cache: basic_result_cache, ..Default::default() };
+    let algorithm = config.rng_algorithm;
+    let mut runner = TestRunner::new_with_rng(config, TestRng::deterministic_rng(algorithm));
 
     let vec_of_nibbles = |range| vec(any_with::<Nibbles>(range), size);
     let mut preload = vec_of_nibbles(32usize.into()).new_tree(&mut runner).unwrap().current();
