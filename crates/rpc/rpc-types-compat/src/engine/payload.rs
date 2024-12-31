@@ -114,7 +114,7 @@ pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayload
     }
 }
 
-/// Converts [`Block`] to [`ExecutionPayloadBodyV1`]
+/// Converts a [`reth_primitives_traits::Block`] to [`ExecutionPayloadBodyV1`]
 pub fn convert_to_payload_body_v1(
     value: impl reth_primitives_traits::Block,
 ) -> ExecutionPayloadBodyV1 {
