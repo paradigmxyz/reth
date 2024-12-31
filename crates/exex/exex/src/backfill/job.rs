@@ -234,7 +234,7 @@ mod tests {
     };
     use reth_blockchain_tree::noop::NoopBlockchainTree;
     use reth_db_common::init::init_genesis;
-    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_ethereum_evm::execute::EthExecutorProvider;
     use reth_primitives::public_key_to_address;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,

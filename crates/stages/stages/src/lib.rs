@@ -16,7 +16,7 @@
 //! # use reth_downloaders::bodies::bodies::BodiesDownloaderBuilder;
 //! # use reth_downloaders::headers::reverse_headers::ReverseHeadersDownloaderBuilder;
 //! # use reth_network_p2p::test_utils::{TestBodiesClient, TestHeadersClient};
-//! # use reth_evm_ethereum::execute::EthExecutorProvider;
+//! # use reth_ethereum_evm::execute::EthExecutorProvider;
 //! # use alloy_primitives::B256;
 //! # use reth_chainspec::MAINNET;
 //! # use reth_prune_types::PruneModes;
@@ -24,7 +24,7 @@
 //! # use reth_stages::Pipeline;
 //! # use reth_stages::sets::DefaultStages;
 //! # use tokio::sync::watch;
-//! # use reth_evm_ethereum::EthEvmConfig;
+//! # use reth_ethereum_evm::EthEvmConfig;
 //! # use reth_provider::ProviderFactory;
 //! # use reth_provider::StaticFileProviderFactory;
 //! # use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
