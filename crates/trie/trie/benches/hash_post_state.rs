@@ -51,7 +51,7 @@ fn from_bundle_state_seq(state: &HashMap<Address, BundleAccount>) -> HashedPostS
 
 fn generate_test_data(size: usize) -> HashMap<Address, BundleAccount> {
     let storage_size = 1_000;
-    let mut runner = TestRunner::new(ProptestConfig::default());
+    let mut runner = TestRunner::deterministic();
 
     use proptest::collection::hash_map;
     let state = hash_map(
