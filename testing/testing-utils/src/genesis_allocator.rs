@@ -1,5 +1,12 @@
 //! Helps create a custom genesis alloc by making it easy to add funded accounts with known
 //! signers to the genesis block.
+//!
+//! This module provides a convenient way to create and manage genesis accounts for testing purposes.
+//! It handles both funded accounts and contract accounts with code and storage.
+//!
+//! # Performance Note
+//! The allocator uses thread_rng() by default which might not be suitable for all testing scenarios.
+//! Consider using `new_with_rng()` with a deterministic RNG for reproducible tests.
 
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, Bytes, B256, U256};
@@ -49,7 +56,12 @@ pub struct GenesisAllocator<'a> {
 }
 
 impl<'a> GenesisAllocator<'a> {
-    /// Initialize a new alloc builder with the provided rng.
+    /// Initialize a new alloc builder with the provided random number generator.
+    ///
+    /// # Arguments
+    /// * `rng` - The random number generator to use for key pair generation
+    ///
+    /// This is preferred over the default thread_rng when deterministic results are needed.
     pub fn new_with_rng<R>(rng: &'a mut R) -> Self
     where
         R: RngCore,
@@ -81,7 +93,14 @@ impl<'a> GenesisAllocator<'a> {
 
     /// Add a funded account to the genesis alloc with the provided code.
     ///
-    /// Returns the key pair for the account and the account's address.
+    /// # Arguments
+    /// * `balance` - The initial balance for the account
+    /// * `code` - The contract code to deploy at this address
+    ///
+    /// # Returns
+    /// Returns a tuple containing:
+    /// * The keypair that can sign transactions for this account
+    /// * The address where the contract is deployed
     pub fn new_funded_account_with_code(
         &mut self,
         balance: U256,
@@ -119,7 +138,18 @@ impl<'a> GenesisAllocator<'a> {
 
     /// Adds an account with code and storage to the genesis alloc.
     ///
-    /// Returns the key pair for the account and the account's address.
+    /// # Arguments
+    /// * `code` - The contract bytecode to deploy
+    /// * `storage` - Initial storage key-value pairs for the contract
+    ///
+    /// # Returns
+    /// Returns a tuple containing:
+    /// * The keypair that can sign transactions for this account
+    /// * The address where the contract is deployed
+    ///
+    /// # Note
+    /// The account will be created with zero balance. Use `new_funded_account_with_code_and_storage`
+    /// if you need to set an initial balance.
     pub fn new_account_with_code_and_storage(
         &mut self,
         code: Bytes,
@@ -178,7 +208,14 @@ impl<'a> GenesisAllocator<'a> {
         self.alloc.get(address)
     }
 
-    /// Gets a mutable version of the account for the provided address, if it exists.
+    /// Gets a mutable reference to the account for the provided address.
+    ///
+    /// # Arguments
+    /// * `address` - The address of the account to retrieve
+    ///
+    /// # Returns
+    /// * `Some(&mut GenesisAccount)` if the account exists
+    /// * `None` if no account exists at this address
     pub fn get_account_mut(&mut self, address: &Address) -> Option<&mut GenesisAccount> {
         self.alloc.get_mut(address)
     }
