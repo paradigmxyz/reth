@@ -1744,6 +1744,16 @@
           "legendFormat": "Closed {{mode}}",
           "range": true,
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "__expr__",
+            "uid": "${DS_EXPRESSION}"
+          },
+          "expression": "${A} - ${B}",
+          "hide": false,
+          "refId": "diff(opened, closed)",
+          "type": "math"
         }
       ],
       "title": "Number of transactions",
