@@ -13,8 +13,10 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::{
-    eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
-    eip7685::EMPTY_REQUESTS_HASH, eip7840::{BlobParams, BlobScheduleItem},
+    eip1559::INITIAL_BASE_FEE,
+    eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
+    eip7685::EMPTY_REQUESTS_HASH,
+    eip7840::{BlobParams, BlobScheduleItem},
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -170,7 +172,6 @@ impl HardforkBlobParams {
     /// Constructs params for chainspec from a provided blob schedule.
     /// Falls back to defaults if the schedule is empty.
     pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobScheduleItem>) -> Self {
-
         let extract = |key: &str, default: fn() -> BlobParams| {
             blob_schedule
                 .get(key)
@@ -191,10 +192,7 @@ impl HardforkBlobParams {
 
 impl Default for HardforkBlobParams {
     fn default() -> Self {
-        Self {
-            cancun: BlobParams::cancun(), 
-            prague: BlobParams::prague(), 
-        }
+        Self { cancun: BlobParams::cancun(), prague: BlobParams::prague() }
     }
 }
 
@@ -265,7 +263,7 @@ impl Default for ChainSpec {
             deposit_contract: Default::default(),
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: MAINNET.prune_delete_limit,
-            blob_params: Default::default()
+            blob_params: Default::default(),
         }
     }
 }
