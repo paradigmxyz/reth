@@ -2447,14 +2447,15 @@ impl RpcServerHandle {
 
     /// Returns an ipc provider from the rpc server handle
     pub async fn new_ipc_provider(&self) -> Result<RootProvider<PubSubFrontend>, eyre::Error> {
-        let ipc_endpoint = self.ipc_endpoint().ok_or(eyre!("ipc endpoint not available"))?;
+        let ipc_endpoint =
+            self.ipc_endpoint().ok_or_else(|| eyre!("ipc endpoint not available"))?;
         let ipc = IpcConnect::new(ipc_endpoint.to_string());
         Ok(ProviderBuilder::new().on_ipc(ipc).await?)
     }
 
     /// Returns a ws provider from the rpc server handle
     pub async fn new_ws_provider(&self) -> Result<RootProvider<PubSubFrontend>, eyre::Error> {
-        let rpc_url = self.ws_url().ok_or(eyre!("ws url not available"))?;
+        let rpc_url = self.ws_url().ok_or_else(|| eyre!("ws url not available"))?;
         let ws = WsConnect::new(rpc_url);
         Ok(ProviderBuilder::new().on_ws(ws).await?)
     }
