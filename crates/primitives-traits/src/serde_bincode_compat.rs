@@ -26,14 +26,14 @@ mod block_bincode {
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use reth_primitives_traits::serde_bincode_compat;
+    /// use reth_primitives_traits::serde_bincode_compat::{self, SerdeBincodeCompat};
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
     /// #[serde_as]
     /// #[derive(Serialize, Deserialize)]
-    /// struct Data<T> {
-    ///     #[serde_as(as = "serde_bincode_compat::BlockBody")]
+    /// struct Data<T: SerdeBincodeCompat> {
+    ///     #[serde_as(as = "serde_bincode_compat::BlockBody<'_, T>")]
     ///     body: alloy_consensus::BlockBody<T>,
     /// }
     /// ```
