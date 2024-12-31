@@ -114,29 +114,6 @@ pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayload
     }
 }
 
-/// Tries to create a sealed new block from the given payload and payload sidecar.
-///
-/// Uses [`try_into_block`] to convert from the [`ExecutionPayload`] to [`Block`] and seals the
-/// block with its hash.
-///
-/// Uses [`validate_block_hash`] to validate the payload block hash and ultimately return the
-/// [`SealedBlock`].
-///
-/// # Note
-///
-/// Empty ommers, nonce, difficulty, and execution request values are validated upon computing block
-/// hash and comparing the value with `payload.block_hash`.
-pub fn try_into_sealed_block(
-    payload: ExecutionPayload,
-    sidecar: &ExecutionPayloadSidecar,
-) -> Result<SealedBlock, PayloadError> {
-    let block_hash = payload.block_hash();
-    let base_payload = payload.try_into_block_with_sidecar(sidecar)?;
-
-    // validate block hash and return
-    validate_block_hash(block_hash, base_payload)
-}
-
 /// Takes the expected block hash and [`Block`], validating the block and converting it into a
 /// [`SealedBlock`].
 ///

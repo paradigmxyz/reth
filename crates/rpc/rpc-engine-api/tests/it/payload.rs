@@ -10,7 +10,7 @@ use alloy_rpc_types_engine::{
 use assert_matches::assert_matches;
 use reth_primitives::{proofs, Block, SealedBlock, SealedHeader, TransactionSigned};
 use reth_rpc_types_compat::engine::payload::{
-    block_to_payload, block_to_payload_v1, convert_to_payload_body_v1, try_into_sealed_block,
+    block_to_payload, block_to_payload_v1, convert_to_payload_body_v1,
 };
 use reth_testing_utils::generators::{
     self, random_block, random_block_range, random_header, BlockParams, BlockRangeParams, Rng,
@@ -76,7 +76,8 @@ fn payload_validation() {
     });
 
     assert_matches!(
-        try_into_sealed_block(block_with_valid_extra_data, &ExecutionPayloadSidecar::none()),
+        block_with_valid_extra_data
+            .try_into_block_with_sidecar::<TransactionSigned>(&ExecutionPayloadSidecar::none()),
         Ok(_)
     );
 
@@ -87,7 +88,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(invalid_extra_data_block, &ExecutionPayloadSidecar::none()),
+        invalid_extra_data_block.try_into_block_with_sidecar::<TransactionSigned>(&ExecutionPayloadSidecar::none()),
         Err(PayloadError::ExtraData(data)) if data == block_with_invalid_extra_data
     );
 
@@ -97,7 +98,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_zero_base_fee, &ExecutionPayloadSidecar::none()),
+        block_with_zero_base_fee.try_into_block_with_sidecar::<TransactionSigned>(&ExecutionPayloadSidecar::none()),
         Err(PayloadError::BaseFee(val)) if val.is_zero()
     );
 
@@ -116,7 +117,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_ommers.clone(), &ExecutionPayloadSidecar::none()),
+        block_with_ommers.clone().try_into_block_with_sidecar::<TransactionSigned>(&ExecutionPayloadSidecar::none()),
         Err(PayloadError::BlockHash { consensus, .. })
             if consensus == block_with_ommers.block_hash()
     );
@@ -127,7 +128,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_difficulty.clone(), &ExecutionPayloadSidecar::none()),
+        block_with_difficulty.clone().try_into_block_with_sidecar::<TransactionSigned>(&ExecutionPayloadSidecar::none()),
         Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_difficulty.block_hash()
     );
 
@@ -137,7 +138,7 @@ fn payload_validation() {
         b
     });
     assert_matches!(
-        try_into_sealed_block(block_with_nonce.clone(), &ExecutionPayloadSidecar::none()),
+        block_with_nonce.clone().try_into_block_with_sidecar::<TransactionSigned>(&ExecutionPayloadSidecar::none()),
         Err(PayloadError::BlockHash { consensus, .. }) if consensus == block_with_nonce.block_hash()
     );
 
