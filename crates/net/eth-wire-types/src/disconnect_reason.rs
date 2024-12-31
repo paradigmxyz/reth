@@ -134,3 +134,57 @@ impl Decodable for DisconnectReason {
 #[derive(Debug, Clone, Error)]
 #[error("unknown disconnect reason: {0}")]
 pub struct UnknownDisconnectReason(u8);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_serialize_deserialize() {
+        let variants = vec![
+            DisconnectReason::DisconnectRequested,
+            DisconnectReason::TcpSubsystemError,
+            DisconnectReason::ProtocolBreach,
+            DisconnectReason::UselessPeer,
+            DisconnectReason::TooManyPeers,
+            DisconnectReason::AlreadyConnected,
+            DisconnectReason::IncompatibleP2PProtocolVersion,
+            DisconnectReason::NullNodeIdentity,
+            DisconnectReason::ClientQuitting,
+            DisconnectReason::UnexpectedHandshakeIdentity,
+            DisconnectReason::ConnectedToSelf,
+            DisconnectReason::PingTimeout,
+            DisconnectReason::SubprotocolSpecific,
+        ];
+
+        for variant in variants {
+            // Serialize
+            let serialized = serde_json::to_string(&variant).expect("Serialization failed");
+
+            // Deserialize
+            let deserialized: DisconnectReason =
+                serde_json::from_str(&serialized).expect("Deserialization failed");
+
+            assert_eq!(variant, deserialized, "Serialization/Deserialization mismatch");
+        }
+    }
+
+    #[test]
+    fn test_json_examples() {
+        let json = "\"DisconnectRequested\"";
+        let deserialized: DisconnectReason =
+            serde_json::from_str(json).expect("Deserialization failed");
+        assert_eq!(deserialized, DisconnectReason::DisconnectRequested);
+
+        let serialized = serde_json::to_string(&deserialized).expect("Serialization failed");
+        assert_eq!(serialized, json);
+
+        let json = "\"TcpSubsystemError\"";
+        let deserialized: DisconnectReason =
+            serde_json::from_str(json).expect("Deserialization failed");
+        assert_eq!(deserialized, DisconnectReason::TcpSubsystemError);
+
+        let serialized = serde_json::to_string(&deserialized).expect("Serialization failed");
+        assert_eq!(serialized, json);
+    }
+}
