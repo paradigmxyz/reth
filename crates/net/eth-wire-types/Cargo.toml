@@ -31,6 +31,7 @@ derive_more.workspace = true
 thiserror.workspace = true
 serde = { workspace = true, optional = true }
 
+
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
@@ -44,6 +45,7 @@ arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 rand.workspace = true
+serde_json.workspace = true
 
 [features]
 default = ["std"]
