@@ -1724,15 +1724,29 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(reth_database_transaction_open_total{instance=~\"$instance\"}) by (mode)",
+          "expr": "sum(reth_database_transaction_opened_total{instance=~\"$instance\"}) by (mode)",
           "format": "time_series",
           "instant": false,
-          "legendFormat": "{{mode}}",
+          "legendFormat": "Opened {{mode}}",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "sum(reth_database_transaction_closed_total{instance=~\"$instance\"}) by (mode)",
+          "format": "time_series",
+          "instant": false,
+          "legendFormat": "Closed {{mode}}",
+          "range": true,
+          "refId": "B"
         }
       ],
-      "title": "Number of open transactions",
+      "title": "Number of transactions",
       "type": "timeseries"
     },
     {
