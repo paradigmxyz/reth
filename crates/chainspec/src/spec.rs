@@ -223,6 +223,11 @@ impl Default for ChainSpec {
 }
 
 impl ChainSpec {
+    /// Converts the given [`Genesis`] into a [`ChainSpec`].
+    pub fn from_genesis(genesis: Genesis) -> Self {
+        genesis.into()
+    }
+
     /// Get information about the chain itself
     pub const fn chain(&self) -> Chain {
         self.chain
@@ -277,7 +282,7 @@ impl ChainSpec {
             if self.is_cancun_active_at_timestamp(self.genesis.timestamp) {
                 let blob_gas_used = self.genesis.blob_gas_used.unwrap_or(0);
                 let excess_blob_gas = self.genesis.excess_blob_gas.unwrap_or(0);
-                (Some(B256::ZERO), Some(blob_gas_used as u64), Some(excess_blob_gas as u64))
+                (Some(B256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
             } else {
                 (None, None, None)
             };

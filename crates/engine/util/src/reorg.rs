@@ -1,6 +1,7 @@
 //! Stream wrapper that simulates reorgs.
 
 use alloy_consensus::{Header, Transaction};
+use alloy_eips::eip7840::BlobParams;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus,
 };
@@ -28,7 +29,7 @@ use reth_revm::{
     DatabaseCommit,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
-use revm_primitives::{calc_excess_blob_gas, EVMError, EnvWithHandlerCfg};
+use revm_primitives::{EVMError, EnvWithHandlerCfg};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -391,10 +392,7 @@ where
         if chain_spec.is_cancun_active_at_timestamp(reorg_target.timestamp) {
             (
                 Some(sum_blob_gas_used),
-                Some(calc_excess_blob_gas(
-                    reorg_target_parent.excess_blob_gas.unwrap_or_default(),
-                    reorg_target_parent.blob_gas_used.unwrap_or_default(),
-                )),
+                reorg_target_parent.next_block_excess_blob_gas(BlobParams::cancun()),
             )
         } else {
             (None, None)
@@ -425,8 +423,7 @@ where
             blob_gas_used,
             excess_blob_gas,
             state_root: state_provider.state_root(hashed_state)?,
-            requests_hash: None,          // TODO(prague)
-            target_blobs_per_block: None, // TODO(prague)
+            requests_hash: None, // TODO(prague)
         },
         body: BlockBody {
             transactions,

@@ -45,7 +45,7 @@ impl From<DatabaseError> for BeaconConsensusEngineError {
 
 /// Represents error cases for an applied forkchoice update.
 ///
-/// This represents all possible error cases, that must be returned as JSON RCP errors back to the
+/// This represents all possible error cases, that must be returned as JSON RPC errors back to the
 /// beacon node.
 #[derive(Debug, thiserror::Error)]
 pub enum BeaconForkChoiceUpdateError {

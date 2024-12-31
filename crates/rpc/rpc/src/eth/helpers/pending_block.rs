@@ -97,7 +97,6 @@ where
             extra_data: Default::default(),
             parent_beacon_block_root: is_cancun.then_some(B256::ZERO),
             requests_hash: is_prague.then_some(EMPTY_REQUESTS_HASH),
-            target_blobs_per_block: None,
         };
 
         // seal the block

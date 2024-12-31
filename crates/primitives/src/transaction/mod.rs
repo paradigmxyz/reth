@@ -1510,7 +1510,6 @@ impl From<TxEnvelope> for TransactionSigned {
             TxEnvelope::Eip1559(tx) => tx.into(),
             TxEnvelope::Eip4844(tx) => tx.into(),
             TxEnvelope::Eip7702(tx) => tx.into(),
-            _ => unreachable!(),
         }
     }
 }

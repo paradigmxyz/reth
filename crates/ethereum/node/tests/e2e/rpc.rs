@@ -1,5 +1,5 @@
 use crate::utils::eth_payload_attributes;
-use alloy_eips::{calc_next_block_base_fee, eip2718::Encodable2718, eip4844};
+use alloy_eips::{calc_next_block_base_fee, eip2718::Encodable2718};
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
 use alloy_rpc_types_beacon::relay::{
@@ -69,7 +69,7 @@ async fn test_fee_history() -> eyre::Result<()> {
     assert!(receipt.status());
 
     let block = provider.get_block_by_number(1.into(), false.into()).await?.unwrap();
-    assert_eq!(block.header.gas_used as u128, receipt.gas_used,);
+    assert_eq!(block.header.gas_used, receipt.gas_used,);
     assert_eq!(block.header.base_fee_per_gas.unwrap(), expected_first_base_fee as u64);
 
     for _ in 0..100 {
@@ -240,7 +240,6 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
             execution_payload: block_to_payload_v3(payload.block().clone()),
             blobs_bundle: BlobsBundleV1::new([]),
             execution_requests: payload.requests().unwrap().try_into().unwrap(),
-            target_blobs_per_block: eip4844::TARGET_BLOBS_PER_BLOCK,
             signature: Default::default(),
         },
         parent_beacon_block_root: attrs.parent_beacon_block_root.unwrap(),

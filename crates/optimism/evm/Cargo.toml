@@ -72,7 +72,8 @@ std = [
 	"derive_more/std",
 	"reth-optimism-forks/std",
 	"thiserror/std",
-	"op-alloy-consensus/std"
+	"op-alloy-consensus/std",
+	"reth-chainspec/std"
 ]
 optimism = [
 	"reth-primitives/optimism",

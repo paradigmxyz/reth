@@ -1,15 +1,11 @@
 //! Collection of methods for block validation.
 
 use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::{
-    calc_next_block_base_fee,
-    eip4844::{DATA_GAS_PER_BLOB, MAX_DATA_GAS_PER_BLOCK},
-};
+use alloy_eips::{calc_next_block_base_fee, eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives::SealedBlock;
 use reth_primitives_traits::{BlockBody, GotExpected, SealedHeader};
-use revm_primitives::calc_excess_blob_gas;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
@@ -176,22 +172,16 @@ where
 ///  * `blob_gas_used` exists as a header field
 ///  * `excess_blob_gas` exists as a header field
 ///  * `parent_beacon_block_root` exists as a header field
-///  * `blob_gas_used` is less than or equal to `MAX_DATA_GAS_PER_BLOCK`
 ///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
 ///  * `excess_blob_gas` is a multiple of `DATA_GAS_PER_BLOB`
+///
+/// Note: This does not enforce any restrictions on `blob_gas_used`
 pub fn validate_4844_header_standalone<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
     let blob_gas_used = header.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
     let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
     if header.parent_beacon_block_root().is_none() {
         return Err(ConsensusError::ParentBeaconBlockRootMissing)
-    }
-
-    if blob_gas_used > MAX_DATA_GAS_PER_BLOCK {
-        return Err(ConsensusError::BlobGasUsedExceedsMaxBlobGasPerBlock {
-            blob_gas_used,
-            max_blob_gas_per_block: MAX_DATA_GAS_PER_BLOCK,
-        })
     }
 
     if blob_gas_used % DATA_GAS_PER_BLOB != 0 {
@@ -313,6 +303,7 @@ pub fn validate_against_parent_timestamp<H: BlockHeader>(
 pub fn validate_against_parent_4844<H: BlockHeader>(
     header: &H,
     parent: &H,
+    blob_params: BlobParams,
 ) -> Result<(), ConsensusError> {
     // From [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844#header-extension):
     //
@@ -329,7 +320,7 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
     let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
     let expected_excess_blob_gas =
-        calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
+        blob_params.next_block_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
     if expected_excess_blob_gas != excess_blob_gas {
         return Err(ConsensusError::ExcessBlobGasDiff {
             diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
@@ -509,7 +500,6 @@ mod tests {
             excess_blob_gas: None,
             parent_beacon_block_root: None,
             requests_hash: None,
-            target_blobs_per_block: None,
         };
         // size: 0x9b5
 

@@ -118,7 +118,8 @@ std = [
 	"reth-trie-common/std",
 	"op-alloy-consensus?/std",
 	"op-alloy-rpc-types?/std",
-	"serde_json/std"
+	"serde_json/std",
+	"reth-chainspec/std"
 ]
 reth-codec = [
 	"dep:reth-codecs",
