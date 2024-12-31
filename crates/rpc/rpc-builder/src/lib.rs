@@ -214,8 +214,12 @@ use std::{
 };
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
+use alloy_provider::{IpcConnect, ProviderBuilder, RootProvider, WsConnect};
+use alloy_pubsub::PubSubFrontend;
+use alloy_transport_http::{reqwest, Http};
 use error::{ConflictingModules, RpcError, ServerKind};
 use eth::DynEthApiBuilder;
+use eyre::eyre;
 use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
@@ -2433,6 +2437,26 @@ impl RpcServerHandle {
 
         let client = builder.build(url).await.expect("failed to create ws client");
         Some(client)
+    }
+
+    /// Returns an http provider from the rpc server handle
+    pub fn new_http_provider(&self) -> Result<RootProvider<Http<reqwest::Client>>, eyre::Error> {
+        let rpc_url = self.http_url().unwrap().parse()?;
+        Ok(ProviderBuilder::new().on_http(rpc_url))
+    }
+
+    /// Returns an ipc provider from the rpc server handle
+    pub async fn new_ipc_provider(&self) -> Result<RootProvider<PubSubFrontend>, eyre::Error> {
+        let ipc_endpoint = self.ipc_endpoint().ok_or(eyre!("ipc endpoint not available"))?;
+        let ipc = IpcConnect::new(ipc_endpoint.to_string());
+        Ok(ProviderBuilder::new().on_ipc(ipc).await?)
+    }
+
+    /// Returns a ws provider from the rpc server handle
+    pub async fn new_ws_provider(&self) -> Result<RootProvider<PubSubFrontend>, eyre::Error> {
+        let rpc_url = self.ws_url().ok_or(eyre!("ws url not available"))?;
+        let ws = WsConnect::new(rpc_url);
+        Ok(ProviderBuilder::new().on_ws(ws).await?)
     }
 }
 
