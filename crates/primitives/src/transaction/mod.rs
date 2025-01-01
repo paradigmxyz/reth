@@ -28,7 +28,8 @@ use op_alloy_consensus::DepositTransaction;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::TxDeposit;
 pub use pooled::PooledTransactionsElementEcRecovered;
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+#[cfg(feature = "rayon")]
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 pub use reth_primitives_traits::{
     transaction::error::{
         InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,

@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives-traits = { workspace = true, features = ["serde"] }
+reth-primitives-traits = { workspace = true, features = ["serde", "rayon"] }
 reth-ethereum-forks.workspace = true
 reth-static-file-types.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
@@ -183,7 +183,7 @@ serde-bincode-compat = [
 	"reth-primitives-traits/serde-bincode-compat",
 	"reth-trie-common/serde-bincode-compat",
 ]
-rayon = ["dep:rayon"]
+rayon = ["dep:rayon", "reth-primitives-traits/rayon"]
 
 
 [[bench]]
