@@ -49,7 +49,6 @@ pub trait BlockExt: Block {
     ///
     /// If the number of senders does not match the number of transactions in the block, this falls
     /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
-    /// See also [`recover_signers_unchecked`]
     ///
     /// Returns an error if a signature is invalid.
     #[track_caller]
