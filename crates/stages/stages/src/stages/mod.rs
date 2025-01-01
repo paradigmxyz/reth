@@ -320,7 +320,7 @@ mod tests {
         assert!(matches!(
             static_file_provider
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), is_full_node,),
-            Ok(expected)
+            Ok(e) if e == expected
         ));
     }
 
@@ -342,7 +342,7 @@ mod tests {
             db.factory
                 .static_file_provider()
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), false,),
-            Ok(expected)
+            Ok(e) if e == expected
         ));
     }
 
@@ -364,7 +364,7 @@ mod tests {
             db.factory
                 .static_file_provider()
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), false),
-            Ok(expected)
+            Ok(e) if e == expected
         ));
     }
 
