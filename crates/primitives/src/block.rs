@@ -1,6 +1,6 @@
 use crate::{
-    traits::BlockExt, transaction::SignedTransactionIntoRecoveredExt, BlockBodyTxExt, GotExpected,
-    RecoveredTx, SealedHeader, TransactionSigned,
+    traits::BlockExt, transaction::SignedTransactionIntoRecoveredExt, GotExpected, RecoveredTx,
+    SealedHeader, TransactionSigned,
 };
 use alloc::vec::Vec;
 use alloy_consensus::Header;
@@ -259,7 +259,7 @@ where
 impl<H, B> SealedBlock<H, B>
 where
     H: reth_primitives_traits::BlockHeader,
-    B: reth_primitives_traits::BlockBody,
+    B: reth_primitives_traits::BlockBody + BlockExt,
 {
     /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
     pub fn senders(&self) -> Option<Vec<Address>>
