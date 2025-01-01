@@ -96,6 +96,7 @@ pprof = { workspace = true, features = [
 ] }
 
 [features]
+ethereum = ["rayon"]
 default = ["c-kzg", "alloy-compat", "std", "reth-codec", "secp256k1"]
 std = [
 	"reth-primitives-traits/std",
