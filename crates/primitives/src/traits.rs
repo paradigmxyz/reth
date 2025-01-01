@@ -29,7 +29,7 @@ pub trait BlockExt: Block {
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
-        self.recover_signers()
+        self.body().recover_signers()
     }
 
     /// Transform into a [`BlockWithSenders`].
@@ -66,7 +66,7 @@ pub trait BlockExt: Block {
         let senders = if self.body().transactions().len() == senders.len() {
             senders
         } else {
-            let Some(senders) = self.recover_signers_unchecked() else { return Err(self) };
+            let Some(senders) = self.body().recover_signers_unchecked() else { return Err(self) };
             senders
         };
 
@@ -83,29 +83,6 @@ pub trait BlockExt: Block {
     {
         let senders = self.senders()?;
         Some(BlockWithSenders::new_unchecked(self, senders))
-    }
-
-    /// Recover signer addresses for all transactions in the block body.
-    #[cfg(feature = "rayon")]
-    fn recover_signers(&self) -> Option<Vec<Address>>
-    where
-        <Self::Body as BlockBody>::Transaction: SignedTransaction,
-    {
-        let txs = self.body().transactions();
-        recover_signers(txs, txs.len())
-    }
-
-    /// Recover signer addresses for all transactions in the block body _without ensuring that the
-    /// signature has a low `s` value_.
-    ///
-    /// Returns `None`, if some transaction's signature is invalid.
-    #[cfg(feature = "rayon")]
-    fn recover_signers_unchecked(&self) -> Option<Vec<Address>>
-    where
-        <Self::Body as BlockBody>::Transaction: SignedTransaction,
-    {
-        let txs = self.body().transactions();
-        recover_signers_unchecked(txs, txs.len())
     }
 }
 

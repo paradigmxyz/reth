@@ -259,7 +259,7 @@ where
 impl<H, B> SealedBlock<H, B>
 where
     H: reth_primitives_traits::BlockHeader,
-    B: reth_primitives_traits::BlockBody + BlockExt,
+    B: reth_primitives_traits::BlockBody,
 {
     /// Expensive operation that recovers transaction signer. See [`SealedBlockWithSenders`].
     pub fn senders(&self) -> Option<Vec<Address>>
