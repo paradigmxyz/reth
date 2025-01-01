@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives-traits = { workspace = true, features = ["serde", "rayon"] }
+reth-primitives-traits = { workspace = true, features = ["serde"] }
 reth-ethereum-forks.workspace = true
 reth-static-file-types.workspace = true
 revm-primitives = { workspace = true, features = ["serde"] }
@@ -53,7 +53,7 @@ derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
 once_cell.workspace = true
 rand = { workspace = true, optional = true }
-rayon = {workspace = true, optional = true }
+rayon.workspace = true
 serde.workspace = true
 serde_with = { workspace = true, optional = true }
 
@@ -96,7 +96,6 @@ pprof = { workspace = true, features = [
 ] }
 
 [features]
-ethereum = ["rayon"]
 default = ["c-kzg", "alloy-compat", "std", "reth-codec", "secp256k1"]
 std = [
 	"reth-primitives-traits/std",
@@ -184,8 +183,6 @@ serde-bincode-compat = [
 	"reth-primitives-traits/serde-bincode-compat",
 	"reth-trie-common/serde-bincode-compat",
 ]
-rayon = ["dep:rayon", "reth-primitives-traits/rayon"]
-
 
 [[bench]]
 name = "recover_ecdsa_crit"

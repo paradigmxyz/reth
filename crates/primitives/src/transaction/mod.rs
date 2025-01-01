@@ -28,8 +28,7 @@ use op_alloy_consensus::DepositTransaction;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::TxDeposit;
 pub use pooled::PooledTransactionsElementEcRecovered;
-#[cfg(feature = "rayon")]
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 pub use reth_primitives_traits::{
     transaction::error::{
         InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
@@ -1905,14 +1904,7 @@ where
     if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
         txes.into_iter().map(|tx| tx.recover_signer()).collect()
     } else {
-        #[cfg(feature = "rayon")]
-        {
-            txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
-        }
-        #[cfg(not(feature = "rayon"))]
-        {
-            txes.into_iter().map(|tx| tx.recover_signer()).collect()
-        }
+        txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
     }
 }
 
