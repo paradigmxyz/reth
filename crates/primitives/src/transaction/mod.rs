@@ -1904,7 +1904,14 @@ where
     if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
         txes.into_iter().map(|tx| tx.recover_signer()).collect()
     } else {
-        txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
+        #[cfg(feature = "rayon")]
+        {
+            txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
+        }
+        #[cfg(not(feature = "rayon"))]
+        {
+            txes.into_iter().map(|tx| tx.recover_signer()).collect()
+        }
     }
 }
 

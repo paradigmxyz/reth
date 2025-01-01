@@ -1,7 +1,4 @@
-use crate::{
-    transaction::{recover_signers, recover_signers_unchecked},
-    BlockWithSenders, SealedBlock,
-};
+use crate::{BlockWithSenders, SealedBlock};
 use alloc::vec::Vec;
 use reth_primitives_traits::{Block, BlockBody, SealedHeader, SignedTransaction};
 use revm_primitives::{Address, B256};

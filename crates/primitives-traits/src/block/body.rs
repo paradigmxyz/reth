@@ -13,6 +13,9 @@ pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincod
 
 impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
 
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
+
 /// Abstraction for block's body.
 pub trait BlockBody:
     Send
@@ -99,24 +102,36 @@ pub trait BlockBody:
     }
 
     /// Recover signer addresses for all transactions in the block body.
-    #[cfg(feature = "rayon")]
     fn recover_signers(&self) -> Option<Vec<Address>>
     where
         Self::Transaction: SignedTransaction,
     {
-        recover_signers(self.transactions(), self.transactions().len())
+        #[cfg(feature = "rayon")]
+        {
+            self.transactions().into_par_iter().map(|tx| tx.recover_signer()).collect()
+        }
+        #[cfg(not(feature = "rayon"))]
+        {
+            self.transactions().iter().map(|tx| tx.recover_signer()).collect()
+        }
     }
 
     /// Recover signer addresses for all transactions in the block body _without ensuring that the
     /// signature has a low `s` value_.
     ///
-    /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [`recover_signers_unchecked`].
+    /// Returns `None`, if some transaction's signature is invalid.
     fn recover_signers_unchecked(&self) -> Option<Vec<Address>>
     where
         Self::Transaction: SignedTransaction,
     {
-        recover_signers_unchecked(self.transactions(), self.transactions().len())
+        #[cfg(feature = "rayon")]
+        {
+            self.transactions().into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
+        }
+        #[cfg(not(feature = "rayon"))]
+        {
+            self.transactions().iter().map(|tx| tx.recover_signer_unchecked()).collect()
+        }
     }
 }
 
