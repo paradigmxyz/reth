@@ -61,6 +61,9 @@ pub enum EthApiError {
     /// Receipts not found for block hash/number/tag
     #[error("receipts not found")]
     ReceiptsNotFound(BlockId),
+    /// Thrown when a requested receipt is not found
+    #[error("receipt not found")]
+    ReceiptNotFound,
     /// Thrown when an unknown block or transaction index is encountered
     #[error("unknown block or tx index")]
     UnknownBlockOrTxIndex,
@@ -184,6 +187,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::TransactionNotFound |
             EthApiError::EvmCustom(_) |
             EthApiError::EvmPrecompile(_) |
+            EthApiError::ReceiptNotFound |
             EthApiError::InvalidRewardPercentiles => internal_rpc_err(error.to_string()),
             EthApiError::UnknownBlockOrTxIndex => {
                 rpc_error_with_code(EthRpcErrorCode::ResourceNotFound.code(), error.to_string())
