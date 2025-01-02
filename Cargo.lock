@@ -8702,7 +8702,6 @@ dependencies = [
  "reth-chainspec",
  "reth-primitives",
  "reth-primitives-traits",
- "reth-rpc-types-compat",
 ]
 
 [[package]]
@@ -9227,7 +9226,6 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
- "alloy-rlp",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "jsonrpsee-types",
