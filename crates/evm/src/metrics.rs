@@ -231,7 +231,6 @@ mod tests {
     fn test_executor_metrics_hook_metrics_recorded() {
         let snapshotter = setup_test_recorder();
         let metrics = ExecutorMetrics::default();
-
         let input = BlockWithSenders::default();
 
         let (tx, _rx) = mpsc::channel();
@@ -281,7 +280,6 @@ mod tests {
     #[test]
     fn test_executor_metrics_hook_called() {
         let metrics = ExecutorMetrics::default();
-
         let input = BlockWithSenders::default();
 
         let (tx, rx) = mpsc::channel();
