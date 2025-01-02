@@ -164,7 +164,6 @@ where
 
         let EvmEnv { cfg_env_with_handler_cfg, block_env } =
             self.eth_api().evm_config().cfg_and_block_env(block.header());
-        // Note: we assume the block has a valid height
 
         // Depending on EIP-2 we need to recover the transactions differently
         let senders =
