@@ -706,9 +706,7 @@ where
     }
 }
 
-impl<N: NodeTypesWithDB<Primitives = EthPrimitives>> CanonStateSubscriptions
-    for BlockchainProvider2<N>
-{
+impl<N: ProviderNodeTypes> CanonStateSubscriptions for BlockchainProvider2<N> {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives> {
         self.canonical_in_memory_state.subscribe_canon_state()
     }
@@ -748,7 +746,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider2<N> {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         self.consistent_provider()?.basic_account(address)
     }
 }
@@ -803,7 +801,7 @@ mod tests {
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
-    use reth_primitives::{BlockExt, Receipt, SealedBlock, StaticFileSegment};
+    use reth_primitives::{BlockExt, EthPrimitives, Receipt, SealedBlock, StaticFileSegment};
     use reth_primitives_traits::{BlockBody as _, SignedTransaction};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
@@ -909,7 +907,7 @@ mod tests {
             transactions_writer.increment_block(block.number)?;
             receipts_writer.increment_block(block.number)?;
 
-            for (tx, receipt) in block.body.transactions().iter().zip(receipts) {
+            for (tx, receipt) in block.body().transactions().zip(receipts) {
                 transactions_writer.append_transaction(tx_num, tx)?;
                 receipts_writer.append_receipt(tx_num, receipt)?;
                 tx_num += 1;
@@ -1395,7 +1393,7 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Generate a random block to initialise the blockchain provider.
-        let mut test_block_builder = TestBlockBuilder::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
         let block_1 = test_block_builder.generate_random_block(0, B256::ZERO);
         let block_hash_1 = block_1.hash();
 

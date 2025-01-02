@@ -167,8 +167,8 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
 }
 
 impl<DB: AccountReader> AccountReader for CachedReadsDbMut<'_, DB> {
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        if let Some(hit) = self.cached.accounts.get(&address) {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        if let Some(hit) = self.cached.accounts.get(address) {
             if let Some(acc) = &hit.info {
                 return Ok(Some(acc.into()))
             }
@@ -182,7 +182,7 @@ impl<DB: AccountReader> AccountReader for CachedReadsDbMut<'_, DB> {
             unsafe {
                 let cache_entry = (*(*cache as *const CachedReads as *mut CachedReads))
                     .accounts
-                    .entry(address)
+                    .entry(*address)
                     .or_default();
                 cache_entry.info = acc;
             }
@@ -356,9 +356,9 @@ impl<DB: StateProvider> StateProvider for CachedReadsDbMut<'_, DB> {
 
     fn bytecode_by_hash(
         &self,
-        code_hash: B256,
+        code_hash: &B256,
     ) -> ProviderResult<Option<reth_primitives::Bytecode>> {
-        let hit = self.cached.contracts.get(&code_hash);
+        let hit = self.cached.contracts.get(code_hash);
         if hit.is_some() {
             return Ok(hit.map(|bytecode| bytecode.clone().into()))
         }
@@ -371,7 +371,7 @@ impl<DB: StateProvider> StateProvider for CachedReadsDbMut<'_, DB> {
             unsafe {
                 let cache_entry = (*(*cache as *const CachedReads as *mut CachedReads))
                     .contracts
-                    .entry(code_hash)
+                    .entry(*code_hash)
                     .or_default();
                 *cache_entry = bytecode;
             }

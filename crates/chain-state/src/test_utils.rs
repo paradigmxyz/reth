@@ -34,7 +34,7 @@ use tokio::sync::broadcast::{self, Sender};
 /// Functionality to build blocks for tests and help with assertions about
 /// their execution.
 #[derive(Debug)]
-pub struct TestBlockBuilder<N: NodePrimitives = reth_primitives::EthPrimitives> {
+pub struct TestBlockBuilder<N: NodePrimitives = EthPrimitives> {
     /// The account that signs all the block's transactions.
     pub signer: Address,
     /// Private key for signing.
@@ -66,7 +66,7 @@ impl<N: NodePrimitives> Default for TestBlockBuilder<N> {
     }
 }
 
-impl TestBlockBuilder {
+impl<N: NodePrimitives> TestBlockBuilder<N> {
     /// Signer pk setter.
     pub fn with_signer_pk(mut self, signer_pk: PrivateKeySigner) -> Self {
         self.signer = signer_pk.address();
@@ -293,6 +293,13 @@ impl TestBlockBuilder {
         );
 
         execution_outcome.with_receipts(Receipts::from(receipts))
+    }
+}
+
+impl TestBlockBuilder {
+    /// Creates a `TestBlockBuilder` configured for Ethereum primitives.
+    pub fn eth() -> Self {
+        Self::default()
     }
 }
 /// A test `ChainEventSubscriptions`

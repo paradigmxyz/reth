@@ -235,14 +235,11 @@ where
         };
 
         // Reject transactions over defined size to prevent DOS attacks
-        let transaction_size = transaction.size();
-        if transaction_size > self.max_tx_input_bytes {
+        let tx_input_len = transaction.input().len();
+        if tx_input_len > self.max_tx_input_bytes {
             return TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::OversizedData(
-                    transaction_size,
-                    self.max_tx_input_bytes,
-                ),
+                InvalidPoolTransactionError::OversizedData(tx_input_len, self.max_tx_input_bytes),
             )
         }
 
@@ -367,7 +364,7 @@ where
         let state = maybe_state.as_deref().expect("provider is set");
 
         // Use provider to get account info
-        let account = match state.basic_account(transaction.sender()) {
+        let account = match state.basic_account(transaction.sender_ref()) {
             Ok(account) => account.unwrap_or_default(),
             Err(err) => {
                 return TransactionValidationOutcome::Error(*transaction.hash(), Box::new(err))
@@ -380,9 +377,9 @@ where
         //
         // Any other case means that the account is not an EOA, and should not be able to send
         // transactions.
-        if account.has_bytecode() {
+        if let Some(code_hash) = &account.bytecode_hash {
             let is_eip7702 = if self.fork_tracker.is_prague_activated() {
-                match state.bytecode_by_hash(account.get_bytecode_hash()) {
+                match state.bytecode_by_hash(code_hash) {
                     Ok(bytecode) => bytecode.unwrap_or_default().is_eip7702(),
                     Err(err) => {
                         return TransactionValidationOutcome::Error(
@@ -861,7 +858,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         SpecId::MERGE
     };
 
-    let gas_after_merge = revm_interpreter::gas::validate_initial_tx_gas(
+    let gas = revm_interpreter::gas::calculate_initial_tx_gas(
         spec_id,
         transaction.input(),
         transaction.is_create(),
@@ -869,7 +866,8 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         transaction.authorization_count() as u64,
     );
 
-    if transaction.gas_limit() < gas_after_merge {
+    let gas_limit = transaction.gas_limit();
+    if gas_limit < gas.initial_gas || gas_limit < gas.floor_gas {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
     } else {
         Ok(())

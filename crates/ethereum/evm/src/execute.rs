@@ -1,7 +1,7 @@
 //! Ethereum block execution strategy.
 
 use crate::{
-    dao_fork::{DAO_HARDFORK_BENEFICIARY, DAO_HARDKFORK_ACCOUNTS},
+    dao_fork::{DAO_HARDFORK_ACCOUNTS, DAO_HARDFORK_BENEFICIARY},
     EthEvmConfig,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
@@ -256,7 +256,7 @@ where
             // drain balances from hardcoded addresses.
             let drained_balance: u128 = self
                 .state
-                .drain_balances(DAO_HARDKFORK_ACCOUNTS)
+                .drain_balances(DAO_HARDFORK_ACCOUNTS)
                 .map_err(|_| BlockValidationError::IncrementBalanceFailed)?
                 .into_iter()
                 .sum();
@@ -809,6 +809,7 @@ mod tests {
             .is_zero()));
     }
 
+    // <https://github.com/ethereum/EIPs/pull/9144>
     #[test]
     fn eip_2935_fork_activation_outside_window_bounds() {
         let fork_activation_block = (BLOCKHASH_SERVE_WINDOW + 256) as u64;
@@ -845,15 +846,6 @@ mod tests {
         // the hash for the ancestor of the fork activation block should be present
         assert!(executor
             .with_state_mut(|state| state.basic(HISTORY_STORAGE_ADDRESS).unwrap().is_some()));
-        assert_ne!(
-            executor.with_state_mut(|state| state
-                .storage(
-                    HISTORY_STORAGE_ADDRESS,
-                    U256::from(fork_activation_block % BLOCKHASH_SERVE_WINDOW as u64 - 1)
-                )
-                .unwrap()),
-            U256::ZERO
-        );
     }
 
     #[test]

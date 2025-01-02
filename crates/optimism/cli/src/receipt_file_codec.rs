@@ -25,8 +25,14 @@ use reth_downloaders::{file_client::FileClientError, receipt_file_client::Receip
 ///
 /// It's recommended to use [`with_capacity`](tokio_util::codec::FramedRead::with_capacity) to set
 /// the capacity of the framed reader to the size of the file.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct HackReceiptFileCodec<R = Receipt>(core::marker::PhantomData<R>);
+
+impl<R> Default for HackReceiptFileCodec<R> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
 
 impl<R> Decoder for HackReceiptFileCodec<R>
 where
@@ -116,11 +122,8 @@ impl TryFrom<HackReceipt> for OpReceipt {
             deposit_receipt_version,
         } = exported_receipt.try_into()?;
 
-        let receipt = alloy_consensus::Receipt {
-            status: success.into(),
-            cumulative_gas_used: cumulative_gas_used as u128,
-            logs,
-        };
+        let receipt =
+            alloy_consensus::Receipt { status: success.into(), cumulative_gas_used, logs };
 
         match tx_type {
             TxType::Legacy => Ok(Self::Legacy(receipt)),

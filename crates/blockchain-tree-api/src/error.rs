@@ -73,7 +73,7 @@ pub enum CanonicalError {
     #[error("transaction error on commit: {0}")]
     CanonicalCommit(String),
     /// Error indicating that a previous optimistic sync target was re-orged
-    #[error("transaction error on revert: {0}")]
+    #[error("optimistic sync target was re-orged at block: {0}")]
     OptimisticTargetRevert(BlockNumber),
 }
 
