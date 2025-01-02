@@ -433,12 +433,12 @@ revm-inspectors = "0.14.1"
 
 # eth
 alloy-chains = { version = "0.1.32", default-features = false }
-alloy-dyn-abi = "0.8.15"
-alloy-primitives = { version = "0.8.15", default-features = false, features = [
+alloy-dyn-abi = "0.8.16"
+alloy-primitives = { version = "0.8.16", default-features = false, features = [
     "map-foldhash",
 ] }
 alloy-rlp = { version = "0.3.10", default-features = false }
-alloy-sol-types = "0.8.15"
+alloy-sol-types = "0.8.16"
 alloy-trie = { version = "0.7", default-features = false }
 
 alloy-consensus = { version = "0.9.1", default-features = false }
