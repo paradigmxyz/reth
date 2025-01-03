@@ -1,4 +1,3 @@
-// todo: expand this (examples, assumptions, invariants)
 //! Execution extensions (`ExEx`).
 //!
 //! An execution extension is a task that derives its state from Reth's state.
@@ -22,6 +21,55 @@
 //! An `ExEx` will only receive notifications for blocks greater than the block emitted in the
 //! event. To clarify: if the `ExEx` emits `ExExEvent::FinishedHeight(0)` it will receive
 //! notifications for any `block_number > 0`.
+//!
+//! # Examples, Assumptions, and Invariants
+//!
+//! ## Examples
+//!
+//! ### Simple Indexer ExEx
+//! ```no_run
+//! use reth_exex::ExEx;
+//! use reth_provider::CanonStateNotification;
+//!
+//! async fn my_indexer(ctx: ExExContext) -> Result<(), Box<dyn std::error::Error>> {
+//!     // Subscribe to canonical state notifications
+//!     let mut notifications = ctx.canonical_state_notifications();
+//!     
+//!     while let Some(notification) = notifications.recv().await {
+//!         // Process new blocks
+//!         for block in notification.blocks() {
+//!             // Index or process block data
+//!             println!("Processed block: {}", block.number());
+//!         }
+//!         
+//!         // Signal completion for pruning
+//!         ctx.events().send(ExExEvent::FinishedHeight(block.number())).unwrap();
+//!     }
+//!     
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Assumptions
+//! 
+//! - ExExs run indefinitely alongside Reth
+//! - ExExs receive canonical state notifications for block execution
+//! - ExExs should handle potential network or database errors gracefully
+//! - ExExs must emit `FinishedHeight` events for proper state pruning
+//!
+//! ## Invariants
+//! 
+//! - An ExEx must not block the main Reth execution
+//! - Notifications are processed in canonical order
+//! - ExExs should be able to recover from temporary failures
+//! - Memory and resource usage must be controlled
+//! 
+//! ## Performance Considerations
+//! 
+//! - Minimize blocking operations
+//! - Use efficient data structures for state tracking
+//! - Implement proper error handling and logging
+//! - Consider batching operations for better performance
 //!
 //! [`Future`]: std::future::Future
 //! [`ExExContext`]: crate::ExExContext
