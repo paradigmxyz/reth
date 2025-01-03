@@ -1,8 +1,7 @@
 //! Contains RPC handler implementations specific to blocks.
 
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
-use reth_primitives::TransactionMeta;
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::BlockReader;
 use reth_rpc_eth_api::{
