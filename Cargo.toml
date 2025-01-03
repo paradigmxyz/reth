@@ -434,6 +434,7 @@ revm-inspectors = "0.14.1"
 # eth
 alloy-chains = { version = "0.1.32", default-features = false }
 alloy-dyn-abi = "0.8.15"
+alloy-eip2124 = { version = "0.1.0", default-features = false }
 alloy-primitives = { version = "0.8.15", default-features = false, features = [
     "map-foldhash",
 ] }
