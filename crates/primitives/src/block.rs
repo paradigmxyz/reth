@@ -232,6 +232,18 @@ where
     }
 }
 
+
+impl<H, B> SealedBlock<H, B>
+where
+    B: reth_primitives_traits::BlockBody,
+{
+    /// Returns the number of transactions in the block.
+    #[inline]
+    pub fn transaction_count(&self) -> usize {
+        self.body.transaction_count()
+    }
+}
+
 impl<H, B> SealedBlock<H, B>
 where
     H: alloy_consensus::BlockHeader,
