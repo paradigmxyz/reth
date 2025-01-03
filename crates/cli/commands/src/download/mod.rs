@@ -1,4 +1,4 @@
-use std::{io::Write, path::Path, sync::Arc};
+use std::{io::Write, path::Path, process::Command as ProcessCommand, sync::Arc};
 use tokio::{fs, io::AsyncWriteExt};
 
 use clap::Parser;
@@ -33,6 +33,10 @@ pub struct Command<C: ChainSpecParser> {
     /// TODO: check if we can add public snapshots urls by default
     #[arg(long, short, required = true)]
     url: String,
+
+    /// Whether to automatically decompress the snapshot after download
+    #[arg(long, short)]
+    decompress: bool,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
@@ -49,11 +53,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         download_snapshot(&self.url, &snapshot_path).await?;
 
         println!("Snapshot downloaded successfully to {:?}", snapshot_path);
-        //TODO: add decompression step
-        println!(
-            "Please extract the snapshot using: tar --use-compress-program=lz4 -xf {:?}",
-            snapshot_path
-        );
+        if self.decompress {
+            println!("Decompressing snapshot...");
+            decompress_snapshot(&snapshot_path, data_dir.data_dir())?;
+            println!("Snapshot decompressed successfully");
+
+            // Clean up compressed file
+            fs::remove_file(&snapshot_path).await?;
+        } else {
+            println!(
+                "Please extract the snapshot using: tar --use-compress-program=lz4 -xf {:?}",
+                snapshot_path
+            );
+        }
 
         Ok(())
     }
@@ -78,6 +90,23 @@ async fn download_snapshot(url: &str, target_path: &Path) -> Result<()> {
         }
     }
     println!("\nDownload complete!");
+
+    Ok(())
+}
+
+// Helper to decompress snashot file using lz4
+fn decompress_snapshot(snapshot_path: &Path, target_dir: &Path) -> Result<()> {
+    let status = ProcessCommand::new("tar")
+        .arg("--use-compress-program=lz4")
+        .arg("-xf")
+        .arg(snapshot_path)
+        .arg("-C")
+        .arg(target_dir)
+        .status()?;
+
+    if !status.success() {
+        return Err(eyre::eyre!("Failed to decompress snapshot"));
+    }
 
     Ok(())
 }
