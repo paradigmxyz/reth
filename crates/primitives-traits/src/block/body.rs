@@ -41,6 +41,10 @@ pub trait BlockBody:
     /// Returns reference to transactions in block.
     fn transactions(&self) -> &[Self::Transaction];
 
+    /// Returns the number of the transactions in the block.
+    fn transaction_count(&self) -> usize {
+        self.transactions().len()
+    }
     /// Consume the block body and return a [`Vec`] of transactions.
     fn into_transactions(self) -> Vec<Self::Transaction>;
 
