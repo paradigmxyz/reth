@@ -19,8 +19,6 @@ concurrency:
 name: bench
 jobs:
   codspeed:
-    runs-on:
-      group: Reth
     steps:
       - uses: actions/checkout@v4
         with:
