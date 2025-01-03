@@ -353,7 +353,7 @@ mod tests {
                 // Insert last progress data
                 let block_number = progress.number;
                 self.db.commit(|tx| {
-                    progress.body.transactions.iter().try_for_each(
+                    progress.body().transactions.iter().try_for_each(
                         |transaction| -> Result<(), reth_db::DatabaseError> {
                             tx.put::<tables::TransactionHashNumbers>(
                                 transaction.hash(),
@@ -398,7 +398,7 @@ mod tests {
 
                     let body = StoredBlockBodyIndices {
                         first_tx_num,
-                        tx_count: progress.body.transactions.len() as u64,
+                        tx_count: progress.body().transactions.len() as u64,
                     };
 
                     first_tx_num = next_tx_num;

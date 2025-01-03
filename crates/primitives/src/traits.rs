@@ -13,7 +13,7 @@ pub trait BlockExt: Block {
     /// Calculate the header hash and seal the block so that it can't be changed.
     fn seal_slow(self) -> SealedBlock<Self::Header, Self::Body> {
         let (header, body) = self.split();
-        SealedBlock { header: SealedHeader::seal(header), body }
+        SealedBlock::new(SealedHeader::seal(header), body)
     }
 
     /// Seal the block with a known hash.
@@ -21,7 +21,7 @@ pub trait BlockExt: Block {
     /// WARNING: This method does not perform validation whether the hash is correct.
     fn seal(self, hash: B256) -> SealedBlock<Self::Header, Self::Body> {
         let (header, body) = self.split();
-        SealedBlock { header: SealedHeader::new(header, hash), body }
+        SealedBlock::new(SealedHeader::new(header, hash), body)
     }
 
     /// Expensive operation that recovers transaction signer.

@@ -42,10 +42,10 @@ where
             let timestamp = block.timestamp();
 
             let l1_block_info =
-                reth_optimism_evm::extract_l1_info(&block.body).map_err(OpEthApiError::from)?;
+                reth_optimism_evm::extract_l1_info(block.body()).map_err(OpEthApiError::from)?;
 
             return block
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .zip(receipts.iter())

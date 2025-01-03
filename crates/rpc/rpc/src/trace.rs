@@ -315,7 +315,7 @@ where
                 all_traces.extend(
                     self.extract_reward_traces(
                         block.header.header(),
-                        block.body.ommers(),
+                        block.body().ommers(),
                         base_block_reward,
                     )
                     .into_iter()
@@ -396,7 +396,7 @@ where
             {
                 traces.extend(self.extract_reward_traces(
                     block.block.header(),
-                    block.body.ommers(),
+                    block.body().ommers(),
                     base_block_reward,
                 ));
             }

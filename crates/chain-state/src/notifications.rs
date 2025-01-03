@@ -214,9 +214,10 @@ impl<T: Clone + Sync + Send + 'static> Stream for ForkChoiceStream<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::BlockBody;
     use alloy_primitives::{b256, B256};
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{Receipt, Receipts, TransactionSigned, TxType};
+    use reth_primitives::{Receipt, Receipts, SealedBlock, TransactionSigned, TxType};
 
     #[test]
     fn test_commit_notification() {
@@ -295,7 +296,7 @@ mod tests {
     #[test]
     fn test_block_receipts_commit() {
         // Create a default block instance for use in block definitions.
-        let block: SealedBlockWithSenders = Default::default();
+        let mut body = BlockBody::<TransactionSigned>::default();
 
         // Define unique hashes for two blocks to differentiate them in the chain.
         let block1_hash = B256::new([0x01; 32]);
@@ -303,13 +304,17 @@ mod tests {
 
         // Create a default transaction to include in block1's transactions.
         let tx = TransactionSigned::default();
+        body.transactions.push(tx);
+
+        let block: SealedBlockWithSenders =
+            SealedBlock::new(SealedHeader::seal(alloy_consensus::Header::default()), body)
+                .seal_with_senders()
+                .unwrap();
 
         // Create a clone of the default block and customize it to act as block1.
         let mut block1 = block.clone();
         block1.set_block_number(1);
         block1.set_hash(block1_hash);
-        // Add the transaction to block1's transactions.
-        block1.block.body.transactions.push(tx);
 
         // Clone the default block and customize it to act as block2.
         let mut block2 = block;
@@ -365,10 +370,14 @@ mod tests {
     #[test]
     fn test_block_receipts_reorg() {
         // Define block1 for the old chain segment, which will be reverted.
-        let mut old_block1: SealedBlockWithSenders = Default::default();
+        let mut body = BlockBody::<TransactionSigned>::default();
+        body.transactions.push(TransactionSigned::default());
+        let mut old_block1: SealedBlockWithSenders =
+            SealedBlock::new(SealedHeader::seal(alloy_consensus::Header::default()), body)
+                .seal_with_senders()
+                .unwrap();
         old_block1.set_block_number(1);
         old_block1.set_hash(B256::new([0x01; 32]));
-        old_block1.block.body.transactions.push(TransactionSigned::default());
 
         // Create a receipt for a transaction in the reverted block.
         #[allow(clippy::needless_update)]
@@ -389,10 +398,14 @@ mod tests {
             Arc::new(Chain::new(vec![old_block1.clone()], old_execution_outcome, None));
 
         // Define block2 for the new chain segment, which will be committed.
-        let mut new_block1: SealedBlockWithSenders = Default::default();
+        let mut body = BlockBody::<TransactionSigned>::default();
+        body.transactions.push(TransactionSigned::default());
+        let mut new_block1: SealedBlockWithSenders =
+            SealedBlock::new(SealedHeader::seal(alloy_consensus::Header::default()), body)
+                .seal_with_senders()
+                .unwrap();
         new_block1.set_block_number(2);
         new_block1.set_hash(B256::new([0x02; 32]));
-        new_block1.block.body.transactions.push(TransactionSigned::default());
 
         // Create a receipt for a transaction in the new committed block.
         #[allow(clippy::needless_update)]

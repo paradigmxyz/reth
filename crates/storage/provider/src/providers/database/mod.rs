@@ -718,10 +718,10 @@ mod tests {
             );
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
-                if sender == block.body.transactions[0].recover_signer().unwrap()
+                if sender == block.body().transactions[0].recover_signer().unwrap()
             );
             assert_matches!(
-                provider.transaction_id(block.body.transactions[0].hash()),
+                provider.transaction_id(block.body().transactions[0].hash()),
                 Ok(Some(0))
             );
         }
@@ -741,7 +741,7 @@ mod tests {
                 Ok(_)
             );
             assert_matches!(provider.transaction_sender(0), Ok(None));
-            assert_matches!(provider.transaction_id(block.body.transactions[0].hash()), Ok(None));
+            assert_matches!(provider.transaction_id(block.body().transactions[0].hash()), Ok(None));
         }
     }
 
@@ -772,7 +772,7 @@ mod tests {
                     .clone()
                     .map(|tx_number| (
                         tx_number,
-                        block.body.transactions[tx_number as usize].recover_signer().unwrap()
+                        block.body().transactions[tx_number as usize].recover_signer().unwrap()
                     ))
                     .collect())
             );

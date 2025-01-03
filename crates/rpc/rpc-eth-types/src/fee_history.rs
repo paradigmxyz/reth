@@ -89,7 +89,7 @@ impl FeeHistoryCache {
                 &percentiles,
                 fee_history_entry.gas_used,
                 fee_history_entry.base_fee_per_gas,
-                block.body.transactions(),
+                block.body().transactions(),
                 &receipts,
             )
             .unwrap_or_default();
@@ -370,7 +370,7 @@ impl FeeHistoryEntry {
             base_fee_per_blob_gas: block
                 .excess_blob_gas()
                 .map(alloy_eips::eip4844::calc_blob_gasprice),
-            blob_gas_used_ratio: block.body.blob_gas_used() as f64 /
+            blob_gas_used_ratio: block.body().blob_gas_used() as f64 /
                 alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
             excess_blob_gas: block.excess_blob_gas(),
             blob_gas_used: block.blob_gas_used(),

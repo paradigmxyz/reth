@@ -21,11 +21,7 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
     transformed.header.transactions_root =
         proofs::calculate_transaction_root(&transformed.body.transactions);
     transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.body.ommers);
-    block_to_payload(SealedBlock {
-        header: SealedHeader::seal(transformed.header),
-        body: transformed.body,
-    })
-    .0
+    block_to_payload(SealedBlock::new(SealedHeader::seal(transformed.header), transformed.body)).0
 }
 
 #[test]
@@ -40,7 +36,7 @@ fn payload_body_roundtrip() {
             ExecutionPayloadBodyV1::from_block(block.clone().unseal::<Block>());
 
         assert_eq!(
-            Ok(block.body.transactions),
+            Ok(block.body().transactions.clone()),
             payload_body
                 .transactions
                 .iter()
@@ -48,7 +44,7 @@ fn payload_body_roundtrip() {
                 .collect::<Result<Vec<_>, _>>(),
         );
         let withdraw = payload_body.withdrawals.map(Withdrawals::new);
-        assert_eq!(block.body.withdrawals, withdraw);
+        assert_eq!(block.body().withdrawals.clone(), withdraw);
     }
 }
 
