@@ -477,7 +477,7 @@ mod tests {
         let expected_progress = seed
             .iter()
             .find(|x| {
-                tx_count += x.body().transactions.len();
+                tx_count += x.transaction_count();
                 tx_count as u64 > threshold
             })
             .map(|x| x.number)
@@ -555,7 +555,7 @@ mod tests {
                     tx_number: Some(
                         blocks[..=max_pruned_block as usize]
                             .iter()
-                            .map(|block| block.body().transactions.len() as u64)
+                            .map(|block| block.transaction_count() as u64)
                             .sum(),
                     ),
                     prune_mode: PruneMode::Full,
@@ -570,9 +570,9 @@ mod tests {
             EntitiesCheckpoint {
                 processed: blocks[..=max_processed_block]
                     .iter()
-                    .map(|block| block.body().transactions.len() as u64)
+                    .map(|block| block.transaction_count() as u64)
                     .sum(),
-                total: blocks.iter().map(|block| block.body().transactions.len() as u64).sum()
+                total: blocks.iter().map(|block| block.transaction_count() as u64).sum()
             }
         );
     }

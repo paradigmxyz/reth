@@ -252,7 +252,7 @@ impl TestStageDB {
                 // Insert into body tables.
                 let block_body_indices = StoredBlockBodyIndices {
                     first_tx_num: next_tx_num,
-                    tx_count: block.body().transactions.len() as u64,
+                    tx_count: block.transaction_count() as u64,
                 };
 
                 if !block.body().transactions.is_empty() {
@@ -277,8 +277,8 @@ impl TestStageDB {
                     // Backfill: some tests start at a forward block number, but static files
                     // require no gaps.
                     let segment_header = txs_writer.user_header();
-                    if segment_header.block_end().is_none() &&
-                        segment_header.expected_block_start() == 0
+                    if segment_header.block_end().is_none()
+                        && segment_header.expected_block_start() == 0
                     {
                         for block in 0..block.number {
                             txs_writer.increment_block(block)?;
@@ -489,7 +489,7 @@ impl StorageKind {
 
     fn tx_offset(&self) -> u64 {
         if let Self::Database(offset) = self {
-            return offset.unwrap_or_default()
+            return offset.unwrap_or_default();
         }
         0
     }
