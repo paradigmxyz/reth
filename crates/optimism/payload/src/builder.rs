@@ -1,7 +1,7 @@
 //! Optimism payload builder implementation.
 
 use crate::{
-    config::OpBuilderConfig,
+    config::{OpBuilderConfig, OpDAConfig},
     error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
@@ -142,7 +142,7 @@ where
             best_payload,
         };
 
-        let builder = OpBuilder::new(best);
+        let builder = OpBuilder::new(best, self.config.clone());
 
         let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
@@ -209,7 +209,7 @@ where
         let state = StateProviderDatabase::new(state_provider);
         let mut state = State::builder().with_database(state).with_bundle_update().build();
 
-        let builder = OpBuilder::new(|_| NoopPayloadTransactions::default());
+        let builder = OpBuilder::new(|_| NoopPayloadTransactions::default(), self.config.clone());
         builder.witness(&mut state, &ctx)
     }
 }
@@ -284,11 +284,15 @@ pub struct OpBuilder<'a, Txs> {
     /// Yields the best transaction to include if transactions from the mempool are allowed.
     #[debug(skip)]
     best: Box<dyn FnOnce(BestTransactionsAttributes) -> Txs + 'a>,
+    config: OpBuilderConfig,
 }
 
 impl<'a, Txs> OpBuilder<'a, Txs> {
-    fn new(best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a) -> Self {
-        Self { best: Box::new(best) }
+    fn new(
+        best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
+        config: OpBuilderConfig,
+    ) -> Self {
+        Self { best: Box::new(best), config }
     }
 }
 
@@ -306,7 +310,7 @@ where
         EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
         DB: Database<Error = ProviderError>,
     {
-        let Self { best } = self;
+        let Self { best, config: _ } = self;
         debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
 
         // 1. apply eip-4788 pre block contract call
@@ -321,14 +325,22 @@ where
         // 4. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
             let best_txs = best(ctx.best_transaction_attributes());
-            if ctx.execute_best_transactions(&mut info, state, best_txs)?.is_some() {
-                return Ok(BuildOutcomeKind::Cancelled)
+            if ctx
+                .execute_best_transactions(
+                    &mut info,
+                    state,
+                    best_txs,
+                    self.config.da_config.clone(),
+                )?
+                .is_some()
+            {
+                return Ok(BuildOutcomeKind::Cancelled);
             }
 
             // check if the new payload is even more valuable
             if !ctx.is_better_payload(info.total_fees) {
                 // can skip building the block
-                return Ok(BuildOutcomeKind::Aborted { fees: info.total_fees })
+                return Ok(BuildOutcomeKind::Aborted { fees: info.total_fees });
             }
         }
 
@@ -855,6 +867,7 @@ where
         info: &mut ExecutionInfo,
         db: &mut State<DB>,
         mut best_txs: impl PayloadTransactions<Transaction = EvmConfig::Transaction>,
+        da_config: OpDAConfig,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
@@ -868,6 +881,9 @@ where
             TxEnv::default(),
         );
         let mut evm = self.evm_config.evm_with_env(&mut *db, env);
+
+        // Track cumulative size to throttle the block
+        let mut cumulative_da_size: u64 = 0;
 
         while let Some(tx) = best_txs.next(()) {
             // ensure we still have capacity for this transaction
@@ -884,6 +900,23 @@ where
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue
             }
+
+            // check if calldata is smaller than max DA tx limit
+            let exceeds_tx_size =
+                da_config.max_da_tx_size().is_some_and(|max| tx.calldata_size() > max);
+            // check if calldata with the current cumulative size is bigger than block limit size
+            let exceeds_block_size = da_config
+                .max_da_block_size()
+                .is_some_and(|max| tx.calldata_size() + cumulative_da_size > max);
+
+            // if above limit, we throttle and mark the tx invalid
+            if exceeds_tx_size || exceeds_block_size {
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
+                continue;
+            }
+
+            // Update cumulative DA size
+            cumulative_da_size += tx.calldata_size();
 
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
