@@ -408,7 +408,7 @@ where
         self.inner.on_new_head_block(new_tip_block);
         self.update_l1_block_info(
             new_tip_block.header(),
-            new_tip_block.body.transactions().first(),
+            new_tip_block.body().transactions().first(),
         );
     }
 }

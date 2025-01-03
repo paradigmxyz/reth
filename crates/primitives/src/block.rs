@@ -190,6 +190,16 @@ impl<H, B> SealedBlock<H, B> {
         &self.body
     }
 
+    /// Consumes the block and returns the header.
+    pub fn into_header(self) -> H {
+        self.header.unseal()
+    }
+
+    /// Consumes the block and returns the body.
+    pub fn into_body(self) -> B {
+        self.body
+    }
+
     /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
     #[inline]
     pub fn split_header_body(self) -> (SealedHeader<H>, B) {

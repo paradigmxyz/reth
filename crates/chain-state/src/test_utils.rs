@@ -168,14 +168,14 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             ..Default::default()
         };
 
-        let block = SealedBlock {
-            header: SealedHeader::seal(header),
-            body: BlockBody {
+        let block = SealedBlock::new(
+            SealedHeader::seal(header),
+            BlockBody {
                 transactions: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
                 ommers: Vec::new(),
                 withdrawals: Some(vec![].into()),
             },
-        };
+        );
 
         SealedBlockWithSenders::new(block, vec![self.signer; num_txs as usize]).unwrap()
     }
@@ -259,7 +259,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     /// updated.
     pub fn get_execution_outcome(&mut self, block: SealedBlockWithSenders) -> ExecutionOutcome {
         let receipts = block
-            .body
+            .body()
             .transactions
             .iter()
             .enumerate()
@@ -273,7 +273,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let mut bundle_state_builder = BundleState::builder(block.number..=block.number);
 
-        for tx in &block.body.transactions {
+        for tx in &block.body().transactions {
             self.signer_execute_account_info.balance -= Self::single_tx_cost();
             bundle_state_builder = bundle_state_builder.state_present_account_info(
                 self.signer,

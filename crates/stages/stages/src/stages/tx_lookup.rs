@@ -385,7 +385,7 @@ mod tests {
         let mut tx_hash_numbers = Vec::new();
         let mut tx_hash_number = 0;
         for block in &blocks[..=max_processed_block] {
-            for transaction in &block.body.transactions {
+            for transaction in &block.body().transactions {
                 if block.number > max_pruned_block {
                     tx_hash_numbers.push((transaction.hash(), tx_hash_number));
                 }
@@ -403,7 +403,7 @@ mod tests {
                     tx_number: Some(
                         blocks[..=max_pruned_block as usize]
                             .iter()
-                            .map(|block| block.body.transactions.len() as u64)
+                            .map(|block| block.body().transactions.len() as u64)
                             .sum::<u64>()
                             .sub(1), // `TxNumber` is 0-indexed
                     ),
@@ -419,9 +419,9 @@ mod tests {
             EntitiesCheckpoint {
                 processed: blocks[..=max_processed_block]
                     .iter()
-                    .map(|block| block.body.transactions.len() as u64)
+                    .map(|block| block.body().transactions.len() as u64)
                     .sum(),
-                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum()
+                total: blocks.iter().map(|block| block.body().transactions.len() as u64).sum()
             }
         );
     }

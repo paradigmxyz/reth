@@ -269,7 +269,7 @@ where
 
     // Fetch reorg target block depending on its depth and its parent.
     let mut previous_hash = next_block.parent_hash;
-    let mut candidate_transactions = next_block.body.transactions;
+    let mut candidate_transactions = next_block.into_body().transactions;
     let reorg_target = 'target: {
         loop {
             let reorg_target = provider

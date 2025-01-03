@@ -1635,14 +1635,14 @@ mod tests {
             };
 
             SealedBlockWithSenders::new(
-                SealedBlock {
-                    header: SealedHeader::seal(header),
-                    body: BlockBody {
+                SealedBlock::new(
+                    SealedHeader::seal(header),
+                    BlockBody {
                         transactions: signed_body,
                         ommers: Vec::new(),
                         withdrawals: Some(Withdrawals::default()),
                     },
-                },
+                ),
                 body.iter().map(|tx| tx.signer()).collect(),
             )
             .unwrap()

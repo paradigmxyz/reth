@@ -477,7 +477,7 @@ mod tests {
         let expected_progress = seed
             .iter()
             .find(|x| {
-                tx_count += x.body.transactions.len();
+                tx_count += x.body().transactions.len();
                 tx_count as u64 > threshold
             })
             .map(|x| x.number)
@@ -536,7 +536,7 @@ mod tests {
         let mut tx_senders = Vec::new();
         let mut tx_number = 0;
         for block in &blocks[..=max_processed_block] {
-            for transaction in &block.body.transactions {
+            for transaction in &block.body().transactions {
                 if block.number > max_pruned_block {
                     tx_senders
                         .push((tx_number, transaction.recover_signer().expect("recover signer")));
@@ -555,7 +555,7 @@ mod tests {
                     tx_number: Some(
                         blocks[..=max_pruned_block as usize]
                             .iter()
-                            .map(|block| block.body.transactions.len() as u64)
+                            .map(|block| block.body().transactions.len() as u64)
                             .sum(),
                     ),
                     prune_mode: PruneMode::Full,
@@ -570,9 +570,9 @@ mod tests {
             EntitiesCheckpoint {
                 processed: blocks[..=max_processed_block]
                     .iter()
-                    .map(|block| block.body.transactions.len() as u64)
+                    .map(|block| block.body().transactions.len() as u64)
                     .sum(),
-                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum()
+                total: blocks.iter().map(|block| block.body().transactions.len() as u64).sum()
             }
         );
     }

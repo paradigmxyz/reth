@@ -29,7 +29,7 @@ pub(crate) fn generate_bodies(
     );
 
     let headers = blocks.iter().map(|block| block.header.clone()).collect();
-    let bodies = blocks.into_iter().map(|block| (block.hash(), block.body)).collect();
+    let bodies = blocks.into_iter().map(|block| (block.hash(), block.into_body())).collect();
 
     (headers, bodies)
 }

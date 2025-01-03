@@ -42,7 +42,7 @@ pub fn validate_header_base_fee<H: BlockHeader, ChainSpec: EthereumHardforks>(
 pub fn validate_shanghai_withdrawals<H: BlockHeader, B: BlockBody>(
     block: &SealedBlock<H, B>,
 ) -> Result<(), ConsensusError> {
-    let withdrawals = block.body.withdrawals().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
+    let withdrawals = block.body().withdrawals().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
     let withdrawals_root = alloy_consensus::proofs::calculate_withdrawals_root(withdrawals);
     let header_withdrawals_root =
         block.withdrawals_root().ok_or(ConsensusError::WithdrawalsRootMissing)?;
@@ -67,7 +67,7 @@ pub fn validate_cancun_gas<H: BlockHeader, B: BlockBody>(
     // blob tx
     let header_blob_gas_used =
         block.header().blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
-    let total_blob_gas = block.body.blob_gas_used();
+    let total_blob_gas = block.body().blob_gas_used();
     if total_blob_gas != header_blob_gas_used {
         return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
             got: header_blob_gas_used,
@@ -139,7 +139,7 @@ where
     ChainSpec: EthereumHardforks,
 {
     // Check ommers hash
-    let ommers_hash = block.body.calculate_ommers_root();
+    let ommers_hash = block.body().calculate_ommers_root();
     if Some(block.header.ommers_hash()) != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff(
             GotExpected {
@@ -514,10 +514,10 @@ mod tests {
         let transactions = Vec::new();
 
         (
-            SealedBlock {
-                header: SealedHeader::seal(header),
-                body: BlockBody { transactions, ommers, withdrawals: None },
-            },
+            SealedBlock::new(
+                SealedHeader::seal(header),
+                BlockBody { transactions, ommers, withdrawals: None },
+            ),
             parent,
         )
     }
@@ -539,10 +539,10 @@ mod tests {
                 ..Default::default()
             };
 
-            SealedBlock {
-                header: SealedHeader::seal(header),
-                body: BlockBody { withdrawals: Some(withdrawals), ..Default::default() },
-            }
+            SealedBlock::new(
+                SealedHeader::seal(header),
+                BlockBody { withdrawals: Some(withdrawals), ..Default::default() },
+            )
         };
 
         // Single withdrawal
