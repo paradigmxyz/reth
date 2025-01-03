@@ -8782,6 +8782,7 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
+ "rayon",
  "reth-codecs",
  "revm-primitives",
  "secp256k1",
