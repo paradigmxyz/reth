@@ -169,7 +169,7 @@ pub struct SealedBlock<H = Header, B = BlockBody> {
     #[deref_mut]
     pub header: SealedHeader<H>,
     /// Block body.
-    pub body: B,
+    body: B,
 }
 
 impl<H, B> SealedBlock<H, B> {
