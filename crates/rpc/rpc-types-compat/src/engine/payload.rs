@@ -5,7 +5,7 @@ use alloy_consensus::Header;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, eip7685::RequestsOrHash};
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
-    payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
+    payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2},
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
     ExecutionPayloadV2, ExecutionPayloadV3, PraguePayloadFields,
 };
@@ -103,14 +103,6 @@ pub fn convert_block_to_payload_field_v2<T: Encodable2718>(
         ExecutionPayloadFieldV2::V2(block_to_payload_v2(value))
     } else {
         ExecutionPayloadFieldV2::V1(block_to_payload_v1(value))
-    }
-}
-
-/// Converts [`SealedBlock`] to [`ExecutionPayloadInputV2`]
-pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayloadInputV2 {
-    ExecutionPayloadInputV2 {
-        withdrawals: value.body.withdrawals.clone().map(Withdrawals::into_inner),
-        execution_payload: block_to_payload_v1(value),
     }
 }
 
