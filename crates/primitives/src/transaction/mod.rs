@@ -19,7 +19,6 @@ use alloy_primitives::{
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
 use core::hash::{Hash, Hasher};
 use derive_more::{AsRef, Deref};
-pub use meta::TransactionMeta;
 use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
@@ -49,7 +48,6 @@ pub mod signature;
 pub mod util;
 
 pub(crate) mod access_list;
-mod meta;
 mod pooled;
 mod tx_type;
 

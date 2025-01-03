@@ -9,7 +9,7 @@ use crate::{
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
-use alloy_consensus::Header;
+use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
@@ -31,7 +31,7 @@ use reth_node_types::{
 };
 use reth_primitives::{
     Account, BlockWithSenders, EthPrimitives, Receipt, SealedBlock, SealedBlockFor,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta,
+    SealedBlockWithSenders, SealedHeader,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
