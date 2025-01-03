@@ -29,21 +29,18 @@ auto_impl.workspace = true
 
 [dev-dependencies]
 arbitrary = { workspace = true, features = ["derive"] }
-alloy-consensus.workspace = true
 
 [features]
 default = ["std", "serde", "rustc-hash"]
 arbitrary = [
 	"dep:arbitrary",
 	"alloy-chains/arbitrary",
-	"alloy-consensus/arbitrary",
 	"alloy-primitives/arbitrary",
 	"alloy-eip2124/arbitrary"
 ]
 serde = [
 	"dep:serde",
 	"alloy-chains/serde",
-	"alloy-consensus/serde",
 	"alloy-primitives/serde",
 	"alloy-eip2124/serde"
 ]
@@ -51,7 +48,6 @@ std = [
 	"alloy-chains/std",
 	"alloy-primitives/std",
 	"rustc-hash/std",
-	"alloy-consensus/std",
 	"once_cell/std",
 	"serde?/std",
 	"alloy-eip2124/std"
