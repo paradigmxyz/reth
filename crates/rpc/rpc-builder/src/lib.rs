@@ -214,8 +214,15 @@ use std::{
 };
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
+use alloy_provider::{
+    fillers::{FillProvider, JoinFill, RecommendedFillers, TxFiller},
+    IpcConnect, ProviderBuilder, RootProvider, WsConnect,
+};
+use alloy_pubsub::PubSubFrontend;
+use alloy_transport_http::{reqwest, Http};
 use error::{ConflictingModules, RpcError, ServerKind};
 use eth::DynEthApiBuilder;
+use eyre::eyre;
 use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
@@ -2433,6 +2440,71 @@ impl RpcServerHandle {
 
         let client = builder.build(url).await.expect("failed to create ws client");
         Some(client)
+    }
+
+    /// Returns an http provider (with recommended fillers) from the rpc server handle for the
+    /// specified network
+    #[allow(clippy::type_complexity)]
+    pub fn new_http_provider_for<N: alloy_network::Network + RecommendedFillers + TxFiller>(
+        &self,
+    ) -> Result<
+        FillProvider<
+            JoinFill<alloy_provider::Identity, <N as RecommendedFillers>::RecommendedFillers>,
+            RootProvider<Http<reqwest::Client>, N>,
+            Http<reqwest::Client>,
+            N,
+        >,
+        eyre::Error,
+    > {
+        let rpc_url = self.http_url().unwrap().parse()?;
+        Ok(ProviderBuilder::<alloy_provider::Identity, alloy_provider::Identity, N>::default()
+            .with_recommended_fillers()
+            .on_http(rpc_url))
+    }
+
+    /// Returns an ipc provider (with recommended fillers) from the rpc server handle for the
+    /// specified network
+    #[allow(clippy::type_complexity)]
+    pub async fn new_ipc_provider_for<N: alloy_network::Network + RecommendedFillers + TxFiller>(
+        &self,
+    ) -> Result<
+        FillProvider<
+            JoinFill<alloy_provider::Identity, <N as RecommendedFillers>::RecommendedFillers>,
+            RootProvider<PubSubFrontend, N>,
+            PubSubFrontend,
+            N,
+        >,
+        eyre::Error,
+    > {
+        let ipc_endpoint =
+            self.ipc_endpoint().ok_or_else(|| eyre!("ipc endpoint not available"))?;
+        let ipc = IpcConnect::new(ipc_endpoint.to_string());
+        Ok(ProviderBuilder::<alloy_provider::Identity, alloy_provider::Identity, N>::default()
+            .with_recommended_fillers()
+            .on_ipc(ipc)
+            .await?)
+    }
+
+    /// Returns a ws provider (with recommended fillers) from the rpc server handle for the
+    /// specified network
+    #[allow(clippy::type_complexity)]
+    pub async fn new_ws_provider_for<N: alloy_network::Network + RecommendedFillers + TxFiller>(
+        &self,
+    ) -> Result<
+        FillProvider<
+            JoinFill<alloy_provider::Identity, <N as RecommendedFillers>::RecommendedFillers>,
+            RootProvider<PubSubFrontend, N>,
+            PubSubFrontend,
+            N,
+        >,
+        eyre::Error,
+    > {
+        let rpc_url = self.ws_url().ok_or_else(|| eyre!("ws url not available"))?;
+        let ws = WsConnect::new(rpc_url);
+        Ok(ProviderBuilder::<alloy_provider::Identity, alloy_provider::Identity, N>::default()
+            .with_recommended_fillers()
+            .on_ws(ws)
+            .await?)
     }
 }
 
