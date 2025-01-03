@@ -2246,7 +2246,7 @@ enum MDBX_option_t {
    * And for serie of lazy writes with flush is:
    *  latency = N * (emit + storage-execution) + flush + round-trip-to-storage.
    *
-   * So, for large N and/or noteable round-trip-to-storage the write+flush
+   * So, for large N and/or notable round-trip-to-storage the write+flush
    * approach is win. But for small N and/or near-zero NVMe-like latency
    * the write-through is better.
    *
