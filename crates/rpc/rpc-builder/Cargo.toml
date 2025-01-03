@@ -52,6 +52,7 @@ eyre.workspace = true
 alloy-transport-http.workspace = true
 alloy-provider = {workspace = true, features = ["ws","ipc"]}
 alloy-pubsub.workspace = true
+alloy-network.workspace = true
 
 [dev-dependencies]
 reth-chainspec.workspace = true
