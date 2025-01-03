@@ -263,7 +263,7 @@ pub fn random_block_range<R: Rng>(
             idx,
             BlockParams {
                 parent: Some(
-                    blocks.last().map(|block: &SealedBlock| block.header.hash()).unwrap_or(parent),
+                    blocks.last().map(|block: &SealedBlock| block.hash()).unwrap_or(parent),
                 ),
                 tx_count: Some(tx_count),
                 ommers_count: None,
