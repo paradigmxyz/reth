@@ -9,9 +9,7 @@ use alloy_rpc_types_engine::{
 };
 use assert_matches::assert_matches;
 use reth_primitives::{proofs, Block, SealedBlock, SealedHeader, TransactionSigned};
-use reth_rpc_types_compat::engine::payload::{
-    block_to_payload, block_to_payload_v1, convert_to_payload_body_v1,
-};
+use reth_rpc_types_compat::engine::payload::{block_to_payload, block_to_payload_v1};
 use reth_testing_utils::generators::{
     self, random_block, random_block_range, BlockParams, BlockRangeParams, Rng,
 };
@@ -38,8 +36,8 @@ fn payload_body_roundtrip() {
         0..=99,
         BlockRangeParams { tx_count: 0..2, ..Default::default() },
     ) {
-        let unsealed = block.clone().unseal::<Block>();
-        let payload_body: ExecutionPayloadBodyV1 = convert_to_payload_body_v1(unsealed);
+        let payload_body: ExecutionPayloadBodyV1 =
+            ExecutionPayloadBodyV1::from_block(block.clone().unseal::<Block>());
 
         assert_eq!(
             Ok(block.body.transactions),
