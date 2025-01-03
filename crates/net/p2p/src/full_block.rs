@@ -709,7 +709,7 @@ mod tests {
         assert_eq!(received.len(), 10);
         for (i, block) in received.iter().enumerate() {
             let expected_number = header.number - i as u64;
-            assert_eq!(block.header.number, expected_number);
+            assert_eq!(block.number, expected_number);
         }
     }
 
@@ -728,7 +728,7 @@ mod tests {
         assert_eq!(received.len(), 50);
         for (i, block) in received.iter().enumerate() {
             let expected_number = header.number - i as u64;
-            assert_eq!(block.header.number, expected_number);
+            assert_eq!(block.number, expected_number);
         }
     }
 
@@ -748,7 +748,7 @@ mod tests {
         assert_eq!(received.len(), range_length);
         for (i, block) in received.iter().enumerate() {
             let expected_number = header.number - i as u64;
-            assert_eq!(block.header.number, expected_number);
+            assert_eq!(block.number, expected_number);
         }
     }
 }

@@ -18,7 +18,7 @@ use reth_primitives::{
 use reth_primitives_traits::{Block, BlockBody as _, SignedTransaction};
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, ops::Deref, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -183,7 +183,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
         let header = in_memory_state
             .head_state()
-            .map_or_else(SealedHeader::default, |state| state.block_ref().block().header.clone());
+            .map_or_else(SealedHeader::default, |state| state.block_ref().block().deref().clone());
         let chain_info_tracker = ChainInfoTracker::new(header, finalized, safe);
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
@@ -462,7 +462,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns the `SealedHeader` corresponding to the pending state.
     pub fn pending_sealed_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
-        self.pending_state().map(|h| h.block_ref().block().header.clone())
+        self.pending_state().map(|h| h.block_ref().block().deref().clone())
     }
 
     /// Returns the `Header` corresponding to the pending state.
@@ -584,7 +584,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                     index: index as u64,
                     block_hash: block_state.hash(),
                     block_number: block_state.block_ref().block.number(),
-                    base_fee: block_state.block_ref().block.header.base_fee_per_gas(),
+                    base_fee: block_state.block_ref().block.base_fee_per_gas(),
                     timestamp: block_state.block_ref().block.timestamp(),
                     excess_blob_gas: block_state.block_ref().block.excess_blob_gas(),
                 };
@@ -664,7 +664,7 @@ impl<N: NodePrimitives> BlockState<N> {
     /// Returns the state root after applying the executed block that determines
     /// the state.
     pub fn state_root(&self) -> B256 {
-        self.block.block().header.state_root()
+        self.block.block().state_root()
     }
 
     /// Returns the `Receipts` of executed block that determines the state.
@@ -789,7 +789,7 @@ impl<N: NodePrimitives> BlockState<N> {
                         index: index as u64,
                         block_hash: block_state.hash(),
                         block_number: block_state.block_ref().block.number(),
-                        base_fee: block_state.block_ref().block.header.base_fee_per_gas(),
+                        base_fee: block_state.block_ref().block.base_fee_per_gas(),
                         timestamp: block_state.block_ref().block.timestamp(),
                         excess_blob_gas: block_state.block_ref().block.excess_blob_gas(),
                     };
@@ -1318,7 +1318,7 @@ mod tests {
         );
 
         // Check the pending header
-        assert_eq!(state.pending_header().unwrap(), block2.block().header.header().clone());
+        assert_eq!(state.pending_header().unwrap(), block2.block().header().clone());
 
         // Check the pending sealed header
         assert_eq!(state.pending_sealed_header().unwrap(), block2.block().header.clone());

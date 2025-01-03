@@ -75,9 +75,9 @@ impl Consensus<Header, OpBlockBody> for OpBeaconConsensus {
     ) -> Result<(), ConsensusError> {
         // Check ommers hash
         let ommers_hash = block.body().calculate_ommers_root();
-        if block.header.ommers_hash != ommers_hash {
+        if block.ommers_hash != ommers_hash {
             return Err(ConsensusError::BodyOmmersHashDiff(
-                GotExpected { got: ommers_hash, expected: block.header.ommers_hash }.into(),
+                GotExpected { got: ommers_hash, expected: block.ommers_hash }.into(),
             ))
         }
 

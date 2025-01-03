@@ -32,7 +32,7 @@ pub fn block_to_payload<T: SignedTransaction>(
         _ => ExecutionPayloadSidecar::none(),
     };
 
-    let execution_payload = if value.header.parent_beacon_block_root.is_some() {
+    let execution_payload = if value.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
         ExecutionPayload::V3(block_to_payload_v3(value))
     } else if value.body().withdrawals.is_some() {

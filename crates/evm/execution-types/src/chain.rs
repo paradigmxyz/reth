@@ -710,10 +710,10 @@ mod tests {
         let mut block3 = block.clone();
         let mut block4 = block;
 
-        block1.block.header.set_hash(block1_hash);
-        block2.block.header.set_hash(block2_hash);
-        block3.block.header.set_hash(block3_hash);
-        block4.block.header.set_hash(block4_hash);
+        block1.block.set_hash(block1_hash);
+        block2.block.set_hash(block2_hash);
+        block3.block.set_hash(block3_hash);
+        block4.block.set_hash(block4_hash);
 
         block3.set_parent_hash(block2_hash);
 
