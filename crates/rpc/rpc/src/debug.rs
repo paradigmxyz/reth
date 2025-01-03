@@ -26,7 +26,7 @@ use reth_provider::{
     BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, ProviderBlock,
     ReceiptProviderIdExt, StateProofProvider, TransactionVariant,
 };
-use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
+use reth_revm::{witness::ExecutionWitnessRecord, StateProviderDatabase};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
@@ -633,8 +633,7 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
-                let db = StateProviderDatabase::new(&state_provider);
-                let block_executor = this.inner.block_executor.executor(db);
+                let block_executor = this.inner.block_executor.executor(&state_provider);
 
                 let mut witness_record = ExecutionWitnessRecord::default();
 

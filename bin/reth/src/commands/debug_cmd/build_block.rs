@@ -37,7 +37,7 @@ use reth_provider::{
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
     StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::{cached::CachedReads, database::StateProviderDatabase, primitives::KzgSettings};
+use reth_revm::{cached::CachedReads, primitives::KzgSettings};
 use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -259,9 +259,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     SealedBlockWithSenders::<BlockTy<N>>::new(block.clone(), senders).unwrap();
 
                 let state_provider = blockchain_db.latest()?;
-                let db = StateProviderDatabase::new(&state_provider);
-                let executor =
-                    EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
+                let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec())
+                    .executor(&state_provider);
 
                 let block_execution_output =
                     executor.execute(&block_with_senders.clone().unseal())?;

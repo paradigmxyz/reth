@@ -25,7 +25,6 @@ use reth_provider::{
     DatabaseProviderFactory, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
     ProviderError, ProviderFactory, StateWriter, StorageLocation,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages::{
     stages::{AccountHashingStage, MerkleStage, StorageHashingStage},
     ExecInput, Stage, StageCheckpoint,
@@ -162,9 +161,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             provider_rw.insert_block(sealed_block.clone(), StorageLocation::Database)?;
 
             td += sealed_block.difficulty;
-            let mut executor = executor_provider.batch_executor(StateProviderDatabase::new(
-                LatestStateProviderRef::new(&provider_rw),
-            ));
+            let mut executor =
+                executor_provider.batch_executor(LatestStateProviderRef::new(&provider_rw));
             executor.execute_and_verify_one(&sealed_block.clone().unseal())?;
             let execution_outcome = executor.finalize();
 
@@ -216,11 +214,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
             let clean_input = ExecInput { target: Some(sealed_block.number), checkpoint: None };
             loop {
-                let clean_result = merkle_stage
-                    .execute(&provider_rw, clean_input)
-                    .map_err(|e| eyre::eyre!("Clean state root calculation failed: {}", e))?;
-                if clean_result.done {
-                    break;
+                let clean_result = merkle_stage.execute(&provider_rw, clean_input);
+                assert!(clean_result.is_ok(), "Clean state root calculation failed");
+                if clean_result.unwrap().done {
+                    break
                 }
             }
 

@@ -32,7 +32,6 @@ reth-execution-types.workspace = true
 reth-prune.workspace = true
 reth-prune-types.workspace = true
 reth-storage-errors.workspace = true
-reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
@@ -68,7 +67,6 @@ reth-execution-errors.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-downloaders.workspace = true
-reth-revm.workspace = true
 reth-static-file.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
@@ -109,7 +107,6 @@ test-utils = [
     "reth-downloaders/test-utils",
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
-    "reth-revm/test-utils",
     "reth-codecs/test-utils",
     "reth-db-api/test-utils",
     "reth-trie-db/test-utils",
