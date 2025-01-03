@@ -16,14 +16,11 @@ use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 pub fn block_to_payload<T: SignedTransaction>(
     value: SealedBlock<Header, BlockBody<T>>,
 ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-    let cancun = if let Some(parent_beacon_block_root) = value.parent_beacon_block_root {
-        Some(CancunPayloadFields {
+    let cancun =
+        value.parent_beacon_block_root.map(|parent_beacon_block_root| CancunPayloadFields {
             parent_beacon_block_root,
-            versioned_hashes: value.body.blob_versioned_hashes_iter().copied().collect(),
-        })
-    } else {
-        None
-    };
+            versioned_hashes: value.body().blob_versioned_hashes_iter().copied().collect(),
+        });
 
     let prague = value
         .requests_hash
@@ -38,7 +35,7 @@ pub fn block_to_payload<T: SignedTransaction>(
     let execution_payload = if value.header.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
         ExecutionPayload::V3(block_to_payload_v3(value))
-    } else if value.body.withdrawals.is_some() {
+    } else if value.body().withdrawals.is_some() {
         // block with withdrawals: V2
         ExecutionPayload::V2(block_to_payload_v2(value))
     } else {
@@ -54,7 +51,7 @@ pub fn block_to_payload_v1<T: Encodable2718>(
     value: SealedBlock<Header, BlockBody<T>>,
 ) -> ExecutionPayloadV1 {
     let transactions =
-        value.body.transactions.iter().map(|tx| tx.encoded_2718().into()).collect::<Vec<_>>();
+        value.body().transactions.iter().map(|tx| tx.encoded_2718().into()).collect::<Vec<_>>();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,
         fee_recipient: value.beneficiary,
@@ -75,10 +72,10 @@ pub fn block_to_payload_v1<T: Encodable2718>(
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV2`]
 pub fn block_to_payload_v2<T: Encodable2718>(
-    mut value: SealedBlock<Header, BlockBody<T>>,
+    value: SealedBlock<Header, BlockBody<T>>,
 ) -> ExecutionPayloadV2 {
     ExecutionPayloadV2 {
-        withdrawals: value.body.withdrawals.take().unwrap_or_default().into_inner(),
+        withdrawals: value.body().withdrawals.clone().unwrap_or_default().into_inner(),
         payload_inner: block_to_payload_v1(value),
     }
 }
@@ -99,7 +96,7 @@ pub fn convert_block_to_payload_field_v2<T: Encodable2718>(
     value: SealedBlock<Header, BlockBody<T>>,
 ) -> ExecutionPayloadFieldV2 {
     // if there are withdrawals, return V2
-    if value.body.withdrawals.is_some() {
+    if value.body().withdrawals.is_some() {
         ExecutionPayloadFieldV2::V2(block_to_payload_v2(value))
     } else {
         ExecutionPayloadFieldV2::V1(block_to_payload_v1(value))

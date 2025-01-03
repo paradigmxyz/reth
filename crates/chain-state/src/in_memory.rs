@@ -549,7 +549,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             if let Some(tx) = block_state
                 .block_ref()
                 .block()
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .find(|tx| tx.trie_hash() == hash)
@@ -573,7 +573,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             if let Some((index, tx)) = block_state
                 .block_ref()
                 .block()
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .enumerate()
@@ -758,7 +758,7 @@ impl<N: NodePrimitives> BlockState<N> {
             block_state
                 .block_ref()
                 .block()
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .find(|tx| tx.trie_hash() == hash)
@@ -778,7 +778,7 @@ impl<N: NodePrimitives> BlockState<N> {
             block_state
                 .block_ref()
                 .block()
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .enumerate()

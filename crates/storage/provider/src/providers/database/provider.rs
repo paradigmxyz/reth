@@ -1255,7 +1255,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             transaction_kind,
             |block_number| self.sealed_header(block_number),
             |header, body, senders| {
-                SealedBlock { header, body }
+                SealedBlock::new(header, body)
                     // Note: we're using unchecked here because we know the block contains valid txs
                     // wrt to its height and can ignore the s value check so pre
                     // EIP-2 txs are allowed
@@ -1297,7 +1297,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             range,
             |range| self.sealed_headers_range(range),
             |header, body, senders| {
-                SealedBlockWithSenders::new(SealedBlock { header, body }, senders)
+                SealedBlockWithSenders::new(SealedBlock::new(header, body), senders)
                     .ok_or(ProviderError::SenderRecoveryError)
             },
         )
@@ -2806,11 +2806,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         durations_recorder.record_relative(metrics::Action::GetNextTxNum);
         let first_tx_num = next_tx_num;
 
-        let tx_count = block.block.body.transactions().len() as u64;
+        let tx_count = block.block.body().transactions().len() as u64;
 
         // Ensures we have all the senders for the block's transactions.
         for (transaction, sender) in
-            block.block.body.transactions().iter().zip(block.senders.iter())
+            block.block.body().transactions().iter().zip(block.senders.iter())
         {
             let hash = transaction.tx_hash();
 
@@ -2824,7 +2824,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             next_tx_num += 1;
         }
 
-        self.append_block_bodies(vec![(block_number, Some(block.block.body))], write_to)?;
+        self.append_block_bodies(vec![(block_number, Some(block.block.into_body()))], write_to)?;
 
         debug!(
             target: "providers::db",

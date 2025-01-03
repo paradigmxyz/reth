@@ -314,11 +314,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let mut replay_block_txs = true;
 
             let num_txs =
-                transaction_index.index().unwrap_or_else(|| block.body.transactions().len());
+                transaction_index.index().unwrap_or_else(|| block.body().transactions().len());
             // but if all transactions are to be replayed, we can use the state at the block itself,
             // however only if we're not targeting the pending block, because for pending we can't
             // rely on the block's state being available
-            if !is_block_target_pending && num_txs == block.body.transactions().len() {
+            if !is_block_target_pending && num_txs == block.body().transactions().len() {
                 at = block.hash();
                 replay_block_txs = false;
             }

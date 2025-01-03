@@ -187,10 +187,10 @@ async fn test_custom_block_priority_config() {
     assert_eq!(block_payloads.len(), 1);
     let (block_payload, _) = block_payloads.first().unwrap();
     let block_payload = block_payload.block().clone();
-    assert_eq!(block_payload.body.transactions.len(), 2); // L1 block info tx + end-of-block custom tx
+    assert_eq!(block_payload.body().transactions.len(), 2); // L1 block info tx + end-of-block custom tx
 
     // Check that last transaction in the block looks like a transfer to a random address.
-    let end_of_block_tx = block_payload.body.transactions.last().unwrap();
+    let end_of_block_tx = block_payload.body().transactions.last().unwrap();
     let OpTypedTransaction::Eip1559(end_of_block_tx) = &end_of_block_tx.transaction else {
         panic!("expected EIP-1559 transaction");
     };
