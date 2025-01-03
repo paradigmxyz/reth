@@ -140,11 +140,11 @@ where
 {
     // Check ommers hash
     let ommers_hash = block.body().calculate_ommers_root();
-    if Some(block.header.ommers_hash()) != ommers_hash {
+    if Some(block.ommers_hash()) != ommers_hash {
         return Err(ConsensusError::BodyOmmersHashDiff(
             GotExpected {
                 got: ommers_hash.unwrap_or(EMPTY_OMMER_ROOT_HASH),
-                expected: block.header.ommers_hash(),
+                expected: block.ommers_hash(),
             }
             .into(),
         ))

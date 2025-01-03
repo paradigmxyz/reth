@@ -131,11 +131,11 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         }
 
         if self.is_cancun_active_at_timestamp(sealed_block.timestamp) {
-            if sealed_block.header.blob_gas_used.is_none() {
+            if sealed_block.blob_gas_used.is_none() {
                 // cancun active but blob gas used not present
                 return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed)
             }
-            if sealed_block.header.excess_blob_gas.is_none() {
+            if sealed_block.excess_blob_gas.is_none() {
                 // cancun active but excess blob gas not present
                 return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
             }
@@ -148,11 +148,11 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
                 // cancun not active but blob transactions present
                 return Err(PayloadError::PreCancunBlockWithBlobTransactions)
             }
-            if sealed_block.header.blob_gas_used.is_some() {
+            if sealed_block.blob_gas_used.is_some() {
                 // cancun not active but blob gas used present
                 return Err(PayloadError::PreCancunBlockWithBlobGasUsed)
             }
-            if sealed_block.header.excess_blob_gas.is_some() {
+            if sealed_block.excess_blob_gas.is_some() {
                 // cancun not active but excess blob gas present
                 return Err(PayloadError::PreCancunBlockWithExcessBlobGas)
             }
