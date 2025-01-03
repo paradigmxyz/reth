@@ -78,7 +78,7 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
         address: Address,
         block_number: u64,
         page_size: usize,
-    ) -> RpcResult<TransactionsWithReceipts>;
+    ) -> RpcResult<TransactionsWithReceipts<T>>;
 
     /// Gets the transaction hash for a certain sender address, given its nonce.
     #[method(name = "getTransactionBySenderAndNonce")]

@@ -466,6 +466,16 @@ where
     .err()
     .unwrap();
 
+    OtterscanClient::<Transaction, Header>::search_transactions_after(
+        client,
+        address,
+        block_number,
+        page_size,
+    )
+    .await
+    .err()
+    .unwrap();
+
     assert!(is_unimplemented(
         OtterscanClient::<Transaction, Header>::search_transactions_before(
             client,
@@ -477,17 +487,7 @@ where
         .err()
         .unwrap()
     ));
-    assert!(is_unimplemented(
-        OtterscanClient::<Transaction, Header>::search_transactions_after(
-            client,
-            address,
-            block_number,
-            page_size,
-        )
-        .await
-        .err()
-        .unwrap()
-    ));
+
     assert!(OtterscanClient::<Transaction, Header>::get_transaction_by_sender_and_nonce(
         client, sender, nonce
     )
