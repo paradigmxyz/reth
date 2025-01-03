@@ -61,18 +61,19 @@ tokio.workspace = true
 
 # misc
 ahash = "0.8"
-human_bytes = "0.4.1"
-eyre.workspace = true
+backon.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
+eyre.workspace = true
+human_bytes = "0.4.1"
+reqwest.workspace = true 
 serde.workspace = true
 serde_json.workspace = true
-tracing.workspace = true
-backon.workspace = true
 secp256k1 = { workspace = true, features = [
     "global-context",
     "rand-std",
     "recovery",
 ] }
+tracing.workspace = true
 
 # io
 fdlimit.workspace = true

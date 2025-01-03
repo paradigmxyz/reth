@@ -91,9 +91,9 @@ futures.workspace = true
 
 # misc
 aquamarine.workspace = true
-eyre.workspace = true
-clap = { workspace = true, features = ["derive", "env"] }
 backon.workspace = true
+clap = { workspace = true, features = ["derive", "env"] }
+eyre.workspace = true
 similar-asserts.workspace = true
 
 [dev-dependencies]
