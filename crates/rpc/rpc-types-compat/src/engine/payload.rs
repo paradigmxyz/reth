@@ -114,27 +114,6 @@ pub fn convert_to_payload_body_v1(
     }
 }
 
-/// Transforms a [`SealedBlock`] into a [`ExecutionPayloadV1`]
-pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPayloadV1 {
-    let transactions = value.encoded_2718_transactions();
-    ExecutionPayloadV1 {
-        parent_hash: value.parent_hash,
-        fee_recipient: value.beneficiary,
-        state_root: value.state_root,
-        receipts_root: value.receipts_root,
-        logs_bloom: value.logs_bloom,
-        prev_randao: value.mix_hash,
-        block_number: value.number,
-        gas_limit: value.gas_limit,
-        gas_used: value.gas_used,
-        timestamp: value.timestamp,
-        extra_data: value.extra_data.clone(),
-        base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-        block_hash: value.hash(),
-        transactions,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::block_to_payload_v3;
