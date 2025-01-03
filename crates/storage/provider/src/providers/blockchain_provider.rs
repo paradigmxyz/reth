@@ -2740,14 +2740,14 @@ mod tests {
 
             // Even though the block exists, given the order of provider queries done in the method
             // above, we do not see it.
-            assert_eq!(
+            assert!(matches!(
                 old_transaction_hash_fn(
                     to_be_persisted_tx.hash(),
                     provider.canonical_in_memory_state(),
                     provider.database.clone()
                 ),
                 Ok(None)
-            );
+            ));
         }
 
         // CORRECT BEHAVIOUR
@@ -2757,14 +2757,14 @@ mod tests {
             persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[1].number);
             let to_be_persisted_tx = in_memory_blocks[1].body().transactions[0].clone();
 
-            assert_eq!(
+            assert!(matches!(
                 correct_transaction_hash_fn(
                     to_be_persisted_tx.hash(),
                     provider.canonical_in_memory_state(),
                     provider.database
                 ),
                 Ok(Some(to_be_persisted_tx))
-            );
+            ));
         }
 
         Ok(())

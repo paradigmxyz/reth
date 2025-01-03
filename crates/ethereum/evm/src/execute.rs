@@ -421,10 +421,10 @@ mod tests {
                 "Executing cancun block without parent beacon block root field should fail",
             );
 
-        assert_eq!(
+        assert!(matches!(
             err.as_validation().unwrap().clone(),
             BlockValidationError::MissingParentBeaconBlockRoot
-        );
+        ));
 
         // fix header, set a gas limit
         header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
@@ -1098,13 +1098,13 @@ mod tests {
         // Check if the execution result is an error and assert the specific error type
         match exec_result {
             Ok(_) => panic!("Expected block gas limit error"),
-            Err(err) => assert_eq!(
+            Err(err) => assert!(matches!(
                 *err.as_validation().unwrap(),
                 BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: 2_500_000,
                     block_available_gas: 1_500_000,
                 }
-            ),
+            )),
         }
     }
 
