@@ -1,8 +1,8 @@
 use super::{DatabaseProviderRO, ProviderFactory, ProviderNodeTypes};
 use crate::{
     providers::StaticFileProvider, AccountReader, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, EvmEnvProvider,
-    HeaderProvider, ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    BlockReader, BlockReaderIdExt, BlockSource, ChainSpecProvider, ChangeSetReader, HeaderProvider,
+    ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StateReader, StaticFileProviderFactory, TransactionVariant,
     TransactionsProvider, WithdrawalsProvider,
 };
@@ -17,7 +17,6 @@ use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStatePro
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::models::BlockNumberAddress;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
 use reth_primitives::{
@@ -235,7 +234,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             let AccountBeforeTx { info: old_info, address } = account_before;
             match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
-                    let new_info = state_provider.basic_account(address)?;
+                    let new_info = state_provider.basic_account(&address)?;
                     entry.insert((old_info, new_info, HashMap::new()));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
@@ -253,7 +252,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             // get account state or insert from plain state.
             let account_state = match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
-                    let present_info = state_provider.basic_account(address)?;
+                    let present_info = state_provider.basic_account(&address)?;
                     entry.insert((present_info, present_info, HashMap::new()))
                 }
                 hash_map::Entry::Occupied(entry) => entry.into_mut(),
@@ -1218,22 +1217,6 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for ConsistentProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for ConsistentProvider<N> {
-    fn env_with_header<EvmConfig>(
-        &self,
-        header: &HeaderTy<N>,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<EvmEnv>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        let total_difficulty = self
-            .header_td_by_number(header.number())?
-            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?;
-        Ok(evm_config.cfg_and_block_env(header, total_difficulty))
-    }
-}
-
 impl<N: ProviderNodeTypes> PruneCheckpointReader for ConsistentProvider<N> {
     fn get_prune_checkpoint(
         &self,
@@ -1444,7 +1427,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
 
 impl<N: ProviderNodeTypes> AccountReader for ConsistentProvider<N> {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         // use latest state provider
         let state_provider = self.latest_ref()?;
         state_provider.basic_account(address)

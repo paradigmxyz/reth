@@ -37,8 +37,7 @@ pub const fn test_address() -> SocketAddr {
 pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
     let config = AuthServerConfig::builder(secret).socket_addr(test_address()).build();
     let (tx, _rx) = unbounded_channel();
-    let beacon_engine_handle =
-        BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx, Default::default());
+    let beacon_engine_handle = BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx);
     let client = ClientVersionV1 {
         code: ClientCode::RH,
         name: "Reth".to_string(),

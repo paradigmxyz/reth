@@ -1,6 +1,4 @@
-#![allow(missing_docs, unreachable_pub)]
-
-use std::time::{Duration, Instant};
+#![allow(missing_docs)]
 
 use alloy_primitives::{B256, U256};
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -11,14 +9,13 @@ use reth_testing_utils::generators;
 use reth_trie::Nibbles;
 use reth_trie_sparse::RevealedSparseTrie;
 
-pub fn update_rlp_node_level(c: &mut Criterion) {
+fn update_rlp_node_level(c: &mut Criterion) {
     let mut rng = generators::rng();
-
     let mut group = c.benchmark_group("update rlp node level");
     group.sample_size(20);
 
     for size in [100_000] {
-        let mut runner = TestRunner::new(ProptestConfig::default());
+        let mut runner = TestRunner::deterministic();
         let state = proptest::collection::hash_map(any::<B256>(), any::<U256>(), size)
             .new_tree(&mut runner)
             .unwrap()
@@ -53,20 +50,11 @@ pub fn update_rlp_node_level(c: &mut Criterion) {
                 group.bench_function(
                     format!("size {size} | updated {updated_leaves}% | depth {depth}"),
                     |b| {
-                        // Use `iter_custom` to avoid measuring clones and drops
-                        b.iter_custom(|iters| {
-                            let mut elapsed = Duration::ZERO;
-
-                            let mut cloned = sparse.clone();
-                            for _ in 0..iters {
-                                let start = Instant::now();
-                                cloned.update_rlp_node_level(depth);
-                                elapsed += start.elapsed();
-                                cloned = sparse.clone();
-                            }
-
-                            elapsed
-                        })
+                        b.iter_batched_ref(
+                            || sparse.clone(),
+                            |cloned| cloned.update_rlp_node_level(depth),
+                            criterion::BatchSize::PerIteration,
+                        )
                     },
                 );
             }

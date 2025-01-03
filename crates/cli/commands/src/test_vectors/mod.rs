@@ -25,7 +25,7 @@ pub enum Subcommands {
     /// The generated vectors are serialized in both `json` and `Compact` formats and saved to a
     /// file.
     ///
-    /// Use the `--read` flag to read and validate the previously generated vectors from file.
+    /// Use the `--read` flag to read and validate the previously generated vectors from a file.
     #[group(multiple = false, required = true)]
     Compact {
         /// Write test vectors to a file.

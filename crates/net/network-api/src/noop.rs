@@ -31,8 +31,8 @@ impl NetworkInfo for NoopNetwork {
             client_version: "reth-test".to_string(),
             protocol_version: ProtocolVersion::V5 as u64,
             eth_protocol_info: EthProtocolInfo {
-                difficulty: Default::default(),
                 network: 1,
+                difficulty: None,
                 genesis: Default::default(),
                 config: Default::default(),
                 head: Default::default(),

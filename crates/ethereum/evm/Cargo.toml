@@ -22,6 +22,7 @@ reth-consensus.workspace = true
 
 # Ethereum
 revm-primitives.workspace = true
+reth-primitives-traits.workspace = true
 
 # scroll
 reth-scroll-execution.workspace = true
@@ -56,7 +57,10 @@ std = [
 	"alloy-primitives/std",
 	"revm-primitives/std",
 	"secp256k1/std",
-	"reth-ethereum-forks/std"
+	"reth-ethereum-forks/std",
+	"serde_json/std",
+	"reth-primitives-traits/std",
+	"reth-chainspec/std"
 ]
 scroll = [
 	"reth-primitives/scroll",

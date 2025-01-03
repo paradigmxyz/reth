@@ -21,7 +21,7 @@ reth-primitives-traits.workspace = true
 alloy-chains = { workspace = true, features = ["serde", "rlp"] }
 alloy-eips = { workspace = true, features = ["serde"] }
 alloy-genesis.workspace = true
-alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
+alloy-primitives = { workspace = true, features = ["rlp"] }
 alloy-consensus.workspace = true
 
 # misc
@@ -51,7 +51,9 @@ std = [
 	"alloy-rlp/std",
 	"reth-ethereum-forks/std",
 	"derive_more/std",
-	"reth-network-peers/std"
+	"reth-network-peers/std",
+	"reth-trie-common/std",
+	"serde_json/std"
 ]
 arbitrary = [
 	"alloy-chains/arbitrary",

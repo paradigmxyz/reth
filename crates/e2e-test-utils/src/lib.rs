@@ -9,7 +9,6 @@ use reth_chainspec::EthChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
-use reth_node_api::EngineValidator;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
@@ -18,7 +17,6 @@ use reth_node_builder::{
     PayloadTypes,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
-use reth_primitives::EthPrimitives;
 use reth_provider::providers::{
     BlockchainProvider, BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree,
 };
@@ -126,7 +124,7 @@ pub async fn setup_engine<N>(
 where
     N: Default
         + Node<TmpNodeAdapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>
-        + NodeTypesWithEngine<Primitives = EthPrimitives>
+        + NodeTypesWithEngine
         + NodeTypesForProvider,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>,
@@ -136,10 +134,7 @@ where
         >,
     >,
     N::AddOns: RethRpcAddOns<Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>
-        + EngineValidatorAddOn<
-            Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>,
-            Validator: EngineValidator<N::Engine, Block = reth_primitives::Block>,
-        >,
+        + EngineValidatorAddOn<Adapter<N, BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>>>,
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
         <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,

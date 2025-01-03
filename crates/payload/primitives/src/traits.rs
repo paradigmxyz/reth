@@ -5,19 +5,22 @@ use alloy_eips::{
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use reth_chain_state::ExecutedBlock;
-use reth_primitives::{EthPrimitives, NodePrimitives, SealedBlock};
+use reth_primitives::{NodePrimitives, SealedBlockFor};
 
-/// Represents a built payload type that contains a built [`SealedBlock`] and can be converted into
+/// Represents a built payload type that contains a built `SealedBlock` and can be converted into
 /// engine API execution payloads.
-pub trait BuiltPayload<N: NodePrimitives = EthPrimitives>: Send + Sync + std::fmt::Debug {
+pub trait BuiltPayload: Send + Sync + std::fmt::Debug {
+    /// The node's primitive types
+    type Primitives: NodePrimitives;
+
     /// Returns the built block (sealed)
-    fn block(&self) -> &SealedBlock<N::BlockHeader, N::BlockBody>;
+    fn block(&self) -> &SealedBlockFor<<Self::Primitives as NodePrimitives>::Block>;
 
     /// Returns the fees collected for the built block
     fn fees(&self) -> U256;
 
     /// Returns the entire execution data for the built block, if available.
-    fn executed_block(&self) -> Option<ExecutedBlock<N>> {
+    fn executed_block(&self) -> Option<ExecutedBlock<Self::Primitives>> {
         None
     }
 

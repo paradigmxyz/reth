@@ -63,21 +63,23 @@ criterion.workspace = true
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
-	"alloy-primitives/serde",
-	"alloy-consensus/serde",
-	"alloy-trie/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-trie/serde",
     "alloy-eips/serde",
-	"revm/serde",
-	"reth-trie-common/serde",
-	"reth-primitives-traits/serde",
+    "revm/serde",
+    "reth-trie-common/serde",
+    "reth-primitives-traits/serde",
 ]
 test-utils = [
-	"triehash",
-	"revm/test-utils",
-	"reth-primitives/test-utils",
+    "triehash",
+    "revm/test-utils",
+    "reth-primitives/test-utils",
+    "reth-trie-common/test-utils",
 	"reth-trie-common/test-utils",
-	"reth-stages-types/test-utils",
-	"reth-primitives-traits/test-utils"
+    "reth-trie-sparse/test-utils",
+    "reth-stages-types/test-utils",
+    "reth-primitives-traits/test-utils"
 ]
 scroll = [
 	"revm/scroll",

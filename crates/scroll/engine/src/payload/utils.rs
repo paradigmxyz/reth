@@ -89,7 +89,6 @@ fn try_payload_v1_to_block<T: Decodable2718>(
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
         difficulty: Default::default(),
         nonce: Default::default(),
-        target_blobs_per_block: None,
     };
 
     Ok(Block { header, body: BlockBody { transactions, ..Default::default() } })

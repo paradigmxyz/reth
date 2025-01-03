@@ -56,10 +56,10 @@ where
     /// # Caution
     ///
     /// This does not initialize the tx environment.
-    fn evm_env_for_block(&self, header: &Header, total_difficulty: U256) -> EnvWithHandlerCfg {
+    fn evm_env_for_block(&self, header: &Header) -> EnvWithHandlerCfg {
         let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
         let mut block_env = BlockEnv::default();
-        self.evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, header, total_difficulty);
+        self.evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, header);
 
         EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
     }
@@ -76,11 +76,7 @@ where
     type Primitives = EthPrimitives;
     type Error = BlockExecutionError;
 
-    fn apply_pre_execution_changes(
-        &mut self,
-        block: &BlockWithSenders,
-        _total_difficulty: U256,
-    ) -> Result<(), Self::Error> {
+    fn apply_pre_execution_changes(&mut self, block: &BlockWithSenders) -> Result<(), Self::Error> {
         // set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
             (*self.evm_config.chain_spec()).is_spurious_dragon_active_at_block(block.header.number);
@@ -108,9 +104,8 @@ where
     fn execute_transactions(
         &mut self,
         block: &BlockWithSenders,
-        total_difficulty: U256,
     ) -> Result<ExecuteOutput, Self::Error> {
-        let env = self.evm_env_for_block(&block.header, total_difficulty);
+        let env = self.evm_env_for_block(&block.header);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
         let mut cumulative_gas_used = 0;
@@ -204,7 +199,6 @@ where
     fn apply_post_execution_changes(
         &mut self,
         _block: &BlockWithSenders,
-        _total_difficulty: U256,
         _receipts: &[Receipt],
     ) -> Result<Requests, Self::Error> {
         Ok(Default::default())
@@ -449,7 +443,7 @@ mod tests {
         }
 
         // execute and verify output
-        let res = strategy.execute_transactions(&block, U256::ZERO);
+        let res = strategy.execute_transactions(&block);
 
         // check for error or execution outcome
         if let Some(error) = expected_error {
@@ -479,7 +473,7 @@ mod tests {
         let curie_block = block(7096836, vec![]);
 
         // apply pre execution change
-        strategy.apply_pre_execution_changes(&curie_block, U256::ZERO)?;
+        strategy.apply_pre_execution_changes(&curie_block)?;
 
         // take bundle
         let mut state = strategy.state;
@@ -511,7 +505,7 @@ mod tests {
         let not_curie_block = block(7096837, vec![]);
 
         // apply pre execution change
-        strategy.apply_pre_execution_changes(&not_curie_block, U256::ZERO)?;
+        strategy.apply_pre_execution_changes(&not_curie_block)?;
 
         // take bundle
         let mut state = strategy.state;
@@ -535,7 +529,7 @@ mod tests {
         let block = block(7096837, vec![transaction]);
 
         // execute and verify error
-        let res = strategy.execute_transactions(&block, U256::ZERO);
+        let res = strategy.execute_transactions(&block);
         assert_eq!(
             res.unwrap_err().to_string(),
             "transaction gas limit 10000001 is more than blocks available gas 10000000"

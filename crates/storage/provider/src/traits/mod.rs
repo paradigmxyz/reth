@@ -3,9 +3,6 @@
 // Re-export all the traits
 pub use reth_storage_api::*;
 
-// Re-export for convenience
-pub use reth_evm::provider::EvmEnvProvider;
-
 mod block;
 pub use block::*;
 

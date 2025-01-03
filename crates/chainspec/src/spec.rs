@@ -223,6 +223,11 @@ impl Default for ChainSpec {
 }
 
 impl ChainSpec {
+    /// Converts the given [`Genesis`] into a [`ChainSpec`].
+    pub fn from_genesis(genesis: Genesis) -> Self {
+        genesis.into()
+    }
+
     /// Get information about the chain itself
     pub const fn chain(&self) -> Chain {
         self.chain
@@ -238,6 +243,12 @@ impl ChainSpec {
     #[inline]
     pub fn is_optimism_mainnet(&self) -> bool {
         self.chain == Chain::optimism_mainnet()
+    }
+
+    /// Returns the known paris block, if it exists.
+    #[inline]
+    pub fn paris_block(&self) -> Option<u64> {
+        self.paris_block_and_final_difficulty.map(|(block, _)| block)
     }
 
     /// Get the genesis block specification.
@@ -271,7 +282,7 @@ impl ChainSpec {
             if self.is_cancun_active_at_timestamp(self.genesis.timestamp) {
                 let blob_gas_used = self.genesis.blob_gas_used.unwrap_or(0);
                 let excess_blob_gas = self.genesis.excess_blob_gas.unwrap_or(0);
-                (Some(B256::ZERO), Some(blob_gas_used as u64), Some(excess_blob_gas as u64))
+                (Some(B256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
             } else {
                 (None, None, None)
             };
@@ -389,7 +400,7 @@ impl ChainSpec {
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(&self, self.paris_block_and_final_difficulty.map(|(block, _)| block))
+        DisplayHardforks::new(&self)
     }
 
     /// Get the fork id for the given hardfork.
@@ -605,12 +616,20 @@ impl From<Genesis> for ChainSpec {
             .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
             .collect::<Vec<_>>();
 
-        // Paris
+        // We expect no new networks to be configured with the merge, so we ignore the TTD field
+        // and merge netsplit block from external genesis files. All existing networks that have
+        // merged should have a static ChainSpec already (namely mainnet and sepolia).
         let paris_block_and_final_difficulty =
             if let Some(ttd) = genesis.config.terminal_total_difficulty {
                 hardforks.push((
                     EthereumHardfork::Paris.boxed(),
                     ForkCondition::TTD {
+                        // NOTE: this will not work properly if the merge is not activated at
+                        // genesis, and there is no merge netsplit block
+                        activation_block_number: genesis
+                            .config
+                            .merge_netsplit_block
+                            .unwrap_or_default(),
                         total_difficulty: ttd,
                         fork_block: genesis.config.merge_netsplit_block,
                     },
@@ -767,10 +786,10 @@ impl ChainSpecBuilder {
     /// Enable the Paris hardfork at the given TTD.
     ///
     /// Does not set the merge netsplit block.
-    pub fn paris_at_ttd(self, ttd: U256) -> Self {
+    pub fn paris_at_ttd(self, ttd: U256, activation_block_number: BlockNumber) -> Self {
         self.with_fork(
             EthereumHardfork::Paris,
-            ForkCondition::TTD { total_difficulty: ttd, fork_block: None },
+            ForkCondition::TTD { activation_block_number, total_difficulty: ttd, fork_block: None },
         )
     }
 
@@ -848,7 +867,11 @@ impl ChainSpecBuilder {
         self = self.london_activated();
         self.hardforks.insert(
             EthereumHardfork::Paris,
-            ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+            ForkCondition::TTD {
+                activation_block_number: 0,
+                total_difficulty: U256::ZERO,
+                fork_block: None,
+            },
         );
         self
     }
@@ -890,8 +913,8 @@ impl ChainSpecBuilder {
     pub fn build(self) -> ChainSpec {
         let paris_block_and_final_difficulty = {
             self.hardforks.get(EthereumHardfork::Paris).and_then(|cond| {
-                if let ForkCondition::TTD { fork_block, total_difficulty } = cond {
-                    fork_block.map(|fork_block| (fork_block, total_difficulty))
+                if let ForkCondition::TTD { total_difficulty, activation_block_number, .. } = cond {
+                    Some((activation_block_number, total_difficulty))
                 } else {
                     None
                 }
@@ -1135,6 +1158,7 @@ Post-merge hard forks (timestamp based):
             .with_fork(
                 EthereumHardfork::Paris,
                 ForkCondition::TTD {
+                    activation_block_number: 101,
                     fork_block: Some(101),
                     total_difficulty: U256::from(10_790_000),
                 },
@@ -1168,6 +1192,7 @@ Post-merge hard forks (timestamp based):
         // Fork::ConditionTTD test case without a new chain spec to demonstrate ChainSpec::satisfy
         // is independent of ChainSpec for this(these - including ForkCondition::Block) match arm(s)
         let fork_cond_ttd_no_new_spec = fork_cond_block_only_case.satisfy(ForkCondition::TTD {
+            activation_block_number: 101,
             fork_block: None,
             total_difficulty: U256::from(10_790_000),
         });

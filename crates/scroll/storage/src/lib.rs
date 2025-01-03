@@ -53,7 +53,7 @@ impl<DB: EvmStateProvider> Database for ScrollStateProviderDatabase<DB> {
     /// Retrieves basic account information for a given address. Caches the Scroll account extension
     /// for the touched account if it has bytecode.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        let Some(account) = self.db.basic_account(address)? else { return Ok(None) };
+        let Some(account) = self.db.basic_account(&address)? else { return Ok(None) };
         let Some(code_hash) = account.bytecode_hash else { return Ok(Some(account.into())) };
 
         if let Some(AccountExtension { code_size, poseidon_code_hash: Some(hash) }) =
@@ -66,7 +66,7 @@ impl<DB: EvmStateProvider> Database for ScrollStateProviderDatabase<DB> {
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.db.bytecode_by_hash(code_hash)?.unwrap_or_default().0)
+        Ok(self.db.bytecode_by_hash(&code_hash)?.unwrap_or_default().0)
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
@@ -82,11 +82,11 @@ impl<DB: EvmStateProvider> DatabaseRef for ScrollStateProviderDatabase<DB> {
     type Error = ProviderError;
 
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        Ok(self.db.basic_account(address)?.map(Into::into))
+        Ok(self.db.basic_account(&address)?.map(Into::into))
     }
 
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        Ok(self.db.bytecode_by_hash(code_hash)?.unwrap_or_default().0)
+        Ok(self.db.bytecode_by_hash(&code_hash)?.unwrap_or_default().0)
     }
 
     fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {

@@ -35,6 +35,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 alloy-primitives.workspace = true
+op-alloy-consensus.workspace = true
 reth-optimism-chainspec.workspace = true
 
 [features]

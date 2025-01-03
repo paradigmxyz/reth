@@ -24,7 +24,6 @@ reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-rpc-types-compat.workspace = true
 reth-engine-primitives.workspace = true
-reth-evm.workspace = true
 reth-transaction-pool.workspace = true
 
 # ethereum

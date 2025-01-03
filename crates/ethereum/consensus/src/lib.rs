@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_consensus::{BlockHeader, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS;
+use alloy_eips::{eip7840::BlobParams, merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{
@@ -195,7 +195,13 @@ where
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp()) {
-            validate_against_parent_4844(header.header(), parent.header())?;
+            let blob_params = if self.chain_spec.is_prague_active_at_timestamp(header.timestamp()) {
+                BlobParams::prague()
+            } else {
+                BlobParams::cancun()
+            };
+
+            validate_against_parent_4844(header.header(), parent.header(), blob_params)?;
         }
 
         Ok(())

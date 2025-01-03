@@ -83,7 +83,8 @@ test-utils = [
     "reth-scroll-state-commitment/test-utils",
     "reth-trie/test-utils",
     "reth-trie-common/test-utils",
-    "reth-trie-db/test-utils"
+    "reth-trie-db/test-utils",
+    "reth-trie-parallel/test-utils"
 ]
 metrics = [
     "reth-metrics",

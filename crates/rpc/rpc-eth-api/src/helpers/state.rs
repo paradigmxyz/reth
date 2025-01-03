@@ -10,10 +10,10 @@ use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
-use reth_evm::env::EvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_provider::{
-    BlockIdReader, BlockNumReader, ChainSpecProvider, EvmEnvProvider as _, StateProvider,
-    StateProviderBox, StateProviderFactory,
+    BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
+    StateProviderFactory,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_transaction_pool::TransactionPool;
@@ -53,7 +53,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         self.spawn_blocking_io(move |this| {
             Ok(this
                 .state_at_block_id_or_latest(block_id)?
-                .account_balance(address)
+                .account_balance(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default())
         })
@@ -131,7 +131,7 @@ pub trait EthState: LoadState + SpawnBlocking {
     ) -> impl Future<Output = Result<Option<Account>, Self::Error>> + Send {
         self.spawn_blocking_io(move |this| {
             let state = this.state_at_block_id(block_id)?;
-            let account = state.basic_account(address).map_err(Self::Error::from_eth_err)?;
+            let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
             let Some(account) = account else { return Ok(None) };
 
             // Check whether the distance to the block exceeds the maximum configured proof window.
@@ -231,10 +231,8 @@ pub trait LoadState:
 
                 let header =
                     self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
-                let evm_env = self
-                    .provider()
-                    .env_with_header(&header, self.evm_config().clone())
-                    .map_err(Self::Error::from_eth_err)?;
+                let evm_env = self.evm_config().cfg_and_block_env(&header);
+
                 Ok((evm_env, block_hash.into()))
             }
         }
@@ -254,7 +252,7 @@ pub trait LoadState:
             // first fetch the on chain nonce of the account
             let on_chain_account_nonce = this
                 .latest_state()?
-                .account_nonce(address)
+                .account_nonce(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default();
 
@@ -292,7 +290,7 @@ pub trait LoadState:
             // first fetch the on chain nonce of the account
             let on_chain_account_nonce = this
                 .state_at_block_id_or_latest(block_id)?
-                .account_nonce(address)
+                .account_nonce(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default();
 
@@ -335,7 +333,7 @@ pub trait LoadState:
         self.spawn_blocking_io(move |this| {
             Ok(this
                 .state_at_block_id_or_latest(block_id)?
-                .account_code(address)
+                .account_code(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default()
                 .original_bytes())

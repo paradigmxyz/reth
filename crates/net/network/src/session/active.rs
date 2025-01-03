@@ -390,7 +390,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
     /// Starts the disconnect process
     fn start_disconnect(&mut self, reason: DisconnectReason) -> Result<(), EthStreamError> {
-        self.conn.inner_mut().start_disconnect(reason).map_err(Into::into)
+        Ok(self.conn.inner_mut().start_disconnect(reason)?)
     }
 
     /// Flushes the disconnect message and emits the corresponding message

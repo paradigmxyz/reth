@@ -84,6 +84,7 @@ test-utils = [
 	"reth-trie-db/test-utils",
 	"reth-trie/test-utils",
 	"revm/test-utils",
+	"reth-trie-parallel/test-utils",
 	"reth-scroll-state-commitment?/test-utils"
 ]
 optimism = [

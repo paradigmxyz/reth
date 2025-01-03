@@ -2227,14 +2227,44 @@ where
 
         let exec_time = Instant::now();
 
-        // TODO: create StateRootTask with the receiving end of a channel and
-        // pass the sending end of the channel to the state hook.
-        let noop_state_hook = |_state: &EvmState| {};
-        let output = self.metrics.executor.execute_metered(
-            executor,
-            (&block, U256::MAX).into(),
-            Box::new(noop_state_hook),
-        )?;
+        let persistence_not_in_progress = !self.persistence_state.in_progress();
+
+        // TODO: uncomment to use StateRootTask
+
+        // let (state_root_handle, state_hook) = if persistence_not_in_progress {
+        //     let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+        //
+        //     let state_root_config = StateRootConfig::new_from_input(
+        //         consistent_view.clone(),
+        //         self.compute_trie_input(consistent_view, block.header().parent_hash())
+        //             .map_err(ParallelStateRootError::into)?,
+        //     );
+        //
+        //     let provider_ro = consistent_view.provider_ro()?;
+        //     let nodes_sorted = state_root_config.nodes_sorted.clone();
+        //     let state_sorted = state_root_config.state_sorted.clone();
+        //     let prefix_sets = state_root_config.prefix_sets.clone();
+        //     let blinded_provider_factory = ProofBlindedProviderFactory::new(
+        //         InMemoryTrieCursorFactory::new(
+        //             DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+        //             &nodes_sorted,
+        //         ),
+        //         HashedPostStateCursorFactory::new(
+        //             DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+        //             &state_sorted,
+        //         ),
+        //         prefix_sets,
+        //     );
+        //
+        //     let state_root_task = StateRootTask::new(state_root_config,
+        // blinded_provider_factory);     let state_hook = state_root_task.state_hook();
+        //     (Some(state_root_task.spawn(scope)), Box::new(state_hook) as Box<dyn OnStateHook>)
+        // } else {
+        //     (None, Box::new(|_state: &EvmState| {}) as Box<dyn OnStateHook>)
+        // };
+        let state_hook = Box::new(|_state: &EvmState| {});
+
+        let output = self.metrics.executor.execute_metered(executor, &block, state_hook)?;
 
         trace!(target: "engine::tree", elapsed=?exec_time.elapsed(), ?block_number, "Executed block");
 
@@ -2256,33 +2286,47 @@ where
 
         trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
         let root_time = Instant::now();
-        let mut state_root_result = None;
-
-        // TODO: switch to calculate state root using `StateRootTask`.
 
         // We attempt to compute state root in parallel if we are currently not persisting anything
         // to database. This is safe, because the database state cannot change until we
         // finish parallel computation. It is important that nothing is being persisted as
         // we are computing in parallel, because we initialize a different database transaction
         // per thread and it might end up with a different view of the database.
-        let persistence_in_progress = self.persistence_state.in_progress();
-        if !persistence_in_progress {
-            state_root_result = match self
-                .compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
-            {
-                Ok((state_root, trie_output)) => Some((state_root, trie_output)),
+        let state_root_result = if persistence_not_in_progress {
+            // TODO: uncomment to use StateRootTask
+
+            // if let Some(state_root_handle) = state_root_handle {
+            //     match state_root_handle.wait_for_result() {
+            //         Ok((task_state_root, task_trie_updates)) => {
+            //             info!(
+            //                 target: "engine::tree",
+            //                 block = ?sealed_block.num_hash(),
+            //                 ?task_state_root,
+            //                 "State root task finished"
+            //             );
+            //         }
+            //         Err(error) => {
+            //             info!(target: "engine::tree", ?error, "Failed to wait for state root task
+            // result");         }
+            //     }
+            // }
+
+            match self.compute_state_root_parallel(block.header().parent_hash(), &hashed_state) {
+                Ok(result) => Some(result),
                 Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
                     debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
                     None
                 }
                 Err(error) => return Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
-            };
-        }
+            }
+        } else {
+            None
+        };
 
         let (state_root, trie_output) = if let Some(result) = state_root_result {
             result
         } else {
-            debug!(target: "engine::tree", block=?sealed_block.num_hash(), persistence_in_progress, "Failed to compute state root in parallel");
+            debug!(target: "engine::tree", block=?sealed_block.num_hash(), ?persistence_not_in_progress, "Failed to compute state root in parallel");
             state_provider.state_root_from_state_with_updates(hashed_state.clone())?
         };
 
@@ -2354,29 +2398,9 @@ where
         parent_hash: B256,
         hashed_state: &HashedPostState,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
-        // TODO: when we switch to calculate state root using `StateRootTask` this
-        // method can be still useful to calculate the required `TrieInput` to
-        // create the task.
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-        let mut input = TrieInput::default();
 
-        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
-            debug!(target: "engine::tree", %parent_hash, %historical, "Calculating state root in parallel, parent found in memory");
-            // Retrieve revert state for historical block.
-            let revert_state = consistent_view.revert_state(historical)?;
-            input.append(revert_state);
-
-            // Extend with contents of parent in-memory blocks.
-            for block in blocks.iter().rev() {
-                input.append_cached_ref(block.trie_updates(), block.hashed_state())
-            }
-        } else {
-            // The block attaches to canonical persisted parent.
-            debug!(target: "engine::tree", %parent_hash, "Calculating state root in parallel, parent found in disk");
-            let revert_state = consistent_view.revert_state(parent_hash)?;
-            input.append(revert_state);
-        }
-
+        let mut input = self.compute_trie_input(consistent_view.clone(), parent_hash)?;
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
@@ -2387,6 +2411,34 @@ where
         let parallel_state_root =
             reth_trie_parallel::root::ParallelStateRoot::new(consistent_view, input);
         parallel_state_root.incremental_root_with_updates()
+    }
+
+    /// Computes the trie input at the provided parent hash.
+    fn compute_trie_input(
+        &self,
+        consistent_view: ConsistentDbView<P>,
+        parent_hash: B256,
+    ) -> Result<TrieInput, ParallelStateRootError> {
+        let mut input = TrieInput::default();
+
+        if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(parent_hash) {
+            debug!(target: "engine::tree", %parent_hash, %historical, "Parent found in memory");
+            // Retrieve revert state for historical block.
+            let revert_state = consistent_view.revert_state(historical)?;
+            input.append(revert_state);
+
+            // Extend with contents of parent in-memory blocks.
+            for block in blocks.iter().rev() {
+                input.append_cached_ref(block.trie_updates(), block.hashed_state())
+            }
+        } else {
+            // The block attaches to canonical persisted parent.
+            debug!(target: "engine::tree", %parent_hash, "Parent found on disk");
+            let revert_state = consistent_view.revert_state(parent_hash)?;
+            input.append(revert_state);
+        }
+
+        Ok(input)
     }
 
     /// Handles an error that occurred while inserting a block.
@@ -2664,7 +2716,7 @@ mod tests {
     use reth_primitives::{Block, BlockExt, EthPrimitives};
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
-    use reth_trie::updates::TrieUpdates;
+    use reth_trie::{updates::TrieUpdates, HashedPostState};
     use std::{
         str::FromStr,
         sync::mpsc::{channel, Sender},
@@ -3069,8 +3121,7 @@ mod tests {
     fn test_tree_persist_block_batch() {
         let tree_config = TreeConfig::default();
         let chain_spec = MAINNET.clone();
-        let mut test_block_builder =
-            TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
+        let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
         // we need more than tree_config.persistence_threshold() +1 blocks to
         // trigger the persistence task.
@@ -3104,8 +3155,7 @@ mod tests {
     async fn test_tree_persist_blocks() {
         let tree_config = TreeConfig::default();
         let chain_spec = MAINNET.clone();
-        let mut test_block_builder =
-            TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
+        let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
         // we need more than tree_config.persistence_threshold() +1 blocks to
         // trigger the persistence task.
@@ -3137,7 +3187,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_in_memory_state_trait_impl() {
-        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(0..10).collect();
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(0..10).collect();
         let test_harness = TestHarness::new(MAINNET.clone()).with_blocks(blocks.clone());
 
         for executed_block in blocks {
@@ -3164,7 +3214,7 @@ mod tests {
     #[tokio::test]
     async fn test_engine_request_during_backfill() {
         let tree_config = TreeConfig::default();
-        let blocks: Vec<_> = TestBlockBuilder::default()
+        let blocks: Vec<_> = TestBlockBuilder::eth()
             .get_executed_blocks(0..tree_config.persistence_threshold())
             .collect();
         let mut test_harness = TestHarness::new(MAINNET.clone())
@@ -3265,7 +3315,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_insert_executed() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
-        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..4).collect();
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
         tree_state.insert_executed(blocks[0].clone());
         tree_state.insert_executed(blocks[1].clone());
@@ -3291,7 +3341,7 @@ mod tests {
     #[tokio::test]
     async fn test_tree_state_insert_executed_with_reorg() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
-        let mut test_block_builder = TestBlockBuilder::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -3331,7 +3381,7 @@ mod tests {
     async fn test_tree_state_remove_before() {
         let start_num_hash = BlockNumHash::default();
         let mut tree_state = TreeState::new(start_num_hash);
-        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..6).collect();
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
@@ -3381,7 +3431,7 @@ mod tests {
     async fn test_tree_state_remove_before_finalized() {
         let start_num_hash = BlockNumHash::default();
         let mut tree_state = TreeState::new(start_num_hash);
-        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..6).collect();
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
@@ -3431,7 +3481,7 @@ mod tests {
     async fn test_tree_state_remove_before_lower_finalized() {
         let start_num_hash = BlockNumHash::default();
         let mut tree_state = TreeState::new(start_num_hash);
-        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..6).collect();
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..6).collect();
 
         for block in &blocks {
             tree_state.insert_executed(block.clone());
@@ -3481,7 +3531,7 @@ mod tests {
     async fn test_tree_state_on_new_head() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
-        let mut test_block_builder = TestBlockBuilder::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
 
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
 
@@ -3533,7 +3583,7 @@ mod tests {
 
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
-        let mut test_block_builder = TestBlockBuilder::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
 
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..5).collect();
 
@@ -3600,7 +3650,7 @@ mod tests {
     async fn test_get_canonical_blocks_to_persist() {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec);
-        let mut test_block_builder = TestBlockBuilder::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
 
         let canonical_head_number = 9;
         let blocks: Vec<_> =
@@ -3655,8 +3705,7 @@ mod tests {
         let chain_spec = MAINNET.clone();
         let mut test_harness = TestHarness::new(chain_spec.clone());
 
-        let mut test_block_builder =
-            TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
+        let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
 
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(0..5).collect();
         test_harness = test_harness.with_blocks(blocks);

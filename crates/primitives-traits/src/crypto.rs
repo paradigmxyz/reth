@@ -56,8 +56,8 @@ pub mod secp256k1 {
     }
 }
 
-#[cfg(feature = "secp256k1")]
-#[allow(unused)]
+#[cfg(any(test, feature = "secp256k1"))]
+#[allow(unused, unreachable_pub)]
 mod impl_secp256k1 {
     use super::*;
     pub(crate) use ::secp256k1::Error;
@@ -196,9 +196,9 @@ mod tests {
             sign_message(B256::from_slice(&secret.to_bytes()[..]), hash).expect("sign message");
 
         let mut sig: [u8; 65] = [0; 65];
-        sig[0..32].copy_from_slice(&signature.r.to_be_bytes::<32>());
-        sig[32..64].copy_from_slice(&signature.s.to_be_bytes::<32>());
-        sig[64] = signature.odd_y_parity as u8;
+        sig[0..32].copy_from_slice(&signature.r().to_be_bytes::<32>());
+        sig[32..64].copy_from_slice(&signature.s().to_be_bytes::<32>());
+        sig[64] = signature.v() as u8;
 
         assert_eq!(recover_signer_unchecked(&sig, &hash).ok(), Some(signer));
     }
