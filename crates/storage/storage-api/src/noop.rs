@@ -8,6 +8,7 @@ use crate::{
     StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumberOrTag,
@@ -18,9 +19,7 @@ use alloy_primitives::{
 };
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_primitives::{
-    BlockWithSenders, EthPrimitives, SealedBlockFor, SealedBlockWithSenders, TransactionMeta,
-};
+use reth_primitives::{BlockWithSenders, EthPrimitives, SealedBlockFor, SealedBlockWithSenders};
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives, SealedHeader};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};

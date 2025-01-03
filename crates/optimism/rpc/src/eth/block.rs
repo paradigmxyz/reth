@@ -1,6 +1,6 @@
 //! Loads and formats OP block RPC response.
 
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::BlockId;
 use op_alloy_network::Network;
 use op_alloy_rpc_types::OpTransactionReceipt;
@@ -8,7 +8,6 @@ use reth_chainspec::ChainSpecProvider;
 use reth_node_api::BlockBody;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_primitives::TransactionMeta;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_rpc_eth_api::{
@@ -42,10 +41,10 @@ where
             let timestamp = block.timestamp();
 
             let l1_block_info =
-                reth_optimism_evm::extract_l1_info(&block.body).map_err(OpEthApiError::from)?;
+                reth_optimism_evm::extract_l1_info(block.body()).map_err(OpEthApiError::from)?;
 
             return block
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .zip(receipts.iter())

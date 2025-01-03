@@ -4,7 +4,7 @@ use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, Address, TxHash, B256};
 use parking_lot::RwLock;
@@ -13,7 +13,7 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
     BlockWithSenders, EthPrimitives, NodePrimitives, Receipts, SealedBlock, SealedBlockFor,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta,
+    SealedBlockWithSenders, SealedHeader,
 };
 use reth_primitives_traits::{Block, BlockBody as _, SignedTransaction};
 use reth_storage_api::StateProviderBox;
@@ -549,7 +549,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             if let Some(tx) = block_state
                 .block_ref()
                 .block()
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .find(|tx| tx.trie_hash() == hash)
@@ -573,7 +573,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             if let Some((index, tx)) = block_state
                 .block_ref()
                 .block()
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .enumerate()
@@ -758,7 +758,7 @@ impl<N: NodePrimitives> BlockState<N> {
             block_state
                 .block_ref()
                 .block()
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .find(|tx| tx.trie_hash() == hash)
@@ -778,7 +778,7 @@ impl<N: NodePrimitives> BlockState<N> {
             block_state
                 .block_ref()
                 .block()
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .enumerate()

@@ -267,8 +267,8 @@ mod tests {
         let mut receipts = Vec::with_capacity(blocks.len());
         let mut tx_num = 0u64;
         for block in &blocks {
-            let mut block_receipts = Vec::with_capacity(block.body.transactions.len());
-            for transaction in &block.body.transactions {
+            let mut block_receipts = Vec::with_capacity(block.body().transactions.len());
+            for transaction in &block.body().transactions {
                 block_receipts.push((tx_num, random_receipt(&mut rng, transaction, Some(0))));
                 tx_num += 1;
             }

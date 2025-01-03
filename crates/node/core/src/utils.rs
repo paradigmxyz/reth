@@ -84,7 +84,7 @@ where
         eyre::bail!("Invalid number of bodies received. Expected: 1. Received: 0")
     };
 
-    let block = SealedBlock { header, body };
+    let block = SealedBlock::new(header, body);
     consensus.validate_block_pre_execution(&block)?;
 
     Ok(block)
