@@ -41,6 +41,11 @@ pub trait BlockBody:
     /// Returns reference to transactions in block.
     fn transactions(&self) -> &[Self::Transaction];
 
+    /// Returns an iterator over all transaction hashes in the block body.
+    fn transaction_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
+        self.transactions().iter().map(|tx| tx.tx_hash())
+    }
+
     /// Consume the block body and return a [`Vec`] of transactions.
     fn into_transactions(self) -> Vec<Self::Transaction>;
 
