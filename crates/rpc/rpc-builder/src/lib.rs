@@ -2444,6 +2444,7 @@ impl RpcServerHandle {
 
     /// Returns an http provider (with recommended fillers) from the rpc server handle for the
     /// specified network
+    #[allow(clippy::type_complexity)]
     pub fn new_http_provider_for<N: alloy_network::Network + RecommendedFillers + TxFiller>(
         &self,
     ) -> Result<
@@ -2463,6 +2464,7 @@ impl RpcServerHandle {
 
     /// Returns an ipc provider (with recommended fillers) from the rpc server handle for the
     /// specified network
+    #[allow(clippy::type_complexity)]
     pub async fn new_ipc_provider_for<N: alloy_network::Network + RecommendedFillers + TxFiller>(
         &self,
     ) -> Result<
@@ -2485,6 +2487,7 @@ impl RpcServerHandle {
 
     /// Returns a ws provider (with recommended fillers) from the rpc server handle for the
     /// specified network
+    #[allow(clippy::type_complexity)]
     pub async fn new_ws_provider_for<N: alloy_network::Network + RecommendedFillers + TxFiller>(
         &self,
     ) -> Result<
