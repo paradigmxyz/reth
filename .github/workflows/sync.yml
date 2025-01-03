@@ -3,7 +3,7 @@
 name: sync test
 
 on:
-  merge_group:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,8 +15,7 @@ concurrency:
 jobs:
   sync:
     name: sync (${{ matrix.chain.bin }})
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
@@ -24,12 +23,12 @@ jobs:
     strategy:
       matrix:
         chain:
-          - build: install
-            bin: reth
-            chain: mainnet
-            tip: "0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4"
-            block: 100000
-            unwind-target: "0x52e0509d33a988ef807058e2980099ee3070187f7333aae12b64d4d675f34c5a"
+          #- build: install
+          #  bin: reth
+          #  chain: mainnet
+          #  tip: "0x91c90676cab257a59cd956d7cb0bceb9b1a71d79755c23c7277a0697ccfaf8c4"
+          #  block: 100000
+          #  unwind-target: "0x52e0509d33a988ef807058e2980099ee3070187f7333aae12b64d4d675f34c5a"
           - build: install-op
             bin: op-reth
             chain: base

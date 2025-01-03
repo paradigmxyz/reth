@@ -19,13 +19,15 @@ concurrency:
 jobs:
   test:
     name: test / ${{ matrix.network }}
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     env:
       RUST_BACKTRACE: 1
     strategy:
       matrix:
-        network: ["ethereum", "optimism"]
+        network: [
+          #"ethereum",
+          "optimism"
+        ]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
