@@ -641,15 +641,13 @@ where
                 let mut witness_record = ExecutionWitnessRecord::default();
 
                 let _ = block_executor
-                    .execute_with_state_closure(
-                        &(*block).clone().unseal(), |statedb: &State<_>| {
-                            witness_record.record_executed_state(
-                                statedb,
-                                #[cfg(feature = "scroll")]
-                                &statedb.database.post_execution_context,
-                            );
-                        },
-                    )
+                    .execute_with_state_closure(&(*block).clone().unseal(), |statedb: &State<_>| {
+                        witness_record.record_executed_state(
+                            statedb,
+                            #[cfg(feature = "scroll")]
+                            &statedb.database.post_execution_context,
+                        );
+                    })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
                 let ExecutionWitnessRecord { hashed_state, codes, keys } = witness_record;

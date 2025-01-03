@@ -11,14 +11,14 @@ use crate::{
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider,  HashingWriter, HeaderProvider, HeaderSyncGap,
-    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
-    KeyHasherProvider, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
-    StageCheckpointReader, StateCommitmentProvider, StateProviderBox, StateRootProviderExt,
-    StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader,
-    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
-    TrieWriter, WithdrawalsProvider,
+    DBProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter, KeyHasherProvider,
+    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
+    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
+    StateCommitmentProvider, StateProviderBox, StateRootProviderExt, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader, StorageTrieWriter,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
+    WithdrawalsProvider,
 };
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::{
