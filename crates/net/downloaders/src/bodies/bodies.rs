@@ -678,8 +678,10 @@ mod tests {
         );
 
         let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
-        let bodies =
-            blocks.into_iter().map(|block| (block.hash(), block.body)).collect::<HashMap<_, _>>();
+        let bodies = blocks
+            .into_iter()
+            .map(|block| (block.hash(), block.into_body()))
+            .collect::<HashMap<_, _>>();
 
         insert_headers(db.db(), &headers);
 

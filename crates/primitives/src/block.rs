@@ -169,7 +169,7 @@ pub struct SealedBlock<H = Header, B = BlockBody> {
     #[deref_mut]
     pub header: SealedHeader<H>,
     /// Block body.
-    pub body: B,
+    body: B,
 }
 
 impl<H, B> SealedBlock<H, B> {
@@ -188,6 +188,16 @@ impl<H, B> SealedBlock<H, B> {
     /// Returns reference to block body.
     pub const fn body(&self) -> &B {
         &self.body
+    }
+
+    /// Consumes the block and returns the header.
+    pub fn into_header(self) -> H {
+        self.header.unseal()
+    }
+
+    /// Consumes the block and returns the body.
+    pub fn into_body(self) -> B {
+        self.body
     }
 
     /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components

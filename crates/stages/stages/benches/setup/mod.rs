@@ -151,9 +151,10 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
             .unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
-        let mut updated_header = cloned_second.header.unseal();
+        let mut updated_header = cloned_second.header.clone().unseal();
         updated_header.state_root = root;
-        *second_block = SealedBlock { header: SealedHeader::seal(updated_header), ..cloned_second };
+        *second_block =
+            SealedBlock::new(SealedHeader::seal(updated_header), cloned_second.into_body());
 
         let offset = transitions.len() as u64;
 
@@ -184,9 +185,9 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
 
         let last_block = blocks.last_mut().unwrap();
         let cloned_last = last_block.clone();
-        let mut updated_header = cloned_last.header.unseal();
+        let mut updated_header = cloned_last.header.clone().unseal();
         updated_header.state_root = root;
-        *last_block = SealedBlock { header: SealedHeader::seal(updated_header), ..cloned_last };
+        *last_block = SealedBlock::new(SealedHeader::seal(updated_header), cloned_last.into_body());
 
         db.insert_blocks(blocks.iter(), StorageKind::Static).unwrap();
 

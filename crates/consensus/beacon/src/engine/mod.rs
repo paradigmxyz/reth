@@ -2774,8 +2774,7 @@ mod tests {
                 .with_real_consensus()
                 .build();
 
-            let genesis =
-                SealedBlock { header: chain_spec.sealed_genesis_header(), ..Default::default() };
+            let genesis = SealedBlock::new(chain_spec.sealed_genesis_header(), Default::default());
             let block1 = random_block(
                 &mut rng,
                 1,

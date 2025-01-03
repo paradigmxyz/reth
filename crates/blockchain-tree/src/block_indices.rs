@@ -572,23 +572,23 @@ mod tests {
 
         // Define blocks with their numbers and parent hashes.
         let block_1 = SealedBlockWithSenders {
-            block: SealedBlock {
-                header: SealedHeader::new(
+            block: SealedBlock::new(
+                SealedHeader::new(
                     Header { parent_hash, number: 1, ..Default::default() },
                     block_hash_1,
                 ),
-                ..Default::default()
-            },
+                Default::default(),
+            ),
             ..Default::default()
         };
         let block_2 = SealedBlockWithSenders {
-            block: SealedBlock {
-                header: SealedHeader::new(
+            block: SealedBlock::new(
+                SealedHeader::new(
                     Header { parent_hash: block_hash_1, number: 2, ..Default::default() },
                     block_hash_2,
                 ),
-                ..Default::default()
-            },
+                Default::default(),
+            ),
             ..Default::default()
         };
 

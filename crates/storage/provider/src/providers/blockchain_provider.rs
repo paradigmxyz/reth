@@ -882,7 +882,7 @@ mod tests {
         let receipts: Vec<Vec<_>> = database_blocks
             .iter()
             .chain(in_memory_blocks.iter())
-            .map(|block| block.body.transactions.iter())
+            .map(|block| block.body().transactions.iter())
             .map(|tx| tx.map(|tx| random_receipt(rng, tx, Some(2))).collect())
             .collect();
 
@@ -1253,11 +1253,11 @@ mod tests {
         // First in memory block ommers should be found
         assert_eq!(
             provider.ommers(first_in_mem_block.number.into())?,
-            Some(first_in_mem_block.body.ommers.clone())
+            Some(first_in_mem_block.body().ommers.clone())
         );
         assert_eq!(
             provider.ommers(first_in_mem_block.hash().into())?,
-            Some(first_in_mem_block.body.ommers.clone())
+            Some(first_in_mem_block.body().ommers.clone())
         );
 
         // A random hash should return None as the block number is not found
@@ -1468,7 +1468,7 @@ mod tests {
                         shainghai_timestamp
                     )?
                     .unwrap(),
-                block.body.withdrawals.unwrap(),
+                block.body().withdrawals.clone().unwrap(),
                 "Expected withdrawals_by_block to return correct withdrawals"
             );
         }
@@ -1478,7 +1478,7 @@ mod tests {
 
         assert_eq!(
             Some(provider.latest_withdrawal()?.unwrap()),
-            canonical_block.body.withdrawals.clone().unwrap().pop(),
+            canonical_block.body().withdrawals.clone().unwrap().pop(),
             "Expected latest withdrawal to be equal to last withdrawal entry in canonical block"
         );
 
@@ -1675,11 +1675,11 @@ mod tests {
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            database_block.body.ommers
+            database_block.body().ommers
         );
         assert_eq!(
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            database_block.body.ommers
+            database_block.body().ommers
         );
 
         let block_number = in_memory_block.number;
@@ -1687,11 +1687,11 @@ mod tests {
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            in_memory_block.body.ommers
+            in_memory_block.body().ommers
         );
         assert_eq!(
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            in_memory_block.body.ommers
+            in_memory_block.body().ommers
         );
 
         Ok(())
@@ -2168,9 +2168,9 @@ mod tests {
             $(
                 // Since data moves for each tried method, need to recalculate everything
                 let db_tx_count =
-                    database_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
+                    database_blocks.iter().map(|b| b.body().transactions.len()).sum::<usize>() as u64;
                 let in_mem_tx_count =
-                    in_memory_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
+                    in_memory_blocks.iter().map(|b| b.body().transactions.len()).sum::<usize>() as u64;
 
                 let db_range = 0..=(db_tx_count - 1);
                 let in_mem_range = db_tx_count..=(in_mem_tx_count + db_range.end());
@@ -2249,7 +2249,7 @@ mod tests {
                 .senders()
                 .unwrap()),
             (transactions_by_tx_range, |block: &SealedBlock, _: &Vec<Vec<Receipt>>| block
-                .body
+                .body()
                 .transactions
                 .clone()),
             (receipts_by_tx_range, |block: &SealedBlock, receipts: &Vec<Vec<Receipt>>| receipts
@@ -2348,7 +2348,7 @@ mod tests {
             (sealed_block_with_senders_range, |block: &SealedBlock| block
                 .clone()
                 .with_senders_unchecked(vec![])),
-            (transactions_by_block_range, |block: &SealedBlock| block.body.transactions.clone()),
+            (transactions_by_block_range, |block: &SealedBlock| block.body().transactions.clone()),
         ]);
 
         Ok(())
@@ -2405,13 +2405,13 @@ mod tests {
         let mut in_memory_blocks: std::collections::VecDeque<_> = in_memory_blocks.into();
 
         $(
-            let tx_hash = |block: &SealedBlock| block.body.transactions[0].hash();
+            let tx_hash = |block: &SealedBlock| block.body().transactions[0].hash();
             let tx_num = |block: &SealedBlock| {
                 database_blocks
                     .iter()
                     .chain(in_memory_blocks.iter())
                     .take_while(|b| b.number < block.number)
-                    .map(|b| b.body.transactions.len())
+                    .map(|b| b.body().transactions.len())
                     .sum::<usize>() as u64
             };
 
@@ -2432,7 +2432,7 @@ mod tests {
                     .iter()
                     .chain(in_memory_blocks.iter())
                     .take_while(|b| b.number < block.number)
-                    .map(|b| b.body.transactions.len())
+                    .map(|b| b.body().transactions.len())
                     .sum::<usize>() as u64
             };
 
@@ -2528,7 +2528,7 @@ mod tests {
                     block.number,
                     Some(StoredBlockBodyIndices {
                         first_tx_num: tx_num,
-                        tx_count: block.body.transactions.len() as u64
+                        tx_count: block.body().transactions.len() as u64
                     })
                 ),
                 u64::MAX
@@ -2597,7 +2597,7 @@ mod tests {
                 transaction_by_id,
                 |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
-                    Some(block.body.transactions[test_tx_index].clone())
+                    Some(block.body().transactions[test_tx_index].clone())
                 ),
                 u64::MAX
             ),
@@ -2606,7 +2606,7 @@ mod tests {
                 transaction_by_id_unhashed,
                 |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
-                    Some(block.body.transactions[test_tx_index].clone())
+                    Some(block.body().transactions[test_tx_index].clone())
                 ),
                 u64::MAX
             ),
@@ -2615,7 +2615,7 @@ mod tests {
                 transaction_by_hash,
                 |block: &SealedBlock, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
                     tx_hash,
-                    Some(block.body.transactions[test_tx_index].clone())
+                    Some(block.body().transactions[test_tx_index].clone())
                 ),
                 B256::random()
             ),
@@ -2633,7 +2633,7 @@ mod tests {
                 transactions_by_block,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     BlockHashOrNumber::Number(block.number),
-                    Some(block.body.transactions.clone())
+                    Some(block.body().transactions.clone())
                 ),
                 BlockHashOrNumber::Number(u64::MAX)
             ),
@@ -2642,7 +2642,7 @@ mod tests {
                 transactions_by_block,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     BlockHashOrNumber::Hash(block.hash()),
-                    Some(block.body.transactions.clone())
+                    Some(block.body().transactions.clone())
                 ),
                 BlockHashOrNumber::Number(u64::MAX)
             ),
@@ -2651,7 +2651,7 @@ mod tests {
                 transaction_sender,
                 |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
-                    block.body.transactions[test_tx_index].recover_signer()
+                    block.body().transactions[test_tx_index].recover_signer()
                 ),
                 u64::MAX
             ),
@@ -2737,7 +2737,7 @@ mod tests {
             // This will persist block 1 AFTER a database is created. Moving it from memory to
             // storage.
             persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
-            let to_be_persisted_tx = in_memory_blocks[0].body.transactions[0].clone();
+            let to_be_persisted_tx = in_memory_blocks[0].body().transactions[0].clone();
 
             // Even though the block exists, given the order of provider queries done in the method
             // above, we do not see it.
@@ -2756,7 +2756,7 @@ mod tests {
             // This will persist block 1 AFTER a database is created. Moving it from memory to
             // storage.
             persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[1].number);
-            let to_be_persisted_tx = in_memory_blocks[1].body.transactions[0].clone();
+            let to_be_persisted_tx = in_memory_blocks[1].body().transactions[0].clone();
 
             assert_eq!(
                 correct_transaction_hash_fn(

@@ -519,7 +519,7 @@ mod tests {
 
         /// A helper to create a collection of block bodies keyed by their hash.
         pub(crate) fn body_by_hash(block: &SealedBlock) -> (B256, BlockBody) {
-            (block.hash(), block.body.clone())
+            (block.hash(), block.body().clone())
         }
 
         /// A helper struct for running the [`BodyStage`].
@@ -592,7 +592,7 @@ mod tests {
 
                         let body = StoredBlockBodyIndices {
                             first_tx_num: 0,
-                            tx_count: progress.body.transactions.len() as u64,
+                            tx_count: progress.body().transactions.len() as u64,
                         };
 
                         static_file_producer.set_block_range(0..=progress.number);
@@ -614,7 +614,7 @@ mod tests {
                         if !progress.ommers_hash_is_empty() {
                             tx.put::<tables::BlockOmmers>(
                                 progress.number,
-                                StoredBlockOmmers { ommers: progress.body.ommers.clone() },
+                                StoredBlockOmmers { ommers: progress.body().ommers.clone() },
                             )?;
                         }
 
@@ -801,7 +801,7 @@ mod tests {
                     } else {
                         let body =
                             this.responses.remove(&header.hash()).expect("requested unknown body");
-                        response.push(BlockResponse::Full(SealedBlock { header, body }));
+                        response.push(BlockResponse::Full(SealedBlock::new(header, body)));
                     }
 
                     if response.len() as u64 >= this.batch_size {

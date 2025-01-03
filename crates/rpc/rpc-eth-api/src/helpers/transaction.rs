@@ -94,7 +94,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             self.cache()
                 .get_sealed_block_with_senders(block)
                 .await
-                .map(|b| b.map(|b| b.body.transactions().to_vec()))
+                .map(|b| b.map(|b| b.body().transactions().to_vec()))
                 .map_err(Self::Error::from_eth_err)
         }
     }
