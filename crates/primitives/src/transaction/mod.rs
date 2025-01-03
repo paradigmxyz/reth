@@ -909,37 +909,6 @@ impl TransactionSigned {
         *self.tx_hash()
     }
 
-    /// Recovers a list of signers from a transaction list iterator.
-    ///
-    /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [`Self::recover_signer`].
-    pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
-    where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
-    {
-        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
-            txes.into_iter().map(|tx| tx.recover_signer()).collect()
-        } else {
-            txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
-        }
-    }
-
-    /// Recovers a list of signers from a transaction list iterator _without ensuring that the
-    /// signature has a low `s` value_.
-    ///
-    /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [`Self::recover_signer_unchecked`].
-    pub fn recover_signers_unchecked<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
-    where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self>,
-    {
-        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
-            txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
-        } else {
-            txes.into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
-        }
-    }
-
     /// Returns the [`RecoveredTx`] transaction with the given sender.
     #[inline]
     pub const fn with_signer(self, signer: Address) -> RecoveredTx {
@@ -2204,38 +2173,6 @@ mod tests {
         let mut b = Vec::with_capacity(data.len());
         tx.encode(&mut b);
         assert_eq!(data.as_slice(), b.as_slice());
-    }
-
-    #[cfg(feature = "secp256k1")]
-    proptest::proptest! {
-        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(1))]
-
-        #[test]
-        fn test_parallel_recovery_order(txes in proptest::collection::vec(
-            proptest_arbitrary_interop::arb::<Transaction>(),
-            *crate::transaction::PARALLEL_SENDER_RECOVERY_THRESHOLD * 5
-        )) {
-            let mut rng =rand::thread_rng();
-            let secp = secp256k1::Secp256k1::new();
-            let txes: Vec<TransactionSigned> = txes.into_iter().map(|mut tx| {
-                 if let Some(chain_id) = tx.chain_id() {
-                    // Otherwise we might overflow when calculating `v` on `recalculate_hash`
-                    tx.set_chain_id(chain_id % (u64::MAX / 2 - 36));
-                }
-
-                let key_pair = secp256k1::Keypair::new(&secp, &mut rng);
-
-                let signature =
-                    crate::sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
-
-                TransactionSigned::new_unhashed(tx, signature)
-            }).collect();
-
-            let parallel_senders = TransactionSigned::recover_signers(&txes, txes.len()).unwrap();
-            let seq_senders = txes.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<_>>>().unwrap();
-
-            assert_eq!(parallel_senders, seq_senders);
-        }
     }
 
     // <https://etherscan.io/tx/0x280cde7cdefe4b188750e76c888f13bd05ce9a4d7767730feefe8a0e50ca6fc4>
