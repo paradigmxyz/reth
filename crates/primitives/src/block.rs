@@ -930,4 +930,14 @@ mod tests {
         let decoded = BlockBody::decode(&mut buf.as_slice()).unwrap();
         assert_eq!(body, decoded);
     }
+
+    #[test]
+    fn test_transaction_count() {
+        let mut block = Block::default();
+        assert_eq!(block.body.transaction_count(), 0);
+        block.body.transactions.push(TransactionSigned::default());
+        assert_eq!(block.body.transaction_count(), 1);
+        block.body.transactions.push(TransactionSigned::default());
+        assert_eq!(block.body.transaction_count(), 2);
+    }
 }
