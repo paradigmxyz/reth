@@ -801,15 +801,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
     /// Load shard and remove it. If list is empty, last shard was full or
     /// there are no shards at all.
-    fn take_shard<T>(&self, key: T::Key) -> ProviderResult<Vec<u64>>
+    fn take_shard<T>(
+        &self,
+        cursor: &mut <TX as DbTxMut>::CursorMut<T>,
+        key: T::Key,
+    ) -> ProviderResult<Vec<u64>>
     where
         T: Table<Value = BlockNumberList>,
     {
-        let mut cursor = self.tx.cursor_read::<T>()?;
-        let shard = cursor.seek_exact(key)?;
-        if let Some((shard_key, list)) = shard {
+        if let Some((_, list)) = cursor.seek_exact(key)? {
             // delete old shard so new one can be inserted.
-            self.tx.delete::<T>(shard_key, None)?;
+            cursor.delete_current()?;
             let list = list.iter().collect::<Vec<_>>();
             return Ok(list)
         }
@@ -832,13 +834,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         P: Copy,
         T: Table<Value = BlockNumberList>,
     {
+        let mut cursor = self.tx.cursor_write::<T>()?;
         for (partial_key, indices) in index_updates {
             let mut last_shard =
-                self.take_shard::<T>(sharded_key_factory(partial_key, u64::MAX))?;
+                self.take_shard::<T>(&mut cursor, sharded_key_factory(partial_key, u64::MAX))?;
             last_shard.extend(indices);
             // Chunk indices and insert them in shards of N size.
-            let indices = last_shard;
-            let mut chunks = indices.chunks(sharded_key::NUM_OF_INDICES_IN_SHARD).peekable();
+            let mut chunks = last_shard.chunks(sharded_key::NUM_OF_INDICES_IN_SHARD).peekable();
             while let Some(list) = chunks.next() {
                 let highest_block_number = if chunks.peek().is_some() {
                     *list.last().expect("`chunks` does not return empty list")
@@ -846,9 +848,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
                     // Insert last list with `u64::MAX`.
                     u64::MAX
                 };
-                self.tx.put::<T>(
+                cursor.insert(
                     sharded_key_factory(partial_key, highest_block_number),
-                    BlockNumberList::new_pre_sorted(list.iter().copied()),
+                    &BlockNumberList::new_pre_sorted(list.iter().copied()),
                 )?;
             }
         }
