@@ -241,7 +241,7 @@ where
             ),
         );
     }
-    let all_reverts_init: RevertsInit = std::iter::once((block, reverts_init)).collect();
+    let all_reverts_init: RevertsInit = HashMap::from_iter([(block, reverts_init)]);
 
     let execution_outcome = ExecutionOutcome::new_init(
         state_init,
