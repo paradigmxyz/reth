@@ -37,6 +37,13 @@ where
 
     type Error = EthApiError;
 
+    fn fill_pending(
+        &self,
+        tx: RecoveredTx<TransactionSigned>,
+    ) -> Result<Self::Transaction, Self::Error> {
+        self.fill(tx, TransactionInfo::default())
+    }
+
     fn fill(
         &self,
         tx: RecoveredTx<TransactionSigned>,

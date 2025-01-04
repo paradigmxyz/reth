@@ -20,15 +20,6 @@ pub fn from_recovered_with_block_context<Tx, T: TransactionCompat<Tx>>(
     resp_builder.fill(tx, tx_info)
 }
 
-/// Create a new rpc transaction result for a _pending_ signed transaction, setting block
-/// environment related fields to `None`.
-pub fn from_recovered<Tx, T: TransactionCompat<Tx>>(
-    tx: RecoveredTx<Tx>,
-    resp_builder: &T,
-) -> Result<T::Transaction, T::Error> {
-    resp_builder.fill(tx, TransactionInfo::default())
-}
-
 /// Builds RPC transaction w.r.t. network.
 pub trait TransactionCompat<T = TransactionSigned>:
     Send + Sync + Unpin + Clone + fmt::Debug
@@ -44,6 +35,9 @@ pub trait TransactionCompat<T = TransactionSigned>:
 
     /// RPC transaction error type.
     type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
+
+    /// Wrapper for `fill()` with default `TransactionInfo`
+    fn fill_pending(&self, tx: RecoveredTx<T>) -> Result<Self::Transaction, Self::Error>;
 
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.

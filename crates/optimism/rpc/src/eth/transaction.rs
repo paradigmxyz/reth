@@ -82,6 +82,13 @@ where
     type Transaction = Transaction;
     type Error = OpEthApiError;
 
+    fn fill_pending(
+        &self,
+        tx: RecoveredTx<OpTransactionSigned>,
+    ) -> Result<Self::Transaction, Self::Error> {
+        self.fill(tx, TransactionInfo::default())
+    }
+
     fn fill(
         &self,
         tx: RecoveredTx<OpTransactionSigned>,
