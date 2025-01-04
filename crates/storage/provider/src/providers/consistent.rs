@@ -12,7 +12,10 @@ use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber,
 };
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{
+    map::{hash_map, HashMap},
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
+};
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::models::BlockNumberAddress;
@@ -32,7 +35,6 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use revm::db::states::PlainStorageRevert;
 use std::{
-    collections::{hash_map, HashMap},
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
 };
@@ -224,8 +226,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         storage_changeset: Vec<(BlockNumberAddress, StorageEntry)>,
         block_range_end: BlockNumber,
     ) -> ProviderResult<(BundleStateInit, RevertsInit)> {
-        let mut state: BundleStateInit = HashMap::new();
-        let mut reverts: RevertsInit = HashMap::new();
+        let mut state: BundleStateInit = HashMap::default();
+        let mut reverts: RevertsInit = HashMap::default();
         let state_provider = self.state_by_block_number_ref(block_range_end)?;
 
         // add account changeset changes
@@ -234,7 +236,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
                     let new_info = state_provider.basic_account(&address)?;
-                    entry.insert((old_info, new_info, HashMap::new()));
+                    entry.insert((old_info, new_info, HashMap::default()));
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     // overwrite old account state.
@@ -252,7 +254,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             let account_state = match state.entry(address) {
                 hash_map::Entry::Vacant(entry) => {
                     let present_info = state_provider.basic_account(&address)?;
-                    entry.insert((present_info, present_info, HashMap::new()))
+                    entry.insert((present_info, present_info, HashMap::default()))
                 }
                 hash_map::Entry::Occupied(entry) => entry.into_mut(),
             };
