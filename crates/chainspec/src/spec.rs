@@ -162,7 +162,9 @@ pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
 /// A container for hardforks that use eip-7804 blobs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HardforkBlobParams {
+    /// Configuration for blob-related calculations for the Cancun hardfork.
     pub cancun: BlobParams,
+    /// Configuration for blob-related calculations for the Prague hardfork.
     pub prague: BlobParams,
 }
 
