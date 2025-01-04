@@ -1572,7 +1572,7 @@ mod tests {
         }
 
         let single_tx_cost = U256::from(INITIAL_BASE_FEE * MIN_TRANSACTION_GAS);
-        let mock_tx = |nonce: u64| -> RecoveredTx {
+        let mock_tx = |nonce: u64| -> RecoveredTx<_> {
             TransactionSigned::new_unhashed(
                 Transaction::Eip1559(TxEip1559 {
                     chain_id: chain_spec.chain.id(),
@@ -1589,7 +1589,7 @@ mod tests {
 
         let mock_block = |number: u64,
                           parent: Option<B256>,
-                          body: Vec<RecoveredTx>,
+                          body: Vec<RecoveredTx<TransactionSigned>>,
                           num_of_signer_txs: u64|
          -> SealedBlockWithSenders {
             let signed_body =
