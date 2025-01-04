@@ -1,6 +1,6 @@
 use crate::BlockExecutionOutput;
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{logs_bloom, Address, BlockNumber, Bloom, Log, B256, U256};
+use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives::Receipts;
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie::{HashedPostState, KeyHasher};
@@ -8,7 +8,6 @@ use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,
 };
-use std::collections::HashMap;
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
