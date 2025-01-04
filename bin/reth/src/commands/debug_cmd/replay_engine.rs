@@ -12,7 +12,7 @@ use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, Environ
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
-use reth_consensus::FullConsensus;
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::DatabaseEnv;
 use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
@@ -97,7 +97,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let Environment { provider_factory, config, data_dir } =
             self.env.init::<N>(AccessRights::RW)?;
 
-        let consensus: Arc<dyn FullConsensus> =
+        let consensus: Arc<dyn FullConsensus<Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
         let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());

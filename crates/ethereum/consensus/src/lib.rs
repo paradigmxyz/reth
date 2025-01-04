@@ -116,18 +116,17 @@ where
     H: BlockHeader,
     B: BlockBody,
 {
+    type Error = ConsensusError;
+
     fn validate_body_against_header(
         &self,
         body: &B,
         header: &SealedHeader<H>,
-    ) -> Result<(), ConsensusError> {
+    ) -> Result<(), Self::Error> {
         validate_body_against_header(body, header.header())
     }
 
-    fn validate_block_pre_execution(
-        &self,
-        block: &SealedBlock<H, B>,
-    ) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(&self, block: &SealedBlock<H, B>) -> Result<(), Self::Error> {
         validate_block_pre_execution(block, &self.chain_spec)
     }
 }

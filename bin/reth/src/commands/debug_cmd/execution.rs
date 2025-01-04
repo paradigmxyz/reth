@@ -18,6 +18,7 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_errors::ConsensusError;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
@@ -64,7 +65,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         &self,
         config: &Config,
         client: Client,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<Error = ConsensusError>>,
         provider_factory: ProviderFactory<N>,
         task_executor: &TaskExecutor,
         static_file_producer: StaticFileProducer<ProviderFactory<N>>,
@@ -172,7 +173,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let Environment { provider_factory, config, data_dir } =
             self.env.init::<N>(AccessRights::RW)?;
 
-        let consensus: Arc<dyn Consensus> =
+        let consensus: Arc<dyn Consensus<Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
         // Configure and build network

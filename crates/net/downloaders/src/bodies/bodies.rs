@@ -5,7 +5,7 @@ use alloy_primitives::BlockNumber;
 use futures::Stream;
 use futures_util::StreamExt;
 use reth_config::BodiesConfig;
-use reth_consensus::Consensus;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_network_p2p::{
     bodies::{
         client::BodiesClient,
@@ -39,7 +39,7 @@ pub struct BodiesDownloader<B: BodiesClient, Provider: HeaderProvider> {
     /// The bodies client
     client: Arc<B>,
     /// The consensus client
-    consensus: Arc<dyn Consensus<Provider::Header, B::Body>>,
+    consensus: Arc<dyn Consensus<Provider::Header, B::Body, Error = ConsensusError>>,
     /// The database handle
     provider: Provider,
     /// The maximum number of non-empty blocks per one request
@@ -579,7 +579,7 @@ impl BodiesDownloaderBuilder {
     pub fn build<B, Provider>(
         self,
         client: B,
-        consensus: Arc<dyn Consensus<Provider::Header, B::Body>>,
+        consensus: Arc<dyn Consensus<Provider::Header, B::Body, Error = ConsensusError>>,
         provider: Provider,
     ) -> BodiesDownloader<B, Provider>
     where
