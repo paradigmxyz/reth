@@ -6,6 +6,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
+use std::ops::Deref;
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
     transaction::SignedTransactionIntoRecoveredExt, RecoveredTx, SealedBlockFor,
@@ -91,7 +92,7 @@ impl<N: NodePrimitives> Chain<N> {
 
     /// Returns an iterator over all headers in the block with increasing block numbers.
     pub fn headers(&self) -> impl Iterator<Item = SealedHeader<N::BlockHeader>> + '_ {
-        self.blocks.values().map(|block| block.header.clone())
+        self.blocks.values().map(|block| block.deref().clone())
     }
 
     /// Get cached trie updates for this chain.

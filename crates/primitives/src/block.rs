@@ -167,7 +167,7 @@ pub struct SealedBlock<H = Header, B = BlockBody> {
     /// Locked block header.
     #[deref]
     #[deref_mut]
-    pub header: SealedHeader<H>,
+    header: SealedHeader<H>,
     /// Block body.
     body: B,
 }
