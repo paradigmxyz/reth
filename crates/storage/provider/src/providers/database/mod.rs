@@ -778,7 +778,7 @@ mod tests {
             );
 
             let db_senders = provider.senders_by_tx_range(range);
-            assert_eq!(db_senders, Ok(vec![]));
+            assert!(matches!(db_senders, Ok(ref v) if v.is_empty()));
         }
     }
 
