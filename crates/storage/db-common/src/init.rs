@@ -44,7 +44,7 @@ pub const AVERAGE_COUNT_ACCOUNTS_PER_GB_STATE_DUMP: usize = 285_228;
 const SOFT_LIMIT_COUNT_FLUSHED_UPDATES: usize = 1_000_000;
 
 /// Storage initialization error type.
-#[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
+#[derive(Debug, thiserror::Error, Clone)]
 pub enum InitStorageError {
     /// Genesis header found on static files but the database is empty.
     #[error("static files found, but the database is uninitialized. If attempting to re-syncing, delete both.")]
@@ -688,13 +688,13 @@ mod tests {
             static_file_provider,
         ));
 
-        assert_eq!(
+        assert!(matches!(
             genesis_hash.unwrap_err(),
             InitStorageError::GenesisHashMismatch {
                 chainspec_hash: MAINNET_GENESIS_HASH,
                 storage_hash: SEPOLIA_GENESIS_HASH
             }
-        )
+        ))
     }
 
     #[test]
