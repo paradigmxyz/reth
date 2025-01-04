@@ -632,7 +632,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             (*block_hash).into(),
             |db_provider| db_provider.header(block_hash),
-            |block_state| Ok(Some(block_state.block_ref().block().header.header().clone())),
+            |block_state| Ok(Some(block_state.block_ref().block().header().clone())),
         )
     }
 
@@ -640,7 +640,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             num.into(),
             |db_provider| db_provider.header_by_number(num),
-            |block_state| Ok(Some(block_state.block_ref().block().header.header().clone())),
+            |block_state| Ok(Some(block_state.block_ref().block().header().clone())),
         )
     }
 
@@ -682,7 +682,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.headers_range(range),
-            |block_state, _| Some(block_state.block_ref().block().header.header().clone()),
+            |block_state, _| Some(block_state.block_ref().block().header().clone()),
             |_| true,
         )
     }
@@ -694,7 +694,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             number.into(),
             |db_provider| db_provider.sealed_header(number),
-            |block_state| Ok(Some(block_state.block_ref().block().header.clone())),
+            |block_state| Ok(Some(block_state.block_ref().block().header().clone())),
         )
     }
 
@@ -705,7 +705,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.sealed_headers_range(range),
-            |block_state, _| Some(block_state.block_ref().block().header.clone()),
+            |block_state, _| Some(block_state.block_ref().block().header().clone()),
             |_| true,
         )
     }
@@ -719,7 +719,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
             range,
             |db_provider, range, predicate| db_provider.sealed_headers_while(range, predicate),
             |block_state, predicate| {
-                let header = &block_state.block_ref().block().header;
+                let header = &block_state.block_ref().block().header();
                 predicate(header).then(|| header.clone())
             },
             predicate,

@@ -228,8 +228,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns the header corresponding to the given hash.
-    pub fn header_by_hash(&self, hash: B256) -> Option<SealedHeader<N::BlockHeader>> {
-        self.state_by_hash(hash).map(|block| block.block_ref().block.header.clone())
+    pub fn header_by_hash(&self, hash: B256) -> Option<SealedBlockFor<<N as NodePrimitives>::Block>> {
+        self.state_by_hash(hash).map(|block| block.block_ref().block.deref().clone())
     }
 
     /// Clears all entries in the in memory state.
@@ -1321,7 +1321,7 @@ mod tests {
         assert_eq!(state.pending_header().unwrap(), block2.block().header().clone());
 
         // Check the pending sealed header
-        assert_eq!(state.pending_sealed_header().unwrap(), block2.block().header.clone());
+        assert_eq!(state.pending_sealed_header().unwrap(), block2.block().deref().clone());
 
         // Check the pending block with senders
         assert_eq!(

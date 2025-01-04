@@ -18,6 +18,7 @@ use reth_primitives::{
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
 use revm::{db::BundleState, primitives::AccountInfo};
 use std::{str::FromStr, sync::LazyLock};
+use std::ops::Deref;
 
 /// Assert genesis block
 pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
@@ -29,7 +30,7 @@ pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
     let tx = provider;
 
     // check if all tables are empty
-    assert_eq!(tx.table::<tables::Headers>().unwrap(), vec![(g.number, g.header.clone().unseal())]);
+    assert_eq!(tx.table::<tables::Headers>().unwrap(), vec![(g.number, g.deref().clone().unseal())]);
 
     assert_eq!(tx.table::<tables::HeaderNumbers>().unwrap(), vec![(h, n)]);
     assert_eq!(tx.table::<tables::CanonicalHeaders>().unwrap(), vec![(n, h)]);
