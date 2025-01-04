@@ -39,7 +39,7 @@ mod tests {
     use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
     use alloy_primitives::{Address, StorageKey, StorageValue, U256};
     use reth_chainspec::MAINNET;
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_ethereum_evm::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_rpc_eth_api::helpers::EthState;

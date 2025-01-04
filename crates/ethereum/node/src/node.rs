@@ -6,8 +6,8 @@ use reth_chainspec::ChainSpec;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
+use reth_ethereum_evm::execute::EthExecutionStrategyFactory;
 use reth_evm::execute::BasicBlockExecutorProvider;
-use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, FullNodeComponents, TxTy};
 use reth_node_builder::{

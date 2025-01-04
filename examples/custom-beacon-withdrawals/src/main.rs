@@ -20,6 +20,7 @@ use reth::{
     },
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_ethereum_evm::EthEvmConfig;
 use reth_evm::{
     env::EvmEnv,
     execute::{
@@ -27,7 +28,6 @@ use reth_evm::{
         InternalBlockExecutionError,
     },
 };
-use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
 use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
 use std::{fmt::Display, sync::Arc};

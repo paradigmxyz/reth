@@ -21,8 +21,8 @@ use reth_downloaders::{
 };
 use reth_engine_primitives::{BeaconOnNewPayloadError, EngineApiMessageVersion};
 use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_evm::execute::EthExecutorProvider;
 use reth_evm::{either::Either, test_utils::MockExecutorProvider};
-use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_exex_types::FinishedExExHeight;
 use reth_network_p2p::{
     sync::NoopSyncStateUpdater, test_utils::NoopFullBlockClient, EthBlockClient,

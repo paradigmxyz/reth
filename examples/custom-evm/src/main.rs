@@ -23,8 +23,8 @@ use reth::{
     transaction_pool::{PoolTransaction, TransactionPool},
 };
 use reth_chainspec::{Chain, ChainSpec};
+use reth_ethereum_evm::EthEvmConfig;
 use reth_evm::env::EvmEnv;
-use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{
     ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
     NodeTypesWithEngine, PayloadTypes,

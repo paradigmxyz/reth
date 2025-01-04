@@ -127,7 +127,7 @@ impl Case for BlockchainTestCase {
                 // Execute the execution stage using the EVM processor factory for the test case
                 // network.
                 let _ = ExecutionStage::new_with_executor(
-                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(chain_spec),
+                    reth_ethereum_evm::execute::EthExecutorProvider::ethereum(chain_spec),
                 )
                 .execute(
                     &provider,

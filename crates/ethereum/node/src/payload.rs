@@ -5,9 +5,9 @@ use reth_chainspec::ChainSpec;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
+use reth_ethereum_evm::EthEvmConfig;
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_evm::ConfigureEvm;
-use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{FullNodeTypes, HeaderTy, NodeTypesWithEngine, TxTy};
 use reth_node_builder::{
     components::PayloadServiceBuilder, BuilderContext, PayloadBuilderConfig, PayloadTypes,

@@ -54,7 +54,7 @@ mod tests {
         table::Table,
         transaction::{DbTx, DbTxMut},
     };
-    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_ethereum_evm::execute::EthExecutorProvider;
     use reth_exex::ExExManagerHandle;
     use reth_primitives::{Account, Bytecode, SealedBlock, StaticFileSegment};
     use reth_provider::{

@@ -459,7 +459,7 @@ mod tests {
     use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use reth_chainspec::{BaseFeeParams, ChainSpec};
-    use reth_evm_ethereum::EthEvmConfig;
+    use reth_ethereum_evm::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives::{Block, BlockBody, TransactionSigned};
     use reth_provider::{

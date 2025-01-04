@@ -1384,8 +1384,8 @@ mod tests {
     use reth_consensus::test_utils::TestConsensus;
     use reth_db::tables;
     use reth_db_api::transaction::DbTxMut;
+    use reth_ethereum_evm::execute::EthExecutorProvider;
     use reth_evm::test_utils::MockExecutorProvider;
-    use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_node_types::FullNodePrimitives;
     use reth_primitives::{
         proofs::{calculate_receipt_root, calculate_transaction_root},

@@ -1,5 +1,5 @@
 [package]
-name = "reth-evm-ethereum"
+name = "reth-ethereum-evm"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
