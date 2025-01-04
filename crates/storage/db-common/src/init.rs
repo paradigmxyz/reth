@@ -2,7 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{map::HashMap, Address, B256, U256};
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
@@ -23,7 +23,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_trie::{IntermediateStateRootState, StateRoot as StateRootComputer, StateRootProgress};
 use reth_trie_db::DatabaseStateRoot;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, io::BufRead};
+use std::io::BufRead;
 use tracing::{debug, error, info, trace};
 
 /// Default soft limit for number of bytes to read from state dump file, before inserting into
@@ -186,9 +186,11 @@ where
         + AsRef<Provider>,
 {
     let capacity = alloc.size_hint().1.unwrap_or(0);
-    let mut state_init: BundleStateInit = HashMap::with_capacity(capacity);
-    let mut reverts_init = HashMap::with_capacity(capacity);
-    let mut contracts: HashMap<B256, Bytecode> = HashMap::with_capacity(capacity);
+    let mut state_init: BundleStateInit =
+        HashMap::with_capacity_and_hasher(capacity, Default::default());
+    let mut reverts_init = HashMap::with_capacity_and_hasher(capacity, Default::default());
+    let mut contracts: HashMap<B256, Bytecode> =
+        HashMap::with_capacity_and_hasher(capacity, Default::default());
 
     for (address, account) in alloc {
         let bytecode_hash = if let Some(code) = &account.code {
@@ -239,7 +241,7 @@ where
             ),
         );
     }
-    let all_reverts_init: RevertsInit = HashMap::from([(block, reverts_init)]);
+    let all_reverts_init: RevertsInit = std::iter::once((block, reverts_init)).collect();
 
     let execution_outcome = ExecutionOutcome::new_init(
         state_init,
