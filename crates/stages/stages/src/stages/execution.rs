@@ -702,7 +702,9 @@ mod tests {
             previous_checkpoint,
         );
 
-        assert_eq!(stage_checkpoint, Ok(previous_stage_checkpoint));
+        assert!(
+            matches!(stage_checkpoint, Ok(checkpoint) if checkpoint == previous_stage_checkpoint)
+        );
     }
 
     #[test]
@@ -938,28 +940,21 @@ mod tests {
             };
 
             // assert accounts
-            assert_eq!(
-                provider.basic_account(&account1),
-                Ok(Some(account1_info)),
-                "Post changed of a account"
+            assert!(
+                matches!(provider.basic_account(&account1), Ok(Some(acc)) if acc == account1_info)
             );
-            assert_eq!(
-                provider.basic_account(&account2),
-                Ok(Some(account2_info)),
-                "Post changed of a account"
+            assert!(
+                matches!(provider.basic_account(&account2), Ok(Some(acc)) if acc == account2_info)
             );
-            assert_eq!(
-                provider.basic_account(&account3),
-                Ok(Some(account3_info)),
-                "Post changed of a account"
+            assert!(
+                matches!(provider.basic_account(&account3), Ok(Some(acc)) if acc == account3_info)
             );
             // assert storage
             // Get on dupsort would return only first value. This is good enough for this test.
-            assert_eq!(
+            assert!(matches!(
                 provider.tx_ref().get::<tables::PlainStorageState>(account1),
-                Ok(Some(StorageEntry { key: B256::with_last_byte(1), value: U256::from(2) })),
-                "Post changed of a account"
-            );
+                Ok(Some(entry)) if entry.key == B256::with_last_byte(1) && entry.value == U256::from(2)
+            ));
 
             let mut provider = factory.database_provider_rw().unwrap();
             let mut stage = stage();
@@ -1074,25 +1069,13 @@ mod tests {
             } if total == block.gas_used);
 
             // assert unwind stage
-            assert_eq!(
-                provider.basic_account(&acc1),
-                Ok(Some(acc1_info)),
-                "Pre changed of a account"
-            );
-            assert_eq!(
-                provider.basic_account(&acc2),
-                Ok(Some(acc2_info)),
-                "Post changed of a account"
-            );
+            assert!(matches!(provider.basic_account(&acc1), Ok(Some(acc)) if acc == acc1_info));
+            assert!(matches!(provider.basic_account(&acc2), Ok(Some(acc)) if acc == acc2_info));
 
             let miner_acc = address!("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba");
-            assert_eq!(
-                provider.basic_account(&miner_acc),
-                Ok(None),
-                "Third account should be unwound"
-            );
+            assert!(matches!(provider.basic_account(&miner_acc), Ok(None)));
 
-            assert_eq!(provider.receipt(0), Ok(None), "First receipt should be unwound");
+            assert!(matches!(provider.receipt(0), Ok(None)));
         }
     }
 
@@ -1173,13 +1156,12 @@ mod tests {
 
         // assert unwind stage
         let provider = test_db.factory.database_provider_rw().unwrap();
-        assert_eq!(provider.basic_account(&destroyed_address), Ok(None), "Account was destroyed");
+        assert!(matches!(provider.basic_account(&destroyed_address), Ok(None)));
 
-        assert_eq!(
+        assert!(matches!(
             provider.tx_ref().get::<tables::PlainStorageState>(destroyed_address),
-            Ok(None),
-            "There is storage for destroyed account"
-        );
+            Ok(None)
+        ));
         // drops tx so that it returns write privilege to test_tx
         drop(provider);
         let plain_accounts = test_db.table::<tables::PlainAccountState>().unwrap();

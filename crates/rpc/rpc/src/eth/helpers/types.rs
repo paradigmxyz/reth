@@ -39,7 +39,7 @@ where
 
     fn fill(
         &self,
-        tx: RecoveredTx,
+        tx: RecoveredTx<TransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
