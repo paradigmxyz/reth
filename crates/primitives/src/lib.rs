@@ -43,11 +43,14 @@ pub use reth_primitives_traits::{
 };
 pub use static_file::StaticFileSegment;
 
-pub use alloy_consensus::{transaction::PooledTransaction, ReceiptWithBloom};
+pub use alloy_consensus::{
+    transaction::{PooledTransaction, TransactionMeta},
+    ReceiptWithBloom,
+};
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
     InvalidTransactionError, PooledTransactionsElementEcRecovered, RecoveredTx, Transaction,
-    TransactionMeta, TransactionSigned, TransactionSignedEcRecovered, TxType,
+    TransactionSigned, TransactionSignedEcRecovered, TxType,
 };
 
 // Re-exports

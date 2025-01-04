@@ -49,6 +49,7 @@ serde = { workspace = true, optional = true}
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-codecs.workspace = true
@@ -141,4 +142,7 @@ reth-codec = [
 ]
 op = [
 	"dep:op-alloy-consensus",
+]
+rayon = [
+	"dep:rayon",
 ]

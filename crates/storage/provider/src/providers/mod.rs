@@ -9,7 +9,7 @@ use crate::{
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
-use alloy_consensus::Header;
+use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
@@ -31,11 +31,13 @@ use reth_node_types::{
 };
 use reth_primitives::{
     Account, BlockWithSenders, EthPrimitives, Receipt, SealedBlock, SealedBlockFor,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta,
+    SealedBlockWithSenders, SealedHeader,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{BlockBodyIndicesProvider, CanonChainTracker, OmmersProvider};
+use reth_storage_api::{
+    BlockBodyIndicesProvider, CanonChainTracker, OmmersProvider, StateCommitmentProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     collections::BTreeMap,
@@ -253,6 +255,10 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
         self.database.database_provider_rw()
     }
+}
+
+impl<N: ProviderNodeTypes> StateCommitmentProvider for BlockchainProvider<N> {
+    type StateCommitment = N::StateCommitment;
 }
 
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {

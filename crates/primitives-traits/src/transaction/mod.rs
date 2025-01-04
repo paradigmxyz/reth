@@ -6,6 +6,8 @@ pub mod signed;
 
 pub mod error;
 
+pub use alloy_consensus::transaction::{TransactionInfo, TransactionMeta};
+
 use crate::{InMemorySize, MaybeCompact, MaybeSerde};
 use core::{fmt, hash::Hash};
 

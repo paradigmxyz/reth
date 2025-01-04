@@ -7,6 +7,7 @@ use crate::{
     PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber,
@@ -20,7 +21,6 @@ use reth_errors::{RethError, RethResult};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
     BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
-    TransactionMeta,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -718,10 +718,10 @@ mod tests {
             );
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
-                if sender == block.body.transactions[0].recover_signer().unwrap()
+                if sender == block.body().transactions[0].recover_signer().unwrap()
             );
             assert_matches!(
-                provider.transaction_id(block.body.transactions[0].hash()),
+                provider.transaction_id(block.body().transactions[0].hash()),
                 Ok(Some(0))
             );
         }
@@ -741,7 +741,7 @@ mod tests {
                 Ok(_)
             );
             assert_matches!(provider.transaction_sender(0), Ok(None));
-            assert_matches!(provider.transaction_id(block.body.transactions[0].hash()), Ok(None));
+            assert_matches!(provider.transaction_id(block.body().transactions[0].hash()), Ok(None));
         }
     }
 
@@ -772,7 +772,7 @@ mod tests {
                     .clone()
                     .map(|tx_number| (
                         tx_number,
-                        block.body.transactions[tx_number as usize].recover_signer().unwrap()
+                        block.body().transactions[tx_number as usize].recover_signer().unwrap()
                     ))
                     .collect())
             );

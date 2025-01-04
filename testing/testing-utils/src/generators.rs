@@ -232,10 +232,10 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
         ..Default::default()
     };
 
-    SealedBlock {
-        header: SealedHeader::seal(header),
-        body: BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
-    }
+    SealedBlock::new(
+        SealedHeader::seal(header),
+        BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
+    )
 }
 
 /// Generate a range of random blocks.
@@ -263,7 +263,7 @@ pub fn random_block_range<R: Rng>(
             idx,
             BlockParams {
                 parent: Some(
-                    blocks.last().map(|block: &SealedBlock| block.header.hash()).unwrap_or(parent),
+                    blocks.last().map(|block: &SealedBlock| block.hash()).unwrap_or(parent),
                 ),
                 tx_count: Some(tx_count),
                 ommers_count: None,
