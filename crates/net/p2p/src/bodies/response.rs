@@ -1,29 +1,14 @@
-use std::ops::Deref;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, U256};
 use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
 use reth_primitives_traits::InMemorySize;
-
 /// The block response
-#[derive(Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum BlockResponse<H, B = BlockBody> {
     /// Full block response (with transactions or ommers)
     Full(SealedBlock<H, B>),
     /// The empty block response
     Empty(SealedHeader<H>),
-}
-
-impl<H: BlockHeader + PartialEq, B: PartialEq> PartialEq for BlockResponse<H, B> 
-where
-    SealedBlock<H, B>: PartialEq,
-{
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Full(a), Self::Full(b)) => a == b,
-            (Self::Empty(a), Self::Empty(b)) => a == b,
-            _ => false,
-        }
-    }
 }
 
 impl<H, B> BlockResponse<H, B>
@@ -33,7 +18,7 @@ where
     /// Return the reference to the response header
     pub fn header(&self) -> &SealedHeader<H> {
         match self {
-            Self::Full(block) => &block.deref(),
+            Self::Full(block) => block.as_sealed_header(),
             Self::Empty(header) => header,
         }
     }

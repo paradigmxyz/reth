@@ -228,7 +228,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns the header corresponding to the given hash.
-    pub fn header_by_hash(&self, hash: B256) -> Option<SealedBlockFor<<N as NodePrimitives>::Block>> {
+    pub fn header_by_hash(
+        &self,
+        hash: B256,
+    ) -> Option<SealedBlockFor<<N as NodePrimitives>::Block>> {
         self.state_by_hash(hash).map(|block| block.block_ref().block.deref().clone())
     }
 

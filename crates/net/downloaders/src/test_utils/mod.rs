@@ -7,8 +7,11 @@ use alloy_primitives::B256;
 use futures::SinkExt;
 use reth_primitives::{BlockBody, SealedHeader};
 use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-use std::{collections::HashMap, io::SeekFrom, ops::RangeInclusive};
-use std::ops::Deref;
+use std::{
+    collections::HashMap,
+    io::SeekFrom,
+    ops::{Deref, RangeInclusive},
+};
 use tokio::{fs::File, io::AsyncSeekExt};
 use tokio_util::codec::FramedWrite;
 

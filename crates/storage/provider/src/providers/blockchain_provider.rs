@@ -814,11 +814,10 @@ mod tests {
     };
     use revm::db::BundleState;
     use std::{
-        ops::{Bound, Range, RangeBounds},
+        ops::{Bound, Deref, Range, RangeBounds},
         sync::Arc,
         time::Instant,
     };
-    use std::ops::Deref;
 
     const TEST_BLOCKS_COUNT: usize = 5;
 
@@ -2338,7 +2337,8 @@ mod tests {
         // todo(joshie) add canonical_hashes_range below after changing its interface into range
         // instead start end
         test_by_block_range!([
-            // For headers_range, we need to compare the raw header fields since Header may not implement PartialEq
+            // For headers_range, we need to compare the raw header fields since Header may not
+            // implement PartialEq
             (headers_range, |block: &SealedBlock| block.header().clone().into()),
             (sealed_headers_range, |block: &SealedBlock| block.deref().clone()),
             (block_range, |block: &SealedBlock| block.clone().unseal()),

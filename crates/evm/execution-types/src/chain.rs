@@ -6,7 +6,6 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
-use std::ops::Deref;
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
     transaction::SignedTransactionIntoRecoveredExt, RecoveredTx, SealedBlockFor,
@@ -15,6 +14,7 @@ use reth_primitives::{
 use reth_primitives_traits::{Block, BlockBody, NodePrimitives, SignedTransaction};
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
+use std::ops::Deref;
 
 /// A chain of blocks and their final state.
 ///

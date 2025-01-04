@@ -14,11 +14,11 @@ use reth_primitives_traits::InMemorySize;
 use std::{
     collections::VecDeque,
     mem,
+    ops::Deref,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
 };
-use std::ops::Deref;
 
 /// Body request implemented as a [Future].
 ///
@@ -195,7 +195,7 @@ where
                     // Body is invalid, put the header back and return an error
                     let hash = block.hash();
                     let number = block.number();
-                    self.pending_headers.push_front(block.deref().clone());
+                    self.pending_headers.push_front(block.deref());
                     return Err(DownloadError::BodyValidation {
                         hash,
                         number,

@@ -694,7 +694,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             number.into(),
             |db_provider| db_provider.sealed_header(number),
-            |block_state| Ok(Some(block_state.block_ref().block().header().clone())),
+            |block_state| Ok(Some(block_state.block_ref().block().clone())),
         )
     }
 
