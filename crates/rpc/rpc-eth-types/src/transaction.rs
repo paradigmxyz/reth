@@ -6,7 +6,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
 use reth_primitives::{RecoveredTx, TransactionSigned};
 use reth_primitives_traits::SignedTransaction;
-use reth_rpc_types_compat::{transaction::from_recovered_with_block_context, TransactionCompat};
+use reth_rpc_types_compat::TransactionCompat;
 
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -54,7 +54,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
                     base_fee: base_fee.map(u128::from),
                 };
 
-                from_recovered_with_block_context(transaction, tx_info, resp_builder)
+                resp_builder.fill(transaction, tx_info)
             }
         }
     }
