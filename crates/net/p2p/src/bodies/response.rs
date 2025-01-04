@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, U256};
 use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
@@ -19,7 +20,7 @@ where
     /// Return the reference to the response header
     pub const fn header(&self) -> &SealedHeader<H> {
         match self {
-            Self::Full(block) => &block.header,
+            Self::Full(block) => &block.as_sealed_header().clone(),
             Self::Empty(header) => header,
         }
     }

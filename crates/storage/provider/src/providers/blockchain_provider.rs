@@ -818,7 +818,7 @@ mod tests {
         sync::Arc,
         time::Instant,
     };
-be    use std::ops::Deref;
+    use std::ops::Deref;
 
     const TEST_BLOCKS_COUNT: usize = 5;
 
@@ -1566,7 +1566,7 @@ be    use std::ops::Deref;
         );
         assert_eq!(
             provider.sealed_header_by_number_or_tag(block_number.into())?,
-            Some(database_block.deref())
+            Some(database_block.header.clone())
         );
 
         assert_eq!(
@@ -1575,7 +1575,7 @@ be    use std::ops::Deref;
         );
         assert_eq!(
             provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Latest).unwrap(),
-            Some(canonical_block.deref())
+            Some(canonical_block.header.clone())
         );
 
         assert_eq!(
@@ -1584,7 +1584,7 @@ be    use std::ops::Deref;
         );
         assert_eq!(
             provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Safe).unwrap(),
-            Some(safe_block.deref())
+            Some(safe_block.header.clone())
         );
 
         assert_eq!(

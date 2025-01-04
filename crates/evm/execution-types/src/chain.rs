@@ -92,7 +92,7 @@ impl<N: NodePrimitives> Chain<N> {
 
     /// Returns an iterator over all headers in the block with increasing block numbers.
     pub fn headers(&self) -> impl Iterator<Item = SealedHeader<N::BlockHeader>> + '_ {
-        self.blocks.values().map(|block| block.deref().clone())
+        self.blocks.values().map(|block| block.as_sealed_header().clone())
     }
 
     /// Get cached trie updates for this chain.
