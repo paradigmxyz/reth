@@ -46,6 +46,10 @@ pub trait BlockBody:
         self.transactions().iter().map(|tx| tx.tx_hash())
     }
 
+    /// Returns the number of the transactions in the block.
+    fn transaction_count(&self) -> usize {
+        self.transactions().len()
+    }
     /// Consume the block body and return a [`Vec`] of transactions.
     fn into_transactions(self) -> Vec<Self::Transaction>;
 

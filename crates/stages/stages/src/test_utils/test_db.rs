@@ -252,7 +252,7 @@ impl TestStageDB {
                 // Insert into body tables.
                 let block_body_indices = StoredBlockBodyIndices {
                     first_tx_num: next_tx_num,
-                    tx_count: block.body().transactions.len() as u64,
+                    tx_count: block.transaction_count() as u64,
                 };
 
                 if !block.body().transactions.is_empty() {
@@ -489,7 +489,7 @@ impl StorageKind {
 
     fn tx_offset(&self) -> u64 {
         if let Self::Database(offset) = self {
-            return offset.unwrap_or_default()
+            return offset.unwrap_or_default();
         }
         0
     }
