@@ -278,7 +278,7 @@ mod tests {
                 let mut receipt = random_receipt(&mut rng, transaction, Some(1));
                 receipt.logs.push(random_log(
                     &mut rng,
-                    (txi == (block.body().transactions.len() - 1)).then_some(deposit_contract_addr),
+                    (txi == (block.transaction_count() - 1)).then_some(deposit_contract_addr),
                     Some(1),
                 ));
                 receipts.push((receipts.len() as u64, receipt));
@@ -288,7 +288,7 @@ mod tests {
 
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
-            blocks.iter().map(|block| block.body().transactions.len()).sum::<usize>()
+            blocks.iter().map(|block| block.transaction_count()).sum::<usize>()
         );
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
@@ -337,7 +337,7 @@ mod tests {
 
             assert_eq!(
                 db.table::<tables::Receipts>().unwrap().len(),
-                blocks.iter().map(|block| block.body().transactions.len()).sum::<usize>() -
+                blocks.iter().map(|block| block.transaction_count()).sum::<usize>() -
                     ((pruned_tx + 1) - unprunable) as usize
             );
 
