@@ -74,12 +74,12 @@ macro_rules! poll_nested_stream_with_budget_inner {
 /// Polls the given stream.
 #[macro_export]
 macro_rules! poll_nested_stream_with_budget {
-    ($target:literal, $label:literal, $budget:ident, $poll_stream:expr, $on_ready_some:expr $(, $on_ready_none:expr;)? $(,)?) => {
-        $crate::poll_nested_stream_with_budget_inner!($target, $label, $budget, $poll_stream, $on_ready_some $(, $on_ready_none;)?)
+    ($target:literal, $label:literal, $budget:ident, $poll_stream:expr, $on_ready_some:expr $(,)?) => {
+        $crate::poll_nested_stream_with_budget_inner!($target, $label, $budget, $poll_stream, $on_ready_some, tracing::error!(target: $target, label = $label, "closed");)
     };
 
-    ($target:literal, $label:literal, $budget:ident, $poll_stream:expr, $on_ready_some:expr $(,)?) => {
-        $crate::poll_nested_stream_with_budget_inner!($target, $label, $budget, $poll_stream, $on_ready_some, eprintln!("[{}] {} closed", $target, $label);)
+    ($target:literal, $label:literal, $budget:ident, $poll_stream:expr, $on_ready_some:expr $(, $on_ready_none:expr;)? $(,)?) => {
+        $crate::poll_nested_stream_with_budget_inner!($target, $label, $budget, $poll_stream, $on_ready_some $(, $on_ready_none;)?)
     };
 }
 
