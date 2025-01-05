@@ -398,7 +398,7 @@ mod tests {
 
                     let body = StoredBlockBodyIndices {
                         first_tx_num,
-                        tx_count: progress.body().transactions.len() as u64,
+                        tx_count: progress.transaction_count() as u64,
                     };
 
                     first_tx_num = next_tx_num;
