@@ -779,17 +779,6 @@ impl From<TypedTransaction> for Transaction {
 }
 
 /// Signed transaction.
-///
-/// # Deprecation Notice
-/// 
-/// This type will be deprecated in favor of the Ethereum-specific type from reth-ethereum-primitives.
-/// New code should use `reth_ethereum_primitives::Transaction` instead.
-/// 
-/// This type is currently used as a default transaction type in several places:
-/// - As the default Block transaction type
-/// - In testing code
-///
-/// These usages will be gradually migrated to use the Ethereum-specific type.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 #[derive(Debug, Clone, Eq, AsRef, Deref, Serialize, Deserialize)]
 pub struct TransactionSigned {
