@@ -311,6 +311,16 @@ where
         block_number: u64,
         page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts<RpcTransaction<Eth::NetworkTypes>>> {
+        let state = self.eth.latest_state().map_err(|e| internal_rpc_err(e.to_string()))?;
+        let account = state.basic_account(&address).map_err(|e| internal_rpc_err(e.to_string()))?;
+
+        if account.is_none() {
+            return Err(EthApiError::InvalidParams(
+                "invalid parameter: address does not exist".to_string(),
+            )
+            .into());
+        }
+
         let tip: u64 = self.eth.block_number()?.saturating_to();
 
         if block_number > tip {
