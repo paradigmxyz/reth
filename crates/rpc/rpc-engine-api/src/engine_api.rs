@@ -26,9 +26,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives::EthereumHardfork;
 use reth_rpc_api::EngineApiServer;
-use reth_rpc_types_compat::engine::payload::{
-    convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
-};
+use reth_rpc_types_compat::engine::payload::convert_to_payload_body_v1;
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -176,7 +174,7 @@ where
         &self,
         payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = convert_payload_input_v2_to_payload(payload);
+        let payload = payload.into_payload();
         let payload_or_attrs =
             PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload, None,
@@ -1031,9 +1029,8 @@ mod tests {
     use reth_engine_primitives::BeaconEngineMessage;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
-    use reth_primitives::{Block, SealedBlock};
+    use reth_primitives::{Block, TransactionSigned};
     use reth_provider::test_utils::MockEthProvider;
-    use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
     use reth_tasks::TokioTaskExecutor;
     use reth_testing_utils::generators::random_block;
     use reth_transaction_pool::noop::NoopTransactionPool;
@@ -1100,9 +1097,11 @@ mod tests {
         let (mut handle, api) = setup_engine_api();
 
         tokio::spawn(async move {
-            api.new_payload_v1(execution_payload_from_sealed_block(SealedBlock::default()))
-                .await
-                .unwrap();
+            api.new_payload_v1(ExecutionPayloadV1::from_block_slow(
+                &Block::<TransactionSigned>::default(),
+            ))
+            .await
+            .unwrap();
         });
         assert_matches!(handle.from_api.recv().await, Some(BeaconEngineMessage::NewPayload { .. }));
     }
@@ -1110,6 +1109,7 @@ mod tests {
     // tests covering `engine_getPayloadBodiesByRange` and `engine_getPayloadBodiesByHash`
     mod get_payload_bodies {
         use super::*;
+        use alloy_rpc_types_engine::ExecutionPayloadBodyV1;
         use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
 
         #[tokio::test]
@@ -1155,7 +1155,7 @@ mod tests {
             let expected = blocks
                 .iter()
                 .cloned()
-                .map(|b| Some(convert_to_payload_body_v1(b.unseal::<Block>())))
+                .map(|b| Some(ExecutionPayloadBodyV1::from_block(b.unseal::<Block>())))
                 .collect::<Vec<_>>();
 
             let res = api.get_payload_bodies_by_range_v1(start, count).await.unwrap();
@@ -1197,7 +1197,7 @@ mod tests {
                     if first_missing_range.contains(&b.number) {
                         None
                     } else {
-                        Some(convert_to_payload_body_v1(b.unseal::<Block>()))
+                        Some(ExecutionPayloadBodyV1::from_block(b.unseal::<Block>()))
                     }
                 })
                 .collect::<Vec<_>>();
@@ -1216,7 +1216,7 @@ mod tests {
                     {
                         None
                     } else {
-                        Some(convert_to_payload_body_v1(b.unseal::<Block>()))
+                        Some(ExecutionPayloadBodyV1::from_block(b.unseal::<Block>()))
                     }
                 })
                 .collect::<Vec<_>>();

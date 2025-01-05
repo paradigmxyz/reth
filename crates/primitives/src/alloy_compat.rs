@@ -16,14 +16,14 @@ impl TryFrom<AnyRpcBlock> for SealedBlock {
         let block_hash = block.header.hash;
         let block = block.try_map_transactions(|tx| tx.try_into())?;
 
-        Ok(Self {
-            header: SealedHeader::new(block.header.inner.into_header_with_defaults(), block_hash),
-            body: BlockBody {
+        Ok(Self::new(
+            SealedHeader::new(block.header.inner.into_header_with_defaults(), block_hash),
+            BlockBody {
                 transactions: block.transactions.into_transactions().collect(),
                 ommers: Default::default(),
                 withdrawals: block.withdrawals.map(|w| w.into_inner().into()),
             },
-        })
+        ))
     }
 }
 

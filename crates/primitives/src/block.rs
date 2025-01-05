@@ -1,6 +1,6 @@
 use crate::{
-    traits::BlockExt, transaction::SignedTransactionIntoRecoveredExt, BlockBodyTxExt, GotExpected,
-    RecoveredTx, SealedHeader, TransactionSigned,
+    traits::BlockExt, transaction::SignedTransactionIntoRecoveredExt, GotExpected, RecoveredTx,
+    SealedHeader, TransactionSigned,
 };
 use alloc::vec::Vec;
 use alloy_consensus::Header;
@@ -169,7 +169,7 @@ pub struct SealedBlock<H = Header, B = BlockBody> {
     #[deref_mut]
     pub header: SealedHeader<H>,
     /// Block body.
-    pub body: B,
+    body: B,
 }
 
 impl<H, B> SealedBlock<H, B> {
@@ -188,6 +188,16 @@ impl<H, B> SealedBlock<H, B> {
     /// Returns reference to block body.
     pub const fn body(&self) -> &B {
         &self.body
+    }
+
+    /// Consumes the block and returns the header.
+    pub fn into_header(self) -> H {
+        self.header.unseal()
+    }
+
+    /// Consumes the block and returns the body.
+    pub fn into_body(self) -> B {
+        self.body
     }
 
     /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
@@ -219,6 +229,17 @@ where
     #[inline]
     pub fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
         self.body.blob_versioned_hashes_iter()
+    }
+}
+
+impl<H, B> SealedBlock<H, B>
+where
+    B: reth_primitives_traits::BlockBody,
+{
+    /// Returns the number of transactions in the block.
+    #[inline]
+    pub fn transaction_count(&self) -> usize {
+        self.body.transaction_count()
     }
 }
 
@@ -907,5 +928,15 @@ mod tests {
         body.encode(&mut buf);
         let decoded = BlockBody::decode(&mut buf.as_slice()).unwrap();
         assert_eq!(body, decoded);
+    }
+
+    #[test]
+    fn test_transaction_count() {
+        let mut block = Block::default();
+        assert_eq!(block.body.transaction_count(), 0);
+        block.body.transactions.push(TransactionSigned::default());
+        assert_eq!(block.body.transaction_count(), 1);
+        block.body.transactions.push(TransactionSigned::default());
+        assert_eq!(block.body.transaction_count(), 2);
     }
 }
