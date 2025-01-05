@@ -1453,10 +1453,10 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 }
 
-impl TryFrom<RecoveredTx> for EthPooledTransaction {
+impl TryFrom<RecoveredTx<TransactionSigned>> for EthPooledTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from(tx: RecoveredTx) -> Result<Self, Self::Error> {
+    fn try_from(tx: RecoveredTx<TransactionSigned>) -> Result<Self, Self::Error> {
         // ensure we can handle the transaction type and its format
         match tx.ty() {
             0..=EIP1559_TX_TYPE_ID | EIP7702_TX_TYPE_ID => {
@@ -1480,7 +1480,7 @@ impl TryFrom<RecoveredTx> for EthPooledTransaction {
     }
 }
 
-impl From<EthPooledTransaction> for RecoveredTx {
+impl From<EthPooledTransaction> for RecoveredTx<TransactionSigned> {
     fn from(tx: EthPooledTransaction) -> Self {
         tx.transaction
     }

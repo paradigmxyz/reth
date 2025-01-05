@@ -904,10 +904,10 @@ impl EthPoolTransaction for MockTransaction {
     }
 }
 
-impl TryFrom<RecoveredTx> for MockTransaction {
+impl TryFrom<RecoveredTx<TransactionSigned>> for MockTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from(tx: RecoveredTx) -> Result<Self, Self::Error> {
+    fn try_from(tx: RecoveredTx<TransactionSigned>) -> Result<Self, Self::Error> {
         let sender = tx.signer();
         let transaction = tx.into_signed();
         let hash = transaction.hash();
@@ -1053,7 +1053,7 @@ impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
     }
 }
 
-impl From<MockTransaction> for RecoveredTx {
+impl From<MockTransaction> for RecoveredTx<TransactionSigned> {
     fn from(tx: MockTransaction) -> Self {
         let signed_tx =
             TransactionSigned::new(tx.clone().into(), Signature::test_signature(), *tx.hash());

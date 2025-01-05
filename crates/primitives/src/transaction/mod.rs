@@ -922,14 +922,14 @@ impl TransactionSigned {
 
     /// Returns the [`RecoveredTx`] transaction with the given sender.
     #[inline]
-    pub const fn with_signer(self, signer: Address) -> RecoveredTx {
+    pub const fn with_signer(self, signer: Address) -> RecoveredTx<Self> {
         RecoveredTx::from_signed_transaction(self, signer)
     }
 
     /// Consumes the type, recover signer and return [`RecoveredTx`]
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [`Self::recover_signer`].
-    pub fn into_ecrecovered(self) -> Option<RecoveredTx> {
+    pub fn into_ecrecovered(self) -> Option<RecoveredTx<Self>> {
         let signer = self.recover_signer()?;
         Some(RecoveredTx { signed_transaction: self, signer })
     }
@@ -939,7 +939,7 @@ impl TransactionSigned {
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
     /// [`Self::recover_signer_unchecked`].
-    pub fn into_ecrecovered_unchecked(self) -> Option<RecoveredTx> {
+    pub fn into_ecrecovered_unchecked(self) -> Option<RecoveredTx<Self>> {
         let signer = self.recover_signer_unchecked()?;
         Some(RecoveredTx { signed_transaction: self, signer })
     }
@@ -949,7 +949,7 @@ impl TransactionSigned {
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
     /// [`Self::recover_signer_unchecked`].
-    pub fn try_into_ecrecovered_unchecked(self) -> Result<RecoveredTx, Self> {
+    pub fn try_into_ecrecovered_unchecked(self) -> Result<RecoveredTx<Self>, Self> {
         match self.recover_signer_unchecked() {
             None => Err(self),
             Some(signer) => Ok(RecoveredTx { signed_transaction: self, signer }),
@@ -1193,8 +1193,8 @@ impl alloy_consensus::Transaction for TransactionSigned {
     }
 }
 
-impl From<RecoveredTx> for TransactionSigned {
-    fn from(recovered: RecoveredTx) -> Self {
+impl From<RecoveredTx<Self>> for TransactionSigned {
+    fn from(recovered: RecoveredTx<Self>) -> Self {
         recovered.signed_transaction
     }
 }
