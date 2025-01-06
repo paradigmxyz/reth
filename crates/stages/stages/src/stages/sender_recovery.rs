@@ -207,7 +207,7 @@ where
                     }
                 }
             };
-            senders_cursor.append(tx_id, sender)?;
+            senders_cursor.append(tx_id, &sender)?;
             processed_transactions += 1;
         }
     }

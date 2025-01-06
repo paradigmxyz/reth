@@ -114,7 +114,7 @@ pub trait DbCursorRW<T: Table> {
     ///
     /// This is efficient for pre-sorted data. If the data is not pre-sorted, use
     /// [`DbCursorRW::insert`].
-    fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
+    fn append(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError>;
 
     /// Delete current value that cursor points to
     fn delete_current(&mut self) -> Result<(), DatabaseError>;

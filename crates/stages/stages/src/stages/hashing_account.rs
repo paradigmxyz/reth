@@ -202,7 +202,7 @@ where
 
                 let (key, value) = item?;
                 hashed_account_cursor
-                    .append(RawKey::<B256>::from_vec(key), RawValue::<Account>::from_vec(value))?;
+                    .append(RawKey::<B256>::from_vec(key), &RawValue::<Account>::from_vec(value))?;
             }
         } else {
             // Aggregate all transition changesets and make a list of accounts that have been

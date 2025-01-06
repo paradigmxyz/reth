@@ -1761,7 +1761,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
     fn write_state(
         &self,
-        execution_outcome: ExecutionOutcome<Self::Receipt>,
+        execution_outcome: &ExecutionOutcome<Self::Receipt>,
         is_value_known: OriginalValuesKnown,
         write_receipts_to: StorageLocation,
     ) -> ProviderResult<()> {
@@ -1795,7 +1795,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             })
             .transpose()?;
 
-        for (idx, receipts) in execution_outcome.receipts.into_iter().enumerate() {
+        for (idx, receipts) in execution_outcome.receipts.iter().enumerate() {
             let block_number = execution_outcome.first_block + idx as u64;
 
             // Increment block number for receipts static file writer
@@ -2874,7 +2874,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             let mut durations_recorder = metrics::DurationsRecorder::default();
 
             // insert block meta
-            block_indices_cursor.append(*block_number, block_indices)?;
+            block_indices_cursor.append(*block_number, &block_indices)?;
 
             durations_recorder.record_relative(metrics::Action::InsertBlockBodyIndices);
 
@@ -2882,7 +2882,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
             // write transaction block index
             if !body.transactions().is_empty() {
-                tx_block_cursor.append(block_indices.last_tx_num(), *block_number)?;
+                tx_block_cursor.append(block_indices.last_tx_num(), block_number)?;
                 durations_recorder.record_relative(metrics::Action::InsertTransactionBlocks);
             }
 
@@ -2892,7 +2892,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
                     writer.append_transaction(next_tx_num, transaction)?;
                 }
                 if let Some(cursor) = tx_cursor.as_mut() {
-                    cursor.append(next_tx_num, transaction.clone())?;
+                    cursor.append(next_tx_num, &transaction)?;
                 }
 
                 // Increment transaction id for each transaction.
@@ -3002,7 +3002,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     fn append_blocks_with_state(
         &self,
         blocks: Vec<SealedBlockWithSenders<Self::Block>>,
-        execution_outcome: ExecutionOutcome<Self::Receipt>,
+        execution_outcome: &ExecutionOutcome<Self::Receipt>,
         hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,
     ) -> ProviderResult<()> {

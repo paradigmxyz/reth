@@ -1260,7 +1260,7 @@ where
         provider_rw
             .append_blocks_with_state(
                 blocks.into_blocks().collect(),
-                state,
+                &state,
                 hashed_state_sorted,
                 trie_updates,
             )

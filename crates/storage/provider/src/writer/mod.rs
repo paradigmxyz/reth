@@ -169,7 +169,7 @@ where
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
             self.database().write_state(
-                Arc::unwrap_or_clone(execution_output),
+                &execution_output,
                 OriginalValuesKnown::No,
                 StorageLocation::StaticFiles,
             )?;

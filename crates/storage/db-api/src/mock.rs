@@ -236,7 +236,7 @@ impl<T: Table> DbCursorRW<T> for CursorMock {
     fn append(
         &mut self,
         _key: <T as Table>::Key,
-        _value: <T as Table>::Value,
+        _value: &<T as Table>::Value,
     ) -> Result<(), DatabaseError> {
         Ok(())
     }

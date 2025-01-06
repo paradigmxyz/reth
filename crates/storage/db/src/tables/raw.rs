@@ -168,7 +168,7 @@ impl<V: Value> Compress for RawValue<V> {
         self.value
     }
 
-    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B) {
+    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
         buf.put_slice(self.value.as_slice())
     }
 }

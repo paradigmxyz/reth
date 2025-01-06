@@ -169,7 +169,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             let execution_outcome = executor.finalize();
 
             provider_rw.write_state(
-                execution_outcome,
+                &execution_outcome,
                 OriginalValuesKnown::Yes,
                 StorageLocation::Database,
             )?;
