@@ -1546,17 +1546,17 @@ impl<T> RecoveredTx<T> {
     }
 
     /// Returns a reference to [`TransactionSigned`]
-    pub const fn as_signed(&self) -> &T {
+    pub const fn tx(&self) -> &T {
         &self.signed_transaction
     }
 
     /// Transform back to [`TransactionSigned`]
-    pub fn into_signed(self) -> T {
+    pub fn into_tx(self) -> T {
         self.signed_transaction
     }
 
     /// Dissolve Self to its component
-    pub fn to_components(self) -> (T, Address) {
+    pub fn into_parts(self) -> (T, Address) {
         (self.signed_transaction, self.signer)
     }
 

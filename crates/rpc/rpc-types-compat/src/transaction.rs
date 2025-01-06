@@ -68,5 +68,5 @@ pub fn transaction_to_call_request<T: alloy_consensus::Transaction>(
     tx: RecoveredTx<T>,
 ) -> TransactionRequest {
     let from = tx.signer();
-    TransactionRequest::from_transaction_with_sender(tx.into_signed(), from)
+    TransactionRequest::from_transaction_with_sender(tx.into_tx(), from)
 }

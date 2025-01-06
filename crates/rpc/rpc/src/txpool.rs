@@ -103,7 +103,7 @@ where
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
             let tx = tx.clone_into_consensus();
-            entry.insert(tx.nonce().to_string(), tx.into_signed().into());
+            entry.insert(tx.nonce().to_string(), tx.into_tx().into());
         }
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();

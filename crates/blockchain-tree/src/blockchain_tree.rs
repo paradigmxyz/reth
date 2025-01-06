@@ -1592,8 +1592,7 @@ mod tests {
                           body: Vec<RecoveredTx<TransactionSigned>>,
                           num_of_signer_txs: u64|
          -> SealedBlockWithSenders {
-            let signed_body =
-                body.clone().into_iter().map(|tx| tx.into_signed()).collect::<Vec<_>>();
+            let signed_body = body.clone().into_iter().map(|tx| tx.into_tx()).collect::<Vec<_>>();
             let transactions_root = calculate_transaction_root(&signed_body);
             let receipts = body
                 .iter()

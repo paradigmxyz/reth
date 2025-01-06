@@ -64,7 +64,7 @@ pub fn broadcast_ingress_bench(c: &mut Criterion) {
                                     tx.sender(),
                                     ExtendedAccount::new(0, U256::from(100_000_000)),
                                 );
-                                txs.push(Arc::new(tx.transaction().clone().into_signed()));
+                                txs.push(Arc::new(tx.transaction().clone().into_tx()));
                                 peer1.send_transactions(peer0_id, txs);
                             }
                         }
