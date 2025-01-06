@@ -15,7 +15,6 @@ workspace = true
 # reth
 reth-codecs.workspace = true
 reth-db-models.workspace = true
-reth-optimism-primitives = { workspace = true, optional = true }
 reth-primitives = { workspace = true, features = ["reth-codec"] }
 reth-primitives-traits = { workspace = true, features = ["serde", "reth-codec"] }
 reth-prune-types.workspace = true
@@ -27,6 +26,9 @@ reth-trie-common.workspace = true
 alloy-primitives.workspace = true
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
+
+# optimism
+reth-optimism-primitives = { workspace = true, optional = true }
 
 # codecs
 modular-bitfield.workspace = true
@@ -87,6 +89,7 @@ arbitrary = [
 optimism = [
 	"reth-primitives/optimism",
 	"reth-codecs/op",
-	"reth-optimism-primitives?/optimism"
+	"reth-optimism-primitives?/optimism",
+    "op",
 ]
 op = ["dep:reth-optimism-primitives", "reth-codecs/op"]

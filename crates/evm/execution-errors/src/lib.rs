@@ -24,7 +24,7 @@ pub mod trie;
 pub use trie::*;
 
 /// Transaction validation errors
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Error, Clone, Debug)]
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
     #[error("EVM reported invalid transaction ({hash}): {error}")]

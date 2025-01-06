@@ -122,11 +122,8 @@ impl TryFrom<HackReceipt> for OpReceipt {
             deposit_receipt_version,
         } = exported_receipt.try_into()?;
 
-        let receipt = alloy_consensus::Receipt {
-            status: success.into(),
-            cumulative_gas_used: cumulative_gas_used as u128,
-            logs,
-        };
+        let receipt =
+            alloy_consensus::Receipt { status: success.into(), cumulative_gas_used, logs };
 
         match tx_type {
             TxType::Legacy => Ok(Self::Legacy(receipt)),

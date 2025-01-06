@@ -14,7 +14,7 @@ workspace = true
 reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-cli-commands.workspace = true
 reth-consensus.workspace = true
-reth-db = { workspace = true, features = ["mdbx"] }
+reth-db = { workspace = true, features = ["mdbx", "op"] }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-downloaders.workspace = true

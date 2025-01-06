@@ -12,6 +12,7 @@ use reth_db_api::transaction::DbTx;
 use reth_downloaders::file_client::{
     ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
 };
+use reth_node_builder::BlockTy;
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpExecutorProvider;
@@ -69,7 +70,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
         let mut total_decoded_txns = 0;
         let mut total_filtered_out_dup_txns = 0;
 
-        while let Some(mut file_client) = reader.next_chunk::<FileClient>().await? {
+        while let Some(mut file_client) = reader.next_chunk::<FileClient<BlockTy<N>>>().await? {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"

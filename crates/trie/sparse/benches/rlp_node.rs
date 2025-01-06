@@ -11,12 +11,11 @@ use reth_trie_sparse::RevealedSparseTrie;
 
 fn update_rlp_node_level(c: &mut Criterion) {
     let mut rng = generators::rng();
-
     let mut group = c.benchmark_group("update rlp node level");
     group.sample_size(20);
 
     for size in [100_000] {
-        let mut runner = TestRunner::new(ProptestConfig::default());
+        let mut runner = TestRunner::deterministic();
         let state = proptest::collection::hash_map(any::<B256>(), any::<U256>(), size)
             .new_tree(&mut runner)
             .unwrap()

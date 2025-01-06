@@ -78,7 +78,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
 
 fn generate_test_data(size: usize) -> (HashedPostState, HashedPostState) {
     let storage_size = 1_000;
-    let mut runner = TestRunner::new(ProptestConfig::default());
+    let mut runner = TestRunner::deterministic();
 
     use proptest::{collection::hash_map, sample::subsequence};
     let db_state = hash_map(

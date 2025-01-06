@@ -1,7 +1,4 @@
-use crate::{
-    transaction::{recover_signers, recover_signers_unchecked},
-    BlockWithSenders, SealedBlock,
-};
+use crate::{BlockWithSenders, SealedBlock};
 use alloc::vec::Vec;
 use reth_primitives_traits::{Block, BlockBody, SealedHeader, SignedTransaction};
 use revm_primitives::{Address, B256};
@@ -13,7 +10,7 @@ pub trait BlockExt: Block {
     /// Calculate the header hash and seal the block so that it can't be changed.
     fn seal_slow(self) -> SealedBlock<Self::Header, Self::Body> {
         let (header, body) = self.split();
-        SealedBlock { header: SealedHeader::seal(header), body }
+        SealedBlock::new(SealedHeader::seal(header), body)
     }
 
     /// Seal the block with a known hash.
@@ -21,7 +18,7 @@ pub trait BlockExt: Block {
     /// WARNING: This method does not perform validation whether the hash is correct.
     fn seal(self, hash: B256) -> SealedBlock<Self::Header, Self::Body> {
         let (header, body) = self.split();
-        SealedBlock { header: SealedHeader::new(header, hash), body }
+        SealedBlock::new(SealedHeader::new(header, hash), body)
     }
 
     /// Expensive operation that recovers transaction signer.
@@ -52,7 +49,6 @@ pub trait BlockExt: Block {
     ///
     /// If the number of senders does not match the number of transactions in the block, this falls
     /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
-    /// See also [`recover_signers_unchecked`]
     ///
     /// Returns an error if a signature is invalid.
     #[track_caller]
@@ -87,28 +83,3 @@ pub trait BlockExt: Block {
 }
 
 impl<T: Block> BlockExt for T {}
-
-/// Extension trait for [`BlockBody`] adding helper methods operating with transactions.
-pub trait BlockBodyTxExt: BlockBody {
-    /// Recover signer addresses for all transactions in the block body.
-    fn recover_signers(&self) -> Option<Vec<Address>>
-    where
-        Self::Transaction: SignedTransaction,
-    {
-        recover_signers(self.transactions(), self.transactions().len())
-    }
-
-    /// Recover signer addresses for all transactions in the block body _without ensuring that the
-    /// signature has a low `s` value_.
-    ///
-    /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [`recover_signers_unchecked`].
-    fn recover_signers_unchecked(&self) -> Option<Vec<Address>>
-    where
-        Self::Transaction: SignedTransaction,
-    {
-        recover_signers_unchecked(self.transactions(), self.transactions().len())
-    }
-}
-
-impl<T: BlockBody> BlockBodyTxExt for T {}

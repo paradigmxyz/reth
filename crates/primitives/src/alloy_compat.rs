@@ -1,98 +1,29 @@
 //! Common conversions from alloy types.
 
-use crate::{Block, BlockBody, Transaction, TransactionSigned};
-use alloc::{string::ToString, vec::Vec};
-use alloy_consensus::{constants::EMPTY_TRANSACTIONS, Header, TxEnvelope};
-use alloy_network::{AnyHeader, AnyRpcBlock, AnyRpcTransaction, AnyTxEnvelope};
+use crate::{BlockBody, SealedBlock, Transaction, TransactionSigned};
+use alloc::string::ToString;
+use alloy_consensus::TxEnvelope;
+use alloy_network::{AnyRpcBlock, AnyRpcTransaction, AnyTxEnvelope};
 use alloy_serde::WithOtherFields;
 use op_alloy_rpc_types as _;
+use reth_primitives_traits::SealedHeader;
 
-impl TryFrom<AnyRpcBlock> for Block {
+impl TryFrom<AnyRpcBlock> for SealedBlock {
     type Error = alloy_rpc_types::ConversionError;
 
     fn try_from(block: AnyRpcBlock) -> Result<Self, Self::Error> {
-        use alloy_rpc_types::ConversionError;
-
         let block = block.inner;
+        let block_hash = block.header.hash;
+        let block = block.try_map_transactions(|tx| tx.try_into())?;
 
-        let transactions = {
-            let transactions: Result<Vec<TransactionSigned>, ConversionError> = match block
-                .transactions
-            {
-                alloy_rpc_types::BlockTransactions::Full(transactions) => {
-                    transactions.into_iter().map(|tx| tx.try_into()).collect()
-                }
-                alloy_rpc_types::BlockTransactions::Hashes(_) |
-                alloy_rpc_types::BlockTransactions::Uncle => {
-                    // alloy deserializes empty blocks into `BlockTransactions::Hashes`, if the tx
-                    // root is the empty root then we can just return an empty vec.
-                    if block.header.transactions_root == EMPTY_TRANSACTIONS {
-                        Ok(Vec::new())
-                    } else {
-                        Err(ConversionError::Custom("missing transactions".to_string()))
-                    }
-                }
-            };
-            transactions?
-        };
-
-        let AnyHeader {
-            parent_hash,
-            ommers_hash,
-            beneficiary,
-            state_root,
-            transactions_root,
-            receipts_root,
-            logs_bloom,
-            difficulty,
-            number,
-            gas_limit,
-            gas_used,
-            timestamp,
-            extra_data,
-            mix_hash,
-            nonce,
-            base_fee_per_gas,
-            withdrawals_root,
-            blob_gas_used,
-            excess_blob_gas,
-            parent_beacon_block_root,
-            requests_hash,
-            target_blobs_per_block,
-        } = block.header.inner;
-
-        Ok(Self {
-            header: Header {
-                parent_hash,
-                ommers_hash,
-                beneficiary,
-                state_root,
-                transactions_root,
-                receipts_root,
-                logs_bloom,
-                difficulty,
-                number,
-                gas_limit,
-                gas_used,
-                timestamp,
-                extra_data,
-                mix_hash: mix_hash
-                    .ok_or_else(|| ConversionError::Custom("missing mixHash".to_string()))?,
-                nonce: nonce.ok_or_else(|| ConversionError::Custom("missing nonce".to_string()))?,
-                base_fee_per_gas,
-                withdrawals_root,
-                blob_gas_used,
-                excess_blob_gas,
-                parent_beacon_block_root,
-                requests_hash,
-                target_blobs_per_block,
-            },
-            body: BlockBody {
-                transactions,
+        Ok(Self::new(
+            SealedHeader::new(block.header.inner.into_header_with_defaults(), block_hash),
+            BlockBody {
+                transactions: block.transactions.into_transactions().collect(),
                 ommers: Default::default(),
                 withdrawals: block.withdrawals.map(|w| w.into_inner().into()),
             },
-        })
+        ))
     }
 }
 
@@ -104,6 +35,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
 
         let WithOtherFields { inner: tx, other: _ } = tx;
 
+        #[allow(unreachable_patterns)]
         let (transaction, signature, hash) = match tx.inner {
             AnyTxEnvelope::Ethereum(TxEnvelope::Legacy(tx)) => {
                 let (tx, signature, hash) = tx.into_parts();

@@ -1,7 +1,7 @@
 //! Defines the types for blob transactions, legacy, and other EIP-2718 transactions included in a
 //! response to `GetPooledTransactions`.
 
-use crate::RecoveredTx;
+use crate::{RecoveredTx, TransactionSigned};
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use reth_primitives_traits::transaction::error::TransactionConversionError;
@@ -11,7 +11,7 @@ pub type PooledTransactionsElementEcRecovered<T = PooledTransaction> = Recovered
 
 impl PooledTransactionsElementEcRecovered {
     /// Transform back to [`RecoveredTx`]
-    pub fn into_ecrecovered_transaction(self) -> RecoveredTx {
+    pub fn into_ecrecovered_transaction(self) -> RecoveredTx<TransactionSigned> {
         let (tx, signer) = self.to_components();
         RecoveredTx::from_signed_transaction(tx.into(), signer)
     }
@@ -21,9 +21,9 @@ impl PooledTransactionsElementEcRecovered {
     ///
     /// Returns the transaction is not an EIP-4844 transaction.
     pub fn try_from_blob_transaction(
-        tx: RecoveredTx,
+        tx: RecoveredTx<TransactionSigned>,
         sidecar: BlobTransactionSidecar,
-    ) -> Result<Self, RecoveredTx> {
+    ) -> Result<Self, RecoveredTx<TransactionSigned>> {
         let RecoveredTx { signer, signed_transaction } = tx;
         let transaction = signed_transaction
             .try_into_pooled_eip4844(sidecar)
@@ -33,10 +33,10 @@ impl PooledTransactionsElementEcRecovered {
 }
 
 /// Converts a `Recovered` into a `PooledTransactionsElementEcRecovered`.
-impl TryFrom<RecoveredTx> for PooledTransactionsElementEcRecovered {
+impl TryFrom<RecoveredTx<TransactionSigned>> for PooledTransactionsElementEcRecovered {
     type Error = TransactionConversionError;
 
-    fn try_from(tx: RecoveredTx) -> Result<Self, Self::Error> {
+    fn try_from(tx: RecoveredTx<TransactionSigned>) -> Result<Self, Self::Error> {
         match PooledTransaction::try_from(tx.signed_transaction) {
             Ok(pooled_transaction) => {
                 Ok(Self::from_signed_transaction(pooled_transaction, tx.signer))

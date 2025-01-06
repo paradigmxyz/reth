@@ -101,15 +101,16 @@ where
             cumulative_gas += block.gas_used();
 
             // Configure the executor to use the current state.
-            trace!(target: "exex::backfill", number = block_number, txs = block.body.transactions().len(), "Executing block");
+            trace!(target: "exex::backfill", number = block_number, txs = block.body().transactions().len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
 
             // Unseal the block for execution
             let (block, senders) = block.into_components();
-            let (unsealed_header, hash) = block.header.split();
-            let block = P::Block::new(unsealed_header, block.body).with_senders_unchecked(senders);
+            let (header, body) = block.split_header_body();
+            let (unsealed_header, hash) = header.split();
+            let block = P::Block::new(unsealed_header, body).with_senders_unchecked(senders);
 
             executor.execute_and_verify_one(&block)?;
             execution_duration += execute_start.elapsed();

@@ -82,6 +82,7 @@ reth-stages = { workspace = true, features = ["test-utils"] }
 reth-static-file.workspace = true
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
+reth-trie-db.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
@@ -89,6 +90,7 @@ alloy-rlp.workspace = true
 assert_matches.workspace = true
 criterion.workspace = true
 crossbeam-channel = "0.5.13"
+proptest.workspace = true
 rand.workspace = true
 
 [[bench]]

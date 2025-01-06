@@ -10,6 +10,7 @@
 #![cfg(feature = "optimism")]
 
 use alloy_consensus::{BlockHeader, Header, EMPTY_OMMER_ROOT_HASH};
+use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B64, U256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{
@@ -23,8 +24,8 @@ use reth_consensus_common::validation::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::OpPrimitives;
-use reth_primitives::{BlockBody, BlockWithSenders, GotExpected, SealedBlock, SealedHeader};
+use reth_optimism_primitives::{OpBlock, OpBlockBody, OpPrimitives, OpReceipt};
+use reth_primitives::{BlockWithSenders, GotExpected, SealedBlockFor, SealedHeader};
 use std::{sync::Arc, time::SystemTime};
 
 mod proof;
@@ -52,28 +53,31 @@ impl OpBeaconConsensus {
 impl FullConsensus<OpPrimitives> for OpBeaconConsensus {
     fn validate_block_post_execution(
         &self,
-        block: &BlockWithSenders,
-        input: PostExecutionInput<'_>,
+        block: &BlockWithSenders<OpBlock>,
+        input: PostExecutionInput<'_, OpReceipt>,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec, input.receipts)
     }
 }
 
-impl Consensus for OpBeaconConsensus {
+impl Consensus<Header, OpBlockBody> for OpBeaconConsensus {
     fn validate_body_against_header(
         &self,
-        body: &BlockBody,
+        body: &OpBlockBody,
         header: &SealedHeader,
     ) -> Result<(), ConsensusError> {
         validate_body_against_header(body, header.header())
     }
 
-    fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(
+        &self,
+        block: &SealedBlockFor<OpBlock>,
+    ) -> Result<(), ConsensusError> {
         // Check ommers hash
-        let ommers_hash = reth_primitives::proofs::calculate_ommers_root(&block.body.ommers);
-        if block.header.ommers_hash != ommers_hash {
+        let ommers_hash = block.body().calculate_ommers_root();
+        if block.ommers_hash != ommers_hash {
             return Err(ConsensusError::BodyOmmersHashDiff(
-                GotExpected { got: ommers_hash, expected: block.header.ommers_hash }.into(),
+                GotExpected { got: ommers_hash, expected: block.ommers_hash }.into(),
             ))
         }
 
@@ -139,7 +143,7 @@ impl HeaderValidator for OpBeaconConsensus {
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp) {
-            validate_against_parent_4844(header.header(), parent.header())?;
+            validate_against_parent_4844(header.header(), parent.header(), BlobParams::cancun())?;
         }
 
         Ok(())

@@ -267,8 +267,8 @@ mod tests {
         let mut receipts = Vec::with_capacity(blocks.len());
         let mut tx_num = 0u64;
         for block in &blocks {
-            let mut block_receipts = Vec::with_capacity(block.body.transactions.len());
-            for transaction in &block.body.transactions {
+            let mut block_receipts = Vec::with_capacity(block.transaction_count());
+            for transaction in &block.body().transactions {
                 block_receipts.push((tx_num, random_receipt(&mut rng, transaction, Some(0))));
                 tx_num += 1;
             }
@@ -317,11 +317,11 @@ mod tests {
         // writer for the first time.
         let mut static_file_provider = db.factory.static_file_provider();
         static_file_provider = StaticFileProvider::read_write(static_file_provider.path()).unwrap();
-        assert_eq!(
+        assert!(matches!(
             static_file_provider
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), is_full_node,),
-            Ok(expected)
-        );
+            Ok(e) if e == expected
+        ));
     }
 
     /// Saves a checkpoint with `checkpoint_block_number` and compare the check consistency result
@@ -338,12 +338,12 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             db.factory
                 .static_file_provider()
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), false,),
-            Ok(expected)
-        );
+            Ok(e) if e == expected
+        ));
     }
 
     /// Inserts a dummy value at key and compare the check consistency result against the expected
@@ -360,12 +360,12 @@ mod tests {
         cursor.insert(key, Default::default()).unwrap();
         provider_rw.commit().unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             db.factory
                 .static_file_provider()
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), false),
-            Ok(expected)
-        );
+            Ok(e) if e == expected
+        ));
     }
 
     #[test]
@@ -373,10 +373,10 @@ mod tests {
         let db = seed_data(90).unwrap();
         let db_provider = db.factory.database_provider_ro().unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             db.factory.static_file_provider().check_consistency(&db_provider, false),
             Ok(None)
-        );
+        ));
     }
 
     #[test]
