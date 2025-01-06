@@ -1,5 +1,6 @@
 //! Transaction types.
 
+use crate::RecoveredTx;
 use alloc::vec::Vec;
 pub use alloy_consensus::transaction::PooledTransaction;
 use alloy_consensus::{
@@ -1520,99 +1521,6 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
 /// Type alias kept for backward compatibility.
 pub type TransactionSignedEcRecovered<T = TransactionSigned> = RecoveredTx<T>;
-
-/// Signed transaction with recovered signer.
-#[derive(Debug, Clone, PartialEq, Hash, Eq, AsRef, Deref)]
-pub struct RecoveredTx<T = TransactionSigned> {
-    /// Signer of the transaction
-    signer: Address,
-    /// Signed transaction
-    #[deref]
-    #[as_ref]
-    signed_transaction: T,
-}
-
-// === impl RecoveredTx ===
-
-impl<T> RecoveredTx<T> {
-    /// Signer of transaction recovered from signature
-    pub const fn signer(&self) -> Address {
-        self.signer
-    }
-
-    /// Reference to the signer of transaction recovered from signature
-    pub const fn signer_ref(&self) -> &Address {
-        &self.signer
-    }
-
-    /// Returns a reference to [`TransactionSigned`]
-    pub const fn tx(&self) -> &T {
-        &self.signed_transaction
-    }
-
-    /// Transform back to [`TransactionSigned`]
-    pub fn into_tx(self) -> T {
-        self.signed_transaction
-    }
-
-    /// Dissolve Self to its component
-    pub fn into_parts(self) -> (T, Address) {
-        (self.signed_transaction, self.signer)
-    }
-
-    /// Create [`RecoveredTx`] from [`TransactionSigned`] and [`Address`] of the
-    /// signer.
-    #[inline]
-    pub const fn from_signed_transaction(signed_transaction: T, signer: Address) -> Self {
-        Self { signed_transaction, signer }
-    }
-
-    /// Applies the given closure to the inner transactions.
-    pub fn map_transaction<Tx>(self, f: impl FnOnce(T) -> Tx) -> RecoveredTx<Tx> {
-        RecoveredTx::from_signed_transaction(f(self.signed_transaction), self.signer)
-    }
-}
-
-impl<T: Encodable> Encodable for RecoveredTx<T> {
-    /// This encodes the transaction _with_ the signature, and an rlp header.
-    ///
-    /// Refer to docs for [`TransactionSigned::encode`] for details on the exact format.
-    fn encode(&self, out: &mut dyn bytes::BufMut) {
-        self.signed_transaction.encode(out)
-    }
-
-    fn length(&self) -> usize {
-        self.signed_transaction.length()
-    }
-}
-
-impl<T: SignedTransaction> Decodable for RecoveredTx<T> {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let signed_transaction = T::decode(buf)?;
-        let signer = signed_transaction
-            .recover_signer()
-            .ok_or(RlpError::Custom("Unable to recover decoded transaction signer."))?;
-        Ok(Self { signer, signed_transaction })
-    }
-}
-
-impl<T: Encodable2718> Encodable2718 for RecoveredTx<T> {
-    fn type_flag(&self) -> Option<u8> {
-        self.signed_transaction.type_flag()
-    }
-
-    fn encode_2718_len(&self) -> usize {
-        self.signed_transaction.encode_2718_len()
-    }
-
-    fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
-        self.signed_transaction.encode_2718(out)
-    }
-
-    fn trie_hash(&self) -> B256 {
-        self.signed_transaction.trie_hash()
-    }
-}
 
 /// Extension trait for [`SignedTransaction`] to convert it into [`RecoveredTx`].
 pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
