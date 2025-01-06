@@ -3,8 +3,6 @@
 #![cfg(feature = "std")]
 
 use alloc::sync::Arc;
-use std::time::SystemTime;
-
 use alloy_consensus::{BlockHeader, Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B64, U256};
@@ -22,6 +20,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpBlock, OpBlockBody, OpPrimitives, OpReceipt};
 use reth_primitives::{BlockWithSenders, GotExpected, SealedBlockFor, SealedHeader};
+use std::time::SystemTime;
 
 use crate::validate_block_post_execution;
 
