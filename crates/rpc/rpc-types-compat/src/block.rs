@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{
 use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, BlockWithSenders};
 use reth_primitives_traits::{Block as BlockTrait, BlockBody, SignedTransaction};
 
-use crate::{transaction::from_recovered_with_block_context, TransactionCompat};
+use crate::transaction::TransactionCompat;
 
 /// Converts the given primitive block into a [`Block`] response with the given
 /// [`BlockTransactionsKind`]
@@ -94,11 +94,7 @@ where
                 index: Some(idx as u64),
             };
 
-            from_recovered_with_block_context::<_, T>(
-                signed_tx_ec_recovered,
-                tx_info,
-                tx_resp_builder,
-            )
+            tx_resp_builder.fill(signed_tx_ec_recovered, tx_info)
         })
         .collect::<Result<Vec<_>, T::Error>>()?;
 
