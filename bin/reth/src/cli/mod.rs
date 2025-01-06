@@ -224,7 +224,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Database debugging utilities
     #[command(name = "db")]
     Db(db::Command<C>),
-    /// Downloads public node snapshots
+    /// Downloads and optionally decompresses node snapshots from a URL
     #[command(name = "download")]
     Download(download::Command<C>),
     /// Manipulate individual stages.
