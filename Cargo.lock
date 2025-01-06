@@ -7637,6 +7637,7 @@ dependencies = [
  "arbitrary",
  "bincode",
  "rand 0.8.5",
+ "reth-ethereum-primitives",
  "reth-execution-errors",
  "reth-primitives",
  "reth-primitives-traits",
