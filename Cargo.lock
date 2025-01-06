@@ -6923,6 +6923,7 @@ dependencies = [
  "rand 0.8.5",
  "reth-chainspec",
  "reth-consensus",
+ "reth-ethereum-primitives",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-storage-api",

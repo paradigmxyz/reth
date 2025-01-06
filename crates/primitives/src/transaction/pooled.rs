@@ -12,7 +12,7 @@ pub type PooledTransactionsElementEcRecovered<T = PooledTransaction> = Recovered
 impl PooledTransactionsElementEcRecovered {
     /// Transform back to [`RecoveredTx`]
     pub fn into_ecrecovered_transaction(self) -> RecoveredTx<TransactionSigned> {
-        let (tx, signer) = self.to_components();
+        let (tx, signer) = self.into_parts();
         RecoveredTx::from_signed_transaction(tx.into(), signer)
     }
 
