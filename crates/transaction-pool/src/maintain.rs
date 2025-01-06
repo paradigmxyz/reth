@@ -8,7 +8,7 @@ use crate::{
     BlockInfo, PoolTransaction, PoolUpdateKind,
 };
 use alloy_consensus::{BlockHeader, Typed2718};
-use alloy_eips::BlockNumberOrTag;
+use alloy_eips::{eip7840::BlobParams, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use alloy_rlp::Encodable;
 use futures_util::{
@@ -19,9 +19,7 @@ use reth_chain_state::CanonStateNotification;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
-use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, SealedHeader, TransactionSigned,
-};
+use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, SealedHeader};
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -78,13 +76,9 @@ pub fn maintain_transaction_pool_future<N, Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) -> BoxFuture<'static, ()>
 where
-    N: NodePrimitives<
-        BlockHeader = reth_primitives::Header,
-        BlockBody = reth_primitives::BlockBody,
-        SignedTx = TransactionSigned,
-    >,
-    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
-    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = TransactionSigned>> + 'static,
+    N: NodePrimitives,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
@@ -104,13 +98,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     task_spawner: Tasks,
     config: MaintainPoolConfig,
 ) where
-    N: NodePrimitives<
-        BlockHeader = reth_primitives::Header,
-        BlockBody = reth_primitives::BlockBody,
-        SignedTx = TransactionSigned,
-    >,
-    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + Send + 'static,
-    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = TransactionSigned>> + 'static,
+    N: NodePrimitives,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
@@ -129,7 +119,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     chain_spec.base_fee_params_at_timestamp(latest.timestamp() + 12),
                 )
                 .unwrap_or_default(),
-            pending_blob_fee: latest.next_block_blob_fee(),
+            pending_blob_fee: latest.next_block_blob_fee(BlobParams::cancun()),
         };
         pool.set_block_info(info);
     }
@@ -286,7 +276,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                         chain_spec.base_fee_params_at_timestamp(new_tip.timestamp() + 12),
                     )
                     .unwrap_or_default();
-                let pending_block_blob_fee = new_tip.next_block_blob_fee();
+                let pending_block_blob_fee = new_tip.next_block_blob_fee(BlobParams::cancun());
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
@@ -339,7 +329,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                             // been validated previously, we still need the blob in order to
                             // accurately set the transaction's
                             // encoded-length which is propagated over the network.
-                            pool.get_blob(TransactionSigned::hash(&tx))
+                            pool.get_blob(*tx.tx_hash())
                                 .ok()
                                 .flatten()
                                 .map(Arc::unwrap_or_clone)
@@ -389,7 +379,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                         chain_spec.base_fee_params_at_timestamp(tip.timestamp() + 12),
                     )
                     .unwrap_or_default();
-                let pending_block_blob_fee = tip.next_block_blob_fee();
+                let pending_block_blob_fee = tip.next_block_blob_fee(BlobParams::cancun());
 
                 let first_block = blocks.first();
                 trace!(
@@ -545,7 +535,7 @@ where
         Err(err) => return Err(Box::new((addresses.collect(), err))),
     };
     for addr in addresses {
-        if let Ok(maybe_acc) = state.basic_account(addr) {
+        if let Ok(maybe_acc) = state.basic_account(&addr) {
             let acc = maybe_acc
                 .map(|acc| ChangedAccount { address: addr, nonce: acc.nonce, balance: acc.balance })
                 .unwrap_or_else(|| ChangedAccount::empty(addr));
@@ -680,7 +670,7 @@ mod tests {
     use alloy_primitives::{hex, U256};
     use reth_chainspec::MAINNET;
     use reth_fs_util as fs;
-    use reth_primitives::PooledTransaction;
+    use reth_primitives::{PooledTransaction, TransactionSigned};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
 

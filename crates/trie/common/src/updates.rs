@@ -1,4 +1,5 @@
 use crate::{BranchNodeCompact, HashBuilder, Nibbles};
+use alloc::vec::Vec;
 use alloy_primitives::{
     map::{B256HashMap, B256HashSet, HashMap, HashSet},
     B256,
@@ -230,6 +231,10 @@ impl StorageTrieUpdates {
 #[cfg(any(test, feature = "serde"))]
 mod serde_nibbles_set {
     use crate::Nibbles;
+    use alloc::{
+        string::{String, ToString},
+        vec::Vec,
+    };
     use alloy_primitives::map::HashSet;
     use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
@@ -266,13 +271,17 @@ mod serde_nibbles_set {
 #[cfg(any(test, feature = "serde"))]
 mod serde_nibbles_map {
     use crate::Nibbles;
+    use alloc::{
+        string::{String, ToString},
+        vec::Vec,
+    };
     use alloy_primitives::{hex, map::HashMap};
+    use core::marker::PhantomData;
     use serde::{
         de::{Error, MapAccess, Visitor},
         ser::SerializeMap,
         Deserialize, Deserializer, Serialize, Serializer,
     };
-    use std::marker::PhantomData;
 
     pub(super) fn serialize<S, T>(
         map: &HashMap<Nibbles, T>,
@@ -308,7 +317,7 @@ mod serde_nibbles_map {
         {
             type Value = HashMap<Nibbles, T>;
 
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 formatter.write_str("a map with hex-encoded Nibbles keys")
             }
 
@@ -411,10 +420,10 @@ fn exclude_empty_from_pair<V>(
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
     use crate::{BranchNodeCompact, Nibbles};
+    use alloc::borrow::Cow;
     use alloy_primitives::map::{B256HashMap, HashMap, HashSet};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
-    use std::borrow::Cow;
 
     /// Bincode-compatible [`super::TrieUpdates`] serde implementation.
     ///

@@ -2,6 +2,7 @@
 //! types.
 
 use crate::HeadersDirection;
+use alloc::vec::Vec;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
@@ -259,7 +260,6 @@ mod tests {
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
                     requests_hash: None,
-                    target_blobs_per_block: None,
                 },
             ]),
         }.encode(&mut data);
@@ -295,7 +295,6 @@ mod tests {
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
                     requests_hash: None,
-                    target_blobs_per_block: None,
                 },
             ]),
         };
@@ -396,7 +395,6 @@ mod tests {
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
                             requests_hash: None,
-                            target_blobs_per_block: None,
                         },
                     ],
                     withdrawals: None,
@@ -472,7 +470,6 @@ mod tests {
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
                             requests_hash: None,
-                            target_blobs_per_block: None,
                         },
                     ],
                     withdrawals: None,

@@ -14,9 +14,10 @@ use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayload
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::EthereumHardforks;
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_primitives::{OpBlock, OpPrimitives, OpTransactionSigned};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{transaction::WithEncoded, SealedBlock, TransactionSigned};
+use reth_primitives::{transaction::WithEncoded, SealedBlockFor};
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
@@ -31,7 +32,7 @@ pub struct OpPayloadBuilderAttributes {
     pub no_tx_pool: bool,
     /// Decoded transactions and the original EIP-2718 encoded bytes as received in the payload
     /// attributes.
-    pub transactions: Vec<WithEncoded<TransactionSigned>>,
+    pub transactions: Vec<WithEncoded<OpTransactionSigned>>,
     /// The gas limit for the generated payload
     pub gas_limit: Option<u64>,
     /// EIP-1559 parameters for the generated payload
@@ -70,8 +71,7 @@ impl PayloadBuilderAttributes for OpPayloadBuilderAttributes {
             .into_iter()
             .map(|data| {
                 let mut buf = data.as_ref();
-                let tx =
-                    TransactionSigned::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
+                let tx = Decodable2718::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
 
                 if !buf.is_empty() {
                     return Err(alloy_rlp::Error::UnexpectedLength);
@@ -135,9 +135,9 @@ pub struct OpBuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// The built block
-    pub(crate) block: Arc<SealedBlock>,
+    pub(crate) block: Arc<SealedBlockFor<OpBlock>>,
     /// Block execution data for the payload, if any.
-    pub(crate) executed_block: Option<ExecutedBlock>,
+    pub(crate) executed_block: Option<ExecutedBlock<OpPrimitives>>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
@@ -155,11 +155,11 @@ impl OpBuiltPayload {
     /// Initializes the payload with the given initial block.
     pub const fn new(
         id: PayloadId,
-        block: Arc<SealedBlock>,
+        block: Arc<SealedBlockFor<OpBlock>>,
         fees: U256,
         chain_spec: Arc<OpChainSpec>,
         attributes: OpPayloadBuilderAttributes,
-        executed_block: Option<ExecutedBlock>,
+        executed_block: Option<ExecutedBlock<OpPrimitives>>,
     ) -> Self {
         Self { id, block, executed_block, fees, sidecars: Vec::new(), chain_spec, attributes }
     }
@@ -170,7 +170,7 @@ impl OpBuiltPayload {
     }
 
     /// Returns the built block(sealed)
-    pub fn block(&self) -> &SealedBlock {
+    pub fn block(&self) -> &SealedBlockFor<OpBlock> {
         &self.block
     }
 
@@ -186,7 +186,9 @@ impl OpBuiltPayload {
 }
 
 impl BuiltPayload for OpBuiltPayload {
-    fn block(&self) -> &SealedBlock {
+    type Primitives = OpPrimitives;
+
+    fn block(&self) -> &SealedBlockFor<OpBlock> {
         &self.block
     }
 
@@ -194,7 +196,7 @@ impl BuiltPayload for OpBuiltPayload {
         self.fees
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlock> {
+    fn executed_block(&self) -> Option<ExecutedBlock<OpPrimitives>> {
         self.executed_block.clone()
     }
 
@@ -204,7 +206,9 @@ impl BuiltPayload for OpBuiltPayload {
 }
 
 impl BuiltPayload for &OpBuiltPayload {
-    fn block(&self) -> &SealedBlock {
+    type Primitives = OpPrimitives;
+
+    fn block(&self) -> &SealedBlockFor<OpBlock> {
         (**self).block()
     }
 
@@ -212,7 +216,7 @@ impl BuiltPayload for &OpBuiltPayload {
         (**self).fees()
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlock> {
+    fn executed_block(&self) -> Option<ExecutedBlock<OpPrimitives>> {
         self.executed_block.clone()
     }
 
@@ -262,7 +266,7 @@ impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
-            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            blobs_bundle: sidecars.into_iter().collect::<Vec<_>>().into(),
             parent_beacon_block_root,
         }
     }
@@ -289,7 +293,7 @@ impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
-            blobs_bundle: sidecars.into_iter().map(Into::into).collect::<Vec<_>>().into(),
+            blobs_bundle: sidecars.into_iter().collect::<Vec<_>>().into(),
             parent_beacon_block_root,
             execution_requests: vec![],
         }
@@ -371,8 +375,6 @@ mod tests {
                 suggested_fee_recipient: address!("4200000000000000000000000000000000000011"),
                 withdrawals: Some([].into()),
                 parent_beacon_block_root: b256!("8fe0193b9bf83cb7e5a08538e494fecc23046aab9a497af3704f4afdae3250ff").into(),
-                target_blobs_per_block: None,
-                max_blobs_per_block: None,
             },
             transactions: Some([bytes!("7ef8f8a0dc19cfa777d90980e4875d0a548a881baaa3f83f14d1bc0d3038bc329350e54194deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e20000f424000000000000000000000000300000000670d6d890000000000000125000000000000000000000000000000000000000000000000000000000000000700000000000000000000000000000000000000000000000000000000000000014bf9181db6e381d4384bbf69c48b0ee0eed23c6ca26143c6d2544f9d39997a590000000000000000000000007f83d659683caf2767fd3c720981d51f5bc365bc")].into()),
             no_tx_pool: None,

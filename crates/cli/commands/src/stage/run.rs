@@ -4,6 +4,7 @@
 
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::Sealable;
 use clap::Parser;
 use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};

@@ -6,6 +6,7 @@ use crate::{
     to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
+use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
@@ -17,7 +18,7 @@ use reth_db::{
     table::{Decompress, Value},
 };
 use reth_node_types::NodePrimitives;
-use reth_primitives::{transaction::recover_signers, SealedHeader, TransactionMeta};
+use reth_primitives::{transaction::recover_signers, SealedHeader};
 use reth_primitives_traits::SignedTransaction;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{

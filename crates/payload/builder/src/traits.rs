@@ -3,6 +3,7 @@
 use reth_chain_state::CanonStateNotification;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
+use reth_primitives_traits::NodePrimitives;
 use std::future::Future;
 
 /// A type that can build a payload.
@@ -105,7 +106,7 @@ pub trait PayloadJobGenerator: Send + Sync {
     ///
     /// This is intended for any logic that needs to be run when the chain state changes or used to
     /// use the in memory state for the head block.
-    fn on_new_state(&mut self, new_state: CanonStateNotification) {
+    fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
         let _ = new_state;
     }
 }

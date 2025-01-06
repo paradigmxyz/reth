@@ -4,20 +4,18 @@ use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use clap::{Parser, Subcommand};
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::Config;
-use reth_consensus::Consensus;
+use reth_consensus::noop::NoopConsensus;
 use reth_db::DatabaseEnv;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_node_core::args::NetworkArgs;
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainSpecProvider,
-    ChainStateBlockReader, ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory,
-    StorageLocation,
+    providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainStateBlockReader,
+    ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory, StorageLocation,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
@@ -112,8 +110,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         config: Config,
         provider_factory: ProviderFactory<N>,
     ) -> Result<Pipeline<N>, eyre::Error> {
-        let consensus: Arc<dyn Consensus> =
-            Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
         let stage_conf = &config.stages;
         let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 
@@ -133,7 +129,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 DefaultStages::new(
                     provider_factory.clone(),
                     tip_rx,
-                    Arc::clone(&consensus),
+                    Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
                     executor.clone(),

@@ -46,7 +46,7 @@ tokio.workspace = true
 
 ## misc
 eyre.workspace = true
-itertools.workspace = true
+itertools = { workspace = true, features = ["use_std"] }
 metrics.workspace = true
 parking_lot.workspace = true
 rmp-serde = "1.3"

@@ -166,13 +166,14 @@ where
             ip: enode.address,
             ports: Ports { discovery: enode.udp_port, listener: enode.tcp_port },
             listen_addr: enode.tcp_addr(),
+            #[allow(deprecated)]
             protocols: ProtocolInfo {
                 eth: Some(EthProtocolInfo {
                     network: status.eth_protocol_info.network,
-                    difficulty: status.eth_protocol_info.difficulty,
                     genesis: status.eth_protocol_info.genesis,
                     config,
                     head: status.eth_protocol_info.head,
+                    difficulty: None,
                 }),
                 snap: None,
             },

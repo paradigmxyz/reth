@@ -55,7 +55,7 @@ pub enum BlockchainTreeError {
 }
 
 /// Canonical Errors
-#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum CanonicalError {
     /// Error originating from validation operations.
     #[error(transparent)]
@@ -73,7 +73,7 @@ pub enum CanonicalError {
     #[error("transaction error on commit: {0}")]
     CanonicalCommit(String),
     /// Error indicating that a previous optimistic sync target was re-orged
-    #[error("transaction error on revert: {0}")]
+    #[error("optimistic sync target was re-orged at block: {0}")]
     OptimisticTargetRevert(BlockNumber),
 }
 
@@ -167,7 +167,7 @@ impl std::fmt::Debug for InsertBlockError {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to insert block (hash={}, number={}, parent_hash={}): {kind}", 
+#[error("Failed to insert block (hash={}, number={}, parent_hash={}): {kind}",
         .block.hash(),
         .block.number,
         .block.parent_hash)]
@@ -206,7 +206,7 @@ impl<B: Block> std::fmt::Debug for InsertBlockErrorDataTwo<B> {
             .field("hash", &self.block.hash())
             .field("number", &self.block.number())
             .field("parent_hash", &self.block.parent_hash())
-            .field("num_txs", &self.block.body.transactions().len())
+            .field("num_txs", &self.block.body().transactions().len())
             .finish_non_exhaustive()
     }
 }

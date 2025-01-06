@@ -18,7 +18,7 @@ use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_primitives::{Block, BlockExt};
+use reth_primitives::SealedBlock;
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
 use tracing::{debug, info};
@@ -46,8 +46,7 @@ impl Command {
                 let block_res =
                     block_provider.get_block_by_number(next_block.into(), true.into()).await;
                 let block = block_res.unwrap().unwrap();
-                let block_hash = block.header.hash;
-                let block = Block::try_from(block).unwrap().seal(block_hash);
+                let block: SealedBlock = block.try_into().unwrap();
                 let head_block_hash = block.hash();
                 let safe_block_hash = block_provider
                     .get_block_by_number(block.number.saturating_sub(32).into(), false.into());
@@ -79,9 +78,9 @@ impl Command {
             let block_number = block.header.number;
 
             let versioned_hashes: Vec<B256> =
-                block.body.blob_versioned_hashes_iter().copied().collect();
+                block.body().blob_versioned_hashes_iter().copied().collect();
             let parent_beacon_block_root = block.parent_beacon_block_root;
-            let payload = block_to_payload(block);
+            let payload = block_to_payload(block).0;
 
             debug!(?block_number, "Sending payload",);
 

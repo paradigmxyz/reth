@@ -11,8 +11,8 @@ use reth_primitives::{
     BlockBody, Receipt,
 };
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderBlock,
-    ProviderReceipt, ProviderTx, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderReceipt, ProviderTx,
+    StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
@@ -35,8 +35,7 @@ where
                 Block = reth_primitives::Block,
                 Receipt = reth_primitives::Receipt,
                 Header = reth_primitives::Header,
-            > + EvmEnvProvider
-                          + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+            > + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                           + StateProviderFactory,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
@@ -94,11 +93,10 @@ where
             blob_gas_used: is_cancun.then(|| {
                 transactions.iter().map(|tx| tx.blob_gas_used().unwrap_or_default()).sum::<u64>()
             }),
-            excess_blob_gas: block_env.get_blob_excess_gas().map(Into::into),
+            excess_blob_gas: block_env.get_blob_excess_gas(),
             extra_data: Default::default(),
             parent_beacon_block_root: is_cancun.then_some(B256::ZERO),
             requests_hash: is_prague.then_some(EMPTY_REQUESTS_HASH),
-            target_blobs_per_block: None,
         };
 
         // seal the block
@@ -119,7 +117,7 @@ where
             tx_type: tx.tx_type(),
             success: result.is_success(),
             cumulative_gas_used,
-            logs: result.into_logs().into_iter().map(Into::into).collect(),
+            logs: result.into_logs().into_iter().collect(),
             ..Default::default()
         }
     }

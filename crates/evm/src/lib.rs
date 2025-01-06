@@ -20,7 +20,7 @@ extern crate alloc;
 use crate::builder::RethEvmBuilder;
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use reth_primitives_traits::BlockHeader;
+use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{Database, Evm, GetInspector};
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv};
 
@@ -34,7 +34,6 @@ use env::EvmEnv;
 #[cfg(feature = "std")]
 pub mod metrics;
 pub mod noop;
-pub mod provider;
 pub mod state_change;
 pub mod system_calls;
 #[cfg(any(test, feature = "test-utils"))]
@@ -120,7 +119,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     type Header: BlockHeader;
 
     /// The transaction type.
-    type Transaction;
+    type Transaction: SignedTransaction;
 
     /// The error type that is returned by [`Self::next_cfg_and_block_env`].
     type Error: core::error::Error + Send + Sync;
@@ -145,9 +144,9 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     );
 
     /// Returns a [`CfgEnvWithHandlerCfg`] for the given header.
-    fn cfg_env(&self, header: &Self::Header, total_difficulty: U256) -> CfgEnvWithHandlerCfg {
+    fn cfg_env(&self, header: &Self::Header) -> CfgEnvWithHandlerCfg {
         let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-        self.fill_cfg_env(&mut cfg, header, total_difficulty);
+        self.fill_cfg_env(&mut cfg, header);
         cfg
     }
 
@@ -155,19 +154,14 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     ///
     /// This __must__ set the corresponding spec id in the handler cfg, based on timestamp or total
     /// difficulty
-    fn fill_cfg_env(
-        &self,
-        cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Self::Header,
-        total_difficulty: U256,
-    );
+    fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header);
 
     /// Fill [`BlockEnv`] field according to the chain spec and given header
-    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, after_merge: bool) {
+    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, spec_id: SpecId) {
         block_env.number = U256::from(header.number());
         block_env.coinbase = header.beneficiary();
         block_env.timestamp = U256::from(header.timestamp());
-        if after_merge {
+        if spec_id >= SpecId::MERGE {
             block_env.prevrandao = header.mix_hash();
             block_env.difficulty = U256::ZERO;
         } else {
@@ -179,15 +173,15 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 
         // EIP-4844 excess blob gas of this block, introduced in Cancun
         if let Some(excess_blob_gas) = header.excess_blob_gas() {
-            block_env.set_blob_excess_gas_and_price(excess_blob_gas);
+            block_env.set_blob_excess_gas_and_price(excess_blob_gas, spec_id >= SpecId::PRAGUE);
         }
     }
 
     /// Creates a new [`EvmEnv`] for the given header.
-    fn cfg_and_block_env(&self, header: &Self::Header, total_difficulty: U256) -> EvmEnv {
+    fn cfg_and_block_env(&self, header: &Self::Header) -> EvmEnv {
         let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
         let mut block_env = BlockEnv::default();
-        self.fill_cfg_and_block_env(&mut cfg, &mut block_env, header, total_difficulty);
+        self.fill_cfg_and_block_env(&mut cfg, &mut block_env, header);
         EvmEnv::new(cfg, block_env)
     }
 
@@ -200,11 +194,9 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         cfg: &mut CfgEnvWithHandlerCfg,
         block_env: &mut BlockEnv,
         header: &Self::Header,
-        total_difficulty: U256,
     ) {
-        self.fill_cfg_env(cfg, header, total_difficulty);
-        let after_merge = cfg.handler_cfg.spec_id >= SpecId::MERGE;
-        self.fill_block_env(block_env, header, after_merge);
+        self.fill_cfg_env(cfg, header);
+        self.fill_block_env(block_env, header, cfg.handler_cfg.spec_id);
     }
 
     /// Returns the configured [`EvmEnv`] for `parent + 1` block.

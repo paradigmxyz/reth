@@ -11,15 +11,15 @@ use crate::{
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap,
-    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
-    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
-    StateCommitmentProvider, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
-    StorageLocation, StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    DBProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter, LatestStateProvider,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, RevertsInit, StageCheckpointReader, StateCommitmentProvider,
+    StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation,
+    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Header};
 use alloy_eips::{
     eip2718::Encodable2718,
     eip4895::{Withdrawal, Withdrawals},
@@ -47,14 +47,12 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
 use reth_primitives::{
     Account, BlockExt, BlockWithSenders, Bytecode, GotExpected, NodePrimitives, SealedBlock,
     SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment, StorageEntry,
-    TransactionMeta,
 };
 use reth_primitives_traits::{Block as _, BlockBody as _, SignedTransaction};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
@@ -863,8 +861,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        Ok(self.tx.get::<tables::PlainAccountState>(address)?)
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        Ok(self.tx.get_by_encoded_key::<tables::PlainAccountState>(address)?)
     }
 }
 
@@ -1043,9 +1041,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
             StaticFileSegment::Headers,
             to_range(range),
             |static_file, range, _| static_file.headers_range(range),
-            |range, _| {
-                self.cursor_read_collect::<tables::Headers<Self::Header>>(range).map_err(Into::into)
-            },
+            |range, _| self.cursor_read_collect::<tables::Headers<Self::Header>>(range),
             |_| true,
         )
     }
@@ -1121,9 +1117,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, 
             StaticFileSegment::Headers,
             start..end,
             |static_file, range, _| static_file.canonical_hashes_range(range.start, range.end),
-            |range, _| {
-                self.cursor_read_collect::<tables::CanonicalHeaders>(range).map_err(Into::into)
-            },
+            |range, _| self.cursor_read_collect::<tables::CanonicalHeaders>(range),
             |_| true,
         )
     }
@@ -1260,7 +1254,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             transaction_kind,
             |block_number| self.sealed_header(block_number),
             |header, body, senders| {
-                SealedBlock { header, body }
+                SealedBlock::new(header, body)
                     // Note: we're using unchecked here because we know the block contains valid txs
                     // wrt to its height and can ignore the s value check so pre
                     // EIP-2 txs are allowed
@@ -1302,7 +1296,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             range,
             |range| self.sealed_headers_range(range),
             |header, body, senders| {
-                SealedBlockWithSenders::new(SealedBlock { header, body }, senders)
+                SealedBlockWithSenders::new(SealedBlock::new(header, body), senders)
                     .ok_or(ProviderError::SenderRecoveryError)
             },
         )
@@ -1518,7 +1512,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.cursor_read_collect::<tables::TransactionSenders>(range).map_err(Into::into)
+        self.cursor_read_collect::<tables::TransactionSenders>(range)
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
@@ -1571,10 +1565,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
             StaticFileSegment::Receipts,
             to_range(range),
             |static_file, range, _| static_file.receipts_by_tx_range(range),
-            |range, _| {
-                self.cursor_read_collect::<tables::Receipts<Self::Receipt>>(range)
-                    .map_err(Into::into)
-            },
+            |range, _| self.cursor_read_collect::<tables::Receipts<Self::Receipt>>(range),
             |_| true,
         )
     }
@@ -1637,24 +1628,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockBodyIndicesProvider
 {
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
-    }
-}
-
-impl<TX: DbTx + 'static, N: NodeTypesForProvider> EvmEnvProvider<HeaderTy<N>>
-    for DatabaseProvider<TX, N>
-{
-    fn env_with_header<EvmConfig>(
-        &self,
-        header: &HeaderTy<N>,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<EvmEnv>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        let total_difficulty = self
-            .header_td_by_number(header.number())?
-            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?;
-        Ok(evm_config.cfg_and_block_env(header, total_difficulty))
     }
 }
 
@@ -2832,11 +2805,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         durations_recorder.record_relative(metrics::Action::GetNextTxNum);
         let first_tx_num = next_tx_num;
 
-        let tx_count = block.block.body.transactions().len() as u64;
+        let tx_count = block.block.body().transactions().len() as u64;
 
         // Ensures we have all the senders for the block's transactions.
         for (transaction, sender) in
-            block.block.body.transactions().iter().zip(block.senders.iter())
+            block.block.body().transactions().iter().zip(block.senders.iter())
         {
             let hash = transaction.tx_hash();
 
@@ -2850,7 +2823,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             next_tx_num += 1;
         }
 
-        self.append_block_bodies(vec![(block_number, Some(block.block.body))], write_to)?;
+        self.append_block_bodies(vec![(block_number, Some(block.block.into_body()))], write_to)?;
 
         debug!(
             target: "providers::db",

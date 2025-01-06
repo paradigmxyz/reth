@@ -1,6 +1,7 @@
 //! Merkle trie proofs.
 
 use crate::{Nibbles, TrieAccount};
+use alloc::vec::Vec;
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,

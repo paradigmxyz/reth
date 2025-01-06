@@ -572,3 +572,32 @@ impl SignedTransaction for TransactionSigned {
         recover_signer_unchecked(&self.signature, signature_hash)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eips::eip7702::constants::SECP256K1N_HALF;
+    use alloy_primitives::hex;
+
+    #[test]
+    fn eip_2_reject_high_s_value() {
+        // This pre-homestead transaction has a high `s` value and should be rejected by the
+        // `recover_signer` method:
+        // https://etherscan.io/getRawTx?tx=0x9e6e19637bb625a8ff3d052b7c2fe57dc78c55a15d258d77c43d5a9c160b0384
+        //
+        // Block number: 46170
+        let raw_tx = hex!("f86d8085746a52880082520894c93f2250589a6563f5359051c1ea25746549f0d889208686e75e903bc000801ba034b6fdc33ea520e8123cf5ac4a9ff476f639cab68980cd9366ccae7aef437ea0a0e517caa5f50e27ca0d1e9a92c503b4ccb039680c6d9d0c71203ed611ea4feb33");
+        let tx = TransactionSigned::decode_2718(&mut &raw_tx[..]).unwrap();
+        let signature = tx.signature();
+
+        // make sure we know it's greater than SECP256K1N_HALF
+        assert!(signature.s() > SECP256K1N_HALF);
+
+        // recover signer, expect failure
+        let hash = *tx.tx_hash();
+        assert!(recover_signer(signature, hash).is_none());
+
+        // use unchecked, ensure it succeeds (the signature is valid if not for EIP-2)
+        assert!(recover_signer_unchecked(signature, hash).is_some());
+    }
+}

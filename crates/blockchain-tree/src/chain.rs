@@ -6,7 +6,7 @@
 use super::externals::TreeExternals;
 use crate::BundleStateDataRef;
 use alloy_eips::ForkBlock;
-use alloy_primitives::{BlockHash, BlockNumber, U256};
+use alloy_primitives::{BlockHash, BlockNumber};
 use reth_blockchain_tree_api::{
     error::{BlockchainTreeError, InsertBlockErrorKind},
     BlockAttachment, BlockValidationKind,
@@ -209,7 +209,7 @@ impl AppendableChain {
         let block_hash = block.hash();
         let block = block.unseal();
 
-        let state = executor.execute((&block, U256::MAX).into())?;
+        let state = executor.execute(&block)?;
         externals.consensus.validate_block_post_execution(
             &block,
             PostExecutionInput::new(&state.receipts, &state.requests),

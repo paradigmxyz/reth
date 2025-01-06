@@ -2,6 +2,7 @@ use alloy_consensus::{
     transaction::PooledTransaction, Header, TxEip1559, TxEip2930, TxEip4844, TxEip4844WithSidecar,
     TxEip7702, TxLegacy, TxType,
 };
+use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
 use revm_primitives::Log;
 
@@ -79,6 +80,27 @@ impl InMemorySize for PooledTransaction {
             Self::Eip4844(tx) => tx.size(),
             Self::Eip7702(tx) => tx.size(),
         }
+    }
+}
+
+impl<T: InMemorySize> InMemorySize for alloy_consensus::BlockBody<T> {
+    /// Calculates a heuristic for the in-memory size of the block body
+    #[inline]
+    fn size(&self) -> usize {
+        self.transactions.iter().map(T::size).sum::<usize>() +
+            self.transactions.capacity() * core::mem::size_of::<T>() +
+            self.ommers.iter().map(Header::size).sum::<usize>() +
+            self.ommers.capacity() * core::mem::size_of::<Header>() +
+            self.withdrawals
+                .as_ref()
+                .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)
+    }
+}
+
+impl<T: InMemorySize> InMemorySize for alloy_consensus::Block<T> {
+    #[inline]
+    fn size(&self) -> usize {
+        self.header.size() + self.body.size()
     }
 }
 

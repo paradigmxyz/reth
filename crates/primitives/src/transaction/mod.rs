@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 pub use alloy_consensus::transaction::PooledTransaction;
 use alloy_consensus::{
     transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction as _, TxEip1559, TxEip2930,
-    TxEip4844, TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxLegacy, Typed2718,
+    TxEip4844, TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy, Typed2718,
     TypedTransaction,
 };
 use alloy_eips::{
@@ -17,10 +17,8 @@ use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
-pub use compat::FillTxEnv;
 use core::hash::{Hash, Hasher};
 use derive_more::{AsRef, Deref};
-pub use meta::TransactionMeta;
 use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
@@ -34,7 +32,7 @@ pub use reth_primitives_traits::{
     transaction::error::{
         InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
     },
-    WithEncoded,
+    FillTxEnv, WithEncoded,
 };
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
@@ -50,8 +48,6 @@ pub mod signature;
 pub mod util;
 
 pub(crate) mod access_list;
-mod compat;
-mod meta;
 mod pooled;
 mod tx_type;
 
@@ -913,47 +909,16 @@ impl TransactionSigned {
         *self.tx_hash()
     }
 
-    /// Recovers a list of signers from a transaction list iterator.
-    ///
-    /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [`Self::recover_signer`].
-    pub fn recover_signers<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
-    where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self> + Send,
-    {
-        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
-            txes.into_iter().map(|tx| tx.recover_signer()).collect()
-        } else {
-            txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
-        }
-    }
-
-    /// Recovers a list of signers from a transaction list iterator _without ensuring that the
-    /// signature has a low `s` value_.
-    ///
-    /// Returns `None`, if some transaction's signature is invalid, see also
-    /// [`Self::recover_signer_unchecked`].
-    pub fn recover_signers_unchecked<'a, T>(txes: T, num_txes: usize) -> Option<Vec<Address>>
-    where
-        T: IntoParallelIterator<Item = &'a Self> + IntoIterator<Item = &'a Self>,
-    {
-        if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
-            txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
-        } else {
-            txes.into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
-        }
-    }
-
     /// Returns the [`RecoveredTx`] transaction with the given sender.
     #[inline]
-    pub const fn with_signer(self, signer: Address) -> RecoveredTx {
+    pub const fn with_signer(self, signer: Address) -> RecoveredTx<Self> {
         RecoveredTx::from_signed_transaction(self, signer)
     }
 
     /// Consumes the type, recover signer and return [`RecoveredTx`]
     ///
     /// Returns `None` if the transaction's signature is invalid, see also [`Self::recover_signer`].
-    pub fn into_ecrecovered(self) -> Option<RecoveredTx> {
+    pub fn into_ecrecovered(self) -> Option<RecoveredTx<Self>> {
         let signer = self.recover_signer()?;
         Some(RecoveredTx { signed_transaction: self, signer })
     }
@@ -963,7 +928,7 @@ impl TransactionSigned {
     ///
     /// Returns `None` if the transaction's signature is invalid, see also
     /// [`Self::recover_signer_unchecked`].
-    pub fn into_ecrecovered_unchecked(self) -> Option<RecoveredTx> {
+    pub fn into_ecrecovered_unchecked(self) -> Option<RecoveredTx<Self>> {
         let signer = self.recover_signer_unchecked()?;
         Some(RecoveredTx { signed_transaction: self, signer })
     }
@@ -973,7 +938,7 @@ impl TransactionSigned {
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
     /// [`Self::recover_signer_unchecked`].
-    pub fn try_into_ecrecovered_unchecked(self) -> Result<RecoveredTx, Self> {
+    pub fn try_into_ecrecovered_unchecked(self) -> Result<RecoveredTx<Self>, Self> {
         match self.recover_signer_unchecked() {
             None => Err(self),
             Some(signer) => Ok(RecoveredTx { signed_transaction: self, signer }),
@@ -1028,6 +993,9 @@ impl SignedTransaction for TransactionSigned {
 
 impl reth_primitives_traits::FillTxEnv for TransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
+        #[cfg(feature = "optimism")]
+        let envelope = alloy_eips::eip2718::Encodable2718::encoded_2718(self);
+
         tx_env.caller = sender;
         match self.as_ref() {
             Transaction::Legacy(tx) => {
@@ -1102,7 +1070,36 @@ impl reth_primitives_traits::FillTxEnv for TransactionSigned {
                     Some(AuthorizationList::Signed(tx.authorization_list.clone()));
             }
             #[cfg(feature = "optimism")]
-            Transaction::Deposit(_) => {}
+            Transaction::Deposit(tx) => {
+                tx_env.access_list.clear();
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = U256::ZERO;
+                tx_env.gas_priority_fee = None;
+                tx_env.transact_to = tx.to;
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = None;
+                tx_env.nonce = None;
+                tx_env.authorization_list = None;
+
+                tx_env.optimism = revm_primitives::OptimismFields {
+                    source_hash: Some(tx.source_hash),
+                    mint: tx.mint,
+                    is_system_transaction: Some(tx.is_system_transaction),
+                    enveloped_tx: Some(envelope.into()),
+                };
+                return;
+            }
+        }
+
+        #[cfg(feature = "optimism")]
+        if !self.is_deposit() {
+            tx_env.optimism = revm_primitives::OptimismFields {
+                source_hash: None,
+                mint: None,
+                is_system_transaction: Some(false),
+                enveloped_tx: Some(envelope.into()),
+            }
         }
     }
 }
@@ -1185,9 +1182,15 @@ impl alloy_consensus::Transaction for TransactionSigned {
     }
 }
 
-impl From<RecoveredTx> for TransactionSigned {
-    fn from(recovered: RecoveredTx) -> Self {
+impl From<RecoveredTx<Self>> for TransactionSigned {
+    fn from(recovered: RecoveredTx<Self>) -> Self {
         recovered.signed_transaction
+    }
+}
+
+impl From<RecoveredTx<PooledTransaction>> for TransactionSigned {
+    fn from(recovered: RecoveredTx<PooledTransaction>) -> Self {
+        recovered.signed_transaction.into()
     }
 }
 
@@ -1456,6 +1459,25 @@ impl From<Signed<TxEip4844WithSidecar>> for TransactionSigned {
     fn from(value: Signed<TxEip4844WithSidecar>) -> Self {
         let (tx, sig, hash) = value.into_parts();
         Self::new(tx.tx.into(), sig, hash)
+    }
+}
+
+impl From<Signed<TxEip4844Variant>> for TransactionSigned {
+    fn from(value: Signed<TxEip4844Variant>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new(tx.into(), sig, hash)
+    }
+}
+
+impl From<TxEnvelope> for TransactionSigned {
+    fn from(value: TxEnvelope) -> Self {
+        match value {
+            TxEnvelope::Legacy(tx) => tx.into(),
+            TxEnvelope::Eip2930(tx) => tx.into(),
+            TxEnvelope::Eip1559(tx) => tx.into(),
+            TxEnvelope::Eip4844(tx) => tx.into(),
+            TxEnvelope::Eip7702(tx) => tx.into(),
+        }
     }
 }
 
@@ -2151,38 +2173,6 @@ mod tests {
         let mut b = Vec::with_capacity(data.len());
         tx.encode(&mut b);
         assert_eq!(data.as_slice(), b.as_slice());
-    }
-
-    #[cfg(feature = "secp256k1")]
-    proptest::proptest! {
-        #![proptest_config(proptest::prelude::ProptestConfig::with_cases(1))]
-
-        #[test]
-        fn test_parallel_recovery_order(txes in proptest::collection::vec(
-            proptest_arbitrary_interop::arb::<Transaction>(),
-            *crate::transaction::PARALLEL_SENDER_RECOVERY_THRESHOLD * 5
-        )) {
-            let mut rng =rand::thread_rng();
-            let secp = secp256k1::Secp256k1::new();
-            let txes: Vec<TransactionSigned> = txes.into_iter().map(|mut tx| {
-                 if let Some(chain_id) = tx.chain_id() {
-                    // Otherwise we might overflow when calculating `v` on `recalculate_hash`
-                    tx.set_chain_id(chain_id % (u64::MAX / 2 - 36));
-                }
-
-                let key_pair = secp256k1::Keypair::new(&secp, &mut rng);
-
-                let signature =
-                    crate::sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
-
-                TransactionSigned::new_unhashed(tx, signature)
-            }).collect();
-
-            let parallel_senders = TransactionSigned::recover_signers(&txes, txes.len()).unwrap();
-            let seq_senders = txes.iter().map(|tx| tx.recover_signer()).collect::<Option<Vec<_>>>().unwrap();
-
-            assert_eq!(parallel_senders, seq_senders);
-        }
     }
 
     // <https://etherscan.io/tx/0x280cde7cdefe4b188750e76c888f13bd05ce9a4d7767730feefe8a0e50ca6fc4>

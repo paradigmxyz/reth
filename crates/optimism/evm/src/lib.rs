@@ -14,11 +14,13 @@ extern crate alloc;
 
 use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::Header;
+use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, U256};
 use op_alloy_consensus::EIP1559ParamError;
 use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
-use reth_primitives::{transaction::FillTxEnv, Head, TransactionSigned};
+use reth_optimism_primitives::OpTransactionSigned;
+use reth_primitives_traits::FillTxEnv;
 use reth_revm::{
     inspector_handle_register,
     primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
@@ -58,10 +60,10 @@ impl OpEvmConfig {
 
 impl ConfigureEvmEnv for OpEvmConfig {
     type Header = Header;
-    type Transaction = TransactionSigned;
+    type Transaction = OpTransactionSigned;
     type Error = EIP1559ParamError;
 
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &OpTransactionSigned, sender: Address) {
         transaction.fill_tx_env(tx_env, sender);
     }
 
@@ -110,22 +112,8 @@ impl ConfigureEvmEnv for OpEvmConfig {
         env.block.basefee = U256::ZERO;
     }
 
-    fn fill_cfg_env(
-        &self,
-        cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Self::Header,
-        total_difficulty: U256,
-    ) {
-        let spec_id = revm_spec(
-            self.chain_spec(),
-            &Head {
-                number: header.number,
-                timestamp: header.timestamp,
-                difficulty: header.difficulty,
-                total_difficulty,
-                hash: Default::default(),
-            },
-        );
+    fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
+        let spec_id = revm_spec(self.chain_spec(), header);
 
         cfg_env.chain_id = self.chain_spec.chain().id();
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
@@ -148,9 +136,9 @@ impl ConfigureEvmEnv for OpEvmConfig {
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)
         let blob_excess_gas_and_price = parent
-            .next_block_excess_blob_gas()
+            .next_block_excess_blob_gas(BlobParams::cancun())
             .or_else(|| (spec_id.is_enabled_in(SpecId::CANCUN)).then_some(0))
-            .map(BlobExcessGasAndPrice::new);
+            .map(|gas| BlobExcessGasAndPrice::new(gas, false));
 
         let block_env = BlockEnv {
             number: U256::from(parent.number + 1),
@@ -203,18 +191,22 @@ impl ConfigureEvm for OpEvmConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{constants::KECCAK_EMPTY, Header};
+    use alloy_consensus::{constants::KECCAK_EMPTY, Header, Receipt};
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
-    use alloy_primitives::{bytes, Address, LogData, B256, U256};
+    use alloy_primitives::{
+        bytes,
+        map::{HashMap, HashSet},
+        Address, LogData, B256, U256,
+    };
     use reth_chainspec::ChainSpec;
     use reth_evm::execute::ProviderError;
     use reth_execution_types::{
         AccountRevertInit, BundleStateInit, Chain, ExecutionOutcome, RevertsInit,
     };
     use reth_optimism_chainspec::BASE_MAINNET;
-    use reth_optimism_primitives::OpPrimitives;
-    use reth_primitives::{Account, Log, Receipt, Receipts, SealedBlockWithSenders, TxType};
+    use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
+    use reth_primitives::{Account, Log, Receipts, SealedBlockWithSenders};
     use reth_revm::{
         db::{BundleState, CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
@@ -222,10 +214,7 @@ mod tests {
         JournaledState,
     };
     use revm_primitives::{EnvWithHandlerCfg, HandlerCfg};
-    use std::{
-        collections::{HashMap, HashSet},
-        sync::Arc,
-    };
+    use std::sync::Arc;
 
     fn test_evm_config() -> OpEvmConfig {
         OpEvmConfig::new(BASE_MAINNET.clone())
@@ -246,14 +235,11 @@ mod tests {
             .shanghai_activated()
             .build();
 
-        // Define the total difficulty as zero (default)
-        let total_difficulty = U256::ZERO;
-
         // Use the `OpEvmConfig` to create the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
         let EvmEnv { cfg_env_with_handler_cfg, .. } =
             OpEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
-                .cfg_and_block_env(&header, total_difficulty);
+                .cfg_and_block_env(&header);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
@@ -547,7 +533,7 @@ mod tests {
     #[test]
     fn receipts_by_block_hash() {
         // Create a default SealedBlockWithSenders object
-        let block: SealedBlockWithSenders = Default::default();
+        let block: SealedBlockWithSenders<OpBlock> = Default::default();
 
         // Define block hashes for block1 and block2
         let block1_hash = B256::new([0x01; 32]);
@@ -558,31 +544,25 @@ mod tests {
         let mut block2 = block;
 
         // Set the hashes of block1 and block2
-        block1.block.header.set_block_number(10);
-        block1.block.header.set_hash(block1_hash);
+        block1.block.set_block_number(10);
+        block1.block.set_hash(block1_hash);
 
-        block2.block.header.set_block_number(11);
-        block2.block.header.set_hash(block2_hash);
+        block2.block.set_block_number(11);
+        block2.block.set_hash(block2_hash);
 
         // Create a random receipt object, receipt1
-        let receipt1 = Receipt {
-            tx_type: TxType::Legacy,
+        let receipt1 = OpReceipt::Legacy(Receipt {
             cumulative_gas_used: 46913,
             logs: vec![],
-            success: true,
-            deposit_nonce: Some(18),
-            deposit_receipt_version: Some(34),
-        };
+            status: true.into(),
+        });
 
         // Create another random receipt object, receipt2
-        let receipt2 = Receipt {
-            tx_type: TxType::Legacy,
+        let receipt2 = OpReceipt::Legacy(Receipt {
             cumulative_gas_used: 1325345,
             logs: vec![],
-            success: true,
-            deposit_nonce: Some(18),
-            deposit_receipt_version: Some(34),
-        };
+            status: true.into(),
+        });
 
         // Create a Receipts object with a vector of receipt vectors
         let receipts =
@@ -590,7 +570,7 @@ mod tests {
 
         // Create an ExecutionOutcome object with the created bundle, receipts, an empty requests
         // vector, and first_block set to 10
-        let execution_outcome = ExecutionOutcome {
+        let execution_outcome = ExecutionOutcome::<OpReceipt> {
             bundle: Default::default(),
             receipts,
             requests: vec![],
@@ -631,14 +611,11 @@ mod tests {
 
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
-                tx_type: TxType::Legacy,
+            receipt_vec: vec![vec![Some(OpReceipt::Legacy(Receipt {
                 cumulative_gas_used: 46913,
                 logs: vec![],
-                success: true,
-                deposit_nonce: Some(18),
-                deposit_receipt_version: Some(34),
-            })]],
+                status: true.into(),
+            }))]],
         };
 
         // Create a Requests object with a vector of requests
@@ -694,14 +671,11 @@ mod tests {
     fn test_block_number_to_index() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
-                tx_type: TxType::Legacy,
+            receipt_vec: vec![vec![Some(OpReceipt::Legacy(Receipt {
                 cumulative_gas_used: 46913,
                 logs: vec![],
-                success: true,
-                deposit_nonce: Some(18),
-                deposit_receipt_version: Some(34),
-            })]],
+                status: true.into(),
+            }))]],
         };
 
         // Define the first block number
@@ -730,14 +704,11 @@ mod tests {
     fn test_get_logs() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
-                tx_type: TxType::Legacy,
+            receipt_vec: vec![vec![Some(OpReceipt::Legacy(Receipt {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
-                success: true,
-                deposit_nonce: Some(18),
-                deposit_receipt_version: Some(34),
-            })]],
+                status: true.into(),
+            }))]],
         };
 
         // Define the first block number
@@ -763,14 +734,11 @@ mod tests {
     fn test_receipts_by_block() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
-                tx_type: TxType::Legacy,
+            receipt_vec: vec![vec![Some(OpReceipt::Legacy(Receipt {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
-                success: true,
-                deposit_nonce: Some(18),
-                deposit_receipt_version: Some(34),
-            })]],
+                status: true.into(),
+            }))]],
         };
 
         // Define the first block number
@@ -791,14 +759,11 @@ mod tests {
         // Assert that the receipts for block number 123 match the expected receipts
         assert_eq!(
             receipts_by_block,
-            vec![&Some(Receipt {
-                tx_type: TxType::Legacy,
+            vec![&Some(OpReceipt::Legacy(Receipt {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
-                success: true,
-                deposit_nonce: Some(18),
-                deposit_receipt_version: Some(34),
-            })]
+                status: true.into(),
+            }))]
         );
     }
 
@@ -806,14 +771,11 @@ mod tests {
     fn test_receipts_len() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
-                tx_type: TxType::Legacy,
+            receipt_vec: vec![vec![Some(OpReceipt::Legacy(Receipt {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
-                success: true,
-                deposit_nonce: Some(18),
-                deposit_receipt_version: Some(34),
-            })]],
+                status: true.into(),
+            }))]],
         };
 
         // Create an empty Receipts object
@@ -855,14 +817,11 @@ mod tests {
     #[test]
     fn test_revert_to() {
         // Create a random receipt object
-        let receipt = Receipt {
-            tx_type: TxType::Legacy,
+        let receipt = OpReceipt::Legacy(Receipt {
             cumulative_gas_used: 46913,
             logs: vec![],
-            success: true,
-            deposit_nonce: Some(18),
-            deposit_receipt_version: Some(34),
-        };
+            status: true.into(),
+        });
 
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
@@ -905,14 +864,11 @@ mod tests {
     #[test]
     fn test_extend_execution_outcome() {
         // Create a Receipt object with specific attributes.
-        let receipt = Receipt {
-            tx_type: TxType::Legacy,
+        let receipt = OpReceipt::Legacy(Receipt {
             cumulative_gas_used: 46913,
             logs: vec![],
-            success: true,
-            deposit_nonce: Some(18),
-            deposit_receipt_version: Some(34),
-        };
+            status: true.into(),
+        });
 
         // Create a Receipts object containing the receipt.
         let receipts = Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] };
@@ -950,14 +906,11 @@ mod tests {
     #[test]
     fn test_split_at_execution_outcome() {
         // Create a random receipt object
-        let receipt = Receipt {
-            tx_type: TxType::Legacy,
+        let receipt = OpReceipt::Legacy(Receipt {
             cumulative_gas_used: 46913,
             logs: vec![],
-            success: true,
-            deposit_nonce: Some(18),
-            deposit_receipt_version: Some(34),
-        };
+            status: true.into(),
+        });
 
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {

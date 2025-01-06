@@ -4,14 +4,17 @@ use crate::{
     BlockHeader, FullSignedTx, InMemorySize, MaybeSerde, MaybeSerdeBincodeCompat, SignedTransaction,
 };
 use alloc::{fmt, vec::Vec};
-use alloy_consensus::Transaction;
+use alloy_consensus::{Header, Transaction};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
 pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
 
 impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
+
+#[cfg(feature = "rayon")]
+use rayon::prelude::*;
 
 /// Abstraction for block's body.
 pub trait BlockBody:
@@ -38,6 +41,15 @@ pub trait BlockBody:
     /// Returns reference to transactions in block.
     fn transactions(&self) -> &[Self::Transaction];
 
+    /// Returns an iterator over all transaction hashes in the block body.
+    fn transaction_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
+        self.transactions().iter().map(|tx| tx.tx_hash())
+    }
+
+    /// Returns the number of the transactions in the block.
+    fn transaction_count(&self) -> usize {
+        self.transactions().len()
+    }
     /// Consume the block body and return a [`Vec`] of transactions.
     fn into_transactions(self) -> Vec<Self::Transaction>;
 
@@ -97,4 +109,69 @@ pub trait BlockBody:
     fn encoded_2718_transactions(&self) -> Vec<Bytes> {
         self.encoded_2718_transactions_iter().map(Into::into).collect()
     }
+
+    /// Recover signer addresses for all transactions in the block body.
+    fn recover_signers(&self) -> Option<Vec<Address>>
+    where
+        Self::Transaction: SignedTransaction,
+    {
+        #[cfg(feature = "rayon")]
+        {
+            self.transactions().into_par_iter().map(|tx| tx.recover_signer()).collect()
+        }
+        #[cfg(not(feature = "rayon"))]
+        {
+            self.transactions().iter().map(|tx| tx.recover_signer()).collect()
+        }
+    }
+
+    /// Recover signer addresses for all transactions in the block body _without ensuring that the
+    /// signature has a low `s` value_.
+    ///
+    /// Returns `None`, if some transaction's signature is invalid.
+    fn recover_signers_unchecked(&self) -> Option<Vec<Address>>
+    where
+        Self::Transaction: SignedTransaction,
+    {
+        #[cfg(feature = "rayon")]
+        {
+            self.transactions().into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
+        }
+        #[cfg(not(feature = "rayon"))]
+        {
+            self.transactions().iter().map(|tx| tx.recover_signer_unchecked()).collect()
+        }
+    }
 }
+
+impl<T> BlockBody for alloy_consensus::BlockBody<T>
+where
+    T: SignedTransaction,
+{
+    type Transaction = T;
+    type OmmerHeader = Header;
+
+    fn transactions(&self) -> &[Self::Transaction] {
+        &self.transactions
+    }
+
+    fn into_transactions(self) -> Vec<Self::Transaction> {
+        self.transactions
+    }
+
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.withdrawals.as_ref()
+    }
+
+    fn ommers(&self) -> Option<&[Self::OmmerHeader]> {
+        Some(&self.ommers)
+    }
+}
+
+/// This is a helper alias to make it easy to refer to the inner `Transaction` associated type of a
+/// given type that implements [`BlockBody`].
+pub type BodyTx<N> = <N as BlockBody>::Transaction;
+
+/// This is a helper alias to make it easy to refer to the inner `OmmerHeader` associated type of a
+/// given type that implements [`BlockBody`].
+pub type BodyOmmer<N> = <N as BlockBody>::OmmerHeader;

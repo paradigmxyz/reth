@@ -4,7 +4,7 @@ use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
     ChainInfoTracker, MemoryOverlayStateProvider,
 };
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::{map::HashMap, Address, TxHash, B256};
 use parking_lot::RwLock;
@@ -13,12 +13,12 @@ use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
     BlockWithSenders, EthPrimitives, NodePrimitives, Receipts, SealedBlock, SealedBlockFor,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta,
+    SealedBlockWithSenders, SealedHeader,
 };
 use reth_primitives_traits::{Block, BlockBody as _, SignedTransaction};
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, ops::Deref, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -183,7 +183,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
         let header = in_memory_state
             .head_state()
-            .map_or_else(SealedHeader::default, |state| state.block_ref().block().header.clone());
+            .map_or_else(SealedHeader::default, |state| state.block_ref().block().deref().clone());
         let chain_info_tracker = ChainInfoTracker::new(header, finalized, safe);
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
@@ -462,7 +462,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns the `SealedHeader` corresponding to the pending state.
     pub fn pending_sealed_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
-        self.pending_state().map(|h| h.block_ref().block().header.clone())
+        self.pending_state().map(|h| h.block_ref().block().deref().clone())
     }
 
     /// Returns the `Header` corresponding to the pending state.
@@ -549,7 +549,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             if let Some(tx) = block_state
                 .block_ref()
                 .block()
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .find(|tx| tx.trie_hash() == hash)
@@ -573,7 +573,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             if let Some((index, tx)) = block_state
                 .block_ref()
                 .block()
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .enumerate()
@@ -584,7 +584,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                     index: index as u64,
                     block_hash: block_state.hash(),
                     block_number: block_state.block_ref().block.number(),
-                    base_fee: block_state.block_ref().block.header.base_fee_per_gas(),
+                    base_fee: block_state.block_ref().block.base_fee_per_gas(),
                     timestamp: block_state.block_ref().block.timestamp(),
                     excess_blob_gas: block_state.block_ref().block.excess_blob_gas(),
                 };
@@ -664,7 +664,7 @@ impl<N: NodePrimitives> BlockState<N> {
     /// Returns the state root after applying the executed block that determines
     /// the state.
     pub fn state_root(&self) -> B256 {
-        self.block.block().header.state_root()
+        self.block.block().state_root()
     }
 
     /// Returns the `Receipts` of executed block that determines the state.
@@ -758,7 +758,7 @@ impl<N: NodePrimitives> BlockState<N> {
             block_state
                 .block_ref()
                 .block()
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .find(|tx| tx.trie_hash() == hash)
@@ -778,7 +778,7 @@ impl<N: NodePrimitives> BlockState<N> {
             block_state
                 .block_ref()
                 .block()
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .enumerate()
@@ -789,7 +789,7 @@ impl<N: NodePrimitives> BlockState<N> {
                         index: index as u64,
                         block_hash: block_state.hash(),
                         block_number: block_state.block_ref().block.number(),
-                        base_fee: block_state.block_ref().block.header.base_fee_per_gas(),
+                        base_fee: block_state.block_ref().block.base_fee_per_gas(),
                         timestamp: block_state.block_ref().block.timestamp(),
                         excess_blob_gas: block_state.block_ref().block.excess_blob_gas(),
                     };
@@ -999,7 +999,7 @@ mod tests {
             Ok(None)
         }
 
-        fn bytecode_by_hash(&self, _code_hash: B256) -> ProviderResult<Option<Bytecode>> {
+        fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
             Ok(None)
         }
     }
@@ -1019,7 +1019,7 @@ mod tests {
     }
 
     impl AccountReader for MockStateProvider {
-        fn basic_account(&self, _address: Address) -> ProviderResult<Option<Account>> {
+        fn basic_account(&self, _address: &Address) -> ProviderResult<Option<Account>> {
             Ok(None)
         }
     }
@@ -1318,7 +1318,7 @@ mod tests {
         );
 
         // Check the pending header
-        assert_eq!(state.pending_header().unwrap(), block2.block().header.header().clone());
+        assert_eq!(state.pending_header().unwrap(), block2.block().header().clone());
 
         // Check the pending sealed header
         assert_eq!(state.pending_sealed_header().unwrap(), block2.block().header.clone());
@@ -1389,8 +1389,7 @@ mod tests {
 
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_single_block() {
-        let block = TestBlockBuilder::<EthPrimitives>::default()
-            .get_executed_block_with_number(1, B256::random());
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::random());
         let hash = block.block().hash();
         let mut blocks = HashMap::default();
         blocks.insert(hash, Arc::new(BlockState::new(block)));
@@ -1408,7 +1407,7 @@ mod tests {
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_multiple_blocks() {
         let mut parent_hash = B256::random();
-        let mut block_builder = TestBlockBuilder::default();
+        let mut block_builder = TestBlockBuilder::eth();
         let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
 
         for i in 1..=3 {
@@ -1430,7 +1429,7 @@ mod tests {
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_with_pending_block() {
         let mut parent_hash = B256::random();
-        let mut block_builder = TestBlockBuilder::default();
+        let mut block_builder = TestBlockBuilder::<EthPrimitives>::eth();
         let state: CanonicalInMemoryState = CanonicalInMemoryState::empty();
 
         for i in 1..=2 {

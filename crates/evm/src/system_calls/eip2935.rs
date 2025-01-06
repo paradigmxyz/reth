@@ -65,6 +65,11 @@ where
         }
     };
 
+    // NOTE: Revm currently marks these accounts as "touched" when we do the above transact calls,
+    // and includes them in the result.
+    //
+    // There should be no state changes to these addresses anyways as a result of this system call,
+    // so we can just remove them from the state returned.
     res.state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
     res.state.remove(&evm.block().coinbase);
 

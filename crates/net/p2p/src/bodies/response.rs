@@ -40,7 +40,7 @@ where
     /// Return the reference to the response body
     pub fn into_body(self) -> Option<B> {
         match self {
-            Self::Full(block) => Some(block.body),
+            Self::Full(block) => Some(block.into_body()),
             Self::Empty(_) => None,
         }
     }

@@ -5,7 +5,7 @@ use alloy_primitives::{BlockHash, BlockNumber};
 use reth_provider::{BlockExecutionForkProvider, ExecutionDataProvider, ExecutionOutcome};
 use std::collections::BTreeMap;
 
-/// Structure that combines references of required data to be a [`ExecutionDataProvider`].
+/// Structure that combines references of required data to be an [`ExecutionDataProvider`].
 #[derive(Clone, Debug)]
 pub struct BundleStateDataRef<'a> {
     /// The execution outcome after execution of one or more transactions and/or blocks.
@@ -39,7 +39,7 @@ impl BlockExecutionForkProvider for BundleStateDataRef<'_> {
     }
 }
 
-/// Structure that owns the relevant data needs to be a [`ExecutionDataProvider`]
+/// Structure that owns the relevant data needs to be an [`ExecutionDataProvider`]
 #[derive(Clone, Debug)]
 pub struct ExecutionData {
     /// Execution outcome.

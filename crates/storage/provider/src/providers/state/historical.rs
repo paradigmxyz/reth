@@ -249,21 +249,21 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> AccountRea
     for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        match self.account_history_lookup(address)? {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        match self.account_history_lookup(*address)? {
             HistoryInfo::NotYetWritten => Ok(None),
             HistoryInfo::InChangeset(changeset_block_number) => Ok(self
                 .tx()
                 .cursor_dup_read::<tables::AccountChangeSets>()?
-                .seek_by_key_subkey(changeset_block_number, address)?
-                .filter(|acc| acc.address == address)
+                .seek_by_key_subkey(changeset_block_number, *address)?
+                .filter(|acc| &acc.address == address)
                 .ok_or(ProviderError::AccountChangesetNotFound {
                     block_number: changeset_block_number,
-                    address,
+                    address: *address,
                 })?
                 .info),
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
-                Ok(self.tx().get::<tables::PlainAccountState>(address)?)
+                Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
             }
         }
     }
@@ -438,8 +438,8 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentPr
     }
 
     /// Get account code by its hash
-    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
-        self.tx().get::<tables::Bytecodes>(code_hash).map_err(Into::into)
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        self.tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)
     }
 }
 
@@ -633,45 +633,51 @@ mod tests {
         let db = factory.provider().unwrap();
 
         // run
-        assert_eq!(HistoricalStateProviderRef::new(&db, 1).basic_account(ADDRESS), Ok(None));
-        assert_eq!(
-            HistoricalStateProviderRef::new(&db, 2).basic_account(ADDRESS),
-            Ok(Some(acc_at3))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&db, 3).basic_account(ADDRESS),
-            Ok(Some(acc_at3))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&db, 4).basic_account(ADDRESS),
-            Ok(Some(acc_at7))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&db, 7).basic_account(ADDRESS),
-            Ok(Some(acc_at7))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&db, 9).basic_account(ADDRESS),
-            Ok(Some(acc_at10))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&db, 10).basic_account(ADDRESS),
-            Ok(Some(acc_at10))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&db, 11).basic_account(ADDRESS),
-            Ok(Some(acc_at15))
-        );
-        assert_eq!(
-            HistoricalStateProviderRef::new(&db, 16).basic_account(ADDRESS),
-            Ok(Some(acc_plain))
-        );
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 1).basic_account(&ADDRESS),
+            Ok(None)
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 2).basic_account(&ADDRESS),
+            Ok(Some(acc)) if acc == acc_at3
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 3).basic_account(&ADDRESS),
+            Ok(Some(acc)) if acc == acc_at3
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 4).basic_account(&ADDRESS),
+            Ok(Some(acc)) if acc == acc_at7
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 7).basic_account(&ADDRESS),
+            Ok(Some(acc)) if acc == acc_at7
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 9).basic_account(&ADDRESS),
+            Ok(Some(acc)) if acc == acc_at10
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 10).basic_account(&ADDRESS),
+            Ok(Some(acc)) if acc == acc_at10
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 11).basic_account(&ADDRESS),
+            Ok(Some(acc)) if acc == acc_at15
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 16).basic_account(&ADDRESS),
+            Ok(Some(acc)) if acc == acc_plain
+        ));
 
-        assert_eq!(HistoricalStateProviderRef::new(&db, 1).basic_account(HIGHER_ADDRESS), Ok(None));
-        assert_eq!(
-            HistoricalStateProviderRef::new(&db, 1000).basic_account(HIGHER_ADDRESS),
-            Ok(Some(higher_acc_plain))
-        );
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 1).basic_account(&HIGHER_ADDRESS),
+            Ok(None)
+        ));
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 1000).basic_account(&HIGHER_ADDRESS),
+            Ok(Some(acc)) if acc == higher_acc_plain
+        ));
     }
 
     #[test]
@@ -727,43 +733,46 @@ mod tests {
         let db = factory.provider().unwrap();
 
         // run
-        assert_eq!(HistoricalStateProviderRef::new(&db, 0).storage(ADDRESS, STORAGE), Ok(None));
-        assert_eq!(
+        assert!(matches!(
+            HistoricalStateProviderRef::new(&db, 0).storage(ADDRESS, STORAGE),
+            Ok(None)
+        ));
+        assert!(matches!(
             HistoricalStateProviderRef::new(&db, 3).storage(ADDRESS, STORAGE),
             Ok(Some(U256::ZERO))
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             HistoricalStateProviderRef::new(&db, 4).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_at7.value))
-        );
-        assert_eq!(
+            Ok(Some(expected_value)) if expected_value == entry_at7.value
+        ));
+        assert!(matches!(
             HistoricalStateProviderRef::new(&db, 7).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_at7.value))
-        );
-        assert_eq!(
+            Ok(Some(expected_value)) if expected_value == entry_at7.value
+        ));
+        assert!(matches!(
             HistoricalStateProviderRef::new(&db, 9).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_at10.value))
-        );
-        assert_eq!(
+            Ok(Some(expected_value)) if expected_value == entry_at10.value
+        ));
+        assert!(matches!(
             HistoricalStateProviderRef::new(&db, 10).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_at10.value))
-        );
-        assert_eq!(
+            Ok(Some(expected_value)) if expected_value == entry_at10.value
+        ));
+        assert!(matches!(
             HistoricalStateProviderRef::new(&db, 11).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_at15.value))
-        );
-        assert_eq!(
+            Ok(Some(expected_value)) if expected_value == entry_at15.value
+        ));
+        assert!(matches!(
             HistoricalStateProviderRef::new(&db, 16).storage(ADDRESS, STORAGE),
-            Ok(Some(entry_plain.value))
-        );
-        assert_eq!(
+            Ok(Some(expected_value)) if expected_value == entry_plain.value
+        ));
+        assert!(matches!(
             HistoricalStateProviderRef::new(&db, 1).storage(HIGHER_ADDRESS, STORAGE),
             Ok(None)
-        );
-        assert_eq!(
+        ));
+        assert!(matches!(
             HistoricalStateProviderRef::new(&db, 1000).storage(HIGHER_ADDRESS, STORAGE),
-            Ok(Some(higher_entry_plain.value))
-        );
+            Ok(Some(expected_value)) if expected_value == higher_entry_plain.value
+        ));
     }
 
     #[test]
@@ -781,14 +790,14 @@ mod tests {
                 storage_history_block_number: Some(3),
             },
         );
-        assert_eq!(
+        assert!(matches!(
             provider.account_history_lookup(ADDRESS),
-            Err(ProviderError::StateAtBlockPruned(provider.block_number))
-        );
-        assert_eq!(
+            Err(ProviderError::StateAtBlockPruned(number)) if number == provider.block_number
+        ));
+        assert!(matches!(
             provider.storage_history_lookup(ADDRESS, STORAGE),
-            Err(ProviderError::StateAtBlockPruned(provider.block_number))
-        );
+            Err(ProviderError::StateAtBlockPruned(number)) if number == provider.block_number
+        ));
 
         // provider block_number == lowest available block number,
         // i.e. state at provider block is available
@@ -800,11 +809,14 @@ mod tests {
                 storage_history_block_number: Some(2),
             },
         );
-        assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::MaybeInPlainState));
-        assert_eq!(
+        assert!(matches!(
+            provider.account_history_lookup(ADDRESS),
+            Ok(HistoryInfo::MaybeInPlainState)
+        ));
+        assert!(matches!(
             provider.storage_history_lookup(ADDRESS, STORAGE),
             Ok(HistoryInfo::MaybeInPlainState)
-        );
+        ));
 
         // provider block_number == lowest available block number,
         // i.e. state at provider block is available
@@ -816,10 +828,13 @@ mod tests {
                 storage_history_block_number: Some(1),
             },
         );
-        assert_eq!(provider.account_history_lookup(ADDRESS), Ok(HistoryInfo::MaybeInPlainState));
-        assert_eq!(
+        assert!(matches!(
+            provider.account_history_lookup(ADDRESS),
+            Ok(HistoryInfo::MaybeInPlainState)
+        ));
+        assert!(matches!(
             provider.storage_history_lookup(ADDRESS, STORAGE),
             Ok(HistoryInfo::MaybeInPlainState)
-        );
+        ));
     }
 }

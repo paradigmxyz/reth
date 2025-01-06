@@ -8,6 +8,7 @@ use crate::{
     StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumberOrTag,
@@ -18,9 +19,7 @@ use alloy_primitives::{
 };
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_primitives::{
-    BlockWithSenders, EthPrimitives, SealedBlockFor, SealedBlockWithSenders, TransactionMeta,
-};
+use reth_primitives::{BlockWithSenders, EthPrimitives, SealedBlockFor, SealedBlockWithSenders};
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives, SealedHeader};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -357,7 +356,7 @@ impl<C: Send + Sync, N: NodePrimitives> HeaderProvider for NoopProvider<C, N> {
 }
 
 impl<C: Send + Sync, N: NodePrimitives> AccountReader for NoopProvider<C, N> {
-    fn basic_account(&self, _address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, _address: &Address) -> ProviderResult<Option<Account>> {
         Ok(None)
     }
 }
@@ -465,7 +464,7 @@ impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {
         Ok(None)
     }
 
-    fn bytecode_by_hash(&self, _code_hash: B256) -> ProviderResult<Option<Bytecode>> {
+    fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         Ok(None)
     }
 }

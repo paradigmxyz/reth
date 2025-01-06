@@ -23,40 +23,26 @@ fn main() {
 
     if let Err(err) =
         Cli::<OpChainSpecParser, RollupArgs>::parse().run(|builder, rollup_args| async move {
-            if rollup_args.experimental {
-                tracing::warn!(target: "reth::cli", "Experimental engine is default now, and the --engine.experimental flag is deprecated. To enable the legacy functionality, use --engine.legacy.");
-            }
-            let use_legacy_engine = rollup_args.legacy;
-            match use_legacy_engine {
-                false => {
-                    let engine_tree_config = TreeConfig::default()
-                        .with_persistence_threshold(rollup_args.persistence_threshold)
-                        .with_memory_block_buffer_target(rollup_args.memory_block_buffer_target);
+            let engine_tree_config = TreeConfig::default()
+                .with_persistence_threshold(rollup_args.persistence_threshold)
+                .with_memory_block_buffer_target(rollup_args.memory_block_buffer_target);
 
-                    let op_node = OpNode::new(rollup_args.clone());
-                    let handle = builder
-                        .with_types_and_provider::<OpNode, BlockchainProvider2<_>>()
-                        .with_components(op_node.components())
-                        .with_add_ons(op_node.add_ons())
-                        .launch_with_fn(|builder| {
-                            let launcher = EngineNodeLauncher::new(
-                                builder.task_executor().clone(),
-                                builder.config().datadir(),
-                                engine_tree_config,
-                            );
-                            builder.launch_with(launcher)
-                        })
-                        .await?;
+            let op_node = OpNode::new(rollup_args.clone());
+            let handle = builder
+                .with_types_and_provider::<OpNode, BlockchainProvider2<_>>()
+                .with_components(op_node.components())
+                .with_add_ons(op_node.add_ons())
+                .launch_with_fn(|builder| {
+                    let launcher = EngineNodeLauncher::new(
+                        builder.task_executor().clone(),
+                        builder.config().datadir(),
+                        engine_tree_config,
+                    );
+                    builder.launch_with(launcher)
+                })
+                .await?;
 
-                    handle.node_exit_future.await
-                }
-                true => {
-                    let handle =
-                        builder.node(OpNode::new(rollup_args.clone())).launch().await?;
-
-                    handle.node_exit_future.await
-                }
-            }
+            handle.node_exit_future.await
         })
     {
         eprintln!("Error: {err:?}");

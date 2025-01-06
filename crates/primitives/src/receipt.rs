@@ -250,8 +250,8 @@ impl TxReceipt for Receipt {
         alloy_primitives::logs_bloom(self.logs.iter())
     }
 
-    fn cumulative_gas_used(&self) -> u128 {
-        self.cumulative_gas_used as u128
+    fn cumulative_gas_used(&self) -> u64 {
+        self.cumulative_gas_used
     }
 
     fn logs(&self) -> &[Log] {
