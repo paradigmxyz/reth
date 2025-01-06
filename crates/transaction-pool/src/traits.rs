@@ -1252,14 +1252,14 @@ impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
                 let (tx, sig, hash) = tx.into_parts();
                 let (tx, blob) = tx.into_parts();
                 let tx = TransactionSigned::new(tx.into(), sig, hash);
-                let tx = RecoveredTx::from_signed_transaction(tx, signer);
+                let tx = RecoveredTx::new_unchecked(tx, signer);
                 let mut pooled = Self::new(tx, encoded_length);
                 pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
                 pooled
             }
             tx => {
                 // no blob sidecar
-                let tx = RecoveredTx::from_signed_transaction(tx.into(), signer);
+                let tx = RecoveredTx::new_unchecked(tx.into(), signer);
                 Self::new(tx, encoded_length)
             }
         }
@@ -1284,7 +1284,7 @@ impl PoolTransaction for EthPooledTransaction {
         let pooled = tx
             .try_into_pooled()
             .map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)?;
-        Ok(RecoveredTx::from_signed_transaction(pooled, signer))
+        Ok(RecoveredTx::new_unchecked(pooled, signer))
     }
 
     /// Returns hash of the transaction.
@@ -1692,7 +1692,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = RecoveredTx::from_signed_transaction(signed_tx, Default::default());
+        let transaction = RecoveredTx::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly
@@ -1713,7 +1713,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = RecoveredTx::from_signed_transaction(signed_tx, Default::default());
+        let transaction = RecoveredTx::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly
@@ -1734,7 +1734,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = RecoveredTx::from_signed_transaction(signed_tx, Default::default());
+        let transaction = RecoveredTx::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly
@@ -1757,7 +1757,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = RecoveredTx::from_signed_transaction(signed_tx, Default::default());
+        let transaction = RecoveredTx::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 300);
 
         // Check that the pooled transaction is created correctly
@@ -1780,7 +1780,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = RecoveredTx::from_signed_transaction(signed_tx, Default::default());
+        let transaction = RecoveredTx::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly

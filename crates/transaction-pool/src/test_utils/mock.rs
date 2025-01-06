@@ -1056,7 +1056,7 @@ impl From<MockTransaction> for RecoveredTx<TransactionSigned> {
         let signed_tx =
             TransactionSigned::new(tx.clone().into(), Signature::test_signature(), *tx.hash());
 
-        Self::from_signed_transaction(signed_tx, tx.sender())
+        Self::new_unchecked(signed_tx, tx.sender())
     }
 }
 
@@ -1178,7 +1178,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
 
         arb::<(TransactionSigned, Address)>()
             .prop_map(|(signed_transaction, signer)| {
-                RecoveredTx::from_signed_transaction(signed_transaction, signer)
+                RecoveredTx::new_unchecked(signed_transaction, signer)
                     .try_into()
                     .expect("Failed to create an Arbitrary MockTransaction via RecoveredTx")
             })
