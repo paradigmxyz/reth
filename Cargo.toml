@@ -318,7 +318,7 @@ reth-codecs = { path = "crates/storage/codecs" }
 reth-codecs-derive = { path = "crates/storage/codecs/derive" }
 reth-config = { path = "crates/config" }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
-reth-consensus-common = { path = "crates/consensus/common" }
+reth-consensus-common = { path = "crates/consensus/common", default-features = false }
 reth-consensus-debug-client = { path = "crates/consensus/debug-client" }
 reth-db = { path = "crates/storage/db", default-features = false }
 reth-db-api = { path = "crates/storage/db-api" }
