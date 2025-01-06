@@ -99,12 +99,12 @@ where
     fn next(&mut self, ctx: ()) -> Option<RecoveredTx<Self::Transaction>> {
         while let Some(tx) = self.before.next(ctx) {
             if let Some(before_max_gas) = self.before_max_gas {
-                if self.before_gas + tx.as_signed().gas_limit() <= before_max_gas {
-                    self.before_gas += tx.as_signed().gas_limit();
+                if self.before_gas + tx.tx().gas_limit() <= before_max_gas {
+                    self.before_gas += tx.tx().gas_limit();
                     return Some(tx);
                 }
-                self.before.mark_invalid(tx.signer(), tx.as_signed().nonce());
-                self.after.mark_invalid(tx.signer(), tx.as_signed().nonce());
+                self.before.mark_invalid(tx.signer(), tx.tx().nonce());
+                self.after.mark_invalid(tx.signer(), tx.tx().nonce());
             } else {
                 return Some(tx);
             }
@@ -112,11 +112,11 @@ where
 
         while let Some(tx) = self.after.next(ctx) {
             if let Some(after_max_gas) = self.after_max_gas {
-                if self.after_gas + tx.as_signed().gas_limit() <= after_max_gas {
-                    self.after_gas += tx.as_signed().gas_limit();
+                if self.after_gas + tx.tx().gas_limit() <= after_max_gas {
+                    self.after_gas += tx.tx().gas_limit();
                     return Some(tx);
                 }
-                self.after.mark_invalid(tx.signer(), tx.as_signed().nonce());
+                self.after.mark_invalid(tx.signer(), tx.tx().nonce());
             } else {
                 return Some(tx);
             }

@@ -909,7 +909,7 @@ fn on_new_transactions(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
             .get_all(hashes)
             .into_iter()
             .map(|tx| {
-                (*tx.hash(), Arc::new(tx.transaction.to_recovered_transaction().into_signed()))
+                (*tx.hash(), Arc::new(tx.transaction.to_recovered_transaction().into_tx()))
             })
             .collect(),
     );
@@ -1098,7 +1098,7 @@ fn on_get_pooled_transactions(
             .pool
             .get_all(request.0)
             .into_iter()
-            .map(|tx| tx.transaction.to_recovered_transaction().into_signed())
+            .map(|tx| tx.transaction.to_recovered_transaction().into_tx())
             .collect::<Vec<_>>();
 
         // we sent a response at which point we assume that the peer is aware of the transaction

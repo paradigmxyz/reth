@@ -1245,7 +1245,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
 impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
         let encoded_length = tx.encode_2718_len();
-        let (tx, signer) = tx.to_components();
+        let (tx, signer) = tx.into_parts();
         match tx {
             PooledTransaction::Eip4844(tx) => {
                 // include the blob sidecar
@@ -1280,7 +1280,7 @@ impl PoolTransaction for EthPooledTransaction {
     fn try_consensus_into_pooled(
         tx: RecoveredTx<Self::Consensus>,
     ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
-        let (tx, signer) = tx.to_components();
+        let (tx, signer) = tx.into_parts();
         let pooled = tx
             .try_into_pooled()
             .map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)?;
@@ -1427,7 +1427,7 @@ impl EthPoolTransaction for EthPooledTransaction {
         tx: RecoveredTx<Self::Consensus>,
         sidecar: BlobTransactionSidecar,
     ) -> Option<Self> {
-        let (tx, signer) = tx.to_components();
+        let (tx, signer) = tx.into_parts();
         tx.try_into_pooled_eip4844(sidecar)
             .ok()
             .map(|tx| tx.with_signer(signer))
