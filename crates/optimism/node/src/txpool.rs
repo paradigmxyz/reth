@@ -324,7 +324,7 @@ where
             propagate,
         } = outcome
         {
-            let l1_block_info = self.block_info.l1_block_info.read().clone();
+            let mut l1_block_info = self.block_info.l1_block_info.read().clone();
 
             let mut encoded = Vec::with_capacity(valid_tx.transaction().encoded_length());
             let tx = valid_tx.transaction().clone_into_consensus();

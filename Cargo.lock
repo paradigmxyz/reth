@@ -9588,9 +9588,9 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "19.0.0"
+version = "19.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e8905d0c5f10e767f13ea7cb8e502d315f144071a60fe2bd83977922dd3afa26"
+checksum = "8b829dc9d6e62c5a540dfdceb0c4d2217e445bf5f6f5ed3866817e7a9637c019"
 dependencies = [
  "auto_impl",
  "cfg-if",
