@@ -113,6 +113,8 @@ pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     ProofCalculationError(ProviderError),
     /// Proof revealing completed
     ProofRevealed {
+        sequence_number: u64,
+        state_update: HashedPostState,
         /// The updated sparse trie
         trie: Box<SparseStateTrie<BPF>>,
         /// Time taken to reveal the proof
@@ -490,26 +492,30 @@ where
     fn spawn_reveal_multiproof(
         &mut self,
         scope: &rayon::Scope<'env>,
-        targets: MultiProofTargets,
-        proof: MultiProof,
+        proof_calculated: Box<ProofCalculated>,
     ) {
         let Some(mut trie) = self.sparse_trie.take() else { return };
 
         trace!(
             target: "engine::root",
-            targets = targets.len(),
+            targets = proof_calculated.targets.len(),
             "Spawning proof reveal"
         );
 
         let tx = self.tx.clone();
         scope.spawn(move |_| {
             let start = Instant::now();
-            let result = trie.reveal_multiproof(targets, proof);
+            let result = trie.reveal_multiproof(proof_calculated.targets, proof_calculated.proof);
             let elapsed = start.elapsed();
 
             match result {
                 Ok(()) => {
-                    let _ = tx.send(StateRootMessage::ProofRevealed { trie, elapsed });
+                    let _ = tx.send(StateRootMessage::ProofRevealed {
+                        sequence_number: proof_calculated.sequence_number,
+                        state_update: proof_calculated.state_update,
+                        trie,
+                        elapsed,
+                    });
                 }
                 Err(e) => {
                     let _ = tx.send(StateRootMessage::RootCalculationError(e));
@@ -523,7 +529,8 @@ where
         let mut current_proof: Option<(MultiProofTargets, MultiProof)> = None;
 
         let mut updates_received = 0;
-        let mut proofs_processed = 0;
+        let mut proofs_calculated = 0;
+        let mut proofs_revealed = 0;
         let mut roots_calculated = 0;
 
         let mut updates_finished = false;
@@ -552,7 +559,7 @@ where
                             self.thread_pool,
                         );
                     }
-                    StateRootMessage::StateUpdate(update) => {
+                    StateRootMessage::StateUpdate(state_update) => {
                         if updates_received == 0 {
                             first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
@@ -562,14 +569,14 @@ where
                         updates_received += 1;
                         debug!(
                             target: "engine::root",
-                            len = update.len(),
+                            len = state_update.len(),
                             total_updates = updates_received,
                             "Received new state update"
                         );
                         Self::on_state_update(
                             scope,
                             self.config.clone(),
-                            update,
+                            state_update,
                             &mut self.fetched_proof_targets,
                             self.state_update_sequencer.next_sequence(),
                             self.tx.clone(),
@@ -581,80 +588,67 @@ where
                         updates_finished = true;
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
-                        proofs_processed += 1;
+                        proofs_calculated += 1;
                         debug!(
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
-                            total_proofs = proofs_processed,
+                            total_proofs = proofs_calculated,
                             "Processing calculated proof"
                         );
 
-                        if let Some(combined_state_update) = self.aggregate_state_updates(
-                            proof_calculated.sequence_number,
-                            proof_calculated.state_update,
-                        ) {
-                            if self.sparse_trie.is_none() {
-                                // We aggregated a new sequecne of state updates, and the trie is
-                                // currently busy, so we need to save both combined state update
-                                // and calculated proof for updating the sparse trie later.
-
-                                current_state_update.extend(combined_state_update);
-
-                                let proof = current_proof.get_or_insert_default();
-                                extend_multi_proof_targets(&mut proof.0, proof_calculated.targets);
-                                proof.1.extend(proof_calculated.proof);
-                            } else {
-                                // We aggregated a new sequecne of state updates, and the trie is
-                                // available, so we can spawn the root calculation along with the
-                                // calculated proof.
-
-                                self.spawn_root_calculation(
-                                    scope,
-                                    combined_state_update,
-                                    Some((proof_calculated.targets, proof_calculated.proof)),
-                                );
-                            }
-                        } else if self.sparse_trie.is_some() {
-                            // We didn't aggregate new state updates, and trie is available, so we
-                            // can spawn the proof revealing for the calculated proof.
-
-                            self.spawn_reveal_multiproof(
-                                scope,
-                                proof_calculated.targets,
-                                proof_calculated.proof,
-                            );
+                        if self.sparse_trie.is_some() {
+                            // The trie is available, so we can spawn the proof revealing for the
+                            // calculated proof.
+                            self.spawn_reveal_multiproof(scope, proof_calculated);
                         } else {
-                            // We didn't aggregate new state updates, and the trie is currently
-                            // busy, so we need to save the calculated proof for revealing it later.
-
+                            // The trie is currently busy, so we need to save the calculated proof
+                            // for revealing it later.
                             let proof = current_proof.get_or_insert_default();
                             extend_multi_proof_targets(&mut proof.0, proof_calculated.targets);
                             proof.1.extend(proof_calculated.proof);
                         }
                     }
-                    StateRootMessage::ProofRevealed { trie, elapsed } => {
-                        debug!(
-                            target: "engine::root",
-                            ?elapsed,
-                            "Revealed proof"
-                        );
+                    StateRootMessage::ProofRevealed {
+                        sequence_number,
+                        state_update,
+                        trie,
+                        elapsed,
+                    } => {
+                        proofs_revealed += 1;
+                        debug!(target: "engine::root", ?elapsed, "Revealed proof");
                         self.sparse_trie = Some(trie);
+
+                        if let Some(state_update) =
+                            self.aggregate_state_updates(sequence_number, state_update)
+                        {
+                            if self.sparse_trie.is_none() {
+                                // We aggregated a new sequecne of state updates, and the trie is
+                                // currently busy, so we need to save the combined state update
+                                // for updating the sparse trie later.
+                                current_state_update.extend(state_update);
+                            } else {
+                                // We aggregated a new sequecne of state updates, and the trie is
+                                // available, so we can spawn the root calculation.
+                                self.spawn_root_calculation(scope, state_update, None);
+                            }
+                        }
                     }
                     StateRootMessage::RootCalculated { trie, elapsed } => {
                         roots_calculated += 1;
                         debug!(
                             target: "engine::root",
                             ?elapsed,
-                            roots_calculated,
-                            proofs = proofs_processed,
-                            updates = updates_received,
-                            "Computed intermediate root"
+                            ?updates_received,
+                            ?proofs_calculated,
+                            ?proofs_revealed,
+                            ?roots_calculated,
+                            "Root calculated"
                         );
                         self.sparse_trie = Some(trie);
 
                         let has_new_data =
                             !current_state_update.is_empty() || current_proof.is_some();
-                        let all_proofs_received = proofs_processed >= updates_received;
+                        let all_proofs_received = proofs_calculated >= updates_received;
                         let no_pending_state_updates = !self.state_update_sequencer.has_pending();
 
                         trace!(
@@ -692,7 +686,7 @@ where
                             debug!(
                                 target: "engine::root",
                                 total_updates = updates_received,
-                                total_proofs = proofs_processed,
+                                total_proofs = proofs_calculated,
                                 roots_calculated,
                                 ?total_time,
                                 ?time_from_last_update,
