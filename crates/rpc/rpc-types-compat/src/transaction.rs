@@ -7,28 +7,6 @@ use alloy_rpc_types_eth::{request::TransactionRequest, TransactionInfo};
 use reth_primitives::{RecoveredTx, TransactionSigned};
 use serde::{Deserialize, Serialize};
 
-/// Create a new rpc transaction result for a mined transaction, using the given block hash,
-/// number, and tx index fields to populate the corresponding fields in the rpc result.
-///
-/// The block hash, number, and tx index fields should be from the original block where the
-/// transaction was mined.
-pub fn from_recovered_with_block_context<Tx, T: TransactionCompat<Tx>>(
-    tx: RecoveredTx<Tx>,
-    tx_info: TransactionInfo,
-    resp_builder: &T,
-) -> Result<T::Transaction, T::Error> {
-    resp_builder.fill(tx, tx_info)
-}
-
-/// Create a new rpc transaction result for a _pending_ signed transaction, setting block
-/// environment related fields to `None`.
-pub fn from_recovered<Tx, T: TransactionCompat<Tx>>(
-    tx: RecoveredTx<Tx>,
-    resp_builder: &T,
-) -> Result<T::Transaction, T::Error> {
-    resp_builder.fill(tx, TransactionInfo::default())
-}
-
 /// Builds RPC transaction w.r.t. network.
 pub trait TransactionCompat<T = TransactionSigned>:
     Send + Sync + Unpin + Clone + fmt::Debug
@@ -45,8 +23,18 @@ pub trait TransactionCompat<T = TransactionSigned>:
     /// RPC transaction error type.
     type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
 
+    /// Wrapper for `fill()` with default `TransactionInfo`
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
+    fn fill_pending(&self, tx: RecoveredTx<T>) -> Result<Self::Transaction, Self::Error> {
+        self.fill(tx, TransactionInfo::default())
+    }
+
+    /// Create a new rpc transaction result for a mined transaction, using the given block hash,
+    /// number, and tx index fields to populate the corresponding fields in the rpc result.
+    ///
+    /// The block hash, number, and tx index fields should be from the original block where the
+    /// transaction was mined.
     fn fill(
         &self,
         tx: RecoveredTx<T>,
