@@ -73,7 +73,8 @@ std = [
 	"reth-optimism-forks/std",
 	"thiserror/std",
 	"op-alloy-consensus/std",
-	"reth-chainspec/std"
+	"reth-chainspec/std",
+	"reth-consensus-common/std"
 ]
 optimism = [
 	"reth-primitives/optimism",
