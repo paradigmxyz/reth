@@ -16,7 +16,7 @@ workspace = true
 alloy-chains.workspace = true
 alloy-eip2124.workspace = true
 alloy-primitives = { workspace = true, features = ["serde", "rlp"] }
-once_cell.workspace = true
+reth-primitives-traits.workspace = true
 
 # misc
 serde = { workspace = true, features = ["derive"], optional = true }
@@ -48,7 +48,6 @@ std = [
 	"alloy-chains/std",
 	"alloy-primitives/std",
 	"rustc-hash/std",
-	"once_cell/std",
 	"serde?/std",
 	"alloy-eip2124/std"
 ]

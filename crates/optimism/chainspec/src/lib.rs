@@ -26,8 +26,6 @@ pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, Display, From, Into};
 pub use dev::OP_DEV;
-#[cfg(not(feature = "std"))]
-pub(crate) use once_cell::sync::Lazy as LazyLock;
 pub use op::OP_MAINNET;
 use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
 pub use op_sepolia::OP_SEPOLIA;
@@ -38,8 +36,7 @@ use reth_chainspec::{
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
-#[cfg(feature = "std")]
-pub(crate) use std::sync::LazyLock;
+use reth_primitives_traits::sync::LazyLock;
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]

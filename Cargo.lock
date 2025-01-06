@@ -6670,7 +6670,6 @@ dependencies = [
  "alloy-trie",
  "auto_impl",
  "derive_more",
- "once_cell",
  "reth-ethereum-forks",
  "reth-network-peers",
  "reth-primitives-traits",
@@ -7496,7 +7495,7 @@ dependencies = [
  "arbitrary",
  "auto_impl",
  "dyn-clone",
- "once_cell",
+ "reth-primitives-traits",
  "rustc-hash 2.1.0",
  "serde",
 ]
@@ -8382,6 +8381,7 @@ dependencies = [
  "alloy-primitives",
  "once_cell",
  "reth-ethereum-forks",
+ "reth-primitives-traits",
  "serde",
 ]
 
@@ -8701,6 +8701,7 @@ dependencies = [
  "derive_more",
  "k256",
  "modular-bitfield",
+ "once_cell",
  "op-alloy-consensus",
  "proptest",
  "proptest-arbitrary-interop",
