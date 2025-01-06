@@ -8,9 +8,8 @@ use crate::{
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{
-    eip2718::Encodable2718,
-    eip4895::{Withdrawal, Withdrawals},
-    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber,
+    eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumHash,
+    BlockNumberOrTag, HashOrNumber,
 };
 use alloy_primitives::{
     map::{hash_map, HashMap},
@@ -1130,24 +1129,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ConsistentProvider<N> {
             id,
             |db_provider| db_provider.withdrawals_by_block(id, timestamp),
             |block_state| Ok(block_state.block_ref().block().body().withdrawals().cloned()),
-        )
-    }
-
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        let best_block_num = self.best_block_number()?;
-
-        self.get_in_memory_or_storage_by_block(
-            best_block_num.into(),
-            |db_provider| db_provider.latest_withdrawal(),
-            |block_state| {
-                Ok(block_state
-                    .block_ref()
-                    .block()
-                    .body()
-                    .withdrawals()
-                    .cloned()
-                    .and_then(|mut w| w.pop()))
-            },
         )
     }
 }
