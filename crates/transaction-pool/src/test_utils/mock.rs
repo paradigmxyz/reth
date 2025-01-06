@@ -1047,7 +1047,8 @@ impl TryFrom<RecoveredTx<TransactionSigned>> for MockTransaction {
 
 impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
-        tx.into_ecrecovered_transaction().try_into().expect(
+        let (tx, signer) = tx.into_parts();
+        RecoveredTx::<TransactionSigned>::new_unchecked(tx.into(), signer).try_into().expect(
             "Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction",
         )
     }
@@ -1058,7 +1059,7 @@ impl From<MockTransaction> for RecoveredTx<TransactionSigned> {
         let signed_tx =
             TransactionSigned::new(tx.clone().into(), Signature::test_signature(), *tx.hash());
 
-        Self::from_signed_transaction(signed_tx, tx.sender())
+        Self::new_unchecked(signed_tx, tx.sender())
     }
 }
 
@@ -1180,7 +1181,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
 
         arb::<(TransactionSigned, Address)>()
             .prop_map(|(signed_transaction, signer)| {
-                RecoveredTx::from_signed_transaction(signed_transaction, signer)
+                RecoveredTx::new_unchecked(signed_transaction, signer)
                     .try_into()
                     .expect("Failed to create an Arbitrary MockTransaction via RecoveredTx")
             })
