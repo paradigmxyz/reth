@@ -51,7 +51,7 @@ Datadir:
           Custom URL to download the snapshot from
 
   -d, --decompress
-          Whether to automatically decompress the snapshot after download
+          Whether to automatically decompress the snapshot after downloading
 
 Logging:
       --log.stdout.format <FORMAT>
@@ -87,7 +87,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
 
-          [default: /Users/leanarzis/Library/Caches/reth/logs]
+          [default: <CACHE_DIR>/logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
