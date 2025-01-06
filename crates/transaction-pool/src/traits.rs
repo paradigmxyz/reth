@@ -21,8 +21,7 @@ use reth_execution_types::ChangedAccount;
 use reth_primitives::{
     kzg::KzgSettings,
     transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
-    PooledTransaction, PooledTransactionsElementEcRecovered, RecoveredTx, SealedBlock, Transaction,
-    TransactionSigned,
+    PooledTransaction, RecoveredTx, SealedBlock, Transaction, TransactionSigned,
 };
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 #[cfg(feature = "serde")]
@@ -1242,8 +1241,8 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
 }
 
 /// Conversion from the network transaction type to the pool transaction type.
-impl From<PooledTransactionsElementEcRecovered> for EthPooledTransaction {
-    fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
+impl From<RecoveredTx<PooledTransaction>> for EthPooledTransaction {
+    fn from(tx: RecoveredTx<PooledTransaction>) -> Self {
         let encoded_length = tx.encode_2718_len();
         let (tx, signer) = tx.into_parts();
         match tx {

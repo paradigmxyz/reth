@@ -30,8 +30,7 @@ use rand::{
 };
 use reth_primitives::{
     transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
-    PooledTransaction, PooledTransactionsElementEcRecovered, RecoveredTx, Transaction,
-    TransactionSigned, TxType,
+    PooledTransaction, RecoveredTx, Transaction, TransactionSigned, TxType,
 };
 use reth_primitives_traits::InMemorySize;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
@@ -1045,8 +1044,8 @@ impl TryFrom<RecoveredTx<TransactionSigned>> for MockTransaction {
     }
 }
 
-impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
-    fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
+impl From<RecoveredTx<PooledTransaction>> for MockTransaction {
+    fn from(tx: RecoveredTx<PooledTransaction>) -> Self {
         let (tx, signer) = tx.into_parts();
         RecoveredTx::<TransactionSigned>::new_unchecked(tx.into(), signer).try_into().expect(
             "Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction",
