@@ -104,10 +104,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let this = self.clone();
             self.spawn_with_state_at_block(block, move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut gas_used = 0;
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
-                let mut gas_used = 0;
-                for block in block_state_calls {
+                let mut block_state_calls = block_state_calls.into_iter().peekable();
+                while let Some(block) = block_state_calls.next() {
                     // Increase number and timestamp for every new block
                     block_env.number += U256::from(1);
                     block_env.timestamp += U256::from(1);
@@ -135,7 +136,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         block_env.basefee = U256::ZERO;
                     }
 
-                    let SimBlock { block_overrides, state_overrides, mut calls } = block;
+                    let SimBlock { block_overrides, state_overrides, calls } = block;
 
                     if let Some(block_overrides) = block_overrides {
                         apply_block_overrides(block_overrides, &mut db, &mut block_env);
@@ -150,26 +151,51 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         )
                     }
 
-                    // Resolve transactions, populate missing fields and enforce calls correctness.
-                    let transactions = simulate::resolve_transactions(
-                        &mut calls,
-                        validation,
-                        block_env.gas_limit.to(),
-                        cfg_env_with_handler_cfg.chain_id,
-                        &mut db,
-                        this.tx_resp_builder(),
-                    )?;
+                    let default_gas_limit = {
+                        let total_specified_gas = calls.iter().filter_map(|tx| tx.gas).sum::<u64>();
+                        let txs_without_gas_limit =
+                            calls.iter().filter(|tx| tx.gas.is_none()).count();
+
+                        if total_specified_gas > block_env.gas_limit.to() {
+                            return Err(EthApiError::Other(Box::new(
+                                EthSimulateError::BlockGasLimitExceeded,
+                            ))
+                            .into())
+                        }
+
+                        if txs_without_gas_limit > 0 {
+                            (block_env.gas_limit.to::<u64>() - total_specified_gas) /
+                                txs_without_gas_limit as u64
+                        } else {
+                            0
+                        }
+                    };
 
                     let mut calls = calls.into_iter().peekable();
-                    let mut senders = Vec::with_capacity(transactions.len());
+                    let mut transactions = Vec::with_capacity(calls.len());
+                    let mut senders = Vec::with_capacity(calls.len());
                     let mut results = Vec::with_capacity(calls.len());
 
-                    while let Some(tx) = calls.next() {
-                        let env = this.build_call_evm_env(
+                    while let Some(call) = calls.next() {
+                        let sender = call.from.unwrap_or_default();
+
+                        // Resolve transaction, populate missing fields and enforce calls
+                        // correctness.
+                        let tx = simulate::resolve_transaction(
+                            call,
+                            validation,
+                            default_gas_limit,
+                            cfg_env_with_handler_cfg.chain_id,
+                            &mut db,
+                            this.tx_resp_builder(),
+                        )?;
+
+                        let tx_env = this.evm_config().tx_env(&tx, sender);
+                        let env = EnvWithHandlerCfg::new_with_cfg_env(
                             cfg_env_with_handler_cfg.clone(),
                             block_env.clone(),
-                            tx,
-                        )?;
+                            tx_env,
+                        );
 
                         let (res, env) = {
                             if trace_transfers {
@@ -183,12 +209,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             }
                         };
 
-                        if calls.peek().is_some() {
+                        if calls.peek().is_some() || block_state_calls.peek().is_some() {
                             // need to apply the state changes of this call before executing the
                             // next call
                             db.commit(res.state);
                         }
 
+                        transactions.push(tx);
                         senders.push(env.tx.caller);
                         results.push(res.result);
                     }
@@ -287,11 +314,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let mut replay_block_txs = true;
 
             let num_txs =
-                transaction_index.index().unwrap_or_else(|| block.body.transactions().len());
+                transaction_index.index().unwrap_or_else(|| block.body().transactions().len());
             // but if all transactions are to be replayed, we can use the state at the block itself,
             // however only if we're not targeting the pending block, because for pending we can't
             // rely on the block's state being available
-            if !is_block_target_pending && num_txs == block.body.transactions().len() {
+            if !is_block_target_pending && num_txs == block.body().transactions().len() {
                 at = block.hash();
                 replay_block_txs = false;
             }
@@ -324,15 +351,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let state_overrides = state_override.take();
                     let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                    let env = this
-                        .prepare_call_env(
-                            cfg_env_with_handler_cfg.clone(),
-                            block_env.clone(),
-                            tx,
-                            &mut db,
-                            overrides,
-                        )
-                        .map(Into::into)?;
+                    let env = this.prepare_call_env(
+                        cfg_env_with_handler_cfg.clone(),
+                        block_env.clone(),
+                        tx,
+                        &mut db,
+                        overrides,
+                    )?;
                     let (res, _) = this.transact(&mut db, env)?;
 
                     match ensure_success(res.result) {

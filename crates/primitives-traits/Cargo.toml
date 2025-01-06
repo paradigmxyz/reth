@@ -49,6 +49,7 @@ serde = { workspace = true, optional = true}
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-codecs.workspace = true
@@ -88,7 +89,9 @@ std = [
 	"k256/std",
 	"secp256k1?/std",
 	"thiserror/std",
-	"alloy-trie/std"
+	"alloy-trie/std",
+	"op-alloy-consensus?/std",
+	"serde_json/std"
 ]
 secp256k1 = ["dep:secp256k1"]
 test-utils = [
@@ -139,4 +142,7 @@ reth-codec = [
 ]
 op = [
 	"dep:op-alloy-consensus",
+]
+rayon = [
+	"dep:rayon",
 ]

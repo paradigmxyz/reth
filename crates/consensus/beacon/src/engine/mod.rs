@@ -167,6 +167,8 @@ type PendingForkchoiceUpdate<PayloadAttributes> =
 /// # Panics
 ///
 /// If the future is polled more than once. Leads to undefined state.
+///
+/// Note: soon deprecated. See `reth_engine_service::EngineService`.
 #[must_use = "Future does nothing unless polled"]
 #[allow(missing_debug_implementations)]
 pub struct BeaconConsensusEngine<N, BT, Client>
@@ -297,7 +299,7 @@ where
         hooks: EngineHooks,
     ) -> RethResult<(Self, BeaconConsensusEngineHandle<N::Engine>)> {
         let event_sender = EventSender::default();
-        let handle = BeaconConsensusEngineHandle::new(to_engine, event_sender.clone());
+        let handle = BeaconConsensusEngineHandle::new(to_engine);
         let sync = EngineSyncController::new(
             pipeline,
             client,
@@ -2458,7 +2460,7 @@ mod tests {
                     .chain(MAINNET.chain)
                     .genesis(MAINNET.genesis.clone())
                     .london_activated()
-                    .paris_at_ttd(U256::from(3))
+                    .paris_at_ttd(U256::from(3), 3)
                     .build(),
             );
 
@@ -2772,8 +2774,7 @@ mod tests {
                 .with_real_consensus()
                 .build();
 
-            let genesis =
-                SealedBlock { header: chain_spec.sealed_genesis_header(), ..Default::default() };
+            let genesis = SealedBlock::new(chain_spec.sealed_genesis_header(), Default::default());
             let block1 = random_block(
                 &mut rng,
                 1,

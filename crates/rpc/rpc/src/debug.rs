@@ -23,8 +23,8 @@ use reth_evm::{
 use reth_primitives::{BlockExt, NodePrimitives, ReceiptWithBloom, SealedBlockWithSenders};
 use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
 use reth_provider::{
-    BlockIdReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, HeaderProvider,
-    ProviderBlock, ReceiptProviderIdExt, StateProofProvider, TransactionVariant,
+    BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, ProviderBlock,
+    ReceiptProviderIdExt, StateProofProvider, TransactionVariant,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
@@ -103,7 +103,7 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state| {
-                let mut results = Vec::with_capacity(block.body.transactions().len());
+                let mut results = Vec::with_capacity(block.body().transactions().len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
@@ -162,11 +162,8 @@ where
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
 
-        // Note: we assume the block has a valid height
-        let EvmEnv { cfg_env_with_handler_cfg, block_env } = self
-            .provider()
-            .env_with_header(block.header(), self.eth_api().evm_config().clone())
-            .map_err(Eth::Error::from_eth_err)?;
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } =
+            self.eth_api().evm_config().cfg_and_block_env(block.header());
 
         // Depending on EIP-2 we need to recover the transactions differently
         let senders =
@@ -530,11 +527,12 @@ where
         let mut replay_block_txs = true;
 
         // if a transaction index is provided, we need to replay the transactions until the index
-        let num_txs = transaction_index.index().unwrap_or_else(|| block.body.transactions().len());
+        let num_txs =
+            transaction_index.index().unwrap_or_else(|| block.body().transactions().len());
         // but if all transactions are to be replayed, we can use the state at the block itself
         // this works with the exception of the PENDING block, because its state might not exist if
         // built locally
-        if !target_block.is_pending() && num_txs == block.body.transactions().len() {
+        if !target_block.is_pending() && num_txs == block.body().transactions().len() {
             at = block.hash();
             replay_block_txs = false;
         }
@@ -641,12 +639,9 @@ where
                 let mut witness_record = ExecutionWitnessRecord::default();
 
                 let _ = block_executor
-                    .execute_with_state_closure(
-                        (&(*block).clone().unseal(), block.difficulty()).into(),
-                        |statedb: &State<_>| {
-                            witness_record.record_executed_state(statedb);
-                        },
-                    )
+                    .execute_with_state_closure(&(*block).clone().unseal(), |statedb: &State<_>| {
+                        witness_record.record_executed_state(statedb);
+                    })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 
                 let ExecutionWitnessRecord { hashed_state, codes, keys } = witness_record;

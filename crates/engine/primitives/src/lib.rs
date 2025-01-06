@@ -30,7 +30,7 @@ pub use reth_payload_primitives::{
     PayloadTypes,
 };
 use reth_payload_primitives::{InvalidPayloadAttributesError, PayloadAttributes};
-use reth_primitives::SealedBlockFor;
+use reth_primitives::{NodePrimitives, SealedBlockFor};
 use reth_primitives_traits::Block;
 use serde::{de::DeserializeOwned, ser::Serialize};
 
@@ -80,6 +80,13 @@ pub trait EngineTypes:
         + Send
         + Sync
         + 'static;
+
+    /// Converts a [`BuiltPayload`] into an [`ExecutionPayload`] and [`ExecutionPayloadSidecar`].
+    fn block_to_payload(
+        block: SealedBlockFor<
+            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
+        >,
+    ) -> (ExecutionPayload, ExecutionPayloadSidecar);
 }
 
 /// Type that validates an [`ExecutionPayload`].

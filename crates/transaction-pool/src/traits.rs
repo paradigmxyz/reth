@@ -978,7 +978,7 @@ pub trait PoolTransaction:
     type TryFromConsensusError: fmt::Display;
 
     /// Associated type representing the raw consensus variant of the transaction.
-    type Consensus: From<Self::Pooled>;
+    type Consensus: SignedTransaction + From<Self::Pooled>;
 
     /// Associated type representing the recovered pooled variant of the transaction.
     type Pooled: SignedTransaction;
@@ -1133,11 +1133,9 @@ pub trait PoolTransaction:
         &self,
         max_init_code_size: usize,
     ) -> Result<(), InvalidPoolTransactionError> {
-        if self.is_create() && self.input().len() > max_init_code_size {
-            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(
-                self.size(),
-                max_init_code_size,
-            ))
+        let input_len = self.input().len();
+        if self.is_create() && input_len > max_init_code_size {
+            Err(InvalidPoolTransactionError::ExceedsMaxInitCodeSize(input_len, max_init_code_size))
         } else {
             Ok(())
         }
@@ -1192,20 +1190,20 @@ pub trait EthPoolTransaction: PoolTransaction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EthPooledTransaction<T = TransactionSigned> {
     /// `EcRecovered` transaction, the consensus format.
-    pub(crate) transaction: RecoveredTx<T>,
+    pub transaction: RecoveredTx<T>,
 
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
     /// For EIP-4844 blob transactions: `max_fee_per_gas * gas_limit + tx_value +
     /// max_blob_fee_per_gas * blob_gas_used`.
-    pub(crate) cost: U256,
+    pub cost: U256,
 
     /// This is the RLP length of the transaction, computed when the transaction is added to the
     /// pool.
-    pub(crate) encoded_length: usize,
+    pub encoded_length: usize,
 
     /// The blob side car for this transaction
-    pub(crate) blob_sidecar: EthBlobTransactionSidecar,
+    pub blob_sidecar: EthBlobTransactionSidecar,
 }
 
 impl<T: SignedTransaction> EthPooledTransaction<T> {
@@ -1455,10 +1453,10 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 }
 
-impl TryFrom<RecoveredTx> for EthPooledTransaction {
+impl TryFrom<RecoveredTx<TransactionSigned>> for EthPooledTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from(tx: RecoveredTx) -> Result<Self, Self::Error> {
+    fn try_from(tx: RecoveredTx<TransactionSigned>) -> Result<Self, Self::Error> {
         // ensure we can handle the transaction type and its format
         match tx.ty() {
             0..=EIP1559_TX_TYPE_ID | EIP7702_TX_TYPE_ID => {
@@ -1482,7 +1480,7 @@ impl TryFrom<RecoveredTx> for EthPooledTransaction {
     }
 }
 
-impl From<EthPooledTransaction> for RecoveredTx {
+impl From<EthPooledTransaction> for RecoveredTx<TransactionSigned> {
     fn from(tx: EthPooledTransaction) -> Self {
         tx.transaction
     }

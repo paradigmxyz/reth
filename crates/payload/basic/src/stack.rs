@@ -7,7 +7,7 @@ use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Address, B256, U256};
 use reth_payload_builder::PayloadId;
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives::SealedBlock;
+use reth_primitives::{NodePrimitives, SealedBlockFor};
 
 use alloy_eips::eip7685::Requests;
 use std::{error::Error, fmt};
@@ -151,9 +151,11 @@ where
 impl<L, R> BuiltPayload for Either<L, R>
 where
     L: BuiltPayload,
-    R: BuiltPayload,
+    R: BuiltPayload<Primitives = L::Primitives>,
 {
-    fn block(&self) -> &SealedBlock {
+    type Primitives = L::Primitives;
+
+    fn block(&self) -> &SealedBlockFor<<L::Primitives as NodePrimitives>::Block> {
         match self {
             Self::Left(l) => l.block(),
             Self::Right(r) => r.block(),
@@ -184,7 +186,8 @@ where
     L::Attributes: Unpin + Clone,
     R::Attributes: Unpin + Clone,
     L::BuiltPayload: Unpin + Clone,
-    R::BuiltPayload: Unpin + Clone,
+    R::BuiltPayload:
+        BuiltPayload<Primitives = <L::BuiltPayload as BuiltPayload>::Primitives> + Unpin + Clone,
     <<L as PayloadBuilder<Pool, Client>>::Attributes as PayloadBuilderAttributes>::Error: 'static,
     <<R as PayloadBuilder<Pool, Client>>::Attributes as PayloadBuilderAttributes>::Error: 'static,
 {

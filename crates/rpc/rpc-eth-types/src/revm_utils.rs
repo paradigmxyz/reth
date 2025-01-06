@@ -20,7 +20,7 @@ use super::{EthApiError, EthResult, RpcInvalidTransactionError};
 #[inline]
 pub fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
     let spec = PrecompileSpecId::from_spec_id(spec_id);
-    Precompiles::new(spec).addresses().copied().map(Address::from)
+    Precompiles::new(spec).addresses().copied()
 }
 
 /// Calculates the caller gas allowance.

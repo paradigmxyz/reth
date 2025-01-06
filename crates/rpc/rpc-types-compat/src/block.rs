@@ -47,7 +47,7 @@ where
     B: BlockTrait,
 {
     let block_hash = block_hash.unwrap_or_else(|| block.header().hash_slow());
-    let transactions = block.body().transactions().iter().map(|tx| *tx.tx_hash()).collect();
+    let transactions = block.body().transaction_hashes_iter().copied().collect();
 
     from_block_with_transactions(
         block.length(),

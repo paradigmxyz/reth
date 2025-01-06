@@ -252,10 +252,10 @@ impl TestStageDB {
                 // Insert into body tables.
                 let block_body_indices = StoredBlockBodyIndices {
                     first_tx_num: next_tx_num,
-                    tx_count: block.body.transactions.len() as u64,
+                    tx_count: block.transaction_count() as u64,
                 };
 
-                if !block.body.transactions.is_empty() {
+                if !block.body().transactions.is_empty() {
                     tx.put::<tables::TransactionBlocks>(
                         block_body_indices.last_tx_num(),
                         block.number,
@@ -263,7 +263,7 @@ impl TestStageDB {
                 }
                 tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
 
-                let res = block.body.transactions.iter().try_for_each(|body_tx| {
+                let res = block.body().transactions.iter().try_for_each(|body_tx| {
                     if let Some(txs_writer) = &mut txs_writer {
                         txs_writer.append_transaction(next_tx_num, body_tx)?;
                     } else {
@@ -489,7 +489,7 @@ impl StorageKind {
 
     fn tx_offset(&self) -> u64 {
         if let Self::Database(offset) = self {
-            return offset.unwrap_or_default()
+            return offset.unwrap_or_default();
         }
         0
     }

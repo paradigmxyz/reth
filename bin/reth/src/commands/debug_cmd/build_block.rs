@@ -29,7 +29,8 @@ use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
 use reth_primitives::{
-    BlockExt, SealedBlockFor, SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
+    BlockExt, EthPrimitives, SealedBlockFor, SealedBlockWithSenders, SealedHeader, Transaction,
+    TransactionSigned,
 };
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -121,7 +122,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
@@ -220,8 +221,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             suggested_fee_recipient: self.suggested_fee_recipient,
             // TODO: add support for withdrawals
             withdrawals: None,
-            target_blobs_per_block: None,
-            max_blobs_per_block: None,
         };
         let payload_config = PayloadConfig::new(
             Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
@@ -265,7 +264,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
                 let block_execution_output =
-                    executor.execute((&block_with_senders.clone().unseal(), U256::MAX).into())?;
+                    executor.execute(&block_with_senders.clone().unseal())?;
                 let execution_outcome =
                     ExecutionOutcome::from((block_execution_output, block.number));
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");

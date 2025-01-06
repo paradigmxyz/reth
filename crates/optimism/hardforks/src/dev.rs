@@ -23,7 +23,11 @@ pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
         (
             EthereumHardfork::Paris.boxed(),
-            ForkCondition::TTD { fork_block: None, total_difficulty: U256::ZERO },
+            ForkCondition::TTD {
+                activation_block_number: 0,
+                fork_block: None,
+                total_difficulty: U256::ZERO,
+            },
         ),
         (crate::OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
         (crate::OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),

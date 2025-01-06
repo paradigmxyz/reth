@@ -131,7 +131,7 @@ impl From<oneshot::error::RecvError> for RequestError {
 pub type DownloadResult<T> = Result<T, DownloadError>;
 
 /// The downloader error type
-#[derive(Debug, Clone, PartialEq, Eq, Display, Error)]
+#[derive(Debug, Clone, Display, Error)]
 pub enum DownloadError {
     /* ==================== HEADER ERRORS ==================== */
     /// Header validation failed.

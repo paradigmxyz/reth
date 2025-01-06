@@ -69,7 +69,6 @@ pprof = { workspace = true, features = [
     "criterion",
 ] }
 criterion.workspace = true
-iai-callgrind.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
@@ -113,6 +112,7 @@ arbitrary = [
     "alloy-consensus/arbitrary",
 ]
 optimism = ["reth-primitives/optimism", "reth-db-api/optimism"]
+op = ["reth-db-api/op"]
 disable-lock = []
 
 [[bench]]
@@ -122,11 +122,6 @@ harness = false
 
 [[bench]]
 name = "criterion"
-required-features = ["test-utils"]
-harness = false
-
-[[bench]]
-name = "iai"
 required-features = ["test-utils"]
 harness = false
 
