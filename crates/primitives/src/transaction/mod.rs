@@ -48,7 +48,6 @@ pub use tx_type::TxType;
 pub mod signature;
 pub mod util;
 
-pub(crate) mod access_list;
 mod pooled;
 mod tx_type;
 
