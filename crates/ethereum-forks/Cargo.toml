@@ -36,19 +36,22 @@ arbitrary = [
 	"dep:arbitrary",
 	"alloy-chains/arbitrary",
 	"alloy-primitives/arbitrary",
-	"alloy-eip2124/arbitrary"
+	"alloy-eip2124/arbitrary",
+	"reth-primitives-traits/arbitrary"
 ]
 serde = [
 	"dep:serde",
 	"alloy-chains/serde",
 	"alloy-primitives/serde",
-	"alloy-eip2124/serde"
+	"alloy-eip2124/serde",
+	"reth-primitives-traits/serde"
 ]
 std = [
 	"alloy-chains/std",
 	"alloy-primitives/std",
 	"rustc-hash/std",
 	"serde?/std",
-	"alloy-eip2124/std"
+	"alloy-eip2124/std",
+	"reth-primitives-traits/std"
 ]
 rustc-hash = ["dep:rustc-hash"]

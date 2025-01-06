@@ -33,11 +33,13 @@ std = [
 	"once_cell/std",
 	"serde?/std",
 	"alloy-chains/std",
-	"reth-ethereum-forks/std"
+	"reth-ethereum-forks/std",
+	"reth-primitives-traits/std"
 ]
 serde = [
 	"dep:serde",
 	"alloy-chains/serde",
 	"alloy-primitives/serde",
-	"reth-ethereum-forks/serde"
+	"reth-ethereum-forks/serde",
+	"reth-primitives-traits/serde"
 ]
