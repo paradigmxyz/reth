@@ -347,7 +347,8 @@ mod tests {
     use mockall::mock;
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_primitives::{proofs, Account, BlockBody, Transaction, TransactionSigned};
+    use reth_ethereum_primitives::{Transaction, TransactionSigned};
+    use reth_primitives::{proofs, Account, BlockBody};
     use reth_storage_api::{
         errors::provider::ProviderResult, AccountReader, HeaderProvider, WithdrawalsProvider,
     };
