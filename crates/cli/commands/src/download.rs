@@ -94,7 +94,7 @@ async fn download_snapshot(url: &str, target_path: &Path) -> Result<()> {
     Ok(())
 }
 
-// Helper to decompress snashot file using lz4
+// Helper to decompress snapshot file using lz4
 fn decompress_snapshot(snapshot_path: &Path, target_dir: &Path) -> Result<()> {
     let status = ProcessCommand::new("tar")
         .arg("--use-compress-program=lz4")
