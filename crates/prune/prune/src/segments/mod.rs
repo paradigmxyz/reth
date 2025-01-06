@@ -242,8 +242,7 @@ mod tests {
         let range = input.get_next_tx_num_range(&provider).expect("Expected range").unwrap();
 
         // Calculate the total number of transactions
-        let num_txs =
-            blocks.iter().map(|block| block.body().transactions.len() as u64).sum::<u64>();
+        let num_txs = blocks.iter().map(|block| block.transaction_count() as u64).sum::<u64>();
 
         assert_eq!(range, 0..=num_txs - 1);
     }
@@ -289,8 +288,7 @@ mod tests {
         let range = input.get_next_tx_num_range(&provider).expect("Expected range").unwrap();
 
         // Calculate the total number of transactions
-        let num_txs =
-            blocks.iter().map(|block| block.body().transactions.len() as u64).sum::<u64>();
+        let num_txs = blocks.iter().map(|block| block.transaction_count() as u64).sum::<u64>();
 
         assert_eq!(range, 0..=num_txs - 1,);
     }
@@ -324,8 +322,7 @@ mod tests {
 
         // Get the last tx number
         // Calculate the total number of transactions
-        let num_txs =
-            blocks.iter().map(|block| block.body().transactions.len() as u64).sum::<u64>();
+        let num_txs = blocks.iter().map(|block| block.transaction_count() as u64).sum::<u64>();
         let max_range = num_txs - 1;
 
         // Create a prune input with a previous checkpoint that is the last tx number

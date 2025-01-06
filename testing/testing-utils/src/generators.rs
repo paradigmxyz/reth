@@ -12,9 +12,11 @@ use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
-    proofs, sign_message, Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader,
-    StorageEntry, Transaction, TransactionSigned,
+    proofs, Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
+    TransactionSigned,
 };
+
+use reth_primitives_traits::crypto::secp256k1::sign_message;
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
@@ -263,7 +265,7 @@ pub fn random_block_range<R: Rng>(
             idx,
             BlockParams {
                 parent: Some(
-                    blocks.last().map(|block: &SealedBlock| block.header.hash()).unwrap_or(parent),
+                    blocks.last().map(|block: &SealedBlock| block.hash()).unwrap_or(parent),
                 ),
                 tx_count: Some(tx_count),
                 ommers_count: None,
@@ -469,8 +471,10 @@ mod tests {
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
     use alloy_primitives::{hex, PrimitiveSignature as Signature};
-    use reth_primitives::public_key_to_address;
-    use reth_primitives_traits::SignedTransaction;
+    use reth_primitives_traits::{
+        crypto::secp256k1::{public_key_to_address, sign_message},
+        SignedTransaction,
+    };
     use std::str::FromStr;
 
     #[test]

@@ -273,7 +273,7 @@ where
                     env: Env::boxed(
                         cfg_env_with_handler_cfg.cfg_env.clone(),
                         block_env,
-                        this.eth_api().evm_config().tx_env(tx.as_signed(), tx.signer()),
+                        this.eth_api().evm_config().tx_env(tx.tx(), tx.signer()),
                     ),
                     handler_cfg: cfg_env_with_handler_cfg.handler_cfg,
                 };

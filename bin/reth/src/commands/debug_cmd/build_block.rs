@@ -192,7 +192,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
                     let pooled = transaction
                         .clone()
-                        .into_signed()
+                        .into_tx()
                         .try_into_pooled_eip4844(sidecar.clone())
                         .expect("should not fail to convert blob tx if it is already eip4844");
                     let encoded_length = pooled.encode_2718_len();

@@ -121,7 +121,7 @@ where
         let env = EnvWithHandlerCfg::new_with_cfg_env(
             cfg_env_with_handler_cfg,
             block_env,
-            self.eth_api().evm_config().tx_env(tx.as_signed(), tx.signer()),
+            self.eth_api().evm_config().tx_env(tx.tx(), tx.signer()),
         );
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);

@@ -8,10 +8,7 @@ use crate::{
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
-use alloy_eips::{
-    eip4895::{Withdrawal, Withdrawals},
-    BlockHashOrNumber,
-};
+use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use core::fmt;
 use reth_chainspec::{ChainInfo, EthereumHardforks};
@@ -556,10 +553,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
     ) -> ProviderResult<Option<Withdrawals>> {
         self.provider()?.withdrawals_by_block(id, timestamp)
     }
-
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        self.provider()?.latest_withdrawal()
-    }
 }
 
 impl<N: ProviderNodeTypes> OmmersProvider for ProviderFactory<N> {
@@ -778,7 +771,7 @@ mod tests {
             );
 
             let db_senders = provider.senders_by_tx_range(range);
-            assert_eq!(db_senders, Ok(vec![]));
+            assert!(matches!(db_senders, Ok(ref v) if v.is_empty()));
         }
     }
 

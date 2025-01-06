@@ -11,8 +11,7 @@ use crate::{
 };
 use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{
-    eip4895::{Withdrawal, Withdrawals},
-    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
+    eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
 };
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -569,10 +568,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider<N> {
         timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
         self.database.withdrawals_by_block(id, timestamp)
-    }
-
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        self.database.latest_withdrawal()
     }
 }
 

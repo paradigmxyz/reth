@@ -333,9 +333,8 @@ mod tests {
         BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider, Executor,
     };
     use reth_execution_types::BlockExecutionOutput;
-    use reth_primitives::{
-        public_key_to_address, Account, Block, BlockBody, BlockExt, Transaction,
-    };
+    use reth_primitives::{Account, Block, BlockBody, BlockExt, Transaction};
+    use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
     use reth_revm::{test_utils::StateProviderTest, Database, TransitionState};
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
     use revm_primitives::{address, EvmState, BLOCKHASH_SERVE_WINDOW};
@@ -420,10 +419,10 @@ mod tests {
                 "Executing cancun block without parent beacon block root field should fail",
             );
 
-        assert_eq!(
+        assert!(matches!(
             err.as_validation().unwrap().clone(),
             BlockValidationError::MissingParentBeaconBlockRoot
-        );
+        ));
 
         // fix header, set a gas limit
         header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
@@ -1097,13 +1096,13 @@ mod tests {
         // Check if the execution result is an error and assert the specific error type
         match exec_result {
             Ok(_) => panic!("Expected block gas limit error"),
-            Err(err) => assert_eq!(
+            Err(err) => assert!(matches!(
                 *err.as_validation().unwrap(),
                 BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: 2_500_000,
                     block_available_gas: 1_500_000,
                 }
-            ),
+            )),
         }
     }
 
