@@ -25,7 +25,7 @@ use reth_trie::{
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{sync::Arc, time::Instant};
-use tracing::{debug, error, trace};
+use tracing::{debug, trace};
 
 #[cfg(feature = "metrics")]
 use crate::metrics::ParallelStateRootMetrics;
@@ -196,8 +196,11 @@ where
                     proof_result
                 })();
 
+                // We can have the receiver dropped before we send, because we still calculate
+                // storage proofs for deleted accounts, but do not actually walk over them in
+                // `account_node_iter` below.
                 if let Err(e) = tx.send(result) {
-                    error!(
+                    debug!(
                         target: "trie::parallel",
                         ?hashed_address,
                         error = ?e,
