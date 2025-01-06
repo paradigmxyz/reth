@@ -685,7 +685,7 @@ impl PoolTransaction for MockTransaction {
     fn try_consensus_into_pooled(
         tx: RecoveredTx<Self::Consensus>,
     ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
-        let (tx, signer) = tx.to_components();
+        let (tx, signer) = tx.into_parts();
         Self::Pooled::try_from(tx)
             .map(|tx| tx.with_signer(signer))
             .map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)
@@ -871,7 +871,7 @@ impl EthPoolTransaction for MockTransaction {
         self,
         sidecar: Arc<BlobTransactionSidecar>,
     ) -> Option<RecoveredTx<Self::Pooled>> {
-        let (tx, signer) = self.into_consensus().to_components();
+        let (tx, signer) = self.into_consensus().into_parts();
         tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
             .map(|tx| tx.with_signer(signer))
             .ok()
@@ -881,7 +881,7 @@ impl EthPoolTransaction for MockTransaction {
         tx: RecoveredTx<Self::Consensus>,
         sidecar: BlobTransactionSidecar,
     ) -> Option<Self> {
-        let (tx, signer) = tx.to_components();
+        let (tx, signer) = tx.into_parts();
         tx.try_into_pooled_eip4844(sidecar)
             .map(|tx| tx.with_signer(signer))
             .ok()
@@ -909,7 +909,7 @@ impl TryFrom<RecoveredTx<TransactionSigned>> for MockTransaction {
 
     fn try_from(tx: RecoveredTx<TransactionSigned>) -> Result<Self, Self::Error> {
         let sender = tx.signer();
-        let transaction = tx.into_signed();
+        let transaction = tx.into_tx();
         let hash = transaction.hash();
         let size = transaction.size();
 

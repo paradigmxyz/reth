@@ -341,7 +341,7 @@ pub trait LoadPendingBlock:
             let env = Env::boxed(
                 cfg.cfg_env.clone(),
                 block_env.clone(),
-                Self::evm_config(self).tx_env(tx.as_signed(), tx.signer()),
+                Self::evm_config(self).tx_env(tx.tx(), tx.signer()),
             );
 
             let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
@@ -393,7 +393,7 @@ pub trait LoadPendingBlock:
             cumulative_gas_used += gas_used;
 
             // append transaction to the list of executed transactions
-            let (tx, sender) = tx.to_components();
+            let (tx, sender) = tx.into_parts();
             executed_txs.push(tx);
             senders.push(sender);
             results.push(result);
