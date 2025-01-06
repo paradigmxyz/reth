@@ -311,14 +311,17 @@ where
         block_number: u64,
         page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts<RpcTransaction<Eth::NetworkTypes>>> {
-        let state = self.eth.latest_state().map_err(|e| internal_rpc_err(e.to_string()))?;
-        let account = state.basic_account(&address).map_err(|e| internal_rpc_err(e.to_string()))?;
+        {
+            let state = self.eth.latest_state().map_err(|e| internal_rpc_err(e.to_string()))?;
+            let account =
+                state.basic_account(&address).map_err(|e| internal_rpc_err(e.to_string()))?;
 
-        if account.is_none() {
-            return Err(EthApiError::InvalidParams(
-                "invalid parameter: address does not exist".to_string(),
-            )
-            .into());
+            if account.is_none() {
+                return Err(EthApiError::InvalidParams(
+                    "invalid parameter: address does not exist".to_string(),
+                )
+                .into());
+            }
         }
 
         let tip: u64 = self.eth.block_number()?.saturating_to();
@@ -330,6 +333,10 @@ where
             .into());
         }
 
+        // Since the transactions are ordered such that the most recent transaction is at the top,
+        // if the search reaches the tip of the chain then it is the first page of the
+        // transactions. If the search starts from the genesis block, then it is the last page of
+        // the transactions
         let mut txs_with_receipts = TransactionsWithReceipts {
             txs: Vec::default(),
             receipts: Vec::default(),
@@ -389,13 +396,11 @@ where
             for trace in &traces {
                 let tx_hash = trace.transaction_hash.ok_or(EthApiError::TransactionNotFound)?;
 
-                let tx = EthApiServer::transaction_by_hash(&self.eth, tx_hash)
-                    .await?
-                    .ok_or(EthApiError::TransactionNotFound)?;
-
-                let receipt = EthApiServer::transaction_receipt(&self.eth, tx_hash)
-                    .await?
-                    .ok_or(EthApiError::TransactionNotFound)?;
+                let tx = EthApiServer::transaction_by_hash(&self.eth, tx_hash);
+                let receipt = EthApiServer::transaction_receipt(&self.eth, tx_hash);
+                let (tx, receipt) = futures::try_join!(tx, receipt)?;
+                let tx = tx.ok_or(EthApiError::TransactionNotFound)?;
+                let receipt = receipt.ok_or(EthApiError::ReceiptNotFound)?;
 
                 let inner = OtsReceipt {
                     status: receipt.status(),
