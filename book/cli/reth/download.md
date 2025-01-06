@@ -1,6 +1,6 @@
 # reth download
 
-Download and optionally decompress chain snapshots from public given URL into datadir/chain directory 
+Downloads and optionally decompresses node snapshots from a URL
 
 ```bash
 $ reth download --help

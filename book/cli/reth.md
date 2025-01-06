@@ -15,6 +15,7 @@ Commands:
   import        This syncs RLP encoded blocks from a file
   dump-genesis  Dumps genesis block JSON configuration to stdout
   db            Database debugging utilities
+  download      Downloads and optionally decompresses node snapshots from a URL
   stage         Manipulate individual stages
   p2p           P2P Debugging utilities
   config        Write config to stdout
