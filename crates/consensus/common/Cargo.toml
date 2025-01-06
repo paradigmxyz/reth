@@ -24,8 +24,5 @@ alloy-eips.workspace = true
 
 [dev-dependencies]
 alloy-consensus.workspace = true
-reth-storage-api.workspace = true
-reth-ethereum-primitives.workspace = true
 rand.workspace = true
-mockall = "0.13"
 
