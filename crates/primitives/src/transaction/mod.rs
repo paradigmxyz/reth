@@ -30,8 +30,11 @@ use op_alloy_consensus::TxDeposit;
 pub use pooled::PooledTransactionsElementEcRecovered;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 pub use reth_primitives_traits::{
-    transaction::error::{
-        InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
+    transaction::{
+        error::{
+            InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
+        },
+        signed::SignedTransactionIntoRecoveredExt,
     },
     FillTxEnv, WithEncoded,
 };
@@ -1514,42 +1517,6 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
 /// Type alias kept for backward compatibility.
 pub type TransactionSignedEcRecovered<T = TransactionSigned> = RecoveredTx<T>;
-
-/// Extension trait for [`SignedTransaction`] to convert it into [`RecoveredTx`].
-pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
-    /// Tries to recover signer and return [`RecoveredTx`] by cloning the type.
-    fn try_ecrecovered(&self) -> Option<RecoveredTx<Self>> {
-        let signer = self.recover_signer()?;
-        Some(RecoveredTx::new_unchecked(self.clone(), signer))
-    }
-
-    /// Tries to recover signer and return [`RecoveredTx`].
-    ///
-    /// Returns `Err(Self)` if the transaction's signature is invalid, see also
-    /// [`SignedTransaction::recover_signer`].
-    fn try_into_ecrecovered(self) -> Result<RecoveredTx<Self>, Self> {
-        match self.recover_signer() {
-            None => Err(self),
-            Some(signer) => Ok(RecoveredTx::new_unchecked(self, signer)),
-        }
-    }
-
-    /// Consumes the type, recover signer and return [`RecoveredTx`] _without
-    /// ensuring that the signature has a low `s` value_ (EIP-2).
-    ///
-    /// Returns `None` if the transaction's signature is invalid.
-    fn into_ecrecovered_unchecked(self) -> Option<RecoveredTx<Self>> {
-        let signer = self.recover_signer_unchecked()?;
-        Some(RecoveredTx::new_unchecked(self, signer))
-    }
-
-    /// Returns the [`RecoveredTx`] transaction with the given sender.
-    fn with_signer(self, signer: Address) -> RecoveredTx<Self> {
-        RecoveredTx::new_unchecked(self, signer)
-    }
-}
-
-impl<T> SignedTransactionIntoRecoveredExt for T where T: SignedTransaction {}
 
 /// Bincode-compatible transaction type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]
