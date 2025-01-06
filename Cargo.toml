@@ -388,9 +388,7 @@ reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
 reth-payload-validator = { path = "crates/payload/validator" }
 reth-payload-util = { path = "crates/payload/util" }
-reth-primitives = { path = "crates/primitives", default-features = false, features = [
-    "std",
-] }
+reth-primitives = { path = "crates/primitives", default-features = false }
 reth-primitives-traits = { path = "crates/primitives-traits", default-features = false }
 reth-provider = { path = "crates/storage/provider" }
 reth-prune = { path = "crates/prune/prune" }
