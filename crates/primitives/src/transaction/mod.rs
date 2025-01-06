@@ -875,8 +875,7 @@ impl TransactionSigned {
         }
     }
 
-    /// Converts from an EIP-4844 [`RecoveredTx`] to a
-    /// [`PooledTransactionsElementEcRecovered`] with the given sidecar.
+    /// Converts from an EIP-4844 transaction to a [`PooledTransaction`] with the given sidecar.
     ///
     /// Returns an `Err` containing the original `TransactionSigned` if the transaction is not
     /// EIP-4844.
