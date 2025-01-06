@@ -1,5 +1,7 @@
 //! Helper function for Receipt root calculation for Optimism hardforks.
 
+use alloc::vec::Vec;
+
 use alloy_consensus::TxReceipt;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
