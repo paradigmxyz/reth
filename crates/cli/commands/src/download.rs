@@ -25,29 +25,28 @@ pub struct Command<C: ChainSpecParser> {
     )]
     chain: Arc<C::ChainSpec>,
 
-    /// Path where will be store the snapshot
+    /// Path where will be stored the snapshot
     #[command(flatten)]
     datadir: DatadirArgs,
 
     /// Custom URL to download the snapshot from
-    /// TODO: check if we can add public snapshots urls by default
     #[arg(long, short, required = true)]
     url: String,
 
-    /// Whether to automatically decompress the snapshot after download
+    /// Whether to automatically decompress the snapshot after downloading
     #[arg(long, short)]
     decompress: bool,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
-    /// Execute the download command
+    /// Downloads and saves the snapshot from the specified URL
     pub async fn execute<N>(self) -> Result<()> {
         let data_dir = self.datadir.resolve_datadir(self.chain.chain());
         let snapshot_path = data_dir.data_dir().join(SNAPSHOT_FILE);
         fs::create_dir_all(&data_dir).await?;
 
-        println!("Starting snapshot download for chain: {:?}", self.chain);
-        println!("Target directory: {:?}", data_dir);
+        println!("Starting snapshot download for chain: {:?}", self.chain.chain());
+        println!("Target directory: {:?}", data_dir.data_dir());
         println!("Source URL: {}", self.url);
 
         download_snapshot(&self.url, &snapshot_path).await?;
@@ -71,6 +70,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
     }
 }
 
+// Downloads a file from the given URL to the specified path, displaying download progress.
 async fn download_snapshot(url: &str, target_path: &Path) -> Result<()> {
     let client = Client::new();
     let mut response = client.get(url).send().await?.error_for_status()?;
