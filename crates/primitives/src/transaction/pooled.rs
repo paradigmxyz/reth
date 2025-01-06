@@ -12,8 +12,8 @@ pub type PooledTransactionsElementEcRecovered<T = PooledTransaction> = Recovered
 impl PooledTransactionsElementEcRecovered {
     /// Transform back to [`RecoveredTx`]
     pub fn into_ecrecovered_transaction(self) -> RecoveredTx<TransactionSigned> {
-        let (tx, signer) = self.to_components();
-        RecoveredTx::from_signed_transaction(tx.into(), signer)
+        let (tx, signer) = self.into_parts();
+        RecoveredTx::new_unchecked(tx.into(), signer)
     }
 
     /// Converts from an EIP-4844 [`RecoveredTx`] to a
@@ -24,11 +24,11 @@ impl PooledTransactionsElementEcRecovered {
         tx: RecoveredTx<TransactionSigned>,
         sidecar: BlobTransactionSidecar,
     ) -> Result<Self, RecoveredTx<TransactionSigned>> {
-        let RecoveredTx { signer, signed_transaction } = tx;
+        let (signed_transaction, signer) = tx.into_parts();
         let transaction = signed_transaction
             .try_into_pooled_eip4844(sidecar)
-            .map_err(|tx| RecoveredTx { signer, signed_transaction: tx })?;
-        Ok(Self::from_signed_transaction(transaction, signer))
+            .map_err(|tx| RecoveredTx::new_unchecked(tx, signer))?;
+        Ok(Self::new_unchecked(transaction, signer))
     }
 }
 
@@ -37,10 +37,9 @@ impl TryFrom<RecoveredTx<TransactionSigned>> for PooledTransactionsElementEcReco
     type Error = TransactionConversionError;
 
     fn try_from(tx: RecoveredTx<TransactionSigned>) -> Result<Self, Self::Error> {
-        match PooledTransaction::try_from(tx.signed_transaction) {
-            Ok(pooled_transaction) => {
-                Ok(Self::from_signed_transaction(pooled_transaction, tx.signer))
-            }
+        let (signed_transaction, signer) = tx.into_parts();
+        match PooledTransaction::try_from(signed_transaction) {
+            Ok(pooled_transaction) => Ok(Self::new_unchecked(pooled_transaction, signer)),
             Err(_) => Err(TransactionConversionError::UnsupportedForP2P),
         }
     }

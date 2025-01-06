@@ -16,7 +16,7 @@ use alloy_eips::{
 use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
-use alloy_rlp::{Decodable, Encodable, Error as RlpError, Header};
+use alloy_rlp::{Decodable, Encodable, Header};
 use core::hash::{Hash, Hasher};
 use derive_more::{AsRef, Deref};
 use once_cell as _;
@@ -912,7 +912,7 @@ impl TransactionSigned {
     /// Returns the [`RecoveredTx`] transaction with the given sender.
     #[inline]
     pub const fn with_signer(self, signer: Address) -> RecoveredTx<Self> {
-        RecoveredTx::from_signed_transaction(self, signer)
+        RecoveredTx::new_unchecked(self, signer)
     }
 
     /// Consumes the type, recover signer and return [`RecoveredTx`]
@@ -920,7 +920,7 @@ impl TransactionSigned {
     /// Returns `None` if the transaction's signature is invalid, see also [`Self::recover_signer`].
     pub fn into_ecrecovered(self) -> Option<RecoveredTx<Self>> {
         let signer = self.recover_signer()?;
-        Some(RecoveredTx { signed_transaction: self, signer })
+        Some(RecoveredTx::new_unchecked(self, signer))
     }
 
     /// Consumes the type, recover signer and return [`RecoveredTx`] _without
@@ -930,7 +930,7 @@ impl TransactionSigned {
     /// [`Self::recover_signer_unchecked`].
     pub fn into_ecrecovered_unchecked(self) -> Option<RecoveredTx<Self>> {
         let signer = self.recover_signer_unchecked()?;
-        Some(RecoveredTx { signed_transaction: self, signer })
+        Some(RecoveredTx::new_unchecked(self, signer))
     }
 
     /// Tries to recover signer and return [`RecoveredTx`]. _without ensuring that
@@ -941,7 +941,7 @@ impl TransactionSigned {
     pub fn try_into_ecrecovered_unchecked(self) -> Result<RecoveredTx<Self>, Self> {
         match self.recover_signer_unchecked() {
             None => Err(self),
-            Some(signer) => Ok(RecoveredTx { signed_transaction: self, signer }),
+            Some(signer) => Ok(RecoveredTx::new_unchecked(self, signer)),
         }
     }
 
@@ -1184,13 +1184,13 @@ impl alloy_consensus::Transaction for TransactionSigned {
 
 impl From<RecoveredTx<Self>> for TransactionSigned {
     fn from(recovered: RecoveredTx<Self>) -> Self {
-        recovered.signed_transaction
+        recovered.into_tx()
     }
 }
 
 impl From<RecoveredTx<PooledTransaction>> for TransactionSigned {
     fn from(recovered: RecoveredTx<PooledTransaction>) -> Self {
-        recovered.signed_transaction.into()
+        recovered.into_tx().into()
     }
 }
 
@@ -1523,6 +1523,7 @@ pub type TransactionSignedEcRecovered<T = TransactionSigned> = RecoveredTx<T>;
 
 /// Signed transaction with recovered signer.
 #[derive(Debug, Clone, PartialEq, Hash, Eq, AsRef, Deref)]
+#[non_exhaustive]
 pub struct RecoveredTx<T = TransactionSigned> {
     /// Signer of the transaction
     signer: Address,
@@ -1546,30 +1547,30 @@ impl<T> RecoveredTx<T> {
     }
 
     /// Returns a reference to [`TransactionSigned`]
-    pub const fn as_signed(&self) -> &T {
+    pub const fn tx(&self) -> &T {
         &self.signed_transaction
     }
 
     /// Transform back to [`TransactionSigned`]
-    pub fn into_signed(self) -> T {
+    pub fn into_tx(self) -> T {
         self.signed_transaction
     }
 
     /// Dissolve Self to its component
-    pub fn to_components(self) -> (T, Address) {
+    pub fn into_parts(self) -> (T, Address) {
         (self.signed_transaction, self.signer)
     }
 
     /// Create [`RecoveredTx`] from [`TransactionSigned`] and [`Address`] of the
     /// signer.
     #[inline]
-    pub const fn from_signed_transaction(signed_transaction: T, signer: Address) -> Self {
+    pub const fn new_unchecked(signed_transaction: T, signer: Address) -> Self {
         Self { signed_transaction, signer }
     }
 
     /// Applies the given closure to the inner transactions.
     pub fn map_transaction<Tx>(self, f: impl FnOnce(T) -> Tx) -> RecoveredTx<Tx> {
-        RecoveredTx::from_signed_transaction(f(self.signed_transaction), self.signer)
+        RecoveredTx::new_unchecked(f(self.signed_transaction), self.signer)
     }
 }
 
@@ -1592,7 +1593,7 @@ impl<T: SignedTransaction> Decodable for RecoveredTx<T> {
         let signer = signed_transaction
             .recover_signer()
             .ok_or(RlpError::Custom("Unable to recover decoded transaction signer."))?;
-        Ok(Self { signer, signed_transaction })
+        Ok(Self::new_unchecked(signed_transaction, signer))
     }
 }
 
@@ -1619,7 +1620,7 @@ pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
     /// Tries to recover signer and return [`RecoveredTx`] by cloning the type.
     fn try_ecrecovered(&self) -> Option<RecoveredTx<Self>> {
         let signer = self.recover_signer()?;
-        Some(RecoveredTx { signed_transaction: self.clone(), signer })
+        Some(RecoveredTx::new_unchecked(self.clone(), signer))
     }
 
     /// Tries to recover signer and return [`RecoveredTx`].
@@ -1629,7 +1630,7 @@ pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
     fn try_into_ecrecovered(self) -> Result<RecoveredTx<Self>, Self> {
         match self.recover_signer() {
             None => Err(self),
-            Some(signer) => Ok(RecoveredTx { signed_transaction: self, signer }),
+            Some(signer) => Ok(RecoveredTx::new_unchecked(self, signer)),
         }
     }
 
@@ -1639,12 +1640,12 @@ pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
     /// Returns `None` if the transaction's signature is invalid.
     fn into_ecrecovered_unchecked(self) -> Option<RecoveredTx<Self>> {
         let signer = self.recover_signer_unchecked()?;
-        Some(RecoveredTx::from_signed_transaction(self, signer))
+        Some(RecoveredTx::new_unchecked(self, signer))
     }
 
     /// Returns the [`RecoveredTx`] transaction with the given sender.
     fn with_signer(self, signer: Address) -> RecoveredTx<Self> {
-        RecoveredTx::from_signed_transaction(self, signer)
+        RecoveredTx::new_unchecked(self, signer)
     }
 }
 
