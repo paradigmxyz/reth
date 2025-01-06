@@ -26,3 +26,14 @@ alloy-eips.workspace = true
 alloy-consensus.workspace = true
 rand.workspace = true
 
+[features]
+default = ["std"]
+std = [
+	"alloy-consensus/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"reth-chainspec/std",
+	"reth-consensus/std",
+	"reth-primitives/std",
+	"reth-primitives-traits/std"
+]
