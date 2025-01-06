@@ -191,10 +191,10 @@ impl<'a> arbitrary::Arbitrary<'a> for Transaction {
 impl Typed2718 for Transaction {
     fn ty(&self) -> u8 {
         match self {
-            Self::Legacy(tx) => tx.ty(),
-            Self::Eip2930(tx) => tx.ty(),
-            Self::Eip1559(tx) => tx.ty(),
-            Self::Eip4844(tx) => tx.ty(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.ty(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.ty(),
@@ -209,10 +209,10 @@ impl Transaction {
     /// It is only for signature signing or signer recovery.
     pub fn signature_hash(&self) -> B256 {
         match self {
-            Self::Legacy(tx) => tx.signature_hash(),
-            Self::Eip2930(tx) => tx.signature_hash(),
-            Self::Eip1559(tx) => tx.signature_hash(),
-            Self::Eip4844(tx) => tx.signature_hash(),
+            Self::Legacy(tx)|
+            Self::Eip2930(tx)|
+            Self::Eip1559(tx)|
+            Self::Eip4844(tx)|
             Self::Eip7702(tx) => tx.signature_hash(),
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => B256::ZERO,
@@ -289,10 +289,10 @@ impl Transaction {
     /// hash intended for signing.
     pub fn encode_for_signing(&self, out: &mut dyn bytes::BufMut) {
         match self {
-            Self::Legacy(tx) => tx.encode_for_signing(out),
-            Self::Eip2930(tx) => tx.encode_for_signing(out),
-            Self::Eip1559(tx) => tx.encode_for_signing(out),
-            Self::Eip4844(tx) => tx.encode_for_signing(out),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.encode_for_signing(out),
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => {}
@@ -302,19 +302,12 @@ impl Transaction {
     /// Produces EIP-2718 encoding of the transaction
     pub fn eip2718_encode(&self, signature: &Signature, out: &mut dyn bytes::BufMut) {
         match self {
-            Self::Legacy(legacy_tx) => {
-                // do nothing w/ with_header
-                legacy_tx.eip2718_encode(signature, out);
-            }
-            Self::Eip2930(access_list_tx) => {
-                access_list_tx.eip2718_encode(signature, out);
-            }
-            Self::Eip1559(dynamic_fee_tx) => {
-                dynamic_fee_tx.eip2718_encode(signature, out);
-            }
-            Self::Eip4844(blob_tx) => blob_tx.eip2718_encode(signature, out),
-            Self::Eip7702(set_code_tx) => {
-                set_code_tx.eip2718_encode(signature, out);
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
+            Self::Eip7702(tx) => {
+                tx.eip2718_encode(signature, out);
             }
             #[cfg(feature = "optimism")]
             Self::Deposit(deposit_tx) => deposit_tx.encode_2718(out),
@@ -324,10 +317,10 @@ impl Transaction {
     /// This sets the transaction's gas limit.
     pub fn set_gas_limit(&mut self, gas_limit: u64) {
         match self {
-            Self::Legacy(tx) => tx.gas_limit = gas_limit,
-            Self::Eip2930(tx) => tx.gas_limit = gas_limit,
-            Self::Eip1559(tx) => tx.gas_limit = gas_limit,
-            Self::Eip4844(tx) => tx.gas_limit = gas_limit,
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.gas_limit = gas_limit,
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.gas_limit = gas_limit,
@@ -337,10 +330,10 @@ impl Transaction {
     /// This sets the transaction's nonce.
     pub fn set_nonce(&mut self, nonce: u64) {
         match self {
-            Self::Legacy(tx) => tx.nonce = nonce,
-            Self::Eip2930(tx) => tx.nonce = nonce,
-            Self::Eip1559(tx) => tx.nonce = nonce,
-            Self::Eip4844(tx) => tx.nonce = nonce,
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.nonce = nonce,
             #[cfg(feature = "optimism")]
             Self::Deposit(_) => { /* noop */ }
@@ -350,10 +343,10 @@ impl Transaction {
     /// This sets the transaction's value.
     pub fn set_value(&mut self, value: U256) {
         match self {
-            Self::Legacy(tx) => tx.value = value,
-            Self::Eip2930(tx) => tx.value = value,
-            Self::Eip1559(tx) => tx.value = value,
-            Self::Eip4844(tx) => tx.value = value,
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.value = value,
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.value = value,
@@ -363,10 +356,10 @@ impl Transaction {
     /// This sets the transaction's input field.
     pub fn set_input(&mut self, input: Bytes) {
         match self {
-            Self::Legacy(tx) => tx.input = input,
-            Self::Eip2930(tx) => tx.input = input,
-            Self::Eip1559(tx) => tx.input = input,
-            Self::Eip4844(tx) => tx.input = input,
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.input = input,
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.input = input,
@@ -449,10 +442,10 @@ impl InMemorySize for Transaction {
     #[inline]
     fn size(&self) -> usize {
         match self {
-            Self::Legacy(tx) => tx.size(),
-            Self::Eip2930(tx) => tx.size(),
-            Self::Eip1559(tx) => tx.size(),
-            Self::Eip4844(tx) => tx.size(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.size(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.size(),
@@ -470,18 +463,10 @@ impl reth_codecs::Compact for Transaction {
     {
         let identifier = self.tx_type().to_compact(buf);
         match self {
-            Self::Legacy(tx) => {
-                tx.to_compact(buf);
-            }
-            Self::Eip2930(tx) => {
-                tx.to_compact(buf);
-            }
-            Self::Eip1559(tx) => {
-                tx.to_compact(buf);
-            }
-            Self::Eip4844(tx) => {
-                tx.to_compact(buf);
-            }
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => {
                 tx.to_compact(buf);
             }
@@ -557,10 +542,10 @@ impl Default for Transaction {
 impl alloy_consensus::Transaction for Transaction {
     fn chain_id(&self) -> Option<ChainId> {
         match self {
-            Self::Legacy(tx) => tx.chain_id(),
-            Self::Eip2930(tx) => tx.chain_id(),
-            Self::Eip1559(tx) => tx.chain_id(),
-            Self::Eip4844(tx) => tx.chain_id(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.chain_id(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.chain_id(),
@@ -569,10 +554,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn nonce(&self) -> u64 {
         match self {
-            Self::Legacy(tx) => tx.nonce(),
-            Self::Eip2930(tx) => tx.nonce(),
-            Self::Eip1559(tx) => tx.nonce(),
-            Self::Eip4844(tx) => tx.nonce(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.nonce(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.nonce(),
@@ -581,10 +566,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn gas_limit(&self) -> u64 {
         match self {
-            Self::Legacy(tx) => tx.gas_limit(),
-            Self::Eip2930(tx) => tx.gas_limit(),
-            Self::Eip1559(tx) => tx.gas_limit(),
-            Self::Eip4844(tx) => tx.gas_limit(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.gas_limit(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.gas_limit(),
@@ -593,10 +578,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn gas_price(&self) -> Option<u128> {
         match self {
-            Self::Legacy(tx) => tx.gas_price(),
-            Self::Eip2930(tx) => tx.gas_price(),
-            Self::Eip1559(tx) => tx.gas_price(),
-            Self::Eip4844(tx) => tx.gas_price(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.gas_price(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.gas_price(),
@@ -605,10 +590,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn max_fee_per_gas(&self) -> u128 {
         match self {
-            Self::Legacy(tx) => tx.max_fee_per_gas(),
-            Self::Eip2930(tx) => tx.max_fee_per_gas(),
-            Self::Eip1559(tx) => tx.max_fee_per_gas(),
-            Self::Eip4844(tx) => tx.max_fee_per_gas(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.max_fee_per_gas(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.max_fee_per_gas(),
@@ -617,10 +602,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
-            Self::Legacy(tx) => tx.max_priority_fee_per_gas(),
-            Self::Eip2930(tx) => tx.max_priority_fee_per_gas(),
-            Self::Eip1559(tx) => tx.max_priority_fee_per_gas(),
-            Self::Eip4844(tx) => tx.max_priority_fee_per_gas(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.max_priority_fee_per_gas(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.max_priority_fee_per_gas(),
@@ -629,10 +614,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
         match self {
-            Self::Legacy(tx) => tx.max_fee_per_blob_gas(),
-            Self::Eip2930(tx) => tx.max_fee_per_blob_gas(),
-            Self::Eip1559(tx) => tx.max_fee_per_blob_gas(),
-            Self::Eip4844(tx) => tx.max_fee_per_blob_gas(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.max_fee_per_blob_gas(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.max_fee_per_blob_gas(),
@@ -641,10 +626,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn priority_fee_or_price(&self) -> u128 {
         match self {
-            Self::Legacy(tx) => tx.priority_fee_or_price(),
-            Self::Eip2930(tx) => tx.priority_fee_or_price(),
-            Self::Eip1559(tx) => tx.priority_fee_or_price(),
-            Self::Eip4844(tx) => tx.priority_fee_or_price(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.priority_fee_or_price(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.priority_fee_or_price(),
@@ -653,10 +638,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
         match self {
-            Self::Legacy(tx) => tx.effective_gas_price(base_fee),
-            Self::Eip2930(tx) => tx.effective_gas_price(base_fee),
-            Self::Eip1559(tx) => tx.effective_gas_price(base_fee),
-            Self::Eip4844(tx) => tx.effective_gas_price(base_fee),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.effective_gas_price(base_fee),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.effective_gas_price(base_fee),
@@ -674,10 +659,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn kind(&self) -> TxKind {
         match self {
-            Self::Legacy(tx) => tx.kind(),
-            Self::Eip2930(tx) => tx.kind(),
-            Self::Eip1559(tx) => tx.kind(),
-            Self::Eip4844(tx) => tx.kind(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.kind(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.kind(),
@@ -686,10 +671,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn is_create(&self) -> bool {
         match self {
-            Self::Legacy(tx) => tx.is_create(),
-            Self::Eip2930(tx) => tx.is_create(),
-            Self::Eip1559(tx) => tx.is_create(),
-            Self::Eip4844(tx) => tx.is_create(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.is_create(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.is_create(),
@@ -698,10 +683,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn value(&self) -> U256 {
         match self {
-            Self::Legacy(tx) => tx.value(),
-            Self::Eip2930(tx) => tx.value(),
-            Self::Eip1559(tx) => tx.value(),
-            Self::Eip4844(tx) => tx.value(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.value(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.value(),
@@ -710,10 +695,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn input(&self) -> &Bytes {
         match self {
-            Self::Legacy(tx) => tx.input(),
-            Self::Eip2930(tx) => tx.input(),
-            Self::Eip1559(tx) => tx.input(),
-            Self::Eip4844(tx) => tx.input(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.input(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.input(),
@@ -722,10 +707,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn access_list(&self) -> Option<&AccessList> {
         match self {
-            Self::Legacy(tx) => tx.access_list(),
-            Self::Eip2930(tx) => tx.access_list(),
-            Self::Eip1559(tx) => tx.access_list(),
-            Self::Eip4844(tx) => tx.access_list(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.access_list(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.access_list(),
@@ -734,10 +719,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn blob_versioned_hashes(&self) -> Option<&[B256]> {
         match self {
-            Self::Legacy(tx) => tx.blob_versioned_hashes(),
-            Self::Eip2930(tx) => tx.blob_versioned_hashes(),
-            Self::Eip1559(tx) => tx.blob_versioned_hashes(),
-            Self::Eip4844(tx) => tx.blob_versioned_hashes(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.blob_versioned_hashes(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.blob_versioned_hashes(),
@@ -746,10 +731,10 @@ impl alloy_consensus::Transaction for Transaction {
 
     fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
         match self {
-            Self::Legacy(tx) => tx.authorization_list(),
-            Self::Eip2930(tx) => tx.authorization_list(),
-            Self::Eip1559(tx) => tx.authorization_list(),
-            Self::Eip4844(tx) => tx.authorization_list(),
+            Self::Legacy(tx) |
+            Self::Eip2930(tx) |
+            Self::Eip1559(tx) |
+            Self::Eip4844(tx) |
             Self::Eip7702(tx) => tx.authorization_list(),
             #[cfg(feature = "optimism")]
             Self::Deposit(tx) => tx.authorization_list(),
@@ -769,10 +754,10 @@ impl From<TxEip4844Variant> for Transaction {
 impl From<TypedTransaction> for Transaction {
     fn from(value: TypedTransaction) -> Self {
         match value {
-            TypedTransaction::Legacy(tx) => tx.into(),
-            TypedTransaction::Eip2930(tx) => tx.into(),
-            TypedTransaction::Eip1559(tx) => tx.into(),
-            TypedTransaction::Eip4844(tx) => tx.into(),
+            TypedTransaction::Legacy(tx) |
+            TypedTransaction::Eip2930(tx) |
+            TypedTransaction::Eip1559(tx) |
+            TypedTransaction::Eip4844(tx) |
             TypedTransaction::Eip7702(tx) => tx.into(),
         }
     }
@@ -1242,7 +1227,7 @@ impl Decodable for TransactionSigned {
     /// by p2p.
     ///
     /// The p2p encoding format always includes an RLP header, although the type RLP header depends
-    /// on whether or not the transaction is a legacy transaction.
+    /// on whether the transaction is a legacy transaction.
     ///
     /// If the transaction is a legacy transaction, it is just encoded as a RLP list:
     /// `rlp(tx-data)`.
