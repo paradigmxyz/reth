@@ -1,5 +1,3 @@
-use alloc::vec::Vec;
-
 use crate::proof::calculate_receipt_root_optimism;
 use alloy_consensus::TxReceipt;
 use alloy_primitives::{Bloom, B256};
