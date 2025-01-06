@@ -461,10 +461,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
     ) -> ProviderResult<Option<Withdrawals>> {
         self.consistent_provider()?.withdrawals_by_block(id, timestamp)
     }
-
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        self.consistent_provider()?.latest_withdrawal()
-    }
 }
 
 impl<N: ProviderNodeTypes> OmmersProvider for BlockchainProvider2<N> {
@@ -1459,7 +1455,7 @@ mod tests {
             "Expected withdrawals_by_block to return empty list if block does not exist"
         );
 
-        for block in blocks.clone() {
+        for block in blocks {
             assert_eq!(
                 provider
                     .withdrawals_by_block(
@@ -1471,15 +1467,6 @@ mod tests {
                 "Expected withdrawals_by_block to return correct withdrawals"
             );
         }
-
-        let canonical_block_num = provider.best_block_number().unwrap();
-        let canonical_block = blocks.get(canonical_block_num as usize).unwrap();
-
-        assert_eq!(
-            Some(provider.latest_withdrawal()?.unwrap()),
-            canonical_block.body().withdrawals.clone().unwrap().pop(),
-            "Expected latest withdrawal to be equal to last withdrawal entry in canonical block"
-        );
 
         Ok(())
     }
