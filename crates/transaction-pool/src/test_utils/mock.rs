@@ -1047,9 +1047,7 @@ impl TryFrom<RecoveredTx<TransactionSigned>> for MockTransaction {
 
 impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
     fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
-        tx.into_ecrecovered_transaction().try_into().expect(
-            "Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction",
-        )
+        Self::from_pooled(tx)
     }
 }
 

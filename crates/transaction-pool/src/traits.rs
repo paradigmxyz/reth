@@ -1416,11 +1416,11 @@ impl EthPoolTransaction for EthPooledTransaction {
         self,
         sidecar: Arc<BlobTransactionSidecar>,
     ) -> Option<RecoveredTx<Self::Pooled>> {
-        PooledTransactionsElementEcRecovered::try_from_blob_transaction(
-            self.into_consensus(),
-            Arc::unwrap_or_clone(sidecar),
-        )
-        .ok()
+        let (signed_transaction, signer) = self.into_consensus().into_parts();
+        let pooled_transaction =
+            signed_transaction.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)).ok()?;
+
+        Some(RecoveredTx::new_unchecked(pooled_transaction, signer))
     }
 
     fn try_from_eip4844(

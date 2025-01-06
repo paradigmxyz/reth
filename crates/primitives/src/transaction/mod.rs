@@ -1803,7 +1803,7 @@ where
 mod tests {
     use crate::{
         transaction::{TxEip1559, TxKind, TxLegacy},
-        RecoveredTx, Transaction, TransactionSigned,
+        Transaction, TransactionSigned,
     };
     use alloy_consensus::Transaction as _;
     use alloy_eips::eip2718::{Decodable2718, Encodable2718};
@@ -2054,17 +2054,6 @@ mod tests {
 
         let encoded = decoded.encoded_2718();
         assert_eq!(encoded, input);
-    }
-
-    #[test]
-    fn test_decode_signed_ec_recovered_transaction() {
-        // random tx: <https://etherscan.io/getRawTx?tx=0x9448608d36e721ef403c53b00546068a6474d6cbab6816c3926de449898e7bce>
-        let input = hex!("02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76");
-        let tx = TransactionSigned::decode(&mut &input[..]).unwrap();
-        let recovered = tx.into_ecrecovered().unwrap();
-
-        let decoded = RecoveredTx::decode(&mut &alloy_rlp::encode(&recovered)[..]).unwrap();
-        assert_eq!(recovered, decoded)
     }
 
     #[test]
