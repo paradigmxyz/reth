@@ -1808,11 +1808,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 .map(|(_, indices)| indices.first_tx_num())
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))?;
 
-            for (idx, receipt) in receipts.into_iter().enumerate() {
+            for (idx, receipt) in receipts.iter().enumerate() {
                 let receipt_idx = first_tx_index + idx as u64;
                 if let Some(receipt) = receipt {
                     if let Some(writer) = &mut receipts_static_writer {
-                        writer.append_receipt(receipt_idx, &receipt)?;
+                        writer.append_receipt(receipt_idx, receipt)?;
                     }
 
                     if let Some(cursor) = &mut receipts_cursor {
@@ -2892,7 +2892,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
                     writer.append_transaction(next_tx_num, transaction)?;
                 }
                 if let Some(cursor) = tx_cursor.as_mut() {
-                    cursor.append(next_tx_num, &transaction)?;
+                    cursor.append(next_tx_num, transaction)?;
                 }
 
                 // Increment transaction id for each transaction.

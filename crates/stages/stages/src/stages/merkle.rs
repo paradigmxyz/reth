@@ -648,7 +648,7 @@ mod tests {
 
                             if !value.is_zero() {
                                 let storage_entry = StorageEntry { key: hashed_slot, value };
-                                storage_cursor.upsert(hashed_address, storage_entry).unwrap();
+                                storage_cursor.upsert(hashed_address, &storage_entry).unwrap();
                             }
                         }
                     }

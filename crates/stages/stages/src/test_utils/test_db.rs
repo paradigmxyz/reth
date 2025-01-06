@@ -396,7 +396,7 @@ impl TestStageDB {
                     {
                         cursor.delete_current()?;
                     }
-                    cursor.upsert(address, entry)?;
+                    cursor.upsert(address, &entry)?;
 
                     let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
                     if cursor
@@ -406,7 +406,7 @@ impl TestStageDB {
                     {
                         cursor.delete_current()?;
                     }
-                    cursor.upsert(hashed_address, hashed_entry)?;
+                    cursor.upsert(hashed_address, &hashed_entry)?;
 
                     Ok(())
                 })

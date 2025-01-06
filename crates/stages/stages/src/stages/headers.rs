@@ -660,7 +660,7 @@ mod tests {
         provider
             .append_blocks_with_state(
                 sealed_blocks,
-                ExecutionOutcome::default(),
+                &ExecutionOutcome::default(),
                 HashedPostStateSorted::default(),
                 TrieUpdates::default(),
             )
