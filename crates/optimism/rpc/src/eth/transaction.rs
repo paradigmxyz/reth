@@ -89,7 +89,7 @@ where
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
         let hash = *tx.tx_hash();
-        let OpTransactionSigned { transaction, signature, .. } = tx.into_signed();
+        let OpTransactionSigned { transaction, signature, .. } = tx.into_tx();
         let mut deposit_receipt_version = None;
         let mut deposit_nonce = None;
 

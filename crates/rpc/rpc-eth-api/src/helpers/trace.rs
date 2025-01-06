@@ -226,7 +226,7 @@ pub trait Trace:
                 let env = EnvWithHandlerCfg::new_with_cfg_env(
                     cfg_env_with_handler_cfg,
                     block_env,
-                    RpcNodeCore::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
+                    RpcNodeCore::evm_config(&this).tx_env(tx.tx(), tx.signer()),
                 );
                 let (res, _) =
                     this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;

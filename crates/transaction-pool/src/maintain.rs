@@ -600,7 +600,7 @@ where
 
     let local_transactions = local_transactions
         .into_iter()
-        .map(|tx| tx.transaction.clone_into_consensus().into_signed())
+        .map(|tx| tx.transaction.clone_into_consensus().into_tx())
         .collect::<Vec<_>>();
 
     let num_txs = local_transactions.len();

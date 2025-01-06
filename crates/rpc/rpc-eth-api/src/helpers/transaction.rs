@@ -21,7 +21,7 @@ use reth_provider::{
     TransactionsProvider,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError, SignError, TransactionSource};
-use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
+use reth_rpc_types_compat::transaction::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
@@ -221,11 +221,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         index: Some(index as u64),
                     };
 
-                    return Ok(Some(from_recovered_with_block_context(
-                        tx.clone().with_signer(*signer),
-                        tx_info,
-                        self.tx_resp_builder(),
-                    )?))
+                    return Ok(Some(
+                        self.tx_resp_builder().fill(tx.clone().with_signer(*signer), tx_info)?,
+                    ))
                 }
             }
 
@@ -250,7 +248,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone_into_consensus();
-                    return Ok(Some(from_recovered(transaction, self.tx_resp_builder())?));
+                    return Ok(Some(self.tx_resp_builder().fill_pending(transaction)?));
                 }
             }
 
@@ -301,11 +299,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                                 base_fee: base_fee_per_gas.map(u128::from),
                                 index: Some(index as u64),
                             };
-                            from_recovered_with_block_context(
-                                tx.clone().with_signer(*signer),
-                                tx_info,
-                                self.tx_resp_builder(),
-                            )
+                            self.tx_resp_builder().fill(tx.clone().with_signer(*signer), tx_info)
                         })
                 })
                 .ok_or(EthApiError::HeaderNotFound(block_id))?

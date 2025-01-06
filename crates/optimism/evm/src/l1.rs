@@ -196,7 +196,7 @@ pub trait RethL1BlockInfo {
     /// - `input`: The calldata of the transaction.
     /// - `is_deposit`: Whether or not the transaction is a deposit.
     fn l1_tx_data_fee(
-        &self,
+        &mut self,
         chain_spec: &ChainSpec,
         timestamp: u64,
         input: &[u8],
@@ -219,7 +219,7 @@ pub trait RethL1BlockInfo {
 
 impl RethL1BlockInfo for L1BlockInfo {
     fn l1_tx_data_fee(
-        &self,
+        &mut self,
         chain_spec: &ChainSpec,
         timestamp: u64,
         input: &[u8],

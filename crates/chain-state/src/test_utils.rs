@@ -145,7 +145,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
             transactions_root: calculate_transaction_root(
-                &transactions.clone().into_iter().map(|tx| tx.into_signed()).collect::<Vec<_>>(),
+                &transactions.clone().into_iter().map(|tx| tx.into_tx()).collect::<Vec<_>>(),
             ),
             receipts_root: calculate_receipt_root(&receipts),
             beneficiary: Address::random(),
@@ -171,7 +171,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         let block = SealedBlock::new(
             SealedHeader::seal(header),
             BlockBody {
-                transactions: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
+                transactions: transactions.into_iter().map(|tx| tx.into_tx()).collect(),
                 ommers: Vec::new(),
                 withdrawals: Some(vec![].into()),
             },

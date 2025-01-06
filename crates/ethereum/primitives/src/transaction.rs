@@ -290,6 +290,15 @@ impl PartialEq for TransactionSigned {
     }
 }
 
+impl TransactionSigned {
+    /// Creates a new signed transaction from the given transaction and signature without the hash.
+    ///
+    /// Note: this only calculates the hash on the first [`TransactionSigned::hash`] call.
+    pub fn new_unhashed(transaction: Transaction, signature: Signature) -> Self {
+        Self { hash: Default::default(), signature, transaction }
+    }
+}
+
 impl Typed2718 for TransactionSigned {
     fn ty(&self) -> u8 {
         self.transaction.ty()
