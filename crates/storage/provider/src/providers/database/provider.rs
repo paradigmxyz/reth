@@ -1680,7 +1680,7 @@ impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N
             let (_, checkpoint) = cursor.seek_exact(stage_id.to_string())?.unwrap_or_default();
             cursor.upsert(
                 stage_id.to_string(),
-                StageCheckpoint {
+                &StageCheckpoint {
                     block_number,
                     ..if drop_stage_checkpoint { Default::default() } else { checkpoint }
                 },
@@ -1907,7 +1907,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         for (address, account) in changes.accounts {
             if let Some(account) = account {
                 tracing::trace!(?address, "Updating plain state account");
-                accounts_cursor.upsert(address, account.into())?;
+                accounts_cursor.upsert(address, &account.into())?;
             } else if accounts_cursor.seek_exact(address)?.is_some() {
                 tracing::trace!(?address, "Deleting plain state account");
                 accounts_cursor.delete_current()?;
@@ -1918,7 +1918,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         tracing::trace!(len = changes.contracts.len(), "Writing bytecodes");
         let mut bytecodes_cursor = self.tx_ref().cursor_write::<tables::Bytecodes>()?;
         for (hash, bytecode) in changes.contracts {
-            bytecodes_cursor.upsert(hash, Bytecode(bytecode))?;
+            bytecodes_cursor.upsert(hash, &Bytecode(bytecode))?;
         }
 
         // Write new storage state and wipe storage if needed.
@@ -1946,7 +1946,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 }
 
                 if !entry.value.is_zero() {
-                    storages_cursor.upsert(address, entry)?;
+                    storages_cursor.upsert(address, &entry)?;
                 }
             }
         }
@@ -1959,7 +1959,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
         for (hashed_address, account) in hashed_state.accounts().accounts_sorted() {
             if let Some(account) = account {
-                hashed_accounts_cursor.upsert(hashed_address, account)?;
+                hashed_accounts_cursor.upsert(hashed_address, &account)?;
             } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
                 hashed_accounts_cursor.delete_current()?;
             }
@@ -1985,7 +1985,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 }
 
                 if !entry.value.is_zero() {
-                    hashed_storage_cursor.upsert(*hashed_address, entry)?;
+                    hashed_storage_cursor.upsert(*hashed_address, &entry)?;
                 }
             }
         }
@@ -2057,7 +2057,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             if old_account != new_account {
                 let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
                 if let Some(account) = old_account {
-                    plain_accounts_cursor.upsert(*address, *account)?;
+                    plain_accounts_cursor.upsert(*address, account)?;
                 } else if existing_entry.is_some() {
                     plain_accounts_cursor.delete_current()?;
                 }
@@ -2078,7 +2078,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 // insert value if needed
                 if !old_storage_value.is_zero() {
-                    plain_storage_cursor.upsert(*address, storage_entry)?;
+                    plain_storage_cursor.upsert(*address, &storage_entry)?;
                 }
             }
         }
@@ -2157,7 +2157,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             if old_account != new_account {
                 let existing_entry = plain_accounts_cursor.seek_exact(*address)?;
                 if let Some(account) = old_account {
-                    plain_accounts_cursor.upsert(*address, *account)?;
+                    plain_accounts_cursor.upsert(*address, account)?;
                 } else if existing_entry.is_some() {
                     plain_accounts_cursor.delete_current()?;
                 }
@@ -2178,7 +2178,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
                 // insert value if needed
                 if !old_storage_value.is_zero() {
-                    plain_storage_cursor.upsert(*address, storage_entry)?;
+                    plain_storage_cursor.upsert(*address, &storage_entry)?;
                 }
             }
         }
@@ -2265,7 +2265,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
                 Some(node) => {
                     if !nibbles.0.is_empty() {
                         num_entries += 1;
-                        account_trie_cursor.upsert(nibbles, node.clone())?;
+                        account_trie_cursor.upsert(nibbles, node)?;
                     }
                 }
                 None => {
@@ -2340,7 +2340,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
         for (hashed_address, account) in &hashed_accounts {
             if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, *account)?;
+                hashed_accounts_cursor.upsert(*hashed_address, account)?;
             } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_accounts_cursor.delete_current()?;
             }
@@ -2370,7 +2370,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
             changesets.into_iter().map(|(ad, ac)| (keccak256(ad), ac)).collect::<BTreeMap<_, _>>();
         for (hashed_address, account) in &hashed_accounts {
             if let Some(account) = account {
-                hashed_accounts_cursor.upsert(*hashed_address, *account)?;
+                hashed_accounts_cursor.upsert(*hashed_address, account)?;
             } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_accounts_cursor.delete_current()?;
             }
@@ -2407,7 +2407,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
             }
 
             if !value.is_zero() {
-                hashed_storage.upsert(hashed_address, StorageEntry { key, value })?;
+                hashed_storage.upsert(hashed_address, &StorageEntry { key, value })?;
             }
         }
         Ok(hashed_storage_keys)
@@ -2459,7 +2459,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
                 }
 
                 if !value.is_zero() {
-                    hashed_storage_cursor.upsert(hashed_address, StorageEntry { key, value })?;
+                    hashed_storage_cursor.upsert(hashed_address, &StorageEntry { key, value })?;
                 }
                 Ok(())
             })
@@ -2571,7 +2571,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             if !partial_shard.is_empty() {
                 cursor.insert(
                     ShardedKey::last(address),
-                    BlockNumberList::new_pre_sorted(partial_shard),
+                    &BlockNumberList::new_pre_sorted(partial_shard),
                 )?;
             }
         }
@@ -2629,7 +2629,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
             if !partial_shard.is_empty() {
                 cursor.insert(
                     StorageShardedKey::last(address, storage_key),
-                    BlockNumberList::new_pre_sorted(partial_shard),
+                    &BlockNumberList::new_pre_sorted(partial_shard),
                 )?;
             }
         }

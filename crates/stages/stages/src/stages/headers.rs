@@ -189,7 +189,7 @@ where
             } else {
                 cursor_header_numbers.insert(
                     RawKey::<BlockHash>::from_vec(hash),
-                    RawValue::<BlockNumber>::from_vec(number),
+                    &RawValue::<BlockNumber>::from_vec(number),
                 )?;
             }
         }

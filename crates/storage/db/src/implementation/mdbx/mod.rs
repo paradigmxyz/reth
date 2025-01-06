@@ -479,7 +479,7 @@ impl DatabaseEnv {
         if Some(&version) != last_version.as_ref() {
             version_cursor.upsert(
                 SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs(),
-                version,
+                &version,
             )?;
             tx.commit()?;
         }
