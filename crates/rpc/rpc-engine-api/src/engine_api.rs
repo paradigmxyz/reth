@@ -21,8 +21,8 @@ use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_engine_primitives::{EngineTypes, EngineValidator};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes,
-    PayloadOrAttributes,
+    validate_execution_requests, validate_payload_timestamp, EngineApiMessageVersion,
+    PayloadBuilderAttributes, PayloadOrAttributes,
 };
 use reth_primitives::EthereumHardfork;
 use reth_rpc_api::EngineApiServer;
@@ -269,6 +269,8 @@ where
         self.inner
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
+
+        validate_execution_requests(&execution_requests)?;
 
         Ok(self
             .inner
