@@ -32,6 +32,7 @@ arbitrary.workspace = true
 bincode.workspace = true
 rand.workspace = true
 reth-primitives = { workspace = true, features = ["arbitrary", "test-utils"] }
+reth-ethereum-primitives.workspace = true
 
 [features]
 default = ["std"]
@@ -65,5 +66,6 @@ std = [
 	"reth-primitives-traits/std",
 	"alloy-consensus/std",
 	"serde_with?/std",
-	"reth-trie-common?/std"
+	"reth-trie-common?/std",
+    "reth-ethereum-primitives/std"
 ]

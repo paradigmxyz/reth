@@ -48,15 +48,8 @@ pub use tx_type::TxType;
 pub mod signature;
 pub mod util;
 
-pub(crate) mod access_list;
 mod pooled;
 mod tx_type;
-
-#[cfg(any(test, feature = "reth-codec"))]
-pub use tx_type::{
-    COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
-    COMPACT_IDENTIFIER_LEGACY,
-};
 
 /// Expected number of transactions where we can expect a speed-up by recovering the senders in
 /// parallel.
@@ -1497,7 +1490,7 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
         let secp = secp256k1::Secp256k1::new();
         let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
-        let signature = crate::sign_message(
+        let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
             transaction.signature_hash(),
         )
