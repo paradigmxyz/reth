@@ -32,6 +32,7 @@ reth-prune.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
+reth-trie-db.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie.workspace = true
@@ -82,7 +83,6 @@ reth-static-file.workspace = true
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
 reth-trie-db.workspace = true
-proptest.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
@@ -90,6 +90,7 @@ alloy-rlp.workspace = true
 assert_matches.workspace = true
 criterion.workspace = true
 crossbeam-channel = "0.5.13"
+proptest.workspace = true
 rand.workspace = true
 
 [[bench]]
