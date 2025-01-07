@@ -66,12 +66,15 @@ pub trait FullConsensus<N: NodePrimitives = EthPrimitives>:
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus<H = Header, B = BlockBody>: AsHeaderValidator<H> {
+    /// The error type related to consensus.
+    type Error;
+
     /// Ensures that body field values match the header.
     fn validate_body_against_header(
         &self,
         body: &B,
         header: &SealedHeader<H>,
-    ) -> Result<(), ConsensusError>;
+    ) -> Result<(), Self::Error>;
 
     /// Validate a block disregarding world state, i.e. things that can be checked before sender
     /// recovery and execution.
@@ -82,8 +85,7 @@ pub trait Consensus<H = Header, B = BlockBody>: AsHeaderValidator<H> {
     /// **This should not be called for the genesis block**.
     ///
     /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block_pre_execution(&self, block: &SealedBlock<H, B>)
-        -> Result<(), ConsensusError>;
+    fn validate_block_pre_execution(&self, block: &SealedBlock<H, B>) -> Result<(), Self::Error>;
 }
 
 /// HeaderValidator is a protocol that validates headers and their relationships.
@@ -170,13 +172,13 @@ impl<T: HeaderValidator<H>, H> AsHeaderValidator<H> for T {
 /// Helper trait to cast `Arc<dyn FullConsensus>` to `Arc<dyn Consensus>`
 pub trait AsConsensus<H, B>: Consensus<H, B> {
     /// Converts the [`Arc`] of self to [`Arc`] of [`HeaderValidator`]
-    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<H, B> + 'a>
+    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<H, B, Error = Self::Error> + 'a>
     where
         Self: 'a;
 }
 
 impl<T: Consensus<H, B>, H, B> AsConsensus<H, B> for T {
-    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<H, B> + 'a>
+    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<H, B, Error = Self::Error> + 'a>
     where
         Self: 'a,
     {

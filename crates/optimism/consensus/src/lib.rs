@@ -61,6 +61,8 @@ impl FullConsensus<OpPrimitives> for OpBeaconConsensus {
 }
 
 impl Consensus<Header, OpBlockBody> for OpBeaconConsensus {
+    type Error = ConsensusError;
+
     fn validate_body_against_header(
         &self,
         body: &OpBlockBody,
