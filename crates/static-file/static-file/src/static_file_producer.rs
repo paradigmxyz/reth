@@ -292,7 +292,7 @@ mod tests {
 
         let tx = db.factory.db_ref().tx_mut().expect("init tx");
         for block in &blocks {
-            TestStageDB::insert_header(None, &tx, &block.header, U256::ZERO)
+            TestStageDB::insert_header(None, &tx, block.sealed_header(), U256::ZERO)
                 .expect("insert block header");
         }
         tx.commit().expect("commit tx");

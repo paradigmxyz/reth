@@ -191,10 +191,10 @@ mod tests {
         let mut block1 = block.clone();
         let mut block2 = block;
 
-        block1.block.header.set_hash(block1_hash);
-        block1.block.header.set_block_number(9);
-        block2.block.header.set_hash(block2_hash);
-        block2.block.header.set_block_number(10);
+        block1.block.set_hash(block1_hash);
+        block1.block.set_block_number(9);
+        block2.block.set_hash(block2_hash);
+        block2.block.set_block_number(10);
 
         let chain = AppendableChain::new(Chain::new(
             [block1, block2],
@@ -257,10 +257,10 @@ mod tests {
         let mut block1: SealedBlockWithSenders = Default::default();
         let mut block2: SealedBlockWithSenders = Default::default();
 
-        block1.block.header.set_hash(block1_hash);
-        block1.block.header.set_block_number(9);
-        block2.block.header.set_hash(block2_hash);
-        block2.block.header.set_block_number(10);
+        block1.block.set_hash(block1_hash);
+        block1.block.set_block_number(9);
+        block2.block.set_hash(block2_hash);
+        block2.block.set_block_number(10);
 
         // Create an chain with these blocks
         let chain = AppendableChain::new(Chain::new(
@@ -299,10 +299,10 @@ mod tests {
         let mut block1: SealedBlockWithSenders = Default::default();
         let mut block2: SealedBlockWithSenders = Default::default();
 
-        block1.block.header.set_hash(block1_hash);
-        block1.block.header.set_block_number(9);
-        block2.block.header.set_hash(block2_hash);
-        block2.block.header.set_block_number(10);
+        block1.block.set_hash(block1_hash);
+        block1.block.set_block_number(9);
+        block2.block.set_hash(block2_hash);
+        block2.block.set_block_number(10);
 
         // Create a chain with these blocks
         let chain = AppendableChain::new(Chain::new(
@@ -337,7 +337,7 @@ mod tests {
         // Create a block with a random hash and add it to the buffer
         let block_hash = B256::random();
         let mut block: SealedBlockWithSenders = Default::default();
-        block.block.header.set_hash(block_hash);
+        block.block.set_hash(block_hash);
 
         // Add the block to the buffered blocks in the TreeState
         tree_state.buffered_blocks.insert_block(block.clone());
@@ -366,9 +366,9 @@ mod tests {
         let mut ancestor_block: SealedBlockWithSenders = Default::default();
         let mut descendant_block: SealedBlockWithSenders = Default::default();
 
-        ancestor_block.block.header.set_hash(ancestor_hash);
-        descendant_block.block.header.set_hash(descendant_hash);
-        descendant_block.block.header.set_parent_hash(ancestor_hash);
+        ancestor_block.block.set_hash(ancestor_hash);
+        descendant_block.block.set_hash(descendant_hash);
+        descendant_block.block.set_parent_hash(ancestor_hash);
 
         // Insert the blocks into the buffer
         tree_state.buffered_blocks.insert_block(ancestor_block.clone());
@@ -398,7 +398,7 @@ mod tests {
         let receipt2 = Receipt::default();
 
         let mut block: SealedBlockWithSenders = Default::default();
-        block.block.header.set_hash(block_hash);
+        block.block.set_hash(block_hash);
 
         let receipts = vec![receipt1, receipt2];
 

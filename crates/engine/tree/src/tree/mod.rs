@@ -936,7 +936,7 @@ where
         while current_canonical_number > current_number {
             if let Some(block) = self.executed_block_by_hash(old_hash)? {
                 old_chain.push(block.clone());
-                old_hash = block.block.header.parent_hash();
+                old_hash = block.block.parent_hash();
                 current_canonical_number -= 1;
             } else {
                 // This shouldn't happen as we're walking back the canonical chain
@@ -952,7 +952,7 @@ where
         // a common ancestor (fork block) is reached.
         while old_hash != current_hash {
             if let Some(block) = self.executed_block_by_hash(old_hash)? {
-                old_hash = block.block.header.parent_hash();
+                old_hash = block.block.parent_hash();
                 old_chain.push(block);
             } else {
                 // This shouldn't happen as we're walking back the canonical chain
@@ -1082,7 +1082,7 @@ where
 
         // 2. ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
-            let tip = chain_update.tip().header.clone();
+            let tip = chain_update.tip().sealed_header().clone();
             self.on_canonical_chain_update(chain_update);
 
             // update the safe and finalized blocks and ensure their values are valid
@@ -1617,8 +1617,11 @@ where
         hash: B256,
     ) -> ProviderResult<Option<SealedHeader<N::BlockHeader>>> {
         // check memory first
-        let block =
-            self.state.tree_state.block_by_hash(hash).map(|block| block.as_ref().clone().header);
+        let block = self
+            .state
+            .tree_state
+            .block_by_hash(hash)
+            .map(|block| block.as_ref().sealed_header().clone());
 
         if block.is_some() {
             Ok(block)
@@ -2031,7 +2034,7 @@ where
         // update the tracked canonical head
         self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
 
-        let tip = chain_update.tip().header.clone();
+        let tip = chain_update.tip().sealed_header().clone();
         let notification = chain_update.to_chain_notification();
 
         // reinsert any missing reorged blocks
@@ -2543,7 +2546,7 @@ where
         };
 
         // keep track of the invalid header
-        self.state.invalid_headers.insert(block.header.block_with_parent());
+        self.state.invalid_headers.insert(block.block_with_parent());
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,

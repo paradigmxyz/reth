@@ -2338,7 +2338,7 @@ mod tests {
         assert_eq!(
             tree.insert_block(block2b.clone(), BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
-                head: block2.header.num_hash(),
+                head: block2.num_hash(),
                 missing_ancestor: block2b.parent_num_hash()
             })
         );
