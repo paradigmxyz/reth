@@ -70,6 +70,10 @@ fn main() {
             }
 
             let use_legacy_engine = engine_args.legacy;
+
+            // Bitfinity import is implemented only for the legacy engine
+            let use_legacy_engine = true;
+
             match use_legacy_engine {
                 false => {
                     let engine_tree_config = TreeConfig::default()
