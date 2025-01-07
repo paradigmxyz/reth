@@ -2198,17 +2198,18 @@ where
         &mut self,
         block: SealedBlockWithSenders<N::Block>,
     ) -> Result<InsertPayloadOk2, InsertBlockErrorTwo<N::Block>> {
-        self.insert_block_inner(block.clone())
-            .map_err(|kind| InsertBlockErrorTwo::new(block.block, kind))
-    }
+        macro_rules! unwrap_or_return_error {
+            ($e:expr, $block:expr) => {
+                match $e {
+                    Ok(t) => t,
+                    Err(e) => return Err(InsertBlockErrorTwo::new($block, e.into())),
+                }
+            };
+        }
 
-    fn insert_block_inner(
-        &mut self,
-        block: SealedBlockWithSenders<N::Block>,
-    ) -> Result<InsertPayloadOk2, InsertBlockErrorKindTwo> {
         debug!(target: "engine::tree", block=?block.num_hash(), parent = ?block.parent_hash(), state_root = ?block.state_root(), "Inserting new block into tree");
 
-        if self.block_by_hash(block.hash())?.is_some() {
+        if unwrap_or_return_error!(self.block_by_hash(block.hash()), block.block).is_some() {
             return Ok(InsertPayloadOk2::AlreadySeen(BlockStatus2::Valid))
         }
 
@@ -2216,10 +2217,12 @@ where
 
         trace!(target: "engine::tree", block=?block.num_hash(), "Validating block consensus");
         // validate block consensus rules
-        self.validate_block(&block)?;
+        unwrap_or_return_error!(self.validate_block(&block), block.block);
 
         trace!(target: "engine::tree", block=?block.num_hash(), parent=?block.parent_hash(), "Fetching block state provider");
-        let Some(state_provider) = self.state_provider(block.parent_hash())? else {
+        let Some(state_provider) =
+            unwrap_or_return_error!(self.state_provider(block.parent_hash()), block.block)
+        else {
             // we don't have the state required to execute this block, buffering it and find the
             // missing parent block
             let missing_ancestor = self
@@ -2238,14 +2241,18 @@ where
         };
 
         // now validate against the parent
-        let parent_block = self.sealed_header_by_hash(block.parent_hash())?.ok_or_else(|| {
-            InsertBlockErrorKindTwo::Provider(ProviderError::HeaderNotFound(
-                block.parent_hash().into(),
-            ))
-        })?;
+        let parent_block = unwrap_or_return_error!(
+            unwrap_or_return_error!(self.sealed_header_by_hash(block.parent_hash()), block.block)
+                .ok_or_else(|| {
+                    InsertBlockErrorKindTwo::Provider(ProviderError::HeaderNotFound(
+                        block.parent_hash().into(),
+                    ))
+                }),
+            block.block
+        );
         if let Err(e) = self.consensus.validate_header_against_parent(&block, &parent_block) {
             warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
-            return Err(e.into())
+            return Err(InsertBlockErrorTwo::new(block.block, e.into()))
         }
 
         trace!(target: "engine::tree", block=?block.num_hash(), "Executing block");
@@ -2253,7 +2260,7 @@ where
 
         let block_number = block.number();
         let block_hash = block.hash();
-        let sealed_block = Arc::new(block.block.clone());
+        let sealed_block = block.block.clone();
         let block = block.unseal();
 
         let persistence_not_in_progress = !self.persistence_state.in_progress();
@@ -2415,7 +2422,8 @@ where
                 output,
                 root_elapsed,
             ))
-        })?;
+        });
+        let state_root_result = unwrap_or_return_error!(state_root_result, sealed_block);
 
         let (state_root, trie_output, hashed_state, output, root_elapsed) = state_root_result;
 
@@ -2427,15 +2435,18 @@ where
                 &output,
                 Some((&trie_output, state_root)),
             );
-            return Err(ConsensusError::BodyStateRootDiff(
-                GotExpected { got: state_root, expected: block.header().state_root() }.into(),
-            )
-            .into())
+            return Err(InsertBlockErrorTwo::consensus_error(
+                ConsensusError::BodyStateRootDiff(
+                    GotExpected { got: state_root, expected: block.header().state_root() }.into(),
+                ),
+                sealed_block,
+            ))
         }
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?sealed_block.num_hash(), "Calculated state root");
 
+        let sealed_block = Arc::new(sealed_block);
         let executed: ExecutedBlock<N> = ExecutedBlock {
             block: sealed_block.clone(),
             senders: Arc::new(block.senders),
@@ -2455,11 +2466,12 @@ where
 
         // emit insert event
         let elapsed = start.elapsed();
-        let engine_event = if self.is_fork(block_hash)? {
-            BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block, elapsed)
-        } else {
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, elapsed)
-        };
+        let engine_event =
+            if unwrap_or_return_error!(self.is_fork(block_hash), sealed_block.as_ref().clone()) {
+                BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block, elapsed)
+            } else {
+                BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, elapsed)
+            };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         debug!(target: "engine::tree", block=?BlockNumHash::new(block_number, block_hash), "Finished inserting block");
