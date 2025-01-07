@@ -16,6 +16,7 @@
 //! - `serde`: Adds serde support for all types.
 //! - `secp256k1`: Adds secp256k1 support for transaction signing/recovery. (By default the no-std
 //!   friendly `k256` is used)
+//! - `rayon`: Uses `rayon` for parallel transaction sender recovery in [`BlockBody`] by default.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",

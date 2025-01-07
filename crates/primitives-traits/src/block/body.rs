@@ -13,9 +13,6 @@ pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincod
 
 impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
 
-#[cfg(feature = "rayon")]
-use rayon::prelude::*;
-
 /// Abstraction for block's body.
 pub trait BlockBody:
     Send
@@ -115,14 +112,7 @@ pub trait BlockBody:
     where
         Self::Transaction: SignedTransaction,
     {
-        #[cfg(feature = "rayon")]
-        {
-            self.transactions().into_par_iter().map(|tx| tx.recover_signer()).collect()
-        }
-        #[cfg(not(feature = "rayon"))]
-        {
-            self.transactions().iter().map(|tx| tx.recover_signer()).collect()
-        }
+        crate::transaction::recover::recover_signers(self.transactions())
     }
 
     /// Recover signer addresses for all transactions in the block body _without ensuring that the
@@ -133,14 +123,7 @@ pub trait BlockBody:
     where
         Self::Transaction: SignedTransaction,
     {
-        #[cfg(feature = "rayon")]
-        {
-            self.transactions().into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
-        }
-        #[cfg(not(feature = "rayon"))]
-        {
-            self.transactions().iter().map(|tx| tx.recover_signer_unchecked()).collect()
-        }
+        crate::transaction::recover::recover_signers_unchecked(self.transactions())
     }
 }
 
