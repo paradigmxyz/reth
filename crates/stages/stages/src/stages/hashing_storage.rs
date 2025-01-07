@@ -533,7 +533,7 @@ mod tests {
                     }
 
                     if !entry.value.is_zero() {
-                        storage_cursor.upsert(bn_address.address(), entry)?;
+                        storage_cursor.upsert(bn_address.address(), &entry)?;
                     }
                 }
                 Ok(())

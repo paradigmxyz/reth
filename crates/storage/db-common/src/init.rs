@@ -252,7 +252,11 @@ where
         Vec::new(),
     );
 
-    provider.write_state(execution_outcome, OriginalValuesKnown::Yes, StorageLocation::Database)?;
+    provider.write_state(
+        &execution_outcome,
+        OriginalValuesKnown::Yes,
+        StorageLocation::Database,
+    )?;
 
     trace!(target: "reth::cli", "Inserted state");
 
