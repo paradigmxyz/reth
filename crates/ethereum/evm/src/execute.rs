@@ -69,6 +69,8 @@ where
             Transaction = reth_primitives::TransactionSigned,
         >,
 {
+    type Error = BlockExecutionError;
+
     type Primitives = EthPrimitives;
 
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =

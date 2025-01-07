@@ -79,6 +79,7 @@ where
         + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
 {
     type Primitives = N;
+    type Error = OpBlockExecutionError;
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
         OpExecutionStrategy<DB, N, EvmConfig>;
 
@@ -153,7 +154,7 @@ where
 {
     type DB = DB;
     type Primitives = N;
-    type Error = BlockExecutionError;
+    type Error = OpBlockExecutionError;
 
     fn init(&mut self, tx_env_overrides: Box<dyn TxEnvOverrides>) {
         self.tx_env_overrides = Some(tx_env_overrides);
@@ -170,12 +171,14 @@ where
 
         let mut evm = self.evm_config.evm_for_block(&mut self.state, block.header());
 
-        self.system_caller.apply_beacon_root_contract_call(
-            block.header().timestamp,
-            block.header().number,
-            block.header().parent_beacon_block_root,
-            &mut evm,
-        )?;
+        self.system_caller
+            .apply_beacon_root_contract_call(
+                block.header().timestamp,
+                block.header().number,
+                block.header().parent_beacon_block_root,
+                &mut evm,
+            )
+            .map_err(OpBlockExecutionError::Eth)?;
 
         // Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
         // blocks will always have at least a single transaction in them (the L1 info transaction),
@@ -202,14 +205,15 @@ where
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
             let block_available_gas = block.gas_limit() - cumulative_gas_used;
-            if transaction.gas_limit() > block_available_gas &&
-                (is_regolith || !transaction.is_deposit())
+            if transaction.gas_limit() > block_available_gas
+                && (is_regolith || !transaction.is_deposit())
             {
-                return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
-                    transaction_gas_limit: transaction.gas_limit(),
-                    block_available_gas,
-                }
-                .into())
+                return Err(OpBlockExecutionError::Eth(BlockExecutionError::Validation(
+                    BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                        transaction_gas_limit: transaction.gas_limit(),
+                        block_available_gas,
+                    },
+                )));
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
@@ -236,10 +240,12 @@ where
             let result_and_state = evm.transact().map_err(move |err| {
                 let new_err = err.map_db_err(|e| e.into());
                 // Ensure hash is calculated for error log, if not already done
-                BlockValidationError::EVM {
-                    hash: transaction.recalculate_hash(),
-                    error: Box::new(new_err),
-                }
+                OpBlockExecutionError::Eth(BlockExecutionError::Validation(
+                    BlockValidationError::EVM {
+                        hash: transaction.recalculate_hash(),
+                        error: Box::new(new_err),
+                    },
+                ))
             })?;
 
             trace!(
@@ -279,8 +285,8 @@ where
                             // when set. The state transition process ensures
                             // this is only set for post-Canyon deposit
                             // transactions.
-                            deposit_receipt_version: (transaction.is_deposit() &&
-                                self.chain_spec.is_fork_active_at_timestamp(
+                            deposit_receipt_version: (transaction.is_deposit()
+                                && self.chain_spec.is_fork_active_at_timestamp(
                                     OpHardfork::Canyon,
                                     block.header().timestamp,
                                 ))
@@ -301,11 +307,14 @@ where
     ) -> Result<Requests, Self::Error> {
         let balance_increments = post_block_balance_increments(&self.chain_spec.clone(), block);
         // increment balances
-        self.state
-            .increment_balances(balance_increments.clone())
-            .map_err(|_| BlockValidationError::IncrementBalanceFailed)?;
+        self.state.increment_balances(balance_increments.clone()).map_err(|_| {
+            OpBlockExecutionError::Eth(BlockExecutionError::Validation(
+                BlockValidationError::IncrementBalanceFailed,
+            ))
+        })?;
         // call state hook with changes due to balance increments.
-        let balance_state = balance_increment_state(&balance_increments, &mut self.state)?;
+        let balance_state = balance_increment_state(&balance_increments, &mut self.state)
+            .map_err(OpBlockExecutionError::Eth)?;
         self.system_caller.on_state(&balance_state);
 
         Ok(Requests::default())
