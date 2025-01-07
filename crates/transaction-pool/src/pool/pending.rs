@@ -972,4 +972,48 @@ mod tests {
         assert!(pool.contains(tx2.id()));
         assert!(!pool.contains(tx1.id()));
     }
+
+    #[test]
+    fn subtraction_overflow() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = PendingPool::new(MockOrdering::default());
+
+        // Addresses for simulated senders A, B, C
+        let a = address!("000000000000000000000000000000000000000a");
+        let b = address!("000000000000000000000000000000000000000b");
+        let c = address!("000000000000000000000000000000000000000c");
+
+        // sender A (local) - 11+ transactions (large enough to keep limit exceeded)
+        // sender B (external) - 2 transactions
+        // sender C (external) - 2 transactions
+
+        // Create transaction chains for senders A, B, C
+        let a_txs = MockTransactionSet::sequential_transactions_by_sender(a, 11, TxType::Eip1559);
+        let b_txs = MockTransactionSet::sequential_transactions_by_sender(b, 2, TxType::Eip1559);
+        let c_txs = MockTransactionSet::sequential_transactions_by_sender(c, 2, TxType::Eip1559);
+
+        // create local txs for sender A
+        for tx in a_txs.into_vec() {
+            let final_tx = Arc::new(f.validated_with_origin(crate::TransactionOrigin::Local, tx));
+
+            pool.add_transaction(final_tx, 0);
+        }
+
+        // create external txs for senders B and C
+        let remaining_txs = [b_txs.into_vec(), c_txs.into_vec()].concat();
+        for tx in remaining_txs {
+            let final_tx = f.validated_arc(tx);
+
+            pool.add_transaction(final_tx, 0);
+        }
+
+        // Sanity check, ensuring everything is consistent.
+        pool.assert_invariants();
+
+        let pool_limit = SubPoolLimit { max_txs: 10, max_size: usize::MAX };
+
+        // This will result in subtraction overflow panic for a debug build
+        // or an infinite loop for a release build
+        pool.truncate_pool(pool_limit);
+    }
 }
