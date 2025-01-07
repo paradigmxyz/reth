@@ -13,9 +13,6 @@ use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, Cancelled, PayloadBuilder, PayloadConfig,
 };
 use reth_beacon_consensus::EthBeaconConsensus;
-use reth_blockchain_tree::{
-    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
-};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
@@ -33,7 +30,7 @@ use reth_primitives::{
     TransactionSigned,
 };
 use reth_provider::{
-    providers::{BlockchainProvider, ProviderNodeTypes},
+    providers::{BlockchainProvider2, ProviderNodeTypes},
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
     StageCheckpointReader, StateProviderFactory,
 };
@@ -131,21 +128,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let consensus: Arc<dyn FullConsensus<Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
-        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
-
-        // configure blockchain tree
-        let tree_externals =
-            TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
-        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
-        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
-
         // fetch the best block from the database
         let best_block = self
             .lookup_best_block(provider_factory.clone())
             .wrap_err("the head block is missing")?;
 
-        let blockchain_db =
-            BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
+        let blockchain_db = BlockchainProvider2::new(provider_factory.clone())?;
         let blob_store = InMemoryBlobStore::default();
 
         let validator =
