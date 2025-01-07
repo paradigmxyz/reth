@@ -446,7 +446,7 @@ impl<
             }
         }
 
-        writer.append_header(block.deref().as_ref(), ttd, &block.hash())?;
+        writer.append_header(block.header(), ttd, &block.hash())?;
 
         self.insert_block(block, StorageLocation::Database)
     }
@@ -2769,10 +2769,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             durations_recorder.record_relative(metrics::Action::InsertCanonicalHeaders);
 
             // Put header with canonical hashes.
-            self.tx.put::<tables::Headers<HeaderTy<N>>>(
-                block_number,
-                block.deref().as_ref().clone(),
-            )?;
+            self.tx.put::<tables::Headers<HeaderTy<N>>>(block_number, block.header().clone())?;
             durations_recorder.record_relative(metrics::Action::InsertHeaders);
 
             self.tx.put::<tables::HeaderTerminalDifficulties>(block_number, ttd.into())?;
