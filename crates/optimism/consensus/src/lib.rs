@@ -6,9 +6,13 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+extern crate alloc;
+
+use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B64, U256};
@@ -26,7 +30,6 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpBlock, OpBlockBody, OpPrimitives, OpReceipt};
 use reth_primitives::{BlockWithSenders, GotExpected, SealedBlockFor, SealedHeader};
-use std::{sync::Arc, time::SystemTime};
 
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
