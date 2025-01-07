@@ -94,12 +94,7 @@ for crate in "${crates[@]}"; do
     continue
   fi
 
-  if [ $crate == "reth-optimism-primitives" ]; then
-    cmd="cargo +stable build -p $crate --target wasm32-wasip1 --no-default-features \
-    --features serde"
-  else
-    cmd="cargo +stable build -p $crate --target wasm32-wasip1 --no-default-features"
-  fi
+  cmd="cargo +stable build -p $crate --target wasm32-wasip1 --no-default-features"
 
   if [ -n "$CI" ]; then
     echo "::group::$cmd"
