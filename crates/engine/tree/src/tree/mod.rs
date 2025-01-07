@@ -15,12 +15,13 @@ use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
 };
+use block_buffer::BlockBuffer;
 use reth_beacon_consensus::{
     BeaconConsensusEngineEvent, InvalidHeaderCache, MIN_BLOCKS_FOR_PIPELINE_RUN,
 };
-use reth_blockchain_tree::{
+use reth_blockchain_tree_api::{
     error::{InsertBlockErrorKindTwo, InsertBlockErrorTwo, InsertBlockFatalError},
-    BlockBuffer, BlockStatus2, InsertPayloadOk2,
+    BlockStatus2, InsertPayloadOk2,
 };
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
@@ -76,6 +77,7 @@ use tokio::sync::{
 };
 use tracing::*;
 
+mod block_buffer;
 pub mod config;
 mod invalid_block_hook;
 mod metrics;

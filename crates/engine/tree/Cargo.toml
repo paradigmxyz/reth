@@ -14,7 +14,6 @@ workspace = true
 # reth
 reth-beacon-consensus.workspace = true
 reth-blockchain-tree-api.workspace = true
-reth-blockchain-tree.workspace = true
 reth-chain-state.workspace = true
 reth-chainspec = { workspace = true, optional = true }
 reth-consensus.workspace = true
@@ -36,6 +35,8 @@ reth-trie-db.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie.workspace = true
+# TODO(mattsse): get rid of this by optimizing cache
+reth-network.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
@@ -103,27 +104,27 @@ harness = false
 
 [features]
 test-utils = [
-    "reth-blockchain-tree/test-utils",
-    "reth-chain-state/test-utils",
-    "reth-chainspec/test-utils",
-    "reth-consensus/test-utils",
-    "reth-db/test-utils",
-    "reth-evm/test-utils",
-    "reth-network-p2p/test-utils",
-    "reth-payload-builder/test-utils",
-    "reth-primitives/test-utils",
-    "reth-primitives-traits/test-utils",
-    "reth-provider/test-utils",
-    "reth-prune-types",
-    "reth-prune-types?/test-utils",
-    "reth-revm/test-utils",
-    "reth-stages-api/test-utils",
-    "reth-stages/test-utils",
-    "reth-static-file",
-    "reth-tracing",
-    "reth-trie/test-utils",
-    "reth-trie-sparse/test-utils",
-    "reth-prune-types?/test-utils",
-    "reth-trie-db/test-utils",
-    "reth-trie-parallel/test-utils",
+	"reth-chain-state/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-consensus/test-utils",
+	"reth-db/test-utils",
+	"reth-evm/test-utils",
+	"reth-network-p2p/test-utils",
+	"reth-payload-builder/test-utils",
+	"reth-primitives/test-utils",
+	"reth-primitives-traits/test-utils",
+	"reth-provider/test-utils",
+	"reth-prune-types",
+	"reth-prune-types?/test-utils",
+	"reth-revm/test-utils",
+	"reth-stages-api/test-utils",
+	"reth-stages/test-utils",
+	"reth-static-file",
+	"reth-tracing",
+	"reth-trie/test-utils",
+	"reth-trie-sparse/test-utils",
+	"reth-prune-types?/test-utils",
+	"reth-trie-db/test-utils",
+	"reth-trie-parallel/test-utils",
+	"reth-network/test-utils"
 ]
