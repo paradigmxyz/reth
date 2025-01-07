@@ -1376,7 +1376,7 @@ mod tests {
             blocks
                 .iter()
                 .take_while(|header| header.number <= 8)
-                .map(|b| b.deref().clone())
+                .map(|b| b.sealed_header().clone())
                 .collect::<Vec<_>>()
         );
 
@@ -1548,7 +1548,7 @@ mod tests {
         let block_number = database_block.number;
         assert_eq!(
             provider.header_by_number_or_tag(block_number.into()).unwrap(),
-            Some(database_block.deref().header().clone())
+            Some(database_block.header().clone())
         );
         assert_eq!(
             provider.sealed_header_by_number_or_tag(block_number.into())?,
@@ -1575,7 +1575,7 @@ mod tests {
 
         assert_eq!(
             provider.header_by_number_or_tag(BlockNumberOrTag::Finalized).unwrap(),
-            Some(finalized_block.deref().clone().unseal())
+            Some(finalized_block.header().clone())
         );
         assert_eq!(
             provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Finalized).unwrap(),
@@ -2033,7 +2033,9 @@ mod tests {
         );
         // test state by block tag for finalized block
         let finalized_block = in_memory_blocks[in_memory_blocks.len() - 3].clone();
-        in_memory_provider.canonical_in_memory_state.set_finalized(finalized_block.deref().clone());
+        in_memory_provider
+            .canonical_in_memory_state
+            .set_finalized(finalized_block.sealed_header().clone());
         assert_eq!(
             finalized_block.hash(),
             in_memory_provider
