@@ -553,7 +553,7 @@ where
     AO: RethRpcAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
     EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>,
 {
-    /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
+    /// Launches the node with the [`EngineNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(
         self,
     ) -> eyre::Result<

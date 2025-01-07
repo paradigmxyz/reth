@@ -30,7 +30,8 @@ pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
 ///
 /// This is essentially the launch logic for a node.
 ///
-/// See also [`EngineNodeLauncher`] and [`NodeBuilderWithComponents::launch_with`]
+/// See also [`EngineNodeLauncher`](crate::EngineNodeLauncher) and
+/// [`NodeBuilderWithComponents::launch_with`]
 pub trait LaunchNode<Target> {
     /// The node type that is created.
     type Node;
