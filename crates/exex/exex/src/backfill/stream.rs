@@ -242,17 +242,15 @@ mod tests {
         BackfillJobFactory,
     };
     use futures::StreamExt;
-    use reth_blockchain_tree::noop::NoopBlockchainTree;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+        providers::BlockchainProvider2, test_utils::create_test_provider_factory_with_chain_spec,
     };
     use reth_stages_api::ExecutionStageThresholds;
     use reth_testing_utils::generators;
     use secp256k1::Keypair;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_single_blocks() -> eyre::Result<()> {
@@ -267,10 +265,7 @@ mod tests {
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(
-            provider_factory.clone(),
-            Arc::new(NoopBlockchainTree::default()),
-        )?;
+        let blockchain_db = BlockchainProvider2::new(provider_factory.clone())?;
 
         // Create first 2 blocks
         let blocks_and_execution_outcomes =
@@ -308,10 +303,7 @@ mod tests {
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(
-            provider_factory.clone(),
-            Arc::new(NoopBlockchainTree::default()),
-        )?;
+        let blockchain_db = BlockchainProvider2::new(provider_factory.clone())?;
 
         // Create first 2 blocks
         let (blocks, execution_outcome) =
