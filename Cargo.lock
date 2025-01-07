@@ -8660,7 +8660,6 @@ dependencies = [
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
- "rayon",
  "reth-chainspec",
  "reth-codecs",
  "reth-ethereum-forks",
