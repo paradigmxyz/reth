@@ -52,6 +52,10 @@ impl StorageTrieDiffEntry {
                 debug!(target: "engine::tree", ?address, ?task, ?regular, "Difference in storage trie existence");
             }
             Self::Value(mut storage_diff) => {
+                if let Some((task, regular)) = storage_diff.is_deleted {
+                    debug!(target: "engine::tree", ?address, ?task, ?regular, "Difference in storage trie deletion");
+                }
+
                 for (path, (task, regular)) in &mut storage_diff.storage_nodes {
                     debug!(target: "engine::tree", ?address, ?path, ?task, ?regular, "Difference in storage trie updates");
                 }
