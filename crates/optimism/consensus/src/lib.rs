@@ -6,9 +6,13 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+extern crate alloc;
+
+use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B64, U256};
@@ -26,7 +30,6 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpBlock, OpBlockBody, OpPrimitives, OpReceipt};
 use reth_primitives::{BlockWithSenders, GotExpected, SealedBlockFor, SealedHeader};
-use std::{sync::Arc, time::SystemTime};
 
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
@@ -157,42 +160,32 @@ impl HeaderValidator for OpBeaconConsensus {
         _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
         // with OP-stack Bedrock activation number determines when TTD (eth Merge) has been reached.
-        let is_post_merge = self.chain_spec.is_bedrock_active_at_block(header.number);
+        debug_assert!(
+            self.chain_spec.is_bedrock_active_at_block(header.number),
+            "manually import OVM blocks"
+        );
 
-        if is_post_merge {
-            if header.nonce != B64::ZERO {
-                return Err(ConsensusError::TheMergeNonceIsNotZero)
-            }
-
-            if header.ommers_hash != EMPTY_OMMER_ROOT_HASH {
-                return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
-            }
-
-            // Post-merge, the consensus layer is expected to perform checks such that the block
-            // timestamp is a function of the slot. This is different from pre-merge, where blocks
-            // are only allowed to be in the future (compared to the system's clock) by a certain
-            // threshold.
-            //
-            // Block validation with respect to the parent should ensure that the block timestamp
-            // is greater than its parent timestamp.
-
-            // validate header extra data for all networks post merge
-            validate_header_extra_data(header)?;
-
-            // mixHash is used instead of difficulty inside EVM
-            // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
-        } else {
-            // Check if timestamp is in the future. Clock can drift but this can be consensus issue.
-            let present_timestamp =
-                SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
-
-            if header.exceeds_allowed_future_timestamp(present_timestamp) {
-                return Err(ConsensusError::TimestampIsInFuture {
-                    timestamp: header.timestamp,
-                    present_timestamp,
-                })
-            }
+        if header.nonce != B64::ZERO {
+            return Err(ConsensusError::TheMergeNonceIsNotZero)
         }
+
+        if header.ommers_hash != EMPTY_OMMER_ROOT_HASH {
+            return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
+        }
+
+        // Post-merge, the consensus layer is expected to perform checks such that the block
+        // timestamp is a function of the slot. This is different from pre-merge, where blocks
+        // are only allowed to be in the future (compared to the system's clock) by a certain
+        // threshold.
+        //
+        // Block validation with respect to the parent should ensure that the block timestamp
+        // is greater than its parent timestamp.
+
+        // validate header extra data for all networks post merge
+        validate_header_extra_data(header)?;
+
+        // mixHash is used instead of difficulty inside EVM
+        // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
 
         Ok(())
     }
