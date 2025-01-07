@@ -8751,6 +8751,7 @@ dependencies = [
  "reth-nippy-jar",
  "reth-node-types",
  "reth-optimism-primitives",
+ "reth-optimism-storage",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-prune-types",

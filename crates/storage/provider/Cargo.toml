@@ -44,6 +44,7 @@ revm.workspace = true
 
 # optimism
 reth-optimism-primitives = { workspace = true, optional = true }
+reth-optimism-storage = { workspace = true, features = ["optimism"] }
 
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }

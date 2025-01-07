@@ -9,6 +9,22 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+#[allow(clippy::while_let_loop)]
+pub fn check_consistency<Provider>(&self, provider: &Provider) -> bool
+where
+    Provider: DBProvider + BlockReader + StageCheckpointReader + ChainSpecProvider,
+{
+    // OVM historical import is broken and does not work with this check. It's importing
+    // duplicated receipts resulting in having more receipts than the expected transaction
+    // range.
+    //
+    // If we detect an OVM import was done (block #1 <https://optimistic.etherscan.io/block/1>), skip it.
+    // More on [#11099](https://github.com/paradigmxyz/reth/pull/11099).
+    reth_chainspec::EthChainSpec::chain(&provider.chain_spec()) ==
+        reth_chainspec::Chain::optimism_mainnet() &&
+        provider.block_number(reth_optimism_primitives::bedrock::OVM_HEADER_1_HASH)?.is_some()
+}
+
 #[cfg(test)]
 mod tests {
     use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
