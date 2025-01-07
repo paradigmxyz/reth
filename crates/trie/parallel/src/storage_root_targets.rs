@@ -36,7 +36,7 @@ impl IntoIterator for StorageRootTargets {
 }
 
 impl rayon::iter::IntoParallelIterator for StorageRootTargets {
-    type Iter = rayon::collections::hash_map::IntoIter<B256, PrefixSet>;
+    type Iter = alloy_primitives::map::rayon::IntoIter<B256, PrefixSet>;
     type Item = (B256, PrefixSet);
 
     fn into_par_iter(self) -> Self::Iter {

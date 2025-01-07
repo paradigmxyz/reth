@@ -23,7 +23,7 @@ reth-provider.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["rayon"] }
 
 # tracing
 tracing.workspace = true
