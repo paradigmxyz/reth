@@ -58,7 +58,8 @@ std = [
 	"revm-primitives/std",
 	"revm/std",
 	"reth-ethereum-forks/std",
-	"reth-chainspec/std"
+	"reth-chainspec/std",
+	"reth-consensus-common/std"
 ]
 test-utils = [
     "dep:parking_lot",

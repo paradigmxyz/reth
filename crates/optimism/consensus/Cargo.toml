@@ -17,7 +17,6 @@ reth-chainspec.workspace = true
 reth-consensus-common.workspace = true
 reth-consensus.workspace = true
 reth-primitives.workspace = true
-reth-trie-common.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true

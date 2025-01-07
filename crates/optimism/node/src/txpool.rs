@@ -58,9 +58,9 @@ impl TryFrom<RecoveredTx<OpTransactionSigned>> for OpPooledTransaction {
     type Error = TransactionConversionError;
 
     fn try_from(value: RecoveredTx<OpTransactionSigned>) -> Result<Self, Self::Error> {
-        let (tx, signer) = value.to_components();
+        let (tx, signer) = value.into_parts();
         let pooled: RecoveredTx<op_alloy_consensus::OpPooledTransaction> =
-            RecoveredTx::from_signed_transaction(tx.try_into()?, signer);
+            RecoveredTx::new_unchecked(tx.try_into()?, signer);
         Ok(pooled.into())
     }
 }
@@ -83,8 +83,8 @@ impl PoolTransaction for OpPooledTransaction {
     fn try_consensus_into_pooled(
         tx: RecoveredTx<Self::Consensus>,
     ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
-        let (tx, signer) = tx.to_components();
-        Ok(RecoveredTx::from_signed_transaction(tx.try_into()?, signer))
+        let (tx, signer) = tx.into_parts();
+        Ok(RecoveredTx::new_unchecked(tx.try_into()?, signer))
     }
 
     fn hash(&self) -> &TxHash {
@@ -324,7 +324,7 @@ where
             propagate,
         } = outcome
         {
-            let l1_block_info = self.block_info.l1_block_info.read().clone();
+            let mut l1_block_info = self.block_info.l1_block_info.read().clone();
 
             let mut encoded = Vec::with_capacity(valid_tx.transaction().encoded_length());
             let tx = valid_tx.transaction().clone_into_consensus();
@@ -459,7 +459,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = OpTransactionSigned::new_unhashed(deposit_tx, signature);
-        let signed_recovered = RecoveredTx::from_signed_transaction(signed_tx, signer);
+        let signed_recovered = RecoveredTx::new_unchecked(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();
         let pooled_tx = OpPooledTransaction::new(signed_recovered, len);
         let outcome = validator.validate_one(origin, pooled_tx);

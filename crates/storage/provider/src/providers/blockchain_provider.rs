@@ -461,10 +461,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
     ) -> ProviderResult<Option<Withdrawals>> {
         self.consistent_provider()?.withdrawals_by_block(id, timestamp)
     }
-
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        self.consistent_provider()?.latest_withdrawal()
-    }
 }
 
 impl<N: ProviderNodeTypes> OmmersProvider for BlockchainProvider2<N> {
@@ -1459,7 +1455,7 @@ mod tests {
             "Expected withdrawals_by_block to return empty list if block does not exist"
         );
 
-        for block in blocks.clone() {
+        for block in blocks {
             assert_eq!(
                 provider
                     .withdrawals_by_block(
@@ -1471,15 +1467,6 @@ mod tests {
                 "Expected withdrawals_by_block to return correct withdrawals"
             );
         }
-
-        let canonical_block_num = provider.best_block_number().unwrap();
-        let canonical_block = blocks.get(canonical_block_num as usize).unwrap();
-
-        assert_eq!(
-            Some(provider.latest_withdrawal()?.unwrap()),
-            canonical_block.body().withdrawals.clone().unwrap().pop(),
-            "Expected latest withdrawal to be equal to last withdrawal entry in canonical block"
-        );
 
         Ok(())
     }
@@ -2167,9 +2154,9 @@ mod tests {
             $(
                 // Since data moves for each tried method, need to recalculate everything
                 let db_tx_count =
-                    database_blocks.iter().map(|b| b.body().transactions.len()).sum::<usize>() as u64;
+                    database_blocks.iter().map(|b| b.transaction_count()).sum::<usize>() as u64;
                 let in_mem_tx_count =
-                    in_memory_blocks.iter().map(|b| b.body().transactions.len()).sum::<usize>() as u64;
+                    in_memory_blocks.iter().map(|b| b.transaction_count()).sum::<usize>() as u64;
 
                 let db_range = 0..=(db_tx_count - 1);
                 let in_mem_range = db_tx_count..=(in_mem_tx_count + db_range.end());
@@ -2412,7 +2399,7 @@ mod tests {
                     .iter()
                     .chain(in_memory_blocks.iter())
                     .take_while(|b| b.number < block.number)
-                    .map(|b| b.body().transactions.len())
+                    .map(|b| b.transaction_count())
                     .sum::<usize>() as u64
             };
 
@@ -2433,7 +2420,7 @@ mod tests {
                     .iter()
                     .chain(in_memory_blocks.iter())
                     .take_while(|b| b.number < block.number)
-                    .map(|b| b.body().transactions.len())
+                    .map(|b| b.transaction_count())
                     .sum::<usize>() as u64
             };
 
@@ -2529,7 +2516,7 @@ mod tests {
                     block.number,
                     Some(StoredBlockBodyIndices {
                         first_tx_num: tx_num,
-                        tx_count: block.body().transactions.len() as u64
+                        tx_count: block.transaction_count() as u64
                     })
                 ),
                 u64::MAX
@@ -2727,7 +2714,7 @@ mod tests {
              canonical_in_memory_state: CanonicalInMemoryState,
              _factory: ProviderFactory<MockNodeTypesWithDB>| {
                 if let Some(tx) = canonical_in_memory_state.transaction_by_hash(hash) {
-                    return Ok::<_, ProviderError>(Some(tx))
+                    return Ok::<_, ProviderError>(Some(tx));
                 }
                 panic!("should not be in database");
                 // _factory.transaction_by_hash(hash)

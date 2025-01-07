@@ -20,11 +20,7 @@ use crate::{
     TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Header};
-use alloy_eips::{
-    eip2718::Encodable2718,
-    eip4895::{Withdrawal, Withdrawals},
-    BlockHashOrNumber,
-};
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256HashMap, HashMap, HashSet},
@@ -1592,12 +1588,6 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Withdrawals
             }
         }
         Ok(None)
-    }
-
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        let latest_block_withdrawal = self.tx.cursor_read::<tables::BlockWithdrawals>()?.last()?;
-        Ok(latest_block_withdrawal
-            .and_then(|(_, mut block_withdrawal)| block_withdrawal.withdrawals.pop()))
     }
 }
 

@@ -332,9 +332,8 @@ mod tests {
         BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider, Executor,
     };
     use reth_execution_types::BlockExecutionOutput;
-    use reth_primitives::{
-        public_key_to_address, Account, Block, BlockBody, BlockExt, Transaction,
-    };
+    use reth_primitives::{Account, Block, BlockBody, BlockExt, Transaction};
+    use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };

@@ -107,7 +107,7 @@ impl OpReceiptFieldsBuilder {
         mut self,
         chain_spec: &OpChainSpec,
         tx: &OpTransactionSigned,
-        l1_block_info: revm::L1BlockInfo,
+        mut l1_block_info: revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
         let raw_tx = tx.encoded_2718();
         let timestamp = self.block_timestamp;

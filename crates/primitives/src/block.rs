@@ -234,6 +234,17 @@ where
 
 impl<H, B> SealedBlock<H, B>
 where
+    B: reth_primitives_traits::BlockBody,
+{
+    /// Returns the number of transactions in the block.
+    #[inline]
+    pub fn transaction_count(&self) -> usize {
+        self.body.transaction_count()
+    }
+}
+
+impl<H, B> SealedBlock<H, B>
+where
     H: alloy_consensus::BlockHeader,
     B: reth_primitives_traits::BlockBody,
 {
@@ -917,5 +928,15 @@ mod tests {
         body.encode(&mut buf);
         let decoded = BlockBody::decode(&mut buf.as_slice()).unwrap();
         assert_eq!(body, decoded);
+    }
+
+    #[test]
+    fn test_transaction_count() {
+        let mut block = Block::default();
+        assert_eq!(block.body.transaction_count(), 0);
+        block.body.transactions.push(TransactionSigned::default());
+        assert_eq!(block.body.transaction_count(), 1);
+        block.body.transactions.push(TransactionSigned::default());
+        assert_eq!(block.body.transaction_count(), 2);
     }
 }
