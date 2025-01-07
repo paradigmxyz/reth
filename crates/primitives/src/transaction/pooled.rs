@@ -4,7 +4,6 @@
 use crate::RecoveredTx;
 use alloy_consensus::transaction::PooledTransaction;
 
-// TODO: remove this foreign type
 /// A signed pooled transaction with recovered signer.
 pub type PooledTransactionsElementEcRecovered<T = PooledTransaction> = RecoveredTx<T>;
 

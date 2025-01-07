@@ -282,6 +282,11 @@ impl<P> RevealedSparseTrie<P> {
         node: TrieNode,
         hash_mask: Option<TrieMask>,
     ) -> SparseTrieResult<()> {
+        // If the node is already revealed and it's not a hash node, do nothing.
+        if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
+            return Ok(())
+        }
+
         if let Some(hash_mask) = hash_mask {
             self.branch_node_hash_masks.insert(path.clone(), hash_mask);
         }

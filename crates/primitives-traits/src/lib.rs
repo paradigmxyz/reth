@@ -69,6 +69,8 @@ pub use alloy_primitives::{logs_bloom, Log, LogData};
 mod storage;
 pub use storage::StorageEntry;
 
+pub mod sync;
+
 /// Common header types
 pub mod header;
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
