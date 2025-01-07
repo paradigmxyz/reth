@@ -1,4 +1,7 @@
-use crate::{BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes, ForkchoiceStatus};
+use crate::{
+    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, EngineApiMessageVersion,
+    EngineTypes, ForkchoiceStatus,
+};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadSidecar, ForkChoiceUpdateResult, ForkchoiceState,
     ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
@@ -12,9 +15,7 @@ use std::{
     pin::Pin,
     task::{ready, Context, Poll},
 };
-use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::oneshot;
-use tokio::sync::oneshot::error::RecvError;
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Represents the outcome of forkchoice update.
 ///
@@ -194,7 +195,6 @@ impl<Engine: EngineTypes> Display for BeaconEngineMessage<Engine> {
     }
 }
 
-
 /// A clonable sender type that can be used to send engine API messages.
 ///
 /// This type mirrors consensus related functions of the engine API.
@@ -236,11 +236,12 @@ where
         state: ForkchoiceState,
         payload_attrs: Option<Engine::PayloadAttributes>,
         version: EngineApiMessageVersion,
-    ) -> Result<ForkchoiceUpdated, BeaconOnNewPayloadError> {
+    ) -> Result<ForkchoiceUpdated, BeaconForkChoiceUpdateError> {
         Ok(self
             .send_fork_choice_updated(state, payload_attrs, version)
-            .map_err(|err| BeaconOnNewPayloadError::EngineUnavailable)
-            .await??
+            .map_err(|_| BeaconForkChoiceUpdateError::EngineUnavailable)
+            .await?
+            .map_err(BeaconForkChoiceUpdateError::internal)?
             .await?)
     }
 
