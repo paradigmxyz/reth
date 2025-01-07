@@ -45,7 +45,6 @@ exclude_crates=(
   reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
-  reth-optimism-primitives
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util
@@ -95,7 +94,12 @@ for crate in "${crates[@]}"; do
     continue
   fi
 
-  cmd="cargo +stable build -p $crate --target wasm32-wasip1 --no-default-features"
+  if [ $crate == "reth-optimism-primitives" ]; then
+    cmd="cargo +stable build -p $crate --target wasm32-wasip1 --no-default-features \
+    --features serde"
+  else
+    cmd="cargo +stable build -p $crate --target wasm32-wasip1 --no-default-features"
+  fi
 
   if [ -n "$CI" ]; then
     echo "::group::$cmd"
