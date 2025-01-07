@@ -6,7 +6,6 @@ use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::Sealable;
 use clap::Parser;
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
@@ -18,6 +17,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_eth_wire::NetPrimitivesFor;
+use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
