@@ -250,6 +250,9 @@ pub trait BlockExecutionStrategy {
 
 /// A strategy factory that can create block execution strategies.
 pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
+    /// The error type returned by this strategy's methods.
+    type Error: From<ProviderError> + core::error::Error;
+
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;
 
@@ -257,7 +260,7 @@ pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>>: BlockExecutionStrategy<
         DB = DB,
         Primitives = Self::Primitives,
-        Error = BlockExecutionError,
+        Error = Self::Error,
     >;
 
     /// Creates a strategy using the give database.
@@ -290,7 +293,7 @@ impl<F> BasicBlockExecutorProvider<F> {
 
 impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
 where
-    F: BlockExecutionStrategyFactory,
+    F: BlockExecutionStrategyFactory<Error = BlockExecutionError>,
 {
     type Primitives = F::Primitives;
 
@@ -624,6 +627,7 @@ mod tests {
     }
 
     impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
+        type Error = BlockExecutionError;
         type Primitives = EthPrimitives;
         type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
             TestExecutorStrategy<DB, TestEvmConfig>;
