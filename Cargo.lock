@@ -7495,7 +7495,7 @@ dependencies = [
  "arbitrary",
  "auto_impl",
  "dyn-clone",
- "reth-primitives-traits",
+ "once_cell",
  "rustc-hash 2.1.0",
  "serde",
 ]
@@ -8381,7 +8381,6 @@ dependencies = [
  "alloy-primitives",
  "once_cell",
  "reth-ethereum-forks",
- "reth-primitives-traits",
  "serde",
 ]
 

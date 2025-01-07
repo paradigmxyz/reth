@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 # reth
 reth-ethereum-forks.workspace = true
-reth-primitives-traits.workspace = true
 
 # ethereum
 alloy-chains.workspace = true
@@ -34,12 +33,10 @@ std = [
 	"serde?/std",
 	"alloy-chains/std",
 	"reth-ethereum-forks/std",
-	"reth-primitives-traits/std"
 ]
 serde = [
 	"dep:serde",
 	"alloy-chains/serde",
 	"alloy-primitives/serde",
 	"reth-ethereum-forks/serde",
-	"reth-primitives-traits/serde"
 ]
