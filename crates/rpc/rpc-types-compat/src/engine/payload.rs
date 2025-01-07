@@ -122,7 +122,7 @@ mod tests {
         CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
         ExecutionPayloadV2, ExecutionPayloadV3,
     };
-    use reth_primitives::{Block, BlockExt, TransactionSigned};
+    use reth_primitives::{BlockExt, TransactionSigned};
 
     #[test]
     fn roundtrip_payload_to_block() {
@@ -153,7 +153,7 @@ mod tests {
             excess_blob_gas: 0x580000,
         };
 
-        let mut block: Block = new_payload.clone().try_into_block().unwrap();
+        let mut block = new_payload.clone().try_into_block::<TransactionSigned>().unwrap();
 
         // this newPayload came with a parent beacon block root, we need to manually insert it
         // before hashing

@@ -83,7 +83,7 @@ pub mod serde_bincode_compat {
 pub struct EthPrimitives;
 
 impl reth_primitives_traits::NodePrimitives for EthPrimitives {
-    type Block = crate::Block;
+    type Block = crate::Block<TransactionSigned>;
     type BlockHeader = alloy_consensus::Header;
     type BlockBody = crate::BlockBody;
     type SignedTx = crate::TransactionSigned;

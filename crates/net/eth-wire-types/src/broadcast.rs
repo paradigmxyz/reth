@@ -69,7 +69,7 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct NewBlock<B = reth_primitives::Block> {
+pub struct NewBlock<B = reth_primitives::Block<TransactionSigned>> {
     /// A new block.
     pub block: B,
     /// The current total difficulty.
