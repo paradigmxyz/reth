@@ -235,7 +235,7 @@ impl TestStageDB {
                 .then(|| provider.latest_writer(StaticFileSegment::Headers).unwrap());
 
             blocks.iter().try_for_each(|block| {
-                Self::insert_header(headers_writer.as_mut(), &tx, &block.header, U256::ZERO)
+                Self::insert_header(headers_writer.as_mut(), &tx, block.sealed_header(), U256::ZERO)
             })?;
 
             if let Some(mut writer) = headers_writer {

@@ -28,7 +28,7 @@ pub(crate) fn generate_bodies(
         BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..2, ..Default::default() },
     );
 
-    let headers = blocks.iter().map(|block| block.header.clone()).collect();
+    let headers = blocks.iter().map(|block| block.sealed_header().clone()).collect();
     let bodies = blocks.into_iter().map(|block| (block.hash(), block.into_body())).collect();
 
     (headers, bodies)

@@ -18,7 +18,7 @@ use reth_primitives::{
 use reth_primitives_traits::{Block, BlockBody as _, SignedTransaction};
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
-use std::{collections::BTreeMap, ops::Deref, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -181,9 +181,9 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         safe: Option<SealedHeader<N::BlockHeader>>,
     ) -> Self {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
-        let header = in_memory_state
-            .head_state()
-            .map_or_else(SealedHeader::default, |state| state.block_ref().block().deref().clone());
+        let header = in_memory_state.head_state().map_or_else(SealedHeader::default, |state| {
+            state.block_ref().block().sealed_header().clone()
+        });
         let chain_info_tracker = ChainInfoTracker::new(header, finalized, safe);
         let (canon_state_notification_sender, _) =
             broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
@@ -229,7 +229,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns the header corresponding to the given hash.
     pub fn header_by_hash(&self, hash: B256) -> Option<SealedHeader<N::BlockHeader>> {
-        self.state_by_hash(hash).map(|block| block.block_ref().block.header.clone())
+        self.state_by_hash(hash).map(|block| block.block_ref().block.sealed_header().clone())
     }
 
     /// Clears all entries in the in memory state.
@@ -462,7 +462,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns the `SealedHeader` corresponding to the pending state.
     pub fn pending_sealed_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
-        self.pending_state().map(|h| h.block_ref().block().deref().clone())
+        self.pending_state().map(|h| h.block_ref().block().sealed_header().clone())
     }
 
     /// Returns the `Header` corresponding to the pending state.
@@ -1321,7 +1321,7 @@ mod tests {
         assert_eq!(state.pending_header().unwrap(), block2.block().header().clone());
 
         // Check the pending sealed header
-        assert_eq!(state.pending_sealed_header().unwrap(), block2.block().header.clone());
+        assert_eq!(state.pending_sealed_header().unwrap(), block2.block().sealed_header().clone());
 
         // Check the pending block with senders
         assert_eq!(

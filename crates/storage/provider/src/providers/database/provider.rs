@@ -426,12 +426,12 @@ impl<
         &self,
         block: SealedBlockWithSenders<<Self as BlockWriter>::Block>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
-        let ttd = if block.number == 0 {
-            block.difficulty
+        let ttd = if block.number() == 0 {
+            block.difficulty()
         } else {
-            let parent_block_number = block.number - 1;
+            let parent_block_number = block.number() - 1;
             let parent_ttd = self.header_td_by_number(parent_block_number)?.unwrap_or_default();
-            parent_ttd + block.difficulty
+            parent_ttd + block.difficulty()
         };
 
         let mut writer = self.static_file_provider.latest_writer(StaticFileSegment::Headers)?;
@@ -439,14 +439,14 @@ impl<
         // Backfill: some tests start at a forward block number, but static files require no gaps.
         let segment_header = writer.user_header();
         if segment_header.block_end().is_none() && segment_header.expected_block_start() == 0 {
-            for block_number in 0..block.number {
-                let mut prev = block.header.clone().unseal();
+            for block_number in 0..block.number() {
+                let mut prev = block.sealed_header().clone().unseal();
                 prev.number = block_number;
                 writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
             }
         }
 
-        writer.append_header(block.header.as_ref(), ttd, &block.hash())?;
+        writer.append_header(block.header(), ttd, &block.hash())?;
 
         self.insert_block(block, StorageLocation::Database)
     }
@@ -2769,8 +2769,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             durations_recorder.record_relative(metrics::Action::InsertCanonicalHeaders);
 
             // Put header with canonical hashes.
-            self.tx
-                .put::<tables::Headers<HeaderTy<N>>>(block_number, block.header.as_ref().clone())?;
+            self.tx.put::<tables::Headers<HeaderTy<N>>>(block_number, block.header().clone())?;
             durations_recorder.record_relative(metrics::Action::InsertHeaders);
 
             self.tx.put::<tables::HeaderTerminalDifficulties>(block_number, ttd.into())?;
@@ -2780,7 +2779,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         if write_to.static_files() {
             let mut writer =
                 self.static_file_provider.get_writer(block_number, StaticFileSegment::Headers)?;
-            writer.append_header(&block.header, ttd, &block.hash())?;
+            writer.append_header(block.header(), ttd, &block.hash())?;
         }
 
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;

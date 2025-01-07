@@ -2,7 +2,6 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, U256};
 use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
 use reth_primitives_traits::InMemorySize;
-
 /// The block response
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum BlockResponse<H, B = BlockBody> {
@@ -19,7 +18,7 @@ where
     /// Return the reference to the response header
     pub const fn header(&self) -> &SealedHeader<H> {
         match self {
-            Self::Full(block) => &block.header,
+            Self::Full(block) => block.sealed_header(),
             Self::Empty(header) => header,
         }
     }

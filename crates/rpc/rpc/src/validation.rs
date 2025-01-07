@@ -102,10 +102,10 @@ where
         message: BidTrace,
         registered_gas_limit: u64,
     ) -> Result<(), ValidationApiError> {
-        self.validate_message_against_header(&block.header, &message)?;
+        self.validate_message_against_header(block.sealed_header(), &message)?;
 
-        self.consensus.validate_header_with_total_difficulty(&block.header, U256::MAX)?;
-        self.consensus.validate_header(&block.header)?;
+        self.consensus.validate_header_with_total_difficulty(block.sealed_header(), U256::MAX)?;
+        self.consensus.validate_header(block.sealed_header())?;
         self.consensus.validate_block_pre_execution(&block)?;
 
         if !self.disallow.is_empty() {
@@ -130,15 +130,14 @@ where
         let latest_header =
             self.provider.latest_header()?.ok_or_else(|| ValidationApiError::MissingLatestBlock)?;
 
-        if latest_header.hash() != block.header.parent_hash() {
+        if latest_header.hash() != block.parent_hash() {
             return Err(ConsensusError::ParentHashMismatch(
-                GotExpected { got: block.header.parent_hash(), expected: latest_header.hash() }
-                    .into(),
+                GotExpected { got: block.parent_hash(), expected: latest_header.hash() }.into(),
             )
             .into())
         }
-        self.consensus.validate_header_against_parent(&block.header, &latest_header)?;
-        self.validate_gas_limit(registered_gas_limit, &latest_header, &block.header)?;
+        self.consensus.validate_header_against_parent(block.sealed_header(), &latest_header)?;
+        self.validate_gas_limit(registered_gas_limit, &latest_header, block.sealed_header())?;
 
         let latest_header_hash = latest_header.hash();
         let state_provider = self.provider.state_by_block_hash(latest_header_hash)?;
