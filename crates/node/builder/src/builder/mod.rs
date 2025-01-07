@@ -7,11 +7,10 @@ use crate::{
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
-    BlockReaderFor, DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
+    BlockReaderFor, EngineNodeLauncher, LaunchNode, Node,
 };
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
-use reth_blockchain_tree::externals::NodeTypesForTree;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli_util::get_secret_key;
 use reth_db_api::{
@@ -34,7 +33,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_provider::{
-    providers::{BlockchainProvider, BlockchainProvider2, NodeTypesForProvider},
+    providers::{BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree},
     ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
@@ -51,11 +50,6 @@ pub use states::*;
 /// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.
 pub type RethFullAdapter<DB, Types> =
-    FullNodeTypesAdapter<Types, DB, BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>>;
-
-/// The adapter type for a reth node with the builtin provider type
-// Note: we need to hardcode this because custom components might depend on it in associated types.
-pub type RethFullAdapter2<DB, Types> =
     FullNodeTypesAdapter<Types, DB, BlockchainProvider2<NodeTypesWithDBAdapter<Types, DB>>>;
 
 #[allow(clippy::doc_markdown)]
@@ -346,18 +340,14 @@ where
     ///
     /// This bootstraps the node internals, creates all the components with the given [Node]
     ///
-    /// Returns a [`NodeHandle`] that can be used to interact with the node.
+    /// Returns a [`NodeHandle`](crate::NodeHandle) that can be used to interact with the node.
     pub async fn launch_node<N>(
         self,
         node: N,
     ) -> eyre::Result<
-        NodeHandle<
-            NodeAdapter<
-                RethFullAdapter<DB, N>,
-                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-            >,
-            N::AddOns,
-        >,
+        <EngineNodeLauncher as LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+        >>::Node,
     >
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForTree,
@@ -368,6 +358,9 @@ where
             >,
         >,
         N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+        EngineNodeLauncher: LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+        >,
     {
         self.node(node).launch().await
     }
@@ -558,14 +551,20 @@ where
     T: NodeTypesWithEngine + NodeTypesForTree,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     AO: RethRpcAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
+    EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>,
 {
-    /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
+    /// Launches the node with the [`EngineNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(
         self,
-    ) -> eyre::Result<NodeHandle<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>, AO>> {
+    ) -> eyre::Result<
+        <EngineNodeLauncher as LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>,
+        >>::Node,
+    > {
         let Self { builder, task_executor } = self;
 
-        let launcher = DefaultNodeLauncher::new(task_executor, builder.config.datadir());
+        let launcher =
+            EngineNodeLauncher::new(task_executor, builder.config.datadir(), Default::default());
         builder.launch_with(launcher).await
     }
 }

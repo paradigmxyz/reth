@@ -9,7 +9,7 @@ graph TD;
     end
     NodeBuilderC--"launch"-->launch
     subgraph launch
-        database("database init")-->tree("blockchain tree init")
+        database("database init")-->tree("blockchain provider init")
         tree--BuilderContext-->components{"build_components"}
         subgraph components
             ComponentsBuilder--"first creates"-->Pool

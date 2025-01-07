@@ -13,9 +13,7 @@ use reth_node_builder::{
     PayloadTypes,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
-use reth_provider::providers::{
-    BlockchainProvider, BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree,
-};
+use reth_provider::providers::{BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TaskManager;
 use std::sync::Arc;
@@ -58,7 +56,10 @@ where
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
-    N::AddOns: RethRpcAddOns<Adapter<N>>,
+    N::AddOns: RethRpcAddOns<Adapter<N>> + EngineValidatorAddOn<Adapter<N>>,
+    LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
+        <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+    >,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -203,11 +204,11 @@ where
 
 /// Testing database
 pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
-type TmpNodeAdapter<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>> =
+type TmpNodeAdapter<N, Provider = BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>> =
     FullNodeTypesAdapter<N, TmpDB, Provider>;
 
 /// Type alias for a `NodeAdapter`
-pub type Adapter<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>> = NodeAdapter<
+pub type Adapter<N, Provider = BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>> = NodeAdapter<
     TmpNodeAdapter<N, Provider>,
     <<N as Node<TmpNodeAdapter<N, Provider>>>::ComponentsBuilder as NodeComponentsBuilder<
         TmpNodeAdapter<N, Provider>,
@@ -215,5 +216,5 @@ pub type Adapter<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpD
 >;
 
 /// Type alias for a type of `NodeHelper`
-pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>> =
+pub type NodeHelperType<N, Provider = BlockchainProvider2<NodeTypesWithDBAdapter<N, TmpDB>>> =
     NodeTestContext<Adapter<N, Provider>, <N as Node<TmpNodeAdapter<N, Provider>>>::AddOns>;
