@@ -126,10 +126,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                                 base_fee_params,
                             )
                         } else {
-                            base_block
-                                .header
-                                .next_block_base_fee(base_fee_params)
-                                .unwrap_or_default()
+                            base_block.next_block_base_fee(base_fee_params).unwrap_or_default()
                         };
                         block_env.basefee = U256::from(base_fee);
                     } else {

@@ -1670,7 +1670,7 @@ where
                             self.latest_valid_hash_for_invalid_payload(block.parent_hash)?
                         };
                         // keep track of the invalid header
-                        self.invalid_headers.insert(block.header.block_with_parent());
+                        self.invalid_headers.insert(block.sealed_header().block_with_parent());
                         PayloadStatus::new(
                             PayloadStatusEnum::Invalid { validation_error: error.to_string() },
                             latest_valid_hash,
@@ -1779,7 +1779,7 @@ where
                             let (block, err) = err.split();
                             warn!(target: "consensus::engine", invalid_number=?block.number, invalid_hash=?block.hash(), %err, "Marking block as invalid");
 
-                            self.invalid_headers.insert(block.header.block_with_parent());
+                            self.invalid_headers.insert(block.sealed_header().block_with_parent());
                         }
                     }
                 }
@@ -2485,7 +2485,7 @@ mod tests {
                     ..Default::default()
                 },
             );
-            block1.header.set_difficulty(U256::from(1));
+            block1.set_difficulty(U256::from(1));
 
             // a second pre-merge block
             let mut block2 = random_block(
@@ -2497,7 +2497,7 @@ mod tests {
                     ..Default::default()
                 },
             );
-            block2.header.set_difficulty(U256::from(1));
+            block2.set_difficulty(U256::from(1));
 
             // a transition block
             let mut block3 = random_block(
@@ -2509,7 +2509,7 @@ mod tests {
                     ..Default::default()
                 },
             );
-            block3.header.set_difficulty(U256::from(1));
+            block3.set_difficulty(U256::from(1));
 
             let (_static_dir, static_dir_path) = create_test_static_files_dir();
             insert_blocks(
@@ -2883,7 +2883,7 @@ mod tests {
         async fn payload_pre_merge() {
             let data = BlockchainTestData::default();
             let mut block1 = data.blocks[0].0.block.clone();
-            block1.header.set_difficulty(
+            block1.set_difficulty(
                 MAINNET.fork(EthereumHardfork::Paris).ttd().unwrap() - U256::from(1),
             );
             block1 = block1.unseal::<reth_primitives::Block>().seal_slow();

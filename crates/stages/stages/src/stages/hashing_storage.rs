@@ -344,7 +344,7 @@ mod tests {
                 BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..3, ..Default::default() },
             );
 
-            self.db.insert_headers(blocks.iter().map(|block| &block.header))?;
+            self.db.insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
 
             let iter = blocks.iter();
             let mut next_tx_num = 0;
@@ -373,7 +373,7 @@ mod tests {
                                     tx,
                                     (block_number, *addr).into(),
                                     new_entry,
-                                    progress.header.number == stage_progress,
+                                    progress.number == stage_progress,
                                 )?;
                             }
 
@@ -392,7 +392,7 @@ mod tests {
                                 key: keccak256("mining"),
                                 value: U256::from(rng.gen::<u32>()),
                             },
-                            progress.header.number == stage_progress,
+                            progress.number == stage_progress,
                         )?;
                     }
 

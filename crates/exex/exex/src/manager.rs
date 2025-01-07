@@ -767,8 +767,8 @@ mod tests {
 
         // Define the notification for testing
         let mut block1: SealedBlockWithSenders = Default::default();
-        block1.block.header.set_hash(B256::new([0x01; 32]));
-        block1.block.header.set_block_number(10);
+        block1.block.set_hash(B256::new([0x01; 32]));
+        block1.block.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
@@ -785,8 +785,8 @@ mod tests {
 
         // Push another notification
         let mut block2: SealedBlockWithSenders = Default::default();
-        block2.block.header.set_hash(B256::new([0x02; 32]));
-        block2.block.header.set_block_number(20);
+        block2.block.set_hash(B256::new([0x02; 32]));
+        block2.block.set_block_number(20);
 
         let notification2 = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block2.clone()], Default::default(), Default::default())),
@@ -828,8 +828,8 @@ mod tests {
 
         // Push some notifications to fill part of the buffer
         let mut block1: SealedBlockWithSenders = Default::default();
-        block1.block.header.set_hash(B256::new([0x01; 32]));
-        block1.block.header.set_block_number(10);
+        block1.set_hash(B256::new([0x01; 32]));
+        block1.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
@@ -1117,12 +1117,12 @@ mod tests {
 
         // Setup two blocks for the chain commit notification
         let mut block1: SealedBlockWithSenders = Default::default();
-        block1.block.header.set_hash(B256::new([0x01; 32]));
-        block1.block.header.set_block_number(10);
+        block1.block.set_hash(B256::new([0x01; 32]));
+        block1.block.set_block_number(10);
 
         let mut block2: SealedBlockWithSenders = Default::default();
-        block2.block.header.set_hash(B256::new([0x02; 32]));
-        block2.block.header.set_block_number(11);
+        block2.block.set_hash(B256::new([0x02; 32]));
+        block2.block.set_block_number(11);
 
         // Setup a notification
         let notification = ExExNotification::ChainCommitted {
@@ -1170,8 +1170,8 @@ mod tests {
         exex_handle.finished_height = Some(BlockNumHash::new(15, B256::random()));
 
         let mut block1: SealedBlockWithSenders = Default::default();
-        block1.block.header.set_hash(B256::new([0x01; 32]));
-        block1.block.header.set_block_number(10);
+        block1.block.set_hash(B256::new([0x01; 32]));
+        block1.block.set_block_number(10);
 
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
@@ -1327,7 +1327,7 @@ mod tests {
         };
 
         let (finalized_headers_tx, rx) = watch::channel(None);
-        finalized_headers_tx.send(Some(genesis_block.header.clone()))?;
+        finalized_headers_tx.send(Some(genesis_block.sealed_header().clone()))?;
         let finalized_header_stream = ForkChoiceStream::new(rx);
 
         let mut exex_manager = std::pin::pin!(ExExManager::new(
@@ -1361,7 +1361,7 @@ mod tests {
             [notification.clone()]
         );
 
-        finalized_headers_tx.send(Some(block.header.clone()))?;
+        finalized_headers_tx.send(Some(block.sealed_header().clone()))?;
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL isn't finalized because the ExEx didn't emit the `FinishedHeight` event
         assert_eq!(
@@ -1374,7 +1374,7 @@ mod tests {
             .send(ExExEvent::FinishedHeight((rng.gen::<u64>(), rng.gen::<B256>()).into()))
             .unwrap();
 
-        finalized_headers_tx.send(Some(block.header.clone()))?;
+        finalized_headers_tx.send(Some(block.sealed_header().clone()))?;
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL isn't finalized because the ExEx emitted a `FinishedHeight` event with a
         // non-canonical block
@@ -1386,7 +1386,7 @@ mod tests {
         // Send a `FinishedHeight` event with a canonical block
         events_tx.send(ExExEvent::FinishedHeight(block.num_hash())).unwrap();
 
-        finalized_headers_tx.send(Some(block.header.clone()))?;
+        finalized_headers_tx.send(Some(block.sealed_header().clone()))?;
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL is finalized
         assert_eq!(exex_manager.wal.iter_notifications()?.next().transpose()?, None);

@@ -1199,7 +1199,8 @@ where
         durations_recorder.record_relative(MakeCanonicalAction::ClearTrieUpdatesForOtherChildren);
 
         // Send notification about new canonical chain and return outcome of canonicalization.
-        let outcome = CanonicalOutcome::Committed { head: chain_notification.tip().header.clone() };
+        let outcome =
+            CanonicalOutcome::Committed { head: chain_notification.tip().sealed_header().clone() };
         let _ = self.canon_state_notification_sender.send(chain_notification);
         Ok(outcome)
     }
@@ -1434,8 +1435,8 @@ mod tests {
     ) {
         // insert genesis to db.
 
-        genesis.header.set_block_number(10);
-        genesis.header.set_state_root(EMPTY_ROOT_HASH);
+        genesis.set_block_number(10);
+        genesis.set_state_root(EMPTY_ROOT_HASH);
         let provider = factory.provider_rw().unwrap();
 
         provider
@@ -1669,7 +1670,7 @@ mod tests {
 
         assert_eq!(
             tree.make_canonical(fork_block.hash()).unwrap(),
-            CanonicalOutcome::Committed { head: fork_block.header.clone() }
+            CanonicalOutcome::Committed { head: fork_block.sealed_header().clone() }
         );
 
         assert_eq!(
@@ -1679,7 +1680,7 @@ mod tests {
 
         assert_eq!(
             tree.make_canonical(canonical_block_1.hash()).unwrap(),
-            CanonicalOutcome::Committed { head: canonical_block_1.header.clone() }
+            CanonicalOutcome::Committed { head: canonical_block_1.sealed_header().clone() }
         );
 
         assert_eq!(
@@ -1694,12 +1695,12 @@ mod tests {
 
         assert_eq!(
             tree.make_canonical(sidechain_block_1.hash()).unwrap(),
-            CanonicalOutcome::Committed { head: sidechain_block_1.header.clone() }
+            CanonicalOutcome::Committed { head: sidechain_block_1.sealed_header().clone() }
         );
 
         assert_eq!(
             tree.make_canonical(canonical_block_1.hash()).unwrap(),
-            CanonicalOutcome::Committed { head: canonical_block_1.header.clone() }
+            CanonicalOutcome::Committed { head: canonical_block_1.sealed_header().clone() }
         );
 
         assert_eq!(
@@ -1709,7 +1710,7 @@ mod tests {
 
         assert_eq!(
             tree.make_canonical(sidechain_block_2.hash()).unwrap(),
-            CanonicalOutcome::Committed { head: sidechain_block_2.header.clone() }
+            CanonicalOutcome::Committed { head: sidechain_block_2.sealed_header().clone() }
         );
 
         assert_eq!(
@@ -1719,7 +1720,7 @@ mod tests {
 
         assert_eq!(
             tree.make_canonical(canonical_block_3.hash()).unwrap(),
-            CanonicalOutcome::Committed { head: canonical_block_3.header.clone() }
+            CanonicalOutcome::Committed { head: canonical_block_3.sealed_header().clone() }
         );
     }
 
@@ -1841,7 +1842,7 @@ mod tests {
 
         assert_eq!(
             tree.make_canonical(block2.hash()).unwrap(),
-            CanonicalOutcome::Committed { head: block2.header.clone() }
+            CanonicalOutcome::Committed { head: block2.sealed_header().clone() }
         );
 
         assert_eq!(
@@ -1854,7 +1855,7 @@ mod tests {
 
         assert_eq!(
             tree.make_canonical(block3.hash()).unwrap(),
-            CanonicalOutcome::Committed { head: block3.header.clone() }
+            CanonicalOutcome::Committed { head: block3.sealed_header().clone() }
         );
 
         assert_eq!(
@@ -1876,7 +1877,7 @@ mod tests {
 
         assert_eq!(
             tree.make_canonical(block5.hash()).unwrap(),
-            CanonicalOutcome::Committed { head: block5.header.clone() }
+            CanonicalOutcome::Committed { head: block5.sealed_header().clone() }
         );
 
         let provider = tree.externals.provider_factory.provider().unwrap();
@@ -2337,7 +2338,7 @@ mod tests {
         assert_eq!(
             tree.insert_block(block2b.clone(), BlockValidationKind::Exhaustive).unwrap(),
             InsertPayloadOk::Inserted(BlockStatus::Disconnected {
-                head: block2.header.num_hash(),
+                head: block2.num_hash(),
                 missing_ancestor: block2b.parent_num_hash()
             })
         );
