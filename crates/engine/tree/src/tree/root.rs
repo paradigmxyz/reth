@@ -97,11 +97,36 @@ impl<Factory> StateRootConfig<Factory> {
     }
 }
 
+/// A proof target, this can be either:
+/// * An address, for fetching account proofs, or
+/// * An address and storage slot, for fetching storage proofs
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum ProofTarget {
+    /// Account proof target
+    Account(Address),
+    /// Storage proof target
+    Storage {
+        /// The account
+        account: Address,
+        /// The slot
+        slot: B256,
+    },
+}
+
+impl ProofTarget {
+    /// Returns the address for the account referenced in the proof target.
+    pub const fn address(&self) -> &Address {
+        match self {
+            Self::Account(account) | Self::Storage { account, .. } => account,
+        }
+    }
+}
+
 /// Messages used internally by the state root task
 #[derive(Debug)]
 pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     /// Prefetch proof targets
-    PrefetchProofs(HashSet<Address>),
+    PrefetchProofs(HashSet<ProofTarget>),
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
@@ -343,14 +368,16 @@ where
     fn on_prefetch_proof(
         scope: &rayon::Scope<'env>,
         config: StateRootConfig<Factory>,
-        targets: HashSet<Address>,
+        targets: HashSet<ProofTarget>,
         fetched_proof_targets: &mut MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
         thread_pool: &'env rayon::ThreadPool,
     ) {
-        let proof_targets =
-            targets.into_iter().map(|address| (keccak256(address), Default::default())).collect();
+        let proof_targets = targets
+            .into_iter()
+            .map(|target| (keccak256(target.address()), Default::default()))
+            .collect();
         extend_multi_proof_targets_ref(fetched_proof_targets, &proof_targets);
 
         Self::spawn_multiproof(
