@@ -442,7 +442,7 @@ where
         let time = Instant::now();
 
         // write output
-        provider.write_state(state, OriginalValuesKnown::Yes, StorageLocation::StaticFiles)?;
+        provider.write_state(&state, OriginalValuesKnown::Yes, StorageLocation::StaticFiles)?;
 
         let db_write_duration = time.elapsed();
         debug!(

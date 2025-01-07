@@ -287,7 +287,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 let provider_rw = provider_factory.provider_rw()?;
                 provider_rw.append_blocks_with_state(
                     Vec::from([block_with_senders]),
-                    execution_outcome,
+                    &execution_outcome,
                     hashed_post_state.into_sorted(),
                     trie_updates,
                 )?;

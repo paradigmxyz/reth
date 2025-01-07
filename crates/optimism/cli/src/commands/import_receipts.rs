@@ -223,7 +223,7 @@ where
 
         // finally, write the receipts
         provider.write_state(
-            execution_outcome,
+            &execution_outcome,
             OriginalValuesKnown::Yes,
             StorageLocation::StaticFiles,
         )?;

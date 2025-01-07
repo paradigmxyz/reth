@@ -1810,7 +1810,7 @@ mod tests {
                 .into_iter()
                 .map(|b| b.seal_with_senders().expect("failed to seal block with senders"))
                 .collect(),
-            ExecutionOutcome {
+            &ExecutionOutcome {
                 bundle: BundleState::new(
                     database_state.into_iter().map(|(address, (account, _))| {
                         (address, None, Some(account.into()), Default::default())

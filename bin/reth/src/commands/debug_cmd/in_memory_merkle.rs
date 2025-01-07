@@ -177,7 +177,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
         )?;
         provider_rw.write_state(
-            execution_outcome,
+            &execution_outcome,
             OriginalValuesKnown::No,
             StorageLocation::Database,
         )?;
