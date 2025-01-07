@@ -295,6 +295,15 @@ impl Default for BasicPayloadJobGeneratorConfig {
 }
 
 /// A basic payload job that continuously builds a payload with the best transactions from the pool.
+///
+/// This type is a [`PayloadJob`] and [`Future`] that terminates when the deadline is reached or
+/// when the job is resolved: [`PayloadJob::resolve`].
+///
+/// This basic job implementation will trigger new payload build task continuously until the job is
+/// resolved or the deadline is reached, or until the built payload is marked as frozen:
+/// [`BuildOutcome::Freeze`]. Once a frozen payload is returned, no additional payloads will be
+/// built and this future will wait to be resolved: [`PayloadJob::resolve`] or terminated if the
+/// deadline is reached..
 #[derive(Debug)]
 pub struct BasicPayloadJob<Client, Pool, Tasks, Builder>
 where

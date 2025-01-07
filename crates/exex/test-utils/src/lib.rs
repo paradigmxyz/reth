@@ -17,7 +17,6 @@ use std::{
 
 use alloy_eips::BlockNumHash;
 use futures_util::FutureExt;
-use reth_blockchain_tree::noop::NoopBlockchainTree;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_consensus::test_utils::TestConsensus;
 use reth_db::{
@@ -38,7 +37,7 @@ use reth_node_builder::{
         Components, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NodeComponentsBuilder,
         PoolBuilder,
     },
-    BuilderContext, Node, NodeAdapter, RethFullAdapter,
+    BuilderContext, Node, NodeAdapter, RethFullAdapter2,
 };
 use reth_node_core::node_config::NodeConfig;
 use reth_node_ethereum::{
@@ -47,13 +46,11 @@ use reth_node_ethereum::{
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
 use reth_primitives::{BlockExt, EthPrimitives, Head, SealedBlockWithSenders, TransactionSigned};
-use reth_provider::{
-    providers::{BlockchainProvider, StaticFileProvider},
-    BlockReader, EthStorage, ProviderFactory,
-};
+use reth_provider::{providers::StaticFileProvider, BlockReader, EthStorage, ProviderFactory};
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
+use reth_provider::providers::BlockchainProvider2;
 use tempfile::TempDir;
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
@@ -172,14 +169,14 @@ pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
 /// The [`NodeAdapter`] for the [`TestExExContext`]. Contains type necessary to
 /// boot the testing environment
 pub type Adapter = NodeAdapter<
-    RethFullAdapter<TmpDB, TestNode>,
+    RethFullAdapter2<TmpDB, TestNode>,
     <<TestNode as Node<
         FullNodeTypesAdapter<
             TestNode,
             TmpDB,
-            BlockchainProvider<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
+            BlockchainProvider2<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
         >,
-    >>::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<TmpDB, TestNode>>>::Components,
+    >>::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter2<TmpDB, TestNode>>>::Components,
 >;
 /// An [`ExExContext`] using the [`Adapter`] type.
 pub type TestExExContext = ExExContext<Adapter>;
@@ -274,8 +271,7 @@ pub async fn test_exex_context_with_chain_spec(
     );
 
     let genesis_hash = init_genesis(&provider_factory)?;
-    let provider =
-        BlockchainProvider::new(provider_factory.clone(), Arc::new(NoopBlockchainTree::default()))?;
+    let provider = BlockchainProvider2::new(provider_factory.clone())?;
 
     let network_manager = NetworkManager::new(
         NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))

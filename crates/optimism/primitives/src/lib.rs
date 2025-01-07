@@ -21,7 +21,7 @@ mod receipt;
 pub use receipt::OpReceipt;
 
 /// Optimism-specific block type.
-pub type OpBlock = reth_primitives::Block<OpTransactionSigned>;
+pub type OpBlock = alloy_consensus::Block<OpTransactionSigned>;
 
 /// Optimism-specific block body type.
 pub type OpBlockBody = <OpBlock as Block>::Body;
@@ -31,7 +31,7 @@ pub type OpBlockBody = <OpBlock as Block>::Body;
 pub struct OpPrimitives;
 
 #[cfg(feature = "optimism")]
-impl reth_primitives::NodePrimitives for OpPrimitives {
+impl reth_primitives_traits::NodePrimitives for OpPrimitives {
     type Block = OpBlock;
     type BlockHeader = alloy_consensus::Header;
     type BlockBody = OpBlockBody;
