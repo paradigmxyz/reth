@@ -1,5 +1,5 @@
 use crate::engine::hooks::EngineHookError;
-use alloy_rpc_types_engine::ForkchoiceUpdateError;
+pub use reth_engine_primitives::BeaconForkChoiceUpdateError;
 use reth_errors::{DatabaseError, RethError};
 use reth_stages_api::PipelineError;
 
@@ -40,40 +40,5 @@ impl From<PipelineError> for BeaconConsensusEngineError {
 impl From<DatabaseError> for BeaconConsensusEngineError {
     fn from(e: DatabaseError) -> Self {
         Self::Common(e.into())
-    }
-}
-
-/// Represents error cases for an applied forkchoice update.
-///
-/// This represents all possible error cases, that must be returned as JSON RPC errors back to the
-/// beacon node.
-#[derive(Debug, thiserror::Error)]
-pub enum BeaconForkChoiceUpdateError {
-    /// Thrown when a forkchoice update resulted in an error.
-    #[error("forkchoice update error: {0}")]
-    ForkchoiceUpdateError(#[from] ForkchoiceUpdateError),
-    /// Thrown when the engine task is unavailable/stopped.
-    #[error("beacon consensus engine task stopped")]
-    EngineUnavailable,
-    /// An internal error occurred, not necessarily related to the update.
-    #[error(transparent)]
-    Internal(Box<dyn core::error::Error + Send + Sync>),
-}
-
-impl BeaconForkChoiceUpdateError {
-    /// Create a new internal error.
-    pub fn internal<E: core::error::Error + Send + Sync + 'static>(e: E) -> Self {
-        Self::Internal(Box::new(e))
-    }
-}
-
-impl From<RethError> for BeaconForkChoiceUpdateError {
-    fn from(e: RethError) -> Self {
-        Self::internal(e)
-    }
-}
-impl From<DatabaseError> for BeaconForkChoiceUpdateError {
-    fn from(e: DatabaseError) -> Self {
-        Self::internal(e)
     }
 }
