@@ -1,9 +1,10 @@
 //! Support for representing the version of the `eth`
 
-use std::{fmt, str::FromStr};
-
+use crate::alloc::string::ToString;
+use alloc::string::String;
 use alloy_rlp::{Decodable, Encodable, Error as RlpError};
 use bytes::BufMut;
+use core::{fmt, str::FromStr};
 use derive_more::Display;
 use reth_codecs_derive::add_arbitrary_tests;
 

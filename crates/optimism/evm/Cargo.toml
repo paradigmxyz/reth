@@ -46,6 +46,7 @@ revm-primitives.workspace = true
 # misc
 derive_more.workspace = true
 tracing.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 reth-evm = { workspace = true, features = ["test-utils"] }
@@ -67,12 +68,15 @@ std = [
 	"alloy-genesis/std",
 	"alloy-primitives/std",
 	"revm-primitives/std",
-    "reth-primitives-traits/std",
+	"reth-primitives-traits/std",
 	"revm/std",
 	"reth-optimism-primitives/std",
 	"reth-ethereum-forks/std",
 	"derive_more/std",
-	"reth-optimism-forks/std"
+	"reth-optimism-forks/std",
+	"thiserror/std",
+	"op-alloy-consensus/std",
+	"reth-chainspec/std"
 ]
 optimism = [
 	"reth-primitives/optimism",

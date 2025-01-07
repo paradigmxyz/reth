@@ -22,6 +22,7 @@ use reth_node_core::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use reth_node_metrics::recorder::install_prometheus_recorder;
+use reth_primitives::EthPrimitives;
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_evm::ScrollExecutorProvider;
 use reth_tracing::FileWorkerGuard;
@@ -103,7 +104,7 @@ where
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
-        Types: CliNodeTypes<ChainSpec = C::ChainSpec>,
+        Types: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>,
     {
         // add network name to logs dir
         self.logs.log_file_directory =

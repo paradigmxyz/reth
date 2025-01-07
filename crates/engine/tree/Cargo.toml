@@ -33,7 +33,6 @@ reth-revm.workspace = true
 reth-scroll-primitives = { workspace = true, optional = true }
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
-reth-trie-db.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie.workspace = true
@@ -63,6 +62,7 @@ reth-metrics = { workspace = true, features = ["common"] }
 # misc
 rayon.workspace = true
 tracing.workspace = true
+derive_more.workspace = true
 
 # optional deps for test-utils
 reth-prune-types = { workspace = true, optional = true }
@@ -86,6 +86,8 @@ reth-stages = { workspace = true, features = ["test-utils"] }
 reth-static-file.workspace = true
 reth-testing-utils.workspace = true
 reth-tracing.workspace = true
+reth-trie-db.workspace = true
+proptest.workspace = true
 
 # alloy
 alloy-rlp.workspace = true
@@ -124,8 +126,10 @@ test-utils = [
     "reth-static-file",
     "reth-tracing",
     "reth-trie/test-utils",
+    "reth-trie-sparse/test-utils",
     "reth-prune-types?/test-utils",
     "reth-trie-db/test-utils",
+	"reth-trie-parallel/test-utils",
     "reth-scroll-state-commitment?/test-utils"
 ]
 scroll = [

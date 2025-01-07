@@ -61,7 +61,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
-use tracing::{debug, trace};
+use tracing::trace;
 use validation::FilterOutcome;
 
 /// The type responsible for fetching missing transactions from peers.
@@ -626,7 +626,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         {
             for hash in &new_announced_hashes {
                 if self.hashes_pending_fetch.contains(hash) {
-                    debug!(target: "net::tx", "`{}` should have been taken out of buffer before packing in a request, breaks invariant `@hashes_pending_fetch` and `@inflight_requests`, `@hashes_fetch_inflight_and_pending_fetch` for `{}`: {:?}",
+                    tracing::debug!(target: "net::tx", "`{}` should have been taken out of buffer before packing in a request, breaks invariant `@hashes_pending_fetch` and `@inflight_requests`, `@hashes_fetch_inflight_and_pending_fetch` for `{}`: {:?}",
                         format!("{:?}", new_announced_hashes), // Assuming new_announced_hashes can be debug-printed directly
                         format!("{:?}", new_announced_hashes),
                         new_announced_hashes.iter().map(|hash| {
@@ -1498,8 +1498,7 @@ mod test {
             assert_ne!(hash, signed_tx_2.hash())
         }
 
-        let request_hashes =
-            RequestTxHashes::new(request_hashes.into_iter().collect::<HashSet<_>>());
+        let request_hashes = RequestTxHashes::new(request_hashes.into_iter().collect());
 
         // but response contains tx 1 + another tx
         let response_txns = PooledTransactions(vec![signed_tx_1.clone(), signed_tx_2]);

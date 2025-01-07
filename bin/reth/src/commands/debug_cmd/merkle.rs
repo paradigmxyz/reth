@@ -1,4 +1,4 @@
-//! Command for debugging merkle trie calculation.
+//! Command for debugging merkle tree calculation.
 use crate::{args::NetworkArgs, utils::get_single_header};
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
@@ -19,6 +19,7 @@ use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
 use reth_node_api::{BlockTy, NodePrimitives};
 use reth_node_ethereum::EthExecutorProvider;
+use reth_primitives::EthPrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockNumReader, BlockWriter, ChainSpecProvider,
     DatabaseProviderFactory, HeaderProvider, LatestStateProviderRef, OriginalValuesKnown,
@@ -87,7 +88,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `merkle-debug` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
@@ -164,7 +165,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             let mut executor = executor_provider.batch_executor(StateProviderDatabase::new(
                 LatestStateProviderRef::new(&provider_rw),
             ));
-            executor.execute_and_verify_one((&sealed_block.clone().unseal(), td).into())?;
+            executor.execute_and_verify_one(&sealed_block.clone().unseal())?;
             let execution_outcome = executor.finalize();
 
             provider_rw.write_state(
@@ -215,10 +216,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
             let clean_input = ExecInput { target: Some(sealed_block.number), checkpoint: None };
             loop {
-                let clean_result = merkle_stage.execute(&provider_rw, clean_input);
-                assert!(clean_result.is_ok(), "Clean state root calculation failed");
-                if clean_result.unwrap().done {
-                    break
+                let clean_result = merkle_stage
+                    .execute(&provider_rw, clean_input)
+                    .map_err(|e| eyre::eyre!("Clean state root calculation failed: {}", e))?;
+                if clean_result.done {
+                    break;
                 }
             }
 

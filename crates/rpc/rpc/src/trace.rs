@@ -14,13 +14,11 @@ use alloy_rpc_types_trace::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::EthereumHardforks;
-use reth_consensus_common::calc::{
-    base_block_reward, base_block_reward_pre_merge, block_reward, ommer_reward,
-};
+use reth_chainspec::{EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
+use reth_consensus_common::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
 use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_primitives_traits::{BlockBody, BlockHeader};
-use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider, HeaderProvider};
+use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
@@ -313,9 +311,7 @@ where
 
         // add reward traces for all blocks
         for block in &blocks {
-            if let Some(base_block_reward) =
-                self.calculate_base_block_reward(block.header.header())?
-            {
+            if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
                 all_traces.extend(
                     self.extract_reward_traces(
                         block.header.header(),
@@ -509,30 +505,19 @@ where
         header: &H,
     ) -> Result<Option<u128>, Eth::Error> {
         let chain_spec = self.provider().chain_spec();
-        let is_paris_activated = chain_spec.is_paris_active_at_block(header.number());
+        let is_paris_activated = if chain_spec.chain() == MAINNET.chain() {
+            Some(header.number()) >= EthereumHardfork::Paris.mainnet_activation_block()
+        } else if chain_spec.chain() == SEPOLIA.chain() {
+            Some(header.number()) >= EthereumHardfork::Paris.sepolia_activation_block()
+        } else {
+            true
+        };
 
-        Ok(match is_paris_activated {
-            Some(true) => None,
-            Some(false) => Some(base_block_reward_pre_merge(&chain_spec, header.number())),
-            None => {
-                // if Paris hardfork is unknown, we need to fetch the total difficulty at the
-                // block's height and check if it is pre-merge to calculate the base block reward
-                if let Some(header_td) = self
-                    .provider()
-                    .header_td_by_number(header.number())
-                    .map_err(Eth::Error::from_eth_err)?
-                {
-                    base_block_reward(
-                        chain_spec.as_ref(),
-                        header.number(),
-                        header.difficulty(),
-                        header_td,
-                    )
-                } else {
-                    None
-                }
-            }
-        })
+        if is_paris_activated {
+            return Ok(None)
+        }
+
+        Ok(Some(base_block_reward_pre_merge(&chain_spec, header.number())))
     }
 
     /// Extracts the reward traces for the given block:

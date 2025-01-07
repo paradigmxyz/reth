@@ -81,17 +81,11 @@ impl ConfigureEvmEnv for ScrollEvmConfig {
         /* noop */
     }
 
-    fn fill_cfg_env(
-        &self,
-        cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Self::Header,
-        total_difficulty: U256,
-    ) {
+    fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
         let spec_id = self.spec_id_at_head(&Head {
             number: header.number,
             timestamp: header.timestamp,
             difficulty: header.difficulty,
-            total_difficulty,
             ..Default::default()
         });
 
@@ -102,7 +96,7 @@ impl ConfigureEvmEnv for ScrollEvmConfig {
         cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
     }
 
-    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, after_merge: bool) {
+    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, spec_id: SpecId) {
         block_env.number = U256::from(header.number);
 
         if let Some(vault_address) = self.chain_spec.config.fee_vault_address {
@@ -112,7 +106,7 @@ impl ConfigureEvmEnv for ScrollEvmConfig {
         }
 
         block_env.timestamp = U256::from(header.timestamp);
-        if after_merge {
+        if spec_id >= SpecId::MERGE {
             block_env.prevrandao = Some(header.mix_hash);
             block_env.difficulty = U256::ZERO;
         } else {
@@ -211,7 +205,7 @@ mod tests {
         let curie_header = Header { number: 7096836, ..Default::default() };
 
         // fill cfg env
-        config.fill_cfg_env(&mut cfg_env, &curie_header, U256::ZERO);
+        config.fill_cfg_env(&mut cfg_env, &curie_header);
 
         // check correct cfg env
         assert_eq!(cfg_env.chain_id, Scroll as u64);
@@ -224,7 +218,7 @@ mod tests {
         let bernouilli_header = Header { number: 5220340, ..Default::default() };
 
         // fill cfg env
-        config.fill_cfg_env(&mut cfg_env, &bernouilli_header, U256::ZERO);
+        config.fill_cfg_env(&mut cfg_env, &bernouilli_header);
 
         // check correct cfg env
         assert_eq!(cfg_env.chain_id, Scroll as u64);
@@ -237,7 +231,7 @@ mod tests {
         let pre_bernouilli_header = Header { number: 0, ..Default::default() };
 
         // fill cfg env
-        config.fill_cfg_env(&mut cfg_env, &pre_bernouilli_header, U256::ZERO);
+        config.fill_cfg_env(&mut cfg_env, &pre_bernouilli_header);
 
         // check correct cfg env
         assert_eq!(cfg_env.chain_id, Scroll as u64);
@@ -265,7 +259,7 @@ mod tests {
         };
 
         // fill block env
-        config.fill_block_env(&mut block_env, &header, true);
+        config.fill_block_env(&mut block_env, &header, SpecId::MERGE);
 
         // verify block env correctly updated
         let expected = BlockEnv {

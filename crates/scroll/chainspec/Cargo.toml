@@ -58,5 +58,6 @@ std = [
 	"once_cell/std",
 	"serde/std",
 	"derive_more/std",
-	"reth-network-peers/std"
+	"reth-network-peers/std",
+	"serde_json/std"
 ]

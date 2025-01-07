@@ -11,14 +11,14 @@ use crate::{
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, EvmEnvProvider, HashingWriter, HeaderProvider, HeaderSyncGap,
-    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
-    KeyHasherProvider, LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
-    StageCheckpointReader, StateCommitmentProvider, StateProviderBox, StateRootProviderExt,
-    StateWriter, StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader,
-    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
-    TrieWriter, WithdrawalsProvider,
+    DBProvider, HashingWriter, HeaderProvider, HeaderSyncGap, HeaderSyncGapProvider,
+    HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter, KeyHasherProvider,
+    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
+    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
+    StateCommitmentProvider, StateProviderBox, StateRootProviderExt, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader, StorageTrieWriter,
+    TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
+    WithdrawalsProvider,
 };
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::{
@@ -48,7 +48,6 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_network_p2p::headers::downloader::SyncTarget;
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, ReceiptTy, TxTy};
@@ -869,8 +868,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        Ok(self.tx.get::<tables::PlainAccountState>(address)?)
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        Ok(self.tx.get_by_encoded_key::<tables::PlainAccountState>(address)?)
     }
 }
 
@@ -1636,24 +1635,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockBodyIndicesProvider
 {
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
-    }
-}
-
-impl<TX: DbTx + 'static, N: NodeTypesForProvider> EvmEnvProvider<HeaderTy<N>>
-    for DatabaseProvider<TX, N>
-{
-    fn env_with_header<EvmConfig>(
-        &self,
-        header: &HeaderTy<N>,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<EvmEnv>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        let total_difficulty = self
-            .header_td_by_number(header.number())?
-            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?;
-        Ok(evm_config.cfg_and_block_env(header, total_difficulty))
     }
 }
 

@@ -19,7 +19,6 @@ use parking_lot::Mutex;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_engine_primitives::{EngineTypes, EngineValidator};
-use reth_evm::provider::EvmEnvProvider;
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes,
@@ -27,9 +26,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives::EthereumHardfork;
 use reth_rpc_api::EngineApiServer;
-use reth_rpc_types_compat::engine::payload::{
-    convert_payload_input_v2_to_payload, convert_to_payload_body_v1,
-};
+use reth_rpc_types_compat::engine::payload::convert_to_payload_body_v1;
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -80,7 +77,7 @@ struct EngineApiInner<Provider, EngineT: EngineTypes, Pool, Validator, ChainSpec
 impl<Provider, EngineT, Pool, Validator, ChainSpec>
     EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
@@ -177,7 +174,7 @@ where
         &self,
         payload: ExecutionPayloadInputV2,
     ) -> EngineApiResult<PayloadStatus> {
-        let payload = convert_payload_input_v2_to_payload(payload);
+        let payload = payload.into_payload();
         let payload_or_attrs =
             PayloadOrAttributes::<'_, EngineT::PayloadAttributes>::from_execution_payload(
                 &payload, None,
@@ -280,11 +277,7 @@ where
                 payload,
                 ExecutionPayloadSidecar::v4(
                     CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
-                    PraguePayloadFields {
-                        requests: RequestsOrHash::Requests(execution_requests),
-                        // TODO: add as an argument and handle in `try_into_block`
-                        target_blobs_per_block: 0,
-                    },
+                    PraguePayloadFields { requests: RequestsOrHash::Requests(execution_requests) },
                 ),
             )
             .await
@@ -744,7 +737,7 @@ where
 impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
-    Provider: HeaderProvider + BlockReader + StateProviderFactory + EvmEnvProvider + 'static,
+    Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
     EngineT: EngineTypes,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
@@ -1032,7 +1025,6 @@ mod tests {
     use super::*;
     use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
     use assert_matches::assert_matches;
-    use reth_beacon_consensus::BeaconConsensusEngineEvent;
     use reth_chainspec::{ChainSpec, MAINNET};
     use reth_engine_primitives::BeaconEngineMessage;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
@@ -1042,7 +1034,6 @@ mod tests {
     use reth_rpc_types_compat::engine::payload::execution_payload_from_sealed_block;
     use reth_tasks::TokioTaskExecutor;
     use reth_testing_utils::generators::random_block;
-    use reth_tokio_util::EventSender;
     use reth_transaction_pool::noop::NoopTransactionPool;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
@@ -1067,12 +1058,11 @@ mod tests {
         let provider = Arc::new(MockEthProvider::default());
         let payload_store = spawn_test_payload_service();
         let (to_engine, engine_rx) = unbounded_channel();
-        let event_sender: EventSender<BeaconConsensusEngineEvent> = Default::default();
         let task_executor = Box::<TokioTaskExecutor>::default();
         let api = EngineApi::new(
             provider.clone(),
             chain_spec.clone(),
-            BeaconConsensusEngineHandle::new(to_engine, event_sender),
+            BeaconConsensusEngineHandle::new(to_engine),
             payload_store.into(),
             NoopTransactionPool::default(),
             task_executor,

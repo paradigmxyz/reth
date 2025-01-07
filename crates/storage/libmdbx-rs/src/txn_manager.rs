@@ -94,7 +94,7 @@ impl TxnManager {
                 }
             }
         };
-        std::thread::Builder::new().name("mbdx-rs-txn-manager".to_string()).spawn(task).unwrap();
+        std::thread::Builder::new().name("mdbx-rs-txn-manager".to_string()).spawn(task).unwrap();
     }
 
     pub(crate) fn send_message(&self, message: TxnManagerMessage) {

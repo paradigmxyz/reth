@@ -170,10 +170,10 @@ where
             protocols: ProtocolInfo {
                 eth: Some(EthProtocolInfo {
                     network: status.eth_protocol_info.network,
-                    difficulty: status.eth_protocol_info.difficulty,
                     genesis: status.eth_protocol_info.genesis,
                     config,
                     head: status.eth_protocol_info.head,
+                    difficulty: None,
                 }),
                 snap: None,
             },

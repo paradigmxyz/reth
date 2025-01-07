@@ -24,8 +24,6 @@ reth-prune-types.workspace = true
 reth-revm.workspace = true
 reth-storage-errors.workspace = true
 
-reth-storage-api = { workspace = true, optional = true }
-
 # scroll
 revm.workspace = true
 revm-primitives.workspace = true
@@ -61,7 +59,8 @@ std = [
 	"alloy-consensus/std",
 	"revm-primitives/std",
 	"revm/std",
-	"reth-ethereum-forks/std"
+	"reth-ethereum-forks/std",
+	"reth-chainspec/std"
 ]
 test-utils = [
     "dep:parking_lot",
@@ -70,7 +69,6 @@ test-utils = [
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-revm/test-utils",
-	"dep:reth-storage-api",
     "revm/test-utils",
     "reth-prune-types/test-utils",
     "reth-scroll-execution/test-utils"

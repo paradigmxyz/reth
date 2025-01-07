@@ -4,6 +4,7 @@ use alloy_consensus::TxEip1559;
 use alloy_genesis::Genesis;
 use alloy_network::TxSignerSync;
 use alloy_primitives::{Address, ChainId, TxKind};
+use op_alloy_consensus::OpTypedTransaction;
 use reth_chainspec::EthChainSpec;
 use reth_db::test_utils::create_test_rw_db_with_path;
 use reth_e2e_test_utils::{
@@ -25,9 +26,9 @@ use reth_optimism_node::{
     OpEngineTypes, OpNode,
 };
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
-use reth_optimism_primitives::OpPrimitives;
+use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::{PayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed};
-use reth_primitives::{RecoveredTx, SealedBlock, Transaction, TransactionSigned};
+use reth_primitives::RecoveredTx;
 use reth_provider::providers::BlockchainProvider2;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::{pool::BestPayloadTransactions, PoolTransaction};
@@ -44,10 +45,10 @@ impl OpPayloadTransactions for CustomTxPriority {
         &self,
         pool: Pool,
         attr: reth_transaction_pool::BestTransactionsAttributes,
-    ) -> impl PayloadTransactions<Transaction = TransactionSigned>
+    ) -> impl PayloadTransactions<Transaction = OpTransactionSigned>
     where
         Pool: reth_transaction_pool::TransactionPool<
-            Transaction: PoolTransaction<Consensus = TransactionSigned>,
+            Transaction: PoolTransaction<Consensus = OpTransactionSigned>,
         >,
     {
         // Block composition:
@@ -67,7 +68,10 @@ impl OpPayloadTransactions for CustomTxPriority {
         };
         let signature = sender.sign_transaction_sync(&mut end_of_block_tx).unwrap();
         let end_of_block_tx = RecoveredTx::from_signed_transaction(
-            TransactionSigned::new_unhashed(Transaction::Eip1559(end_of_block_tx), signature),
+            OpTransactionSigned::new_unhashed(
+                OpTypedTransaction::Eip1559(end_of_block_tx),
+                signature,
+            ),
             sender.address(),
         );
 
@@ -182,12 +186,14 @@ async fn test_custom_block_priority_config() {
         .unwrap();
     assert_eq!(block_payloads.len(), 1);
     let (block_payload, _) = block_payloads.first().unwrap();
-    let block_payload: SealedBlock = block_payload.block().clone();
+    let block_payload = block_payload.block().clone();
     assert_eq!(block_payload.body.transactions.len(), 2); // L1 block info tx + end-of-block custom tx
 
     // Check that last transaction in the block looks like a transfer to a random address.
     let end_of_block_tx = block_payload.body.transactions.last().unwrap();
-    let end_of_block_tx = end_of_block_tx.transaction.as_eip1559().unwrap();
+    let OpTypedTransaction::Eip1559(end_of_block_tx) = &end_of_block_tx.transaction else {
+        panic!("expected EIP-1559 transaction");
+    };
     assert_eq!(end_of_block_tx.nonce, 1);
     assert_eq!(end_of_block_tx.gas_limit, 21_000);
     assert!(end_of_block_tx.input.is_empty());

@@ -4,7 +4,7 @@ use crate::{
     BlockHeader, FullSignedTx, InMemorySize, MaybeSerde, MaybeSerdeBincodeCompat, SignedTransaction,
 };
 use alloc::{fmt, vec::Vec};
-use alloy_consensus::Transaction;
+use alloy_consensus::{Header, Transaction};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Bytes, B256};
 
@@ -98,3 +98,35 @@ pub trait BlockBody:
         self.encoded_2718_transactions_iter().map(Into::into).collect()
     }
 }
+
+impl<T> BlockBody for alloy_consensus::BlockBody<T>
+where
+    T: SignedTransaction,
+{
+    type Transaction = T;
+    type OmmerHeader = Header;
+
+    fn transactions(&self) -> &[Self::Transaction] {
+        &self.transactions
+    }
+
+    fn into_transactions(self) -> Vec<Self::Transaction> {
+        self.transactions
+    }
+
+    fn withdrawals(&self) -> Option<&Withdrawals> {
+        self.withdrawals.as_ref()
+    }
+
+    fn ommers(&self) -> Option<&[Self::OmmerHeader]> {
+        Some(&self.ommers)
+    }
+}
+
+/// This is a helper alias to make it easy to refer to the inner `Transaction` associated type of a
+/// given type that implements [`BlockBody`].
+pub type BodyTx<N> = <N as BlockBody>::Transaction;
+
+/// This is a helper alias to make it easy to refer to the inner `OmmerHeader` associated type of a
+/// given type that implements [`BlockBody`].
+pub type BodyOmmer<N> = <N as BlockBody>::OmmerHeader;

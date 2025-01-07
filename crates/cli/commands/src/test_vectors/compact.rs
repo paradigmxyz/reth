@@ -269,7 +269,7 @@ where
 
         let (reconstructed, _) = T::from_compact(&compact_bytes, len_or_identifier);
         reconstructed.to_compact(&mut buffer);
-        assert_eq!(buffer, compact_bytes);
+        assert_eq!(buffer, compact_bytes, "mismatch {}", type_name);
     }
 
     println!(" ✅");

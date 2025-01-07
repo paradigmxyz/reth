@@ -1,10 +1,11 @@
 //! All capability related types
 
 use crate::EthVersion;
+use alloc::{borrow::Cow, string::String, vec::Vec};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::BufMut;
+use core::fmt;
 use reth_codecs_derive::add_arbitrary_tests;
-use std::{borrow::Cow, fmt};
 
 /// A message indicating a supported capability and capability version.
 #[add_arbitrary_tests(rlp)]

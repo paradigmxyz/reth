@@ -1,15 +1,17 @@
 //! Helper function for Receipt root calculation for Optimism hardforks.
 
+use alloy_consensus::TxReceipt;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_trie::root::ordered_trie_root_with_encoder;
 use reth_chainspec::ChainSpec;
 use reth_optimism_forks::OpHardfork;
-use reth_primitives::{Receipt, ReceiptWithBloom};
+use reth_optimism_primitives::OpReceipt;
+use reth_primitives::ReceiptWithBloom;
 
 /// Calculates the receipt root for a header.
 pub(crate) fn calculate_receipt_root_optimism(
-    receipts: &[ReceiptWithBloom<Receipt>],
+    receipts: &[ReceiptWithBloom<OpReceipt>],
     chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> B256 {
@@ -25,7 +27,9 @@ pub(crate) fn calculate_receipt_root_optimism(
             .iter()
             .cloned()
             .map(|mut r| {
-                r.receipt.deposit_nonce = None;
+                if let OpReceipt::Deposit(receipt) = &mut r.receipt {
+                    receipt.deposit_nonce = None;
+                }
                 r
             })
             .collect::<Vec<_>>();
@@ -36,11 +40,11 @@ pub(crate) fn calculate_receipt_root_optimism(
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_2718(buf))
 }
 
-/// Calculates the receipt root for a header for the reference type of [Receipt].
+/// Calculates the receipt root for a header for the reference type of [`OpReceipt`].
 ///
 /// NOTE: Prefer calculate receipt root optimism if you have log blooms memoized.
 pub fn calculate_receipt_root_no_memo_optimism(
-    receipts: &[&Receipt],
+    receipts: &[&OpReceipt],
     chain_spec: impl reth_chainspec::Hardforks,
     timestamp: u64,
 ) -> B256 {
@@ -56,7 +60,9 @@ pub fn calculate_receipt_root_no_memo_optimism(
             .iter()
             .map(|r| {
                 let mut r = (*r).clone();
-                r.deposit_nonce = None;
+                if let OpReceipt::Deposit(r) = &mut r {
+                    r.deposit_nonce = None;
+                }
                 r
             })
             .collect::<Vec<_>>();
@@ -74,9 +80,11 @@ pub fn calculate_receipt_root_no_memo_optimism(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Receipt;
     use alloy_primitives::{b256, bloom, hex, Address, Bloom, Bytes, Log, LogData};
+    use op_alloy_consensus::OpDepositReceipt;
     use reth_optimism_chainspec::BASE_SEPOLIA;
-    use reth_primitives::{Receipt, ReceiptWithBloom, TxType};
+    use reth_primitives::ReceiptWithBloom;
 
     /// Tests that the receipt root is computed correctly for the regolith block.
     /// This was implemented due to a minor bug in op-geth and op-erigon where in
@@ -114,21 +122,21 @@ mod tests {
             let receipts = vec![
                 // 0xb0d6ee650637911394396d81172bd1c637d568ed1fbddab0daddfca399c58b53
                 ReceiptWithBloom {
-                    receipt: Receipt {
-                        tx_type: TxType::Deposit,
-                        success: true,
-                        cumulative_gas_used: 46913,
-                        logs: vec![],
+                    receipt: OpReceipt::Deposit(OpDepositReceipt {
+                        inner: Receipt {
+                            status: true.into(),
+                            cumulative_gas_used: 46913,
+                            logs: vec![],
+                        },
                         deposit_nonce: Some(4012991u64),
                         deposit_receipt_version: None,
-                    },
+                    }),
                     logs_bloom: Bloom(hex!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").into()),
                 },
                 // 0x2f433586bae30573c393adfa02bc81d2a1888a3d6c9869f473fb57245166bd9a
                 ReceiptWithBloom {
-                    receipt: Receipt {
-                        tx_type: TxType::Eip1559,
-                        success: true,
+                    receipt: OpReceipt::Eip1559(Receipt {
+                        status: true.into(),
                         cumulative_gas_used: 118083,
                         logs: vec![
                             Log {
@@ -164,17 +172,13 @@ mod tests {
                                     b256!("000000000000000000000000c498902843af527e674846bb7edefa8ad62b8fb9"),
                                 ], Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000003")))
                             },
-                        ],
-                        deposit_nonce: None,
-                        deposit_receipt_version: None,
-                    },
+                        ]}),
                     logs_bloom: Bloom(hex!("00001000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000000800000000000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000040000000000004000000000080000000000000000000000000000000000000000000000000000008000000000000080020000000000000000000000000002000000000000000000000000000080000010000").into()),
                 },
                 // 0x6c33676e8f6077f46a62eabab70bc6d1b1b18a624b0739086d77093a1ecf8266
                 ReceiptWithBloom {
-                    receipt: Receipt {
-                        tx_type: TxType::Eip1559,
-                        success: true,
+                    receipt: OpReceipt::Eip1559(Receipt {
+                        status: true.into(),
                         cumulative_gas_used: 189253,
                         logs: vec![
                             Log {
@@ -207,16 +211,13 @@ mod tests {
                                 Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000003")))
                             },
                         ],
-                        deposit_nonce: None,
-                        deposit_receipt_version: None,
-                    },
+                    }),
                     logs_bloom: Bloom(hex!("00000000000000000000200000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000002000000000020000000000000000000000000000000000000000000000000000000000000000020000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000040000000000004000000000080000000000000000000000000000000000000000000000000000008000000000000080020000000000000000000000000002000000000000000000000000000080000000000").into()),
                 },
                 // 0x4d3ecbef04ba7ce7f5ab55be0c61978ca97c117d7da448ed9771d4ff0c720a3f
                 ReceiptWithBloom {
-                    receipt: Receipt {
-                        tx_type: TxType::Eip1559,
-                        success: true,
+                    receipt: OpReceipt::Eip1559(Receipt {
+                        status: true.into(),
                         cumulative_gas_used: 346969,
                         logs: vec![
                             Log {
@@ -279,16 +280,13 @@ mod tests {
                                 Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002d24d8e9ac1aa79e200000000000000000000000000000000000000000000000014bc73062aea80930000000000000000000000000000000000000000000000000000000000000000")))
                             },
                         ],
-                        deposit_nonce: None,
-                        deposit_receipt_version: None,
-                    },
+                    }),
                     logs_bloom: Bloom(hex!("00200000000000000000000080000000000000000000000000040000100004000000000000000000000000100000000000000000000000000000100000000000000000000000000002000008000000200000000200000000020000000000000040000000000000000400000200000000000000000000000000000010000000000400000000010400000000000000000000000000002000c80000004080002000000000000000400200000000800000000000000000000000000000000000000000000002000000000000000000000000000000000100001000000000000000000000002000000000000000000000010000000000000000000000800000800000").into()),
                 },
                 // 0xf738af5eb00ba23dbc1be2dbce41dbc0180f0085b7fb46646e90bf737af90351
                 ReceiptWithBloom {
-                    receipt: Receipt {
-                        tx_type: TxType::Eip1559,
-                        success: true,
+                    receipt: OpReceipt::Eip1559(Receipt {
+                        status: true.into(),
                         cumulative_gas_used: 623249,
                         logs: vec![
                             Log {
@@ -321,9 +319,7 @@ mod tests {
                                 Bytes::from_static(&hex!("0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000a4fa7f3fbf0677f254ebdb1646146864c305b76e00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000007717500762343034303661353035646234633961386163316433306335633332303265370000000000000000000000000000000000000000000000000000000000000037697066733a2f2f516d515141646b33736538396b47716577395256567a316b68643548375562476d4d4a485a62566f386a6d346f4a2f30000000000000000000")))
                             },
                         ],
-                        deposit_nonce: None,
-                        deposit_receipt_version: None,
-                    },
+                    }),
                     logs_bloom: Bloom(hex!("00000000000000000000000000000000400000000000000000000000000000000000004000000000000001000000000000000002000000000100000000000000000000000000000000000008000000000000000000000000000000000000000004000000020000000000000000000800000000000000000000000010200100200008000002000000000000000000800000000000000000000002000000000000000000000000000000080000000000000000000000004000000000000000000000000002000000000000000000000000000000000000200000000000000020002000000000000000002000000000000000000000000000000000000000000000").into()),
                 },
             ];
@@ -340,14 +336,11 @@ mod tests {
         }];
         let logs_bloom = bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001");
         let receipt = ReceiptWithBloom {
-            receipt: Receipt {
-                tx_type: TxType::Eip2930,
-                success: true,
+            receipt: OpReceipt::Eip2930(Receipt {
+                status: true.into(),
                 cumulative_gas_used: 102068,
                 logs,
-                deposit_nonce: None,
-                deposit_receipt_version: None,
-            },
+            }),
             logs_bloom,
         };
         let receipt = vec![receipt];

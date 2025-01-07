@@ -1,4 +1,5 @@
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
+use alloy_consensus::BlockHeader;
 use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -52,10 +53,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         }
 
         let state_root = LatestStateProviderRef::new(&provider.0).state_root()?;
-        if state_root != best_header.state_root {
+        if state_root != best_header.state_root() {
             eyre::bail!(
                 "Recovery failed. Incorrect state root. Expected: {:?}. Received: {:?}",
-                best_header.state_root,
+                best_header.state_root(),
                 state_root
             );
         }
