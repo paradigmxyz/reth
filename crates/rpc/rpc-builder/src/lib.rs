@@ -759,8 +759,8 @@ where
     /// ```no_run
     /// use reth_consensus::noop::NoopConsensus;
     /// use reth_engine_primitives::PayloadValidator;
+    /// use reth_ethereum_evm::execute::EthExecutorProvider;
     /// use reth_evm::ConfigureEvm;
-    /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_primitives::{Header, TransactionSigned};
     /// use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};

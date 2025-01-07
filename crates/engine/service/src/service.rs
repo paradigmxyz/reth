@@ -155,7 +155,7 @@ mod tests {
     use reth_engine_primitives::BeaconEngineMessage;
     use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
-    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_ethereum_evm::execute::EthExecutorProvider;
     use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives::SealedHeader;

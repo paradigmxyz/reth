@@ -92,6 +92,8 @@ Crates related to transaction execution.
 - [`evm`](../../crates/evm): Traits for configuring an EVM specifics.
 - [`execution-types`](../../crates/evm/execution-types): Commonly used types for (EVM) block execution.
 - [`execution-errors`](../../crates/evm/execution-errors): Commonly used error types used when doing block execution.
+- [`ethereum-evm`](../../crates/ethereum/evm): EVM implementation for Ethereum.
+- [`optimism-evm`](../../crates/optimism/evm): EVM implementation for Optimism.
 
 ### Sync
 

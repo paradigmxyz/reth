@@ -346,7 +346,7 @@ reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false }
 reth-etl = { path = "crates/etl" }
 reth-evm = { path = "crates/evm" }
-reth-evm-ethereum = { path = "crates/ethereum/evm" }
+reth-ethereum-evm = { path = "crates/ethereum/evm" }
 reth-optimism-evm = { path = "crates/optimism/evm" }
 reth-execution-errors = { path = "crates/evm/execution-errors" }
 reth-execution-types = { path = "crates/evm/execution-types" }

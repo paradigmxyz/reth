@@ -2669,7 +2669,7 @@ dependencies = [
  "reth-chainspec",
  "reth-db",
  "reth-db-api",
- "reth-evm-ethereum",
+ "reth-ethereum-evm",
  "reth-primitives",
  "reth-provider",
  "reth-revm",
@@ -2899,8 +2899,8 @@ dependencies = [
  "eyre",
  "reth",
  "reth-chainspec",
+ "reth-ethereum-evm",
  "reth-evm",
- "reth-evm-ethereum",
  "reth-node-ethereum",
  "reth-primitives",
 ]
@@ -2955,8 +2955,8 @@ dependencies = [
  "eyre",
  "reth",
  "reth-chainspec",
+ "reth-ethereum-evm",
  "reth-evm",
- "reth-evm-ethereum",
  "reth-node-api",
  "reth-node-core",
  "reth-node-ethereum",
@@ -6509,8 +6509,8 @@ dependencies = [
  "reth-errors",
  "reth-ethereum-consensus",
  "reth-ethereum-engine-primitives",
+ "reth-ethereum-evm",
  "reth-evm",
- "reth-evm-ethereum",
  "reth-exex-types",
  "reth-metrics",
  "reth-network-p2p",
@@ -6593,8 +6593,8 @@ dependencies = [
  "reth-consensus",
  "reth-db",
  "reth-db-api",
+ "reth-ethereum-evm",
  "reth-evm",
- "reth-evm-ethereum",
  "reth-execution-errors",
  "reth-execution-types",
  "reth-metrics",
@@ -7260,8 +7260,8 @@ dependencies = [
  "reth-engine-primitives",
  "reth-engine-tree",
  "reth-ethereum-engine-primitives",
+ "reth-ethereum-evm",
  "reth-evm",
- "reth-evm-ethereum",
  "reth-exex-types",
  "reth-network-p2p",
  "reth-node-types",
@@ -7487,6 +7487,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-ethereum-evm"
+version = "1.1.4"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-genesis",
+ "alloy-primitives",
+ "alloy-sol-types",
+ "reth-chainspec",
+ "reth-consensus",
+ "reth-ethereum-consensus",
+ "reth-ethereum-forks",
+ "reth-evm",
+ "reth-execution-types",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-revm",
+ "reth-testing-utils",
+ "revm-primitives",
+ "secp256k1",
+ "serde_json",
+]
+
+[[package]]
 name = "reth-ethereum-forks"
 version = "1.1.4"
 dependencies = [
@@ -7512,8 +7536,8 @@ dependencies = [
  "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
+ "reth-ethereum-evm",
  "reth-evm",
- "reth-evm-ethereum",
  "reth-execution-types",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
@@ -7589,30 +7613,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-evm-ethereum"
-version = "1.1.4"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-genesis",
- "alloy-primitives",
- "alloy-sol-types",
- "reth-chainspec",
- "reth-consensus",
- "reth-ethereum-consensus",
- "reth-ethereum-forks",
- "reth-evm",
- "reth-execution-types",
- "reth-primitives",
- "reth-primitives-traits",
- "reth-revm",
- "reth-testing-utils",
- "revm-primitives",
- "secp256k1",
- "serde_json",
-]
-
-[[package]]
 name = "reth-execution-errors"
 version = "1.1.4"
 dependencies = [
@@ -7667,8 +7667,8 @@ dependencies = [
  "reth-chainspec",
  "reth-config",
  "reth-db-common",
+ "reth-ethereum-evm",
  "reth-evm",
- "reth-evm-ethereum",
  "reth-exex-types",
  "reth-fs-util",
  "reth-metrics",
@@ -8174,9 +8174,9 @@ dependencies = [
  "reth-db",
  "reth-e2e-test-utils",
  "reth-ethereum-engine-primitives",
+ "reth-ethereum-evm",
  "reth-ethereum-payload-builder",
  "reth-evm",
- "reth-evm-ethereum",
  "reth-exex",
  "reth-network",
  "reth-node-api",
@@ -8876,8 +8876,8 @@ dependencies = [
  "reth-consensus-common",
  "reth-engine-primitives",
  "reth-errors",
+ "reth-ethereum-evm",
  "reth-evm",
- "reth-evm-ethereum",
  "reth-network-api",
  "reth-network-peers",
  "reth-network-types",
@@ -8969,8 +8969,8 @@ dependencies = [
  "reth-consensus",
  "reth-engine-primitives",
  "reth-ethereum-engine-primitives",
+ "reth-ethereum-evm",
  "reth-evm",
- "reth-evm-ethereum",
  "reth-ipc",
  "reth-metrics",
  "reth-network-api",
@@ -9195,9 +9195,9 @@ dependencies = [
  "reth-db",
  "reth-db-api",
  "reth-downloaders",
+ "reth-ethereum-evm",
  "reth-etl",
  "reth-evm",
- "reth-evm-ethereum",
  "reth-execution-errors",
  "reth-execution-types",
  "reth-exex",
