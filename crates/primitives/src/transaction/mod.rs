@@ -21,8 +21,6 @@ use alloy_rlp::{Decodable, Encodable, Header};
 use core::hash::{Hash, Hasher};
 use derive_more::{AsRef, Deref};
 use once_cell as _;
-#[cfg(not(feature = "std"))]
-use once_cell::sync::{Lazy as LazyLock, OnceCell as OnceLock};
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::DepositTransaction;
 #[cfg(feature = "optimism")]
@@ -30,6 +28,7 @@ use op_alloy_consensus::TxDeposit;
 pub use pooled::PooledTransactionsElementEcRecovered;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 pub use reth_primitives_traits::{
+    sync::{LazyLock, OnceLock},
     transaction::{
         error::{
             InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
@@ -42,8 +41,6 @@ use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
 pub use signature::{recover_signer, recover_signer_unchecked};
-#[cfg(feature = "std")]
-use std::sync::{LazyLock, OnceLock};
 pub use tx_type::TxType;
 
 /// Handling transaction signature operations, including signature recovery,

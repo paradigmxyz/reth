@@ -26,7 +26,6 @@ alloy-consensus.workspace = true
 
 # misc
 auto_impl.workspace = true
-once_cell.workspace = true
 serde_json.workspace = true
 derive_more.workspace = true
 
@@ -47,7 +46,6 @@ std = [
 	"alloy-trie/std",
 	"reth-primitives-traits/std",
 	"alloy-consensus/std",
-	"once_cell/std",
 	"alloy-rlp/std",
 	"reth-ethereum-forks/std",
 	"derive_more/std",
