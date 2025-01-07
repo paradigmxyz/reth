@@ -2,7 +2,7 @@ use futures::{Stream, StreamExt};
 use pin_project::pin_project;
 use reth_beacon_consensus::{BeaconConsensusEngineEvent, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
-use reth_consensus::FullConsensus;
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{BeaconEngineMessage, EngineValidator};
 use reth_engine_tree::{
     backfill::PipelineSync,
@@ -69,7 +69,7 @@ where
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
     pub fn new<V>(
-        consensus: Arc<dyn FullConsensus<N::Primitives>>,
+        consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
         executor_factory: E,
         chain_spec: Arc<N::ChainSpec>,
         client: Client,

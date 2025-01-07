@@ -496,7 +496,7 @@ where
 {
     provider: P,
     executor_provider: E,
-    consensus: Arc<dyn FullConsensus<N>>,
+    consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
     state: EngineApiTreeState<N>,
@@ -585,7 +585,7 @@ where
     pub fn new(
         provider: P,
         executor_provider: E,
-        consensus: Arc<dyn FullConsensus<N>>,
+        consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent<N>>,
         state: EngineApiTreeState<N>,
@@ -643,7 +643,7 @@ where
     pub fn spawn_new(
         provider: P,
         executor_provider: E,
-        consensus: Arc<dyn FullConsensus<N>>,
+        consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
         payload_validator: V,
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,

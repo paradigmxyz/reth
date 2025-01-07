@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Sealable, B256};
-use reth_consensus::Consensus;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::WithPeerId;
 use reth_primitives::{SealedBlock, SealedHeader};
@@ -30,7 +30,7 @@ where
     Client: BlockClient,
 {
     client: Client,
-    consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
+    consensus: Arc<dyn Consensus<Client::Header, Client::Body, Error = ConsensusError>>,
 }
 
 impl<Client> FullBlockClient<Client>
@@ -40,7 +40,7 @@ where
     /// Creates a new instance of `FullBlockClient`.
     pub fn new(
         client: Client,
-        consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
+        consensus: Arc<dyn Consensus<Client::Header, Client::Body, Error = ConsensusError>>,
     ) -> Self {
         Self { client, consensus }
     }
@@ -118,7 +118,7 @@ where
     Client: BlockClient,
 {
     client: Client,
-    consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
+    consensus: Arc<dyn Consensus<Client::Header, Client::Body, Error = ConsensusError>>,
     hash: B256,
     request: FullBlockRequest<Client>,
     header: Option<SealedHeader<Client::Header>>,
@@ -330,7 +330,7 @@ where
     /// The client used to fetch headers and bodies.
     client: Client,
     /// The consensus instance used to validate the blocks.
-    consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
+    consensus: Arc<dyn Consensus<Client::Header, Client::Body, Error = ConsensusError>>,
     /// The block hash to start fetching from (inclusive).
     start_hash: B256,
     /// How many blocks to fetch: `len([start_hash, ..]) == count`

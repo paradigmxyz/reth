@@ -3,7 +3,7 @@
 use crate::ConfigureEvm;
 use alloy_rpc_types_engine::JwtSecret;
 use reth_beacon_consensus::BeaconConsensusEngineHandle;
-use reth_consensus::FullConsensus;
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db_api::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
     Database,
@@ -58,7 +58,10 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Executor: BlockExecutorProvider<Primitives = <Self::Types as NodeTypes>::Primitives>;
 
     /// The consensus type of the node.
-    type Consensus: FullConsensus<<Self::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static;
+    type Consensus: FullConsensus<<Self::Types as NodeTypes>::Primitives, Error = ConsensusError>
+        + Clone
+        + Unpin
+        + 'static;
 
     /// Network API.
     type Network: FullNetwork;

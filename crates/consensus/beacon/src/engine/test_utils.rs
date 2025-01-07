@@ -13,7 +13,7 @@ use reth_blockchain_tree::{
 };
 use reth_chainspec::ChainSpec;
 use reth_config::config::StageConfig;
-use reth_consensus::{test_utils::TestConsensus, FullConsensus};
+use reth_consensus::{test_utils::TestConsensus, ConsensusError, FullConsensus};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv as DE};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
@@ -332,12 +332,13 @@ where
         let provider_factory =
             create_test_provider_factory_with_chain_spec(self.base_config.chain_spec.clone());
 
-        let consensus: Arc<dyn FullConsensus> = match self.base_config.consensus {
-            TestConsensusConfig::Real => {
-                Arc::new(EthBeaconConsensus::new(Arc::clone(&self.base_config.chain_spec)))
-            }
-            TestConsensusConfig::Test => Arc::new(TestConsensus::default()),
-        };
+        let consensus: Arc<dyn FullConsensus<Error = ConsensusError>> =
+            match self.base_config.consensus {
+                TestConsensusConfig::Real => {
+                    Arc::new(EthBeaconConsensus::new(Arc::clone(&self.base_config.chain_spec)))
+                }
+                TestConsensusConfig::Test => Arc::new(TestConsensus::default()),
+            };
         let payload_builder = spawn_test_payload_service::<EthEngineTypes>();
 
         // use either noop client or a user provided client (for example TestFullBlockClient)
