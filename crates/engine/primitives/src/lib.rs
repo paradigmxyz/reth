@@ -14,13 +14,13 @@ use core::fmt;
 
 use alloy_consensus::BlockHeader;
 use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError};
-pub use error::BeaconOnNewPayloadError;
+pub use error::*;
 
 mod forkchoice;
 pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
 
 mod message;
-pub use message::{BeaconEngineMessage, OnForkChoiceUpdated};
+pub use message::*;
 
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
