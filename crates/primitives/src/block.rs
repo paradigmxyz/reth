@@ -503,17 +503,22 @@ impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
+impl<'a, B> arbitrary::Arbitrary<'a> for SealedBlockWithSenders<B>
+where
+    B: reth_primitives_traits::Block + arbitrary::Arbitrary<'a>,
+{
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let block: SealedBlock = SealedBlock::arbitrary(u)?;
+        let block = B::arbitrary(u)?;
 
         let senders = block
-            .body
-            .transactions
+            .body()
+            .transactions()
             .iter()
             .map(|tx| tx.recover_signer().unwrap())
             .collect::<Vec<_>>();
 
+        let (header, body) = block.split();
+        let block = SealedBlock::new(SealedHeader::seal(header), body);
         Ok(Self { block, senders })
     }
 }
