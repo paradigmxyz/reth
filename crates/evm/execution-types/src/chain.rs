@@ -14,7 +14,6 @@ use reth_primitives::{
 use reth_primitives_traits::{Block, BlockBody, NodePrimitives, SignedTransaction};
 use reth_trie::updates::TrieUpdates;
 use revm::db::BundleState;
-use std::ops::Deref;
 
 /// A chain of blocks and their final state.
 ///
@@ -92,7 +91,7 @@ impl<N: NodePrimitives> Chain<N> {
 
     /// Returns an iterator over all headers in the block with increasing block numbers.
     pub fn headers(&self) -> impl Iterator<Item = SealedHeader<N::BlockHeader>> + '_ {
-        self.blocks.values().map(|block| block.as_sealed_header().clone())
+        self.blocks.values().map(|block| block.sealed_header().clone())
     }
 
     /// Get cached trie updates for this chain.
@@ -859,8 +858,8 @@ mod tests {
         let mut block2 = block;
 
         // Set the hashes of block1 and block2
-        block1.block.header.set_hash(block1_hash);
-        block2.block.header.set_hash(block2_hash);
+        block1.block.set_hash(block1_hash);
+        block2.block.set_hash(block2_hash);
 
         // Create a random receipt object, receipt1
         let receipt1 = Receipt {

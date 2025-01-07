@@ -190,6 +190,16 @@ impl<H, B> SealedBlock<H, B> {
         &self.body
     }
 
+    /// Returns the Sealed header.
+    pub const fn sealed_header(&self) -> &SealedHeader<H> {
+        &self.header
+    }
+
+    /// Consumes the block and returns the sealed header.
+    pub fn into_sealed_header(self) -> SealedHeader<H> {
+        self.header
+    }
+
     /// Consumes the block and returns the header.
     pub fn into_header(self) -> H {
         self.header.unseal()

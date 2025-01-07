@@ -440,7 +440,7 @@ impl<
         let segment_header = writer.user_header();
         if segment_header.block_end().is_none() && segment_header.expected_block_start() == 0 {
             for block_number in 0..block.number() {
-                let mut prev = block.as_sealed_header().clone().unseal();
+                let mut prev = block.sealed_header().clone().unseal();
                 prev.number = block_number;
                 writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
             }
@@ -2782,7 +2782,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         if write_to.static_files() {
             let mut writer =
                 self.static_file_provider.get_writer(block_number, StaticFileSegment::Headers)?;
-            writer.append_header(&block.header(), ttd, &block.hash())?;
+            writer.append_header(block.header(), ttd, &block.hash())?;
         }
 
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;

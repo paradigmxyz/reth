@@ -1670,7 +1670,7 @@ where
                             self.latest_valid_hash_for_invalid_payload(block.parent_hash)?
                         };
                         // keep track of the invalid header
-                        self.invalid_headers.insert(block.header.block_with_parent());
+                        self.invalid_headers.insert(block.sealed_header().block_with_parent());
                         PayloadStatus::new(
                             PayloadStatusEnum::Invalid { validation_error: error.to_string() },
                             latest_valid_hash,
@@ -1779,7 +1779,7 @@ where
                             let (block, err) = err.split();
                             warn!(target: "consensus::engine", invalid_number=?block.number, invalid_hash=?block.hash(), %err, "Marking block as invalid");
 
-                            self.invalid_headers.insert(block.header.block_with_parent());
+                            self.invalid_headers.insert(block.sealed_header().block_with_parent());
                         }
                     }
                 }

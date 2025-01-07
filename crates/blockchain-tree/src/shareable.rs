@@ -114,7 +114,7 @@ where
 {
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
         trace!(target: "blockchain_tree", ?hash, "Returning header by hash");
-        self.tree.read().sidechain_block_by_hash(hash).map(|b| b.header.clone())
+        self.tree.read().sidechain_block_by_hash(hash).map(|b| b.sealed_header().clone())
     }
 
     fn block_by_hash(&self, block_hash: BlockHash) -> Option<SealedBlock> {
@@ -128,7 +128,7 @@ where
     }
 
     fn buffered_header_by_hash(&self, block_hash: BlockHash) -> Option<SealedHeader> {
-        self.tree.read().get_buffered_block(&block_hash).map(|b| b.header.clone())
+        self.tree.read().get_buffered_block(&block_hash).map(|b| b.sealed_header().clone())
     }
 
     fn is_canonical(&self, hash: BlockHash) -> Result<bool, ProviderError> {

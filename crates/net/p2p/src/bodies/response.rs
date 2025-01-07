@@ -16,9 +16,9 @@ where
     H: BlockHeader,
 {
     /// Return the reference to the response header
-    pub fn header(&self) -> &SealedHeader<H> {
+    pub const fn header(&self) -> &SealedHeader<H> {
         match self {
-            Self::Full(block) => block.as_sealed_header(),
+            Self::Full(block) => block.sealed_header(),
             Self::Empty(header) => header,
         }
     }

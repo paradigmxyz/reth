@@ -75,7 +75,7 @@ impl Command {
         while let Some((block, head, safe, finalized)) = receiver.recv().await {
             // just put gas used here
             let gas_used = block.gas_used;
-            let block_number = block.header.number;
+            let block_number = block.number;
 
             let versioned_hashes: Vec<B256> =
                 block.body().blob_versioned_hashes_iter().copied().collect();

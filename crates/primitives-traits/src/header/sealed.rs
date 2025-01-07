@@ -58,13 +58,6 @@ impl<H> SealedHeader<H> {
     pub fn split(self) -> (H, BlockHash) {
         (self.header, self.hash)
     }
-
-    /// Returns a reference to self.
-    /// This is useful when you need to convert from a dereferenced header back to SealedHeader.
-    #[inline]
-    pub const fn as_sealed_header(&self) -> &SealedHeader<H> {
-        self
-    }
 }
 
 impl<H: Sealable> SealedHeader<H> {

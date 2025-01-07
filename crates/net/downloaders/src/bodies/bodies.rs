@@ -677,7 +677,7 @@ mod tests {
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 1..2, ..Default::default() },
         );
 
-        let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
+        let headers = blocks.iter().map(|block| block.sealed_header().clone()).collect::<Vec<_>>();
         let bodies = blocks
             .into_iter()
             .map(|block| (block.hash(), block.into_body()))

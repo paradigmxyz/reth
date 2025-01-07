@@ -948,9 +948,9 @@ mod tests {
         let finalized_block = blocks.get(block_count - 3).unwrap();
 
         // Set the canonical head, safe, and finalized blocks
-        provider.set_canonical_head(canonical_block.as_sealed_header().clone());
-        provider.set_safe(safe_block.as_sealed_header().clone());
-        provider.set_finalized(finalized_block.as_sealed_header().clone());
+        provider.set_canonical_head(canonical_block.sealed_header().clone());
+        provider.set_safe(safe_block.sealed_header().clone());
+        provider.set_finalized(finalized_block.sealed_header().clone());
 
         Ok((provider, database_blocks.clone(), in_memory_blocks.clone(), receipts))
     }
@@ -2324,8 +2324,6 @@ mod tests {
         // todo(joshie) add canonical_hashes_range below after changing its interface into range
         // instead start end
         test_by_block_range!([
-            // For headers_range, we need to compare the raw header fields since Header may not
-            // implement PartialEq
             (headers_range, |block: &SealedBlock| block.header().clone().into()),
             (sealed_headers_range, |block: &SealedBlock| block.deref().clone()),
             (block_range, |block: &SealedBlock| block.clone().unseal()),
@@ -2460,7 +2458,7 @@ mod tests {
                 header_by_number,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     block.number,
-                    Some(block.as_sealed_header().clone())
+                    Some(block.sealed_header().clone())
                 ),
                 u64::MAX
             ),
@@ -2469,7 +2467,7 @@ mod tests {
                 sealed_header,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     block.number,
-                    Some(block.as_sealed_header().clone())
+                    Some(block.sealed_header().clone())
                 ),
                 u64::MAX
             ),
