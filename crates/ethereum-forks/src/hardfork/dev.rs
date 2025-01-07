@@ -2,13 +2,13 @@ use alloc::vec;
 
 use alloy_primitives::U256;
 
-use crate::{ChainHardforks, EthereumHardfork, ForkCondition};
-
 use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "std")]
 use std::sync::LazyLock;
+
+use crate::{ChainHardforks, EthereumHardfork, ForkCondition};
 
 /// Dev hardforks
 pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
