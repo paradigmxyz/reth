@@ -34,7 +34,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider},
+    providers::{BlockchainProvider, BlockchainProvider2, NodeTypesForProvider},
     ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
@@ -52,6 +52,11 @@ pub use states::*;
 // Note: we need to hardcode this because custom components might depend on it in associated types.
 pub type RethFullAdapter<DB, Types> =
     FullNodeTypesAdapter<Types, DB, BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>>;
+
+/// The adapter type for a reth node with the builtin provider type
+// Note: we need to hardcode this because custom components might depend on it in associated types.
+pub type RethFullAdapter2<DB, Types> =
+    FullNodeTypesAdapter<Types, DB, BlockchainProvider2<NodeTypesWithDBAdapter<Types, DB>>>;
 
 #[allow(clippy::doc_markdown)]
 #[cfg_attr(doc, aquamarine::aquamarine)]
