@@ -9,6 +9,7 @@ pub use iter::*;
 #[cfg(feature = "rayon")]
 mod rayon {
     use crate::SignedTransaction;
+    use alloc::vec::Vec;
     use alloy_primitives::Address;
     use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
@@ -39,6 +40,7 @@ mod rayon {
 #[cfg(not(feature = "rayon"))]
 mod iter {
     use crate::SignedTransaction;
+    use alloc::vec::Vec;
     use alloy_primitives::Address;
 
     /// Recovers a list of signers from a transaction list iterator.
