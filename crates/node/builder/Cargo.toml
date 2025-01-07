@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 ## reth
 reth-beacon-consensus.workspace = true
-reth-blockchain-tree.workspace = true
 reth-chain-state.workspace = true
 reth-chainspec.workspace = true
 reth-cli-util.workspace = true
@@ -41,7 +40,6 @@ reth-node-core.workspace = true
 reth-node-events.workspace = true
 reth-node-metrics.workspace = true
 reth-payload-builder.workspace = true
-reth-payload-validator.workspace = true
 reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
@@ -99,7 +97,6 @@ default = []
 js-tracer = ["reth-rpc/js-tracer"]
 test-utils = [
     "reth-db/test-utils",
-    "reth-blockchain-tree/test-utils",
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
     "reth-consensus/test-utils",

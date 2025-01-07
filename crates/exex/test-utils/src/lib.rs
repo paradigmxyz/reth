@@ -37,7 +37,7 @@ use reth_node_builder::{
         Components, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NodeComponentsBuilder,
         PoolBuilder,
     },
-    BuilderContext, Node, NodeAdapter, RethFullAdapter2,
+    BuilderContext, Node, NodeAdapter, RethFullAdapter,
 };
 use reth_node_core::node_config::NodeConfig;
 use reth_node_ethereum::{
@@ -169,14 +169,14 @@ pub type TmpDB = Arc<TempDatabase<DatabaseEnv>>;
 /// The [`NodeAdapter`] for the [`TestExExContext`]. Contains type necessary to
 /// boot the testing environment
 pub type Adapter = NodeAdapter<
-    RethFullAdapter2<TmpDB, TestNode>,
+    RethFullAdapter<TmpDB, TestNode>,
     <<TestNode as Node<
         FullNodeTypesAdapter<
             TestNode,
             TmpDB,
             BlockchainProvider2<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
         >,
-    >>::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter2<TmpDB, TestNode>>>::Components,
+    >>::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<TmpDB, TestNode>>>::Components,
 >;
 /// An [`ExExContext`] using the [`Adapter`] type.
 pub type TestExExContext = ExExContext<Adapter>;

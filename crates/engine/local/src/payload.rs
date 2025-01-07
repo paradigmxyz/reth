@@ -59,3 +59,19 @@ where
         }
     }
 }
+
+/// A temporary workaround to support local payload engine launcher for arbitrary payload
+/// attributes.
+// TODO(mattsse): This should be reworked so that LocalPayloadAttributesBuilder can be implemented
+// for any
+pub trait UnsupportedLocalAttributes: Send + Sync + 'static {}
+
+impl<T, ChainSpec> PayloadAttributesBuilder<T> for LocalPayloadAttributesBuilder<ChainSpec>
+where
+    ChainSpec: Send + Sync + 'static,
+    T: UnsupportedLocalAttributes,
+{
+    fn build(&self, _: u64) -> T {
+        panic!("Unsupported payload attributes")
+    }
+}
