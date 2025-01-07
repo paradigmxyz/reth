@@ -231,16 +231,14 @@ mod tests {
         backfill::test_utils::{blocks_and_execution_outputs, chain_spec, to_execution_outcome},
         BackfillJobFactory,
     };
-    use reth_blockchain_tree::noop::NoopBlockchainTree;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
+        providers::BlockchainProvider2, test_utils::create_test_provider_factory_with_chain_spec,
     };
     use reth_testing_utils::generators;
     use secp256k1::Keypair;
-    use std::sync::Arc;
 
     #[test]
     fn test_backfill() -> eyre::Result<()> {
@@ -255,10 +253,7 @@ mod tests {
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(
-            provider_factory.clone(),
-            Arc::new(NoopBlockchainTree::default()),
-        )?;
+        let blockchain_db = BlockchainProvider2::new(provider_factory.clone())?;
 
         let blocks_and_execution_outputs =
             blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
@@ -294,10 +289,7 @@ mod tests {
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(
-            provider_factory.clone(),
-            Arc::new(NoopBlockchainTree::default()),
-        )?;
+        let blockchain_db = BlockchainProvider2::new(provider_factory.clone())?;
 
         let blocks_and_execution_outcomes =
             blocks_and_execution_outputs(provider_factory, chain_spec, key_pair)?;
