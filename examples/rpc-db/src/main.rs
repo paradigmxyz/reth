@@ -18,7 +18,7 @@ use reth::{
     api::NodeTypesWithDBAdapter,
     beacon_consensus::EthBeaconConsensus,
     providers::{
-        providers::{BlockchainProvider, StaticFileProvider},
+        providers::{BlockchainProvider2, StaticFileProvider},
         ProviderFactory,
     },
     rpc::eth::EthApi,
@@ -33,7 +33,7 @@ use reth::rpc::builder::{
 };
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
-use reth::{blockchain_tree::noop::NoopBlockchainTree, tasks::TokioTaskExecutor};
+use reth::tasks::TokioTaskExecutor;
 use reth_node_ethereum::{
     node::EthereumEngineValidator, EthEvmConfig, EthExecutorProvider, EthereumNode,
 };
@@ -61,7 +61,7 @@ async fn main() -> eyre::Result<()> {
     // 2. Setup the blockchain provider using only the database provider and a noop for the tree to
     //    satisfy trait bounds. Tree is not used in this example since we are only operating on the
     //    disk and don't handle new blocks/live sync etc, which is done by the blockchain tree.
-    let provider = BlockchainProvider::new(factory, Arc::new(NoopBlockchainTree::default()))?;
+    let provider = BlockchainProvider2::new(factory)?;
 
     let rpc_builder = RpcModuleBuilder::default()
         .with_provider(provider.clone())

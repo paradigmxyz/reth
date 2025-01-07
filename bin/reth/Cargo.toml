@@ -36,7 +36,6 @@ reth-cli-runner.workspace = true
 reth-cli-commands.workspace = true
 reth-cli-util.workspace = true
 reth-consensus-common.workspace = true
-reth-blockchain-tree.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc.workspace = true
 reth-rpc-types-compat.workspace = true
@@ -64,7 +63,6 @@ reth-node-builder.workspace = true
 reth-node-events.workspace = true
 reth-node-metrics.workspace = true
 reth-consensus.workspace = true
-reth-engine-util.workspace = true
 reth-prune.workspace = true
 
 # crypto
