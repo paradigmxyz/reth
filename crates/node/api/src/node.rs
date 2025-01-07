@@ -2,12 +2,12 @@
 
 use crate::ConfigureEvm;
 use alloy_rpc_types_engine::JwtSecret;
-use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db_api::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
     Database,
 };
+use reth_engine_primitives::BeaconConsensusEngineHandle;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
