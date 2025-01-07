@@ -27,6 +27,7 @@ use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
+pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
     EngineValidator, ForkchoiceStateTracker, OnForkChoiceUpdated,
@@ -82,12 +83,13 @@ pub mod config;
 mod invalid_block_hook;
 mod metrics;
 mod persistence_state;
+pub mod root;
+mod trie_updates;
+
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
-pub use reth_engine_primitives::InvalidBlockHook;
-
-pub mod root;
+use trie_updates::compare_trie_updates;
 
 /// Keeps track of the state of the tree.
 ///
@@ -2352,6 +2354,19 @@ where
                                 task_elapsed = ?time_from_last_update,
                                 "Task state root finished"
                             );
+
+                            if task_state_root != block.header().state_root() {
+                                debug!(target: "engine::tree", "Task state root does not match block state root");
+                                let (regular_root, regular_updates) =
+                                    state_provider.state_root_with_updates(hashed_state.clone())?;
+
+                                if regular_root == block.header().state_root() {
+                                    compare_trie_updates(&task_trie_updates, &regular_updates);
+                                } else {
+                                    debug!(target: "engine::tree", "Regular state root does not match block state root");
+                                }
+                            }
+
                             (task_state_root, task_trie_updates, time_from_last_update)
                         }
                         Err(error) => {
