@@ -64,4 +64,8 @@ scroll = [
 	"reth-scroll-evm/scroll",
 	"reth-scroll-engine/scroll"
 ]
+mpt = [
+	"reth-scroll-chainspec/mpt",
+	"reth-scroll-state-commitment/mpt"
+]
 skip-state-root-validation = []

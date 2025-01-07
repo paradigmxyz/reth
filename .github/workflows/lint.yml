@@ -28,7 +28,7 @@ jobs:
             features: "scroll asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
           - type: scroll-mpt
             args: --bin scroll-reth-mpt --workspace --lib --examples --tests --benches --locked
-            features: "scroll asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+            features: "scroll skip-state-root-validation mpt asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
           - type: book
             args: --manifest-path book/sources/Cargo.toml --workspace --bins
             features: ""

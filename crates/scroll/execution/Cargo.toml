@@ -24,3 +24,4 @@ scroll = [
 	"reth-revm/scroll"
 ]
 test-utils = ["reth-revm/test-utils"]
+mpt = []

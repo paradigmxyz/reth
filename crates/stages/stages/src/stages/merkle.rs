@@ -276,7 +276,9 @@ where
         self.save_execution_checkpoint(provider, None)?;
 
         #[cfg(feature = "skip-state-root-validation")]
-        let _ = trie_root;
+        {
+            debug!(target: "sync::stages::merkle::exec", ?trie_root, block_number = target_block.number());
+        }
         #[cfg(not(feature = "skip-state-root-validation"))]
         validate_state_root(trie_root, SealedHeader::seal(target_block), to_block)?;
 

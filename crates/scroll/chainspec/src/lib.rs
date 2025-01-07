@@ -29,6 +29,8 @@ use std::sync::LazyLock;
 
 extern crate alloc;
 
+use reth_scroll_state_commitment as _;
+
 mod constants;
 pub use constants::{
     SCROLL_DEV_L1_CONFIG, SCROLL_DEV_L1_MESSAGE_QUEUE_ADDRESS, SCROLL_DEV_L1_PROXY_ADDRESS,
@@ -233,7 +235,10 @@ impl ScrollChainSpec {
             difficulty: self.genesis.difficulty,
             nonce: self.genesis.nonce.into(),
             extra_data: self.genesis.extra_data.clone(),
+            #[cfg(not(feature = "mpt"))]
             state_root: reth_scroll_state_commitment::state_root_ref_unhashed(&self.genesis.alloc),
+            #[cfg(feature = "mpt")]
+            state_root: reth_trie_common::root::state_root_ref_unhashed(&self.genesis.alloc),
             timestamp: self.genesis.timestamp,
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,

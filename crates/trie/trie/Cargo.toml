@@ -86,6 +86,11 @@ scroll = [
 	"reth-primitives-traits/scroll",
 	"reth-trie-common/scroll"
 ]
+mpt = [
+	"revm/scroll",
+	"reth-primitives-traits/scroll",
+	"reth-trie-common/mpt"
+]
 
 [[bench]]
 name = "hash_post_state"

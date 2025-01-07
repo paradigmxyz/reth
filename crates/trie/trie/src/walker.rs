@@ -10,7 +10,7 @@ use reth_trie_common::pack_nibbles;
 #[cfg(feature = "metrics")]
 use crate::metrics::WalkerMetrics;
 
-#[cfg(feature = "scroll")]
+#[cfg(all(feature = "scroll", not(feature = "mpt")))]
 use crate::BitsCompatibility;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
@@ -105,9 +105,9 @@ impl<C> TrieWalker<C> {
             .and_then(|key| {
                 if self.can_skip_current_node {
                     // TODO(scroll): replace this with key abstraction.
-                    #[cfg(not(feature = "scroll"))]
+                    #[cfg(any(not(feature = "scroll"), feature = "mpt"))]
                     let key = key.increment().map(|inc| inc.pack());
-                    #[cfg(feature = "scroll")]
+                    #[cfg(all(feature = "scroll", not(feature = "mpt")))]
                     let key = key.increment_bit().map(|inc| inc.pack_bits());
                     key
                 } else {

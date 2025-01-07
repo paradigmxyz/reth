@@ -24,3 +24,4 @@ proptest-arbitrary-interop.workspace = true
 
 [features]
 scroll = ["reth-trie/scroll"]
+mpt = ["reth-trie/mpt"]

@@ -134,6 +134,7 @@ scroll = [
 	"reth-primitives-traits/scroll",
 	"dep:reth-scroll-primitives",
 ]
+mpt = ["scroll"]
 
 [[bench]]
 name = "prefix_set"

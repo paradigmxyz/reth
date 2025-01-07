@@ -42,6 +42,7 @@ std = [
 	"revm/std",
 	"serde?/std"
 ]
+mpt = []
 
 blst = ["revm/blst"]
 optional_block_gas_limit =  ["revm/optional_block_gas_limit"]

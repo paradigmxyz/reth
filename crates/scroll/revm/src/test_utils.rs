@@ -1,14 +1,14 @@
 use crate::{
     shared::AccountInfo,
     states::{
-        ScrollAccountInfo, ScrollAccountInfoRevert, ScrollAccountRevert, ScrollPlainStateReverts,
-        ScrollStateChangeset,
+        ScrollAccountInfo, ScrollAccountInfoRevert, ScrollAccountRevert, ScrollBundleState,
+        ScrollPlainStateReverts, ScrollStateChangeset,
     },
 };
 use reth_scroll_primitives::poseidon::{hash_code, POSEIDON_EMPTY};
 use revm::db::{
     states::{reverts::AccountInfoRevert, PlainStateReverts, StateChangeset},
-    AccountRevert,
+    AccountRevert, BundleState,
 };
 
 // This conversion can cause a loss of information since performed without additional context.
@@ -97,5 +97,12 @@ impl From<ScrollAccountInfo> for AccountInfo {
             #[cfg(feature = "scroll")]
             poseidon_code_hash: info.poseidon_code_hash,
         }
+    }
+}
+
+// This conversion can cause a loss of information since performed without additional context.
+impl From<(BundleState, &())> for ScrollBundleState {
+    fn from((bundle, _): (BundleState, &())) -> Self {
+        bundle.into()
     }
 }

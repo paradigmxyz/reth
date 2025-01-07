@@ -29,6 +29,10 @@ scroll = [
 	"reth-provider/scroll",
 	"reth-scroll-cli/scroll",
 ]
+mpt = [
+	"reth-scroll-cli/mpt",
+	"reth-scroll-node/mpt",
+]
 skip-state-root-validation = [
 	"reth-node-builder/skip-state-root-validation",
 	"reth-scroll-node/skip-state-root-validation"
@@ -42,3 +46,4 @@ optimism = [
 [[bin]]
 name = "scroll-reth-mpt"
 path = "src/main.rs"
+required-features = ["mpt", "skip-state-root-validation", "scroll"]

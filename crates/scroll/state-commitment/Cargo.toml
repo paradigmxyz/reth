@@ -70,6 +70,7 @@ scroll = [
     "reth-provider/scroll",
     "reth-trie/scroll"
 ]
+mpt = ["reth-trie/mpt", "reth-scroll-execution/mpt"]
 test-utils = [
     "dep:zktrie_rust", 
     "dep:zktrie",

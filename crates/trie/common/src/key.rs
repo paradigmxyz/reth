@@ -108,9 +108,9 @@ impl BitsCompatibility for Nibbles {
 /// there is a byte for each bit in the input. The representation is big-endian with respect to the
 /// input. When the `scroll` feature is not enabled, this method will unpack the bytes into nibbles.
 pub fn unpack_nibbles<T: AsRef<[u8]>>(data: T) -> Nibbles {
-    #[cfg(feature = "scroll")]
+    #[cfg(all(feature = "scroll", not(feature = "mpt")))]
     let nibbles = Nibbles::unpack_bits(data);
-    #[cfg(not(feature = "scroll"))]
+    #[cfg(any(not(feature = "scroll"), feature = "mpt"))]
     let nibbles = Nibbles::unpack(data);
     nibbles
 }
@@ -120,9 +120,9 @@ pub fn unpack_nibbles<T: AsRef<[u8]>>(data: T) -> Nibbles {
 /// For the `scroll` feature, this method will pack the bits into a byte representation. When the
 /// `scroll` feature is not enabled, this method will pack the nibbles into bytes.
 pub fn pack_nibbles(nibbles: &Nibbles) -> SmallVec<[u8; 32]> {
-    #[cfg(feature = "scroll")]
+    #[cfg(all(feature = "scroll", not(feature = "mpt")))]
     let packed = nibbles.pack_bits();
-    #[cfg(not(feature = "scroll"))]
+    #[cfg(any(not(feature = "scroll"), feature = "mpt"))]
     let packed = nibbles.pack();
     packed
 }
