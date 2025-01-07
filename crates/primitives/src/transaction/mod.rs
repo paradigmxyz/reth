@@ -26,7 +26,6 @@ use op_alloy_consensus::DepositTransaction;
 #[cfg(feature = "optimism")]
 use op_alloy_consensus::TxDeposit;
 pub use pooled::PooledTransactionsElementEcRecovered;
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 pub use reth_primitives_traits::{
     sync::{LazyLock, OnceLock},
     transaction::{
@@ -50,15 +49,6 @@ pub mod util;
 
 mod pooled;
 mod tx_type;
-
-/// Expected number of transactions where we can expect a speed-up by recovering the senders in
-/// parallel.
-pub static PARALLEL_SENDER_RECOVERY_THRESHOLD: LazyLock<usize> =
-    LazyLock::new(|| match rayon::current_num_threads() {
-        0..=1 => usize::MAX,
-        2..=8 => 10,
-        _ => 5,
-    });
 
 /// A raw transaction.
 ///
@@ -1721,37 +1711,6 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
         }
-    }
-}
-
-/// Recovers a list of signers from a transaction list iterator.
-///
-/// Returns `None`, if some transaction's signature is invalid
-pub fn recover_signers<'a, I, T>(txes: I, num_txes: usize) -> Option<Vec<Address>>
-where
-    T: SignedTransaction,
-    I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,
-{
-    if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
-        txes.into_iter().map(|tx| tx.recover_signer()).collect()
-    } else {
-        txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
-    }
-}
-
-/// Recovers a list of signers from a transaction list iterator _without ensuring that the
-/// signature has a low `s` value_.
-///
-/// Returns `None`, if some transaction's signature is invalid.
-pub fn recover_signers_unchecked<'a, I, T>(txes: I, num_txes: usize) -> Option<Vec<Address>>
-where
-    T: SignedTransaction,
-    I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,
-{
-    if num_txes < *PARALLEL_SENDER_RECOVERY_THRESHOLD {
-        txes.into_iter().map(|tx| tx.recover_signer_unchecked()).collect()
-    } else {
-        txes.into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
     }
 }
 
