@@ -41,7 +41,10 @@ impl TrieUpdatesDiff {
 
 #[derive(Debug)]
 enum StorageTrieDiffEntry {
+    /// Storage Trie entry exists for one of the task or regular trie updates, but not the other.
     Existence(bool, bool),
+    /// Storage Trie entries exists for both task and regular trie updates, but their values
+    /// differ.
     Value(StorageTrieUpdatesDiff),
 }
 
