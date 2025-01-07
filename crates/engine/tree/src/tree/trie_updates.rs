@@ -25,18 +25,11 @@ impl TrieUpdatesDiff {
     pub(super) fn log_differences(mut self) {
         if self.has_differences() {
             for (path, (task, regular)) in &mut self.account_nodes {
-                if let (Some(task), Some(regular)) = (task.as_mut(), regular.as_ref()) {
-                    task.tree_mask = regular.tree_mask;
-                }
-                if task != regular {
-                    debug!(target: "engine::tree", ?path, ?task, ?regular, "Difference in account trie updates");
-                }
+                debug!(target: "engine::tree", ?path, ?task, ?regular, "Difference in account trie updates");
             }
 
             for (path, (task, regular)) in &self.removed_nodes {
-                if task != regular {
-                    debug!(target: "engine::tree", ?path, ?task, ?regular, "Difference in removed account trie nodes");
-                }
+                debug!(target: "engine::tree", ?path, ?task, ?regular, "Difference in removed account trie nodes");
             }
 
             for (address, storage_diff) in self.storage_tries {
@@ -60,18 +53,11 @@ impl StorageTrieDiffEntry {
             }
             Self::Value(mut storage_diff) => {
                 for (path, (task, regular)) in &mut storage_diff.storage_nodes {
-                    if let (Some(task), Some(regular)) = (task.as_mut(), regular.as_ref()) {
-                        task.tree_mask = regular.tree_mask;
-                    }
-                    if task != regular {
-                        debug!(target: "engine::tree", ?address, ?path, ?task, ?regular, "Difference in storage trie updates");
-                    }
+                    debug!(target: "engine::tree", ?address, ?path, ?task, ?regular, "Difference in storage trie updates");
                 }
 
                 for (path, (task, regular)) in &storage_diff.removed_nodes {
-                    if task != regular {
-                        debug!(target: "engine::tree", ?address, ?path, ?task, ?regular, "Difference in removed account trie nodes");
-                    }
+                    debug!(target: "engine::tree", ?address, ?path, ?task, ?regular, "Difference in removed account trie nodes");
                 }
             }
         }
@@ -93,48 +79,50 @@ impl StorageTrieUpdatesDiff {
     }
 }
 
-/// Compares two trie updates and logs the differences if there's any.
-pub(super) fn compare_trie_updates(first: &TrieUpdates, second: &TrieUpdates) {
+/// Compares the trie updates from state root task and regular state root calculation, and logs
+/// the differences if there's any.
+pub(super) fn compare_trie_updates(task: &TrieUpdates, regular: &TrieUpdates) {
     let mut diff = TrieUpdatesDiff::default();
 
     // compare account nodes
-    for key in first
+    for key in task
         .account_nodes
         .keys()
-        .chain(second.account_nodes.keys())
+        .chain(regular.account_nodes.keys())
         .cloned()
         .collect::<HashSet<_>>()
     {
-        let (left, right) = (first.account_nodes.get(&key), second.account_nodes.get(&key));
-        if left != right {
+        let (left, right) = (task.account_nodes.get(&key), regular.account_nodes.get(&key));
+
+        if !branch_nodes_equal(left, right) {
             diff.account_nodes.insert(key, (left.cloned(), right.cloned()));
         }
     }
 
     // compare removed nodes
-    for key in first
+    for key in task
         .removed_nodes
         .iter()
-        .chain(second.removed_nodes.iter())
+        .chain(regular.removed_nodes.iter())
         .cloned()
         .collect::<HashSet<_>>()
     {
         let (left, right) =
-            (first.removed_nodes.contains(&key), second.removed_nodes.contains(&key));
+            (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
         if left != right {
             diff.removed_nodes.insert(key, (left, right));
         }
     }
 
     // compare storage tries
-    for key in first
+    for key in task
         .storage_tries
         .keys()
-        .chain(second.storage_tries.keys())
+        .chain(regular.storage_tries.keys())
         .copied()
         .collect::<HashSet<_>>()
     {
-        let (left, right) = (first.storage_tries.get(&key), second.storage_tries.get(&key));
+        let (left, right) = (task.storage_tries.get(&key), regular.storage_tries.get(&key));
         if left != right {
             if let Some((left, right)) = left.zip(right) {
                 let storage_diff = compare_storage_trie_updates(left, right);
@@ -153,43 +141,61 @@ pub(super) fn compare_trie_updates(first: &TrieUpdates, second: &TrieUpdates) {
 }
 
 fn compare_storage_trie_updates(
-    first: &StorageTrieUpdates,
-    second: &StorageTrieUpdates,
+    task: &StorageTrieUpdates,
+    regular: &StorageTrieUpdates,
 ) -> StorageTrieUpdatesDiff {
     let mut diff = StorageTrieUpdatesDiff {
-        is_deleted: (first.is_deleted != second.is_deleted)
-            .then_some((first.is_deleted, second.is_deleted)),
+        is_deleted: (task.is_deleted != regular.is_deleted)
+            .then_some((task.is_deleted, regular.is_deleted)),
         ..Default::default()
     };
 
     // compare storage nodes
-    for key in first
+    for key in task
         .storage_nodes
         .keys()
-        .chain(second.storage_nodes.keys())
+        .chain(regular.storage_nodes.keys())
         .cloned()
         .collect::<HashSet<_>>()
     {
-        let (left, right) = (first.storage_nodes.get(&key), second.storage_nodes.get(&key));
-        if left != right {
+        let (left, right) = (task.storage_nodes.get(&key), regular.storage_nodes.get(&key));
+        if !branch_nodes_equal(left, right) {
             diff.storage_nodes.insert(key, (left.cloned(), right.cloned()));
         }
     }
 
     // compare removed nodes
-    for key in first
+    for key in task
         .removed_nodes
         .iter()
-        .chain(second.removed_nodes.iter())
+        .chain(regular.removed_nodes.iter())
         .cloned()
         .collect::<HashSet<_>>()
     {
         let (left, right) =
-            (first.removed_nodes.contains(&key), second.removed_nodes.contains(&key));
+            (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
         if left != right {
             diff.removed_nodes.insert(key, (left, right));
         }
     }
 
     diff
+}
+
+/// Compares the branch nodes from state root task and regular state root calculation.
+///
+/// Returns `true` if they are equal.
+fn branch_nodes_equal(
+    task: Option<&BranchNodeCompact>,
+    regular: Option<&BranchNodeCompact>,
+) -> bool {
+    if let (Some(task), Some(regular)) = (task.as_ref(), regular.as_ref()) {
+        task.state_mask == regular.state_mask &&
+        // We do not compare the tree mask because it is known to be mismatching
+            task.hash_mask == regular.hash_mask &&
+            task.hashes == regular.hashes &&
+            task.root_hash == regular.root_hash
+    } else {
+        task == regular
+    }
 }
