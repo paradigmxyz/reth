@@ -340,7 +340,7 @@ where
     ///
     /// This bootstraps the node internals, creates all the components with the given [Node]
     ///
-    /// Returns a [`NodeHandle`] that can be used to interact with the node.
+    /// Returns a [`NodeHandle`](crate::NodeHandle) that can be used to interact with the node.
     pub async fn launch_node<N>(
         self,
         node: N,
