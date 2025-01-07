@@ -13,7 +13,6 @@ use std::future::Future;
 use reth_rpc::eth::RpcNodeCore;
 use reth_tasks::TaskExecutor;
 
-
 /// Alias for [`reth_rpc_eth_types::EthApiBuilderCtx`], adapter for [`RpcNodeCore`].
 pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
     <N as RpcNodeCore>::Provider,

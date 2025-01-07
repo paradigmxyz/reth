@@ -13,9 +13,7 @@ use reth_node_builder::{
     PayloadTypes,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
-use reth_provider::providers::{
-    BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree,
-};
+use reth_provider::providers::{BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree};
 use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TaskManager;
 use std::sync::Arc;
@@ -58,7 +56,7 @@ where
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
-    N::AddOns: RethRpcAddOns<Adapter<N>>,
+    N::AddOns: RethRpcAddOns<Adapter<N>> + EngineValidatorAddOn<Adapter<N>>,
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
         <<N as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,

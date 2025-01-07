@@ -2,7 +2,13 @@
 
 #![allow(clippy::type_complexity, missing_debug_implementations)]
 
-use crate::{common::WithConfigs, components::NodeComponentsBuilder, node::FullNode, rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext}, BlockReaderFor, EngineNodeLauncher, LaunchNode, Node};
+use crate::{
+    common::WithConfigs,
+    components::NodeComponentsBuilder,
+    node::FullNode,
+    rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
+    BlockReaderFor, EngineNodeLauncher, LaunchNode, Node,
+};
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
@@ -27,7 +33,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_provider::{
-    providers::{BlockchainProvider2, NodeTypesForProvider},
+    providers::{BlockchainProvider2, NodeTypesForProvider, NodeTypesForTree},
     ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
@@ -35,7 +41,6 @@ use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
 use secp256k1::SecretKey;
 use std::sync::Arc;
 use tracing::{info, trace, warn};
-use reth_provider::providers::NodeTypesForTree;
 
 pub mod add_ons;
 
@@ -339,7 +344,11 @@ where
     pub async fn launch_node<N>(
         self,
         node: N,
-    ) -> eyre::Result<<EngineNodeLauncher as LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>>>::Node>
+    ) -> eyre::Result<
+        <EngineNodeLauncher as LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+        >>::Node,
+    >
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForTree,
         N::AddOns: RethRpcAddOns<
@@ -349,7 +358,9 @@ where
             >,
         >,
         N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
-        EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>>
+        EngineNodeLauncher: LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+        >,
     {
         self.node(node).launch().await
     }
@@ -545,10 +556,15 @@ where
     /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(
         self,
-    ) -> eyre::Result<<EngineNodeLauncher as LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>>::Node> {
+    ) -> eyre::Result<
+        <EngineNodeLauncher as LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>,
+        >>::Node,
+    > {
         let Self { builder, task_executor } = self;
 
-        let launcher = EngineNodeLauncher::new(task_executor, builder.config.datadir(), Default::default());
+        let launcher =
+            EngineNodeLauncher::new(task_executor, builder.config.datadir(), Default::default());
         builder.launch_with(launcher).await
     }
 }
