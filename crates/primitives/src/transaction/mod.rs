@@ -29,8 +29,11 @@ pub use pooled::PooledTransactionsElementEcRecovered;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 pub use reth_primitives_traits::{
     sync::{LazyLock, OnceLock},
-    transaction::error::{
-        InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
+    transaction::{
+        error::{
+            InvalidTransactionError, TransactionConversionError, TryFromRecoveredTransactionError,
+        },
+        signed::SignedTransactionIntoRecoveredExt,
     },
     FillTxEnv, WithEncoded,
 };
@@ -45,15 +48,8 @@ pub use tx_type::TxType;
 pub mod signature;
 pub mod util;
 
-pub(crate) mod access_list;
 mod pooled;
 mod tx_type;
-
-#[cfg(any(test, feature = "reth-codec"))]
-pub use tx_type::{
-    COMPACT_EXTENDED_IDENTIFIER_FLAG, COMPACT_IDENTIFIER_EIP1559, COMPACT_IDENTIFIER_EIP2930,
-    COMPACT_IDENTIFIER_LEGACY,
-};
 
 /// Expected number of transactions where we can expect a speed-up by recovering the senders in
 /// parallel.
@@ -876,8 +872,7 @@ impl TransactionSigned {
         }
     }
 
-    /// Converts from an EIP-4844 [`RecoveredTx`] to a
-    /// [`PooledTransactionsElementEcRecovered`] with the given sidecar.
+    /// Converts from an EIP-4844 transaction to a [`PooledTransaction`] with the given sidecar.
     ///
     /// Returns an `Err` containing the original `TransactionSigned` if the transaction is not
     /// EIP-4844.
@@ -1518,42 +1513,6 @@ impl<'a> arbitrary::Arbitrary<'a> for TransactionSigned {
 
 /// Type alias kept for backward compatibility.
 pub type TransactionSignedEcRecovered<T = TransactionSigned> = RecoveredTx<T>;
-
-/// Extension trait for [`SignedTransaction`] to convert it into [`RecoveredTx`].
-pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
-    /// Tries to recover signer and return [`RecoveredTx`] by cloning the type.
-    fn try_ecrecovered(&self) -> Option<RecoveredTx<Self>> {
-        let signer = self.recover_signer()?;
-        Some(RecoveredTx::new_unchecked(self.clone(), signer))
-    }
-
-    /// Tries to recover signer and return [`RecoveredTx`].
-    ///
-    /// Returns `Err(Self)` if the transaction's signature is invalid, see also
-    /// [`SignedTransaction::recover_signer`].
-    fn try_into_ecrecovered(self) -> Result<RecoveredTx<Self>, Self> {
-        match self.recover_signer() {
-            None => Err(self),
-            Some(signer) => Ok(RecoveredTx::new_unchecked(self, signer)),
-        }
-    }
-
-    /// Consumes the type, recover signer and return [`RecoveredTx`] _without
-    /// ensuring that the signature has a low `s` value_ (EIP-2).
-    ///
-    /// Returns `None` if the transaction's signature is invalid.
-    fn into_ecrecovered_unchecked(self) -> Option<RecoveredTx<Self>> {
-        let signer = self.recover_signer_unchecked()?;
-        Some(RecoveredTx::new_unchecked(self, signer))
-    }
-
-    /// Returns the [`RecoveredTx`] transaction with the given sender.
-    fn with_signer(self, signer: Address) -> RecoveredTx<Self> {
-        RecoveredTx::new_unchecked(self, signer)
-    }
-}
-
-impl<T> SignedTransactionIntoRecoveredExt for T where T: SignedTransaction {}
 
 /// Bincode-compatible transaction type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]

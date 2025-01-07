@@ -39,6 +39,10 @@ pub struct EngineArgs {
     /// Configure the target number of blocks to keep in memory.
     #[arg(long = "engine.memory-block-buffer-target", conflicts_with = "legacy", default_value_t = DEFAULT_MEMORY_BLOCK_BUFFER_TARGET)]
     pub memory_block_buffer_target: u64,
+
+    /// Enable state root task
+    #[arg(long = "engine.state-root-task", conflicts_with = "legacy")]
+    pub state_root_task_enabled: bool,
 }
 
 impl Default for EngineArgs {
@@ -48,6 +52,7 @@ impl Default for EngineArgs {
             legacy: false,
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+            state_root_task_enabled: false,
         }
     }
 }
@@ -71,7 +76,8 @@ fn main() {
                 false => {
                     let engine_tree_config = TreeConfig::default()
                         .with_persistence_threshold(engine_args.persistence_threshold)
-                        .with_memory_block_buffer_target(engine_args.memory_block_buffer_target);
+                        .with_memory_block_buffer_target(engine_args.memory_block_buffer_target)
+                        .with_state_root_task(engine_args.state_root_task_enabled);
                     let handle = builder
                         .with_types_and_provider::<EthereumNode, BlockchainProvider2<_>>()
                         .with_components(EthereumNode::components())
