@@ -20,7 +20,7 @@ mod forkchoice;
 pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
 
 mod message;
-pub use message::{BeaconEngineMessage, OnForkChoiceUpdated};
+pub use message::*;
 
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
