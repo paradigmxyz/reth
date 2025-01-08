@@ -10,9 +10,7 @@ crates=($(cargo metadata --format-version=1 --no-deps | jq -r '.packages[].name'
 exclude_crates=(
   # The following require investigation if they can be fixed
   reth-basic-payload-builder
-  reth-beacon-consensus
   reth-bench
-  reth-blockchain-tree
   reth-cli
   reth-cli-commands
   reth-cli-runner
