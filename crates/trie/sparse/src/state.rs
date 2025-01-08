@@ -15,7 +15,7 @@ use reth_primitives_traits::Account;
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    MultiProof, MultiProofTargets, Nibbles, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
+    MultiProof, MultiProofTargets, Nibbles, RlpNode, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use std::{collections::VecDeque, fmt, iter::Peekable};
@@ -292,10 +292,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             match &trie_node {
                 TrieNode::Branch(branch) => {
                     for (idx, maybe_child) in branch.as_ref().children() {
-                        if let Some(child) =
-                            maybe_child.filter(|ch| ch.len() == B256::len_bytes() + 1)
-                        {
-                            let child_hash = B256::from_slice(&child[1..]);
+                        if let Some(child_hash) = maybe_child.and_then(RlpNode::as_hash) {
                             let mut child_path = path.clone();
                             child_path.push_unchecked(idx);
                             queue.push_back((child_hash, child_path, maybe_account));
@@ -303,8 +300,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     }
                 }
                 TrieNode::Extension(ext) => {
-                    if ext.child.len() == B256::len_bytes() + 1 {
-                        let child_hash = B256::from_slice(&ext.child[1..]);
+                    if let Some(child_hash) = ext.child.as_hash() {
                         let mut child_path = path.clone();
                         child_path.extend_from_slice_unchecked(&ext.key);
                         queue.push_back((child_hash, child_path, maybe_account));
