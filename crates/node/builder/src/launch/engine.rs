@@ -29,7 +29,7 @@ use reth_node_core::{
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_primitives::EthereumHardforks;
-use reth_provider::providers::{BlockchainProvider2, NodeTypesForProvider};
+use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -75,7 +75,7 @@ where
     T: FullNodeTypes<
         Types = Types,
         DB = DB,
-        Provider = BlockchainProvider2<NodeTypesWithDBAdapter<Types, DB>>,
+        Provider = BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>,
     >,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
@@ -127,7 +127,7 @@ where
             // passing FullNodeTypes as type parameter here so that we can build
             // later the components.
             .with_blockchain_db::<T, _>(move |provider_factory| {
-                Ok(BlockchainProvider2::new(provider_factory)?)
+                Ok(BlockchainProvider::new(provider_factory)?)
             })?
             .with_components(components_builder, on_component_initialized).await?;
 

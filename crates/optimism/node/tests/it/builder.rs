@@ -5,7 +5,7 @@ use reth_node_api::{FullNodeComponents, NodeTypesWithDBAdapter};
 use reth_node_builder::{Node, NodeBuilder, NodeConfig};
 use reth_optimism_chainspec::BASE_MAINNET;
 use reth_optimism_node::{args::RollupArgs, OpNode};
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProvider;
 
 #[test]
 fn test_basic_setup() {
@@ -16,7 +16,7 @@ fn test_basic_setup() {
     let op_node = OpNode::new(args);
     let _builder = NodeBuilder::new(config)
         .with_database(db)
-        .with_types_and_provider::<OpNode, BlockchainProvider2<NodeTypesWithDBAdapter<OpNode, _>>>()
+        .with_types_and_provider::<OpNode, BlockchainProvider<NodeTypesWithDBAdapter<OpNode, _>>>()
         .with_components(op_node.components())
         .with_add_ons(op_node.add_ons())
         .on_component_initialized(move |ctx| {
