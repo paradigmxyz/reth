@@ -124,6 +124,15 @@ where
     }
 }
 
+impl<B> Default for SealedBlock2<B>
+where
+    B: Block + Default,
+{
+    fn default() -> Self {
+        Self::seal(Default::default())
+    }
+}
+
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a, B> arbitrary::Arbitrary<'a> for SealedBlock2<B>
 where
