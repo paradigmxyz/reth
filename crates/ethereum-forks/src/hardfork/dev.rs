@@ -8,7 +8,7 @@ use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "std")]
 use std::sync::LazyLock;
 
-use crate::{ChainHardforks, EthereumHardfork, ForkCondition};
+use crate::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 
 /// Dev hardforks
 pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {

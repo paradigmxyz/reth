@@ -49,6 +49,7 @@ revm-primitives.workspace = true
 futures.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
+moka = { workspace = true, features = ["sync"] }
 
 # metrics
 metrics.workspace = true
