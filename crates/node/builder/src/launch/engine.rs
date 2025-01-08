@@ -2,10 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
-use reth_beacon_consensus::{
-    hooks::{EngineHooks, StaticFileHook},
-    BeaconConsensusEngineHandle,
-};
+use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider};
 use reth_db_api::{
@@ -166,14 +163,9 @@ where
             .maybe_store_messages(node_config.debug.engine_api_store.clone());
 
         let max_block = ctx.max_block(network_client.clone()).await?;
-        let mut hooks = EngineHooks::new();
 
         let static_file_producer = ctx.static_file_producer();
         let static_file_producer_events = static_file_producer.lock().events();
-        hooks.add(StaticFileHook::new(
-            static_file_producer.clone(),
-            Box::new(ctx.task_executor().clone()),
-        ));
         info!(target: "reth::cli", "StaticFileProducer initialized");
 
         let consensus = Arc::new(ctx.components().consensus().clone());
