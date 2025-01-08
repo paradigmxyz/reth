@@ -4915,7 +4915,7 @@ dependencies = [
  "base64 0.22.1",
  "indexmap 2.7.0",
  "metrics",
- "metrics-util 0.19.0",
+ "metrics-util",
  "quanta",
  "thiserror 1.0.69",
 ]
@@ -4938,20 +4938,6 @@ dependencies = [
 
 [[package]]
 name = "metrics-util"
-version = "0.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15b482df36c13dd1869d73d14d28cd4855fbd6cfc32294bee109908a9f4a4ed7"
-dependencies = [
- "crossbeam-epoch",
- "crossbeam-utils",
- "hashbrown 0.15.2",
- "indexmap 2.7.0",
- "metrics",
- "ordered-float",
-]
-
-[[package]]
-name = "metrics-util"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dbd4884b1dd24f7d6628274a2f5ae22465c337c5ba065ec9b6edccddf8acc673"
@@ -4959,7 +4945,9 @@ dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",
  "hashbrown 0.15.2",
+ "indexmap 2.7.0",
  "metrics",
+ "ordered-float",
  "quanta",
  "rand 0.8.5",
  "rand_xoshiro",
@@ -7593,7 +7581,7 @@ dependencies = [
  "auto_impl",
  "futures-util",
  "metrics",
- "metrics-util 0.18.0",
+ "metrics-util",
  "parking_lot",
  "reth-chainspec",
  "reth-consensus",
@@ -8250,7 +8238,7 @@ dependencies = [
  "metrics",
  "metrics-exporter-prometheus",
  "metrics-process",
- "metrics-util 0.18.0",
+ "metrics-util",
  "procfs 0.16.0",
  "reqwest",
  "reth-metrics",
