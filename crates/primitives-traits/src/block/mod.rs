@@ -1,5 +1,8 @@
 //! Block abstraction.
 
+mod sealed;
+pub use sealed::SealedBlock2;
+
 pub mod body;
 pub mod header;
 
@@ -63,6 +66,16 @@ pub trait Block:
 
     /// Splits the block into its header and body.
     fn split(self) -> (Self::Header, Self::Body);
+
+    /// Consumes the block and returns the header.
+    fn into_header(self) -> Self::Header {
+        self.split().0
+    }
+
+    /// Consumes the block and returns the body.
+    fn into_body(self) -> Self::Body {
+        self.split().1
+    }
 }
 
 impl<T> Block for alloy_consensus::Block<T>

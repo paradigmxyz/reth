@@ -4,7 +4,7 @@ use crate::{
     BlockHeader, FullSignedTx, InMemorySize, MaybeSerde, MaybeSerdeBincodeCompat, SignedTransaction,
 };
 use alloc::{fmt, vec::Vec};
-use alloy_consensus::{Header, Transaction};
+use alloy_consensus::{Header, Transaction, Typed2718};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, B256};
 
@@ -47,8 +47,14 @@ pub trait BlockBody:
     fn transaction_count(&self) -> usize {
         self.transactions().len()
     }
+
     /// Consume the block body and return a [`Vec`] of transactions.
     fn into_transactions(self) -> Vec<Self::Transaction>;
+
+    /// Returns `true` if the block body contains a transaction of the given type.
+    fn contains_transaction_type(&self, tx_type: u8) -> bool {
+        self.transactions().iter().any(|tx| tx.is_type(tx_type))
+    }
 
     /// Calculate the transaction root for the block body.
     fn calculate_tx_root(&self) -> B256 {

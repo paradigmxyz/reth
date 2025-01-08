@@ -14,7 +14,7 @@ use derive_more::{AsRef, Deref};
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 pub struct SealedHeader<H = Header> {
-    /// Locked Header hash.
+    /// Sealed Header hash.
     hash: BlockHash,
     /// Locked Header fields.
     #[as_ref]
