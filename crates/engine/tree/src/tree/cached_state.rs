@@ -1,8 +1,7 @@
 //! Implements a state provider that has a shared cache in front of it.
-#![allow(dead_code)]
 use alloy_primitives::{map::B256HashMap, Address, StorageKey, StorageValue, B256};
 use metrics::Gauge;
-use moka::sync::Cache;
+use moka::sync::CacheBuilder;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives::{Account, Bytecode};
@@ -14,6 +13,9 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
+use revm_primitives::map::DefaultHashBuilder;
+
+type Cache<K, V> = moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
 
 /// A wrapper of a state provider and a shared cache.
 pub(crate) struct CachedStateProvider<S> {
@@ -31,19 +33,6 @@ impl<S> CachedStateProvider<S>
 where
     S: StateProvider,
 {
-    /// Creates a new [`CachedStateProvider`] that contains the given state provider and caches.
-    pub(crate) const fn new(
-        state_provider: S,
-        code_cache: Cache<B256, Option<Bytecode>>,
-        storage_cache: Cache<(Address, StorageKey), Option<StorageValue>>,
-        account_cache: Cache<Address, Option<Account>>,
-        metrics: CachedStateMetrics,
-    ) -> Self {
-        let caches = ProviderCaches { code_cache, account_cache, storage_cache };
-
-        Self { state_provider, caches, metrics }
-    }
-
     /// Creates a new [`CachedStateProvider`] from a [`ProviderCaches`], state provider, and
     /// [`CachedStateMetrics`].
     pub(crate) const fn new_with_caches(
@@ -278,9 +267,12 @@ impl ProviderCacheBuilder {
     /// Build a [`ProviderCaches`] struct, so that provider caches can be easily cloned.
     pub(crate) fn build_caches(self) -> ProviderCaches {
         ProviderCaches {
-            code_cache: Cache::new(self.code_cache_size),
-            storage_cache: Cache::new(self.storage_cache_size),
-            account_cache: Cache::new(self.account_cache_size),
+            code_cache: CacheBuilder::new(self.code_cache_size)
+                .build_with_hasher(DefaultHashBuilder::default()),
+            storage_cache: CacheBuilder::new(self.storage_cache_size)
+                .build_with_hasher(DefaultHashBuilder::default()),
+            account_cache: CacheBuilder::new(self.account_cache_size)
+                .build_with_hasher(DefaultHashBuilder::default()),
         }
     }
 }
