@@ -714,10 +714,10 @@ impl<P> RevealedSparseTrie<P> {
                                 let last_child_nibble = child_path.last().unwrap();
 
                                 // Determine whether we need to set trie mask bit.
-                                let should_set_tree_mask_bit = 
+                                let should_set_tree_mask_bit =
                                     // A branch or an extension node explicitly set the
                                     // `store_in_db_trie` flag
-                                    node_type.store_in_db_trie() || 
+                                    node_type.store_in_db_trie() ||
                                     // Set the flag according to whether a child node was
                                     // pre-calculated (`calculated = false`), meaning that it wasn't
                                     // in the database
@@ -755,7 +755,7 @@ impl<P> RevealedSparseTrie<P> {
 
                             // Insert children in the resulting buffer in a normal order,
                             // because initially we iterated in reverse.
-                            // SAFETY: i < len and len is never 0 
+                            // SAFETY: i < len and len is never 0
                             let original_idx = buffers.branch_child_buf.len() - i - 1;
                             buffers.branch_value_stack_buf[original_idx] = child;
                             added_children = true;
