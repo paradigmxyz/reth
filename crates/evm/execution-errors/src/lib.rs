@@ -11,7 +11,10 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, string::String};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use reth_consensus::ConsensusError;
