@@ -1,6 +1,7 @@
 use alloy_primitives::{b256, B256};
 use reth_chainspec::{
-    once_cell_set, BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork, ForkCondition,
+    once_cell_set, BaseFeeParams, Chain, ChainHardforks, ChainSpec, EthereumHardfork,
+    ForkCondition, Hardfork,
 };
 use reth_discv4::NodeRecord;
 use reth_primitives::Head;
