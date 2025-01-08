@@ -495,6 +495,8 @@ pub trait TransactionPool: Send + Sync + Clone {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
+
+    fn update_da_limits(&self, max_tx_da_size: Option<u64>, max_block_da_size: Option<u64>);
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.
@@ -933,19 +935,23 @@ pub struct BestTransactionsAttributes {
     pub basefee: u64,
     /// The blob fee attribute for best transactions.
     pub blob_fee: Option<u64>,
+    /// The max DA size per transaction
+    pub max_da_tx_size: Option<u64>,
+    /// The max DA size per block
+    pub max_da_block_size: Option<u64>,
 }
 
 // === impl BestTransactionsAttributes ===
 
 impl BestTransactionsAttributes {
     /// Creates a new `BestTransactionsAttributes` with the given basefee and blob fee.
-    pub const fn new(basefee: u64, blob_fee: Option<u64>) -> Self {
-        Self { basefee, blob_fee }
+    pub const fn new(basefee: u64, blob_fee: Option<u64>, max_da_tx_size: Option<u64>, max_da_block_size: Option<u64>) -> Self {
+        Self { basefee, blob_fee, max_da_tx_size, max_da_block_size }
     }
 
     /// Creates a new `BestTransactionsAttributes` with the given basefee.
     pub const fn base_fee(basefee: u64) -> Self {
-        Self::new(basefee, None)
+        Self::new(basefee, None, None, None)
     }
 
     /// Sets the given blob fee.

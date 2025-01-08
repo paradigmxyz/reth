@@ -205,7 +205,7 @@ where
             ctx.node.evm_config().clone(),
             Box::new(ctx.node.task_executor().clone()),
         );
-        let miner_ext = OpMinerExtApi::new(da_config);
+        let miner_ext = OpMinerExtApi::new(da_config, ctx.node.pool().clone());
 
         rpc_add_ons
             .launch_add_ons_with(ctx, move |modules, auth_modules| {

@@ -599,6 +599,10 @@ where
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
         self.pool.blob_store().get_by_versioned_hashes(versioned_hashes)
     }
+
+    fn update_da_limits(&self, max_da_tx_size: Option<u64>, max_da_block_size: Option<u64>) {
+        self.pool.update_da_limits(max_da_tx_size, max_da_block_size);
+    }
 }
 
 impl<V, T, S> TransactionPoolExt for Pool<V, T, S>

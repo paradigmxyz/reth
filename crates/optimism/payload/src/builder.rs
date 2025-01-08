@@ -1,7 +1,7 @@
 //! Optimism payload builder implementation.
 
 use crate::{
-    config::OpBuilderConfig,
+    config::{OpBuilderConfig, OpDAConfig},
     error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
@@ -134,6 +134,7 @@ where
 
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
+            da_config: self.config.da_config.clone(),
             chain_spec: client.chain_spec(),
             config,
             initialized_cfg: cfg_env_with_handler_cfg,
@@ -197,6 +198,7 @@ where
         let config = PayloadConfig { parent_header: Arc::new(parent), attributes };
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
+            da_config: self.config.da_config.clone(),
             chain_spec: client.chain_spec(),
             config,
             initialized_cfg: cfg_env_with_handler_cfg,
@@ -552,6 +554,8 @@ impl ExecutionInfo {
 pub struct OpPayloadBuilderCtx<EvmConfig> {
     /// The type that knows how to perform system calls and configure the evm.
     pub evm_config: EvmConfig,
+    /// The DA config for the payload builder
+    pub da_config: OpDAConfig,
     /// The chainspec
     pub chain_spec: Arc<OpChainSpec>,
     /// How to build the payload.
@@ -639,7 +643,12 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
 
     /// Returns the current fee settings for transactions from the mempool
     pub fn best_transaction_attributes(&self) -> BestTransactionsAttributes {
-        BestTransactionsAttributes::new(self.base_fee(), self.get_blob_gasprice())
+        BestTransactionsAttributes::new(
+            self.base_fee(),
+            self.get_blob_gasprice(),
+            self.da_config.max_da_tx_size(),
+            self.da_config.max_da_block_size(),
+        )
     }
 
     /// Returns the unique id for this payload job.
@@ -760,7 +769,7 @@ where
             if sequencer_tx.value().is_eip4844() {
                 return Err(PayloadBuilderError::other(
                     OpPayloadBuilderError::BlobTransactionRejected,
-                ))
+                ));
             }
 
             // Convert the transaction to a [RecoveredTx]. This is
@@ -798,11 +807,11 @@ where
                     match err {
                         EVMError::Transaction(err) => {
                             trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                            continue
+                            continue;
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
+                            return Err(PayloadBuilderError::EvmExecutionError(err));
                         }
                     }
                 }
@@ -876,18 +885,18 @@ where
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue
+                continue;
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if tx.is_eip4844() || tx.tx_type() == TxType::Deposit as u8 {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue
+                continue;
             }
 
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
-                return Ok(Some(()))
+                return Ok(Some(()));
             }
 
             // Configure the environment for the tx.
@@ -908,11 +917,11 @@ where
                                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                             }
 
-                            continue
+                            continue;
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
+                            return Err(PayloadBuilderError::EvmExecutionError(err));
                         }
                     }
                 }

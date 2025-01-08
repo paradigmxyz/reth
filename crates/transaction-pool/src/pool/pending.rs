@@ -6,6 +6,7 @@ use crate::{
     },
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
+use revm_primitives::U256;
 use rustc_hash::FxHashMap;
 use std::{
     cmp::Ordering,
@@ -14,6 +15,10 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::broadcast;
+
+fn tx_estimated_size_fjord(input: &[u8]) -> U256 {
+    U256::from(200)
+}
 
 /// A pool of validated and gapless transactions that are ready to be executed on the current state
 /// and are waiting to be included in a block.
@@ -196,6 +201,26 @@ impl<T: TransactionOrdering> PendingPool<T> {
         }
 
         removed
+    }
+
+    pub(crate) fn update_da_limits(&mut self, max_da_tx_size: u64) {
+        // Create a collection for removed transactions.
+        let mut removed = Vec::new();
+
+        // Remove all transactions that exceed the max_da_tx_size
+        let mut transactions_iter = self.clear_transactions().into_iter().peekable();
+        while let Some((id, tx)) = transactions_iter.next() {
+            // TODO: da size
+            if tx.transaction.size() > max_da_tx_size.try_into().unwrap() {
+                // Add this tx to the removed collection since it exceeds the
+                // max_da_tx_size condition. Decrease the total pool size.
+                removed.push(Arc::clone(&tx.transaction));
+            } else {
+                self.size_of += tx.transaction.size();
+                self.update_independents_and_highest_nonces(&tx);
+                self.by_id.insert(id, tx);
+            }
+        }
     }
 
     /// Updates the pool with the new base fee. Reorders transactions by new priorities. Removes
