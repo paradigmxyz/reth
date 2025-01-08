@@ -195,6 +195,14 @@ impl<H, B> SealedBlock<H, B> {
         &self.header
     }
 
+    /// Clones the wrapped header and returns a [`SealedHeader`] sealed with the hash.
+    pub fn clone_sealed_header(&self) -> SealedHeader<H>
+    where
+        H: Clone,
+    {
+        self.header.clone()
+    }
+
     /// Consumes the block and returns the sealed header.
     pub fn into_sealed_header(self) -> SealedHeader<H> {
         self.header

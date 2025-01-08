@@ -440,7 +440,7 @@ impl<
         let segment_header = writer.user_header();
         if segment_header.block_end().is_none() && segment_header.expected_block_start() == 0 {
             for block_number in 0..block.number() {
-                let mut prev = block.sealed_header().clone().unseal();
+                let mut prev = block.clone_sealed_header().unseal();
                 prev.number = block_number;
                 writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
             }
