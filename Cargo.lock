@@ -8259,6 +8259,7 @@ version = "1.1.5"
 dependencies = [
  "alloy-chains",
  "alloy-primitives",
+ "auto_impl",
  "once_cell",
  "reth-ethereum-forks",
  "serde",
