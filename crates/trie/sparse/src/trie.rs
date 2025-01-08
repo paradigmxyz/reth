@@ -700,9 +700,8 @@ impl<P> RevealedSparseTrie<P> {
                         .resize(buffers.branch_child_buf.len(), Default::default());
                     let mut added_children = false;
 
-                    // TODO(alexey): set the `TrieMask` bits directly
-                    let mut tree_mask_values = Vec::new();
-                    let mut hash_mask_values = Vec::new();
+                    let mut tree_mask = TrieMask::default();
+                    let mut hash_mask = TrieMask::default();
                     let mut hashes = Vec::new();
                     for (i, child_path) in buffers.branch_child_buf.iter().enumerate() {
                         if buffers.rlp_node_stack.last().is_some_and(|e| &e.0 == child_path) {
@@ -711,18 +710,21 @@ impl<P> RevealedSparseTrie<P> {
 
                             // Update the masks only if we need to retain trie updates
                             if retain_updates {
-                                // Set the trie mask
-                                let tree_mask_value = if node_type.store_in_db_trie() {
+                                // SAFETY: it's a child, so it's never empty
+                                let last_child_nibble = child_path.last().unwrap();
+
+                                // Determine whether we need to set trie mask bit.
+                                let should_set_tree_mask_bit =
                                     // A branch or an extension node explicitly set the
                                     // `store_in_db_trie` flag
-                                    true
-                                } else {
+                                    node_type.store_in_db_trie() ||
                                     // Set the flag according to whether a child node was
                                     // pre-calculated (`calculated = false`), meaning that it wasn't
                                     // in the database
-                                    !calculated
-                                };
-                                tree_mask_values.push(tree_mask_value);
+                                    !calculated;
+                                if should_set_tree_mask_bit {
+                                    tree_mask.set_bit(last_child_nibble);
+                                }
 
                                 // Set the hash mask. If a child node is a revealed branch node OR
                                 // is a blinded node that has its hash mask bit set according to the
@@ -733,12 +735,11 @@ impl<P> RevealedSparseTrie<P> {
                                             self.branch_node_hash_masks
                                                 .get(&path)
                                                 .is_some_and(|mask| {
-                                                    mask.is_bit_set(child_path.last().unwrap())
+                                                    mask.is_bit_set(last_child_nibble)
                                                 }))
                                 });
-                                let hash_mask_value = hash.is_some();
-                                hash_mask_values.push(hash_mask_value);
                                 if let Some(hash) = hash {
+                                    hash_mask.set_bit(last_child_nibble);
                                     hashes.push(hash);
                                 }
 
@@ -746,16 +747,17 @@ impl<P> RevealedSparseTrie<P> {
                                     target: "trie::sparse",
                                     ?path,
                                     ?child_path,
-                                    ?tree_mask_value,
-                                    ?hash_mask_value,
+                                    tree_mask_bit_set = should_set_tree_mask_bit,
+                                    hash_mask_bit_set = hash.is_some(),
                                     "Updating branch node child masks"
                                 );
                             }
 
                             // Insert children in the resulting buffer in a normal order,
                             // because initially we iterated in reverse.
-                            buffers.branch_value_stack_buf
-                                [buffers.branch_child_buf.len() - i - 1] = child;
+                            // SAFETY: i < len and len is never 0
+                            let original_idx = buffers.branch_child_buf.len() - i - 1;
+                            buffers.branch_value_stack_buf[original_idx] = child;
                             added_children = true;
                         } else {
                             debug_assert!(!added_children);
@@ -778,21 +780,6 @@ impl<P> RevealedSparseTrie<P> {
                     let store_in_db_trie_value = if let Some(updates) =
                         self.updates.as_mut().filter(|_| retain_updates && !path.is_empty())
                     {
-                        let mut tree_mask_values = tree_mask_values.into_iter().rev();
-                        let mut hash_mask_values = hash_mask_values.into_iter().rev();
-                        let mut tree_mask = TrieMask::default();
-                        let mut hash_mask = TrieMask::default();
-                        for (i, child) in branch_node_ref.children() {
-                            if child.is_some() {
-                                if hash_mask_values.next().unwrap() {
-                                    hash_mask.set_bit(i);
-                                }
-                                if tree_mask_values.next().unwrap() {
-                                    tree_mask.set_bit(i);
-                                }
-                            }
-                        }
-
                         // Store in DB trie if there are either any children that are stored in the
                         // DB trie, or any children represent hashed values
                         let store_in_db_trie = !tree_mask.is_empty() || !hash_mask.is_empty();
