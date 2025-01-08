@@ -5,7 +5,7 @@ use crate::{
 use alloc::vec::Vec;
 use alloy_consensus::Header;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
@@ -212,22 +212,8 @@ impl<H, B> SealedBlock<H, B> {
 
     /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
     #[inline]
-    pub fn split_header_body(self) -> (SealedHeader<H>, B) {
+    pub fn split(self) -> (SealedHeader<H>, B) {
         (self.header, self.body)
-    }
-}
-
-impl SealedBlock {
-    /// Returns whether or not the block contains any blob transactions.
-    #[inline]
-    pub fn has_eip4844_transactions(&self) -> bool {
-        self.body.has_eip4844_transactions()
-    }
-
-    /// Returns whether or not the block contains any eip-7702 transactions.
-    #[inline]
-    pub fn has_eip7702_transactions(&self) -> bool {
-        self.body.has_eip7702_transactions()
     }
 }
 
@@ -369,16 +355,6 @@ where
     {
         Block::new(self.header.unseal(), self.body)
     }
-
-    /// Returns a vector of encoded 2718 transactions.
-    ///
-    /// This is also known as `raw transactions`.
-    ///
-    /// See also [`Encodable2718`].
-    #[doc(alias = "raw_transactions")]
-    pub fn encoded_2718_transactions(&self) -> Vec<Bytes> {
-        self.body.encoded_2718_transactions()
-    }
 }
 
 impl<H: InMemorySize, B: InMemorySize> InMemorySize for SealedBlock<H, B> {
@@ -457,7 +433,7 @@ impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
     #[inline]
     pub fn unseal(self) -> BlockWithSenders<B> {
         let (block, senders) = self.into_components();
-        let (header, body) = block.split_header_body();
+        let (header, body) = block.split();
         let header = header.unseal();
         BlockWithSenders::new_unchecked(B::new(header, body), senders)
     }

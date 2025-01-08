@@ -525,7 +525,7 @@ mod tests {
                 stage_progress,
                 BlockParams { parent: preblocks.last().map(|b| b.hash()), ..Default::default() },
             )
-            .split_header_body();
+            .split();
             let mut header = header.unseal();
 
             header.state_root = state_root(
