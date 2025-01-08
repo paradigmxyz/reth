@@ -304,13 +304,15 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 }
                 TrieNode::Extension(ext) => {
                     if ext.child.len() == B256::len_bytes() + 1 {
-                        let child_hash = B256::from_slice(&&ext.child[1..]);
+                        let child_hash = B256::from_slice(&ext.child[1..]);
                         let mut child_path = path.clone();
                         child_path.extend_from_slice_unchecked(&ext.key);
                         queue.push_back((child_hash, child_path, maybe_account));
                     }
                 }
                 TrieNode::Leaf(leaf) => {
+                    let mut full_path = path.clone();
+                    full_path.extend_from_slice_unchecked(&leaf.key);
                     if let Some(hashed_address) = maybe_account {
                         // Record storage slot in revealed.
                         let hashed_slot = B256::from_slice(&full_path.pack());
@@ -319,9 +321,6 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         let hashed_address = B256::from_slice(&full_path.pack());
                         let account = TrieAccount::decode(&mut &leaf.value[..])?;
                         if account.storage_root != EMPTY_ROOT_HASH {
-                            let mut full_path = path.clone();
-                            full_path.extend_from_slice_unchecked(&leaf.key);
-
                             queue.push_back((
                                 account.storage_root,
                                 Nibbles::default(),
