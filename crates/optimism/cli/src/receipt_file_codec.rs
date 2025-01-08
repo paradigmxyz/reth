@@ -66,7 +66,6 @@ where
     }
 }
 
-
 /// See <https://github.com/testinprod-io/op-geth/pull/1>
 #[derive(Debug, PartialEq, Eq, RlpDecodable)]
 pub struct OpGethReceipt {
