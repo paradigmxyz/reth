@@ -31,7 +31,6 @@ reth-stages.workspace = true
 reth-execution-types.workspace = true
 reth-errors.workspace = true
 reth-transaction-pool.workspace = true
-reth-beacon-consensus.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-commands.workspace = true
 reth-cli-util.workspace = true

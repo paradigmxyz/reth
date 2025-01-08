@@ -3,7 +3,7 @@ use crate::{args::NetworkArgs, utils::get_single_header};
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
-use reth_beacon_consensus::EthBeaconConsensus;
+use reth_node_ethereum::consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};

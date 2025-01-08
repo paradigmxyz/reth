@@ -5,7 +5,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use clap::Parser;
 use futures::StreamExt;
-use reth_beacon_consensus::EthBeaconConsensus;
+use reth_node_ethereum::consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};

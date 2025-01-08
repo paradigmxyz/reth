@@ -1,9 +1,8 @@
 use futures::{Stream, StreamExt};
 use pin_project::pin_project;
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::{BeaconEngineMessage, EngineValidator};
+use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineValidator};
 use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
@@ -30,6 +29,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+use reth_provider::providers::EngineNodeTypes;
 
 /// Alias for consensus engine stream.
 pub type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<T>> + Send + Sync>>;
@@ -150,7 +150,7 @@ pub struct EngineServiceError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_beacon_consensus::EthBeaconConsensus;
+    use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_engine_primitives::BeaconEngineMessage;
     use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};

@@ -16,10 +16,9 @@ use std::{
 
 use crate::miner::{LocalMiner, MiningMode};
 use futures_util::{Stream, StreamExt};
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::{BeaconEngineMessage, EngineValidator};
+use reth_engine_primitives::{BeaconEngineMessage, EngineValidator, BeaconConsensusEngineEvent};
 use reth_engine_service::service::EngineMessageStream;
 use reth_engine_tree::{
     chain::{ChainEvent, HandlerEvent},
@@ -39,6 +38,7 @@ use reth_prune::PrunerWithFactory;
 use reth_stages_api::MetricEventsSender;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::error;
+use reth_provider::providers::EngineNodeTypes;
 
 /// Provides a local dev service engine that can be used to drive the
 /// chain forward.

@@ -12,7 +12,6 @@ use eyre::Context;
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, Cancelled, PayloadBuilder, PayloadConfig,
 };
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
@@ -44,6 +43,7 @@ use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
+use reth_node_ethereum::consensus::EthBeaconConsensus;
 
 /// `reth debug build-block` command
 /// This debug routine requires that the node is positioned at the block before the target.
