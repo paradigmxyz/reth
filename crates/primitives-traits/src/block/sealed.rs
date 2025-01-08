@@ -2,13 +2,13 @@
 
 use crate::{Block, BlockBody, GotExpected, SealedHeader};
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockHash, B256};
-use serde::{Deserialize, Serialize};
+use alloy_primitives::{BlockHash, Sealable, B256};
 
 /// Sealed full block.
 ///
 /// This type wraps the block type together with the block hash.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SealedBlock2<B> {
     /// Sealed Header hash.
     hash: BlockHash,
@@ -104,5 +104,33 @@ where
         }
 
         Ok(())
+    }
+}
+
+impl<B: Block> SealedBlock2<B> {
+    /// Hashes the header and creates a sealed block.
+    pub fn seal(block: B) -> Self {
+        let hash = block.header().hash_slow();
+        Self::new(block, hash)
+    }
+}
+
+impl<B> From<B> for SealedBlock2<B>
+where
+    B: Block,
+{
+    fn from(block: B) -> Self {
+        Self::seal(block)
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a, B> arbitrary::Arbitrary<'a> for SealedBlock2<B>
+where
+    B: Block + arbitrary::Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let block = B::arbitrary(u)?;
+        Ok(SealedBlock2::seal(block))
     }
 }
