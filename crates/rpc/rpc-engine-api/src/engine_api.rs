@@ -16,7 +16,7 @@ use alloy_rpc_types_engine::{
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use parking_lot::Mutex;
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes, EngineValidator};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
@@ -614,7 +614,8 @@ where
         let merge_terminal_td = self
             .inner
             .chain_spec
-            .get_final_paris_total_difficulty()
+            .ethereum_fork_activation(EthereumHardfork::Paris)
+            .ttd()
             .expect("the engine API should not be running for chains w/o paris");
 
         // Compare total difficulty values
