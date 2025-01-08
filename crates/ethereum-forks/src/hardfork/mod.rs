@@ -6,6 +6,7 @@ pub use ethereum::EthereumHardfork;
 mod dev;
 pub use dev::DEV_HARDFORKS;
 
+use alloc::boxed::Box;
 use core::{
     any::Any,
     hash::{Hash, Hasher},
