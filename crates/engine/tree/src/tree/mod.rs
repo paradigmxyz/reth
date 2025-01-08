@@ -16,9 +16,6 @@ use alloy_rpc_types_engine::{
     PayloadValidationError,
 };
 use block_buffer::BlockBuffer;
-use reth_beacon_consensus::{
-    BeaconConsensusEngineEvent, InvalidHeaderCache, MIN_BLOCKS_FOR_PIPELINE_RUN,
-};
 use reth_blockchain_tree_api::{
     error::{InsertBlockErrorKindTwo, InsertBlockErrorTwo, InsertBlockFatalError},
     BlockStatus2, InsertPayloadOk2,
@@ -29,8 +26,9 @@ use reth_chain_state::{
 use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
 pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
-    BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
-    EngineValidator, ForkchoiceStateTracker, OnForkChoiceUpdated,
+    BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError,
+    EngineApiMessageVersion, EngineTypes, EngineValidator, ForkchoiceStateTracker,
+    OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::{execute::BlockExecutorProvider, system_calls::OnStateHook};
@@ -81,11 +79,13 @@ use tracing::*;
 mod block_buffer;
 pub mod config;
 mod invalid_block_hook;
+mod invalid_headers;
 mod metrics;
 mod persistence_state;
 pub mod root;
 mod trie_updates;
 
+use crate::tree::{config::MIN_BLOCKS_FOR_PIPELINE_RUN, invalid_headers::InvalidHeaderCache};
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
