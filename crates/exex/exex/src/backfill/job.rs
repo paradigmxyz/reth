@@ -108,7 +108,7 @@ where
 
             // Unseal the block for execution
             let (block, senders) = block.into_components();
-            let (header, body) = block.split_header_body();
+            let (header, body) = block.split();
             let (unsealed_header, hash) = header.split();
             let block = P::Block::new(unsealed_header, body).with_senders_unchecked(senders);
 

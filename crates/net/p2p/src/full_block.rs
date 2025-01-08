@@ -429,7 +429,7 @@ where
             // put response hashes back into bodies map since we aren't returning them as a
             // response
             for block in valid_responses {
-                let (header, body) = block.split_header_body();
+                let (header, body) = block.split();
                 self.bodies.insert(header, BodyResponse::Validated(body));
             }
 
