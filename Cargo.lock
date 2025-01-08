@@ -7195,7 +7195,6 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "rayon",
- "reth-blockchain-tree-api",
  "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",

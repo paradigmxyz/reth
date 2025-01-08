@@ -12,7 +12,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-blockchain-tree-api.workspace = true
 reth-chain-state.workspace = true
 reth-chainspec = { workspace = true, optional = true }
 reth-consensus.workspace = true

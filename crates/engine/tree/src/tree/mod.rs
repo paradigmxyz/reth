@@ -16,10 +16,7 @@ use alloy_rpc_types_engine::{
     PayloadValidationError,
 };
 use block_buffer::BlockBuffer;
-use reth_blockchain_tree_api::{
-    error::{InsertBlockErrorKindTwo, InsertBlockErrorTwo, InsertBlockFatalError},
-    BlockStatus2, InsertPayloadOk2,
-};
+use error::{InsertBlockErrorKindTwo, InsertBlockErrorTwo, InsertBlockFatalError};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
@@ -78,6 +75,7 @@ use tracing::*;
 
 mod block_buffer;
 pub mod config;
+pub mod error;
 mod invalid_block_hook;
 mod invalid_headers;
 mod metrics;
@@ -85,7 +83,10 @@ mod persistence_state;
 pub mod root;
 mod trie_updates;
 
-use crate::tree::{config::MIN_BLOCKS_FOR_PIPELINE_RUN, invalid_headers::InvalidHeaderCache};
+use crate::tree::{
+    config::MIN_BLOCKS_FOR_PIPELINE_RUN, error::AdvancePersistenceError,
+    invalid_headers::InvalidHeaderCache,
+};
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
@@ -2764,16 +2765,34 @@ where
     }
 }
 
-/// This is an error that can come from advancing persistence. Either this can be a
-/// [`TryRecvError`], or this can be a [`ProviderError`]
-#[derive(Debug, thiserror::Error)]
-pub enum AdvancePersistenceError {
-    /// An error that can be from failing to receive a value from persistence
-    #[error(transparent)]
-    RecvError(#[from] TryRecvError),
-    /// A provider error
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
+/// Block inclusion can be valid, accepted, or invalid. Invalid blocks are returned as an error
+/// variant.
+///
+/// If we don't know the block's parent, we return `Disconnected`, as we can't claim that the block
+/// is valid or not.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlockStatus2 {
+    /// The block is valid and block extends canonical chain.
+    Valid,
+    /// The block may be valid and has an unknown missing ancestor.
+    Disconnected {
+        /// Current canonical head.
+        head: BlockNumHash,
+        /// The lowest ancestor block that is not connected to the canonical chain.
+        missing_ancestor: BlockNumHash,
+    },
+}
+
+/// How a payload was inserted if it was valid.
+///
+/// If the payload was valid, but has already been seen, [`InsertPayloadOk2::AlreadySeen(_)`] is
+/// returned, otherwise [`InsertPayloadOk2::Inserted(_)`] is returned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InsertPayloadOk2 {
+    /// The payload was valid, but we have already seen it.
+    AlreadySeen(BlockStatus2),
+    /// The payload was valid and inserted into the tree.
+    Inserted(BlockStatus2),
 }
 
 #[cfg(test)]
