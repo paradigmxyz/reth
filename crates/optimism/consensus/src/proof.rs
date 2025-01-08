@@ -6,7 +6,7 @@ use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_trie::root::ordered_trie_root_with_encoder;
 use reth_chainspec::ChainSpec;
-use reth_optimism_forks::OpHardfork;
+use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_primitives::OpReceipt;
 use reth_primitives::ReceiptWithBloom;
 
@@ -46,7 +46,7 @@ pub(crate) fn calculate_receipt_root_optimism(
 /// NOTE: Prefer calculate receipt root optimism if you have log blooms memoized.
 pub fn calculate_receipt_root_no_memo_optimism(
     receipts: &[&OpReceipt],
-    chain_spec: impl reth_chainspec::Hardforks,
+    chain_spec: impl OpHardforks,
     timestamp: u64,
 ) -> B256 {
     // There is a minor bug in op-geth and op-erigon where in the Regolith hardfork,
@@ -54,8 +54,8 @@ pub fn calculate_receipt_root_no_memo_optimism(
     // encoding. In the Regolith Hardfork, we must strip the deposit nonce from the
     // receipts before calculating the receipt root. This was corrected in the Canyon
     // hardfork.
-    if chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, timestamp) &&
-        !chain_spec.is_fork_active_at_timestamp(OpHardfork::Canyon, timestamp)
+    if chain_spec.is_regolith_active_at_timestamp(timestamp) &&
+        !chain_spec.is_canyon_active_at_timestamp(timestamp)
     {
         let receipts = receipts
             .iter()

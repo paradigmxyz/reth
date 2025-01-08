@@ -313,6 +313,10 @@ impl Hardforks for OpChainSpec {
 }
 
 impl EthereumHardforks for OpChainSpec {
+    fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
+        self.fork(fork)
+    }
+
     fn get_final_paris_total_difficulty(&self) -> Option<U256> {
         self.inner.get_final_paris_total_difficulty()
     }
@@ -322,7 +326,11 @@ impl EthereumHardforks for OpChainSpec {
     }
 }
 
-impl OpHardforks for OpChainSpec {}
+impl OpHardforks for OpChainSpec {
+    fn op_fork_activation(&self, fork: OpHardfork) -> ForkCondition {
+        self.fork(fork)
+    }
+}
 
 impl From<Genesis> for OpChainSpec {
     fn from(genesis: Genesis) -> Self {

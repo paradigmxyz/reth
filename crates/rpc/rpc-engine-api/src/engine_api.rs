@@ -16,14 +16,13 @@ use alloy_rpc_types_engine::{
 use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use parking_lot::Mutex;
-use reth_chainspec::{EthereumHardforks, Hardforks};
+use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes, EngineValidator};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes,
     PayloadOrAttributes,
 };
-use reth_primitives::EthereumHardfork;
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types_compat::engine::payload::convert_to_payload_body_v1;
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
@@ -615,7 +614,7 @@ where
         let merge_terminal_td = self
             .inner
             .chain_spec
-            .fork(EthereumHardfork::Paris)
+            .ethereum_fork_activation(EthereumHardfork::Paris)
             .ttd()
             .expect("the engine API should not be running for chains w/o paris");
 
@@ -1024,7 +1023,7 @@ mod tests {
     use super::*;
     use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
     use assert_matches::assert_matches;
-    use reth_chainspec::{ChainSpec, MAINNET};
+    use reth_chainspec::{ChainSpec, EthereumHardfork, MAINNET};
     use reth_engine_primitives::BeaconEngineMessage;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_payload_builder::test_utils::spawn_test_payload_service;
