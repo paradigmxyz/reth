@@ -6518,21 +6518,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-blockchain-tree-api"
-version = "1.1.5"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "reth-consensus",
- "reth-execution-errors",
- "reth-primitives",
- "reth-primitives-traits",
- "reth-storage-errors",
- "thiserror 2.0.9",
-]
-
-[[package]]
 name = "reth-chain-state"
 version = "1.1.5"
 dependencies = [
