@@ -527,13 +527,14 @@ tracing-appender = "0.2"
 url = { version = "2.3", default-features = false }
 zstd = "0.13"
 byteorder = "1"
+moka = "0.12"
 
 # metrics
 metrics = "0.24.0"
 metrics-derive = "0.1"
 metrics-exporter-prometheus = { version = "0.16.0", default-features = false }
 metrics-process = "2.1.0"
-metrics-util = { default-features = false, version = "0.18.0" }
+metrics-util = { default-features = false, version = "0.19.0" }
 
 # proc-macros
 proc-macro2 = "1.0"
