@@ -1,8 +1,11 @@
+//! Events emitted by the beacon consensus engine.
+
+use crate::ForkchoiceStatus;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_engine_primitives::ForkchoiceStatus;
-use reth_primitives::{EthPrimitives, NodePrimitives, SealedBlockFor, SealedHeader};
+use reth_primitives::{EthPrimitives, SealedBlockFor};
+use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use std::{
     fmt::{Display, Formatter, Result},
     sync::Arc,
