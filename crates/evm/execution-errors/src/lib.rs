@@ -134,7 +134,6 @@ pub enum BlockExecutionError {
 impl BlockExecutionError {
     /// Create a new [`BlockExecutionError::Internal`] variant, containing a
     /// [`InternalBlockExecutionError::Other`] error.
-    #[cfg(feature = "std")]
     pub fn other<E>(error: E) -> Self
     where
         E: core::error::Error + Send + Sync + 'static,
@@ -144,8 +143,7 @@ impl BlockExecutionError {
 
     /// Create a new [`BlockExecutionError::Internal`] variant, containing a
     /// [`InternalBlockExecutionError::Other`] error with the given message.
-    #[cfg(feature = "std")]
-    pub fn msg(msg: impl std::fmt::Display) -> Self {
+    pub fn msg(msg: impl core::fmt::Display) -> Self {
         Self::Internal(InternalBlockExecutionError::msg(msg))
     }
 
@@ -195,7 +193,6 @@ pub enum InternalBlockExecutionError {
 
 impl InternalBlockExecutionError {
     /// Create a new [`InternalBlockExecutionError::Other`] variant.
-    #[cfg(feature = "std")]
     pub fn other<E>(error: E) -> Self
     where
         E: core::error::Error + Send + Sync + 'static,
@@ -204,8 +201,7 @@ impl InternalBlockExecutionError {
     }
 
     /// Create a new [`InternalBlockExecutionError::Other`] from a given message.
-    #[cfg(feature = "std")]
-    pub fn msg(msg: impl std::fmt::Display) -> Self {
+    pub fn msg(msg: impl core::fmt::Display) -> Self {
         Self::Other(msg.to_string().into())
     }
 }
