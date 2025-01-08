@@ -1,4 +1,3 @@
-use reth_blockchain_tree_api::error::{BlockchainTreeError, CanonicalError};
 use reth_consensus::ConsensusError;
 use reth_execution_errors::BlockExecutionError;
 use reth_fs_util::FsPathError;
@@ -31,10 +30,6 @@ pub enum RethError {
     #[error(transparent)]
     Provider(#[from] ProviderError),
 
-    /// Canonical errors encountered.
-    #[error(transparent)]
-    Canonical(#[from] CanonicalError),
-
     /// Any other error.
     #[error(transparent)]
     Other(Box<dyn core::error::Error + Send + Sync>),
@@ -52,12 +47,6 @@ impl RethError {
     /// Create a new `RethError` from a given message.
     pub fn msg(msg: impl Display) -> Self {
         Self::Other(msg.to_string().into())
-    }
-}
-
-impl From<BlockchainTreeError> for RethError {
-    fn from(error: BlockchainTreeError) -> Self {
-        Self::Canonical(CanonicalError::BlockchainTree(error))
     }
 }
 
@@ -83,5 +72,4 @@ mod size_asserts {
     static_assert_size!(ConsensusError, 48);
     static_assert_size!(DatabaseError, 32);
     static_assert_size!(ProviderError, 48);
-    static_assert_size!(CanonicalError, 56);
 }
