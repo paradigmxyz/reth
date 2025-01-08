@@ -7271,7 +7271,6 @@ dependencies = [
 name = "reth-errors"
 version = "1.1.5"
 dependencies = [
- "reth-blockchain-tree-api",
  "reth-consensus",
  "reth-execution-errors",
  "reth-fs-util",
