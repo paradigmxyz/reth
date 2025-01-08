@@ -16,10 +16,9 @@ use std::{
 
 use crate::miner::{LocalMiner, MiningMode};
 use futures_util::{Stream, StreamExt};
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::{BeaconEngineMessage, EngineValidator};
+use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineValidator};
 use reth_engine_service::service::EngineMessageStream;
 use reth_engine_tree::{
     chain::{ChainEvent, HandlerEvent},
@@ -34,7 +33,10 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_node_types::BlockTy;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributesBuilder, PayloadTypes};
-use reth_provider::{providers::BlockchainProvider2, ChainSpecProvider, ProviderFactory};
+use reth_provider::{
+    providers::{BlockchainProvider2, EngineNodeTypes},
+    ChainSpecProvider, ProviderFactory,
+};
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::MetricEventsSender;
 use tokio::sync::mpsc::UnboundedSender;

@@ -114,6 +114,11 @@ impl<T> NodeTypesForTree for T where
 {
 }
 
+/// Helper trait expressing requirements for node types to be used in engine.
+pub trait EngineNodeTypes: ProviderNodeTypes + NodeTypesWithEngine {}
+
+impl<T> EngineNodeTypes for T where T: ProviderNodeTypes + NodeTypesWithEngine {}
+
 /// Helper trait with requirements for [`ProviderNodeTypes`] to be used within legacy blockchain
 /// tree.
 pub trait TreeNodeTypes: ProviderNodeTypes + NodeTypesForTree {}

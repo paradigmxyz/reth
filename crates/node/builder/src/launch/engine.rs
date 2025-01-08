@@ -2,7 +2,6 @@
 
 use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
-use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider};
 use reth_db_api::{
@@ -20,8 +19,8 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BuiltPayload, FullNodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine,
-    PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
+    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypesWithDBAdapter,
+    NodeTypesWithEngine, PayloadAttributesBuilder, PayloadBuilder, PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},

@@ -103,9 +103,9 @@ pub mod primitives {
     pub use reth_primitives::*;
 }
 
-/// Re-exported from `reth_beacon_consensus`.
+/// Re-exported from `reth_ethereum_consensus`.
 pub mod beacon_consensus {
-    pub use reth_beacon_consensus::*;
+    pub use reth_node_ethereum::consensus::*;
 }
 
 /// Re-exported from `reth_consensus`.
