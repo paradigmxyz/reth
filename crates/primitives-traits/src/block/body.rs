@@ -35,6 +35,13 @@ pub trait BlockBody:
     /// Ommer header type.
     type OmmerHeader: BlockHeader;
 
+    /// Returns a new instance of the [`BlockBody`].
+    fn new(
+        transactions: &[Self::Transaction],
+        ommers: &[Self::OmmerHeader],
+        withdrawals: Option<Withdrawals>,
+    ) -> Self;
+
     /// Returns reference to transactions in block.
     fn transactions(&self) -> &[Self::Transaction];
 
@@ -133,6 +140,14 @@ where
 {
     type Transaction = T;
     type OmmerHeader = Header;
+
+    fn new(
+        transactions: &[Self::Transaction],
+        ommers: &[Self::OmmerHeader],
+        withdrawals: Option<Withdrawals>,
+    ) -> Self {
+        Self { transactions: transactions.into(), ommers: ommers.into(), withdrawals }
+    }
 
     fn transactions(&self) -> &[Self::Transaction] {
         &self.transactions
