@@ -20,7 +20,7 @@ use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine}
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::EthPrimitives;
 use reth_provider::{
-    providers::{BlockchainProvider2, EngineNodeTypes},
+    providers::{BlockchainProvider, EngineNodeTypes},
     ProviderFactory,
 };
 use reth_prune::PrunerWithFactory;
@@ -79,7 +79,7 @@ where
         pipeline: Pipeline<N>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         provider: ProviderFactory<N>,
-        blockchain_db: BlockchainProvider2<N>,
+        blockchain_db: BlockchainProvider<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         payload_builder: PayloadBuilderHandle<N::Engine>,
         payload_validator: V,
@@ -162,7 +162,7 @@ mod tests {
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives::SealedHeader;
     use reth_provider::{
-        providers::BlockchainProvider2, test_utils::create_test_provider_factory_with_chain_spec,
+        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };
     use reth_prune::Pruner;
     use reth_tasks::TokioTaskExecutor;
@@ -192,7 +192,7 @@ mod tests {
 
         let executor_factory = EthExecutorProvider::ethereum(chain_spec.clone());
         let blockchain_db =
-            BlockchainProvider2::with_latest(provider_factory.clone(), SealedHeader::default())
+            BlockchainProvider::with_latest(provider_factory.clone(), SealedHeader::default())
                 .unwrap();
         let engine_payload_validator = EthereumEngineValidator::new(chain_spec.clone());
         let (_tx, rx) = watch::channel(FinishedExExHeight::NoExExs);

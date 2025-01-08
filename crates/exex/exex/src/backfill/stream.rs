@@ -246,7 +246,7 @@ mod tests {
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
     use reth_provider::{
-        providers::BlockchainProvider2, test_utils::create_test_provider_factory_with_chain_spec,
+        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };
     use reth_stages_api::ExecutionStageThresholds;
     use reth_testing_utils::generators;
@@ -265,7 +265,7 @@ mod tests {
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider2::new(provider_factory.clone())?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
 
         // Create first 2 blocks
         let blocks_and_execution_outcomes =
@@ -303,7 +303,7 @@ mod tests {
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider2::new(provider_factory.clone())?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
 
         // Create first 2 blocks
         let (blocks, execution_outcome) =

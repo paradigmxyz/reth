@@ -13,7 +13,7 @@ use reth_node_builder::{
     EngineNodeLauncher,
 };
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProvider;
 use reth_tracing::tracing::warn;
 use tracing::info;
 
@@ -79,7 +79,7 @@ fn main() {
                         .with_memory_block_buffer_target(engine_args.memory_block_buffer_target)
                         .with_state_root_task(engine_args.state_root_task_enabled);
                     let handle = builder
-                        .with_types_and_provider::<EthereumNode, BlockchainProvider2<_>>()
+                        .with_types_and_provider::<EthereumNode, BlockchainProvider<_>>()
                         .with_components(EthereumNode::components())
                         .with_add_ons(EthereumAddOns::default())
                         .launch_with_fn(|builder| {
