@@ -1,8 +1,9 @@
 //! Sealed block types
 
-use crate::{Block, BlockBody, GotExpected, SealedHeader};
+use crate::{Block, BlockBody, GotExpected, InMemorySize, SealedHeader};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, Sealable, B256};
+use core::ops::Deref;
 
 /// Sealed full block.
 ///
@@ -42,6 +43,11 @@ where
     /// Returns reference to block body.
     pub fn body(&self) -> &B::Body {
         self.block.body()
+    }
+
+    /// Returns the block hash
+    pub const fn block_hash(&self) -> &B256 {
+        &self.hash
     }
 
     /// Returns the Sealed header.
@@ -141,5 +147,20 @@ where
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let block = B::arbitrary(u)?;
         Ok(SealedBlock2::seal(block))
+    }
+}
+
+impl<B: InMemorySize> InMemorySize for SealedBlock2<B> {
+    #[inline]
+    fn size(&self) -> usize {
+        self.block.size() + self.hash.size()
+    }
+}
+
+impl<B: Block> Deref for SealedBlock2<B> {
+    type Target = B::Header;
+
+    fn deref(&self) -> &Self::Target {
+        self.header()
     }
 }
