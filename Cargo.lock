@@ -6518,44 +6518,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-blockchain-tree"
-version = "1.1.5"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-genesis",
- "alloy-primitives",
- "aquamarine",
- "assert_matches",
- "linked_hash_set",
- "metrics",
- "parking_lot",
- "reth-blockchain-tree-api",
- "reth-chainspec",
- "reth-consensus",
- "reth-db",
- "reth-db-api",
- "reth-evm",
- "reth-evm-ethereum",
- "reth-execution-errors",
- "reth-execution-types",
- "reth-metrics",
- "reth-network",
- "reth-node-types",
- "reth-primitives",
- "reth-provider",
- "reth-revm",
- "reth-stages-api",
- "reth-storage-errors",
- "reth-testing-utils",
- "reth-trie",
- "reth-trie-db",
- "reth-trie-parallel",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "reth-blockchain-tree-api"
 version = "1.1.5"
 dependencies = [
