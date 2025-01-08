@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-primitives.workspace = true
 reth-rpc-api.workspace = true
 reth-storage-api.workspace = true
 reth-payload-builder.workspace = true
@@ -49,6 +48,7 @@ parking_lot.workspace = true
 [dev-dependencies]
 reth-ethereum-engine-primitives.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
+reth-primitives.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-tokio-util.workspace = true
 reth-testing-utils.workspace = true

@@ -23,6 +23,7 @@ alloy-primitives.workspace = true
 serde = { workspace = true, optional = true }
 
 # misc
+auto_impl.workspace = true
 once_cell.workspace = true
 
 [features]
