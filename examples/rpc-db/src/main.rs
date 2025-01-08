@@ -18,7 +18,7 @@ use reth::{
     api::NodeTypesWithDBAdapter,
     beacon_consensus::EthBeaconConsensus,
     providers::{
-        providers::{BlockchainProvider2, StaticFileProvider},
+        providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
     },
     rpc::eth::EthApi,
@@ -61,7 +61,7 @@ async fn main() -> eyre::Result<()> {
     // 2. Setup the blockchain provider using only the database provider and a noop for the tree to
     //    satisfy trait bounds. Tree is not used in this example since we are only operating on the
     //    disk and don't handle new blocks/live sync etc, which is done by the blockchain tree.
-    let provider = BlockchainProvider2::new(factory)?;
+    let provider = BlockchainProvider::new(factory)?;
 
     let rpc_builder = RpcModuleBuilder::default()
         .with_provider(provider.clone())

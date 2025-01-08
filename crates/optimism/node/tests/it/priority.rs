@@ -29,7 +29,7 @@ use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::{PayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed};
 use reth_primitives::RecoveredTx;
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::{pool::BestPayloadTransactions, PoolTransaction};
 use std::sync::Arc;
@@ -148,7 +148,7 @@ async fn test_custom_block_priority_config() {
     let tasks = TaskManager::current();
     let node_handle = NodeBuilder::new(config.clone())
         .with_database(db)
-        .with_types_and_provider::<OpNode, BlockchainProvider2<_>>()
+        .with_types_and_provider::<OpNode, BlockchainProvider<_>>()
         .with_components(build_components(config.chain.chain_id()))
         .with_add_ons(OpAddOns::default())
         .launch_with_fn(|builder| {

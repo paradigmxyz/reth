@@ -29,7 +29,7 @@ use reth_primitives::{
     TransactionSigned,
 };
 use reth_provider::{
-    providers::{BlockchainProvider2, ProviderNodeTypes},
+    providers::{BlockchainProvider, ProviderNodeTypes},
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
     StageCheckpointReader, StateProviderFactory,
 };
@@ -132,7 +132,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             .lookup_best_block(provider_factory.clone())
             .wrap_err("the head block is missing")?;
 
-        let blockchain_db = BlockchainProvider2::new(provider_factory.clone())?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
         let blob_store = InMemoryBlobStore::default();
 
         let validator =

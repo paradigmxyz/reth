@@ -50,7 +50,7 @@ use reth_provider::{providers::StaticFileProvider, BlockReader, EthStorage, Prov
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProvider;
 use tempfile::TempDir;
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};
@@ -174,7 +174,7 @@ pub type Adapter = NodeAdapter<
         FullNodeTypesAdapter<
             TestNode,
             TmpDB,
-            BlockchainProvider2<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
+            BlockchainProvider<NodeTypesWithDBAdapter<TestNode, TmpDB>>,
         >,
     >>::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<TmpDB, TestNode>>>::Components,
 >;
@@ -271,7 +271,7 @@ pub async fn test_exex_context_with_chain_spec(
     );
 
     let genesis_hash = init_genesis(&provider_factory)?;
-    let provider = BlockchainProvider2::new(provider_factory.clone())?;
+    let provider = BlockchainProvider::new(provider_factory.clone())?;
 
     let network_manager = NetworkManager::new(
         NetworkConfigBuilder::new(SecretKey::new(&mut rand::thread_rng()))

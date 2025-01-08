@@ -34,7 +34,7 @@ use reth_node_types::BlockTy;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributesBuilder, PayloadTypes};
 use reth_provider::{
-    providers::{BlockchainProvider2, EngineNodeTypes},
+    providers::{BlockchainProvider, EngineNodeTypes},
     ChainSpecProvider, ProviderFactory,
 };
 use reth_prune::PrunerWithFactory;
@@ -69,7 +69,7 @@ where
         consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
         executor_factory: impl BlockExecutorProvider<Primitives = N::Primitives>,
         provider: ProviderFactory<N>,
-        blockchain_db: BlockchainProvider2<N>,
+        blockchain_db: BlockchainProvider<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         payload_builder: PayloadBuilderHandle<N::Engine>,
         payload_validator: V,
