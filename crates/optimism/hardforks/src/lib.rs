@@ -22,7 +22,7 @@ use reth_ethereum_forks::{EthereumHardforks, ForkCondition};
 /// Extends [`EthereumHardforks`] with optimism helper methods.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait OpHardforks: EthereumHardforks {
-    /// Retrieves [`ForkCondition`] by an [`EthereumHardfork`]. If `fork` is not present, returns
+    /// Retrieves [`ForkCondition`] by an [`OpHardfork`]. If `fork` is not present, returns
     /// [`ForkCondition::Never`].
     fn op_fork_activation(&self, fork: OpHardfork) -> ForkCondition;
 
