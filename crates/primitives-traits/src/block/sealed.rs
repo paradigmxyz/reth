@@ -45,14 +45,14 @@ where
         self.block.body()
     }
 
-    /// Returns the block hash
-    pub const fn block_hash(&self) -> &B256 {
-        &self.hash
-    }
-
     /// Returns the Sealed header.
     pub fn sealed_header(&self) -> SealedHeader<&B::Header> {
         SealedHeader::new(self.header(), self.hash)
+    }
+
+    /// Clones the wrapped header and returns a [`SealedHeader`] sealed with the hash.
+    pub fn clone_sealed_header(&self) -> SealedHeader<B::Header> {
+        SealedHeader::new(self.header().clone(), self.hash)
     }
 
     /// Consumes the block and returns the sealed header.
@@ -146,7 +146,7 @@ where
 {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let block = B::arbitrary(u)?;
-        Ok(SealedBlock2::seal(block))
+        Ok(Self::seal(block))
     }
 }
 
