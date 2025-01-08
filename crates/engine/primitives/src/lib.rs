@@ -22,6 +22,9 @@ pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStat
 mod message;
 pub use message::*;
 
+mod event;
+pub use event::*;
+
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 

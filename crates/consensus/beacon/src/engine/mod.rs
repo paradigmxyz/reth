@@ -54,8 +54,7 @@ pub use error::{BeaconConsensusEngineError, BeaconEngineResult, BeaconForkChoice
 mod invalid_headers;
 pub use invalid_headers::InvalidHeaderCache;
 
-mod event;
-pub use event::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
+pub use reth_engine_primitives::{BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress};
 
 mod handle;
 pub use handle::BeaconConsensusEngineHandle;
