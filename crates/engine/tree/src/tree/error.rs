@@ -26,13 +26,13 @@ pub enum AdvancePersistenceError {
     .block.number(),
     .block.parent_hash(),
     .kind)]
-struct InsertBlockErrorDataTwo<B: Block> {
+struct InsertBlockErrorData<B: Block> {
     block: SealedBlockFor<B>,
     #[source]
-    kind: InsertBlockErrorKindTwo,
+    kind: InsertBlockErrorKind,
 }
 
-impl<B: Block> std::fmt::Debug for InsertBlockErrorDataTwo<B> {
+impl<B: Block> std::fmt::Debug for InsertBlockErrorData<B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InsertBlockError")
             .field("error", &self.kind)
@@ -44,12 +44,12 @@ impl<B: Block> std::fmt::Debug for InsertBlockErrorDataTwo<B> {
     }
 }
 
-impl<B: Block> InsertBlockErrorDataTwo<B> {
-    const fn new(block: SealedBlockFor<B>, kind: InsertBlockErrorKindTwo) -> Self {
+impl<B: Block> InsertBlockErrorData<B> {
+    const fn new(block: SealedBlockFor<B>, kind: InsertBlockErrorKind) -> Self {
         Self { block, kind }
     }
 
-    fn boxed(block: SealedBlockFor<B>, kind: InsertBlockErrorKindTwo) -> Box<Self> {
+    fn boxed(block: SealedBlockFor<B>, kind: InsertBlockErrorKind) -> Box<Self> {
         Box::new(Self::new(block, kind))
     }
 }
@@ -57,26 +57,26 @@ impl<B: Block> InsertBlockErrorDataTwo<B> {
 /// Error thrown when inserting a block failed because the block is considered invalid.
 #[derive(thiserror::Error)]
 #[error(transparent)]
-pub struct InsertBlockErrorTwo<B: Block> {
-    inner: Box<InsertBlockErrorDataTwo<B>>,
+pub struct InsertBlockError<B: Block> {
+    inner: Box<InsertBlockErrorData<B>>,
 }
 
 // === impl InsertBlockErrorTwo ===
 
-impl<B: Block> InsertBlockErrorTwo<B> {
+impl<B: Block> InsertBlockError<B> {
     /// Create a new `InsertInvalidBlockErrorTwo`
-    pub fn new(block: SealedBlockFor<B>, kind: InsertBlockErrorKindTwo) -> Self {
-        Self { inner: InsertBlockErrorDataTwo::boxed(block, kind) }
+    pub fn new(block: SealedBlockFor<B>, kind: InsertBlockErrorKind) -> Self {
+        Self { inner: InsertBlockErrorData::boxed(block, kind) }
     }
 
     /// Create a new `InsertInvalidBlockError` from a consensus error
     pub fn consensus_error(error: ConsensusError, block: SealedBlockFor<B>) -> Self {
-        Self::new(block, InsertBlockErrorKindTwo::Consensus(error))
+        Self::new(block, InsertBlockErrorKind::Consensus(error))
     }
 
     /// Create a new `InsertInvalidBlockError` from a consensus error
     pub fn sender_recovery_error(block: SealedBlockFor<B>) -> Self {
-        Self::new(block, InsertBlockErrorKindTwo::SenderRecovery)
+        Self::new(block, InsertBlockErrorKind::SenderRecovery)
     }
 
     /// Consumes the error and returns the block that resulted in the error
@@ -87,7 +87,7 @@ impl<B: Block> InsertBlockErrorTwo<B> {
 
     /// Returns the error kind
     #[inline]
-    pub const fn kind(&self) -> &InsertBlockErrorKindTwo {
+    pub const fn kind(&self) -> &InsertBlockErrorKind {
         &self.inner.kind
     }
 
@@ -99,13 +99,13 @@ impl<B: Block> InsertBlockErrorTwo<B> {
 
     /// Consumes the type and returns the block and error kind.
     #[inline]
-    pub fn split(self) -> (SealedBlockFor<B>, InsertBlockErrorKindTwo) {
+    pub fn split(self) -> (SealedBlockFor<B>, InsertBlockErrorKind) {
         let inner = *self.inner;
         (inner.block, inner.kind)
     }
 }
 
-impl<B: Block> std::fmt::Debug for InsertBlockErrorTwo<B> {
+impl<B: Block> std::fmt::Debug for InsertBlockError<B> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(&self.inner, f)
     }
@@ -113,7 +113,7 @@ impl<B: Block> std::fmt::Debug for InsertBlockErrorTwo<B> {
 
 /// All error variants possible when inserting a block
 #[derive(Debug, thiserror::Error)]
-pub enum InsertBlockErrorKindTwo {
+pub enum InsertBlockErrorKind {
     /// Failed to recover senders for the block
     #[error("failed to recover senders for block")]
     SenderRecovery,
@@ -131,7 +131,7 @@ pub enum InsertBlockErrorKindTwo {
     Other(#[from] Box<dyn core::error::Error + Send + Sync + 'static>),
 }
 
-impl InsertBlockErrorKindTwo {
+impl InsertBlockErrorKind {
     /// Returns an [`InsertBlockValidationError`] if the error is caused by an invalid block.
     ///
     /// Returns an [`InsertBlockFatalError`] if the error is caused by an error that is not
