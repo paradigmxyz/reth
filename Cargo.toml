@@ -20,7 +20,6 @@ members = [
     "crates/cli/runner/",
     "crates/cli/util/",
     "crates/config/",
-    "crates/consensus/beacon/",
     "crates/consensus/common/",
     "crates/consensus/consensus/",
     "crates/consensus/debug-client/",
@@ -304,7 +303,6 @@ overflow-checks = true
 op-reth = { path = "crates/optimism/bin" }
 reth = { path = "bin/reth" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
-reth-beacon-consensus = { path = "crates/consensus/beacon" }
 reth-bench = { path = "bin/reth-bench" }
 reth-blockchain-tree = { path = "crates/blockchain-tree" }
 reth-blockchain-tree-api = { path = "crates/blockchain-tree-api" }
