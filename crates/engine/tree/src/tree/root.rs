@@ -1,6 +1,6 @@
 //! State root task related functionality.
 
-use alloy_primitives::{map::HashSet, Address};
+use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
@@ -97,36 +97,11 @@ impl<Factory> StateRootConfig<Factory> {
     }
 }
 
-/// A proof target, this can be either:
-/// * An address, for fetching account proofs, or
-/// * An address and storage slot, for fetching storage proofs
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum ProofTarget {
-    /// Account proof target
-    Account(Address),
-    /// Storage proof target
-    Storage {
-        /// The account
-        account: Address,
-        /// The slot
-        slot: B256,
-    },
-}
-
-impl ProofTarget {
-    /// Returns the address for the account referenced in the proof target.
-    pub const fn address(&self) -> &Address {
-        match self {
-            Self::Account(account) | Self::Storage { account, .. } => account,
-        }
-    }
-}
-
 /// Messages used internally by the state root task
 #[derive(Debug)]
 pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     /// Prefetch proof targets
-    PrefetchProofs(HashSet<ProofTarget>),
+    PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
@@ -368,23 +343,19 @@ where
     fn on_prefetch_proof(
         scope: &rayon::Scope<'env>,
         config: StateRootConfig<Factory>,
-        targets: HashSet<ProofTarget>,
+        targets: MultiProofTargets,
         fetched_proof_targets: &mut MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
         thread_pool: &'env rayon::ThreadPool,
     ) {
-        let proof_targets = targets
-            .into_iter()
-            .map(|target| (keccak256(target.address()), Default::default()))
-            .collect();
-        extend_multi_proof_targets_ref(fetched_proof_targets, &proof_targets);
+        extend_multi_proof_targets_ref(fetched_proof_targets, &targets);
 
         Self::spawn_multiproof(
             scope,
             config,
             Default::default(),
-            proof_targets,
+            targets,
             proof_sequence_number,
             state_root_message_sender,
             thread_pool,
