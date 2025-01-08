@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 
-/// Events emitted by [`crate::BeaconConsensusEngine`].
+/// Events emitted by the consensus engine.
 #[derive(Clone, Debug)]
 pub enum BeaconConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     /// The fork choice state was updated, and the current fork choice status
