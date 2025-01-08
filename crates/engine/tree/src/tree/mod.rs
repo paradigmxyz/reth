@@ -36,13 +36,13 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::BlockExecutorProvider,
     system_calls::{NoopHook, OnStateHook},
-    ConfigureEvm
+    ConfigureEvm, Evm
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_primitives_traits::{
-    Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, BlockBody, SignedTransaction,
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -567,6 +567,8 @@ where
     engine_kind: EngineApiKind,
     /// state root task thread pool
     state_root_task_pool: Arc<rayon::ThreadPool>,
+    /// Parallel prewarming thread pool
+    prewarming_thread_pool: rayon::ThreadPool,
 }
 
 impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
@@ -610,7 +612,7 @@ where
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     E: BlockExecutorProvider<Primitives = N>,
-    C: ConfigureEvm,
+    C: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
     T: EngineTypes,
     V: EngineValidator<T, Block = N::Block>,
 {
@@ -643,6 +645,12 @@ where
                 .expect("Failed to create proof worker thread pool"),
         );
 
+        let prewarming_thread_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("prewarm-worker-{}", i))
+            .build()
+            .expect("Failed to create prewarming worker thread pool");
+
         Self {
             provider,
             executor_provider,
@@ -663,6 +671,7 @@ where
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
             state_root_task_pool,
+            prewarming_thread_pool,
         }
     }
 
@@ -2351,8 +2360,47 @@ where
         // prewarming
         let caches = ProviderCacheBuilder::default().build_caches();
         let cache_metrics = CachedStateMetrics::zeroed();
-        let state_provider =
-            CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
+        let state_provider = CachedStateProvider::new_with_caches(
+            state_provider,
+            caches.clone(),
+            cache_metrics.clone(),
+        );
+
+        // TODO: isolate prewarm logic into method, making moves explicit
+        for (tx, sender) in block.body().transactions().iter().zip(block.senders()) {
+            let Some(state_provider) = self.state_provider(block.parent_hash())? else {
+                error!(target: "engine::tree", parent=?block.parent_hash(), "Could not get state provider for prewarm");
+                continue
+            };
+
+            // Use the caches to create a new executor
+            let state_provider = CachedStateProvider::new_with_caches(
+                state_provider,
+                caches.clone(),
+                cache_metrics.clone(),
+            );
+
+            // clone and copy info required for execution
+            let evm_config = self.evm_config.clone();
+            let header = block.header().clone();
+            let tx = tx.clone();
+            let sender = *sender;
+
+            // spawn task executing the individual tx
+            self.prewarming_thread_pool.spawn(move || {
+                let state_provider = StateProviderDatabase::new(&state_provider);
+
+                // create a new executor and disable nonce checks in the env
+                let mut evm = evm_config.evm_for_block(state_provider, &header);
+
+                // create the tx env and reset nonce
+                let mut tx_env = evm_config.tx_env(&tx, sender);
+                tx_env.nonce = None;
+                if let Err(err) = evm.transact(tx_env) {
+                    error!(target: "engine::tree", ?err, tx_hash=?tx.tx_hash(), ?sender, "Error when executing prewarm transaction");
+                };
+            });
+        }
 
         trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
 
