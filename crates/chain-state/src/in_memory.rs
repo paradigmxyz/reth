@@ -640,7 +640,7 @@ impl<N: NodePrimitives> BlockState<N> {
     pub fn block_with_senders(&self) -> BlockWithSenders<N::Block> {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
-        let (header, body) = block.split_header_body();
+        let (header, body) = block.split();
         BlockWithSenders::new_unchecked(N::Block::new(header.unseal(), body), senders)
     }
 
