@@ -3,7 +3,10 @@ use crate::{
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
-    tree::metrics::EngineApiMetrics,
+    tree::{
+        cached_state::{CachedStateMetrics, CachedStateProvider, ProviderCacheBuilder},
+        metrics::EngineApiMetrics,
+    },
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
@@ -74,6 +77,7 @@ use tokio::sync::{
 use tracing::*;
 
 mod block_buffer;
+mod cached_state;
 pub mod config;
 pub mod error;
 mod invalid_block_hook;
@@ -2248,6 +2252,13 @@ where
             warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
             return Err(e.into())
         }
+
+        // Use cached state provider before executing, this does nothing currently, will be used in
+        // prewarming
+        let caches = ProviderCacheBuilder::default().build_caches();
+        let cache_metrics = CachedStateMetrics::zeroed();
+        let state_provider =
+            CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
         trace!(target: "engine::tree", block=?block.num_hash(), "Executing block");
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
