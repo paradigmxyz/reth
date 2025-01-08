@@ -93,7 +93,6 @@ optimism = [
 	"reth-provider/optimism",
 	"reth-optimism-evm/optimism",
 	"reth-optimism-payload-builder/optimism",
-	"reth-beacon-consensus/optimism",
 	"revm/optimism",
 	"reth-optimism-rpc/optimism",
 	"reth-engine-local/op",

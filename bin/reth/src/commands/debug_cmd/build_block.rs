@@ -23,7 +23,7 @@ use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
-use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
 use reth_primitives::{
     BlockExt, EthPrimitives, SealedBlockFor, SealedBlockWithSenders, SealedHeader, Transaction,
     TransactionSigned,
@@ -43,7 +43,6 @@ use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::{path::PathBuf, str::FromStr, sync::Arc};
 use tracing::*;
-use reth_node_ethereum::consensus::EthBeaconConsensus;
 
 /// `reth debug build-block` command
 /// This debug routine requires that the node is positioned at the block before the target.

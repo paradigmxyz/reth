@@ -19,7 +19,10 @@ use reth_network_p2p::BlockClient;
 use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::EthPrimitives;
-use reth_provider::{providers::BlockchainProvider2, ProviderFactory};
+use reth_provider::{
+    providers::{BlockchainProvider2, EngineNodeTypes},
+    ProviderFactory,
+};
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
 use reth_tasks::TaskSpawner;
@@ -29,7 +32,6 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
-use reth_provider::providers::EngineNodeTypes;
 
 /// Alias for consensus engine stream.
 pub type EngineMessageStream<T> = Pin<Box<dyn Stream<Item = BeaconEngineMessage<T>> + Send + Sync>>;
@@ -150,10 +152,10 @@ pub struct EngineServiceError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_engine_primitives::BeaconEngineMessage;
     use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
+    use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_exex_types::FinishedExExHeight;

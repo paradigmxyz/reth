@@ -19,7 +19,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_api::{BlockTy, NodePrimitives};
-use reth_node_ethereum::EthExecutorProvider;
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
 use reth_primitives::{BlockExt, EthPrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, AccountExtReader, ChainSpecProvider, DatabaseProviderFactory,
@@ -33,7 +33,6 @@ use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::{path::PathBuf, sync::Arc};
 use tracing::*;
-use reth_node_ethereum::consensus::EthBeaconConsensus;
 
 /// `reth debug in-memory-merkle` command
 /// This debug routine requires that the node is positioned at the block before the target.
