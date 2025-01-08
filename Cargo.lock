@@ -6482,62 +6482,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-beacon-consensus"
-version = "1.1.5"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-genesis",
- "alloy-primitives",
- "alloy-rpc-types-engine",
- "assert_matches",
- "futures",
- "itertools 0.13.0",
- "metrics",
- "reth-blockchain-tree",
- "reth-blockchain-tree-api",
- "reth-chainspec",
- "reth-codecs",
- "reth-config",
- "reth-consensus",
- "reth-db",
- "reth-db-api",
- "reth-downloaders",
- "reth-engine-primitives",
- "reth-errors",
- "reth-ethereum-consensus",
- "reth-ethereum-engine-primitives",
- "reth-evm",
- "reth-evm-ethereum",
- "reth-exex-types",
- "reth-metrics",
- "reth-network-p2p",
- "reth-node-types",
- "reth-payload-builder",
- "reth-payload-builder-primitives",
- "reth-payload-primitives",
- "reth-payload-validator",
- "reth-primitives",
- "reth-primitives-traits",
- "reth-provider",
- "reth-prune",
- "reth-prune-types",
- "reth-rpc-types-compat",
- "reth-stages",
- "reth-stages-api",
- "reth-static-file",
- "reth-tasks",
- "reth-testing-utils",
- "reth-tokio-util",
- "reth-tracing",
- "schnellru",
- "thiserror 2.0.9",
- "tokio",
- "tokio-stream",
- "tracing",
-]
-
-[[package]]
 name = "reth-bench"
 version = "1.1.5"
 dependencies = [
