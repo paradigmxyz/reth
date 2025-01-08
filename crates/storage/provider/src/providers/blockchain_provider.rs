@@ -946,9 +946,9 @@ mod tests {
         let finalized_block = blocks.get(block_count - 3).unwrap();
 
         // Set the canonical head, safe, and finalized blocks
-        provider.set_canonical_head(canonical_block.sealed_header().clone());
-        provider.set_safe(safe_block.sealed_header().clone());
-        provider.set_finalized(finalized_block.sealed_header().clone());
+        provider.set_canonical_head(canonical_block.clone_sealed_header());
+        provider.set_safe(safe_block.clone_sealed_header());
+        provider.set_finalized(finalized_block.clone_sealed_header());
 
         Ok((provider, database_blocks.clone(), in_memory_blocks.clone(), receipts))
     }
@@ -1355,7 +1355,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
         // make sure that the finalized block is on db
         let finalized_block = database_blocks.get(database_blocks.len() - 3).unwrap();
-        provider.set_finalized(finalized_block.sealed_header().clone());
+        provider.set_finalized(finalized_block.clone_sealed_header());
 
         let blocks = [database_blocks, in_memory_blocks].concat();
 
@@ -1374,7 +1374,7 @@ mod tests {
             blocks
                 .iter()
                 .take_while(|header| header.number <= 8)
-                .map(|b| b.sealed_header().clone())
+                .map(|b| b.clone_sealed_header())
                 .collect::<Vec<_>>()
         );
 
@@ -1550,7 +1550,7 @@ mod tests {
         );
         assert_eq!(
             provider.sealed_header_by_number_or_tag(block_number.into())?,
-            Some(database_block.sealed_header().clone())
+            Some(database_block.clone_sealed_header())
         );
 
         assert_eq!(
@@ -1559,7 +1559,7 @@ mod tests {
         );
         assert_eq!(
             provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Latest).unwrap(),
-            Some(canonical_block.sealed_header().clone())
+            Some(canonical_block.clone_sealed_header())
         );
 
         assert_eq!(
@@ -1568,7 +1568,7 @@ mod tests {
         );
         assert_eq!(
             provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Safe).unwrap(),
-            Some(safe_block.sealed_header().clone())
+            Some(safe_block.clone_sealed_header())
         );
 
         assert_eq!(
@@ -1577,7 +1577,7 @@ mod tests {
         );
         assert_eq!(
             provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Finalized).unwrap(),
-            Some(finalized_block.sealed_header().clone())
+            Some(finalized_block.clone_sealed_header())
         );
 
         Ok(())
@@ -1605,7 +1605,7 @@ mod tests {
         );
         assert_eq!(
             provider.sealed_header_by_id(block_number.into()).unwrap(),
-            Some(database_block.sealed_header().clone())
+            Some(database_block.clone_sealed_header())
         );
 
         assert_eq!(
@@ -1614,7 +1614,7 @@ mod tests {
         );
         assert_eq!(
             provider.sealed_header_by_id(block_hash.into()).unwrap(),
-            Some(database_block.sealed_header().clone())
+            Some(database_block.clone_sealed_header())
         );
 
         let block_number = in_memory_block.number;
@@ -1626,7 +1626,7 @@ mod tests {
         );
         assert_eq!(
             provider.sealed_header_by_id(block_number.into()).unwrap(),
-            Some(in_memory_block.sealed_header().clone())
+            Some(in_memory_block.clone_sealed_header())
         );
 
         assert_eq!(
@@ -1635,7 +1635,7 @@ mod tests {
         );
         assert_eq!(
             provider.sealed_header_by_id(block_hash.into()).unwrap(),
-            Some(in_memory_block.sealed_header().clone())
+            Some(in_memory_block.clone_sealed_header())
         );
 
         Ok(())
@@ -2021,7 +2021,7 @@ mod tests {
         );
         // test state by block tag for safe block
         let safe_block = in_memory_blocks[in_memory_blocks.len() - 2].clone();
-        in_memory_provider.canonical_in_memory_state.set_safe(safe_block.sealed_header().clone());
+        in_memory_provider.canonical_in_memory_state.set_safe(safe_block.clone_sealed_header());
         assert_eq!(
             safe_block.hash(),
             in_memory_provider
@@ -2033,7 +2033,7 @@ mod tests {
         let finalized_block = in_memory_blocks[in_memory_blocks.len() - 3].clone();
         in_memory_provider
             .canonical_in_memory_state
-            .set_finalized(finalized_block.sealed_header().clone());
+            .set_finalized(finalized_block.clone_sealed_header());
         assert_eq!(
             finalized_block.hash(),
             in_memory_provider
@@ -2106,11 +2106,11 @@ mod tests {
 
         // Set the safe block in memory
         let safe_block = in_memory_blocks[in_memory_blocks.len() - 2].clone();
-        provider.canonical_in_memory_state.set_safe(safe_block.sealed_header().clone());
+        provider.canonical_in_memory_state.set_safe(safe_block.clone_sealed_header());
 
         // Set the finalized block in memory
         let finalized_block = in_memory_blocks[in_memory_blocks.len() - 3].clone();
-        provider.canonical_in_memory_state.set_finalized(finalized_block.sealed_header().clone());
+        provider.canonical_in_memory_state.set_finalized(finalized_block.clone_sealed_header());
 
         // Verify the pending block number and hash
         assert_eq!(
@@ -2325,7 +2325,7 @@ mod tests {
         // instead start end
         test_by_block_range!([
             (headers_range, |block: &SealedBlock| block.header().clone()),
-            (sealed_headers_range, |block: &SealedBlock| block.sealed_header().clone()),
+            (sealed_headers_range, |block: &SealedBlock| block.clone_sealed_header()),
             (block_range, |block: &SealedBlock| block.clone().unseal()),
             (block_with_senders_range, |block: &SealedBlock| block
                 .clone()
@@ -2467,7 +2467,7 @@ mod tests {
                 sealed_header,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     block.number,
-                    Some(block.sealed_header().clone())
+                    Some(block.clone_sealed_header())
                 ),
                 u64::MAX
             ),
