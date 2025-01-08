@@ -88,3 +88,29 @@ where
         (self.header, self.body)
     }
 }
+
+/// An extension trait for [`Block`]s that allows for mutable access to the block's internals.
+///
+/// This allows for modifying the block's header and body for testing purposes.
+#[cfg(any(test, feature = "test-utils"))]
+pub trait TestBlock: Block {
+    /// Returns mutable reference to block body.
+    fn body_mut(&mut self) -> &mut Self::Body;
+
+    /// Returns mutable reference to block header.
+    fn header_mut(&mut self) -> &mut Self::Header;
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl<T> TestBlock for alloy_consensus::Block<T>
+where
+    T: SignedTransaction,
+{
+    fn body_mut(&mut self) -> &mut Self::Body {
+        &mut self.body
+    }
+
+    fn header_mut(&mut self) -> &mut Self::Header {
+        &mut self.header
+    }
+}
