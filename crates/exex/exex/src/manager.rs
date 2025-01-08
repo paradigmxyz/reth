@@ -1327,7 +1327,7 @@ mod tests {
         };
 
         let (finalized_headers_tx, rx) = watch::channel(None);
-        finalized_headers_tx.send(Some(genesis_block.sealed_header().clone()))?;
+        finalized_headers_tx.send(Some(genesis_block.clone_sealed_header()))?;
         let finalized_header_stream = ForkChoiceStream::new(rx);
 
         let mut exex_manager = std::pin::pin!(ExExManager::new(
@@ -1361,7 +1361,7 @@ mod tests {
             [notification.clone()]
         );
 
-        finalized_headers_tx.send(Some(block.sealed_header().clone()))?;
+        finalized_headers_tx.send(Some(block.clone_sealed_header()))?;
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL isn't finalized because the ExEx didn't emit the `FinishedHeight` event
         assert_eq!(
@@ -1374,7 +1374,7 @@ mod tests {
             .send(ExExEvent::FinishedHeight((rng.gen::<u64>(), rng.gen::<B256>()).into()))
             .unwrap();
 
-        finalized_headers_tx.send(Some(block.sealed_header().clone()))?;
+        finalized_headers_tx.send(Some(block.clone_sealed_header()))?;
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL isn't finalized because the ExEx emitted a `FinishedHeight` event with a
         // non-canonical block
@@ -1386,7 +1386,7 @@ mod tests {
         // Send a `FinishedHeight` event with a canonical block
         events_tx.send(ExExEvent::FinishedHeight(block.num_hash())).unwrap();
 
-        finalized_headers_tx.send(Some(block.sealed_header().clone()))?;
+        finalized_headers_tx.send(Some(block.clone_sealed_header()))?;
         assert!(exex_manager.as_mut().poll(&mut cx).is_pending());
         // WAL is finalized
         assert_eq!(exex_manager.wal.iter_notifications()?.next().transpose()?, None);

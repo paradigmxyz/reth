@@ -1087,7 +1087,7 @@ where
 
         // 2. ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
-            let tip = chain_update.tip().sealed_header().clone();
+            let tip = chain_update.tip().clone_sealed_header();
             self.on_canonical_chain_update(chain_update);
 
             // update the safe and finalized blocks and ensure their values are valid
@@ -1626,7 +1626,7 @@ where
             .state
             .tree_state
             .block_by_hash(hash)
-            .map(|block| block.as_ref().sealed_header().clone());
+            .map(|block| block.as_ref().clone_sealed_header());
 
         if block.is_some() {
             Ok(block)
@@ -2039,7 +2039,7 @@ where
         // update the tracked canonical head
         self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
 
-        let tip = chain_update.tip().sealed_header().clone();
+        let tip = chain_update.tip().clone_sealed_header();
         let notification = chain_update.to_chain_notification();
 
         // reinsert any missing reorged blocks
