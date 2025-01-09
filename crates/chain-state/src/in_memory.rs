@@ -648,7 +648,7 @@ impl<N: NodePrimitives> BlockState<N> {
     pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders<N::Block> {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
-        SealedBlockWithSenders { block, senders }
+        SealedBlockWithSenders::new_unchecked(block, senders)
     }
 
     /// Returns the hash of executed block that determines the state.
