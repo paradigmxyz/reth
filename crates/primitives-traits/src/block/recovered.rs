@@ -268,7 +268,7 @@ where
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
     use crate::{serde_bincode_compat::SerdeBincodeCompat, Block};
-    use alloc::borrow::Cow;
+    use alloc::{borrow::Cow, vec::Vec};
     use alloy_primitives::{Address, BlockHash};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
