@@ -199,7 +199,6 @@ where
         base_fee,
         initialized_block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
         None,
-        None,
     ));
     let mut total_fees = U256::ZERO;
 

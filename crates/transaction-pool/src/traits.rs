@@ -937,21 +937,19 @@ pub struct BestTransactionsAttributes {
     pub blob_fee: Option<u64>,
     /// The max DA size per transaction
     pub max_da_tx_size: Option<u64>,
-    /// The max DA size per block
-    pub max_da_block_size: Option<u64>,
 }
 
 // === impl BestTransactionsAttributes ===
 
 impl BestTransactionsAttributes {
     /// Creates a new `BestTransactionsAttributes` with the given basefee and blob fee.
-    pub const fn new(basefee: u64, blob_fee: Option<u64>, max_da_tx_size: Option<u64>, max_da_block_size: Option<u64>) -> Self {
-        Self { basefee, blob_fee, max_da_tx_size, max_da_block_size }
+    pub const fn new(basefee: u64, blob_fee: Option<u64>, max_da_tx_size: Option<u64>) -> Self {
+        Self { basefee, blob_fee, max_da_tx_size }
     }
 
     /// Creates a new `BestTransactionsAttributes` with the given basefee.
     pub const fn base_fee(basefee: u64) -> Self {
-        Self::new(basefee, None, None, None)
+        Self::new(basefee, None, None)
     }
 
     /// Sets the given blob fee.

@@ -275,7 +275,6 @@ pub trait LoadPendingBlock:
                 base_fee,
                 block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
                 None,
-                None,
             ));
 
         let chain_spec = self.provider().chain_spec();
