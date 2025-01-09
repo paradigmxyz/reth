@@ -1,9 +1,9 @@
 //! Block abstraction.
 
-mod sealed;
+pub(crate) mod sealed;
 pub use sealed::SealedBlock2;
 
-mod recovered;
+pub(crate) mod recovered;
 pub use recovered::RecoveredBlock;
 
 pub mod body;
@@ -17,6 +17,14 @@ use crate::{
     BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde,
     SignedTransaction,
 };
+
+/// Bincode-compatible header type serde implementations.
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    pub use super::{
+        recovered::serde_bincode_compat::RecoveredBlock, sealed::serde_bincode_compat::SealedBlock2,
+    };
+}
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlock:

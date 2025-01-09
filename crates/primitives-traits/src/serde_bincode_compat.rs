@@ -1,7 +1,10 @@
 use core::fmt::Debug;
 use serde::{de::DeserializeOwned, Serialize};
 
-pub use super::header::{serde_bincode_compat as header, serde_bincode_compat::*};
+pub use super::{
+    block::{serde_bincode_compat as block, serde_bincode_compat::*},
+    header::{serde_bincode_compat as header, serde_bincode_compat::*},
+};
 pub use block_bincode::BlockBody;
 
 /// Trait for types that can be serialized and deserialized using bincode.
