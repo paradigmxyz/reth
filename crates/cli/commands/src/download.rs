@@ -7,6 +7,7 @@ use reqwest::Client;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_node_core::args::DatadirArgs;
+use tracing::info;
 
 const SNAPSHOT_FILE: &str = "snapshot.tar.lz4";
 
@@ -45,22 +46,25 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let snapshot_path = data_dir.data_dir().join(SNAPSHOT_FILE);
         fs::create_dir_all(&data_dir).await?;
 
-        println!("Starting snapshot download for chain: {:?}", self.chain.chain());
-        println!("Target directory: {:?}", data_dir.data_dir());
-        println!("Source URL: {}", self.url);
+        info!(
+            chain = %self.chain.chain(),
+            dir = ?data_dir.data_dir(),
+            url = %self.url,
+            "Starting snapshot download"
+        );
 
         download_snapshot(&self.url, &snapshot_path).await?;
 
-        println!("Snapshot downloaded successfully to {:?}", snapshot_path);
+        info!("Snapshot downloaded successfully to {:?}", snapshot_path);
         if self.decompress {
-            println!("Decompressing snapshot...");
+            info!("Decompressing snapshot...");
             decompress_snapshot(&snapshot_path, data_dir.data_dir())?;
-            println!("Snapshot decompressed successfully");
+            info!("Snapshot decompressed successfully");
 
             // Clean up compressed file
             fs::remove_file(&snapshot_path).await?;
         } else {
-            println!(
+            info!(
                 "Please extract the snapshot using: tar --use-compress-program=lz4 -xf {:?}",
                 snapshot_path
             );
@@ -89,7 +93,7 @@ async fn download_snapshot(url: &str, target_path: &Path) -> Result<()> {
             std::io::stdout().flush()?;
         }
     }
-    println!("\nDownload complete!");
+    info!("Download complete!");
 
     Ok(())
 }
