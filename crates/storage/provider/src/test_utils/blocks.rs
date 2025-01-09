@@ -240,7 +240,10 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
     header.parent_hash = B256::ZERO;
     let block = SealedBlock::new(SealedHeader::seal(header), body);
 
-    (SealedBlockWithSenders { block, senders: vec![Address::new([0x30; 20])] }, execution_outcome)
+    (
+        SealedBlockWithSenders::new_unchecked(block, vec![Address::new([0x30; 20])]),
+        execution_outcome,
+    )
 }
 
 /// Block two that points to block 1
@@ -304,7 +307,10 @@ fn block2(
     header.parent_hash = parent_hash;
     let block = SealedBlock::new(SealedHeader::seal(header), body);
 
-    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
+    (
+        SealedBlockWithSenders::new_unchecked(block, vec![Address::new([0x31; 20])]),
+        execution_outcome,
+    )
 }
 
 /// Block three that points to block 2
@@ -368,7 +374,10 @@ fn block3(
     header.parent_hash = parent_hash;
     let block = SealedBlock::new(SealedHeader::seal(header), body);
 
-    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
+    (
+        SealedBlockWithSenders::new_unchecked(block, vec![Address::new([0x31; 20])]),
+        execution_outcome,
+    )
 }
 
 /// Block four that points to block 3
@@ -457,7 +466,10 @@ fn block4(
     header.parent_hash = parent_hash;
     let block = SealedBlock::new(SealedHeader::seal(header), body);
 
-    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
+    (
+        SealedBlockWithSenders::new_unchecked(block, vec![Address::new([0x31; 20])]),
+        execution_outcome,
+    )
 }
 
 /// Block five that points to block 4
@@ -543,5 +555,8 @@ fn block5(
     header.parent_hash = parent_hash;
     let block = SealedBlock::new(SealedHeader::seal(header), body);
 
-    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
+    (
+        SealedBlockWithSenders::new_unchecked(block, vec![Address::new([0x31; 20])]),
+        execution_outcome,
+    )
 }

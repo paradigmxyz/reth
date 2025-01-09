@@ -1,5 +1,5 @@
 use crate::{
-    blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
+    blinded::{BlindedProviderFactory, DefaultBlindedProviderFactory},
     RevealedSparseTrie, SparseTrie,
 };
 use alloy_primitives::{
@@ -8,9 +8,7 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
-use reth_execution_errors::{
-    SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieError, SparseTrieErrorKind,
-};
+use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
@@ -95,6 +93,16 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Returns `true` if storage slot for account was already revealed.
     pub fn is_storage_slot_revealed(&self, account: &B256, slot: &B256) -> bool {
         self.revealed.get(account).is_some_and(|slots| slots.contains(slot))
+    }
+
+    /// Returns reference to bytes representing leaf value for the target account.
+    pub fn get_account_value(&self, account: &B256) -> Option<&Vec<u8>> {
+        self.state.as_revealed_ref()?.get_leaf_value(&Nibbles::unpack(account))
+    }
+
+    /// Returns reference to bytes representing leaf value for the target account and storage slot.
+    pub fn get_storage_slot_value(&self, account: &B256, slot: &B256) -> Option<&Vec<u8>> {
+        self.storages.get(account)?.as_revealed_ref()?.get_leaf_value(&Nibbles::unpack(slot))
     }
 
     /// Returns mutable reference to storage sparse trie if it was revealed.
@@ -442,12 +450,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         })
     }
 }
-impl<F> SparseStateTrie<F>
-where
-    F: BlindedProviderFactory,
-    SparseTrieError: From<<F::AccountNodeProvider as BlindedProvider>::Error>
-        + From<<F::StorageNodeProvider as BlindedProvider>::Error>,
-{
+impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Update the account leaf node.
     pub fn update_account_leaf(
         &mut self,
