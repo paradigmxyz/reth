@@ -515,14 +515,13 @@ mod test {
 
     #[test]
     fn eth68_announcement_eip7702_tx() {
-        let types = vec![
-            TxType::Eip7702 as u8,
-            TxType::Legacy as u8,
-        ];
+        let types = vec![TxType::Eip7702 as u8, TxType::Legacy as u8];
         let sizes = vec![MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE];
         let hashes = vec![
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa").unwrap(),
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb").unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb")
+                .unwrap(),
         ];
 
         let announcement = NewPooledTransactionHashes68 {
@@ -548,21 +547,20 @@ mod test {
 
     #[test]
     fn eth68_announcement_eip7702_tx_size_validation() {
-        let types = vec![
-            TxType::Eip7702 as u8,
-            TxType::Eip7702 as u8,
-            TxType::Eip7702 as u8,
-        ];
+        let types = vec![TxType::Eip7702 as u8, TxType::Eip7702 as u8, TxType::Eip7702 as u8];
         // Test with different sizes: too small, reasonable, too large
         let sizes = vec![
-            1, // too small
+            1,                    // too small
             MAX_MESSAGE_SIZE / 2, // reasonable size
             MAX_MESSAGE_SIZE + 1, // too large
         ];
         let hashes = vec![
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa").unwrap(),
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb").unwrap(),
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcccc").unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcccc")
+                .unwrap(),
         ];
 
         let announcement = NewPooledTransactionHashes68 {
@@ -580,7 +578,7 @@ mod test {
         assert_eq!(outcome, FilterOutcome::Ok);
 
         let mut expected_data = HashMap::default();
-     
+
         for i in 0..3 {
             expected_data.insert(hashes[i], Some((types[i], sizes[i])));
         }
@@ -596,17 +594,16 @@ mod test {
             TxType::Eip1559 as u8,
             TxType::Eip4844 as u8,
         ];
-        let sizes = vec![
-            MAX_MESSAGE_SIZE,
-            MAX_MESSAGE_SIZE,
-            MAX_MESSAGE_SIZE,
-            MAX_MESSAGE_SIZE,
-        ];
+        let sizes = vec![MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE];
         let hashes = vec![
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa").unwrap(),
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb").unwrap(),
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcccc").unwrap(),
-            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefdddd").unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcccc")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefdddd")
+                .unwrap(),
         ];
 
         let announcement = NewPooledTransactionHashes68 {
