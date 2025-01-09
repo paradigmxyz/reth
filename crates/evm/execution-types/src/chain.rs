@@ -8,7 +8,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, RecoveredTx, SealedBlockFor,
+    transaction::SignedTransactionIntoRecoveredExt, RecoveredTx,
     SealedBlockWithSenders, SealedHeader,
 };
 use reth_primitives_traits::{Block, BlockBody, NodePrimitives, SignedTransaction};
@@ -64,7 +64,7 @@ impl<N: NodePrimitives> Chain<N> {
         execution_outcome: ExecutionOutcome<N::Receipt>,
         trie_updates: Option<TrieUpdates>,
     ) -> Self {
-        let blocks = blocks.into_iter().map(|b| (b.number(), b)).collect::<BTreeMap<_, _>>();
+        let blocks = blocks.into_iter().map(|b| (b.header().number(), b)).collect::<BTreeMap<_, _>>();
         debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
 
         Self { blocks, execution_outcome, trie_updates }
@@ -131,11 +131,6 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Returns the block with matching hash.
-    pub fn block(&self, block_hash: BlockHash) -> Option<&SealedBlockFor<N::Block>> {
-        self.block_with_senders(block_hash).map(|block| &block.block)
-    }
-
-    /// Returns the block with matching hash.
     pub fn block_with_senders(
         &self,
         block_hash: BlockHash,
@@ -199,7 +194,7 @@ impl<N: NodePrimitives> Chain<N> {
     #[track_caller]
     pub fn fork_block(&self) -> ForkBlock {
         let first = self.first();
-        ForkBlock { number: first.number().saturating_sub(1), hash: first.parent_hash() }
+        ForkBlock { number: first.header().number().saturating_sub(1), hash: first.header().parent_hash() }
     }
 
     /// Get the first block in this chain.
@@ -233,7 +228,7 @@ impl<N: NodePrimitives> Chain<N> {
     ///
     /// If chain doesn't have any blocks.
     pub fn range(&self) -> RangeInclusive<BlockNumber> {
-        self.first().number()..=self.tip().number()
+        self.first().header().number()..=self.tip().header().number()
     }
 
     /// Get all receipts for the given block.
@@ -273,7 +268,7 @@ impl<N: NodePrimitives> Chain<N> {
         block: SealedBlockWithSenders<N::Block>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
     ) {
-        self.blocks.insert(block.number(), block);
+        self.blocks.insert(block.header().number(), block);
         self.execution_outcome.extend(execution_outcome);
         self.trie_updates.take(); // reset
     }
@@ -461,7 +456,7 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
     /// Returns an iterator over all transaction hashes in the block
     #[inline]
     pub fn transaction_hashes(&self) -> impl Iterator<Item = TxHash> + '_ {
-        self.blocks.values().flat_map(|block| block.transactions().iter().map(|tx| tx.trie_hash()))
+        self.blocks.values().flat_map(|block| block.body().transactions().iter().map(|tx| tx.trie_hash()))
     }
 }
 
@@ -537,7 +532,7 @@ pub(super) mod serde_bincode_compat {
     use alloc::borrow::Cow;
     use alloy_primitives::BlockNumber;
     use reth_primitives::{
-        serde_bincode_compat::SealedBlockWithSenders, EthPrimitives, NodePrimitives,
+        serde_bincode_compat::RecoveredBlock as SealedBlockWithSenders, EthPrimitives, NodePrimitives,
     };
     use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, Block};
     use reth_trie_common::serde_bincode_compat::updates::TrieUpdates;
@@ -586,7 +581,7 @@ pub(super) mod serde_bincode_compat {
             let mut state = serializer.serialize_map(Some(self.0.len()))?;
 
             for (block_number, block) in self.0.iter() {
-                state.serialize_entry(block_number, &SealedBlockWithSenders::<'_>::from(block))?;
+                state.serialize_entry(block_number, &SealedBlockWithSenders::<'_, reth_primitives::Block>::from(block))?;
             }
 
             state.end()
@@ -654,13 +649,12 @@ pub(super) mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
+        use super::super::{serde_bincode_compat, Chain};
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_primitives::SealedBlockWithSenders;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
-
-        use super::super::{serde_bincode_compat, Chain};
 
         #[test]
         fn test_chain_bincode_roundtrip() {
@@ -699,6 +693,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_primitives::Receipts;
     use revm::primitives::{AccountInfo, HashMap};
+    use reth_primitives_traits::test_utils::TestBlock;
 
     // TODO: this is temporary, until we fully switch over to `reth_ethereum_primitives` for the
     // `Receipt` type in `EthPrimitives`.
@@ -727,10 +722,10 @@ mod tests {
         let mut block3 = block.clone();
         let mut block4 = block;
 
-        block1.block.set_hash(block1_hash);
-        block2.block.set_hash(block2_hash);
-        block3.block.set_hash(block3_hash);
-        block4.block.set_hash(block4_hash);
+        block1.block_mut().set_hash(block1_hash);
+        block2.set_hash(block2_hash);
+        block3.set_hash(block3_hash);
+        block4.set_hash(block4_hash);
 
         block3.set_parent_hash(block2_hash);
 

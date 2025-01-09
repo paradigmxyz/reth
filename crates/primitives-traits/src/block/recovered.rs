@@ -1,14 +1,12 @@
 //! Recovered Block variant.
 
-use crate::{
-    block::SealedBlock,
-    sync::OnceLock,
-    transaction::signed::{RecoveryError, SignedTransactionIntoRecoveredExt},
-    Block, BlockBody, InMemorySize,
-};
+use crate::{block::SealedBlock, sync::OnceLock, transaction::signed::{RecoveryError, SignedTransactionIntoRecoveredExt}, Block, BlockBody, InMemorySize, SealedHeader};
 use alloc::vec::Vec;
+use alloy_consensus::BlockHeader;
 use alloy_consensus::transaction::Recovered;
-use alloy_primitives::{Address, BlockHash, Sealable};
+use alloy_eips::BlockNumHash;
+use alloy_eips::eip1898::BlockWithParent;
+use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable};
 use derive_more::Deref;
 
 /// A block with senders recovered from transactions.
@@ -195,6 +193,27 @@ impl<B: Block> RecoveredBlock<B> {
         *self.hash_ref()
     }
 
+    /// Return the number hash tuple.
+    pub fn num_hash(&self) -> BlockNumHash {
+        BlockNumHash::new(self.header().number(), self.hash())
+    }
+
+    /// Return a [`BlockWithParent`] for this header.
+    pub fn block_with_parent(&self) -> BlockWithParent {
+        BlockWithParent { parent: self.header().parent_hash(), block: self.num_hash() }
+    }
+
+    /// Clones the internal header and returns a [`SealedHeader`] sealed with the hash.
+    pub fn clone_sealed_header(&self) -> SealedHeader<B::Header> {
+        SealedHeader::new(self.header().clone(), self.hash())
+    }
+
+    /// Clones the wrapped block and returns the [`SealedBlock`] sealed with the hash.
+    pub fn clone_sealed_block(&self) -> SealedBlock<B> {
+        let hash = self.hash();
+        SealedBlock::new(self.block.clone(), hash)
+    }
+
     /// Consumes the block and returns the [`SealedBlock`] and drops the recovered senders.
     pub fn into_sealed_block(self) -> SealedBlock<B> {
         let hash = self.hash();
@@ -240,6 +259,11 @@ impl<B: Block> RecoveredBlock<B> {
     pub fn into_transactions(self) -> Vec<<B::Body as BlockBody>::Transaction> {
         self.block.split().1.into_transactions()
     }
+
+    /// Retrieves the block number
+    pub fn number(&self) -> BlockNumber {
+        self.header().number()
+    }
 }
 
 impl<B: Default> Default for RecoveredBlock<B> {
@@ -263,6 +287,12 @@ impl<B> RecoveredBlock<B>
 where
     B: Block,
 {
+
+    /// Returns a mutable reference to the block.
+    pub fn block_mut(&mut self) -> &mut B {
+        &mut self.block
+    }
+
     /// Returns a mutable reference to the recovered senders.
     pub fn senders_mut(&mut self) -> &mut Vec<Address> {
         &mut self.senders
@@ -271,6 +301,16 @@ where
     /// Appends the sender to the list of senders.
     pub fn push_sender(&mut self, sender: Address) {
         self.senders.push(sender);
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl<B> core::ops::DerefMut for RecoveredBlock<B>
+where
+    B: Block,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.block
     }
 }
 
