@@ -107,13 +107,13 @@ pub struct NodeCommand<
     #[command(flatten)]
     pub pruning: PruningArgs,
 
+    /// Engine cli arguments
+    #[command(flatten, next_help_heading = "Engine")]
+    pub engine: EngineArgs,
+
     /// Additional cli arguments
     #[command(flatten, next_help_heading = "Extension")]
     pub ext: Ext,
-
-    /// Engine cli arguments
-    #[command(flatten, next_help_heading = "Extension")]
-    pub engine: EngineArgs,
 }
 
 impl<C: ChainSpecParser> NodeCommand<C> {
