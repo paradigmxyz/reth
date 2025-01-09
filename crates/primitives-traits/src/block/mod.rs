@@ -22,7 +22,7 @@ use crate::{
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
     pub use super::{
-        recovered::serde_bincode_compat::RecoveredBlock, sealed::serde_bincode_compat::SealedBlock2,
+        recovered::serde_bincode_compat::RecoveredBlock, sealed::serde_bincode_compat::SealedBlock,
     };
 }
 

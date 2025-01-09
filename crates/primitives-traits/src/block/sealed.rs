@@ -265,7 +265,7 @@ where
 #[cfg(any(test, feature = "test-utils"))]
 impl<B: crate::test_utils::TestBlock> SealedBlock<B> {}
 
-/// Bincode-compatible [`SealedBlock2`] serde implementation.
+/// Bincode-compatible [`SealedBlock`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
     use crate::serde_bincode_compat::SerdeBincodeCompat;
@@ -290,44 +290,42 @@ pub(super) mod serde_bincode_compat {
     /// ```
     #[derive(derive_more::Debug, Serialize, Deserialize)]
     #[debug(bound(T::BincodeRepr<'a>: core::fmt::Debug))]
-    pub struct SealedBlock2<'a, T: SerdeBincodeCompat> {
+    pub struct SealedBlock<'a, T: SerdeBincodeCompat> {
         hash: BlockHash,
         block: T::BincodeRepr<'a>,
     }
 
-    impl<'a, T: SerdeBincodeCompat> From<&'a super::SealedBlock<T>> for SealedBlock2<'a, T> {
+    impl<'a, T: SerdeBincodeCompat> From<&'a super::SealedBlock<T>> for SealedBlock<'a, T> {
         fn from(value: &'a super::SealedBlock<T>) -> Self {
             Self { hash: value.hash, block: (&value.block).into() }
         }
     }
 
-    impl<'a, T: SerdeBincodeCompat> From<SealedBlock2<'a, T>> for super::SealedBlock<T> {
-        fn from(value: SealedBlock2<'a, T>) -> Self {
+    impl<'a, T: SerdeBincodeCompat> From<SealedBlock<'a, T>> for super::SealedBlock<T> {
+        fn from(value: SealedBlock<'a, T>) -> Self {
             Self { hash: value.hash, block: value.block.into() }
         }
     }
 
-    impl<T: SerdeBincodeCompat> SerializeAs<super::SealedBlock<T>> for SealedBlock2<'_, T> {
+    impl<T: SerdeBincodeCompat> SerializeAs<super::SealedBlock<T>> for SealedBlock<'_, T> {
         fn serialize_as<S>(source: &super::SealedBlock<T>, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
-            SealedBlock2::from(source).serialize(serializer)
+            SealedBlock::from(source).serialize(serializer)
         }
     }
 
-    impl<'de, T: SerdeBincodeCompat> DeserializeAs<'de, super::SealedBlock<T>>
-        for SealedBlock2<'de, T>
-    {
+    impl<'de, T: SerdeBincodeCompat> DeserializeAs<'de, super::SealedBlock<T>> for SealedBlock<'de, T> {
         fn deserialize_as<D>(deserializer: D) -> Result<super::SealedBlock<T>, D::Error>
         where
             D: Deserializer<'de>,
         {
-            SealedBlock2::deserialize(deserializer).map(Into::into)
+            SealedBlock::deserialize(deserializer).map(Into::into)
         }
     }
 
     impl<T: SerdeBincodeCompat> SerdeBincodeCompat for super::SealedBlock<T> {
-        type BincodeRepr<'a> = SealedBlock2<'a, T>;
+        type BincodeRepr<'a> = SealedBlock<'a, T>;
     }
 }
