@@ -746,11 +746,9 @@ impl<P> RevealedSparseTrie<P> {
                                             .get(&path)
                                             .is_some_and(|mask| mask.is_bit_set(last_child_nibble))
                                     ) ||
-                                    (
-                                        // A branch or an extension node explicitly set the
-                                        // `store_in_db_trie` flag
-                                        child_node_type.store_in_db_trie()
-                                    );
+                                    // A branch or an extension node explicitly set the
+                                    // `store_in_db_trie` flag
+                                    child_node_type.store_in_db_trie();
                                 if should_set_tree_mask_bit {
                                     tree_mask.set_bit(last_child_nibble);
                                 }
