@@ -2372,16 +2372,12 @@ where
                                 "Task state root finished"
                             );
 
-                            if task_state_root != block.header().state_root() {
-                                debug!(target: "engine::tree", "Task state root does not match block state root");
-                                let (regular_root, regular_updates) =
-                                    state_provider.state_root_with_updates(hashed_state.clone())?;
-
-                                if regular_root == block.header().state_root() {
-                                    compare_trie_updates(&task_trie_updates, &regular_updates);
-                                } else {
-                                    debug!(target: "engine::tree", "Regular state root does not match block state root");
-                                }
+                            let (regular_root, regular_updates) =
+                                state_provider.state_root_with_updates(hashed_state.clone())?;
+                            if regular_root == block.header().state_root() {
+                                compare_trie_updates(&task_trie_updates, &regular_updates);
+                            } else {
+                                debug!(target: "engine::tree", "Regular state root does not match block state root");
                             }
 
                             (task_state_root, task_trie_updates, time_from_last_update)
