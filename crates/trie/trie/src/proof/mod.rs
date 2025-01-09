@@ -164,18 +164,24 @@ where
         }
         let _ = hash_builder.root();
         let account_subtree = hash_builder.take_proof_nodes();
-        let branch_node_hash_masks = if self.collect_branch_node_hash_masks {
-            hash_builder
-                .updated_branch_nodes
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(path, node)| (path, node.hash_mask))
-                .collect()
-        } else {
-            HashMap::default()
-        };
+        let (branch_node_hash_masks, branch_node_tree_masks) =
+            if self.collect_branch_node_hash_masks {
+                let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
+                (
+                    updated_branch_nodes
+                        .iter()
+                        .map(|(path, node)| (path.clone(), node.hash_mask))
+                        .collect(),
+                    updated_branch_nodes
+                        .into_iter()
+                        .map(|(path, node)| (path, node.tree_mask))
+                        .collect(),
+                )
+            } else {
+                (HashMap::default(), HashMap::default())
+            };
 
-        Ok(MultiProof { account_subtree, branch_node_hash_masks, storages })
+        Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
     }
 }
 
@@ -300,17 +306,23 @@ where
 
         let root = hash_builder.root();
         let subtree = hash_builder.take_proof_nodes();
-        let branch_node_hash_masks = if self.collect_branch_node_hash_masks {
-            hash_builder
-                .updated_branch_nodes
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(path, node)| (path, node.hash_mask))
-                .collect()
-        } else {
-            HashMap::default()
-        };
+        let (branch_node_hash_masks, branch_node_tree_masks) =
+            if self.collect_branch_node_hash_masks {
+                let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
+                (
+                    updated_branch_nodes
+                        .iter()
+                        .map(|(path, node)| (path.clone(), node.hash_mask))
+                        .collect(),
+                    updated_branch_nodes
+                        .into_iter()
+                        .map(|(path, node)| (path, node.tree_mask))
+                        .collect(),
+                )
+            } else {
+                (HashMap::default(), HashMap::default())
+            };
 
-        Ok(StorageMultiProof { root, subtree, branch_node_hash_masks })
+        Ok(StorageMultiProof { root, subtree, branch_node_hash_masks, branch_node_tree_masks })
     }
 }
