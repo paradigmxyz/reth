@@ -253,6 +253,22 @@ impl<B: InMemorySize> InMemorySize for RecoveredBlock<B> {
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
+impl<B> RecoveredBlock<B>
+where
+    B: Block,
+{
+    /// Returns a mutable reference to the recovered senders.
+    pub fn senders_mut(&mut self) -> &mut Vec<Address> {
+        &mut self.senders
+    }
+
+    /// Appends the sender to the list of senders.
+    pub fn push_sender(&mut self, sender: Address) {
+        self.senders.push(sender);
+    }
+}
+
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a, B> arbitrary::Arbitrary<'a> for RecoveredBlock<B>
 where
