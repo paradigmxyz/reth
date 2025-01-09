@@ -164,3 +164,7 @@ impl<B: Block> Deref for SealedBlock2<B> {
         self.header()
     }
 }
+
+
+#[cfg(any(test, feature = "test-utils"))]
+impl<B: crate::test_utils::TestBlock> SealedBlock2<B> {}
