@@ -756,6 +756,8 @@ impl<P> RevealedSparseTrie<P> {
                                     target: "trie::sparse",
                                     ?path,
                                     ?child_path,
+                                    store_in_db_trie = ?node_type.store_in_db_trie(),
+                                    ?calculated,
                                     tree_mask_bit_set = should_set_tree_mask_bit,
                                     hash_mask_bit_set = hash.is_some(),
                                     "Updating branch node child masks"
