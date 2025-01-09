@@ -4,7 +4,7 @@ use crate::{
     block::SealedBlock2,
     sync::OnceLock,
     transaction::signed::{RecoveryError, SignedTransactionIntoRecoveredExt},
-    Block, BlockBody,
+    Block, BlockBody, InMemorySize,
 };
 use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{Address, BlockHash, Sealable};
@@ -15,7 +15,7 @@ use derive_more::Deref;
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RecoveredBlock<B> {
     /// Block hash
-    #[cfg_attr(feature = "serde", skip)]
+    #[cfg_attr(feature = "serde", serde(skip))]
     hash: OnceLock<BlockHash>,
     /// Block
     #[deref]
@@ -41,7 +41,41 @@ impl<B: Block> RecoveredBlock<B> {
     /// the number of transactions in the block and recovers the senders from the transactions, if
     /// not using [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction)
     /// to recover the senders.
-    pub fn try_unhashed(block: B, senders: Vec<Address>) -> Result<Self, RecoveryError> {
+    pub fn try_new(
+        block: B,
+        senders: Vec<Address>,
+        hash: BlockHash,
+    ) -> Result<Self, RecoveryError> {
+        let senders = if block.body().transaction_count() == senders.len() {
+            senders
+        } else {
+            block.body().try_recover_signers()?
+        };
+        Ok(Self::new(block, senders, hash))
+    }
+
+    /// A safer variant of [`Self::new`] that checks if the number of senders is equal to
+    /// the number of transactions in the block and recovers the senders from the transactions, if
+    /// not using [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction)
+    /// to recover the senders.
+    pub fn try_new_unchecked(
+        block: B,
+        senders: Vec<Address>,
+        hash: BlockHash,
+    ) -> Result<Self, RecoveryError> {
+        let senders = if block.body().transaction_count() == senders.len() {
+            senders
+        } else {
+            block.body().try_recover_signers_unchecked()?
+        };
+        Ok(Self::new(block, senders, hash))
+    }
+
+    /// A safer variant of [`Self::new_unhashed`] that checks if the number of senders is equal to
+    /// the number of transactions in the block and recovers the senders from the transactions, if
+    /// not using [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction)
+    /// to recover the senders.
+    pub fn try_new_unhashed(block: B, senders: Vec<Address>) -> Result<Self, RecoveryError> {
         let senders = if block.body().transaction_count() == senders.len() {
             senders
         } else {
@@ -54,7 +88,10 @@ impl<B: Block> RecoveredBlock<B> {
     /// the number of transactions in the block and recovers the senders from the transactions, if
     /// not using [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction)
     /// to recover the senders.
-    pub fn try_unhashed_unchecked(block: B, senders: Vec<Address>) -> Result<Self, RecoveryError> {
+    pub fn try_new_unhashed_unchecked(
+        block: B,
+        senders: Vec<Address>,
+    ) -> Result<Self, RecoveryError> {
         let senders = if block.body().transaction_count() == senders.len() {
             senders
         } else {
@@ -154,5 +191,14 @@ impl<B: Block> RecoveredBlock<B> {
     #[inline]
     pub fn into_transactions(self) -> Vec<<B::Body as BlockBody>::Transaction> {
         self.block.split().1.into_transactions()
+    }
+}
+
+impl<B: InMemorySize> InMemorySize for RecoveredBlock<B> {
+    #[inline]
+    fn size(&self) -> usize {
+        self.block.size() +
+            core::mem::size_of::<BlockHash>() +
+            self.senders.len() * core::mem::size_of::<Address>()
     }
 }
