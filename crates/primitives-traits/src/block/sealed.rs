@@ -7,6 +7,8 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, Sealable, B256};
+use alloy_rlp::{Decodable, Encodable};
+use bytes::BufMut;
 use core::ops::Deref;
 
 /// Sealed full block.
@@ -203,17 +205,6 @@ where
     }
 }
 
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a, B> arbitrary::Arbitrary<'a> for SealedBlock2<B>
-where
-    B: Block + arbitrary::Arbitrary<'a>,
-{
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let block = B::arbitrary(u)?;
-        Ok(Self::seal(block))
-    }
-}
-
 impl<B: InMemorySize> InMemorySize for SealedBlock2<B> {
     #[inline]
     fn size(&self) -> usize {
@@ -226,6 +217,30 @@ impl<B: Block> Deref for SealedBlock2<B> {
 
     fn deref(&self) -> &Self::Target {
         self.header()
+    }
+}
+
+impl<B: Block> Encodable for SealedBlock2<B> {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.block.encode(out);
+    }
+}
+
+impl<B: Block> Decodable for SealedBlock2<B> {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let block = B::decode(buf)?;
+        Ok(Self::seal(block))
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a, B> arbitrary::Arbitrary<'a> for SealedBlock2<B>
+where
+    B: Block + arbitrary::Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let block = B::arbitrary(u)?;
+        Ok(Self::seal(block))
     }
 }
 
