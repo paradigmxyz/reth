@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use alloy_primitives::{BlockNumber, B256};
 use reth_config::{config::StageConfig, PruneConfig};
-use reth_consensus::Consensus;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -27,7 +27,7 @@ use tokio::sync::watch;
 pub fn build_networked_pipeline<N, Client, Executor>(
     config: &StageConfig,
     client: Client,
-    consensus: Arc<dyn Consensus<Client::Header, Client::Body>>,
+    consensus: Arc<dyn Consensus<Client::Header, Client::Body, Error = ConsensusError>>,
     provider_factory: ProviderFactory<N>,
     task_executor: &TaskExecutor,
     metrics_tx: reth_stages::MetricEventsSender,
@@ -75,7 +75,7 @@ pub fn build_pipeline<N, H, B, Executor>(
     stage_config: &StageConfig,
     header_downloader: H,
     body_downloader: B,
-    consensus: Arc<dyn Consensus<H::Header, B::Body>>,
+    consensus: Arc<dyn Consensus<H::Header, B::Body, Error = ConsensusError>>,
     max_block: Option<u64>,
     metrics_tx: reth_stages::MetricEventsSender,
     prune_config: Option<PruneConfig>,

@@ -4,8 +4,10 @@ use crate::{
 };
 use alloc::vec::Vec;
 use alloy_consensus::Header;
-use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_eips::{
+    eip1898::BlockWithParent, eip2718::Encodable2718, eip4895::Withdrawals, BlockNumHash,
+};
+use alloy_primitives::{Address, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
 #[cfg(any(test, feature = "arbitrary"))]
@@ -162,12 +164,10 @@ impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SealedBlock<H = Header, B = BlockBody> {
     /// Locked block header.
-    #[deref]
-    #[deref_mut]
-    pub header: SealedHeader<H>,
+    header: SealedHeader<H>,
     /// Block body.
     body: B,
 }
@@ -185,9 +185,32 @@ impl<H, B> SealedBlock<H, B> {
         self.header.hash()
     }
 
+    /// Returns reference to block header.
+    pub const fn header(&self) -> &H {
+        self.header.header()
+    }
+
     /// Returns reference to block body.
     pub const fn body(&self) -> &B {
         &self.body
+    }
+
+    /// Returns the Sealed header.
+    pub const fn sealed_header(&self) -> &SealedHeader<H> {
+        &self.header
+    }
+
+    /// Clones the wrapped header and returns a [`SealedHeader`] sealed with the hash.
+    pub fn clone_sealed_header(&self) -> SealedHeader<H>
+    where
+        H: Clone,
+    {
+        self.header.clone()
+    }
+
+    /// Consumes the block and returns the sealed header.
+    pub fn into_sealed_header(self) -> SealedHeader<H> {
+        self.header
     }
 
     /// Consumes the block and returns the header.
@@ -202,22 +225,8 @@ impl<H, B> SealedBlock<H, B> {
 
     /// Splits the [`BlockBody`] and [`SealedHeader`] into separate components
     #[inline]
-    pub fn split_header_body(self) -> (SealedHeader<H>, B) {
+    pub fn split(self) -> (SealedHeader<H>, B) {
         (self.header, self.body)
-    }
-}
-
-impl SealedBlock {
-    /// Returns whether or not the block contains any blob transactions.
-    #[inline]
-    pub fn has_eip4844_transactions(&self) -> bool {
-        self.body.has_eip4844_transactions()
-    }
-
-    /// Returns whether or not the block contains any eip-7702 transactions.
-    #[inline]
-    pub fn has_eip7702_transactions(&self) -> bool {
-        self.body.has_eip7702_transactions()
     }
 }
 
@@ -248,6 +257,16 @@ where
     H: alloy_consensus::BlockHeader,
     B: reth_primitives_traits::BlockBody,
 {
+    /// Return the number hash tuple.
+    pub fn num_hash(&self) -> BlockNumHash {
+        BlockNumHash::new(self.number(), self.hash())
+    }
+
+    /// Return a [`BlockWithParent`] for this header.
+    pub fn block_with_parent(&self) -> BlockWithParent {
+        BlockWithParent { parent: self.parent_hash(), block: self.num_hash() }
+    }
+
     /// Ensures that the transaction root in the block header is valid.
     ///
     /// The transaction root is the Keccak 256-bit hash of the root node of the trie structure
@@ -359,16 +378,6 @@ where
     {
         Block::new(self.header.unseal(), self.body)
     }
-
-    /// Returns a vector of encoded 2718 transactions.
-    ///
-    /// This is also known as `raw transactions`.
-    ///
-    /// See also [`Encodable2718`].
-    #[doc(alias = "raw_transactions")]
-    pub fn encoded_2718_transactions(&self) -> Vec<Bytes> {
-        self.body.encoded_2718_transactions()
-    }
 }
 
 impl<H: InMemorySize, B: InMemorySize> InMemorySize for SealedBlock<H, B> {
@@ -394,6 +403,14 @@ where
     }
 }
 
+impl<H, B> Deref for SealedBlock<H, B> {
+    type Target = H;
+
+    fn deref(&self) -> &Self::Target {
+        self.header.header()
+    }
+}
+
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a, H, B> arbitrary::Arbitrary<'a> for SealedBlock<H, B>
 where
@@ -402,6 +419,52 @@ where
 {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(Self { header: u.arbitrary()?, body: u.arbitrary()? })
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl<H, B> SealedBlock<H, B>
+where
+    H: reth_primitives_traits::test_utils::TestHeader,
+{
+    /// Returns a mutable reference to the header.
+    pub fn header_mut(&mut self) -> &mut H {
+        self.header.header_mut()
+    }
+
+    /// Returns a mutable reference to the header.
+    pub fn body_mut(&mut self) -> &mut B {
+        &mut self.body
+    }
+
+    /// Updates the block header.
+    pub fn set_header(&mut self, header: H) {
+        self.header.set_header(header)
+    }
+
+    /// Updates the block hash.
+    pub fn set_hash(&mut self, hash: alloy_primitives::BlockHash) {
+        self.header.set_hash(hash);
+    }
+
+    /// Updates the parent block hash.
+    pub fn set_parent_hash(&mut self, hash: alloy_primitives::BlockHash) {
+        self.header.set_parent_hash(hash);
+    }
+
+    /// Updates the block number.
+    pub fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
+        self.header.set_block_number(number);
+    }
+
+    /// Updates the block state root.
+    pub fn set_state_root(&mut self, state_root: B256) {
+        self.header.set_state_root(state_root);
+    }
+
+    /// Updates the block difficulty.
+    pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
+        self.header.set_difficulty(difficulty);
     }
 }
 
@@ -447,7 +510,7 @@ impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
     #[inline]
     pub fn unseal(self) -> BlockWithSenders<B> {
         let (block, senders) = self.into_components();
-        let (header, body) = block.split_header_body();
+        let (header, body) = block.split();
         let header = header.unseal();
         BlockWithSenders::new_unchecked(B::new(header, body), senders)
     }
@@ -493,17 +556,22 @@ impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for SealedBlockWithSenders {
+impl<'a, B> arbitrary::Arbitrary<'a> for SealedBlockWithSenders<B>
+where
+    B: reth_primitives_traits::Block + arbitrary::Arbitrary<'a>,
+{
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let block: SealedBlock = SealedBlock::arbitrary(u)?;
+        let block = B::arbitrary(u)?;
 
         let senders = block
-            .body
-            .transactions
+            .body()
+            .transactions()
             .iter()
             .map(|tx| tx.recover_signer().unwrap())
             .collect::<Vec<_>>();
 
+        let (header, body) = block.split();
+        let block = SealedBlock::new(SealedHeader::seal(header), body);
         Ok(Self { block, senders })
     }
 }

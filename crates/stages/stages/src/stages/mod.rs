@@ -357,7 +357,7 @@ mod tests {
     {
         let provider_rw = db.factory.provider_rw().unwrap();
         let mut cursor = provider_rw.tx_ref().cursor_write::<T>().unwrap();
-        cursor.insert(key, Default::default()).unwrap();
+        cursor.insert(key, &Default::default()).unwrap();
         provider_rw.commit().unwrap();
 
         assert!(matches!(

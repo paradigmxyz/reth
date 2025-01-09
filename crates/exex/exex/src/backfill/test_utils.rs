@@ -80,7 +80,7 @@ where
     let block = block.clone().seal_slow();
     provider_rw.append_blocks_with_state(
         vec![block],
-        execution_outcome,
+        &execution_outcome,
         Default::default(),
         Default::default(),
     )?;
@@ -214,7 +214,7 @@ where
     let provider_rw = provider_factory.provider_rw()?;
     provider_rw.append_blocks_with_state(
         vec![block1.clone(), block2.clone()],
-        execution_outcome.clone(),
+        &execution_outcome,
         Default::default(),
         Default::default(),
     )?;

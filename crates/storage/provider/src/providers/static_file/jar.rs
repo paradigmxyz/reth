@@ -18,8 +18,7 @@ use reth_db::{
     table::{Decompress, Value},
 };
 use reth_node_types::NodePrimitives;
-use reth_primitives::{transaction::recover_signers, SealedHeader};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{SealedHeader, SignedTransaction};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     fmt::Debug,
@@ -297,7 +296,8 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
         let txs = self.transactions_by_tx_range(range)?;
-        recover_signers(&txs, txs.len()).ok_or(ProviderError::SenderRecoveryError)
+        reth_primitives_traits::transaction::recover::recover_signers(&txs)
+            .ok_or(ProviderError::SenderRecoveryError)
     }
 
     fn transaction_sender(&self, num: TxNumber) -> ProviderResult<Option<Address>> {

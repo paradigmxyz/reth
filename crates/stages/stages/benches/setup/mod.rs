@@ -151,7 +151,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
             .unwrap();
         let second_block = blocks.get_mut(1).unwrap();
         let cloned_second = second_block.clone();
-        let mut updated_header = cloned_second.header.clone().unseal();
+        let mut updated_header = cloned_second.header().clone();
         updated_header.state_root = root;
         *second_block =
             SealedBlock::new(SealedHeader::seal(updated_header), cloned_second.into_body());
@@ -185,7 +185,7 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
 
         let last_block = blocks.last_mut().unwrap();
         let cloned_last = last_block.clone();
-        let mut updated_header = cloned_last.header.clone().unseal();
+        let mut updated_header = cloned_last.header().clone();
         updated_header.state_root = root;
         *last_block = SealedBlock::new(SealedHeader::seal(updated_header), cloned_last.into_body());
 

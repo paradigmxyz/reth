@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
 reth-primitives-traits = { workspace = true, features = ["op"] }
 reth-codecs = { workspace = true, optional = true, features = ["op"] }
 reth-zstd-compressors = { workspace = true, optional = true }
@@ -48,13 +47,13 @@ proptest-arbitrary-interop.workspace = true
 reth-codecs = { workspace = true, features = ["test-utils", "op"] }
 rstest.workspace = true
 arbitrary.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
 proptest.workspace = true
 
 [features]
-default = ["std", "serde"]
+default = ["std"]
 std = [
 	"reth-primitives-traits/std",
-	"reth-primitives/std",
 	"reth-codecs?/std",
 	"alloy-consensus/std",
 	"alloy-eips/std",
@@ -74,10 +73,8 @@ reth-codec = [
     "std",
     "dep:proptest",
     "dep:arbitrary",
-    "reth-primitives/reth-codec",
     "reth-primitives-traits/reth-codec",
     "reth-codecs?/op",
-    "reth-primitives/reth-codec",
     "dep:bytes",
     "dep:modular-bitfield",
     "dep:reth-zstd-compressors"
@@ -99,14 +96,13 @@ serde-bincode-compat = [
 	"alloy-consensus/serde-bincode-compat",
 	"alloy-eips/serde-bincode-compat",
 	"op-alloy-consensus/serde-bincode-compat",
-	"reth-primitives/serde-bincode-compat",
 	"reth-primitives-traits/serde-bincode-compat"
 ]
 arbitrary = [
     "dep:arbitrary",
     "dep:secp256k1",
+    "secp256k1?/rand",
     "reth-primitives-traits/arbitrary",
-    "reth-primitives/arbitrary",
     "reth-codecs?/arbitrary",
     "op-alloy-consensus/arbitrary",
     "alloy-consensus/arbitrary",
@@ -118,5 +114,4 @@ arbitrary = [
 optimism = [
     "dep:revm-primitives",
 	"revm-primitives/optimism",
-	"reth-primitives/optimism"
 ]

@@ -126,10 +126,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                                 base_fee_params,
                             )
                         } else {
-                            base_block
-                                .header
-                                .next_block_base_fee(base_fee_params)
-                                .unwrap_or_default()
+                            base_block.next_block_base_fee(base_fee_params).unwrap_or_default()
                         };
                         block_env.basefee = U256::from(base_fee);
                     } else {
@@ -682,7 +679,7 @@ pub trait Call:
                 let env = EnvWithHandlerCfg::new_with_cfg_env(
                     cfg_env_with_handler_cfg,
                     block_env,
-                    RpcNodeCore::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
+                    RpcNodeCore::evm_config(&this).tx_env(tx.tx(), tx.signer()),
                 );
 
                 let (res, _) = this.transact(&mut db, env)?;

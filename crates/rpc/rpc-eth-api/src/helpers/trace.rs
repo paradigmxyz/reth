@@ -226,7 +226,7 @@ pub trait Trace:
                 let env = EnvWithHandlerCfg::new_with_cfg_env(
                     cfg_env_with_handler_cfg,
                     block_env,
-                    RpcNodeCore::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
+                    RpcNodeCore::evm_config(&this).tx_env(tx.tx(), tx.signer()),
                 );
                 let (res, _) =
                     this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
@@ -496,12 +496,12 @@ pub trait Trace:
                 db,
                 cfg,
                 block_env,
-                block.header.parent_beacon_block_root(),
+                block.parent_beacon_block_root(),
             )
             .map_err(|_| EthApiError::EvmCustom("failed to apply 4788 system call".to_string()))?;
 
         system_caller
-            .pre_block_blockhashes_contract_call(db, cfg, block_env, block.header.parent_hash())
+            .pre_block_blockhashes_contract_call(db, cfg, block_env, block.parent_hash())
             .map_err(|_| {
                 EthApiError::EvmCustom("failed to apply blockhashes system call".to_string())
             })?;

@@ -29,7 +29,7 @@ pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
     let tx = provider;
 
     // check if all tables are empty
-    assert_eq!(tx.table::<tables::Headers>().unwrap(), vec![(g.number, g.header.clone().unseal())]);
+    assert_eq!(tx.table::<tables::Headers>().unwrap(), vec![(g.number, g.header().clone())]);
 
     assert_eq!(tx.table::<tables::HeaderNumbers>().unwrap(), vec![(h, n)]);
     assert_eq!(tx.table::<tables::CanonicalHeaders>().unwrap(), vec![(n, h)]);
@@ -232,7 +232,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
         b256!("5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd")
     );
 
-    let (header, mut body) = TEST_BLOCK.clone().split_header_body();
+    let (header, mut body) = TEST_BLOCK.clone().split();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = header.unseal();
     header.number = number;
@@ -294,7 +294,7 @@ fn block2(
         b256!("90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8")
     );
 
-    let (header, mut body) = TEST_BLOCK.clone().split_header_body();
+    let (header, mut body) = TEST_BLOCK.clone().split();
 
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = header.unseal();
@@ -359,7 +359,7 @@ fn block3(
     extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
-    let (header, mut body) = TEST_BLOCK.clone().split_header_body();
+    let (header, mut body) = TEST_BLOCK.clone().split();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = header.unseal();
     header.number = number;
@@ -448,7 +448,7 @@ fn block4(
     extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
-    let (header, mut body) = TEST_BLOCK.clone().split_header_body();
+    let (header, mut body) = TEST_BLOCK.clone().split();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = header.unseal();
     header.number = number;
@@ -534,7 +534,7 @@ fn block5(
     extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
-    let (header, mut body) = TEST_BLOCK.clone().split_header_body();
+    let (header, mut body) = TEST_BLOCK.clone().split();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
     let mut header = header.unseal();
     header.number = number;

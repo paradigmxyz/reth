@@ -8,9 +8,8 @@ use crate::{
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{
-    eip2718::Encodable2718,
-    eip4895::{Withdrawal, Withdrawals},
-    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber,
+    eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumHash,
+    BlockNumberOrTag, HashOrNumber,
 };
 use alloy_primitives::{
     map::{hash_map, HashMap},
@@ -632,7 +631,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             (*block_hash).into(),
             |db_provider| db_provider.header(block_hash),
-            |block_state| Ok(Some(block_state.block_ref().block().header.header().clone())),
+            |block_state| Ok(Some(block_state.block_ref().block().header().clone())),
         )
     }
 
@@ -640,7 +639,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             num.into(),
             |db_provider| db_provider.header_by_number(num),
-            |block_state| Ok(Some(block_state.block_ref().block().header.header().clone())),
+            |block_state| Ok(Some(block_state.block_ref().block().header().clone())),
         )
     }
 
@@ -682,7 +681,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.headers_range(range),
-            |block_state, _| Some(block_state.block_ref().block().header.header().clone()),
+            |block_state, _| Some(block_state.block_ref().block().header().clone()),
             |_| true,
         )
     }
@@ -694,7 +693,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             number.into(),
             |db_provider| db_provider.sealed_header(number),
-            |block_state| Ok(Some(block_state.block_ref().block().header.clone())),
+            |block_state| Ok(Some(block_state.block_ref().block().clone_sealed_header())),
         )
     }
 
@@ -705,7 +704,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.sealed_headers_range(range),
-            |block_state, _| Some(block_state.block_ref().block().header.clone()),
+            |block_state, _| Some(block_state.block_ref().block().clone_sealed_header()),
             |_| true,
         )
     }
@@ -719,7 +718,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
             range,
             |db_provider, range, predicate| db_provider.sealed_headers_while(range, predicate),
             |block_state, predicate| {
-                let header = &block_state.block_ref().block().header;
+                let header = block_state.block_ref().block().sealed_header();
                 predicate(header).then(|| header.clone())
             },
             predicate,
@@ -1132,24 +1131,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ConsistentProvider<N> {
             |block_state| Ok(block_state.block_ref().block().body().withdrawals().cloned()),
         )
     }
-
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        let best_block_num = self.best_block_number()?;
-
-        self.get_in_memory_or_storage_by_block(
-            best_block_num.into(),
-            |db_provider| db_provider.latest_withdrawal(),
-            |block_state| {
-                Ok(block_state
-                    .block_ref()
-                    .block()
-                    .body()
-                    .withdrawals()
-                    .cloned()
-                    .and_then(|mut w| w.pop()))
-            },
-        )
-    }
 }
 
 impl<N: ProviderNodeTypes> OmmersProvider for ConsistentProvider<N> {
@@ -1463,7 +1444,7 @@ impl<N: ProviderNodeTypes> StateReader for ConsistentProvider<N> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        providers::blockchain_provider::BlockchainProvider2,
+        providers::blockchain_provider::BlockchainProvider,
         test_utils::create_test_provider_factory, BlockWriter,
     };
     use alloy_eips::BlockHashOrNumber;
@@ -1543,7 +1524,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let provider = BlockchainProvider2::new(factory)?;
+        let provider = BlockchainProvider::new(factory)?;
         let consistent_provider = provider.consistent_provider()?;
 
         // Useful blocks
@@ -1654,7 +1635,7 @@ mod tests {
         provider_rw.commit()?;
 
         // Create a new provider
-        let provider = BlockchainProvider2::new(factory)?;
+        let provider = BlockchainProvider::new(factory)?;
         let consistent_provider = provider.consistent_provider()?;
 
         // First in memory block
@@ -1749,7 +1730,7 @@ mod tests {
                 .into_iter()
                 .map(|b| b.seal_with_senders().expect("failed to seal block with senders"))
                 .collect(),
-            ExecutionOutcome {
+            &ExecutionOutcome {
                 bundle: BundleState::new(
                     database_state.into_iter().map(|(address, (account, _))| {
                         (address, None, Some(account.into()), Default::default())
@@ -1772,7 +1753,7 @@ mod tests {
         )?;
         provider_rw.commit()?;
 
-        let provider = BlockchainProvider2::new(factory)?;
+        let provider = BlockchainProvider::new(factory)?;
 
         let in_memory_changesets = in_memory_changesets.into_iter().next().unwrap();
         let chain = NewCanonicalChain::Commit {

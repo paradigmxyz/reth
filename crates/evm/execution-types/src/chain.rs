@@ -91,7 +91,7 @@ impl<N: NodePrimitives> Chain<N> {
 
     /// Returns an iterator over all headers in the block with increasing block numbers.
     pub fn headers(&self) -> impl Iterator<Item = SealedHeader<N::BlockHeader>> + '_ {
-        self.blocks.values().map(|block| block.header.clone())
+        self.blocks.values().map(|block| block.clone_sealed_header())
     }
 
     /// Get cached trie updates for this chain.
@@ -694,8 +694,25 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::B256;
+    use alloy_consensus::TxType;
+    use alloy_primitives::{Address, B256};
+    use reth_ethereum_primitives::Receipt;
+    use reth_primitives::Receipts;
     use revm::primitives::{AccountInfo, HashMap};
+
+    // TODO: this is temporary, until we fully switch over to `reth_ethereum_primitives` for the
+    // `Receipt` type in `EthPrimitives`.
+    #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[non_exhaustive]
+    struct TestPrimitives;
+
+    impl reth_primitives_traits::NodePrimitives for TestPrimitives {
+        type Block = reth_primitives::Block;
+        type BlockHeader = alloy_consensus::Header;
+        type BlockBody = reth_primitives::BlockBody;
+        type SignedTx = reth_primitives::TransactionSigned;
+        type Receipt = Receipt;
+    }
 
     #[test]
     fn chain_append() {
@@ -828,10 +845,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn receipts_by_block_hash() {
-        use reth_primitives::{Receipt, Receipts, TxType};
-
         // Create a default SealedBlockWithSenders object
         let block: SealedBlockWithSenders = Default::default();
 
@@ -844,8 +858,8 @@ mod tests {
         let mut block2 = block;
 
         // Set the hashes of block1 and block2
-        block1.block.header.set_hash(block1_hash);
-        block2.block.header.set_hash(block2_hash);
+        block1.block.set_hash(block1_hash);
+        block2.block.set_hash(block2_hash);
 
         // Create a random receipt object, receipt1
         let receipt1 = Receipt {
@@ -878,7 +892,7 @@ mod tests {
 
         // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
         // including block1_hash and block2_hash, and the execution_outcome
-        let chain: Chain = Chain {
+        let chain: Chain<TestPrimitives> = Chain {
             blocks: BTreeMap::from([(10, block1), (11, block2)]),
             execution_outcome: execution_outcome.clone(),
             ..Default::default()

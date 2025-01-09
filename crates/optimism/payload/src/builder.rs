@@ -434,7 +434,7 @@ where
         };
 
         let sealed_block = Arc::new(block.seal_slow());
-        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header, "sealed built block");
+        debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
 
         // create the executed block data
         let executed: ExecutedBlock<OpPrimitives> = ExecutedBlock {
@@ -790,7 +790,7 @@ where
                     ))
                 })?;
 
-            *evm.tx_mut() = self.evm_config.tx_env(sequencer_tx.as_signed(), sequencer_tx.signer());
+            *evm.tx_mut() = self.evm_config.tx_env(sequencer_tx.tx(), sequencer_tx.signer());
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
@@ -841,7 +841,7 @@ where
 
             // append sender and transaction to the respective lists
             info.executed_senders.push(sequencer_tx.signer());
-            info.executed_transactions.push(sequencer_tx.into_signed());
+            info.executed_transactions.push(sequencer_tx.into_tx());
         }
 
         Ok(info)
@@ -891,7 +891,7 @@ where
             }
 
             // Configure the environment for the tx.
-            *evm.tx_mut() = self.evm_config.tx_env(tx.as_signed(), tx.signer());
+            *evm.tx_mut() = self.evm_config.tx_env(tx.tx(), tx.signer());
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
@@ -954,7 +954,7 @@ where
 
             // append sender and transaction to the respective lists
             info.executed_senders.push(tx.signer());
-            info.executed_transactions.push(tx.into_signed());
+            info.executed_transactions.push(tx.into_tx());
         }
 
         Ok(None)
