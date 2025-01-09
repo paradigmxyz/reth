@@ -97,6 +97,16 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         self.revealed.get(account).is_some_and(|slots| slots.contains(slot))
     }
 
+    /// Returns reference to bytes representing leaf value for the target account.
+    pub fn get_account_value(&self, account: &B256) -> Option<&Vec<u8>> {
+        self.state.as_revealed_ref()?.get_leaf_value(&Nibbles::unpack(account))
+    }
+
+    /// Returns reference to bytes representing leaf value for the target account and storage slot.
+    pub fn get_storage_slot_value(&self, account: &B256, slot: &B256) -> Option<&Vec<u8>> {
+        self.storages.get(account)?.as_revealed_ref()?.get_leaf_value(&Nibbles::unpack(slot))
+    }
+
     /// Returns mutable reference to storage sparse trie if it was revealed.
     pub fn storage_trie_mut(
         &mut self,

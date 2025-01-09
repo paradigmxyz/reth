@@ -72,6 +72,15 @@ impl<P> SparseTrie<P> {
         matches!(self, Self::Blind)
     }
 
+    /// Returns reference to revealed sparse trie if the trie is not blind.
+    pub fn as_revealed_ref(&self) -> Option<&RevealedSparseTrie<P>> {
+        if let Self::Revealed(revealed) = self {
+            Some(revealed)
+        } else {
+            None
+        }
+    }
+
     /// Returns mutable reference to revealed sparse trie if the trie is not blind.
     pub fn as_revealed_mut(&mut self) -> Option<&mut RevealedSparseTrie<P>> {
         if let Self::Revealed(revealed) = self {
