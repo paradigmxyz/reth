@@ -29,6 +29,7 @@ impl std::fmt::Debug for CursorSubNode {
             .field("tree_flag", &self.tree_flag())
             .field("hash_flag", &self.hash_flag())
             .field("hash", &self.hash())
+            .field("node", &self.node)
             .finish()
     }
 }
