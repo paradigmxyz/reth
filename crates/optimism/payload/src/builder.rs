@@ -649,7 +649,6 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
         BestTransactionsAttributes::new(
             self.base_fee(),
             self.get_blob_gasprice(),
-            self.da_config.max_da_tx_size(),
         )
     }
 
@@ -872,6 +871,7 @@ where
     {
         let block_gas_limit = self.block_gas_limit();
         let block_da_limit = self.da_config.max_da_block_size();
+        let tx_da_limit = self.da_config.max_da_tx_size();
         let base_fee = self.base_fee();
 
         let env = EnvWithHandlerCfg::new_with_cfg_env(
@@ -882,11 +882,13 @@ where
         let mut evm = self.evm_config.evm_with_env(&mut *db, env);
 
         while let Some(tx) = best_txs.next(()) {
+            let tx_exceeds_da_size = tx_da_limit
+                .is_some_and(|da_limit| tx.da_usage() > da_limit);
             let tx_exceeds_block_size = info.cumulative_gas_used + tx.gas_limit() > block_gas_limit;
-            let tx_exceeds_da_size = block_da_limit
+            let tx_exceeds_block_da_size = block_da_limit
                 .is_some_and(|da_limit| info.cumulative_da_bytes_used + tx.da_usage() > da_limit);
 
-            if tx_exceeds_block_size || tx_exceeds_da_size {
+            if tx_exceeds_block_size || tx_exceeds_block_da_size || tx_exceeds_da_size {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue

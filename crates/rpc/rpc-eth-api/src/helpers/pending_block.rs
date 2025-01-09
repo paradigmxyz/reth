@@ -274,7 +274,6 @@ pub trait LoadPendingBlock:
             self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
                 base_fee,
                 block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
-                None,
             ));
 
         let chain_spec = self.provider().chain_spec();

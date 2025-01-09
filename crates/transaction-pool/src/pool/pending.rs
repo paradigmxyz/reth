@@ -198,19 +198,6 @@ impl<T: TransactionOrdering> PendingPool<T> {
         removed
     }
 
-    pub(crate) fn update_da_limits(&mut self, max_da_tx_size: u64) {
-        // Remove all transactions that exceed the max_da_tx_size
-        let mut transactions_iter = self.clear_transactions().into_iter().peekable();
-        while let Some((id, tx)) = transactions_iter.next() {
-            // TODO: da size
-            if tx.transaction.size() <= max_da_tx_size.try_into().unwrap() {
-                self.size_of += tx.transaction.size();
-                self.update_independents_and_highest_nonces(&tx);
-                self.by_id.insert(id, tx);
-            }
-        }
-    }
-
     /// Updates the pool with the new base fee. Reorders transactions by new priorities. Removes
     /// from the subpool all transactions and their dependents that no longer satisfy the given
     /// base fee (`tx.fee < base_fee`).

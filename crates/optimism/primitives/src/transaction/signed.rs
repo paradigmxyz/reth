@@ -32,6 +32,7 @@ use reth_primitives_traits::{
 };
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
+use revm_optimism::transaction::estimate_tx_compressed_size;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -72,9 +73,13 @@ impl OpTransactionSigned {
         matches!(self.transaction, OpTypedTransaction::Deposit(_))
     }
 
+    /// Returns the estimated compressed size of a transaction.
     pub fn da_usage(&self) -> u64 {
-        // TODO: implement da estimation
-        self.size() as u64
+        let mut tx_ser: Vec<u8> = Vec::new();
+        self.transaction.legacy().unwrap().eip2718_encode(&self.signature, &mut tx_ser);
+
+        estimate_tx_compressed_size(&tx_ser)
+            .wrapping_div(1_000_000u64)
     }
 }
 

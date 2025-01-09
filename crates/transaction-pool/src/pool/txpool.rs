@@ -257,21 +257,6 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    /// Updates the DA limits
-    /// 
-    /// The mempool will not keep transactions around that exceed the DA limit size, so
-    /// the update logic is to remove all transactions that exceed the new limit.
-    pub fn update_da_limits(
-        &mut self,
-        mut da_tx_size: Option<u64>,
-    ) {
-        std::mem::swap(&mut self.all_transactions.max_da_tx_size, &mut da_tx_size);
-
-        if let Some(max_tx_size) = da_tx_size {
-            self.pending_pool.update_da_limits(max_tx_size);
-        }
-    }
-
     /// Updates the tracked basefee
     ///
     /// Depending on the change in direction of the basefee, this will promote or demote
@@ -1110,8 +1095,6 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     minimal_protocol_basefee: u64,
     /// The max gas limit of the block
     block_gas_limit: u64,
-    /// The max DA size per transaction
-    max_da_tx_size: Option<u64>,
     /// Max number of executable transaction slots guaranteed per account
     max_account_slots: usize,
     /// _All_ transactions identified by their hash.
@@ -1858,7 +1841,6 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
             price_bumps: Default::default(),
             local_transactions_config: Default::default(),
             metrics: Default::default(),
-            max_da_tx_size: Default::default(),
         }
     }
 }
