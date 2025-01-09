@@ -52,7 +52,7 @@ where
     from_block_with_transactions(
         block.length(),
         block_hash,
-        block.block,
+        block.into_block(),
         BlockTransactions::Hashes(transactions),
     )
 }
@@ -72,14 +72,14 @@ where
     T: TransactionCompat<<<B as BlockTrait>::Body as BlockBody>::Transaction>,
     B: BlockTrait,
 {
-    let block_hash = block_hash.unwrap_or_else(|| block.block.header().hash_slow());
-    let block_number = block.block.header().number();
-    let base_fee_per_gas = block.block.header().base_fee_per_gas();
+    let block_hash = block_hash.unwrap_or_else(|| block.header().hash_slow());
+    let block_number = block.header().number();
+    let base_fee_per_gas = block.header().base_fee_per_gas();
 
     // NOTE: we can safely remove the body here because not needed to finalize the `Block` in
     // `from_block_with_transactions`, however we need to compute the length before
-    let block_length = block.block.length();
-    let transactions = block.block.body().transactions().to_vec();
+    let block_length = block.length();
+    let transactions = block.body().transactions().to_vec();
     let transactions_with_senders = transactions.into_iter().zip(block.senders_iter().copied());
     let transactions = transactions_with_senders
         .enumerate()
@@ -101,7 +101,7 @@ where
     Ok(from_block_with_transactions(
         block_length,
         block_hash,
-        block.block,
+        block.into_block(),
         BlockTransactions::Full(transactions),
     ))
 }

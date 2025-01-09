@@ -50,6 +50,11 @@ impl<B> RecoveredBlock<B> {
     pub fn into_block(self) -> B {
         self.block
     }
+
+    /// Returns a reference to the inner block.
+    pub fn block(&self) -> &B {
+        &self.block
+    }
 }
 
 impl<B: Block> RecoveredBlock<B> {
