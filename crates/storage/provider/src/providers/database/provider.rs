@@ -2800,7 +2800,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         // Ensures we have all the senders for the block's transactions.
         for (transaction, sender) in
-            block.block.body().transactions().iter().zip(block.senders.iter())
+            block.block.body().transactions().iter().zip(block.senders_iter())
         {
             let hash = transaction.tx_hash();
 

@@ -1597,10 +1597,11 @@ where
             return Ok(None)
         };
 
-        let SealedBlockWithSenders { block, senders } = self
+        let (block, senders) = self
             .provider
             .sealed_block_with_senders(hash.into(), TransactionVariant::WithHash)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?;
+            .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?
+            .split();
         let execution_output = self
             .provider
             .get_state(block.number())?
@@ -2452,7 +2453,7 @@ where
 
         let executed: ExecutedBlock<N> = ExecutedBlock {
             block: sealed_block.clone(),
-            senders: Arc::new(block.senders),
+            senders: Arc::new(block.senders().to_vec()),
             execution_output: Arc::new(ExecutionOutcome::from((output, block_number))),
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
@@ -3002,9 +3003,11 @@ mod tests {
             self.persist_blocks(
                 blocks
                     .into_iter()
-                    .map(|b| SealedBlockWithSenders {
-                        block: (*b.block).clone(),
-                        senders: b.senders.to_vec(),
+                    .map(|b| {
+                        SealedBlockWithSenders::new_unchecked(
+                            (*b.block).clone(),
+                            b.senders().clone(),
+                        )
                     })
                     .collect(),
             );
@@ -3710,7 +3713,7 @@ mod tests {
         for block in &chain_a {
             test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
                 block: Arc::new(block.block.clone()),
-                senders: Arc::new(block.senders.clone()),
+                senders: Arc::new(block.senders().to_vec()),
                 execution_output: Arc::new(ExecutionOutcome::default()),
                 hashed_state: Arc::new(HashedPostState::default()),
                 trie: Arc::new(TrieUpdates::default()),
@@ -3721,7 +3724,7 @@ mod tests {
         for block in &chain_b {
             test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
                 block: Arc::new(block.block.clone()),
-                senders: Arc::new(block.senders.clone()),
+                senders: Arc::new(block.senders().to_vec()),
                 execution_output: Arc::new(ExecutionOutcome::default()),
                 hashed_state: Arc::new(HashedPostState::default()),
                 trie: Arc::new(TrieUpdates::default()),

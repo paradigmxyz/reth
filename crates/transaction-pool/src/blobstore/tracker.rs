@@ -127,8 +127,8 @@ mod tests {
         let tx3_hash = B256::random(); // Non-EIP-4844 transaction
 
         // Creating a first block with EIP-4844 transactions
-        let block1 = SealedBlockWithSenders {
-            block: SealedBlock::new(
+        let block1 = SealedBlockWithSenders::new_unchecked(
+            SealedBlock::new(
                 SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
                 BlockBody {
                     transactions: vec![
@@ -152,13 +152,13 @@ mod tests {
                     ..Default::default()
                 },
             ),
-            ..Default::default()
-        };
+            Default::default(),
+        );
 
         // Creating a second block with EIP-1559 and EIP-2930 transactions
         // Note: This block does not contain any EIP-4844 transactions
-        let block2 = SealedBlockWithSenders {
-            block: SealedBlock::new(
+        let block2 = SealedBlockWithSenders::new_unchecked(
+            SealedBlock::new(
                 SealedHeader::new(Header { number: 11, ..Default::default() }, B256::random()),
                 BlockBody {
                     transactions: vec![
@@ -176,8 +176,8 @@ mod tests {
                     ..Default::default()
                 },
             ),
-            ..Default::default()
-        };
+            Default::default(),
+        );
 
         // Extract blocks from the chain
         let chain: Chain = Chain::new(vec![block1, block2], Default::default(), None);
