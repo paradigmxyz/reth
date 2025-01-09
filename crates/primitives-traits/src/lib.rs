@@ -74,8 +74,6 @@ pub mod sync;
 
 /// Common header types
 pub mod header;
-#[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
-pub use header::test_utils;
 pub use header::{Header, HeaderError, SealedHeader};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
@@ -135,3 +133,11 @@ pub trait MaybeSerdeBincodeCompat {}
 impl<T> MaybeSerdeBincodeCompat for T where T: crate::serde_bincode_compat::SerdeBincodeCompat {}
 #[cfg(not(feature = "serde-bincode-compat"))]
 impl<T> MaybeSerdeBincodeCompat for T {}
+
+/// Utilities for testing.
+#[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
+pub mod test_utils {
+    pub use crate::header::test_utils::{generate_valid_header, valid_header_strategy};
+    #[cfg(feature = "test-utils")]
+    pub use crate::{block::TestBlock, header::test_utils::TestHeader};
+}
