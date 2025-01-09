@@ -403,23 +403,23 @@ mod tests {
             &[
                 (
                     Head { number: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0x56, 0xe1, 0xec, 0xfd]), next: 5220340 },
+                    ForkId { hash: ForkHash([0xea, 0x6b, 0x56, 0xca]), next: 5220340 },
                 ),
                 (
                     Head { number: 5220340, ..Default::default() },
-                    ForkId { hash: ForkHash([0x8f, 0x57, 0x36, 0x0b]), next: 7096836 },
+                    ForkId { hash: ForkHash([0xee, 0x46, 0xae, 0x2a]), next: 7096836 },
                 ),
                 (
                     Head { number: 7096836, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9d, 0xf0, 0x1d, 0x89]), next: 1724227200 },
+                    ForkId { hash: ForkHash([0x18, 0xd3, 0xc8, 0xd9]), next: 1724227200 },
                 ),
                 (
                     Head { number: 7096836, timestamp: 1724227200, ..Default::default() },
-                    ForkId { hash: ForkHash([0x98, 0x08, 0x9e, 0xee]), next: 1725264000 },
+                    ForkId { hash: ForkHash([0xcc, 0xeb, 0x09, 0xb0]), next: 1725264000 },
                 ),
                 (
                     Head { number: 7096836, timestamp: 1725264000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x16, 0x22, 0xae, 0x35]), next: 0 },
+                    ForkId { hash: ForkHash([0x21, 0xa2, 0x07, 0x54]), next: 0 },
                 ),
             ],
         );
@@ -432,23 +432,23 @@ mod tests {
             &[
                 (
                     Head { number: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0x2a, 0xd3, 0xf4, 0x42]), next: 3747132 },
+                    ForkId { hash: ForkHash([0x25, 0xfa, 0xe4, 0x54]), next: 3747132 },
                 ),
                 (
                     Head { number: 3747132, ..Default::default() },
-                    ForkId { hash: ForkHash([0xa5, 0x8f, 0xa5, 0x60]), next: 4740239 },
+                    ForkId { hash: ForkHash([0xda, 0x76, 0xc2, 0x2d]), next: 4740239 },
                 ),
                 (
                     Head { number: 4740239, ..Default::default() },
-                    ForkId { hash: ForkHash([0x2a, 0x22, 0xef, 0x69]), next: 1723622400 },
+                    ForkId { hash: ForkHash([0x9f, 0xb4, 0x75, 0xf1]), next: 1723622400 },
                 ),
                 (
                     Head { number: 4740239, timestamp: 1723622400, ..Default::default() },
-                    ForkId { hash: ForkHash([0x4d, 0xe3, 0x20, 0x97]), next: 1724832000 },
+                    ForkId { hash: ForkHash([0xe9, 0x26, 0xd4, 0x9b]), next: 1724832000 },
                 ),
                 (
                     Head { number: 4740239, timestamp: 1724832000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x6a, 0xef, 0xc3, 0x0a]), next: 0 },
+                    ForkId { hash: ForkHash([0x69, 0xf3, 0x7e, 0xde]), next: 0 },
                 ),
             ],
         );
@@ -556,8 +556,8 @@ mod tests {
                         }),
                     ),
                 ]
-                .into_iter()
-                .collect(),
+                    .into_iter()
+                    .collect(),
                 ..Default::default()
             },
             ..Default::default()
