@@ -30,7 +30,7 @@ use reth_primitives::{
     Account, Block, BlockWithSenders, EthPrimitives, NodePrimitives, Receipt, SealedBlock,
     SealedBlockFor, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionSigned,
 };
-use reth_primitives_traits::BlockBody as _;
+use reth_primitives_traits::BlockBody;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
@@ -795,7 +795,7 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
     use reth_primitives::{BlockExt, EthPrimitives, Receipt, SealedBlock, StaticFileSegment};
-    use reth_primitives_traits::{BlockBody as _, SignedTransaction};
+    use reth_primitives_traits::{BlockBody, SignedTransaction};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DatabaseProviderFactory, HeaderProvider,
