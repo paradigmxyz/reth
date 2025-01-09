@@ -30,7 +30,7 @@ where
     Client: BlockClient,
 {
     client: Client,
-    consensus: Arc<dyn Consensus<Client::Header, Client::Body, Error = ConsensusError>>,
+    consensus: Arc<dyn Consensus<Client::Block, Error = ConsensusError>>,
 }
 
 impl<Client> FullBlockClient<Client>
@@ -40,7 +40,7 @@ where
     /// Creates a new instance of `FullBlockClient`.
     pub fn new(
         client: Client,
-        consensus: Arc<dyn Consensus<Client::Header, Client::Body, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<Client::Block, Error = ConsensusError>>,
     ) -> Self {
         Self { client, consensus }
     }
@@ -118,7 +118,7 @@ where
     Client: BlockClient,
 {
     client: Client,
-    consensus: Arc<dyn Consensus<Client::Header, Client::Body, Error = ConsensusError>>,
+    consensus: Arc<dyn Consensus<Client::Block, Error = ConsensusError>>,
     hash: B256,
     request: FullBlockRequest<Client>,
     header: Option<SealedHeader<Client::Header>>,
@@ -140,7 +140,7 @@ where
     }
 
     /// Returns the [`SealedBlock`] if the request is complete and valid.
-    fn take_block(&mut self) -> Option<SealedBlock<Client::Header, Client::Body>> {
+    fn take_block(&mut self) -> Option<SealedBlock<Client::Block>> {
         if self.header.is_none() || self.body.is_none() {
             return None
         }
@@ -148,7 +148,7 @@ where
         let header = self.header.take().unwrap();
         let resp = self.body.take().unwrap();
         match resp {
-            BodyResponse::Validated(body) => Some(SealedBlock::new(header, body)),
+            BodyResponse::Validated(body) => Some(SealedBlock::from_sealed_parts(header, body)),
             BodyResponse::PendingValidation(resp) => {
                 // ensure the block is valid, else retry
                 if let Err(err) = self.consensus.validate_body_against_header(resp.data(), &header)
@@ -159,7 +159,7 @@ where
                     self.request.body = Some(self.client.get_block_body(self.hash));
                     return None
                 }
-                Some(SealedBlock::new(header, resp.into_data()))
+                Some(SealedBlock::from_sealed_parts(header, resp.into_data()))
             }
         }
     }
@@ -182,7 +182,7 @@ impl<Client> Future for FetchFullBlockFuture<Client>
 where
     Client: BlockClient<Header: BlockHeader + Sealable> + 'static,
 {
-    type Output = SealedBlock<Client::Header, Client::Body>;
+    type Output = SealedBlock<Client::Block>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -330,7 +330,7 @@ where
     /// The client used to fetch headers and bodies.
     client: Client,
     /// The consensus instance used to validate the blocks.
-    consensus: Arc<dyn Consensus<Client::Header, Client::Body, Error = ConsensusError>>,
+    consensus: Arc<dyn Consensus<Client::Block, Error = ConsensusError>>,
     /// The block hash to start fetching from (inclusive).
     start_hash: B256,
     /// How many blocks to fetch: `len([start_hash, ..]) == count`
@@ -388,7 +388,7 @@ where
     ///
     /// These are returned in falling order starting with the requested `hash`, i.e. with
     /// descending block numbers.
-    fn take_blocks(&mut self) -> Option<Vec<SealedBlock<Client::Header, Client::Body>>> {
+    fn take_blocks(&mut self) -> Option<Vec<SealedBlock<Client::Block>>> {
         if !self.is_bodies_complete() {
             // not done with bodies yet
             return None
@@ -421,7 +421,8 @@ where
                     }
                 };
 
-                valid_responses.push(SealedBlock::new(header.clone(), body));
+                valid_responses
+                    .push(SealedBlock::<Client::Block>::from_sealed_parts(header.clone(), body));
             }
         }
 
@@ -429,7 +430,7 @@ where
             // put response hashes back into bodies map since we aren't returning them as a
             // response
             for block in valid_responses {
-                let (header, body) = block.split();
+                let (header, body) = block.split_sealed_header_body();
                 self.bodies.insert(header, BodyResponse::Validated(body));
             }
 
@@ -505,7 +506,7 @@ impl<Client> Future for FetchFullBlockRangeFuture<Client>
 where
     Client: BlockClient<Header: Debug + BlockHeader + Sealable + Clone + Hash + Eq> + 'static,
 {
-    type Output = Vec<SealedBlock<Client::Header, Client::Body>>;
+    type Output = Vec<SealedBlock<Client::Block>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
@@ -658,7 +659,7 @@ mod tests {
         let client = FullBlockClient::test_client(client);
 
         let received = client.get_full_block(header.hash()).await;
-        assert_eq!(received, SealedBlock::new(header, body));
+        assert_eq!(received, SealedBlock::from_sealed_parts(header, body));
     }
 
     #[tokio::test]
@@ -671,7 +672,7 @@ mod tests {
 
         let received = client.get_full_block_range(header.hash(), 1).await;
         let received = received.first().expect("response should include a block");
-        assert_eq!(*received, SealedBlock::new(header, body));
+        assert_eq!(*received, SealedBlock::from_sealed_parts(header, body));
     }
 
     /// Inserts headers and returns the last header and block body.
@@ -703,7 +704,7 @@ mod tests {
 
         let received = client.get_full_block_range(header.hash(), 1).await;
         let received = received.first().expect("response should include a block");
-        assert_eq!(*received, SealedBlock::new(header.clone(), body));
+        assert_eq!(*received, SealedBlock::from_sealed_parts(header.clone(), body));
 
         let received = client.get_full_block_range(header.hash(), 10).await;
         assert_eq!(received.len(), 10);
@@ -722,7 +723,7 @@ mod tests {
 
         let received = client.get_full_block_range(header.hash(), 1).await;
         let received = received.first().expect("response should include a block");
-        assert_eq!(*received, SealedBlock::new(header.clone(), body));
+        assert_eq!(*received, SealedBlock::from_sealed_parts(header.clone(), body));
 
         let received = client.get_full_block_range(header.hash(), 50).await;
         assert_eq!(received.len(), 50);

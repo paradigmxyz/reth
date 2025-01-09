@@ -48,6 +48,17 @@ impl<B> SealedBlock<B>
 where
     B: Block,
 {
+    /// Creates the [`SealedBlock`] from the block's parts.
+    pub fn from_parts(header: B::Header, body: B::Body, hash: BlockHash) -> Self {
+        Self::new(B::new(header, body), hash)
+    }
+
+    /// Creates the [`SealedBlock`] from the [`SealedHeader`] and the body.
+    pub fn from_sealed_parts(header: SealedHeader<B::Header>, body: B::Body) -> Self {
+        let (header, hash) = header.split();
+        Self::from_parts(header, body, hash)
+    }
+
     /// Converts this block into a [`RecoveredBlock`] with the given senders if the number of
     /// senders is equal to the number of transactions in the block and recovers the senders from
     /// the transactions, if
@@ -140,6 +151,12 @@ where
     /// Splits the block into body and header into separate components
     pub fn split_header_body(self) -> (B::Header, B::Body) {
         self.block.split()
+    }
+
+    /// Splits the block into body and header into separate components.
+    pub fn split_sealed_header_body(self) -> (SealedHeader<B::Header>, B::Body) {
+        let (header, block) = self.block.split();
+        (SealedHeader::new(header, self.hash), block)
     }
 
     /// Returns an iterator over all blob versioned hashes from the block body.
