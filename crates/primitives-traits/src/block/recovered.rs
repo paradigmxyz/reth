@@ -11,7 +11,7 @@ use alloy_primitives::{Address, BlockHash, Sealable};
 use derive_more::Deref;
 
 /// A block with senders recovered from transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deref)]
+#[derive(Debug, Clone, PartialEq, Eq, Deref)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RecoveredBlock<B> {
     /// Block hash
@@ -191,6 +191,13 @@ impl<B: Block> RecoveredBlock<B> {
     #[inline]
     pub fn into_transactions(self) -> Vec<<B::Body as BlockBody>::Transaction> {
         self.block.split().1.into_transactions()
+    }
+}
+
+impl<B: Default> Default for RecoveredBlock<B> {
+    #[inline]
+    fn default() -> Self {
+        Self::new_unhashed(B::default(), Default::default())
     }
 }
 
