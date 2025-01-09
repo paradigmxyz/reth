@@ -285,7 +285,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     pub fn reveal_witness(
         &mut self,
         state_root: B256,
-        witness: B256HashMap<Bytes>,
+        witness: &B256HashMap<Bytes>,
     ) -> SparseStateTrieResult<()> {
         // Create a `(hash, path, maybe_account)` queue for traversing witness trie nodes
         // starting from the root node.
