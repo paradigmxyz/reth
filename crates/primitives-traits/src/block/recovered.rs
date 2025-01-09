@@ -138,6 +138,32 @@ impl<B: Block> RecoveredBlock<B> {
         Ok(Self::new(block, senders, hash))
     }
 
+    /// A safer variant of [`Self::new_unhashed`] that checks if the number of senders is equal to
+    /// the number of transactions in the block and recovers the senders from the transactions, if
+    /// not using [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction)
+    /// to recover the senders.
+    ///
+    /// Returns an error if any of the transactions fail to recover the sender.
+    pub fn try_recover_sealed_with_senders(
+        block: SealedBlock2<B>,
+        senders: Vec<Address>,
+    ) -> Result<Self, RecoveryError> {
+        let (block, hash) = block.split();
+        Self::try_new(block, senders, hash)
+    }
+
+    /// A safer variant of [`Self::new`] that checks if the number of senders is equal to
+    /// the number of transactions in the block and recovers the senders from the transactions, if
+    /// not using [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction)
+    /// to recover the senders.
+    pub fn try_recover_sealed_with_senders_unchecked(
+        block: SealedBlock2<B>,
+        senders: Vec<Address>,
+    ) -> Result<Self, RecoveryError> {
+        let (block, hash) = block.split();
+        Self::try_new_unchecked(block, senders, hash)
+    }
+
     /// Returns the block hash.
     pub fn hash_ref(&self) -> &BlockHash {
         self.hash.get_or_init(|| self.block.header().hash_slow())

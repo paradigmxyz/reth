@@ -1,9 +1,12 @@
 //! Sealed block types
 
-use crate::{Block, BlockBody, GotExpected, InMemorySize, SealedHeader};
+use crate::{
+    block::RecoveredBlock, transaction::signed::RecoveryError, Block, BlockBody, GotExpected,
+    InMemorySize, SealedHeader,
+};
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
-use alloy_primitives::{BlockHash, Sealable, B256};
+use alloy_primitives::{Address, BlockHash, Sealable, B256};
 use core::ops::Deref;
 
 /// Sealed full block.
@@ -41,6 +44,50 @@ impl<B> SealedBlock2<B>
 where
     B: Block,
 {
+    /// Converts this block into a [`RecoveredBlock`] with the given senders if the number of
+    /// senders is equal to the number of transactions in the block and recovers the senders from
+    /// the transactions, if
+    /// not using [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction)
+    /// to recover the senders.
+    ///
+    /// Returns an error if any of the transactions fail to recover the sender.
+    pub fn try_with_senders(
+        self,
+        senders: Vec<Address>,
+    ) -> Result<RecoveredBlock<B>, RecoveryError> {
+        RecoveredBlock::try_recover_sealed_with_senders(self, senders)
+    }
+
+    /// Converts this block into a [`RecoveredBlock`] with the given senders if the number of
+    /// senders is equal to the number of transactions in the block and recovers the senders from
+    /// the transactions, if
+    /// not using [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction)
+    /// to recover the senders.
+    ///
+    /// Returns an error if any of the transactions fail to recover the sender.
+    pub fn try_with_senders_unchecked(
+        self,
+        senders: Vec<Address>,
+    ) -> Result<RecoveredBlock<B>, RecoveryError> {
+        RecoveredBlock::try_recover_sealed_with_senders_unchecked(self, senders)
+    }
+
+    /// Recovers the senders from the transactions in the block using
+    /// [`SignedTransaction::recover_signer`].
+    ///
+    /// Returns an error if any of the transactions fail to recover the sender.
+    pub fn try_recover(self) -> Result<RecoveredBlock<B>, RecoveryError> {
+        RecoveredBlock::try_recover_sealed(self)
+    }
+
+    /// Recovers the senders from the transactions in the block using
+    /// [`SignedTransaction::recover_signer_unchecked`].
+    ///
+    /// Returns an error if any of the transactions fail to recover the sender.
+    pub fn try_recover_unchecked(self) -> Result<RecoveredBlock<B>, RecoveryError> {
+        RecoveredBlock::try_recover_sealed_unchecked(self)
+    }
+
     /// Returns reference to block header.
     pub fn header(&self) -> &B::Header {
         self.block.header()
