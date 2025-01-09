@@ -532,6 +532,8 @@ pub struct ExecutionInfo {
     pub receipts: Vec<OpReceipt>,
     /// All gas used so far
     pub cumulative_gas_used: u64,
+    /// Estimated DA size
+    pub cumulative_da_bytes_used: u64,
     /// Tracks fees from executed mempool transactions
     pub total_fees: U256,
 }
@@ -544,6 +546,7 @@ impl ExecutionInfo {
             executed_senders: Vec::with_capacity(capacity),
             receipts: Vec::with_capacity(capacity),
             cumulative_gas_used: 0,
+            cumulative_da_bytes_used: 0,
             total_fees: U256::ZERO,
         }
     }
@@ -769,7 +772,7 @@ where
             if sequencer_tx.value().is_eip4844() {
                 return Err(PayloadBuilderError::other(
                     OpPayloadBuilderError::BlobTransactionRejected,
-                ));
+                ))
             }
 
             // Convert the transaction to a [RecoveredTx]. This is
@@ -807,11 +810,11 @@ where
                     match err {
                         EVMError::Transaction(err) => {
                             trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                            continue;
+                            continue
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err));
+                            return Err(PayloadBuilderError::EvmExecutionError(err))
                         }
                     }
                 }
@@ -869,6 +872,7 @@ where
         DB: Database<Error = ProviderError>,
     {
         let block_gas_limit = self.block_gas_limit();
+        let block_da_limit = self.da_config.max_da_block_size();
         let base_fee = self.base_fee();
 
         let env = EnvWithHandlerCfg::new_with_cfg_env(
@@ -879,24 +883,32 @@ where
         let mut evm = self.evm_config.evm_with_env(&mut *db, env);
 
         while let Some(tx) = best_txs.next(()) {
+            if block_da_limit.is_some_and(|da_limit| info.cumulative_da_bytes_used + tx.da_usage() > da_limit) {
+                // we can't fit this transaction into the block, so we need to mark it as
+                // invalid which also removes all dependent transaction from
+                // the iterator before we can continue
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
+                continue
+            }
+
             // ensure we still have capacity for this transaction
             if info.cumulative_gas_used + tx.gas_limit() > block_gas_limit {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue;
+                continue
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if tx.is_eip4844() || tx.tx_type() == TxType::Deposit as u8 {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue;
+                continue
             }
 
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
-                return Ok(Some(()));
+                return Ok(Some(()))
             }
 
             // Configure the environment for the tx.
@@ -917,11 +929,11 @@ where
                                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                             }
 
-                            continue;
+                            continue
                         }
                         err => {
                             // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err));
+                            return Err(PayloadBuilderError::EvmExecutionError(err))
                         }
                     }
                 }
@@ -935,6 +947,7 @@ where
             // add gas used by the transaction to cumulative gas used, before creating the
             // receipt
             info.cumulative_gas_used += gas_used;
+            info.cumulative_da_bytes_used += tx.da_usage();
 
             let receipt = alloy_consensus::Receipt {
                 status: Eip658Value::Eip658(result.is_success()),

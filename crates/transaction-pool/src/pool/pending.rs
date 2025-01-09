@@ -204,18 +204,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
     }
 
     pub(crate) fn update_da_limits(&mut self, max_da_tx_size: u64) {
-        // Create a collection for removed transactions.
-        let mut removed = Vec::new();
-
         // Remove all transactions that exceed the max_da_tx_size
         let mut transactions_iter = self.clear_transactions().into_iter().peekable();
         while let Some((id, tx)) = transactions_iter.next() {
             // TODO: da size
-            if tx.transaction.size() > max_da_tx_size.try_into().unwrap() {
-                // Add this tx to the removed collection since it exceeds the
-                // max_da_tx_size condition. Decrease the total pool size.
-                removed.push(Arc::clone(&tx.transaction));
-            } else {
+            if tx.transaction.size() <= max_da_tx_size.try_into().unwrap() {
                 self.size_of += tx.transaction.size();
                 self.update_independents_and_highest_nonces(&tx);
                 self.by_id.insert(id, tx);

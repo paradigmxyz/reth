@@ -71,6 +71,11 @@ impl OpTransactionSigned {
     pub const fn is_deposit(&self) -> bool {
         matches!(self.transaction, OpTypedTransaction::Deposit(_))
     }
+
+    pub fn da_usage(&self) -> u64 {
+        // TODO: implement da estimation
+        self.size() as u64
+    }
 }
 
 impl SignedTransaction for OpTransactionSigned {
