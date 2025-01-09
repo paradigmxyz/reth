@@ -1,11 +1,14 @@
 //! Recovered Block variant.
 
-use crate::{block::SealedBlock, sync::OnceLock, transaction::signed::{RecoveryError, SignedTransactionIntoRecoveredExt}, Block, BlockBody, InMemorySize, SealedHeader};
+use crate::{
+    block::SealedBlock,
+    sync::OnceLock,
+    transaction::signed::{RecoveryError, SignedTransactionIntoRecoveredExt},
+    Block, BlockBody, InMemorySize, SealedHeader,
+};
 use alloc::vec::Vec;
-use alloy_consensus::BlockHeader;
-use alloy_consensus::transaction::Recovered;
-use alloy_eips::BlockNumHash;
-use alloy_eips::eip1898::BlockWithParent;
+use alloy_consensus::{transaction::Recovered, BlockHeader};
+use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable};
 use derive_more::Deref;
 
@@ -287,7 +290,6 @@ impl<B> RecoveredBlock<B>
 where
     B: Block,
 {
-
     /// Returns a mutable reference to the block.
     pub fn block_mut(&mut self) -> &mut B {
         &mut self.block

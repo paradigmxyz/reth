@@ -25,6 +25,75 @@ mod block_bincode {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
+    /// Bincode-compatible [`alloy_consensus::Block`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_primitives_traits::serde_bincode_compat::{self, SerdeBincodeCompat};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data<T: SerdeBincodeCompat, H: SerdeBincodeCompat> {
+    ///     #[serde_as(as = "serde_bincode_compat::Block<'_, T, H>")]
+    ///     body: alloy_consensus::Block<T>,
+    /// }
+    /// ```
+    #[derive(derive_more::Debug, Serialize, Deserialize)]
+    #[debug(bound())]
+    pub struct Block<'a, T: SerdeBincodeCompat, H: SerdeBincodeCompat> {
+        header: H::BincodeRepr<'a>,
+        body: BlockBody<'a, T>,
+    }
+
+    impl<'a, T: SerdeBincodeCompat, H: SerdeBincodeCompat> From<&'a alloy_consensus::Block<T, H>>
+        for Block<'a, T, H>
+    {
+        fn from(value: &'a alloy_consensus::Block<T, H>) -> Self {
+            Self { header: (&value.header).into(), body: (&value.body).into() }
+        }
+    }
+
+    impl<'a, T: SerdeBincodeCompat, H: SerdeBincodeCompat> From<Block<'a, T, H>>
+        for alloy_consensus::Block<T, H>
+    {
+        fn from(value: Block<'a, T, H>) -> Self {
+            Self { header: value.header.into(), body: value.body.into() }
+        }
+    }
+
+    impl<T: SerdeBincodeCompat, H: SerdeBincodeCompat> SerializeAs<alloy_consensus::Block<T, H>>
+        for Block<'_, H, T>
+    {
+        fn serialize_as<S>(
+            source: &alloy_consensus::Block<T, H>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            Block::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de, T: SerdeBincodeCompat, H: SerdeBincodeCompat>
+        DeserializeAs<'de, alloy_consensus::Block<T, H>> for Block<'de, T, H>
+    {
+        fn deserialize_as<D>(deserializer: D) -> Result<alloy_consensus::Block<T, H>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            Block::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    impl<T: SerdeBincodeCompat, H: SerdeBincodeCompat> SerdeBincodeCompat
+        for alloy_consensus::Block<T, H>
+    {
+        type BincodeRepr<'a> = Block<'a, T, H>;
+    }
+
     /// Bincode-compatible [`alloy_consensus::BlockBody`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
