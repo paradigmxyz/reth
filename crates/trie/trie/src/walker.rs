@@ -97,6 +97,7 @@ impl<C> TrieWalker<C> {
             target: "trie::walker",
             key = ?self.key(),
             children_are_in_trie = ?self.stack.last().is_some_and(|n| n.tree_flag()),
+            node = ?self.stack.last(),
             "Children are in trie"
         );
         self.stack.last().is_some_and(|n| n.tree_flag())
