@@ -16,10 +16,6 @@ use std::{
 };
 use tokio::sync::broadcast;
 
-fn tx_estimated_size_fjord(input: &[u8]) -> U256 {
-    U256::from(200)
-}
-
 /// A pool of validated and gapless transactions that are ready to be executed on the current state
 /// and are waiting to be included in a block.
 ///
