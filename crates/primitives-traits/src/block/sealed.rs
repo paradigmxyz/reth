@@ -76,7 +76,7 @@ where
     }
 
     /// Recovers the senders from the transactions in the block using
-    /// [`SignedTransaction::recover_signer`].
+    /// [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction).
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover(self) -> Result<RecoveredBlock<B>, RecoveryError> {
@@ -84,7 +84,7 @@ where
     }
 
     /// Recovers the senders from the transactions in the block using
-    /// [`SignedTransaction::recover_signer_unchecked`].
+    /// [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction).
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover_unchecked(self) -> Result<RecoveredBlock<B>, RecoveryError> {

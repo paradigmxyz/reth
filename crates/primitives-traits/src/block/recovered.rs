@@ -6,6 +6,7 @@ use crate::{
     transaction::signed::{RecoveryError, SignedTransactionIntoRecoveredExt},
     Block, BlockBody, InMemorySize,
 };
+use alloc::vec::Vec;
 use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{Address, BlockHash, Sealable};
 use derive_more::Deref;
@@ -116,7 +117,7 @@ impl<B: Block> RecoveredBlock<B> {
     }
 
     /// Recovers the senders from the transactions in the block using
-    /// [`SignedTransaction::recover_signer`].
+    /// [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction).
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover(block: B) -> Result<Self, RecoveryError> {
@@ -125,7 +126,7 @@ impl<B: Block> RecoveredBlock<B> {
     }
 
     /// Recovers the senders from the transactions in the block using
-    /// [`SignedTransaction::recover_signer_unchecked`].
+    /// [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction).
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover_unchecked(block: B) -> Result<Self, RecoveryError> {
@@ -134,7 +135,7 @@ impl<B: Block> RecoveredBlock<B> {
     }
 
     /// Recovers the senders from the transactions in the block using
-    /// [`SignedTransaction::recover_signer`].
+    /// [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction).
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover_sealed(block: SealedBlock2<B>) -> Result<Self, RecoveryError> {
@@ -144,7 +145,7 @@ impl<B: Block> RecoveredBlock<B> {
     }
 
     /// Recovers the senders from the transactions in the sealed block using
-    /// [`SignedTransaction::recover_signer_unchecked`].
+    /// [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction).
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover_sealed_unchecked(block: SealedBlock2<B>) -> Result<Self, RecoveryError> {
