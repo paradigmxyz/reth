@@ -115,7 +115,7 @@ where
             if self.disallow.contains(&message.proposer_fee_recipient) {
                 return Err(ValidationApiError::Blacklist(message.proposer_fee_recipient))
             }
-            for (sender, tx) in block.senders.iter().zip(block.transactions()) {
+            for (sender, tx) in block.senders_iter().zip(block.transactions()) {
                 if self.disallow.contains(sender) {
                     return Err(ValidationApiError::Blacklist(*sender))
                 }

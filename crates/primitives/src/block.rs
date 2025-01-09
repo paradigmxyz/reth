@@ -91,7 +91,7 @@ pub struct BlockWithSenders<B = Block> {
     #[deref_mut]
     pub block: B,
     /// List of senders that match the transactions in the block
-    pub senders: Vec<Address>,
+    senders: Vec<Address>,
 }
 
 impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
@@ -103,6 +103,16 @@ impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
     /// New block with senders. Return none if len of tx and senders does not match
     pub fn new(block: B, senders: Vec<Address>) -> Option<Self> {
         (block.body().transactions().len() == senders.len()).then_some(Self { block, senders })
+    }
+
+    /// Returns all senders of the transactions in the block.
+    pub fn senders(&self) -> &[Address] {
+        &self.senders
+    }
+
+    /// Returns an iterator over all senders in the block.
+    pub fn senders_iter(&self) -> impl Iterator<Item = &Address> {
+        self.senders.iter()
     }
 
     /// Seal the block with a known hash.
@@ -122,7 +132,7 @@ impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
 
     /// Split Structure to its components
     #[inline]
-    pub fn into_components(self) -> (B, Vec<Address>) {
+    pub fn split(self) -> (B, Vec<Address>) {
         (self.block, self.senders)
     }
 
@@ -483,7 +493,7 @@ pub struct SealedBlockWithSenders<B: reth_primitives_traits::Block = Block> {
     #[serde(bound = "SealedBlock<B::Header, B::Body>: Serialize + serde::de::DeserializeOwned")]
     pub block: SealedBlock<B::Header, B::Body>,
     /// List of senders that match transactions from block.
-    pub senders: Vec<Address>,
+    senders: Vec<Address>,
 }
 
 impl<B: reth_primitives_traits::Block> Default for SealedBlockWithSenders<B> {
@@ -493,6 +503,14 @@ impl<B: reth_primitives_traits::Block> Default for SealedBlockWithSenders<B> {
 }
 
 impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
+    /// New sealed block with sender
+    pub const fn new_unchecked(
+        block: SealedBlock<B::Header, B::Body>,
+        senders: Vec<Address>,
+    ) -> Self {
+        Self { block, senders }
+    }
+
     /// New sealed block with sender. Return none if len of tx and senders does not match
     pub fn new(block: SealedBlock<B::Header, B::Body>, senders: Vec<Address>) -> Option<Self> {
         (block.body.transactions().len() == senders.len()).then_some(Self { block, senders })
@@ -500,16 +518,26 @@ impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
 }
 
 impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
+    /// Returns all senders of the transactions in the block.
+    pub fn senders(&self) -> &[Address] {
+        &self.senders
+    }
+
+    /// Returns an iterator over all senders in the block.
+    pub fn senders_iter(&self) -> impl Iterator<Item = &Address> {
+        self.senders.iter()
+    }
+
     /// Split Structure to its components
     #[inline]
-    pub fn into_components(self) -> (SealedBlock<B::Header, B::Body>, Vec<Address>) {
+    pub fn split(self) -> (SealedBlock<B::Header, B::Body>, Vec<Address>) {
         (self.block, self.senders)
     }
 
     /// Returns the unsealed [`BlockWithSenders`]
     #[inline]
     pub fn unseal(self) -> BlockWithSenders<B> {
-        let (block, senders) = self.into_components();
+        let (block, senders) = self.split();
         let (header, body) = block.split();
         let header = header.unseal();
         BlockWithSenders::new_unchecked(B::new(header, body), senders)
@@ -552,6 +580,22 @@ impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
             .into_iter()
             .zip(self.senders)
             .map(|(tx, sender)| tx.with_signer(sender))
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl<B> SealedBlockWithSenders<B>
+where
+    B: reth_primitives_traits::Block,
+{
+    /// Returns a mutable reference to the recovered senders.
+    pub fn senders_mut(&mut self) -> &mut Vec<Address> {
+        &mut self.senders
+    }
+
+    /// Appends the sender to the list of senders.
+    pub fn push_sender(&mut self, sender: Address) {
+        self.senders.push(sender);
     }
 }
 
