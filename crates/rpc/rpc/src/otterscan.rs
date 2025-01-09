@@ -12,7 +12,9 @@ use alloy_rpc_types_trace::{
     parity::{Action, CreateAction, CreateOutput, TraceOutput},
 };
 use async_trait::async_trait;
+use futures::{stream::FuturesUnordered, StreamExt};
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
+use reth_provider::BlockReader;
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
@@ -333,6 +335,8 @@ where
             .into());
         }
 
+        const BATCH_SIZE: u64 = 1000;
+
         // Since the transactions are ordered such that the most recent transaction is at the top,
         // if the search reaches the tip of the chain then it is the first page of the
         // transactions. If the search starts from the genesis block, then it is the last page of
@@ -351,7 +355,7 @@ where
             to_address: vec![address],
             mode: TraceFilterMode::Union,
             after: None,
-            count: Some(page_size as u64),
+            count: None,
         };
 
         let matcher = Arc::new(filter.matcher());
@@ -359,20 +363,29 @@ where
 
         // iterate over the blocks until `page_size` transactions are found or the tip is reached
         while txs_with_receipts.txs.len() < page_size {
-            let block = self
-                .eth
-                .block_with_senders(cur_block.into())
-                .await
-                .map_err(Into::into)?
-                .ok_or_else(|| EthApiError::HeaderNotFound(cur_block.into()))?;
-            let timestamp = Some(block.header.timestamp());
-            let matcher = matcher.clone();
+            let start = cur_block;
+            let end = std::cmp::min(tip, cur_block + BATCH_SIZE);
 
-            let traces = self
+            let blocks = self
                 .eth
-                .trace_block_until(
-                    cur_block.into(),
-                    Some(block),
+                .provider()
+                .sealed_block_with_senders_range(start..=end)
+                .map_err(|_| EthApiError::HeaderRangeNotFound(start.into(), end.into()))?
+                .into_iter()
+                .map(Arc::new)
+                .collect::<Vec<_>>();
+
+            let mut block_timestamps = std::collections::HashMap::new();
+            let mut futures = FuturesUnordered::new();
+
+            // trace a batch of blocks
+            for block in &blocks {
+                let matcher = matcher.clone();
+                block_timestamps.insert(block.hash(), block.header().timestamp());
+
+                let future = self.eth.trace_block_until(
+                    block.hash().into(),
+                    Some(block.clone()),
                     None,
                     TracingInspectorConfig::default_parity(),
                     move |tx_info, inspector, _, _, _| {
@@ -382,70 +395,105 @@ where
                         traces.retain(|trace| matcher.matches(&trace.trace));
                         Ok(Some(traces))
                     },
-                )
-                .await
-                .map_err(Into::into)?;
+                );
 
-            let traces = traces
-                .into_iter()
-                .flatten()
-                .flat_map(|traces| traces.into_iter().flatten())
-                .collect::<Vec<_>>();
-
-            // iterate over the traces and fetch the corresponding transactions and receipts
-            for trace in &traces {
-                let tx_hash = trace.transaction_hash.ok_or(EthApiError::TransactionNotFound)?;
-
-                let tx = EthApiServer::transaction_by_hash(&self.eth, tx_hash);
-                let receipt = EthApiServer::transaction_receipt(&self.eth, tx_hash);
-                let (tx, receipt) = futures::try_join!(tx, receipt)?;
-                let tx = tx.ok_or(EthApiError::TransactionNotFound)?;
-                let receipt = receipt.ok_or(EthApiError::ReceiptNotFound)?;
-
-                let inner = OtsReceipt {
-                    status: receipt.status(),
-                    cumulative_gas_used: receipt.cumulative_gas_used(),
-                    logs: None,
-                    logs_bloom: None,
-                    r#type: tx.ty(),
-                };
-
-                let receipt = TransactionReceipt {
-                    inner,
-                    transaction_hash: receipt.transaction_hash(),
-                    transaction_index: receipt.transaction_index(),
-                    block_hash: receipt.block_hash(),
-                    block_number: receipt.block_number(),
-                    gas_used: receipt.gas_used(),
-                    effective_gas_price: receipt.effective_gas_price(),
-                    blob_gas_used: receipt.blob_gas_used(),
-                    blob_gas_price: receipt.blob_gas_price(),
-                    from: receipt.from(),
-                    to: receipt.to(),
-                    contract_address: receipt.contract_address(),
-                    authorization_list: receipt
-                        .authorization_list()
-                        .map(<[SignedAuthorization]>::to_vec),
-                };
-
-                let receipt = OtsTransactionReceipt { receipt, timestamp };
-
-                txs_with_receipts.txs.push(tx);
-                txs_with_receipts.receipts.push(receipt);
+                futures.push(future);
             }
 
-            cur_block += 1;
+            while let Some(result) = futures.next().await {
+                let traces = result
+                    .map_err(Into::into)?
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|traces| traces.into_iter().flatten())
+                    .collect::<Vec<_>>();
 
-            if cur_block > tip {
+                // iterate over the traces and fetch the corresponding transactions and receipts
+                for trace in &traces {
+                    let tx_hash = trace.transaction_hash.ok_or(EthApiError::TransactionNotFound)?;
+                    let tx = EthApiServer::transaction_by_hash(&self.eth, tx_hash);
+                    let receipt = EthApiServer::transaction_receipt(&self.eth, tx_hash);
+                    let (tx, receipt) = futures::try_join!(tx, receipt)?;
+                    let tx = tx.ok_or(EthApiError::TransactionNotFound)?;
+                    let receipt = receipt.ok_or(EthApiError::ReceiptNotFound)?;
+
+                    let inner = OtsReceipt {
+                        status: receipt.status(),
+                        cumulative_gas_used: receipt.cumulative_gas_used(),
+                        logs: None,
+                        logs_bloom: None,
+                        r#type: tx.ty(),
+                    };
+
+                    let receipt = TransactionReceipt {
+                        inner,
+                        transaction_hash: receipt.transaction_hash(),
+                        transaction_index: receipt.transaction_index(),
+                        block_hash: receipt.block_hash(),
+                        block_number: receipt.block_number(),
+                        gas_used: receipt.gas_used(),
+                        effective_gas_price: receipt.effective_gas_price(),
+                        blob_gas_used: receipt.blob_gas_used(),
+                        blob_gas_price: receipt.blob_gas_price(),
+                        from: receipt.from(),
+                        to: receipt.to(),
+                        contract_address: receipt.contract_address(),
+                        authorization_list: receipt
+                            .authorization_list()
+                            .map(<[SignedAuthorization]>::to_vec),
+                    };
+
+                    let receipt = OtsTransactionReceipt {
+                        receipt,
+                        timestamp: trace
+                            .block_hash
+                            .and_then(|hash| block_timestamps.get(&hash).copied()),
+                    };
+
+                    txs_with_receipts.txs.push(tx);
+                    txs_with_receipts.receipts.push(receipt);
+                }
+            }
+
+            if end == tip {
                 // most current block is reached meaning this is the first page of the transactions
                 txs_with_receipts.first_page = true;
                 break;
             }
+
+            cur_block = end + 1;
         }
 
-        // reverse the order to make the most recent appear at top
-        txs_with_receipts.txs.reverse();
-        txs_with_receipts.receipts.reverse();
+        // Zip and sort transactions and receipts together by block number
+        let mut tx_receipt_pairs: Vec<_> =
+            txs_with_receipts.txs.into_iter().zip(txs_with_receipts.receipts).collect();
+
+        tx_receipt_pairs.sort_by_key(|(tx, _)| {
+            tx.block_number().expect("Transactions on chain must have block number")
+        });
+
+        // Get page_size number of transactions. If the page size is reached while within a
+        // block, all transactions in that block are included even if it exceeds the page_number
+        let (paginated_txs, paginated_receipts): (Vec<_>, Vec<_>) = tx_receipt_pairs
+            .into_iter()
+            .scan((None, 0), |(current_block_number, count), (tx, receipt)| {
+                let block_number =
+                    tx.block_number().expect("Transactions on chain must have block number");
+                if *count >= page_size && *current_block_number != Some(block_number) {
+                    return None;
+                }
+                if *current_block_number != Some(block_number) {
+                    *current_block_number = Some(block_number);
+                }
+                *count += 1;
+                Some((tx, receipt))
+            })
+            .unzip();
+
+        // Reverse the order of the transactions to make the most recent ones appear first
+        txs_with_receipts.txs = paginated_txs.into_iter().rev().collect();
+        txs_with_receipts.receipts = paginated_receipts.into_iter().rev().collect();
+
         Ok(txs_with_receipts)
     }
 
