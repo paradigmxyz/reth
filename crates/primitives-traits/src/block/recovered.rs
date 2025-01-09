@@ -202,3 +202,14 @@ impl<B: InMemorySize> InMemorySize for RecoveredBlock<B> {
             self.senders.len() * core::mem::size_of::<Address>()
     }
 }
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a, B> arbitrary::Arbitrary<'a> for RecoveredBlock<B>
+where
+    B: Block + arbitrary::Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let block = B::arbitrary(u)?;
+        Ok(Self::try_recover(block).unwrap())
+    }
+}

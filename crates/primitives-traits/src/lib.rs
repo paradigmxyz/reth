@@ -138,6 +138,6 @@ impl<T> MaybeSerdeBincodeCompat for T {}
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
 pub mod test_utils {
     pub use crate::header::test_utils::{generate_valid_header, valid_header_strategy};
-    #[cfg(feature = "test-utils")]
+    #[cfg(any(test, feature = "test-utils"))]
     pub use crate::{block::TestBlock, header::test_utils::TestHeader};
 }
