@@ -740,9 +740,10 @@ impl<P> RevealedSparseTrie<P> {
                                 // SAFETY: it's a child, so it's never empty
                                 let last_child_nibble = child_path.last().unwrap();
 
-                                let tree_mask_bit_set_in_parent = self.branch_node_tree_masks
-                                            .get(&path)
-                                            .is_some_and(|mask| mask.is_bit_set(last_child_nibble));
+                                let tree_mask_bit_set_in_parent = self
+                                    .branch_node_tree_masks
+                                    .get(&path)
+                                    .is_some_and(|mask| mask.is_bit_set(last_child_nibble));
 
                                 // Determine whether we need to set trie mask bit.
                                 let should_set_tree_mask_bit =
@@ -785,7 +786,7 @@ impl<P> RevealedSparseTrie<P> {
                                     target: "trie::sparse",
                                     ?path,
                                     ?child_path,
-                                    store_in_db_trie = ?node_type.store_in_db_trie(),
+                                    ?node_type,
                                     ?calculated,
                                     ?tree_mask_bit_set_in_parent,
                                     tree_mask_bit_set = should_set_tree_mask_bit,
