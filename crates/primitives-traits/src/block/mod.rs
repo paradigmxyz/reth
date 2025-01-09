@@ -1,7 +1,7 @@
 //! Block abstraction.
 
 pub(crate) mod sealed;
-pub use sealed::SealedBlock2;
+pub use sealed::SealedBlock;
 
 pub(crate) mod recovered;
 pub use recovered::RecoveredBlock;

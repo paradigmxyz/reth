@@ -17,14 +17,14 @@ use core::ops::Deref;
 /// This type wraps the block type together with the block hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct SealedBlock2<B> {
+pub struct SealedBlock<B> {
     /// Sealed Header hash.
     hash: BlockHash,
     /// Sealed full block with header and body.
     block: B,
 }
 
-impl<B> SealedBlock2<B> {
+impl<B> SealedBlock<B> {
     /// Create a new sealed block instance using the block.
     #[inline]
     pub const fn new(block: B, hash: BlockHash) -> Self {
@@ -44,7 +44,7 @@ impl<B> SealedBlock2<B> {
     }
 }
 
-impl<B> SealedBlock2<B>
+impl<B> SealedBlock<B>
 where
     B: Block,
 {
@@ -180,7 +180,7 @@ where
     }
 }
 
-impl<B: Block> SealedBlock2<B> {
+impl<B: Block> SealedBlock<B> {
     /// Hashes the header and creates a sealed block.
     pub fn seal(block: B) -> Self {
         let hash = block.header().hash_slow();
@@ -188,7 +188,7 @@ impl<B: Block> SealedBlock2<B> {
     }
 }
 
-impl<B> From<B> for SealedBlock2<B>
+impl<B> From<B> for SealedBlock<B>
 where
     B: Block,
 {
@@ -197,7 +197,7 @@ where
     }
 }
 
-impl<B> Default for SealedBlock2<B>
+impl<B> Default for SealedBlock<B>
 where
     B: Block + Default,
 {
@@ -206,14 +206,14 @@ where
     }
 }
 
-impl<B: InMemorySize> InMemorySize for SealedBlock2<B> {
+impl<B: InMemorySize> InMemorySize for SealedBlock<B> {
     #[inline]
     fn size(&self) -> usize {
         self.block.size() + self.hash.size()
     }
 }
 
-impl<B: Block> Deref for SealedBlock2<B> {
+impl<B: Block> Deref for SealedBlock<B> {
     type Target = B::Header;
 
     fn deref(&self) -> &Self::Target {
@@ -221,13 +221,13 @@ impl<B: Block> Deref for SealedBlock2<B> {
     }
 }
 
-impl<B: Block> Encodable for SealedBlock2<B> {
+impl<B: Block> Encodable for SealedBlock<B> {
     fn encode(&self, out: &mut dyn BufMut) {
         self.block.encode(out);
     }
 }
 
-impl<B: Block> Decodable for SealedBlock2<B> {
+impl<B: Block> Decodable for SealedBlock<B> {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let block = B::decode(buf)?;
         Ok(Self::seal(block))
@@ -235,7 +235,7 @@ impl<B: Block> Decodable for SealedBlock2<B> {
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<'a, B> arbitrary::Arbitrary<'a> for SealedBlock2<B>
+impl<'a, B> arbitrary::Arbitrary<'a> for SealedBlock<B>
 where
     B: Block + arbitrary::Arbitrary<'a>,
 {
@@ -246,7 +246,7 @@ where
 }
 
 #[cfg(any(test, feature = "test-utils"))]
-impl<B: crate::test_utils::TestBlock> SealedBlock2<B> {}
+impl<B: crate::test_utils::TestBlock> SealedBlock<B> {}
 
 /// Bincode-compatible [`SealedBlock2`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
@@ -256,11 +256,11 @@ pub(super) mod serde_bincode_compat {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
-    /// Bincode-compatible [`super::SealedBlock2`] serde implementation.
+    /// Bincode-compatible [`super::SealedBlock`] serde implementation.
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use reth_primitives_traits::{block::SealedBlock2, serde_bincode_compat};
+    /// use reth_primitives_traits::{block::SealedBlock, serde_bincode_compat};
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
@@ -268,7 +268,7 @@ pub(super) mod serde_bincode_compat {
     /// #[derive(Serialize, Deserialize)]
     /// struct Data<T: SerdeBincodeCompat> {
     ///     #[serde_as(as = "serde_bincode_compat::SealedBlock2<'a, T>")]
-    ///     header: SealedBlock2<T>,
+    ///     header: SealedBlock<T>,
     /// }
     /// ```
     #[derive(derive_more::Debug, Serialize, Deserialize)]
@@ -278,23 +278,20 @@ pub(super) mod serde_bincode_compat {
         block: T::BincodeRepr<'a>,
     }
 
-    impl<'a, T: SerdeBincodeCompat> From<&'a super::SealedBlock2<T>> for SealedBlock2<'a, T> {
-        fn from(value: &'a super::SealedBlock2<T>) -> Self {
+    impl<'a, T: SerdeBincodeCompat> From<&'a super::SealedBlock<T>> for SealedBlock2<'a, T> {
+        fn from(value: &'a super::SealedBlock<T>) -> Self {
             Self { hash: value.hash, block: (&value.block).into() }
         }
     }
 
-    impl<'a, T: SerdeBincodeCompat> From<SealedBlock2<'a, T>> for super::SealedBlock2<T> {
+    impl<'a, T: SerdeBincodeCompat> From<SealedBlock2<'a, T>> for super::SealedBlock<T> {
         fn from(value: SealedBlock2<'a, T>) -> Self {
             Self { hash: value.hash, block: value.block.into() }
         }
     }
 
-    impl<T: SerdeBincodeCompat> SerializeAs<super::SealedBlock2<T>> for SealedBlock2<'_, T> {
-        fn serialize_as<S>(
-            source: &super::SealedBlock2<T>,
-            serializer: S,
-        ) -> Result<S::Ok, S::Error>
+    impl<T: SerdeBincodeCompat> SerializeAs<super::SealedBlock<T>> for SealedBlock2<'_, T> {
+        fn serialize_as<S>(source: &super::SealedBlock<T>, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
@@ -302,10 +299,10 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de, T: SerdeBincodeCompat> DeserializeAs<'de, super::SealedBlock2<T>>
+    impl<'de, T: SerdeBincodeCompat> DeserializeAs<'de, super::SealedBlock<T>>
         for SealedBlock2<'de, T>
     {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::SealedBlock2<T>, D::Error>
+        fn deserialize_as<D>(deserializer: D) -> Result<super::SealedBlock<T>, D::Error>
         where
             D: Deserializer<'de>,
         {
@@ -313,7 +310,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<T: SerdeBincodeCompat> SerdeBincodeCompat for super::SealedBlock2<T> {
+    impl<T: SerdeBincodeCompat> SerdeBincodeCompat for super::SealedBlock<T> {
         type BincodeRepr<'a> = SealedBlock2<'a, T>;
     }
 }

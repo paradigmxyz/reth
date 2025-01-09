@@ -1,6 +1,6 @@
 use crate::{BlockWithSenders, SealedBlock};
 use alloc::vec::Vec;
-use reth_primitives_traits::{Block, BlockBody, SealedHeader, SignedTransaction};
+use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
 use revm_primitives::{Address, B256};
 
 /// Extension trait for [`reth_primitives_traits::Block`] implementations
@@ -8,17 +8,15 @@ use revm_primitives::{Address, B256};
 /// [`BlockWithSenders`], etc.
 pub trait BlockExt: Block {
     /// Calculate the header hash and seal the block so that it can't be changed.
-    fn seal_slow(self) -> SealedBlock<Self::Header, Self::Body> {
-        let (header, body) = self.split();
-        SealedBlock::new(SealedHeader::seal(header), body)
+    fn seal_slow(self) -> SealedBlock<Self> {
+        SealedBlock::seal(self)
     }
 
     /// Seal the block with a known hash.
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
-    fn seal(self, hash: B256) -> SealedBlock<Self::Header, Self::Body> {
-        let (header, body) = self.split();
-        SealedBlock::new(SealedHeader::new(header, hash), body)
+    fn seal(self, hash: B256) -> SealedBlock<Self> {
+        SealedBlock::new(self, hash)
     }
 
     /// Expensive operation that recovers transaction signer.
@@ -66,7 +64,7 @@ pub trait BlockExt: Block {
             senders
         };
 
-        Ok(BlockWithSenders::new_unchecked(self, senders))
+        Ok(BlockWithSenders::new_unhashed(self, senders))
     }
 
     /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
@@ -78,7 +76,7 @@ pub trait BlockExt: Block {
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
         let senders = self.senders()?;
-        Some(BlockWithSenders::new_unchecked(self, senders))
+        Some(BlockWithSenders::new_unhashed(self, senders))
     }
 }
 

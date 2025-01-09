@@ -1,7 +1,7 @@
 //! Recovered Block variant.
 
 use crate::{
-    block::SealedBlock2,
+    block::SealedBlock,
     sync::OnceLock,
     transaction::signed::{RecoveryError, SignedTransactionIntoRecoveredExt},
     Block, BlockBody, InMemorySize,
@@ -138,7 +138,7 @@ impl<B: Block> RecoveredBlock<B> {
     /// [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction).
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
-    pub fn try_recover_sealed(block: SealedBlock2<B>) -> Result<Self, RecoveryError> {
+    pub fn try_recover_sealed(block: SealedBlock<B>) -> Result<Self, RecoveryError> {
         let senders = block.body().try_recover_signers()?;
         let (block, hash) = block.split();
         Ok(Self::new(block, senders, hash))
@@ -148,7 +148,7 @@ impl<B: Block> RecoveredBlock<B> {
     /// [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction).
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
-    pub fn try_recover_sealed_unchecked(block: SealedBlock2<B>) -> Result<Self, RecoveryError> {
+    pub fn try_recover_sealed_unchecked(block: SealedBlock<B>) -> Result<Self, RecoveryError> {
         let senders = block.body().try_recover_signers_unchecked()?;
         let (block, hash) = block.split();
         Ok(Self::new(block, senders, hash))
@@ -161,7 +161,7 @@ impl<B: Block> RecoveredBlock<B> {
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover_sealed_with_senders(
-        block: SealedBlock2<B>,
+        block: SealedBlock<B>,
         senders: Vec<Address>,
     ) -> Result<Self, RecoveryError> {
         let (block, hash) = block.split();
@@ -173,7 +173,7 @@ impl<B: Block> RecoveredBlock<B> {
     /// not using [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction)
     /// to recover the senders.
     pub fn try_recover_sealed_with_senders_unchecked(
-        block: SealedBlock2<B>,
+        block: SealedBlock<B>,
         senders: Vec<Address>,
     ) -> Result<Self, RecoveryError> {
         let (block, hash) = block.split();
@@ -190,16 +190,16 @@ impl<B: Block> RecoveredBlock<B> {
         *self.hash_ref()
     }
 
-    /// Consumes the block and returns the [`SealedBlock2`] and drops the recovered senders.
-    pub fn into_sealed_block(self) -> SealedBlock2<B> {
+    /// Consumes the block and returns the [`SealedBlock`] and drops the recovered senders.
+    pub fn into_sealed_block(self) -> SealedBlock<B> {
         let hash = self.hash();
-        SealedBlock2::new(self.block, hash)
+        SealedBlock::new(self.block, hash)
     }
 
     /// Consumes the type and returns its components.
-    pub fn split_sealed(self) -> (SealedBlock2<B>, Vec<Address>) {
+    pub fn split_sealed(self) -> (SealedBlock<B>, Vec<Address>) {
         let hash = self.hash();
-        (SealedBlock2::new(self.block, hash), self.senders)
+        (SealedBlock::new(self.block, hash), self.senders)
     }
 
     /// Consumes the type and returns its components.
@@ -293,7 +293,7 @@ pub(super) mod serde_bincode_compat {
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use reth_primitives_traits::{block::SealedBlock2, serde_bincode_compat};
+    /// use reth_primitives_traits::{block::SealedBlock, serde_bincode_compat};
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
