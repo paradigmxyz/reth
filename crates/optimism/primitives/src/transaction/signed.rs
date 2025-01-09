@@ -76,6 +76,7 @@ impl OpTransactionSigned {
     /// Returns the estimated compressed size of a transaction.
     pub fn da_usage(&self) -> u64 {
         let mut tx_ser: Vec<u8> = Vec::new();
+        // TODO: check handling of deposit/blob txs - I think they're treated as 0 usage
         self.transaction.legacy().unwrap().eip2718_encode(&self.signature, &mut tx_ser);
 
         estimate_tx_compressed_size(&tx_ser)
