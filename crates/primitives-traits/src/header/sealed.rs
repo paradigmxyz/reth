@@ -119,6 +119,24 @@ impl Decodable for SealedHeader {
     }
 }
 
+impl<H> From<SealedHeader<H>> for Sealed<H> {
+    fn from(value: SealedHeader<H>) -> Self {
+        Self::new_unchecked(value.header, value.hash)
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a, H> arbitrary::Arbitrary<'a> for SealedHeader<H>
+where
+    H: for<'b> arbitrary::Arbitrary<'b> + Sealable,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let header = H::arbitrary(u)?;
+
+        Ok(Self::seal(header))
+    }
+}
+
 #[cfg(any(test, feature = "test-utils"))]
 impl SealedHeader {
     /// Updates the block header.
@@ -149,24 +167,6 @@ impl SealedHeader {
     /// Updates the block difficulty.
     pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
         self.header.difficulty = difficulty;
-    }
-}
-
-impl<H> From<SealedHeader<H>> for Sealed<H> {
-    fn from(value: SealedHeader<H>) -> Self {
-        Self::new_unchecked(value.header, value.hash)
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a, H> arbitrary::Arbitrary<'a> for SealedHeader<H>
-where
-    H: for<'b> arbitrary::Arbitrary<'b> + Sealable,
-{
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let header = H::arbitrary(u)?;
-
-        Ok(Self::seal(header))
     }
 }
 
