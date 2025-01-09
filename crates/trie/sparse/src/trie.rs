@@ -343,7 +343,10 @@ impl<P> RevealedSparseTrie<P> {
                                 // Memoize the hash of a previously blinded node in a new branch
                                 // node.
                                 hash: Some(*hash),
-                                store_in_db_trie: None,
+                                store_in_db_trie: Some(
+                                    hash_mask.is_some_and(|mask| !mask.is_empty()) ||
+                                        tree_mask.is_some_and(|mask| !mask.is_empty()),
+                                ),
                             });
                         }
                         // Branch node already exists, or an extension node was placed where a
