@@ -740,14 +740,16 @@ impl<P> RevealedSparseTrie<P> {
                                 // SAFETY: it's a child, so it's never empty
                                 let last_child_nibble = child_path.last().unwrap();
 
+                                let tree_mask_bit_set_in_parent = self.branch_node_tree_masks
+                                            .get(&path)
+                                            .is_some_and(|mask| mask.is_bit_set(last_child_nibble));
+
                                 // Determine whether we need to set trie mask bit.
                                 let should_set_tree_mask_bit =
                                     // A blinded node has the tree mask bit set
                                     (
                                         node_type.is_hash() &&
-                                        self.branch_node_tree_masks
-                                            .get(&path)
-                                            .is_some_and(|mask| mask.is_bit_set(last_child_nibble))
+                                       tree_mask_bit_set_in_parent
                                     ) ||
                                     (
                                         // A branch or an extension node explicitly set the
@@ -785,6 +787,7 @@ impl<P> RevealedSparseTrie<P> {
                                     ?child_path,
                                     store_in_db_trie = ?node_type.store_in_db_trie(),
                                     ?calculated,
+                                    ?tree_mask_bit_set_in_parent,
                                     tree_mask_bit_set = should_set_tree_mask_bit,
                                     hash_mask_bit_set = hash.is_some(),
                                     "Updating branch node child masks"
