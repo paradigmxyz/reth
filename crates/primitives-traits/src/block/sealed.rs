@@ -2,6 +2,7 @@
 
 use crate::{Block, BlockBody, GotExpected, InMemorySize, SealedHeader};
 use alloy_consensus::BlockHeader;
+use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
 use alloy_primitives::{BlockHash, Sealable, B256};
 use core::ops::Deref;
 
@@ -48,6 +49,16 @@ where
     /// Returns reference to block body.
     pub fn body(&self) -> &B::Body {
         self.block.body()
+    }
+
+    /// Return the number hash tuple.
+    pub fn num_hash(&self) -> BlockNumHash {
+        BlockNumHash::new(self.number(), self.hash())
+    }
+
+    /// Return a [`BlockWithParent`] for this header.
+    pub fn block_with_parent(&self) -> BlockWithParent {
+        BlockWithParent { parent: self.parent_hash(), block: self.num_hash() }
     }
 
     /// Returns the Sealed header.
