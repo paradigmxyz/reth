@@ -375,6 +375,7 @@ where
                 best_payload,
             };
             let result = builder.try_build(args);
+
             let _ = tx.send(result);
         }));
 

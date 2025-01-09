@@ -398,6 +398,8 @@ where
 
     // merge all transitions into bundle state, this would apply the withdrawal balance changes
     // and 4788 contract call
+
+    // TODO: zeke - do we want to check what this looks like before this?
     db.merge_transitions(BundleRetention::Reverts);
 
     let requests_hash = requests.as_ref().map(|requests| requests.requests_hash());
@@ -410,6 +412,10 @@ where
     let receipts_root =
         execution_outcome.ethereum_receipts_root(block_number).expect("Number is in range");
     let logs_bloom = execution_outcome.block_logs_bloom(block_number).expect("Number is in range");
+
+    dbg!("build payload execution outcome", &execution_outcome.receipts);
+    dbg!("build payload execution outcome", &execution_outcome.bundle);
+    dbg!("build payload execution outcome", &execution_outcome.requests);
 
     // calculate the state root
     let hashed_state = db.database.db.hashed_post_state(execution_outcome.state());
