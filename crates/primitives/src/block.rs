@@ -504,7 +504,10 @@ impl<B: reth_primitives_traits::Block> Default for SealedBlockWithSenders<B> {
 
 impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
     /// New sealed block with sender
-    pub fn new_unchecked(block: SealedBlock<B::Header, B::Body>, senders: Vec<Address>) -> Self {
+    pub const fn new_unchecked(
+        block: SealedBlock<B::Header, B::Body>,
+        senders: Vec<Address>,
+    ) -> Self {
         Self { block, senders }
     }
 
