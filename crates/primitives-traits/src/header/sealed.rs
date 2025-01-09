@@ -138,9 +138,9 @@ where
 }
 
 #[cfg(any(test, feature = "test-utils"))]
-impl SealedHeader {
+impl<H: crate::test_utils::TestHeader> SealedHeader<H> {
     /// Updates the block header.
-    pub fn set_header(&mut self, header: Header) {
+    pub fn set_header(&mut self, header: H) {
         self.header = header
     }
 
@@ -149,24 +149,29 @@ impl SealedHeader {
         self.hash = hash
     }
 
+    /// Returns a mutable reference to the header.
+    pub fn header_mut(&mut self) -> &mut H {
+        &mut self.header
+    }
+
     /// Updates the parent block hash.
     pub fn set_parent_hash(&mut self, hash: BlockHash) {
-        self.header.parent_hash = hash
+        self.header.set_parent_hash(hash);
     }
 
     /// Updates the block number.
     pub fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
-        self.header.number = number;
+        self.header.set_block_number(number);
     }
 
     /// Updates the block state root.
     pub fn set_state_root(&mut self, state_root: alloy_primitives::B256) {
-        self.header.state_root = state_root;
+        self.header.set_state_root(state_root);
     }
 
     /// Updates the block difficulty.
     pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
-        self.header.difficulty = difficulty;
+        self.header.set_difficulty(difficulty);
     }
 }
 
