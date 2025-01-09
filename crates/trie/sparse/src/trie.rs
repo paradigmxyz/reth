@@ -1300,10 +1300,7 @@ impl SparseTrieUpdates {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{
-        map::{B256HashSet, HashSet},
-        U256,
-    };
+    use alloy_primitives::{map::B256HashSet, U256};
     use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
     use itertools::Itertools;
@@ -1312,19 +1309,21 @@ mod tests {
     use proptest_arbitrary_interop::arb;
     use rand::seq::IteratorRandom;
     use reth_primitives_traits::Account;
+    use reth_provider::{test_utils::create_test_provider_factory, TrieWriter};
     use reth_trie::{
         hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
         node_iter::{TrieElement, TrieNodeIter},
-        trie_cursor::noop::NoopAccountTrieCursor,
-        updates::TrieUpdates,
+        trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor, TrieCursorFactory},
         walker::TrieWalker,
         BranchNode, ExtensionNode, HashedPostState, LeafNode,
     };
     use reth_trie_common::{
         proof::{ProofNodes, ProofRetainer},
+        updates::TrieUpdates,
         HashBuilder,
     };
-    use std::collections::BTreeMap;
+    use reth_trie_db::DatabaseTrieCursorFactory;
+    use std::collections::{BTreeMap, BTreeSet};
 
     /// Pad nibbles to the length of a B256 hash with zeros on the left.
     fn pad_nibbles_left(nibbles: Nibbles) -> Nibbles {
@@ -1346,6 +1345,7 @@ mod tests {
     /// Returns the state root and the retained proof nodes.
     fn run_hash_builder(
         state: impl IntoIterator<Item = (Nibbles, Account)> + Clone,
+        trie_cursor: impl TrieCursor,
         destroyed_accounts: B256HashSet,
         proof_targets: impl IntoIterator<Item = Nibbles>,
     ) -> (B256, TrieUpdates, ProofNodes, HashMap<Nibbles, TrieMask>) {
@@ -1357,8 +1357,9 @@ mod tests {
 
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
-        let walker = TrieWalker::new(NoopAccountTrieCursor::default(), prefix_set.freeze())
-            .with_deletions_retained(true);
+        prefix_set.extend_keys(destroyed_accounts.iter().map(Nibbles::unpack));
+        let walker =
+            TrieWalker::new(trie_cursor, prefix_set.freeze()).with_deletions_retained(true);
         let hashed_post_state = HashedPostState::default()
             .with_accounts(state.into_iter().map(|(nibbles, account)| {
                 (nibbles.pack().into_inner().unwrap().into(), Some(account))
@@ -1378,6 +1379,7 @@ mod tests {
                     hash_builder.add_branch(branch.key, branch.value, branch.children_are_in_trie);
                 }
                 TrieElement::Leaf(key, account) => {
+                    println!("{key:?} {account:?}");
                     let account = account.into_trie_account(EMPTY_ROOT_HASH);
                     account.encode(&mut account_rlp);
 
@@ -1442,7 +1444,11 @@ mod tests {
                 (_, SparseNode::Empty | SparseNode::Hash(_)) => continue,
                 _ => false,
             };
-            assert!(equals, "proof node: {:?}, sparse node: {:?}", proof_node, sparse_node);
+            assert!(
+                equals,
+                "path: {:?}\nproof node: {:?}\nsparse node: {:?}",
+                proof_node_path, proof_node, sparse_node
+            );
         }
     }
 
@@ -1463,7 +1469,12 @@ mod tests {
         };
 
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
-            run_hash_builder([(key.clone(), value())], Default::default(), [key.clone()]);
+            run_hash_builder(
+                [(key.clone(), value())],
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                [key.clone()],
+            );
 
         let mut sparse = RevealedSparseTrie::default().with_updates(true);
         sparse.update_leaf(key, value_encoded()).unwrap();
@@ -1490,6 +1501,7 @@ mod tests {
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
             run_hash_builder(
                 paths.iter().cloned().zip(std::iter::repeat_with(value)),
+                NoopAccountTrieCursor::default(),
                 Default::default(),
                 paths.clone(),
             );
@@ -1519,6 +1531,7 @@ mod tests {
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
             run_hash_builder(
                 paths.iter().cloned().zip(std::iter::repeat_with(value)),
+                NoopAccountTrieCursor::default(),
                 Default::default(),
                 paths.clone(),
             );
@@ -1556,6 +1569,7 @@ mod tests {
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
             run_hash_builder(
                 paths.iter().sorted_unstable().cloned().zip(std::iter::repeat_with(value)),
+                NoopAccountTrieCursor::default(),
                 Default::default(),
                 paths.clone(),
             );
@@ -1594,6 +1608,7 @@ mod tests {
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
             run_hash_builder(
                 paths.iter().cloned().zip(std::iter::repeat_with(|| old_value)),
+                NoopAccountTrieCursor::default(),
                 Default::default(),
                 paths.clone(),
             );
@@ -1612,6 +1627,7 @@ mod tests {
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
             run_hash_builder(
                 paths.iter().cloned().zip(std::iter::repeat_with(|| new_value)),
+                NoopAccountTrieCursor::default(),
                 Default::default(),
                 paths.clone(),
             );
@@ -1941,9 +1957,10 @@ mod tests {
         // to test the sparse trie updates.
         const KEY_NIBBLES_LEN: usize = 3;
 
-        fn test(updates: Vec<(HashMap<Nibbles, Account>, HashSet<Nibbles>)>) {
+        fn test(updates: Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)>) {
             {
                 let mut state = BTreeMap::default();
+                let provider_factory = create_test_provider_factory();
                 let mut sparse = RevealedSparseTrie::default().with_updates(true);
 
                 for (update, keys_to_delete) in updates {
@@ -1963,28 +1980,36 @@ mod tests {
 
                     // Insert state updates into the hash builder and calculate the root
                     state.extend(update);
+                    let provider = provider_factory.provider().unwrap();
+                    let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
                     let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
                         run_hash_builder(
                             state.clone(),
+                            trie_cursor.account_trie_cursor().unwrap(),
                             Default::default(),
                             state.keys().cloned().collect::<Vec<_>>(),
                         );
+
+                    // Write trie updates to the database
+                    let provider_rw = provider_factory.provider_rw().unwrap();
+                    provider_rw.write_trie_updates(&hash_builder_updates).unwrap();
+                    provider_rw.commit().unwrap();
 
                     // Assert that the sparse trie root matches the hash builder root
                     assert_eq!(sparse_root, hash_builder_root);
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
-                        sparse_updates.updated_nodes,
-                        hash_builder_updates.account_nodes
+                        BTreeMap::from_iter(sparse_updates.updated_nodes),
+                        BTreeMap::from_iter(hash_builder_updates.account_nodes)
                     );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
                     assert_eq_sparse_trie_proof_nodes(&updated_sparse, hash_builder_proof_nodes);
 
                     // Delete some keys from both the hash builder and the sparse trie and check
                     // that the sparse trie root still matches the hash builder root
-                    for key in keys_to_delete {
-                        state.remove(&key).unwrap();
-                        sparse.remove_leaf(&key).unwrap();
+                    for key in &keys_to_delete {
+                        state.remove(key).unwrap();
+                        sparse.remove_leaf(key).unwrap();
                     }
 
                     // We need to clone the sparse trie, so that all updated branch nodes are
@@ -1994,19 +2019,30 @@ mod tests {
                     let sparse_root = updated_sparse.root();
                     let sparse_updates = updated_sparse.take_updates();
 
+                    let provider = provider_factory.provider().unwrap();
+                    let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
                     let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
                         run_hash_builder(
                             state.clone(),
-                            Default::default(),
+                            trie_cursor.account_trie_cursor().unwrap(),
+                            keys_to_delete
+                                .iter()
+                                .map(|nibbles| B256::from_slice(&nibbles.pack()))
+                                .collect(),
                             state.keys().cloned().collect::<Vec<_>>(),
                         );
+
+                    // Write trie updates to the database
+                    let provider_rw = provider_factory.provider_rw().unwrap();
+                    provider_rw.write_trie_updates(&hash_builder_updates).unwrap();
+                    provider_rw.commit().unwrap();
 
                     // Assert that the sparse trie root matches the hash builder root
                     assert_eq!(sparse_root, hash_builder_root);
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
-                        sparse_updates.updated_nodes,
-                        hash_builder_updates.account_nodes
+                        BTreeMap::from_iter(sparse_updates.updated_nodes),
+                        BTreeMap::from_iter(hash_builder_updates.account_nodes)
                     );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
                     assert_eq_sparse_trie_proof_nodes(&updated_sparse, hash_builder_proof_nodes);
@@ -2015,10 +2051,10 @@ mod tests {
         }
 
         fn transform_updates(
-            updates: Vec<HashMap<Nibbles, Account>>,
+            updates: Vec<BTreeMap<Nibbles, Account>>,
             mut rng: impl Rng,
-        ) -> Vec<(HashMap<Nibbles, Account>, HashSet<Nibbles>)> {
-            let mut keys = HashSet::new();
+        ) -> Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)> {
+            let mut keys = BTreeSet::new();
             updates
                 .into_iter()
                 .map(|update| {
@@ -2039,12 +2075,12 @@ mod tests {
 
         proptest!(ProptestConfig::with_cases(10), |(
             updates in proptest::collection::vec(
-                proptest::collection::hash_map(
+                proptest::collection::btree_map(
                     any_with::<Nibbles>(SizeRange::new(KEY_NIBBLES_LEN..=KEY_NIBBLES_LEN)).prop_map(pad_nibbles_right),
                     arb::<Account>(),
-                    1..100,
-                ).prop_map(HashMap::from_iter),
-                1..100,
+                    1..50,
+                ),
+                1..50,
             ).prop_perturb(transform_updates)
         )| {
             test(updates)
@@ -2077,6 +2113,7 @@ mod tests {
         // Generate the proof for the root node and initialize the sparse trie with it
         let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) = run_hash_builder(
             [(key1(), value()), (key3(), value())],
+            NoopAccountTrieCursor::default(),
             Default::default(),
             [Nibbles::default()],
         );
@@ -2088,8 +2125,12 @@ mod tests {
         .unwrap();
 
         // Generate the proof for the first key and reveal it in the sparse trie
-        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) =
-            run_hash_builder([(key1(), value()), (key3(), value())], Default::default(), [key1()]);
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) = run_hash_builder(
+            [(key1(), value()), (key3(), value())],
+            NoopAccountTrieCursor::default(),
+            Default::default(),
+            [key1()],
+        );
         for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
             sparse.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask).unwrap();
@@ -2111,8 +2152,12 @@ mod tests {
         );
 
         // Generate the proof for the third key and reveal it in the sparse trie
-        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) =
-            run_hash_builder([(key1(), value()), (key3(), value())], Default::default(), [key3()]);
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) = run_hash_builder(
+            [(key1(), value()), (key3(), value())],
+            NoopAccountTrieCursor::default(),
+            Default::default(),
+            [key3()],
+        );
         for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
             sparse.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask).unwrap();
@@ -2128,6 +2173,7 @@ mod tests {
         // compare them to the sparse trie
         let (_, _, hash_builder_proof_nodes, _) = run_hash_builder(
             [(key1(), value()), (key2(), value()), (key3(), value())],
+            NoopAccountTrieCursor::default(),
             Default::default(),
             [key1(), key2(), key3()],
         );
@@ -2155,6 +2201,7 @@ mod tests {
         // Generate the proof for the root node and initialize the sparse trie with it
         let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) = run_hash_builder(
             [(key1(), value()), (key2(), value()), (key3(), value())],
+            NoopAccountTrieCursor::default(),
             Default::default(),
             [Nibbles::default()],
         );
@@ -2169,6 +2216,7 @@ mod tests {
         // trie
         let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) = run_hash_builder(
             [(key1(), value()), (key2(), value()), (key3(), value())],
+            NoopAccountTrieCursor::default(),
             Default::default(),
             [key1(), Nibbles::from_nibbles_unchecked([0x01])],
         );
@@ -2195,6 +2243,7 @@ mod tests {
         // Generate the proof for the third key and reveal it in the sparse trie
         let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) = run_hash_builder(
             [(key1(), value()), (key2(), value()), (key3(), value())],
+            NoopAccountTrieCursor::default(),
             Default::default(),
             [key2()],
         );
@@ -2233,6 +2282,7 @@ mod tests {
         // Generate the proof for the root node and initialize the sparse trie with it
         let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) = run_hash_builder(
             [(key1(), value()), (key2(), value())],
+            NoopAccountTrieCursor::default(),
             Default::default(),
             [Nibbles::default()],
         );
@@ -2259,8 +2309,12 @@ mod tests {
         );
 
         // Generate the proof for the first key and reveal it in the sparse trie
-        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) =
-            run_hash_builder([(key1(), value()), (key2(), value())], Default::default(), [key1()]);
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) = run_hash_builder(
+            [(key1(), value()), (key2(), value())],
+            NoopAccountTrieCursor::default(),
+            Default::default(),
+            [key1()],
+        );
         for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
             sparse.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask).unwrap();
@@ -2359,6 +2413,7 @@ mod tests {
 
         let (hash_builder_root, hash_builder_updates, _, _) = run_hash_builder(
             [(key1(), value()), (key2(), value())],
+            NoopAccountTrieCursor::default(),
             Default::default(),
             [Nibbles::default()],
         );
