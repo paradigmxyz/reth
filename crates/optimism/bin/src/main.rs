@@ -6,7 +6,7 @@ use clap::Parser;
 use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher, Node};
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::{args::RollupArgs, OpNode};
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProvider;
 
 use tracing as _;
 
@@ -29,7 +29,7 @@ fn main() {
 
             let op_node = OpNode::new(rollup_args.clone());
             let handle = builder
-                .with_types_and_provider::<OpNode, BlockchainProvider2<_>>()
+                .with_types_and_provider::<OpNode, BlockchainProvider<_>>()
                 .with_components(op_node.components())
                 .with_add_ons(op_node.add_ons())
                 .launch_with_fn(|builder| {

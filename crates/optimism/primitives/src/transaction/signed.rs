@@ -26,7 +26,7 @@ use op_alloy_consensus::{OpPooledTransaction, OpTypedTransaction, TxDeposit};
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
 use reth_primitives_traits::{
-    crypto::secp256k1::{recover_signer, recover_signer_unchecked, sign_message},
+    crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     transaction::error::TransactionConversionError,
     InMemorySize, SignedTransaction,
 };
@@ -519,7 +519,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
 
         let secp = secp256k1::Secp256k1::new();
         let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
-        let signature = sign_message(
+        let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
             signature_hash(&transaction),
         )

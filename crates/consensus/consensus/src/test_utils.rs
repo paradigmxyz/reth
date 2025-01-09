@@ -61,11 +61,13 @@ impl<N: NodePrimitives> FullConsensus<N> for TestConsensus {
 }
 
 impl<H, B> Consensus<H, B> for TestConsensus {
+    type Error = ConsensusError;
+
     fn validate_body_against_header(
         &self,
         _body: &B,
         _header: &SealedHeader<H>,
-    ) -> Result<(), ConsensusError> {
+    ) -> Result<(), Self::Error> {
         if self.fail_body_against_header() {
             Err(ConsensusError::BaseFeeMissing)
         } else {
@@ -73,10 +75,7 @@ impl<H, B> Consensus<H, B> for TestConsensus {
         }
     }
 
-    fn validate_block_pre_execution(
-        &self,
-        _block: &SealedBlock<H, B>,
-    ) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(&self, _block: &SealedBlock<H, B>) -> Result<(), Self::Error> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)
         } else {

@@ -184,12 +184,12 @@ where
             if first_sync {
                 cursor_header_numbers.append(
                     RawKey::<BlockHash>::from_vec(hash),
-                    RawValue::<BlockNumber>::from_vec(number),
+                    &RawValue::<BlockNumber>::from_vec(number),
                 )?;
             } else {
                 cursor_header_numbers.insert(
                     RawKey::<BlockHash>::from_vec(hash),
-                    RawValue::<BlockNumber>::from_vec(number),
+                    &RawValue::<BlockNumber>::from_vec(number),
                 )?;
             }
         }
@@ -660,7 +660,7 @@ mod tests {
         provider
             .append_blocks_with_state(
                 sealed_blocks,
-                ExecutionOutcome::default(),
+                &ExecutionOutcome::default(),
                 HashedPostStateSorted::default(),
                 TrieUpdates::default(),
             )

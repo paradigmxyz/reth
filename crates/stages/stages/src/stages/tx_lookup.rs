@@ -164,9 +164,9 @@ where
 
                     let key = RawKey::<TxHash>::from_vec(hash);
                     if append_only {
-                        txhash_cursor.append(key, RawValue::<TxNumber>::from_vec(number))?
+                        txhash_cursor.append(key, &RawValue::<TxNumber>::from_vec(number))?
                     } else {
-                        txhash_cursor.insert(key, RawValue::<TxNumber>::from_vec(number))?
+                        txhash_cursor.insert(key, &RawValue::<TxNumber>::from_vec(number))?
                     }
                 }
 

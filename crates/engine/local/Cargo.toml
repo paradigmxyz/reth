@@ -10,7 +10,6 @@ exclude.workspace = true
 
 [dependencies]
 # reth
-reth-beacon-consensus.workspace = true
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
 reth-engine-primitives.workspace = true

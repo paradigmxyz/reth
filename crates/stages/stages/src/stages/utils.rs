@@ -224,9 +224,9 @@ where
                 let value = BlockNumberList::new_pre_sorted(chunk);
 
                 if append_only {
-                    cursor.append(key, value)?;
+                    cursor.append(key, &value)?;
                 } else {
-                    cursor.upsert(key, value)?;
+                    cursor.upsert(key, &value)?;
                 }
             }
         }

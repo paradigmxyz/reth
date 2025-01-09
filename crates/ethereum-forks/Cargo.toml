@@ -16,11 +16,11 @@ workspace = true
 alloy-chains.workspace = true
 alloy-eip2124.workspace = true
 alloy-primitives = { workspace = true, features = ["serde", "rlp"] }
-once_cell.workspace = true
 
 # misc
 serde = { workspace = true, features = ["derive"], optional = true }
 dyn-clone.workspace = true
+once_cell.workspace = true
 rustc-hash = { workspace = true, optional = true }
 
 # arbitrary utils
@@ -48,8 +48,8 @@ std = [
 	"alloy-chains/std",
 	"alloy-primitives/std",
 	"rustc-hash/std",
-	"once_cell/std",
 	"serde?/std",
-	"alloy-eip2124/std"
+	"alloy-eip2124/std",
+	"once_cell/std"
 ]
 rustc-hash = ["dep:rustc-hash"]

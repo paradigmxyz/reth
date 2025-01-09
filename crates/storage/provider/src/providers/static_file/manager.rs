@@ -33,7 +33,6 @@ use reth_primitives::{
         find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive,
         DEFAULT_BLOCKS_PER_STATIC_FILE,
     },
-    transaction::recover_signers,
     BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
     StaticFileSegment, TransactionSigned,
 };
@@ -1554,7 +1553,8 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
         let txes = self.transactions_by_tx_range(range)?;
-        recover_signers(&txes, txes.len()).ok_or(ProviderError::SenderRecoveryError)
+        reth_primitives_traits::transaction::recover::recover_signers(&txes)
+            .ok_or(ProviderError::SenderRecoveryError)
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {

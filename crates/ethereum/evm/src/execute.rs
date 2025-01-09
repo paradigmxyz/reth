@@ -5,7 +5,7 @@ use crate::{
     EthEvmConfig,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::Transaction as _;
+use alloy_consensus::Transaction;
 use alloy_eips::{eip6110, eip7685::Requests};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
@@ -116,14 +116,14 @@ where
 impl<DB, EvmConfig> EthExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
-    EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
+    EvmConfig: ConfigureEvm,
 {
     /// Configures a new evm configuration and block environment for the given block.
     ///
     /// # Caution
     ///
     /// This does not initialize the tx environment.
-    fn evm_env_for_block(&self, header: &alloy_consensus::Header) -> EnvWithHandlerCfg {
+    fn evm_env_for_block(&self, header: &EvmConfig::Header) -> EnvWithHandlerCfg {
         let EvmEnv { cfg_env_with_handler_cfg, block_env } =
             self.evm_config.cfg_and_block_env(header);
         EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, Default::default())
@@ -156,7 +156,7 @@ where
         let env = self.evm_env_for_block(&block.header);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
-        self.system_caller.apply_pre_execution_changes(&block.block, &mut evm)?;
+        self.system_caller.apply_pre_execution_changes(&block.header, &mut evm)?;
 
         Ok(())
     }

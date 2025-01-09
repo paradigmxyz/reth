@@ -43,7 +43,7 @@ impl<H: Send + Sync + Unpin + 'static, B: Send + Sync + Unpin + 'static> TaskDow
     /// # Example
     ///
     /// ```
-    /// use reth_consensus::Consensus;
+    /// use reth_consensus::{Consensus, ConsensusError};
     /// use reth_downloaders::bodies::{bodies::BodiesDownloaderBuilder, task::TaskDownloader};
     /// use reth_network_p2p::bodies::client::BodiesClient;
     /// use reth_primitives_traits::InMemorySize;
@@ -55,7 +55,7 @@ impl<H: Send + Sync + Unpin + 'static, B: Send + Sync + Unpin + 'static> TaskDow
     ///     Provider: HeaderProvider<Header = alloy_consensus::Header> + Unpin + 'static,
     /// >(
     ///     client: Arc<B>,
-    ///     consensus: Arc<dyn Consensus<Provider::Header, B::Body>>,
+    ///     consensus: Arc<dyn Consensus<Provider::Header, B::Body, Error = ConsensusError>>,
     ///     provider: Provider,
     /// ) {
     ///     let downloader = BodiesDownloaderBuilder::default().build(client, consensus, provider);

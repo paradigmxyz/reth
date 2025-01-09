@@ -1,6 +1,6 @@
 //! Hard forks of optimism protocol.
 
-use alloc::{boxed::Box, format, string::String, vec};
+use alloc::{format, string::String, vec};
 use core::{
     any::Any,
     fmt::{self, Display, Formatter},

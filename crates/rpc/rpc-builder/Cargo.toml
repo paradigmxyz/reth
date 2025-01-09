@@ -51,7 +51,6 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 
 [dev-dependencies]
 reth-chainspec.workspace = true
-reth-beacon-consensus.workspace = true
 reth-network-api.workspace = true
 reth-network-peers.workspace = true
 reth-evm-ethereum.workspace = true

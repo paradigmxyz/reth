@@ -12,6 +12,7 @@ use op_alloy_network::Network;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
 use reth_primitives::{logs_bloom, BlockBody, SealedBlockWithSenders};
 use reth_provider::{
@@ -40,7 +41,7 @@ where
             Block = OpBlock,
             Receipt = OpReceipt,
             Header = reth_primitives::Header,
-        > + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+        > + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
         Evm: ConfigureEvm<
