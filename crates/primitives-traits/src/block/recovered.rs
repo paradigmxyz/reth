@@ -52,7 +52,7 @@ impl<B> RecoveredBlock<B> {
     }
 
     /// Returns a reference to the inner block.
-    pub fn block(&self) -> &B {
+    pub const fn block(&self) -> &B {
         &self.block
     }
 }

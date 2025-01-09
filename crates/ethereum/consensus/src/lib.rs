@@ -24,7 +24,7 @@ use reth_consensus_common::validation::{
 use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt, SealedBlock, SealedHeader};
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
-    BlockBody,
+    Block,
 };
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
@@ -110,23 +110,22 @@ where
     }
 }
 
-impl<H, B, ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensus<H, B>
+impl<B, ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensus<B>
     for EthBeaconConsensus<ChainSpec>
 where
-    H: BlockHeader,
-    B: BlockBody,
+    B: Block,
 {
     type Error = ConsensusError;
 
     fn validate_body_against_header(
         &self,
-        body: &B,
-        header: &SealedHeader<H>,
+        body: &B::Body,
+        header: &SealedHeader<B::Header>,
     ) -> Result<(), Self::Error> {
         validate_body_against_header(body, header.header())
     }
 
-    fn validate_block_pre_execution(&self, block: &SealedBlock<H, B>) -> Result<(), Self::Error> {
+    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), Self::Error> {
         validate_block_pre_execution(block, &self.chain_spec)
     }
 }
