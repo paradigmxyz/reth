@@ -496,12 +496,12 @@ pub trait Trace:
                 db,
                 cfg,
                 block_env,
-                block.header.parent_beacon_block_root(),
+                block.parent_beacon_block_root(),
             )
             .map_err(|_| EthApiError::EvmCustom("failed to apply 4788 system call".to_string()))?;
 
         system_caller
-            .pre_block_blockhashes_contract_call(db, cfg, block_env, block.header.parent_hash())
+            .pre_block_blockhashes_contract_call(db, cfg, block_env, block.parent_hash())
             .map_err(|_| {
                 EthApiError::EvmCustom("failed to apply blockhashes system call".to_string())
             })?;

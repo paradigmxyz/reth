@@ -25,8 +25,7 @@ pub fn validate_header_base_fee<H: BlockHeader, ChainSpec: EthereumHardforks>(
     header: &H,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
-    if chain_spec.is_fork_active_at_block(EthereumHardfork::London, header.number()) &&
-        header.base_fee_per_gas().is_none()
+    if chain_spec.is_london_active_at_block(header.number()) && header.base_fee_per_gas().is_none()
     {
         return Err(ConsensusError::BaseFeeMissing)
     }
@@ -65,8 +64,7 @@ pub fn validate_cancun_gas<H: BlockHeader, B: BlockBody>(
 ) -> Result<(), ConsensusError> {
     // Check that the blob gas used in the header matches the sum of the blob gas used by each
     // blob tx
-    let header_blob_gas_used =
-        block.header().blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
+    let header_blob_gas_used = block.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
     let total_blob_gas = block.body().blob_gas_used();
     if total_blob_gas != header_blob_gas_used {
         return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
@@ -253,23 +251,25 @@ pub fn validate_against_parent_eip1559_base_fee<
     parent: &H,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
-    if chain_spec.fork(EthereumHardfork::London).active_at_block(header.number()) {
+    if chain_spec.is_london_active_at_block(header.number()) {
         let base_fee = header.base_fee_per_gas().ok_or(ConsensusError::BaseFeeMissing)?;
 
-        let expected_base_fee =
-            if chain_spec.fork(EthereumHardfork::London).transitions_at_block(header.number()) {
-                alloy_eips::eip1559::INITIAL_BASE_FEE
-            } else {
-                // This BaseFeeMissing will not happen as previous blocks are checked to have
-                // them.
-                let base_fee = parent.base_fee_per_gas().ok_or(ConsensusError::BaseFeeMissing)?;
-                calc_next_block_base_fee(
-                    parent.gas_used(),
-                    parent.gas_limit(),
-                    base_fee,
-                    chain_spec.base_fee_params_at_timestamp(header.timestamp()),
-                )
-            };
+        let expected_base_fee = if chain_spec
+            .ethereum_fork_activation(EthereumHardfork::London)
+            .transitions_at_block(header.number())
+        {
+            alloy_eips::eip1559::INITIAL_BASE_FEE
+        } else {
+            // This BaseFeeMissing will not happen as previous blocks are checked to have
+            // them.
+            let base_fee = parent.base_fee_per_gas().ok_or(ConsensusError::BaseFeeMissing)?;
+            calc_next_block_base_fee(
+                parent.gas_used(),
+                parent.gas_limit(),
+                base_fee,
+                chain_spec.base_fee_params_at_timestamp(header.timestamp()),
+            )
+        };
         if expected_base_fee != base_fee {
             return Err(ConsensusError::BaseFeeDiff(GotExpected {
                 expected: expected_base_fee,

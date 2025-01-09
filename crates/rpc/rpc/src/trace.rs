@@ -314,7 +314,7 @@ where
             if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
                 all_traces.extend(
                     self.extract_reward_traces(
-                        block.header.header(),
+                        block.header(),
                         block.body().ommers(),
                         base_block_reward,
                     )
@@ -391,11 +391,9 @@ where
             maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
 
         if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            if let Some(base_block_reward) =
-                self.calculate_base_block_reward(block.header.header())?
-            {
+            if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
                 traces.extend(self.extract_reward_traces(
-                    block.block.header(),
+                    block.header(),
                     block.body().ommers(),
                     base_block_reward,
                 ));
@@ -490,7 +488,7 @@ where
 
         Ok(Some(BlockOpcodeGas {
             block_hash: block.hash(),
-            block_number: block.header.number(),
+            block_number: block.number(),
             transactions,
         }))
     }

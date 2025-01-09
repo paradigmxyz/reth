@@ -12,8 +12,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-beacon-consensus.workspace = true
-reth-blockchain-tree-api.workspace = true
 reth-chain-state.workspace = true
 reth-chainspec = { workspace = true, optional = true }
 reth-consensus.workspace = true
@@ -51,12 +49,14 @@ revm-primitives.workspace = true
 futures.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "sync"] }
+moka = { workspace = true, features = ["sync"] }
 
 # metrics
 metrics.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
+schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
@@ -73,6 +73,7 @@ reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-ethereum-engine-primitives.workspace = true
+reth-ethereum-consensus.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-exex-types.workspace = true
 reth-network-p2p = { workspace = true, features = ["test-utils"] }

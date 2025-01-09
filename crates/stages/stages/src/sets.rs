@@ -44,7 +44,7 @@ use crate::{
 };
 use alloy_primitives::B256;
 use reth_config::config::StageConfig;
-use reth_consensus::Consensus;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
 use reth_provider::HeaderSyncGapProvider;
@@ -102,7 +102,7 @@ where
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn Consensus<H::Header, B::Body>>,
+        consensus: Arc<dyn Consensus<H::Header, B::Body, Error = ConsensusError>>,
         header_downloader: H,
         body_downloader: B,
         executor_factory: E,
@@ -185,7 +185,7 @@ where
     /// The tip for the headers stage.
     tip: watch::Receiver<B256>,
     /// The consensus engine used to validate incoming data.
-    consensus: Arc<dyn Consensus<H::Header, B::Body>>,
+    consensus: Arc<dyn Consensus<H::Header, B::Body, Error = ConsensusError>>,
     /// The block header downloader
     header_downloader: H,
     /// The block body downloader
@@ -203,7 +203,7 @@ where
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn Consensus<H::Header, B::Body>>,
+        consensus: Arc<dyn Consensus<H::Header, B::Body, Error = ConsensusError>>,
         header_downloader: H,
         body_downloader: B,
         stages_config: StageConfig,
@@ -236,7 +236,7 @@ where
         provider: P,
         tip: watch::Receiver<B256>,
         header_downloader: H,
-        consensus: Arc<dyn Consensus<H::Header, B::Body>>,
+        consensus: Arc<dyn Consensus<H::Header, B::Body, Error = ConsensusError>>,
         stages_config: StageConfig,
     ) -> StageSetBuilder<Provider>
     where

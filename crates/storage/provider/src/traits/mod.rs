@@ -19,6 +19,3 @@ pub use static_file_provider::StaticFileProviderFactory;
 
 mod full;
 pub use full::{FullProvider, FullRpcProvider};
-
-mod tree_viewer;
-pub use tree_viewer::TreeViewer;

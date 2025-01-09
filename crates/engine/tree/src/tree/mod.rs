@@ -3,7 +3,10 @@ use crate::{
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
-    tree::metrics::EngineApiMetrics,
+    tree::{
+        cached_state::{CachedStateMetrics, CachedStateProvider, ProviderCacheBuilder},
+        metrics::EngineApiMetrics,
+    },
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
@@ -16,20 +19,16 @@ use alloy_rpc_types_engine::{
     PayloadValidationError,
 };
 use block_buffer::BlockBuffer;
-use reth_beacon_consensus::{
-    BeaconConsensusEngineEvent, InvalidHeaderCache, MIN_BLOCKS_FOR_PIPELINE_RUN,
-};
-use reth_blockchain_tree_api::{
-    error::{InsertBlockErrorKindTwo, InsertBlockErrorTwo, InsertBlockFatalError},
-    BlockStatus2, InsertPayloadOk2,
-};
+use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
+pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
-    BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
-    EngineValidator, ForkchoiceStateTracker, OnForkChoiceUpdated,
+    BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError,
+    EngineApiMessageVersion, EngineTypes, EngineValidator, ForkchoiceStateTracker,
+    OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::{execute::BlockExecutorProvider, system_calls::OnStateHook};
@@ -78,16 +77,24 @@ use tokio::sync::{
 use tracing::*;
 
 mod block_buffer;
+mod cached_state;
 pub mod config;
+pub mod error;
 mod invalid_block_hook;
+mod invalid_headers;
 mod metrics;
 mod persistence_state;
+pub mod root;
+mod trie_updates;
+
+use crate::tree::{
+    config::MIN_BLOCKS_FOR_PIPELINE_RUN, error::AdvancePersistenceError,
+    invalid_headers::InvalidHeaderCache,
+};
 pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
-pub use reth_engine_primitives::InvalidBlockHook;
-
-pub mod root;
+use trie_updates::compare_trie_updates;
 
 /// Keeps track of the state of the tree.
 ///
@@ -494,7 +501,7 @@ where
 {
     provider: P,
     executor_provider: E,
-    consensus: Arc<dyn FullConsensus<N>>,
+    consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
     state: EngineApiTreeState<N>,
@@ -583,7 +590,7 @@ where
     pub fn new(
         provider: P,
         executor_provider: E,
-        consensus: Arc<dyn FullConsensus<N>>,
+        consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent<N>>,
         state: EngineApiTreeState<N>,
@@ -641,7 +648,7 @@ where
     pub fn spawn_new(
         provider: P,
         executor_provider: E,
-        consensus: Arc<dyn FullConsensus<N>>,
+        consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
         payload_validator: V,
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
@@ -843,17 +850,17 @@ where
             match self.insert_block_without_senders(block) {
                 Ok(status) => {
                     let status = match status {
-                        InsertPayloadOk2::Inserted(BlockStatus2::Valid) => {
+                        InsertPayloadOk::Inserted(BlockStatus::Valid) => {
                             latest_valid_hash = Some(block_hash);
                             self.try_connect_buffered_blocks(num_hash)?;
                             PayloadStatusEnum::Valid
                         }
-                        InsertPayloadOk2::AlreadySeen(BlockStatus2::Valid) => {
+                        InsertPayloadOk::AlreadySeen(BlockStatus::Valid) => {
                             latest_valid_hash = Some(block_hash);
                             PayloadStatusEnum::Valid
                         }
-                        InsertPayloadOk2::Inserted(BlockStatus2::Disconnected { .. }) |
-                        InsertPayloadOk2::AlreadySeen(BlockStatus2::Disconnected { .. }) => {
+                        InsertPayloadOk::Inserted(BlockStatus::Disconnected { .. }) |
+                        InsertPayloadOk::AlreadySeen(BlockStatus::Disconnected { .. }) => {
                             // not known to be invalid, but we don't know anything else
                             PayloadStatusEnum::Syncing
                         }
@@ -934,7 +941,7 @@ where
         while current_canonical_number > current_number {
             if let Some(block) = self.executed_block_by_hash(old_hash)? {
                 old_chain.push(block.clone());
-                old_hash = block.block.header.parent_hash();
+                old_hash = block.block.parent_hash();
                 current_canonical_number -= 1;
             } else {
                 // This shouldn't happen as we're walking back the canonical chain
@@ -950,7 +957,7 @@ where
         // a common ancestor (fork block) is reached.
         while old_hash != current_hash {
             if let Some(block) = self.executed_block_by_hash(old_hash)? {
-                old_hash = block.block.header.parent_hash();
+                old_hash = block.block.parent_hash();
                 old_chain.push(block);
             } else {
                 // This shouldn't happen as we're walking back the canonical chain
@@ -1080,7 +1087,7 @@ where
 
         // 2. ensure we can apply a new chain update for the head block
         if let Some(chain_update) = self.on_new_head(state.head_block_hash)? {
-            let tip = chain_update.tip().header.clone();
+            let tip = chain_update.tip().clone_sealed_header();
             self.on_canonical_chain_update(chain_update);
 
             // update the safe and finalized blocks and ensure their values are valid
@@ -1615,8 +1622,11 @@ where
         hash: B256,
     ) -> ProviderResult<Option<SealedHeader<N::BlockHeader>>> {
         // check memory first
-        let block =
-            self.state.tree_state.block_by_hash(hash).map(|block| block.as_ref().clone().header);
+        let block = self
+            .state
+            .tree_state
+            .block_by_hash(hash)
+            .map(|block| block.as_ref().clone_sealed_header());
 
         if block.is_some() {
             Ok(block)
@@ -1799,7 +1809,7 @@ where
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_header(block) {
+        if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
@@ -1833,7 +1843,7 @@ where
                 Ok(res) => {
                     debug!(target: "engine::tree", child =?child_num_hash, ?res, "connected buffered block");
                     if self.is_sync_target_head(child_num_hash.hash) &&
-                        matches!(res, InsertPayloadOk2::Inserted(BlockStatus2::Valid))
+                        matches!(res, InsertPayloadOk::Inserted(BlockStatus::Valid))
                     {
                         self.make_canonical(child_num_hash.hash)?;
                     }
@@ -1858,10 +1868,10 @@ where
     fn buffer_block_without_senders(
         &mut self,
         block: SealedBlockFor<N::Block>,
-    ) -> Result<(), InsertBlockErrorTwo<N::Block>> {
+    ) -> Result<(), InsertBlockError<N::Block>> {
         match block.try_seal_with_senders() {
             Ok(block) => self.buffer_block(block),
-            Err(block) => Err(InsertBlockErrorTwo::sender_recovery_error(block)),
+            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
         }
     }
 
@@ -1869,9 +1879,9 @@ where
     fn buffer_block(
         &mut self,
         block: SealedBlockWithSenders<N::Block>,
-    ) -> Result<(), InsertBlockErrorTwo<N::Block>> {
+    ) -> Result<(), InsertBlockError<N::Block>> {
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertBlockErrorTwo::consensus_error(err, block.block))
+            return Err(InsertBlockError::consensus_error(err, block.block))
         }
         self.state.buffer.insert_block(block);
         Ok(())
@@ -2029,7 +2039,7 @@ where
         // update the tracked canonical head
         self.state.tree_state.set_canonical_head(chain_update.tip().num_hash());
 
-        let tip = chain_update.tip().header.clone();
+        let tip = chain_update.tip().clone_sealed_header();
         let notification = chain_update.to_chain_notification();
 
         // reinsert any missing reorged blocks
@@ -2143,7 +2153,7 @@ where
 
         // try to append the block
         match self.insert_block(block) {
-            Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid)) => {
+            Ok(InsertPayloadOk::Inserted(BlockStatus::Valid)) => {
                 if self.is_sync_target_head(block_num_hash.hash) {
                     trace!(target: "engine::tree", "appended downloaded sync target block");
 
@@ -2156,10 +2166,7 @@ where
                 trace!(target: "engine::tree", "appended downloaded block");
                 self.try_connect_buffered_blocks(block_num_hash)?;
             }
-            Ok(InsertPayloadOk2::Inserted(BlockStatus2::Disconnected {
-                head,
-                missing_ancestor,
-            })) => {
+            Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected { head, missing_ancestor })) => {
                 // block is not connected to the canonical head, we need to download
                 // its missing branch first
                 return Ok(self.on_disconnected_downloaded_block(
@@ -2168,7 +2175,7 @@ where
                     head,
                 ))
             }
-            Ok(InsertPayloadOk2::AlreadySeen(_)) => {
+            Ok(InsertPayloadOk::AlreadySeen(_)) => {
                 trace!(target: "engine::tree", "downloaded block already executed");
             }
             Err(err) => {
@@ -2185,29 +2192,29 @@ where
     fn insert_block_without_senders(
         &mut self,
         block: SealedBlockFor<N::Block>,
-    ) -> Result<InsertPayloadOk2, InsertBlockErrorTwo<N::Block>> {
+    ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
         match block.try_seal_with_senders() {
             Ok(block) => self.insert_block(block),
-            Err(block) => Err(InsertBlockErrorTwo::sender_recovery_error(block)),
+            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
         }
     }
 
     fn insert_block(
         &mut self,
         block: SealedBlockWithSenders<N::Block>,
-    ) -> Result<InsertPayloadOk2, InsertBlockErrorTwo<N::Block>> {
+    ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
         self.insert_block_inner(block.clone())
-            .map_err(|kind| InsertBlockErrorTwo::new(block.block, kind))
+            .map_err(|kind| InsertBlockError::new(block.block, kind))
     }
 
     fn insert_block_inner(
         &mut self,
         block: SealedBlockWithSenders<N::Block>,
-    ) -> Result<InsertPayloadOk2, InsertBlockErrorKindTwo> {
+    ) -> Result<InsertPayloadOk, InsertBlockErrorKind> {
         debug!(target: "engine::tree", block=?block.num_hash(), parent = ?block.parent_hash(), state_root = ?block.state_root(), "Inserting new block into tree");
 
         if self.block_by_hash(block.hash())?.is_some() {
-            return Ok(InsertPayloadOk2::AlreadySeen(BlockStatus2::Valid))
+            return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid))
         }
 
         let start = Instant::now();
@@ -2229,7 +2236,7 @@ where
 
             self.state.buffer.insert_block(block);
 
-            return Ok(InsertPayloadOk2::Inserted(BlockStatus2::Disconnected {
+            return Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected {
                 head: self.state.tree_state.current_canonical_head,
                 missing_ancestor,
             }))
@@ -2237,14 +2244,23 @@ where
 
         // now validate against the parent
         let parent_block = self.sealed_header_by_hash(block.parent_hash())?.ok_or_else(|| {
-            InsertBlockErrorKindTwo::Provider(ProviderError::HeaderNotFound(
+            InsertBlockErrorKind::Provider(ProviderError::HeaderNotFound(
                 block.parent_hash().into(),
             ))
         })?;
-        if let Err(e) = self.consensus.validate_header_against_parent(&block, &parent_block) {
+        if let Err(e) =
+            self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
+        {
             warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
             return Err(e.into())
         }
+
+        // Use cached state provider before executing, this does nothing currently, will be used in
+        // prewarming
+        let caches = ProviderCacheBuilder::default().build_caches();
+        let cache_metrics = CachedStateMetrics::zeroed();
+        let state_provider =
+            CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
         trace!(target: "engine::tree", block=?block.num_hash(), "Executing block");
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
@@ -2265,7 +2281,7 @@ where
                 let state_root_config = StateRootConfig::new_from_input(
                     consistent_view.clone(),
                     self.compute_trie_input(consistent_view.clone(), block.header().parent_hash())
-                        .map_err(|e| InsertBlockErrorKindTwo::Other(Box::new(e)))?,
+                        .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
                 );
 
                 let provider_ro = consistent_view.provider_ro()?;
@@ -2352,6 +2368,19 @@ where
                                 task_elapsed = ?time_from_last_update,
                                 "Task state root finished"
                             );
+
+                            if task_state_root != block.header().state_root() {
+                                debug!(target: "engine::tree", "Task state root does not match block state root");
+                                let (regular_root, regular_updates) =
+                                    state_provider.state_root_with_updates(hashed_state.clone())?;
+
+                                if regular_root == block.header().state_root() {
+                                    compare_trie_updates(&task_trie_updates, &regular_updates);
+                                } else {
+                                    debug!(target: "engine::tree", "Regular state root does not match block state root");
+                                }
+                            }
+
                             (task_state_root, task_trie_updates, time_from_last_update)
                         }
                         Err(error) => {
@@ -2383,7 +2412,7 @@ where
                                 state_provider.state_root_with_updates(hashed_state.clone())?;
                             (root, updates, root_time.elapsed())
                         }
-                        Err(error) => return Err(InsertBlockErrorKindTwo::Other(Box::new(error))),
+                        Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
                     }
                 }
             } else {
@@ -2393,7 +2422,7 @@ where
                 (root, updates, root_time.elapsed())
             };
 
-            Result::<_, InsertBlockErrorKindTwo>::Ok((
+            Result::<_, InsertBlockErrorKind>::Ok((
                 state_root,
                 trie_updates,
                 hashed_state,
@@ -2448,7 +2477,7 @@ where
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         debug!(target: "engine::tree", block=?BlockNumHash::new(block_number, block_hash), "Finished inserting block");
-        Ok(InsertPayloadOk2::Inserted(BlockStatus2::Valid))
+        Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
     }
 
     /// Compute state root for the given hashed post state in parallel.
@@ -2508,7 +2537,7 @@ where
     /// Returns the proper payload status response if the block is invalid.
     fn on_insert_block_error(
         &mut self,
-        error: InsertBlockErrorTwo<N::Block>,
+        error: InsertBlockError<N::Block>,
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
         let (block, error) = error.split();
 
@@ -2528,7 +2557,7 @@ where
         };
 
         // keep track of the invalid header
-        self.state.invalid_headers.insert(block.header.block_with_parent());
+        self.state.invalid_headers.insert(block.block_with_parent());
         Ok(PayloadStatus::new(
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
@@ -2746,16 +2775,34 @@ where
     }
 }
 
-/// This is an error that can come from advancing persistence. Either this can be a
-/// [`TryRecvError`], or this can be a [`ProviderError`]
-#[derive(Debug, thiserror::Error)]
-pub enum AdvancePersistenceError {
-    /// An error that can be from failing to receive a value from persistence
-    #[error(transparent)]
-    RecvError(#[from] TryRecvError),
-    /// A provider error
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
+/// Block inclusion can be valid, accepted, or invalid. Invalid blocks are returned as an error
+/// variant.
+///
+/// If we don't know the block's parent, we return `Disconnected`, as we can't claim that the block
+/// is valid or not.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BlockStatus {
+    /// The block is valid and block extends canonical chain.
+    Valid,
+    /// The block may be valid and has an unknown missing ancestor.
+    Disconnected {
+        /// Current canonical head.
+        head: BlockNumHash,
+        /// The lowest ancestor block that is not connected to the canonical chain.
+        missing_ancestor: BlockNumHash,
+    },
+}
+
+/// How a payload was inserted if it was valid.
+///
+/// If the payload was valid, but has already been seen, [`InsertPayloadOk::AlreadySeen(_)`] is
+/// returned, otherwise [`InsertPayloadOk::Inserted(_)`] is returned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InsertPayloadOk {
+    /// The payload was valid, but we have already seen it.
+    AlreadySeen(BlockStatus),
+    /// The payload was valid and inserted into the tree.
+    Inserted(BlockStatus),
 }
 
 #[cfg(test)]
@@ -2767,10 +2814,10 @@ mod tests {
     use alloy_rlp::Decodable;
     use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar};
     use assert_matches::assert_matches;
-    use reth_beacon_consensus::EthBeaconConsensus;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
     use reth_engine_primitives::ForkchoiceStatus;
+    use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_primitives::{Block, BlockExt, EthPrimitives};
@@ -2980,7 +3027,7 @@ mod tests {
         fn insert_block(
             &mut self,
             block: SealedBlockWithSenders,
-        ) -> Result<InsertPayloadOk2, InsertBlockErrorTwo<Block>> {
+        ) -> Result<InsertPayloadOk, InsertBlockError<Block>> {
             let execution_outcome = self.block_builder.get_execution_outcome(block.clone());
             self.extend_execution_outcome([execution_outcome]);
             self.tree.provider.add_state_root(block.state_root);
@@ -3337,7 +3384,7 @@ mod tests {
         let outcome = test_harness.tree.insert_block_without_senders(sealed.clone()).unwrap();
         assert_eq!(
             outcome,
-            InsertPayloadOk2::Inserted(BlockStatus2::Disconnected {
+            InsertPayloadOk::Inserted(BlockStatus::Disconnected {
                 head: test_harness.tree.state.tree_state.current_canonical_head,
                 missing_ancestor: sealed.parent_num_hash()
             })
