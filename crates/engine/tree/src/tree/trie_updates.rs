@@ -52,7 +52,10 @@ impl StorageTrieDiffEntry {
     fn log_differences(self, address: B256) {
         match self {
             Self::Existence(task, regular) => {
-                debug!(target: "engine::tree", ?address, ?task, ?regular, "Difference in storage trie existence");
+                // It is expected to have more storage tries in the regular trie than in the task
+                if task && !regular {
+                    debug!(target: "engine::tree", ?address, ?task, ?regular, "Difference in storage trie existence");
+                }
             }
             Self::Value(mut storage_diff) => {
                 if let Some((task, regular)) = storage_diff.is_deleted {
