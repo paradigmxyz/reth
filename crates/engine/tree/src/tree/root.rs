@@ -1,6 +1,6 @@
 //! State root task related functionality.
 
-use alloy_primitives::{map::HashSet, Address};
+use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
@@ -101,7 +101,7 @@ impl<Factory> StateRootConfig<Factory> {
 #[derive(Debug)]
 pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     /// Prefetch proof targets
-    PrefetchProofs(HashSet<Address>),
+    PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
@@ -340,21 +340,19 @@ where
     fn on_prefetch_proof(
         scope: &rayon::Scope<'env>,
         config: StateRootConfig<Factory>,
-        targets: HashSet<Address>,
+        targets: MultiProofTargets,
         fetched_proof_targets: &mut MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
         thread_pool: Arc<rayon::ThreadPool>,
     ) {
-        let proof_targets =
-            targets.into_iter().map(|address| (keccak256(address), Default::default())).collect();
-        extend_multi_proof_targets_ref(fetched_proof_targets, &proof_targets);
+        extend_multi_proof_targets_ref(fetched_proof_targets, &targets);
 
         Self::spawn_multiproof(
             scope,
             config,
             Default::default(),
-            proof_targets,
+            targets,
             proof_sequence_number,
             state_root_message_sender,
             thread_pool,
