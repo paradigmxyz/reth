@@ -32,7 +32,7 @@ use crate::metrics::ParallelStateRootMetrics;
 
 /// TODO:
 #[derive(Debug)]
-pub struct ParallelProof<'env, Factory> {
+pub struct ParallelProof<Factory> {
     /// Consistent view of the database.
     view: ConsistentDbView<Factory>,
     /// The sorted collection of cached in-memory intermediate trie nodes that
@@ -47,20 +47,20 @@ pub struct ParallelProof<'env, Factory> {
     /// Flag indicating whether to include branch node hash masks in the proof.
     collect_branch_node_hash_masks: bool,
     /// Thread pool for local tasks
-    thread_pool: &'env rayon::ThreadPool,
+    thread_pool: Arc<rayon::ThreadPool>,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
 }
 
-impl<'env, Factory> ParallelProof<'env, Factory> {
+impl<Factory> ParallelProof<Factory> {
     /// Create new state proof generator.
     pub fn new(
         view: ConsistentDbView<Factory>,
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
-        thread_pool: &'env rayon::ThreadPool,
+        thread_pool: Arc<rayon::ThreadPool>,
     ) -> Self {
         Self {
             view,
@@ -81,7 +81,7 @@ impl<'env, Factory> ParallelProof<'env, Factory> {
     }
 }
 
-impl<Factory> ParallelProof<'_, Factory>
+impl<Factory> ParallelProof<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader>
         + StateCommitmentProvider
@@ -407,7 +407,7 @@ mod tests {
                 Default::default(),
                 Default::default(),
                 Default::default(),
-                &state_root_task_pool
+                Arc::new(state_root_task_pool)
             )
             .multiproof(targets.clone())
             .unwrap(),

@@ -260,7 +260,7 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 /// to the tree.
 /// Then it updates relevant leaves according to the result of the transaction.
 #[derive(Debug)]
-pub struct StateRootTask<'env, Factory, BPF: BlindedProviderFactory> {
+pub struct StateRootTask<Factory, BPF: BlindedProviderFactory> {
     /// Task configuration.
     config: StateRootConfig<Factory>,
     /// Receiver for state root related messages.
@@ -275,10 +275,10 @@ pub struct StateRootTask<'env, Factory, BPF: BlindedProviderFactory> {
     /// progress.
     sparse_trie: Option<Box<SparseStateTrie<BPF>>>,
     /// Reference to the shared thread pool for parallel proof generation
-    thread_pool: &'env rayon::ThreadPool,
+    thread_pool: Arc<rayon::ThreadPool>,
 }
 
-impl<'env, Factory, BPF> StateRootTask<'env, Factory, BPF>
+impl<'env, Factory, BPF> StateRootTask<Factory, BPF>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader>
         + StateCommitmentProvider
@@ -294,7 +294,7 @@ where
     pub fn new(
         config: StateRootConfig<Factory>,
         blinded_provider: BPF,
-        thread_pool: &'env rayon::ThreadPool,
+        thread_pool: Arc<rayon::ThreadPool>,
     ) -> Self {
         let (tx, rx) = channel();
 
@@ -344,7 +344,7 @@ where
         fetched_proof_targets: &mut MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
-        thread_pool: &'env rayon::ThreadPool,
+        thread_pool: Arc<rayon::ThreadPool>,
     ) {
         let proof_targets =
             targets.into_iter().map(|address| (keccak256(address), Default::default())).collect();
@@ -371,7 +371,7 @@ where
         fetched_proof_targets: &mut MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
-        thread_pool: &'env rayon::ThreadPool,
+        thread_pool: Arc<rayon::ThreadPool>,
     ) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
@@ -396,7 +396,7 @@ where
         proof_targets: MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
-        thread_pool: &'env rayon::ThreadPool,
+        thread_pool: Arc<rayon::ThreadPool>,
     ) {
         // Dispatch proof gathering for this state update
         scope.spawn(move |_| {
@@ -533,7 +533,7 @@ where
                             &mut self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
-                            self.thread_pool,
+                            self.thread_pool.clone(),
                         );
                     }
                     StateRootMessage::StateUpdate(update) => {
@@ -557,7 +557,7 @@ where
                             &mut self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
-                            self.thread_pool,
+                            self.thread_pool.clone(),
                         );
                     }
                     StateRootMessage::FinishedStateUpdates => {
@@ -735,7 +735,7 @@ fn get_proof_targets(
 /// Calculate multiproof for the targets.
 #[inline]
 fn calculate_multiproof<Factory>(
-    thread_pool: &rayon::ThreadPool,
+    thread_pool: Arc<rayon::ThreadPool>,
     config: StateRootConfig<Factory>,
     proof_targets: MultiProofTargets,
 ) -> ProviderResult<MultiProof>
@@ -993,7 +993,11 @@ mod tests {
             .expect("Failed to create proof worker thread pool");
 
         let (root_from_task, _) = std::thread::scope(|std_scope| {
-            let task = StateRootTask::new(config, blinded_provider_factory, &state_root_task_pool);
+            let task = StateRootTask::new(
+                config,
+                blinded_provider_factory,
+                Arc::new(state_root_task_pool),
+            );
             let mut state_hook = task.state_hook();
             let handle = task.spawn(std_scope);
 
