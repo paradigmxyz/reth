@@ -162,11 +162,10 @@ impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref, DerefMut)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref)]
 pub struct SealedBlock<H = Header, B = BlockBody> {
     /// Locked block header.
     #[deref]
-    #[deref_mut]
     header: SealedHeader<H>,
     /// Block body.
     body: B,
@@ -396,6 +395,52 @@ where
 {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(Self { header: u.arbitrary()?, body: u.arbitrary()? })
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl<H, B> SealedBlock<H, B>
+where
+    H: reth_primitives_traits::test_utils::TestHeader,
+{
+    /// Returns a mutable reference to the header.
+    pub fn header_mut(&mut self) -> &mut H {
+        self.header.header_mut()
+    }
+
+    /// Returns a mutable reference to the header.
+    pub fn body_mut(&mut self) -> &mut B {
+        &mut self.body
+    }
+
+    /// Updates the block header.
+    pub fn set_header(&mut self, header: H) {
+        self.header.set_header(header)
+    }
+
+    /// Updates the block hash.
+    pub fn set_hash(&mut self, hash: alloy_primitives::BlockHash) {
+        self.header.set_hash(hash);
+    }
+
+    /// Updates the parent block hash.
+    pub fn set_parent_hash(&mut self, hash: alloy_primitives::BlockHash) {
+        self.header.set_parent_hash(hash);
+    }
+
+    /// Updates the block number.
+    pub fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
+        self.header.set_block_number(number);
+    }
+
+    /// Updates the block state root.
+    pub fn set_state_root(&mut self, state_root: B256) {
+        self.header.set_state_root(state_root);
+    }
+
+    /// Updates the block difficulty.
+    pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
+        self.header.set_difficulty(difficulty);
     }
 }
 

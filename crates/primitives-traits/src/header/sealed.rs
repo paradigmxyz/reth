@@ -149,6 +149,11 @@ impl<H: crate::test_utils::TestHeader> SealedHeader<H> {
         self.hash = hash
     }
 
+    /// Returns a mutable reference to the header.
+    pub fn header_mut(&mut self) -> &mut H {
+        &mut self.header
+    }
+
     /// Updates the parent block hash.
     pub fn set_parent_hash(&mut self, hash: BlockHash) {
         self.header.set_parent_hash(hash);
