@@ -187,6 +187,7 @@ impl<B: Block> RecoveredBlock<B> {
     }
 
     /// Consumes the type and returns its components.
+    #[doc(alias = "into_components")]
     pub fn split(self) -> (B, Vec<Address>) {
         (self.block, self.senders)
     }

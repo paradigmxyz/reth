@@ -35,6 +35,7 @@ impl<B> SealedBlock2<B> {
     }
 
     /// Consumes the type and returns its components.
+    #[doc(alias = "into_components")]
     pub fn split(self) -> (B, BlockHash) {
         (self.block, self.hash)
     }
