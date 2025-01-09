@@ -233,7 +233,7 @@ where
                         .into_iter()
                         .map(|b| {
                             let senders = b.senders().unwrap_or_default();
-                            OrderedSealedBlockWithSenders(SealedBlockWithSenders::new_unchecked(
+                            OrderedSealedBlockWithSenders(SealedBlockWithSenders::new_unhashed(
                                 b, senders,
                             ))
                         })
@@ -289,7 +289,7 @@ impl<B: Block> Ord for OrderedSealedBlockWithSenders<B> {
 impl<B: Block> From<SealedBlockFor<B>> for OrderedSealedBlockWithSenders<B> {
     fn from(block: SealedBlockFor<B>) -> Self {
         let senders = block.senders().unwrap_or_default();
-        Self(SealedBlockWithSenders::new_unchecked(block, senders))
+        Self(SealedBlockWithSenders::new_unhashed(block, senders))
     }
 }
 

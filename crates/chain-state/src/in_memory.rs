@@ -648,7 +648,7 @@ impl<N: NodePrimitives> BlockState<N> {
     pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders<N::Block> {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
-        SealedBlockWithSenders::new_unchecked(block, senders)
+        SealedBlockWithSenders::new_unhashed(block, senders)
     }
 
     /// Returns the hash of executed block that determines the state.
@@ -840,7 +840,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     ///
     /// Note: this clones the block and senders.
     pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders<N::Block> {
-        SealedBlockWithSenders::new_unchecked((*self.block).clone(), (*self.senders).clone())
+        SealedBlockWithSenders::new_unhashed((*self.block).clone(), (*self.senders).clone())
     }
 
     /// Returns a reference to the block's execution outcome

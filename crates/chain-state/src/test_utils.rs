@@ -177,7 +177,8 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             },
         );
 
-        SealedBlockWithSenders::new(block, vec![self.signer; num_txs as usize]).unwrap()
+        SealedBlockWithSenders::try_new_unhashed(block, vec![self.signer; num_txs as usize])
+            .unwrap()
     }
 
     /// Creates a fork chain with the given base block.

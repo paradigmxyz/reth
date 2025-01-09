@@ -647,7 +647,7 @@ mod tests {
         let sealed_blocks = sealed_headers
             .iter()
             .map(|header| {
-                SealedBlockWithSenders::new(
+                SealedBlockWithSenders::try_new_unhashed(
                     SealedBlock::new(header.clone(), BlockBody::default()),
                     vec![],
                 )

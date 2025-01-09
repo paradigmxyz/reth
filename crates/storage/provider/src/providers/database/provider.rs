@@ -1294,7 +1294,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             range,
             |range| self.sealed_headers_range(range),
             |header, body, senders| {
-                SealedBlockWithSenders::new(SealedBlock::new(header, body), senders)
+                SealedBlockWithSenders::try_new_unhashed(SealedBlock::new(header, body), senders)
                     .ok_or(ProviderError::SenderRecoveryError)
             },
         )

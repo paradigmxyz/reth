@@ -69,8 +69,11 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>,
 {
     provider_rw.insert_block(
-        SealedBlockWithSenders::new(SealedBlock::new(header.clone(), Default::default()), vec![])
-            .expect("no senders or txes"),
+        SealedBlockWithSenders::try_new_unhashed(
+            SealedBlock::new(header.clone(), Default::default()),
+            vec![],
+        )
+        .expect("no senders or txes"),
         StorageLocation::Database,
     )?;
 

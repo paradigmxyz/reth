@@ -504,7 +504,7 @@ impl<B: reth_primitives_traits::Block> Default for SealedBlockWithSenders<B> {
 
 impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
     /// New sealed block with sender
-    pub const fn new_unchecked(
+    pub const fn new_unhashed(
         block: SealedBlock<B::Header, B::Body>,
         senders: Vec<Address>,
     ) -> Self {
@@ -512,7 +512,10 @@ impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
     }
 
     /// New sealed block with sender. Return none if len of tx and senders does not match
-    pub fn new(block: SealedBlock<B::Header, B::Body>, senders: Vec<Address>) -> Option<Self> {
+    pub fn try_new_unhashed(
+        block: SealedBlock<B::Header, B::Body>,
+        senders: Vec<Address>,
+    ) -> Option<Self> {
         (block.body.transactions().len() == senders.len()).then_some(Self { block, senders })
     }
 }
@@ -1017,9 +1020,9 @@ mod tests {
             Some(BlockWithSenders { block: block.clone(), senders: vec![sender] })
         );
         let sealed = block.seal_slow();
-        assert_eq!(SealedBlockWithSenders::<Block>::new(sealed.clone(), vec![]), None);
+        assert_eq!(SealedBlockWithSenders::<Block>::try_new_unhashed(sealed.clone(), vec![]), None);
         assert_eq!(
-            SealedBlockWithSenders::<Block>::new(sealed.clone(), vec![sender]),
+            SealedBlockWithSenders::<Block>::try_new_unhashed(sealed.clone(), vec![sender]),
             Some(SealedBlockWithSenders { block: sealed, senders: vec![sender] })
         );
     }

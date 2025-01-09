@@ -243,7 +243,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
                 let senders = block.senders().expect("sender recovery failed");
                 let block_with_senders =
-                    SealedBlockWithSenders::<BlockTy<N>>::new(block.clone(), senders).unwrap();
+                    SealedBlockWithSenders::<BlockTy<N>>::try_new_unhashed(block.clone(), senders)
+                        .unwrap();
 
                 let state_provider = blockchain_db.latest()?;
                 let db = StateProviderDatabase::new(&state_provider);

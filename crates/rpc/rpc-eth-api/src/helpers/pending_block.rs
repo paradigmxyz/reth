@@ -426,6 +426,6 @@ pub trait LoadPendingBlock:
             results,
         );
 
-        Ok((SealedBlockWithSenders::new_unchecked(block.seal_slow(), senders), receipts))
+        Ok((SealedBlockWithSenders::new_unhashed(block.seal_slow(), senders), receipts))
     }
 }

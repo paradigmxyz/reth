@@ -1211,7 +1211,7 @@ mod tests {
 
         assert_eq!(
             provider.pending_block_with_senders()?,
-            Some(reth_primitives::SealedBlockWithSenders::new_unchecked(
+            Some(reth_primitives::SealedBlockWithSenders::new_unhashed(
                 block.clone(),
                 block.senders().unwrap()
             ))

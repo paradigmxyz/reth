@@ -3004,7 +3004,7 @@ mod tests {
                 blocks
                     .into_iter()
                     .map(|b| {
-                        SealedBlockWithSenders::new_unchecked(
+                        SealedBlockWithSenders::new_unhashed(
                             (*b.block).clone(),
                             b.senders().clone(),
                         )
