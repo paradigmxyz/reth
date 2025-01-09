@@ -9,9 +9,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_consensus::{BlockHeader, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS;
+use alloy_eips::{eip7840::BlobParams, merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS};
 use alloy_primitives::U256;
-use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{
     Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput,
 };
@@ -56,16 +56,16 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         parent: &SealedHeader<H>,
     ) -> Result<(), ConsensusError> {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
-        let parent_gas_limit =
-            if self.chain_spec.fork(EthereumHardfork::London).transitions_at_block(header.number())
-            {
-                parent.gas_limit() *
-                    self.chain_spec
-                        .base_fee_params_at_timestamp(header.timestamp())
-                        .elasticity_multiplier as u64
-            } else {
-                parent.gas_limit()
-            };
+        let parent_gas_limit = if !self.chain_spec.is_london_active_at_block(parent.number()) &&
+            self.chain_spec.is_london_active_at_block(header.number())
+        {
+            parent.gas_limit() *
+                self.chain_spec
+                    .base_fee_params_at_timestamp(header.timestamp())
+                    .elasticity_multiplier as u64
+        } else {
+            parent.gas_limit()
+        };
 
         // Check for an increase in gas limit beyond the allowed threshold.
         if header.gas_limit() > parent_gas_limit {
@@ -116,18 +116,17 @@ where
     H: BlockHeader,
     B: BlockBody,
 {
+    type Error = ConsensusError;
+
     fn validate_body_against_header(
         &self,
         body: &B,
         header: &SealedHeader<H>,
-    ) -> Result<(), ConsensusError> {
+    ) -> Result<(), Self::Error> {
         validate_body_against_header(body, header.header())
     }
 
-    fn validate_block_pre_execution(
-        &self,
-        block: &SealedBlock<H, B>,
-    ) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(&self, block: &SealedBlock<H, B>) -> Result<(), Self::Error> {
         validate_block_pre_execution(block, &self.chain_spec)
     }
 }
@@ -195,7 +194,13 @@ where
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp()) {
-            validate_against_parent_4844(header.header(), parent.header())?;
+            let blob_params = if self.chain_spec.is_prague_active_at_timestamp(header.timestamp()) {
+                BlobParams::prague()
+            } else {
+                BlobParams::cancun()
+            };
+
+            validate_against_parent_4844(header.header(), parent.header(), blob_params)?;
         }
 
         Ok(())
@@ -204,12 +209,10 @@ where
     fn validate_header_with_total_difficulty(
         &self,
         header: &H,
-        total_difficulty: U256,
+        _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
-        let is_post_merge = self
-            .chain_spec
-            .fork(EthereumHardfork::Paris)
-            .active_at_ttd(total_difficulty, header.difficulty());
+        let is_post_merge =
+            self.chain_spec.is_paris_active_at_block(header.number()).is_some_and(|active| active);
 
         if is_post_merge {
             // TODO: add `is_zero_difficulty` to `alloy_consensus::BlockHeader` trait

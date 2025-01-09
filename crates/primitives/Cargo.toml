@@ -53,7 +53,6 @@ derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
 once_cell.workspace = true
 rand = { workspace = true, optional = true }
-rayon.workspace = true
 serde.workspace = true
 serde_with = { workspace = true, optional = true }
 
@@ -64,7 +63,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 # eth
 reth-chainspec = { workspace = true, features = ["arbitrary"] }
 reth-codecs = { workspace = true, features = ["test-utils"] }
-reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
+reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-testing-utils.workspace = true
 reth-trie-common = { workspace = true, features = ["arbitrary"] }
 revm-primitives = { workspace = true, features = ["arbitrary"] }
@@ -118,7 +117,8 @@ std = [
 	"reth-trie-common/std",
 	"op-alloy-consensus?/std",
 	"op-alloy-rpc-types?/std",
-	"serde_json/std"
+	"serde_json/std",
+	"reth-chainspec/std"
 ]
 reth-codec = [
 	"dep:reth-codecs",

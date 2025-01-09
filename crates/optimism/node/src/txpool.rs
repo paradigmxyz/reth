@@ -9,10 +9,10 @@ use parking_lot::RwLock;
 use reth_chainspec::ChainSpec;
 use reth_node_api::{Block, BlockBody};
 use reth_optimism_evm::RethL1BlockInfo;
-use reth_optimism_primitives::OpTransactionSigned;
+use reth_optimism_primitives::{OpBlock, OpTransactionSigned};
 use reth_primitives::{
     transaction::TransactionConversionError, GotExpected, InvalidTransactionError, RecoveredTx,
-    SealedBlock, TransactionSigned,
+    SealedBlock,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
@@ -30,14 +30,21 @@ use std::sync::{
 
 /// Type alias for default optimism transaction pool
 pub type OpTransactionPool<Client, S> = Pool<
-    TransactionValidationTaskExecutor<OpTransactionValidator<Client, EthPooledTransaction>>,
-    CoinbaseTipOrdering<EthPooledTransaction>,
+    TransactionValidationTaskExecutor<OpTransactionValidator<Client, OpPooledTransaction>>,
+    CoinbaseTipOrdering<OpPooledTransaction>,
     S,
 >;
 
 /// Pool transaction for OP.
 #[derive(Debug, Clone, derive_more::Deref)]
 pub struct OpPooledTransaction(EthPooledTransaction<OpTransactionSigned>);
+
+impl OpPooledTransaction {
+    /// Create new instance of [Self].
+    pub fn new(transaction: RecoveredTx<OpTransactionSigned>, encoded_length: usize) -> Self {
+        Self(EthPooledTransaction::new(transaction, encoded_length))
+    }
+}
 
 impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for OpPooledTransaction {
     fn from(tx: RecoveredTx<op_alloy_consensus::OpPooledTransaction>) -> Self {
@@ -51,9 +58,9 @@ impl TryFrom<RecoveredTx<OpTransactionSigned>> for OpPooledTransaction {
     type Error = TransactionConversionError;
 
     fn try_from(value: RecoveredTx<OpTransactionSigned>) -> Result<Self, Self::Error> {
-        let (tx, signer) = value.to_components();
+        let (tx, signer) = value.into_parts();
         let pooled: RecoveredTx<op_alloy_consensus::OpPooledTransaction> =
-            RecoveredTx::from_signed_transaction(tx.try_into()?, signer);
+            RecoveredTx::new_unchecked(tx.try_into()?, signer);
         Ok(pooled.into())
     }
 }
@@ -76,8 +83,8 @@ impl PoolTransaction for OpPooledTransaction {
     fn try_consensus_into_pooled(
         tx: RecoveredTx<Self::Consensus>,
     ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
-        let (tx, signer) = tx.to_components();
-        Ok(RecoveredTx::from_signed_transaction(tx.try_into()?, signer))
+        let (tx, signer) = tx.into_parts();
+        Ok(RecoveredTx::new_unchecked(tx.try_into()?, signer))
     }
 
     fn hash(&self) -> &TxHash {
@@ -241,7 +248,7 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
 impl<Client, Tx> OpTransactionValidator<Client, Tx>
 where
     Client: StateProviderFactory + BlockReaderIdExt,
-    Tx: EthPoolTransaction<Consensus = TransactionSigned>,
+    Tx: EthPoolTransaction<Consensus = OpTransactionSigned>,
 {
     /// Create a new [`OpTransactionValidator`].
     pub fn new(inner: EthTransactionValidator<Client, Tx>) -> Self {
@@ -317,7 +324,7 @@ where
             propagate,
         } = outcome
         {
-            let l1_block_info = self.block_info.l1_block_info.read().clone();
+            let mut l1_block_info = self.block_info.l1_block_info.read().clone();
 
             let mut encoded = Vec::with_capacity(valid_tx.transaction().encoded_length());
             let tx = valid_tx.transaction().clone_into_consensus();
@@ -373,8 +380,8 @@ where
 
 impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory + BlockReaderIdExt<Block = reth_primitives::Block>,
-    Tx: EthPoolTransaction<Consensus = TransactionSigned>,
+    Client: StateProviderFactory + BlockReaderIdExt<Block = OpBlock>,
+    Tx: EthPoolTransaction<Consensus = OpTransactionSigned>,
 {
     type Transaction = Tx;
 
@@ -401,7 +408,7 @@ where
         self.inner.on_new_head_block(new_tip_block);
         self.update_l1_block_info(
             new_tip_block.header(),
-            new_tip_block.body.transactions().first(),
+            new_tip_block.body().transactions().first(),
         );
     }
 }
@@ -417,16 +424,17 @@ pub struct OpL1BlockInfo {
 
 #[cfg(test)]
 mod tests {
-    use crate::txpool::OpTransactionValidator;
+    use crate::txpool::{OpPooledTransaction, OpTransactionValidator};
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{PrimitiveSignature as Signature, TxKind, U256};
-    use op_alloy_consensus::TxDeposit;
+    use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
     use reth_chainspec::MAINNET;
-    use reth_primitives::{RecoveredTx, Transaction, TransactionSigned};
+    use reth_optimism_primitives::OpTransactionSigned;
+    use reth_primitives::RecoveredTx;
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
-        blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
-        EthPooledTransaction, TransactionOrigin, TransactionValidationOutcome,
+        blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder, TransactionOrigin,
+        TransactionValidationOutcome,
     };
     #[test]
     fn validate_optimism_transaction() {
@@ -439,7 +447,7 @@ mod tests {
 
         let origin = TransactionOrigin::External;
         let signer = Default::default();
-        let deposit_tx = Transaction::Deposit(TxDeposit {
+        let deposit_tx = OpTypedTransaction::Deposit(TxDeposit {
             source_hash: Default::default(),
             from: signer,
             to: TxKind::Create,
@@ -450,10 +458,10 @@ mod tests {
             input: Default::default(),
         });
         let signature = Signature::test_signature();
-        let signed_tx = TransactionSigned::new_unhashed(deposit_tx, signature);
-        let signed_recovered = RecoveredTx::from_signed_transaction(signed_tx, signer);
+        let signed_tx = OpTransactionSigned::new_unhashed(deposit_tx, signature);
+        let signed_recovered = RecoveredTx::new_unchecked(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();
-        let pooled_tx = EthPooledTransaction::new(signed_recovered, len);
+        let pooled_tx = OpPooledTransaction::new(signed_recovered, len);
         let outcome = validator.validate_one(origin, pooled_tx);
 
         let err = match outcome {

@@ -292,14 +292,14 @@ mod tests {
 
         let tx = db.factory.db_ref().tx_mut().expect("init tx");
         for block in &blocks {
-            TestStageDB::insert_header(None, &tx, &block.header, U256::ZERO)
+            TestStageDB::insert_header(None, &tx, block.sealed_header(), U256::ZERO)
                 .expect("insert block header");
         }
         tx.commit().expect("commit tx");
 
         let mut receipts = Vec::new();
         for block in &blocks {
-            for transaction in &block.body.transactions {
+            for transaction in &block.body().transactions {
                 receipts
                     .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
             }

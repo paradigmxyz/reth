@@ -1,7 +1,12 @@
 //! Database access for `eth_` transaction RPC methods. Loads transaction and receipt data w.r.t.
 //! network.
 
-use alloy_consensus::{BlockHeader, Transaction};
+use super::{EthApiSpec, EthSigner, LoadBlock, LoadReceipt, LoadState, SpawnBlocking};
+use crate::{
+    helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
+    RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
+};
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Transaction};
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::TransactionBuilder;
@@ -9,24 +14,16 @@ use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, SealedBlockWithSenders, TransactionMeta,
-};
+use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, SealedBlockWithSenders};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError, SignError, TransactionSource};
-use reth_rpc_types_compat::transaction::{from_recovered, from_recovered_with_block_context};
+use reth_rpc_types_compat::transaction::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
-
-use super::{EthApiSpec, EthSigner, LoadBlock, LoadReceipt, LoadState, SpawnBlocking};
-use crate::{
-    helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
-    RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
-};
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
@@ -94,7 +91,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             self.cache()
                 .get_sealed_block_with_senders(block)
                 .await
-                .map(|b| b.map(|b| b.body.transactions().to_vec()))
+                .map(|b| b.map(|b| b.body().transactions().to_vec()))
                 .map_err(Self::Error::from_eth_err)
         }
     }
@@ -224,11 +221,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         index: Some(index as u64),
                     };
 
-                    return Ok(Some(from_recovered_with_block_context(
-                        tx.clone().with_signer(*signer),
-                        tx_info,
-                        self.tx_resp_builder(),
-                    )?))
+                    return Ok(Some(
+                        self.tx_resp_builder().fill(tx.clone().with_signer(*signer), tx_info)?,
+                    ))
                 }
             }
 
@@ -253,7 +248,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone_into_consensus();
-                    return Ok(Some(from_recovered(transaction, self.tx_resp_builder())?));
+                    return Ok(Some(self.tx_resp_builder().fill_pending(transaction)?));
                 }
             }
 
@@ -304,11 +299,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                                 base_fee: base_fee_per_gas.map(u128::from),
                                 index: Some(index as u64),
                             };
-                            from_recovered_with_block_context(
-                                tx.clone().with_signer(*signer),
-                                tx_info,
-                                self.tx_resp_builder(),
-                            )
+                            self.tx_resp_builder().fill(tx.clone().with_signer(*signer), tx_info)
                         })
                 })
                 .ok_or(EthApiError::HeaderNotFound(block_id))?

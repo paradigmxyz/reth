@@ -40,7 +40,9 @@ impl ForkCondition {
 
     /// Checks whether the fork condition is satisfied at the given block.
     ///
-    /// For TTD conditions, this will only return true if the activation block is already known.
+    /// This will return true if the block number is equal or greater than the activation block of:
+    /// - [`ForkCondition::Block`]
+    /// - [`ForkCondition::TTD`]
     ///
     /// For timestamp conditions, this will always return false.
     pub const fn active_at_block(&self, current_block: BlockNumber) -> bool {
@@ -83,6 +85,11 @@ impl ForkCondition {
         matches!(self, Self::Timestamp(time) if timestamp >= *time && parent_timestamp < *time)
     }
 
+    /// Checks whether the fork condition is satisfied at the given timestamp or number.
+    pub const fn active_at_timestamp_or_number(&self, timestamp: u64, block_number: u64) -> bool {
+        self.active_at_timestamp(timestamp) || self.active_at_block(block_number)
+    }
+
     /// Checks whether the fork condition is satisfied at the given head block.
     ///
     /// This will return true if:
@@ -91,8 +98,7 @@ impl ForkCondition {
     /// - The condition is satisfied by the timestamp;
     /// - or the condition is satisfied by the total difficulty
     pub fn active_at_head(&self, head: &Head) -> bool {
-        self.active_at_block(head.number) ||
-            self.active_at_timestamp(head.timestamp) ||
+        self.active_at_timestamp_or_number(head.timestamp, head.number) ||
             self.active_at_ttd(head.total_difficulty, head.difficulty)
     }
 

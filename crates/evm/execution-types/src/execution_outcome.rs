@@ -1,6 +1,6 @@
 use crate::BlockExecutionOutput;
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{logs_bloom, Address, BlockNumber, Bloom, Log, B256, U256};
+use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives::Receipts;
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie::{HashedPostState, KeyHasher};
@@ -8,7 +8,6 @@ use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,
 };
-use std::collections::HashMap;
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -382,17 +381,11 @@ impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(feature = "optimism"))]
-    use alloy_primitives::bytes;
-    #[cfg(not(feature = "optimism"))]
-    use alloy_primitives::LogData;
-    use alloy_primitives::{Address, B256};
+    use alloy_consensus::TxType;
+    use alloy_primitives::{bytes, Address, LogData, B256};
     use reth_primitives::Receipts;
-    #[cfg(not(feature = "optimism"))]
-    use reth_primitives::TxType;
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_initialisation() {
         // Create a new BundleState object with initial data
         let bundle = BundleState::new(
@@ -403,7 +396,7 @@ mod tests {
 
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
+            receipt_vec: vec![vec![Some(reth_ethereum_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![],
@@ -461,11 +454,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_block_number_to_index() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
+            receipt_vec: vec![vec![Some(reth_ethereum_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![],
@@ -496,11 +488,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_get_logs() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
+            receipt_vec: vec![vec![Some(reth_ethereum_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -528,11 +519,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_receipts_by_block() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
+            receipt_vec: vec![vec![Some(reth_ethereum_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -558,7 +548,7 @@ mod tests {
         // Assert that the receipts for block number 123 match the expected receipts
         assert_eq!(
             receipts_by_block,
-            vec![&Some(reth_primitives::Receipt {
+            vec![&Some(reth_ethereum_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -568,11 +558,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_receipts_len() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
+            receipt_vec: vec![vec![Some(reth_ethereum_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -617,10 +606,9 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_revert_to() {
         // Create a random receipt object
-        let receipt = reth_primitives::Receipt {
+        let receipt = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
@@ -666,10 +654,9 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_extend_execution_outcome() {
         // Create a Receipt object with specific attributes.
-        let receipt = reth_primitives::Receipt {
+        let receipt = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
@@ -710,10 +697,9 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_split_at_execution_outcome() {
         // Create a random receipt object
-        let receipt = reth_primitives::Receipt {
+        let receipt = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],

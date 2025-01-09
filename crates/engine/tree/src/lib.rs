@@ -47,7 +47,7 @@
 //! ## Handling consensus messages
 //!
 //! Consensus message handling is performed by three main components:
-//! 1. The [`EngineHandler`](engine::EngineHandler), which takes incoming consensus mesesages and
+//! 1. The [`EngineHandler`](engine::EngineHandler), which takes incoming consensus messages and
 //!    manages any requested backfill or download work.
 //! 2. The [`EngineApiRequestHandler`](engine::EngineApiRequestHandler), which processes messages
 //!    from the [`EngineHandler`](engine::EngineHandler) and delegates them to the
@@ -91,9 +91,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-
-/// Re-export of the blockchain tree API.
-pub use reth_blockchain_tree_api::*;
 
 /// Support for backfill sync mode.
 pub mod backfill;

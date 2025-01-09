@@ -7,10 +7,8 @@ use crate::{
     PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_eips::{
-    eip4895::{Withdrawal, Withdrawals},
-    BlockHashOrNumber,
-};
+use alloy_consensus::transaction::TransactionMeta;
+use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use core::fmt;
 use reth_chainspec::{ChainInfo, EthereumHardforks};
@@ -20,7 +18,6 @@ use reth_errors::{RethError, RethResult};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
     BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
-    TransactionMeta,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -556,10 +553,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
     ) -> ProviderResult<Option<Withdrawals>> {
         self.provider()?.withdrawals_by_block(id, timestamp)
     }
-
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        self.provider()?.latest_withdrawal()
-    }
 }
 
 impl<N: ProviderNodeTypes> OmmersProvider for ProviderFactory<N> {
@@ -718,10 +711,10 @@ mod tests {
             );
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
-                if sender == block.body.transactions[0].recover_signer().unwrap()
+                if sender == block.body().transactions[0].recover_signer().unwrap()
             );
             assert_matches!(
-                provider.transaction_id(block.body.transactions[0].hash()),
+                provider.transaction_id(block.body().transactions[0].hash()),
                 Ok(Some(0))
             );
         }
@@ -741,7 +734,7 @@ mod tests {
                 Ok(_)
             );
             assert_matches!(provider.transaction_sender(0), Ok(None));
-            assert_matches!(provider.transaction_id(block.body.transactions[0].hash()), Ok(None));
+            assert_matches!(provider.transaction_id(block.body().transactions[0].hash()), Ok(None));
         }
     }
 
@@ -772,13 +765,13 @@ mod tests {
                     .clone()
                     .map(|tx_number| (
                         tx_number,
-                        block.body.transactions[tx_number as usize].recover_signer().unwrap()
+                        block.body().transactions[tx_number as usize].recover_signer().unwrap()
                     ))
                     .collect())
             );
 
             let db_senders = provider.senders_by_tx_range(range);
-            assert_eq!(db_senders, Ok(vec![]));
+            assert!(matches!(db_senders, Ok(ref v) if v.is_empty()));
         }
     }
 

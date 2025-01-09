@@ -16,6 +16,7 @@
 //! - `serde`: Adds serde support for all types.
 //! - `secp256k1`: Adds secp256k1 support for transaction signing/recovery. (By default the no-std
 //!   friendly `k256` is used)
+//! - `rayon`: Uses `rayon` for parallel transaction sender recovery in [`BlockBody`] by default.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -69,10 +70,10 @@ pub use alloy_primitives::{logs_bloom, Log, LogData};
 mod storage;
 pub use storage::StorageEntry;
 
+pub mod sync;
+
 /// Common header types
 pub mod header;
-#[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
-pub use header::test_utils;
 pub use header::{Header, HeaderError, SealedHeader};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
@@ -132,3 +133,11 @@ pub trait MaybeSerdeBincodeCompat {}
 impl<T> MaybeSerdeBincodeCompat for T where T: crate::serde_bincode_compat::SerdeBincodeCompat {}
 #[cfg(not(feature = "serde-bincode-compat"))]
 impl<T> MaybeSerdeBincodeCompat for T {}
+
+/// Utilities for testing.
+#[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
+pub mod test_utils {
+    pub use crate::header::test_utils::{generate_valid_header, valid_header_strategy};
+    #[cfg(feature = "test-utils")]
+    pub use crate::{block::TestBlock, header::test_utils::TestHeader};
+}

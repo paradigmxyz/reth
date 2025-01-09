@@ -184,12 +184,12 @@ where
             if first_sync {
                 cursor_header_numbers.append(
                     RawKey::<BlockHash>::from_vec(hash),
-                    RawValue::<BlockNumber>::from_vec(number),
+                    &RawValue::<BlockNumber>::from_vec(number),
                 )?;
             } else {
                 cursor_header_numbers.insert(
                     RawKey::<BlockHash>::from_vec(hash),
-                    RawValue::<BlockNumber>::from_vec(number),
+                    &RawValue::<BlockNumber>::from_vec(number),
                 )?;
             }
         }
@@ -526,10 +526,7 @@ mod tests {
 
                             // validate the header total difficulty
                             td += header.difficulty;
-                            assert_eq!(
-                                provider.header_td_by_number(block_num)?.map(Into::into),
-                                Some(td)
-                            );
+                            assert_eq!(provider.header_td_by_number(block_num)?, Some(td));
                         }
                     }
                     _ => self.check_no_header_entry_above(initial_checkpoint)?,
@@ -663,7 +660,7 @@ mod tests {
         provider
             .append_blocks_with_state(
                 sealed_blocks,
-                ExecutionOutcome::default(),
+                &ExecutionOutcome::default(),
                 HashedPostStateSorted::default(),
                 TrieUpdates::default(),
             )

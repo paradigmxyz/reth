@@ -4,19 +4,11 @@ use alloy_consensus::TxEip4844;
 use alloy_eips::eip4844::{
     env_settings::EnvKzgSettings, BlobTransactionSidecar, MAX_BLOBS_PER_BLOCK,
 };
-use alloy_primitives::hex;
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use proptest::{
-    prelude::*,
-    strategy::ValueTree,
-    test_runner::{RngAlgorithm, TestRng, TestRunner},
-};
+use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
-
-// constant seed to use for the rng
-const SEED: [u8; 32] = hex!("1337133713371337133713371337133713371337133713371337133713371337");
 
 /// Benchmarks EIP-48444 blob validation.
 fn blob_validation(c: &mut Criterion) {
@@ -35,9 +27,7 @@ fn validate_blob_tx(
     kzg_settings: EnvKzgSettings,
 ) {
     let setup = || {
-        let config = ProptestConfig::default();
-        let rng = TestRng::from_seed(RngAlgorithm::ChaCha, &SEED);
-        let mut runner = TestRunner::new_with_rng(config, rng);
+        let mut runner = TestRunner::deterministic();
 
         // generate tx and sidecar
         let mut tx = arb::<TxEip4844>().new_tree(&mut runner).unwrap().current();

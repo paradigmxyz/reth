@@ -14,7 +14,6 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-blockchain-tree-api.workspace = true
 reth-execution-types.workspace = true
 reth-primitives = { workspace = true, features = ["reth-codec", "secp256k1"] }
 reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
@@ -43,7 +42,7 @@ alloy-consensus.workspace = true
 revm.workspace = true
 
 # optimism
-reth-optimism-primitives = { workspace = true, optional = true }
+reth-optimism-primitives = { workspace = true, features = ["reth-codec"], optional = true }
 
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }

@@ -537,7 +537,7 @@ mod tests {
                 number: newest_block - i,
                 gas_limit,
                 gas_used,
-                base_fee_per_gas: base_fee_per_gas.map(Into::into),
+                base_fee_per_gas,
                 parent_hash,
                 ..Default::default()
             };

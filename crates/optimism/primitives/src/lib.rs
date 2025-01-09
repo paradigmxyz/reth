@@ -14,25 +14,29 @@ extern crate alloc;
 pub mod bedrock;
 pub mod transaction;
 
+use reth_primitives_traits::Block;
 pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType};
 
 mod receipt;
 pub use receipt::OpReceipt;
 
-/// Optimism primitive types.
-pub type OpPrimitives = reth_primitives::EthPrimitives;
+/// Optimism-specific block type.
+pub type OpBlock = alloy_consensus::Block<OpTransactionSigned>;
 
-// TODO: once we are ready for separating primitive types, introduce a separate `NodePrimitives`
-// implementation used exclusively by legacy engine.
-//
-// #[derive(Debug, Default, Clone, PartialEq, Eq)]
-// pub struct OpPrimitives;
-//
-// impl NodePrimitives for OpPrimitives {
-//     type Block = Block;
-//     type BlockHeader = Header;
-//     type BlockBody = BlockBody;
-//     type SignedTx = TransactionSigned;
-//     type TxType = OpTxType;
-//     type Receipt = Receipt;
-// }
+/// Optimism-specific block body type.
+pub type OpBlockBody = <OpBlock as Block>::Body;
+
+/// Primitive types for Optimism Node.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct OpPrimitives;
+
+#[cfg(feature = "optimism")]
+impl reth_primitives_traits::NodePrimitives for OpPrimitives {
+    type Block = OpBlock;
+    type BlockHeader = alloy_consensus::Header;
+    type BlockBody = OpBlockBody;
+    type SignedTx = OpTransactionSigned;
+    type Receipt = OpReceipt;
+}
+
+use once_cell as _;

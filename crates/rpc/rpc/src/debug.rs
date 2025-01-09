@@ -103,7 +103,7 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state| {
-                let mut results = Vec::with_capacity(block.body.transactions().len());
+                let mut results = Vec::with_capacity(block.body().transactions().len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
                 this.eth_api().apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
@@ -273,7 +273,7 @@ where
                     env: Env::boxed(
                         cfg_env_with_handler_cfg.cfg_env.clone(),
                         block_env,
-                        this.eth_api().evm_config().tx_env(tx.as_signed(), tx.signer()),
+                        this.eth_api().evm_config().tx_env(tx.tx(), tx.signer()),
                     ),
                     handler_cfg: cfg_env_with_handler_cfg.handler_cfg,
                 };
@@ -527,11 +527,12 @@ where
         let mut replay_block_txs = true;
 
         // if a transaction index is provided, we need to replay the transactions until the index
-        let num_txs = transaction_index.index().unwrap_or_else(|| block.body.transactions().len());
+        let num_txs =
+            transaction_index.index().unwrap_or_else(|| block.body().transactions().len());
         // but if all transactions are to be replayed, we can use the state at the block itself
         // this works with the exception of the PENDING block, because its state might not exist if
         // built locally
-        if !target_block.is_pending() && num_txs == block.body.transactions().len() {
+        if !target_block.is_pending() && num_txs == block.body().transactions().len() {
             at = block.hash();
             replay_block_txs = false;
         }

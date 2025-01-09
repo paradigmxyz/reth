@@ -344,7 +344,7 @@ mod tests {
                 BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..3, ..Default::default() },
             );
 
-            self.db.insert_headers(blocks.iter().map(|block| &block.header))?;
+            self.db.insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
 
             let iter = blocks.iter();
             let mut next_tx_num = 0;
@@ -353,7 +353,7 @@ mod tests {
                 // Insert last progress data
                 let block_number = progress.number;
                 self.db.commit(|tx| {
-                    progress.body.transactions.iter().try_for_each(
+                    progress.body().transactions.iter().try_for_each(
                         |transaction| -> Result<(), reth_db::DatabaseError> {
                             tx.put::<tables::TransactionHashNumbers>(
                                 transaction.hash(),
@@ -373,7 +373,7 @@ mod tests {
                                     tx,
                                     (block_number, *addr).into(),
                                     new_entry,
-                                    progress.header.number == stage_progress,
+                                    progress.number == stage_progress,
                                 )?;
                             }
 
@@ -392,13 +392,13 @@ mod tests {
                                 key: keccak256("mining"),
                                 value: U256::from(rng.gen::<u32>()),
                             },
-                            progress.header.number == stage_progress,
+                            progress.number == stage_progress,
                         )?;
                     }
 
                     let body = StoredBlockBodyIndices {
                         first_tx_num,
-                        tx_count: progress.body.transactions.len() as u64,
+                        tx_count: progress.transaction_count() as u64,
                     };
 
                     first_tx_num = next_tx_num;
@@ -533,7 +533,7 @@ mod tests {
                     }
 
                     if !entry.value.is_zero() {
-                        storage_cursor.upsert(bn_address.address(), entry)?;
+                        storage_cursor.upsert(bn_address.address(), &entry)?;
                     }
                 }
                 Ok(())

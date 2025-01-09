@@ -23,7 +23,6 @@ use reth_rpc_eth_types::{
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
-use reth_rpc_types_compat::transaction::from_recovered;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
@@ -637,7 +636,7 @@ where
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            match from_recovered(tx.transaction.to_consensus(), &self.tx_resp_builder) {
+            match self.tx_resp_builder.fill_pending(tx.transaction.to_consensus()) {
                 Ok(tx) => pending_txs.push(tx),
                 Err(err) => {
                     error!(target: "rpc",

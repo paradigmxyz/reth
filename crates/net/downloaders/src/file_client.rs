@@ -340,7 +340,7 @@ impl<B: FullBlock> BodiesClient for FileClient<B> {
 
 impl<B: FullBlock> DownloadClient for FileClient<B> {
     fn report_bad_message(&self, _peer_id: PeerId) {
-        warn!("Reported a bad message on a file client, the file may be corrupted or invalid");
+        trace!("Reported a bad message on a file client, the file may be corrupted or invalid");
         // noop
     }
 

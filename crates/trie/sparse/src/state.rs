@@ -1,5 +1,5 @@
 use crate::{
-    blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
+    blinded::{BlindedProviderFactory, DefaultBlindedProviderFactory},
     RevealedSparseTrie, SparseTrie,
 };
 use alloy_primitives::{
@@ -8,17 +8,15 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
-use reth_execution_errors::{
-    SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieError, SparseTrieErrorKind,
-};
+use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
     updates::{StorageTrieUpdates, TrieUpdates},
-    MultiProof, MultiProofTargets, Nibbles, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
+    MultiProof, MultiProofTargets, Nibbles, RlpNode, TrieAccount, TrieNode, EMPTY_ROOT_HASH,
     TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use std::{fmt, iter::Peekable};
+use std::{collections::VecDeque, fmt, iter::Peekable};
 
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFactory> {
@@ -95,6 +93,16 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Returns `true` if storage slot for account was already revealed.
     pub fn is_storage_slot_revealed(&self, account: &B256, slot: &B256) -> bool {
         self.revealed.get(account).is_some_and(|slots| slots.contains(slot))
+    }
+
+    /// Returns reference to bytes representing leaf value for the target account.
+    pub fn get_account_value(&self, account: &B256) -> Option<&Vec<u8>> {
+        self.state.as_revealed_ref()?.get_leaf_value(&Nibbles::unpack(account))
+    }
+
+    /// Returns reference to bytes representing leaf value for the target account and storage slot.
+    pub fn get_storage_slot_value(&self, account: &B256, slot: &B256) -> Option<&Vec<u8>> {
+        self.storages.get(account)?.as_revealed_ref()?.get_leaf_value(&Nibbles::unpack(slot))
     }
 
     /// Returns mutable reference to storage sparse trie if it was revealed.
@@ -271,6 +279,104 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         Ok(())
     }
 
+    /// Reveal state witness with the given state root.
+    /// The state witness is expected to be a map of `keccak(rlp(node)): rlp(node).`
+    /// NOTE: This method does not extensively validate the witness.
+    pub fn reveal_witness(
+        &mut self,
+        state_root: B256,
+        witness: B256HashMap<Bytes>,
+    ) -> SparseStateTrieResult<()> {
+        // Create a `(hash, path, maybe_account)` queue for traversing witness trie nodes
+        // starting from the root node.
+        let mut queue = VecDeque::from([(state_root, Nibbles::default(), None)]);
+
+        while let Some((hash, path, maybe_account)) = queue.pop_front() {
+            // Retrieve the trie node and decode it.
+            let Some(trie_node_bytes) = witness.get(&hash) else { continue };
+            let trie_node = TrieNode::decode(&mut &trie_node_bytes[..])?;
+
+            // Push children nodes into the queue.
+            match &trie_node {
+                TrieNode::Branch(branch) => {
+                    for (idx, maybe_child) in branch.as_ref().children() {
+                        if let Some(child_hash) = maybe_child.and_then(RlpNode::as_hash) {
+                            let mut child_path = path.clone();
+                            child_path.push_unchecked(idx);
+                            queue.push_back((child_hash, child_path, maybe_account));
+                        }
+                    }
+                }
+                TrieNode::Extension(ext) => {
+                    if let Some(child_hash) = ext.child.as_hash() {
+                        let mut child_path = path.clone();
+                        child_path.extend_from_slice_unchecked(&ext.key);
+                        queue.push_back((child_hash, child_path, maybe_account));
+                    }
+                }
+                TrieNode::Leaf(leaf) => {
+                    let mut full_path = path.clone();
+                    full_path.extend_from_slice_unchecked(&leaf.key);
+                    if let Some(hashed_address) = maybe_account {
+                        // Record storage slot in revealed.
+                        let hashed_slot = B256::from_slice(&full_path.pack());
+                        self.revealed.entry(hashed_address).or_default().insert(hashed_slot);
+                    } else {
+                        let hashed_address = B256::from_slice(&full_path.pack());
+                        let account = TrieAccount::decode(&mut &leaf.value[..])?;
+                        if account.storage_root != EMPTY_ROOT_HASH {
+                            queue.push_back((
+                                account.storage_root,
+                                Nibbles::default(),
+                                Some(hashed_address),
+                            ));
+                        }
+
+                        // Record account in revealed.
+                        self.revealed.entry(hashed_address).or_default();
+                    }
+                }
+                TrieNode::EmptyRoot => {} // nothing to do here
+            };
+
+            // Reveal the node itself.
+            if let Some(account) = maybe_account {
+                let storage_trie_entry = self.storages.entry(account).or_default();
+                if path.is_empty() {
+                    // Handle special storage state root node case.
+                    storage_trie_entry.reveal_root_with_provider(
+                        self.provider_factory.storage_node_provider(account),
+                        trie_node,
+                        None,
+                        self.retain_updates,
+                    )?;
+                } else {
+                    // Reveal non-root storage trie node.
+                    storage_trie_entry
+                        .as_revealed_mut()
+                        .ok_or(SparseTrieErrorKind::Blind)?
+                        .reveal_node(path, trie_node, None)?;
+                }
+            } else if path.is_empty() {
+                // Handle special state root node case.
+                self.state.reveal_root_with_provider(
+                    self.provider_factory.account_node_provider(),
+                    trie_node,
+                    None,
+                    self.retain_updates,
+                )?;
+            } else {
+                // Reveal non-root state trie node.
+                self.state
+                    .as_revealed_mut()
+                    .ok_or(SparseTrieErrorKind::Blind)?
+                    .reveal_node(path, trie_node, None)?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Validates the root node of the proof and returns it if it exists and is valid.
     fn validate_root_node<I: Iterator<Item = (Nibbles, Bytes)>>(
         &self,
@@ -344,12 +450,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         })
     }
 }
-impl<F> SparseStateTrie<F>
-where
-    F: BlindedProviderFactory,
-    SparseTrieError: From<<F::AccountNodeProvider as BlindedProvider>::Error>
-        + From<<F::StorageNodeProvider as BlindedProvider>::Error>,
-{
+impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Update the account leaf node.
     pub fn update_account_leaf(
         &mut self,

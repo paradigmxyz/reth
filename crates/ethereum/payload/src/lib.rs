@@ -11,7 +11,8 @@
 
 use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{
-    eip4844::MAX_DATA_GAS_PER_BLOCK, eip6110, eip7685::Requests, merge::BEACON_NONCE,
+    eip4844::MAX_DATA_GAS_PER_BLOCK, eip6110, eip7685::Requests, eip7840::BlobParams,
+    merge::BEACON_NONCE,
 };
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
@@ -40,8 +41,8 @@ use reth_transaction_pool::{
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
     primitives::{
-        calc_excess_blob_gas, BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg,
-        InvalidTransaction, ResultAndState, TxEnv,
+        BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, InvalidTransaction,
+        ResultAndState, TxEnv,
     },
     DatabaseCommit,
 };
@@ -284,7 +285,7 @@ where
         }
 
         // Configure the environment for the tx.
-        *evm.tx_mut() = evm_config.tx_env(tx.as_signed(), tx.signer());
+        *evm.tx_mut() = evm_config.tx_env(tx.tx(), tx.signer());
 
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
@@ -341,7 +342,7 @@ where
             tx_type: tx.tx_type(),
             success: result.is_success(),
             cumulative_gas_used,
-            logs: result.into_logs().into_iter().map(Into::into).collect(),
+            logs: result.into_logs().into_iter().collect(),
             ..Default::default()
         }));
 
@@ -353,7 +354,7 @@ where
 
         // append sender and transaction to the respective lists
         executed_senders.push(tx.signer());
-        executed_txs.push(tx.into_signed());
+        executed_txs.push(tx.into_tx());
     }
 
     // check if we have a better block
@@ -438,13 +439,17 @@ where
             .map_err(PayloadBuilderError::other)?;
 
         excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_header.timestamp) {
-            let parent_excess_blob_gas = parent_header.excess_blob_gas.unwrap_or_default();
-            let parent_blob_gas_used = parent_header.blob_gas_used.unwrap_or_default();
-            Some(calc_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used))
+            let blob_params = if chain_spec.is_prague_active_at_timestamp(parent_header.timestamp) {
+                BlobParams::prague()
+            } else {
+                // cancun
+                BlobParams::cancun()
+            };
+            parent_header.next_block_excess_blob_gas(blob_params)
         } else {
             // for the first post-fork block, both parent.blob_gas_used and
             // parent.excess_blob_gas are evaluated as 0
-            Some(calc_excess_blob_gas(0, 0))
+            Some(alloy_eips::eip4844::calc_excess_blob_gas(0, 0))
         };
 
         blob_gas_used = Some(sum_blob_gas_used);
@@ -469,10 +474,9 @@ where
         gas_used: cumulative_gas_used,
         extra_data: builder_config.extra_data,
         parent_beacon_block_root: attributes.parent_beacon_block_root,
-        blob_gas_used: blob_gas_used.map(Into::into),
-        excess_blob_gas: excess_blob_gas.map(Into::into),
+        blob_gas_used,
+        excess_blob_gas,
         requests_hash,
-        target_blobs_per_block: None,
     };
 
     let withdrawals = chain_spec
@@ -486,7 +490,7 @@ where
     };
 
     let sealed_block = Arc::new(block.seal_slow());
-    debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.header, "sealed built block");
+    debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
 
     // create the executed block data
     let executed = ExecutedBlock {

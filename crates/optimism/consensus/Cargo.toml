@@ -17,7 +17,6 @@ reth-chainspec.workspace = true
 reth-consensus-common.workspace = true
 reth-consensus.workspace = true
 reth-primitives.workspace = true
-reth-trie-common.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
@@ -35,7 +34,23 @@ tracing.workspace = true
 
 [dev-dependencies]
 alloy-primitives.workspace = true
+op-alloy-consensus.workspace = true
 reth-optimism-chainspec.workspace = true
 
 [features]
+default = ["std"]
+std = [
+    "reth-chainspec/std",
+    "reth-consensus/std",
+    "reth-consensus-common/std",
+    "reth-primitives/std",
+    "reth-optimism-forks/std",
+    "reth-optimism-chainspec/std",
+    "reth-optimism-primitives/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-consensus/std",
+    "alloy-trie/std",
+    "op-alloy-consensus/std",
+]
 optimism = ["reth-primitives/optimism", "reth-optimism-primitives/optimism"]

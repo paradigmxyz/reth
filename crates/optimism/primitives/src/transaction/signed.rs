@@ -66,6 +66,11 @@ impl OpTransactionSigned {
     pub fn new_unhashed(transaction: OpTypedTransaction, signature: Signature) -> Self {
         Self { hash: Default::default(), signature, transaction }
     }
+
+    /// Returns whether this transaction is a deposit.
+    pub const fn is_deposit(&self) -> bool {
+        matches!(self.transaction, OpTypedTransaction::Deposit(_))
+    }
 }
 
 impl SignedTransaction for OpTransactionSigned {
@@ -514,7 +519,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
 
         let secp = secp256k1::Secp256k1::new();
         let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
-        let signature = reth_primitives::transaction::util::secp256k1::sign_message(
+        let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
             signature_hash(&transaction),
         )

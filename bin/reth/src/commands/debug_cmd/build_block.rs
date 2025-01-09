@@ -12,22 +12,18 @@ use eyre::Context;
 use reth_basic_payload_builder::{
     BuildArguments, BuildOutcome, Cancelled, PayloadBuilder, PayloadConfig,
 };
-use reth_beacon_consensus::EthBeaconConsensus;
-use reth_blockchain_tree::{
-    BlockchainTree, BlockchainTreeConfig, ShareableBlockchainTree, TreeExternals,
-};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_consensus::{Consensus, FullConsensus};
-use reth_errors::RethResult;
+use reth_errors::{ConsensusError, RethResult};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
-use reth_node_ethereum::{EthEvmConfig, EthExecutorProvider};
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
 use reth_primitives::{
     BlockExt, EthPrimitives, SealedBlockFor, SealedBlockWithSenders, SealedHeader, Transaction,
     TransactionSigned,
@@ -128,24 +124,15 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     ) -> eyre::Result<()> {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
-        let consensus: Arc<dyn FullConsensus> =
+        let consensus: Arc<dyn FullConsensus<Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
-
-        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
-
-        // configure blockchain tree
-        let tree_externals =
-            TreeExternals::new(provider_factory.clone(), Arc::clone(&consensus), executor);
-        let tree = BlockchainTree::new(tree_externals, BlockchainTreeConfig::default())?;
-        let blockchain_tree = Arc::new(ShareableBlockchainTree::new(tree));
 
         // fetch the best block from the database
         let best_block = self
             .lookup_best_block(provider_factory.clone())
             .wrap_err("the head block is missing")?;
 
-        let blockchain_db =
-            BlockchainProvider::new(provider_factory.clone(), blockchain_tree.clone())?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
         let blob_store = InMemoryBlobStore::default();
 
         let validator =
@@ -192,7 +179,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
                     let pooled = transaction
                         .clone()
-                        .into_signed()
+                        .into_tx()
                         .try_into_pooled_eip4844(sidecar.clone())
                         .expect("should not fail to convert blob tx if it is already eip4844");
                     let encoded_length = pooled.encode_2718_len();
@@ -221,8 +208,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             suggested_fee_recipient: self.suggested_fee_recipient,
             // TODO: add support for withdrawals
             withdrawals: None,
-            target_blobs_per_block: None,
-            max_blobs_per_block: None,
         };
         let payload_config = PayloadConfig::new(
             Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),
@@ -253,7 +238,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 debug!(target: "reth::cli", ?block, "Built new payload");
 
                 consensus.validate_header_with_total_difficulty(block, U256::MAX)?;
-                consensus.validate_header(block)?;
+                consensus.validate_header(block.sealed_header())?;
                 consensus.validate_block_pre_execution(block)?;
 
                 let senders = block.senders().expect("sender recovery failed");
@@ -289,7 +274,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 let provider_rw = provider_factory.provider_rw()?;
                 provider_rw.append_blocks_with_state(
                     Vec::from([block_with_senders]),
-                    execution_outcome,
+                    &execution_outcome,
                     hashed_post_state.into_sorted(),
                     trie_updates,
                 )?;

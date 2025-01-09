@@ -126,10 +126,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                                 base_fee_params,
                             )
                         } else {
-                            base_block
-                                .header
-                                .next_block_base_fee(base_fee_params)
-                                .unwrap_or_default()
+                            base_block.next_block_base_fee(base_fee_params).unwrap_or_default()
                         };
                         block_env.basefee = U256::from(base_fee);
                     } else {
@@ -314,11 +311,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let mut replay_block_txs = true;
 
             let num_txs =
-                transaction_index.index().unwrap_or_else(|| block.body.transactions().len());
+                transaction_index.index().unwrap_or_else(|| block.body().transactions().len());
             // but if all transactions are to be replayed, we can use the state at the block itself,
             // however only if we're not targeting the pending block, because for pending we can't
             // rely on the block's state being available
-            if !is_block_target_pending && num_txs == block.body.transactions().len() {
+            if !is_block_target_pending && num_txs == block.body().transactions().len() {
                 at = block.hash();
                 replay_block_txs = false;
             }
@@ -351,15 +348,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let state_overrides = state_override.take();
                     let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                    let env = this
-                        .prepare_call_env(
-                            cfg_env_with_handler_cfg.clone(),
-                            block_env.clone(),
-                            tx,
-                            &mut db,
-                            overrides,
-                        )
-                        .map(Into::into)?;
+                    let env = this.prepare_call_env(
+                        cfg_env_with_handler_cfg.clone(),
+                        block_env.clone(),
+                        tx,
+                        &mut db,
+                        overrides,
+                    )?;
                     let (res, _) = this.transact(&mut db, env)?;
 
                     match ensure_success(res.result) {
@@ -684,7 +679,7 @@ pub trait Call:
                 let env = EnvWithHandlerCfg::new_with_cfg_env(
                     cfg_env_with_handler_cfg,
                     block_env,
-                    RpcNodeCore::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
+                    RpcNodeCore::evm_config(&this).tx_env(tx.tx(), tx.signer()),
                 );
 
                 let (res, _) = this.transact(&mut db, env)?;

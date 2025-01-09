@@ -100,7 +100,7 @@ impl AccountHashingStage {
                 provider.tx_ref().cursor_write::<tables::PlainAccountState>()?;
             accounts.sort_by(|a, b| a.0.cmp(&b.0));
             for (addr, acc) in &accounts {
-                account_cursor.append(*addr, *acc)?;
+                account_cursor.append(*addr, acc)?;
             }
 
             let mut acc_changeset_cursor =
@@ -113,7 +113,7 @@ impl AccountHashingStage {
                     bytecode_hash: None,
                 };
                 let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
-                acc_changeset_cursor.append(t, acc_before_tx)?;
+                acc_changeset_cursor.append(t, &acc_before_tx)?;
             }
         }
 
@@ -202,7 +202,7 @@ where
 
                 let (key, value) = item?;
                 hashed_account_cursor
-                    .append(RawKey::<B256>::from_vec(key), RawValue::<Account>::from_vec(value))?;
+                    .append(RawKey::<B256>::from_vec(key), &RawValue::<Account>::from_vec(value))?;
             }
         } else {
             // Aggregate all transition changesets and make a list of accounts that have been

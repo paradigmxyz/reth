@@ -8,19 +8,15 @@ use crate::{
     StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_eips::{
-    eip4895::{Withdrawal, Withdrawals},
-    BlockHashOrNumber, BlockId, BlockNumberOrTag,
-};
+use alloy_consensus::transaction::TransactionMeta;
+use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     map::{B256HashMap, HashMap},
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_primitives::{
-    BlockWithSenders, EthPrimitives, SealedBlockFor, SealedBlockWithSenders, TransactionMeta,
-};
+use reth_primitives::{BlockWithSenders, EthPrimitives, SealedBlockFor, SealedBlockWithSenders};
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives, SealedHeader};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -542,9 +538,6 @@ impl<C: Send + Sync, N: NodePrimitives> WithdrawalsProvider for NoopProvider<C, 
         _id: BlockHashOrNumber,
         _timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
-        Ok(None)
-    }
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
         Ok(None)
     }
 }

@@ -22,7 +22,6 @@ reth-rpc-api = { workspace = true, features = ["client"] }
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
-reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-network.workspace = true
 reth-node-api.workspace = true
@@ -35,7 +34,7 @@ reth-engine-local.workspace = true
 reth-tasks.workspace = true
 
 # currently need to enable this for workspace level
-reth-optimism-primitives  = { workspace = true, features = ["arbitrary"] }
+reth-optimism-primitives  = { workspace = true, features = ["arbitrary", "serde"] }
 
 # rpc
 jsonrpsee.workspace = true

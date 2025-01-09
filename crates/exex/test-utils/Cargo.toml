@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 ## reth
 reth-chainspec.workspace = true
-reth-blockchain-tree.workspace = true
 reth-config.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-db = { workspace = true, features = ["test-utils"] }

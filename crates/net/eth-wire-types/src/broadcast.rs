@@ -1,24 +1,19 @@
 //! Types for broadcasting new data.
 
 use crate::{EthMessage, EthVersion, NetworkPrimitives};
-use alloy_primitives::{Bytes, TxHash, B256, U128};
+use alloc::{sync::Arc, vec::Vec};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Bytes, TxHash, B256, U128,
+};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
+use core::mem;
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::SignedTransaction;
-use std::{
-    collections::{HashMap, HashSet},
-    mem,
-    sync::Arc,
-};
-
-#[cfg(feature = "arbitrary")]
-use proptest::{collection::vec, prelude::*};
-#[cfg(feature = "arbitrary")]
-use proptest_arbitrary_interop::arb;
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -345,17 +340,21 @@ pub struct NewPooledTransactionHashes68 {
 }
 
 #[cfg(feature = "arbitrary")]
-impl Arbitrary for NewPooledTransactionHashes68 {
+impl proptest::prelude::Arbitrary for NewPooledTransactionHashes68 {
     type Parameters = ();
     fn arbitrary_with(_args: ()) -> Self::Strategy {
+        use proptest::{collection::vec, prelude::*};
         // Generate a single random length for all vectors
         let vec_length = any::<usize>().prop_map(|x| x % 100 + 1); // Lengths between 1 and 100
 
         vec_length
             .prop_flat_map(|len| {
                 // Use the generated length to create vectors of TxType, usize, and B256
-                let types_vec =
-                    vec(arb::<reth_primitives::TxType>().prop_map(|ty| ty as u8), len..=len);
+                let types_vec = vec(
+                    proptest_arbitrary_interop::arb::<reth_primitives::TxType>()
+                        .prop_map(|ty| ty as u8),
+                    len..=len,
+                );
 
                 // Map the usize values to the range 0..131072(0x20000)
                 let sizes_vec = vec(proptest::num::usize::ANY.prop_map(|x| x % 131072), len..=len);
@@ -367,7 +366,7 @@ impl Arbitrary for NewPooledTransactionHashes68 {
             .boxed()
     }
 
-    type Strategy = BoxedStrategy<Self>;
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
 
 impl NewPooledTransactionHashes68 {
@@ -496,7 +495,7 @@ impl DedupPayload for NewPooledTransactionHashes68 {
     fn dedup(self) -> PartiallyValidData<Self::Value> {
         let Self { hashes, mut sizes, mut types } = self;
 
-        let mut deduped_data = HashMap::with_capacity(hashes.len());
+        let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
 
         for hash in hashes.into_iter().rev() {
             if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
@@ -522,7 +521,7 @@ impl DedupPayload for NewPooledTransactionHashes66 {
     fn dedup(self) -> PartiallyValidData<Self::Value> {
         let Self(hashes) = self;
 
-        let mut deduped_data = HashMap::with_capacity(hashes.len());
+        let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
 
         let noop_value: Eth68TxMetadata = None;
 
@@ -699,7 +698,7 @@ impl RequestTxHashes {
     /// be stored in its entirety like in the future waiting for a
     /// [`GetPooledTransactions`](crate::GetPooledTransactions) request to resolve.
     pub fn with_capacity(capacity: usize) -> Self {
-        Self::new(HashSet::with_capacity(capacity))
+        Self::new(HashSet::with_capacity_and_hasher(capacity, Default::default()))
     }
 
     /// Returns an new empty instance.
@@ -744,7 +743,7 @@ mod tests {
 
     /// Takes as input a struct / encoded hex message pair, ensuring that we encode to the exact hex
     /// message, and decode to the exact struct.
-    fn test_encoding_vector<T: Encodable + Decodable + PartialEq + std::fmt::Debug>(
+    fn test_encoding_vector<T: Encodable + Decodable + PartialEq + core::fmt::Debug>(
         input: (T, &[u8]),
     ) {
         let (expected_decoded, expected_encoded) = input;

@@ -91,7 +91,7 @@ impl<N: NodePrimitives> Chain<N> {
 
     /// Returns an iterator over all headers in the block with increasing block numbers.
     pub fn headers(&self) -> impl Iterator<Item = SealedHeader<N::BlockHeader>> + '_ {
-        self.blocks.values().map(|block| block.header.clone())
+        self.blocks.values().map(|block| block.clone_sealed_header())
     }
 
     /// Get cached trie updates for this chain.
@@ -254,7 +254,7 @@ impl<N: NodePrimitives> Chain<N> {
             self.blocks().iter().zip(self.execution_outcome.receipts().iter())
         {
             let mut tx_receipts = Vec::with_capacity(receipts.len());
-            for (tx, receipt) in block.body.transactions().iter().zip(receipts.iter()) {
+            for (tx, receipt) in block.body().transactions().iter().zip(receipts.iter()) {
                 tx_receipts.push((
                     tx.trie_hash(),
                     receipt.as_ref().expect("receipts have not been pruned").clone(),
@@ -437,7 +437,7 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
     /// Returns an iterator over all transactions in the chain.
     #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &<B::Body as BlockBody>::Transaction> + '_ {
-        self.blocks.values().flat_map(|block| block.body.transactions().iter())
+        self.blocks.values().flat_map(|block| block.body().transactions().iter())
     }
 
     /// Returns an iterator over all transactions and their senders.
@@ -694,8 +694,25 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::B256;
+    use alloy_consensus::TxType;
+    use alloy_primitives::{Address, B256};
+    use reth_ethereum_primitives::Receipt;
+    use reth_primitives::Receipts;
     use revm::primitives::{AccountInfo, HashMap};
+
+    // TODO: this is temporary, until we fully switch over to `reth_ethereum_primitives` for the
+    // `Receipt` type in `EthPrimitives`.
+    #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[non_exhaustive]
+    struct TestPrimitives;
+
+    impl reth_primitives_traits::NodePrimitives for TestPrimitives {
+        type Block = reth_primitives::Block;
+        type BlockHeader = alloy_consensus::Header;
+        type BlockBody = reth_primitives::BlockBody;
+        type SignedTx = reth_primitives::TransactionSigned;
+        type Receipt = Receipt;
+    }
 
     #[test]
     fn chain_append() {
@@ -710,10 +727,10 @@ mod tests {
         let mut block3 = block.clone();
         let mut block4 = block;
 
-        block1.block.header.set_hash(block1_hash);
-        block2.block.header.set_hash(block2_hash);
-        block3.block.header.set_hash(block3_hash);
-        block4.block.header.set_hash(block4_hash);
+        block1.block.set_hash(block1_hash);
+        block2.block.set_hash(block2_hash);
+        block3.block.set_hash(block3_hash);
+        block4.block.set_hash(block4_hash);
 
         block3.set_parent_hash(block2_hash);
 
@@ -767,13 +784,13 @@ mod tests {
         let block1_hash = B256::new([15; 32]);
         block1.set_block_number(1);
         block1.set_hash(block1_hash);
-        block1.senders.push(Address::new([4; 20]));
+        block1.push_sender(Address::new([4; 20]));
 
         let mut block2: SealedBlockWithSenders = Default::default();
         let block2_hash = B256::new([16; 32]);
         block2.set_block_number(2);
         block2.set_hash(block2_hash);
-        block2.senders.push(Address::new([4; 20]));
+        block2.push_sender(Address::new([4; 20]));
 
         let mut block_state_extended = execution_outcome1;
         block_state_extended.extend(execution_outcome2);
@@ -828,10 +845,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn receipts_by_block_hash() {
-        use reth_primitives::{Receipt, Receipts, TxType};
-
         // Create a default SealedBlockWithSenders object
         let block: SealedBlockWithSenders = Default::default();
 
@@ -844,8 +858,8 @@ mod tests {
         let mut block2 = block;
 
         // Set the hashes of block1 and block2
-        block1.block.header.set_hash(block1_hash);
-        block2.block.header.set_hash(block2_hash);
+        block1.block.set_hash(block1_hash);
+        block2.block.set_hash(block2_hash);
 
         // Create a random receipt object, receipt1
         let receipt1 = Receipt {
@@ -878,7 +892,7 @@ mod tests {
 
         // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
         // including block1_hash and block2_hash, and the execution_outcome
-        let chain: Chain = Chain {
+        let chain: Chain<TestPrimitives> = Chain {
             blocks: BTreeMap::from([(10, block1), (11, block2)]),
             execution_outcome: execution_outcome.clone(),
             ..Default::default()
