@@ -20,11 +20,8 @@ pub trait BlindedProviderFactory {
 
 /// Trie node provider for retrieving blinded nodes.
 pub trait BlindedProvider {
-    /// The error type for the provider.
-    type Error: Into<SparseTrieError>;
-
     /// Retrieve blinded node by path.
-    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<Bytes>, Self::Error>;
+    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<Bytes>, SparseTrieError>;
 }
 
 /// Default blinded node provider factory that creates [`DefaultBlindedProvider`].
@@ -49,9 +46,7 @@ impl BlindedProviderFactory for DefaultBlindedProviderFactory {
 pub struct DefaultBlindedProvider;
 
 impl BlindedProvider for DefaultBlindedProvider {
-    type Error = SparseTrieError;
-
-    fn blinded_node(&mut self, _path: &Nibbles) -> Result<Option<Bytes>, Self::Error> {
+    fn blinded_node(&mut self, _path: &Nibbles) -> Result<Option<Bytes>, SparseTrieError> {
         Ok(None)
     }
 }

@@ -84,9 +84,7 @@ where
     T: TrieCursorFactory + Clone + Send + Sync,
     H: HashedCursorFactory + Clone + Send + Sync,
 {
-    type Error = SparseTrieError;
-
-    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<Bytes>, Self::Error> {
+    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<Bytes>, SparseTrieError> {
         let targets = HashMap::from_iter([(pad_path_to_key(path), HashSet::default())]);
         let proof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
@@ -128,9 +126,7 @@ where
     T: TrieCursorFactory + Clone + Send + Sync,
     H: HashedCursorFactory + Clone + Send + Sync,
 {
-    type Error = SparseTrieError;
-
-    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<Bytes>, Self::Error> {
+    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<Bytes>, SparseTrieError> {
         let targets = HashSet::from_iter([pad_path_to_key(path)]);
         let storage_prefix_set =
             self.prefix_sets.storage_prefix_sets.get(&self.account).cloned().unwrap_or_default();

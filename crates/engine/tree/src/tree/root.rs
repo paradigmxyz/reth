@@ -17,7 +17,7 @@ use reth_trie::{
 use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
-    errors::{SparseStateTrieError, SparseStateTrieResult, SparseTrieError, SparseTrieErrorKind},
+    errors::{SparseStateTrieError, SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie,
 };
 use revm_primitives::{keccak256, EvmState, B256};
@@ -286,8 +286,8 @@ where
         + Send
         + Sync
         + 'static,
-    ABP: BlindedProvider<Error = SparseTrieError> + Send + Sync + 'env,
-    SBP: BlindedProvider<Error = SparseTrieError> + Send + Sync + 'env,
+    ABP: BlindedProvider + Send + Sync + 'env,
+    SBP: BlindedProvider + Send + Sync + 'env,
     BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP>
         + Send
         + Sync
@@ -759,16 +759,17 @@ where
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
 /// time it took.
-fn update_sparse_trie<
-    ABP: BlindedProvider<Error = SparseTrieError> + Send + Sync,
-    SBP: BlindedProvider<Error = SparseTrieError> + Send + Sync,
-    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP> + Send + Sync,
->(
+fn update_sparse_trie<ABP, SBP, BPF>(
     mut trie: Box<SparseStateTrie<BPF>>,
     multiproof: MultiProof,
     targets: MultiProofTargets,
     state: HashedPostState,
-) -> SparseStateTrieResult<(Box<SparseStateTrie<BPF>>, Duration)> {
+) -> SparseStateTrieResult<(Box<SparseStateTrie<BPF>>, Duration)>
+where
+    ABP: BlindedProvider + Send + Sync,
+    SBP: BlindedProvider + Send + Sync,
+    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP> + Send + Sync,
+{
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
 
