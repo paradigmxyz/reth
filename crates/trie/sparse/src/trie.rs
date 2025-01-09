@@ -60,9 +60,16 @@ impl SparseTrie {
         &mut self,
         root: TrieNode,
         hash_mask: Option<TrieMask>,
+        tree_mask: Option<TrieMask>,
         retain_updates: bool,
     ) -> SparseTrieResult<&mut RevealedSparseTrie> {
-        self.reveal_root_with_provider(Default::default(), root, hash_mask, retain_updates)
+        self.reveal_root_with_provider(
+            Default::default(),
+            root,
+            hash_mask,
+            tree_mask,
+            retain_updates,
+        )
     }
 }
 
@@ -100,6 +107,7 @@ impl<P> SparseTrie<P> {
         provider: P,
         root: TrieNode,
         hash_mask: Option<TrieMask>,
+        tree_mask: Option<TrieMask>,
         retain_updates: bool,
     ) -> SparseTrieResult<&mut RevealedSparseTrie<P>> {
         if self.is_blind() {
@@ -107,6 +115,7 @@ impl<P> SparseTrie<P> {
                 provider,
                 root,
                 hash_mask,
+                tree_mask,
                 retain_updates,
             )?))
         }
@@ -163,6 +172,8 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     nodes: HashMap<Nibbles, SparseNode>,
     /// All branch node hash masks.
     branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
+    /// All branch node tree masks.
+    branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     /// All leaf values.
     values: HashMap<Nibbles, Vec<u8>>,
     /// Prefix set.
@@ -178,6 +189,7 @@ impl<P> fmt::Debug for RevealedSparseTrie<P> {
         f.debug_struct("RevealedSparseTrie")
             .field("nodes", &self.nodes)
             .field("branch_hash_masks", &self.branch_node_hash_masks)
+            .field("branch_tree_masks", &self.branch_node_tree_masks)
             .field("values", &self.values)
             .field("prefix_set", &self.prefix_set)
             .field("updates", &self.updates)
@@ -192,6 +204,7 @@ impl Default for RevealedSparseTrie {
             provider: Default::default(),
             nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
             branch_node_hash_masks: HashMap::default(),
+            branch_node_tree_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             updates: None,
@@ -205,19 +218,21 @@ impl RevealedSparseTrie {
     pub fn from_root(
         node: TrieNode,
         hash_mask: Option<TrieMask>,
+        tree_mask: Option<TrieMask>,
         retain_updates: bool,
     ) -> SparseTrieResult<Self> {
         let mut this = Self {
             provider: Default::default(),
             nodes: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
+            branch_node_tree_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             rlp_buf: Vec::new(),
             updates: None,
         }
         .with_updates(retain_updates);
-        this.reveal_node(Nibbles::default(), node, hash_mask)?;
+        this.reveal_node(Nibbles::default(), node, hash_mask, tree_mask)?;
         Ok(this)
     }
 }
@@ -228,19 +243,21 @@ impl<P> RevealedSparseTrie<P> {
         provider: P,
         node: TrieNode,
         hash_mask: Option<TrieMask>,
+        tree_mask: Option<TrieMask>,
         retain_updates: bool,
     ) -> SparseTrieResult<Self> {
         let mut this = Self {
             provider,
             nodes: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
+            branch_node_tree_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             rlp_buf: Vec::new(),
             updates: None,
         }
         .with_updates(retain_updates);
-        this.reveal_node(Nibbles::default(), node, hash_mask)?;
+        this.reveal_node(Nibbles::default(), node, hash_mask, tree_mask)?;
         Ok(this)
     }
 
@@ -250,6 +267,7 @@ impl<P> RevealedSparseTrie<P> {
             provider,
             nodes: self.nodes,
             branch_node_hash_masks: self.branch_node_hash_masks,
+            branch_node_tree_masks: self.branch_node_tree_masks,
             values: self.values,
             prefix_set: self.prefix_set,
             updates: self.updates,
@@ -286,6 +304,7 @@ impl<P> RevealedSparseTrie<P> {
         path: Nibbles,
         node: TrieNode,
         hash_mask: Option<TrieMask>,
+        tree_mask: Option<TrieMask>,
     ) -> SparseTrieResult<()> {
         // If the node is already revealed and it's not a hash node, do nothing.
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
@@ -294,6 +313,9 @@ impl<P> RevealedSparseTrie<P> {
 
         if let Some(hash_mask) = hash_mask {
             self.branch_node_hash_masks.insert(path.clone(), hash_mask);
+        }
+        if let Some(tree_mask) = tree_mask {
+            self.branch_node_tree_masks.insert(path.clone(), tree_mask);
         }
 
         match node {
@@ -433,7 +455,7 @@ impl<P> RevealedSparseTrie<P> {
             return Ok(())
         }
 
-        self.reveal_node(path, TrieNode::decode(&mut &child[..])?, None)
+        self.reveal_node(path, TrieNode::decode(&mut &child[..])?, None, None)
     }
 
     /// Traverse trie nodes down to the leaf node and collect all nodes along the path.
@@ -896,7 +918,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                                     // remove or do nothing, so
                                     // we can safely ignore the hash mask here and
                                     // pass `None`.
-                                    self.reveal_node(current.clone(), decoded, None)?;
+                                    self.reveal_node(current.clone(), decoded, None, None)?;
                                 }
                             }
                         }
@@ -1048,7 +1070,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                                 // We'll never have to update the revealed branch node, only remove
                                 // or do nothing, so we can safely ignore the hash mask here and
                                 // pass `None`.
-                                self.reveal_node(child_path.clone(), decoded, None)?;
+                                self.reveal_node(child_path.clone(), decoded, None, None)?;
                             }
                         }
 
