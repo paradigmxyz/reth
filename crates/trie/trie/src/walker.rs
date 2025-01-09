@@ -5,6 +5,7 @@ use crate::{
 };
 use alloy_primitives::{map::HashSet, B256};
 use reth_storage_errors::db::DatabaseError;
+use tracing::debug;
 
 #[cfg(feature = "metrics")]
 use crate::metrics::WalkerMetrics;
@@ -92,6 +93,12 @@ impl<C> TrieWalker<C> {
 
     /// Indicates whether the children of the current node are present in the trie.
     pub fn children_are_in_trie(&self) -> bool {
+        debug!(
+            target: "trie::walker",
+            key = ?self.key(),
+            children_are_in_trie = ?self.stack.last().is_some_and(|n| n.tree_flag()),
+            "Children are in trie"
+        );
         self.stack.last().is_some_and(|n| n.tree_flag())
     }
 
