@@ -4,6 +4,7 @@ use crate::{
     block::RecoveredBlock, transaction::signed::RecoveryError, Block, BlockBody, GotExpected,
     InMemorySize, SealedHeader,
 };
+use alloc::vec::Vec;
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, Sealable, B256};
