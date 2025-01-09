@@ -29,6 +29,11 @@ impl<B> SealedBlock2<B> {
     pub const fn hash(&self) -> B256 {
         self.hash
     }
+
+    /// Consumes the type and returns its components.
+    pub fn split(self) -> (B, BlockHash) {
+        (self.block, self.hash)
+    }
 }
 
 impl<B> SealedBlock2<B>
@@ -164,7 +169,6 @@ impl<B: Block> Deref for SealedBlock2<B> {
         self.header()
     }
 }
-
 
 #[cfg(any(test, feature = "test-utils"))]
 impl<B: crate::test_utils::TestBlock> SealedBlock2<B> {}

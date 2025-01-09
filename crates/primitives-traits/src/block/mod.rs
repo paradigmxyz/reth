@@ -3,6 +3,9 @@
 mod sealed;
 pub use sealed::SealedBlock2;
 
+mod recovered;
+pub use recovered::RecoveredBlock;
+
 pub mod body;
 pub mod header;
 
