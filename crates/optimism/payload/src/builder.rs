@@ -646,10 +646,7 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
 
     /// Returns the current fee settings for transactions from the mempool
     pub fn best_transaction_attributes(&self) -> BestTransactionsAttributes {
-        BestTransactionsAttributes::new(
-            self.base_fee(),
-            self.get_blob_gasprice(),
-        )
+        BestTransactionsAttributes::new(self.base_fee(), self.get_blob_gasprice())
     }
 
     /// Returns the unique id for this payload job.

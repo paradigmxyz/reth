@@ -731,8 +731,7 @@ mod tests {
     #[test]
     fn test_satisfy_attributes_empty_pool() {
         let pool: BlobTransactions<MockTransaction> = BlobTransactions::default();
-        let attributes =
-            BestTransactionsAttributes { blob_fee: Some(100), basefee: 100 };
+        let attributes = BestTransactionsAttributes { blob_fee: Some(100), basefee: 100 };
         // Satisfy attributes on an empty pool should return an empty vector
         let satisfied = pool.satisfy_attributes(attributes);
         assert!(satisfied.is_empty());
