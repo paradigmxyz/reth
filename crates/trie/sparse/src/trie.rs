@@ -5,7 +5,7 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::Decodable;
-use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind, SparseTrieResult};
+use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
@@ -73,7 +73,7 @@ impl<P> SparseTrie<P> {
     }
 
     /// Returns reference to revealed sparse trie if the trie is not blind.
-    pub fn as_revealed_ref(&self) -> Option<&RevealedSparseTrie<P>> {
+    pub const fn as_revealed_ref(&self) -> Option<&RevealedSparseTrie<P>> {
         if let Self::Revealed(revealed) = self {
             Some(revealed)
         } else {
@@ -131,11 +131,7 @@ impl<P> SparseTrie<P> {
     }
 }
 
-impl<P> SparseTrie<P>
-where
-    P: BlindedProvider,
-    SparseTrieError: From<P::Error>,
-{
+impl<P: BlindedProvider> SparseTrie<P> {
     /// Update the leaf node.
     pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
@@ -825,11 +821,7 @@ impl<P> RevealedSparseTrie<P> {
     }
 }
 
-impl<P> RevealedSparseTrie<P>
-where
-    P: BlindedProvider,
-    SparseTrieError: From<P::Error>,
-{
+impl<P: BlindedProvider> RevealedSparseTrie<P> {
     /// Update the leaf node with provided value.
     pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
         self.prefix_set.insert(path.clone());

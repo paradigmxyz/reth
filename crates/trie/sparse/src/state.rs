@@ -1,5 +1,5 @@
 use crate::{
-    blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
+    blinded::{BlindedProviderFactory, DefaultBlindedProviderFactory},
     RevealedSparseTrie, SparseTrie,
 };
 use alloy_primitives::{
@@ -8,9 +8,7 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::{Decodable, Encodable};
-use reth_execution_errors::{
-    SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieError, SparseTrieErrorKind,
-};
+use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
@@ -452,12 +450,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         })
     }
 }
-impl<F> SparseStateTrie<F>
-where
-    F: BlindedProviderFactory,
-    SparseTrieError: From<<F::AccountNodeProvider as BlindedProvider>::Error>
-        + From<<F::StorageNodeProvider as BlindedProvider>::Error>,
-{
+impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Update the account leaf node.
     pub fn update_account_leaf(
         &mut self,
