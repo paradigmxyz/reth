@@ -720,17 +720,13 @@ impl<P> RevealedSparseTrie<P> {
 
                                 // Determine whether we need to set trie mask bit.
                                 let should_set_tree_mask_bit =
-                                    // The node should be a branch or an extension node
-                                    (node_type.is_branch() || node_type.is_extension()) &&
-                                    (
-                                        // A branch or an extension node explicitly set the
-                                        // `store_in_db_trie` flag
-                                        node_type.store_in_db_trie() ||
-                                        // Set the flag according to whether a child node was
-                                        // pre-calculated (`calculated = false`), meaning that it wasn't
-                                        // in the database
-                                        !calculated
-                                    );
+                                    // A branch or an extension node explicitly set the
+                                    // `store_in_db_trie` flag
+                                    node_type.store_in_db_trie() ||
+                                    // Set the flag according to whether a child node was
+                                    // pre-calculated (`calculated = false`), meaning that it wasn't
+                                    // in the database
+                                    !calculated;
                                 if should_set_tree_mask_bit {
                                     tree_mask.set_bit(last_child_nibble);
                                 }
@@ -1151,10 +1147,6 @@ enum SparseNodeType {
 impl SparseNodeType {
     const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash)
-    }
-
-    const fn is_extension(&self) -> bool {
-        matches!(self, Self::Extension { .. })
     }
 
     const fn is_branch(&self) -> bool {
