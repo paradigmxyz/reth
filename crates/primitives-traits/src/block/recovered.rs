@@ -34,6 +34,21 @@ impl<B> RecoveredBlock<B> {
     pub fn new_unhashed(block: B, senders: Vec<Address>) -> Self {
         Self { hash: Default::default(), block, senders }
     }
+
+    /// Returns the recovered senders.
+    pub fn sender(&self) -> &[Address] {
+        &self.senders
+    }
+
+    /// Returns an iterator over the recovered senders.
+    pub fn senders_iter(&self) -> impl Iterator<Item = &Address> {
+        self.senders.iter()
+    }
+
+    /// Consumes the type and returns the inner block.
+    pub fn into_block(self) -> B {
+        self.block
+    }
 }
 
 impl<B: Block> RecoveredBlock<B> {
