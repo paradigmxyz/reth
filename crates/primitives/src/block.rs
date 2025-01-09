@@ -4,7 +4,9 @@ use crate::{
 };
 use alloc::vec::Vec;
 use alloy_consensus::Header;
-use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
+use alloy_eips::{
+    eip1898::BlockWithParent, eip2718::Encodable2718, eip4895::Withdrawals, BlockNumHash,
+};
 use alloy_primitives::{Address, B256};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use derive_more::{Deref, DerefMut};
@@ -162,10 +164,9 @@ impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
 /// Sealed Ethereum full block.
 ///
 /// Withdrawals can be optionally included at the end of the RLP encoded message.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Deref)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SealedBlock<H = Header, B = BlockBody> {
     /// Locked block header.
-    #[deref]
     header: SealedHeader<H>,
     /// Block body.
     body: B,
@@ -182,6 +183,11 @@ impl<H, B> SealedBlock<H, B> {
     #[inline]
     pub const fn hash(&self) -> B256 {
         self.header.hash()
+    }
+
+    /// Returns reference to block header.
+    pub const fn header(&self) -> &H {
+        self.header.header()
     }
 
     /// Returns reference to block body.
@@ -251,6 +257,16 @@ where
     H: alloy_consensus::BlockHeader,
     B: reth_primitives_traits::BlockBody,
 {
+    /// Return the number hash tuple.
+    pub fn num_hash(&self) -> BlockNumHash {
+        BlockNumHash::new(self.number(), self.hash())
+    }
+
+    /// Return a [`BlockWithParent`] for this header.
+    pub fn block_with_parent(&self) -> BlockWithParent {
+        BlockWithParent { parent: self.parent_hash(), block: self.num_hash() }
+    }
+
     /// Ensures that the transaction root in the block header is valid.
     ///
     /// The transaction root is the Keccak 256-bit hash of the root node of the trie structure
@@ -384,6 +400,14 @@ where
 {
     fn default() -> Self {
         Self { header: Default::default(), body: Default::default() }
+    }
+}
+
+impl<H, B> Deref for SealedBlock<H, B> {
+    type Target = H;
+
+    fn deref(&self) -> &Self::Target {
+        self.header.header()
     }
 }
 
