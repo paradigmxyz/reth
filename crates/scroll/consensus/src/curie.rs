@@ -1,6 +1,6 @@
 //! Curie fork transition for Scroll.
 //!
-//! On block 7096836, Scroll performed a transition to the Curie fork state, which brought  various
+//! On block 7096836, Scroll performed a transition to the Curie fork state, which brought various
 //! changes to the protocol:
 //!    1. Fee reduction cost thanks to the use of compressed blobs on the L1.
 //!    2. Modified [EIP-1559](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1559.md) pricing
@@ -20,8 +20,7 @@
 use revm::{
     db::states::StorageSlot,
     primitives::{address, bytes, Address, Bytecode, Bytes, U256},
-    shared::AccountInfo,
-    Database, State,
+    AccountInfo, Database, State,
 };
 
 /// L1 gas price oracle address.
@@ -126,8 +125,7 @@ mod tests {
         db::states::{bundle_state::BundleRetention, plain_account::PlainStorage, StorageSlot},
         keccak256,
         primitives::{bytes, poseidon, U256},
-        shared::AccountInfo,
-        Bytecode, Database, EmptyDB, State,
+        AccountInfo, Bytecode, Database, EmptyDB, State,
     };
     use std::str::FromStr;
 

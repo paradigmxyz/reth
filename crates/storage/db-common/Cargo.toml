@@ -28,9 +28,6 @@ alloy-consensus.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 
-# scroll
-reth-scroll-primitives = { workspace = true, optional = true }
-
 # misc
 eyre.workspace = true
 thiserror.workspace = true
@@ -50,6 +47,3 @@ alloy-consensus.workspace = true
 
 [lints]
 workspace = true
-
-[features]
-scroll = ["reth-scroll-primitives"]

@@ -92,13 +92,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// let mut hashed_state = HashedPostState::default();
     /// hashed_state.accounts.insert(
     ///     [0x11; 32].into(),
-    ///     Some(Account {
-    ///         nonce: 1,
-    ///         balance: U256::from(10),
-    ///         bytecode_hash: None,
-    ///         #[cfg(feature = "scroll")]
-    ///         account_extension: None,
-    ///     }),
+    ///     Some(Account { nonce: 1, balance: U256::from(10), bytecode_hash: None }),
     /// );
     ///
     /// // Calculate the state root

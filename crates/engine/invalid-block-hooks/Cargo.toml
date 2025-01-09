@@ -30,8 +30,6 @@ alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
 
 # scroll
-reth-scroll-execution.workspace = true
-reth-scroll-storage = { workspace = true, optional = true }
 reth-scroll-revm = { workspace = true, optional = true }
 
 # async
@@ -51,6 +49,5 @@ scroll = [
     "reth-revm/scroll",
     "reth-provider/scroll",
     "reth-trie/scroll",
-    "reth-scroll-storage",
     "reth-scroll-revm"
 ]

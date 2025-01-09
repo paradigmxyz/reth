@@ -1,4 +1,7 @@
-use crate::prefix_set::{PrefixSetMut, TriePrefixSetsMut};
+use crate::{
+    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    Nibbles,
+};
 use alloy_primitives::{
     map::{hash_map, B256HashMap, B256HashSet, HashMap, HashSet},
     Address, B256, U256,
@@ -6,7 +9,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives::Account;
-use reth_trie_common::{unpack_nibbles, KeyHasher};
+use reth_trie_common::KeyHasher;
 use revm::db::{states::CacheAccount, AccountStatus, BundleAccount};
 use std::borrow::Cow;
 
@@ -57,8 +60,7 @@ impl HashedPostState {
             .into_par_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
-                let hashed_account =
-                    account.account.as_ref().map(|a| Account::from_account_info(&a.info));
+                let hashed_account = account.account.as_ref().map(|a| (&a.info).into());
                 let hashed_storage = HashedStorage::from_plain_storage::<KH>(
                     account.status,
                     account.account.as_ref().map(|a| a.storage.iter()).into_iter().flatten(),
@@ -115,8 +117,7 @@ impl HashedPostState {
         let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
         let mut destroyed_accounts = HashSet::default();
         for (hashed_address, account) in &self.accounts {
-            // TODO(scroll): replace this with abstraction.
-            account_prefix_set.insert(unpack_nibbles(hashed_address));
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
             if account.is_none() {
                 destroyed_accounts.insert(*hashed_address);
@@ -128,7 +129,7 @@ impl HashedPostState {
             HashMap::with_capacity_and_hasher(self.storages.len(), Default::default());
         for (hashed_address, hashed_storage) in &self.storages {
             // TODO(scroll): replace this with abstraction.
-            account_prefix_set.insert(unpack_nibbles(hashed_address));
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
             storage_prefix_sets.insert(*hashed_address, hashed_storage.construct_prefix_set());
         }
 
@@ -252,7 +253,7 @@ impl HashedStorage {
         } else {
             let mut prefix_set = PrefixSetMut::with_capacity(self.storage.len());
             for hashed_slot in self.storage.keys() {
-                prefix_set.insert(unpack_nibbles(hashed_slot));
+                prefix_set.insert(Nibbles::unpack(hashed_slot));
             }
             prefix_set
         }
@@ -504,7 +505,7 @@ mod tests {
         let address = Address::random();
 
         // Create mock account info.
-        let account_info = revm::shared::AccountInfo {
+        let account_info = revm::AccountInfo {
             balance: U256::from(500),
             nonce: 5,
             code_hash: B256::random(),

@@ -85,4 +85,3 @@ test-utils = [
     "revm/test-utils",
     "reth-evm/test-utils",
 ]
-scroll = []

@@ -20,6 +20,3 @@ alloy-eips.workspace = true
 tracing.workspace = true
 futures-util.workspace = true
 eyre.workspace = true
-
-[features]
-scroll = []

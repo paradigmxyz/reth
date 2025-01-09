@@ -21,8 +21,10 @@ use reth_consensus::ConsensusError;
 use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt};
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
-use reth_scroll_execution::FinalizeExecution;
-use revm::{db::BundleState, State};
+use revm::{
+    db::{states::bundle_state::BundleRetention, BundleState},
+    State,
+};
 use revm_primitives::{db::Database, Account, AccountStatus, EvmState};
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
@@ -152,9 +154,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
         Input<'a> = &'a BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
         Output = BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>,
         Error = BlockExecutionError,
-    >
-    where
-        State<DB>: FinalizeExecution<Output = BundleState>;
+    >;
 
     /// An executor that can execute a batch of blocks given a database.
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
@@ -162,17 +162,14 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
         Input<'a> = &'a BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
         Output = ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>,
         Error = BlockExecutionError,
-    >
-    where
-        State<DB>: FinalizeExecution<Output = BundleState>;
+    >;
 
     /// Creates a new executor for single block execution.
     ///
     /// This is used to execute a single block and get the changed state.
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
-        State<DB>: FinalizeExecution<Output = BundleState>;
+        DB: Database<Error: Into<ProviderError> + Display>;
 
     /// Creates a new batch executor with the given database and pruning modes.
     ///
@@ -180,8 +177,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// during historical sync which involves executing multiple blocks in sequence.
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
-        State<DB>: FinalizeExecution<Output = BundleState>;
+        DB: Database<Error: Into<ProviderError> + Display>;
 }
 
 /// Helper type for the output of executing a block.
@@ -236,7 +232,10 @@ pub trait BlockExecutionStrategy {
     fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
 
     /// Returns the final bundle state.
-    fn finish(&mut self) -> BundleState;
+    fn finish(&mut self) -> BundleState {
+        self.state_mut().merge_transitions(BundleRetention::Reverts);
+        self.state_mut().take_bundle()
+    }
 
     /// Validate a block with regard to execution results.
     fn validate_block_post_execution(
@@ -259,15 +258,12 @@ pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
         DB = DB,
         Primitives = Self::Primitives,
         Error = BlockExecutionError,
-    >
-    where
-        State<DB>: FinalizeExecution<Output = BundleState>;
+    >;
 
     /// Creates a strategy using the give database.
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
-        State<DB>: FinalizeExecution<Output = BundleState>;
+        DB: Database<Error: Into<ProviderError> + Display>;
 }
 
 impl<F> Clone for BasicBlockExecutorProvider<F>
@@ -298,20 +294,15 @@ where
 {
     type Primitives = F::Primitives;
 
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>>
-        = BasicBlockExecutor<F::Strategy<DB>>
-    where
-        State<DB>: FinalizeExecution<Output = BundleState>;
+    type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
+        BasicBlockExecutor<F::Strategy<DB>>;
 
-    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>
-        = BasicBatchExecutor<F::Strategy<DB>>
-    where
-        State<DB>: FinalizeExecution<Output = BundleState>;
+    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
+        BasicBatchExecutor<F::Strategy<DB>>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
-        State<DB>: FinalizeExecution<Output = BundleState>,
     {
         let strategy = self.strategy_factory.create_strategy(db);
         BasicBlockExecutor::new(strategy)
@@ -320,7 +311,6 @@ where
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
-        State<DB>: FinalizeExecution<Output = BundleState>,
     {
         let strategy = self.strategy_factory.create_strategy(db);
         let batch_record = BlockBatchRecord::default();
@@ -347,7 +337,6 @@ impl<S, DB> Executor<DB> for BasicBlockExecutor<S>
 where
     S: BlockExecutionStrategy<DB = DB>,
     DB: Database<Error: Into<ProviderError> + Display>,
-    State<DB>: FinalizeExecution<Output = BundleState>,
 {
     type Input<'a> = &'a BlockWithSenders<<S::Primitives as NodePrimitives>::Block>;
     type Output = BlockExecutionOutput<<S::Primitives as NodePrimitives>::Receipt>;
@@ -435,7 +424,6 @@ impl<S, DB> BatchExecutor<DB> for BasicBatchExecutor<S>
 where
     S: BlockExecutionStrategy<DB = DB, Error = BlockExecutionError>,
     DB: Database<Error: Into<ProviderError> + Display>,
-    State<DB>: FinalizeExecution<Output = BundleState>,
 {
     type Input<'a> = &'a BlockWithSenders<<S::Primitives as NodePrimitives>::Block>;
     type Output = ExecutionOutcome<<S::Primitives as NodePrimitives>::Receipt>;
@@ -467,7 +455,7 @@ where
 
     fn finalize(mut self) -> Self::Output {
         ExecutionOutcome::new(
-            self.strategy.state_mut().finalize(),
+            self.strategy.state_mut().take_bundle(),
             self.batch_record.take_receipts(),
             self.batch_record.first_block().unwrap_or_default(),
             self.batch_record.take_requests(),
@@ -539,19 +527,12 @@ mod tests {
 
     impl BlockExecutorProvider for TestExecutorProvider {
         type Primitives = EthPrimitives;
-        type Executor<DB: Database<Error: Into<ProviderError> + Display>>
-            = TestExecutor<DB>
-        where
-            State<DB>: FinalizeExecution<Output = BundleState>;
-        type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>
-            = TestExecutor<DB>
-        where
-            State<DB>: FinalizeExecution<Output = BundleState>;
+        type Executor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
+        type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
 
         fn executor<DB>(&self, _db: DB) -> Self::Executor<DB>
         where
             DB: Database<Error: Into<ProviderError> + Display>,
-            State<DB>: FinalizeExecution<Output = BundleState>,
         {
             TestExecutor(PhantomData)
         }
@@ -559,7 +540,6 @@ mod tests {
         fn batch_executor<DB>(&self, _db: DB) -> Self::BatchExecutor<DB>
         where
             DB: Database<Error: Into<ProviderError> + Display>,
-            State<DB>: FinalizeExecution<Output = BundleState>,
         {
             TestExecutor(PhantomData)
         }
@@ -567,10 +547,7 @@ mod tests {
 
     struct TestExecutor<DB>(PhantomData<DB>);
 
-    impl<DB> Executor<DB> for TestExecutor<DB>
-    where
-        State<DB>: FinalizeExecution<Output = BundleState>,
-    {
+    impl<DB> Executor<DB> for TestExecutor<DB> {
         type Input<'a> = &'a BlockWithSenders;
         type Output = BlockExecutionOutput<Receipt>;
         type Error = BlockExecutionError;
@@ -648,15 +625,12 @@ mod tests {
 
     impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
         type Primitives = EthPrimitives;
-        type Strategy<DB: Database<Error: Into<ProviderError> + Display>>
-            = TestExecutorStrategy<DB, TestEvmConfig>
-        where
-            State<DB>: FinalizeExecution<Output = BundleState>;
+        type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
+            TestExecutorStrategy<DB, TestEvmConfig>;
 
         fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
         where
             DB: Database<Error: Into<ProviderError> + Display>,
-            State<DB>: FinalizeExecution<Output = BundleState>,
         {
             let state = State::builder()
                 .with_database(db)
@@ -680,7 +654,6 @@ mod tests {
     impl<DB> BlockExecutionStrategy for TestExecutorStrategy<DB, TestEvmConfig>
     where
         DB: Database,
-        State<DB>: FinalizeExecution<Output = BundleState>,
     {
         type DB = DB;
         type Primitives = EthPrimitives;

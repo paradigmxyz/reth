@@ -117,7 +117,6 @@ test-utils = [
 ]
 scroll = [
     "reth-primitives/scroll",
-    "reth-chainspec/scroll",
     "reth-db-api/scroll",
     "reth-evm/scroll",
     "reth-provider/scroll",
@@ -129,9 +128,6 @@ scroll = [
     "reth-blockchain-tree/scroll",
     "reth-rpc-eth-types/scroll",
     "reth-stages/scroll",
-    "reth-db-common/scroll",
-    "reth-engine-tree/scroll",
-    "reth-engine-util/scroll",
     "reth-invalid-block-hooks/scroll"
 ]
 skip-state-root-validation = [

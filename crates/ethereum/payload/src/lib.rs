@@ -400,10 +400,7 @@ where
 
     let requests_hash = requests.as_ref().map(|requests| requests.requests_hash());
     let execution_outcome = ExecutionOutcome::new(
-        // TODO(scroll): allow the information loss of the Scroll account fields for the Ethereum
-        // payload builder. Remove once we transition to the `ScrollPayloadBuilder`.
-        #[allow(clippy::useless_conversion)]
-        db.take_bundle().into(),
+        db.take_bundle(),
         vec![receipts].into(),
         block_number,
         vec![requests.clone().unwrap_or_default()],

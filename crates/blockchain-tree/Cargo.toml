@@ -34,10 +34,6 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
-# scroll
-reth-scroll-state-commitment = { workspace = true, optional = true }
-reth-scroll-storage = { workspace = true, optional = true }
-
 # common
 parking_lot.workspace = true
 tracing.workspace = true
@@ -85,7 +81,6 @@ test-utils = [
 	"reth-trie/test-utils",
 	"revm/test-utils",
 	"reth-trie-parallel/test-utils",
-	"reth-scroll-state-commitment?/test-utils"
 ]
 optimism = [
 	"reth-primitives/optimism",
@@ -106,6 +101,4 @@ scroll = [
 	"reth-testing-utils/scroll",
 	"reth-trie/scroll",
 	"revm/scroll",
-	"reth-scroll-storage/scroll",
-	"reth-scroll-state-commitment/scroll"
 ]

@@ -1,5 +1,6 @@
 use crate::{
     branch::{BranchNodeRef, CHILD_INDEX_MASK},
+    constants::EMPTY_ROOT_HASH,
     leaf::HashLeaf,
     sub_tree::SubTreeRef,
 };
@@ -11,7 +12,6 @@ use alloy_trie::{
     BranchNodeCompact, Nibbles, TrieMask,
 };
 use core::cmp;
-use reth_scroll_primitives::poseidon::EMPTY_ROOT_HASH;
 use tracing::trace;
 
 #[derive(Debug, Default)]
@@ -461,26 +461,9 @@ impl From<HashBuilder> for reth_trie::HashBuilder {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::key::AsBytes;
     use alloc::collections::BTreeMap;
-    use hex_literal::hex;
-    use reth_scroll_primitives::poseidon::{hash_with_domain, Fr, PrimeField};
-    use reth_trie::BitsCompatibility;
-
-    #[test]
-    fn test_convert_to_bit_representation() {
-        let nibbles = Nibbles::unpack_bits(vec![7, 8]);
-        let expected = [0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0];
-        assert_eq!(nibbles.as_slice(), expected);
-    }
-
-    #[test]
-    fn test_convert_to_bit_representation_truncation() {
-        // 64 byte nibble
-        let hex = hex!("0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f0102030405060708090a0b0c0d0e0f01020304");
-        assert_eq!(hex.len(), 64);
-        let nibbles = Nibbles::unpack_bits(hex);
-        assert_eq!(nibbles.len(), 254);
-    }
+    use poseidon_bn254::{hash_with_domain, Fr, PrimeField};
 
     #[test]
     fn test_basic_trie() {
@@ -533,8 +516,8 @@ mod test {
         let leaf_hashes: BTreeMap<_, _> = leaf_values
             .iter()
             .map(|(key, value)| {
-                let key_fr = Fr::from_repr_vartime(key.encode_leaf_key())
-                    .expect("key is valid field element");
+                let key_fr =
+                    Fr::from_repr_vartime(key.as_bytes()).expect("key is valid field element");
                 let value = Fr::from_repr_vartime(*value).expect("value is a valid field element");
                 let hash = hash_with_domain(&[key_fr, value], crate::LEAF_NODE_DOMAIN);
                 (key.clone(), hash)

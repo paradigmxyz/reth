@@ -26,8 +26,6 @@ use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt, OpTransactionSi
 use reth_primitives::BlockWithSenders;
 use reth_primitives_traits::SignedTransaction;
 use reth_revm::{Database, State};
-use reth_scroll_execution::FinalizeExecution;
-use revm::db::{states::bundle_state::BundleRetention, BundleState};
 use revm_primitives::{db::DatabaseCommit, EnvWithHandlerCfg, ResultAndState};
 use tracing::trace;
 
@@ -64,15 +62,12 @@ where
         + ConfigureEvm<Header = alloy_consensus::Header, Transaction = OpTransactionSigned>,
 {
     type Primitives = OpPrimitives;
-    type Strategy<DB: Database<Error: Into<ProviderError> + Display>>
-        = OpExecutionStrategy<DB, EvmConfig>
-    where
-        State<DB>: FinalizeExecution<Output = BundleState>;
+    type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
+        OpExecutionStrategy<DB, EvmConfig>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
-        State<DB>: FinalizeExecution<Output = BundleState>,
     {
         let state =
             State::builder().with_database(db).with_bundle_update().without_state_clear().build();
@@ -127,7 +122,6 @@ where
 impl<DB, EvmConfig> BlockExecutionStrategy for OpExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
-    State<DB>: FinalizeExecution<Output = BundleState>,
     EvmConfig: ConfigureEvm<Header = alloy_consensus::Header, Transaction = OpTransactionSigned>,
 {
     type DB = DB;
@@ -291,11 +285,6 @@ where
 
     fn state_mut(&mut self) -> &mut State<DB> {
         &mut self.state
-    }
-
-    fn finish(&mut self) -> BundleState {
-        self.state_mut().merge_transitions(BundleRetention::Reverts);
-        self.state_mut().finalize()
     }
 
     fn with_state_hook(&mut self, hook: Option<Box<dyn OnStateHook>>) {

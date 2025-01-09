@@ -19,10 +19,8 @@ use reth_primitives::{
 use reth_revm::primitives::{CfgEnvWithHandlerCfg, U256};
 use reth_scroll_chainspec::{ChainSpecProvider, ScrollChainSpec};
 use reth_scroll_consensus::{apply_curie_hard_fork, L1_GAS_PRICE_ORACLE_ADDRESS};
-use reth_scroll_execution::FinalizeExecution;
 use reth_scroll_forks::{ScrollHardfork, ScrollHardforks};
 use revm::{
-    db::{states::bundle_state::BundleRetention, BundleState},
     primitives::{BlockEnv, EnvWithHandlerCfg, ExecutionResult, ResultAndState},
     Database, DatabaseCommit, State,
 };
@@ -68,7 +66,6 @@ where
 impl<DB, EvmConfig> BlockExecutionStrategy for ScrollExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
-    State<DB>: FinalizeExecution<Output = BundleState>,
     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>
         + ChainSpecProvider<ChainSpec = ScrollChainSpec>,
 {
@@ -212,11 +209,6 @@ where
         &mut self.state
     }
 
-    fn finish(&mut self) -> BundleState {
-        self.state_mut().merge_transitions(BundleRetention::Reverts);
-        self.state_mut().finalize()
-    }
-
     fn validate_block_post_execution(
         &self,
         block: &BlockWithSenders,
@@ -280,16 +272,13 @@ where
         + ChainSpecProvider<ChainSpec = ScrollChainSpec>,
 {
     type Primitives = EthPrimitives;
-    type Strategy<DB: Database<Error: Into<ProviderError> + Display>>
-        = ScrollExecutionStrategy<DB, EvmConfig>
-    where
-        State<DB>: FinalizeExecution<Output = BundleState>;
+    type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
+        ScrollExecutionStrategy<DB, EvmConfig>;
 
     /// Creates a strategy using the give database.
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
-        State<DB>: FinalizeExecution<Output = BundleState>,
     {
         let state =
             State::builder().with_database(db).without_state_clear().with_bundle_update().build();
@@ -328,8 +317,7 @@ mod tests {
     use revm::{
         db::states::{bundle_state::BundleRetention, StorageSlot},
         primitives::{Address, B256, U256},
-        shared::AccountInfo,
-        Bytecode, EmptyDBTyped, TxKind,
+        AccountInfo, Bytecode, EmptyDBTyped, TxKind,
     };
 
     const BLOCK_GAS_LIMIT: u64 = 10_000_000;

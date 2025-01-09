@@ -38,7 +38,6 @@ alloy-rpc-types-engine.workspace = true
 reth-scroll-chainspec.workspace = true
 reth-scroll-engine.workspace = true
 reth-scroll-evm.workspace = true
-reth-scroll-state-commitment.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -60,12 +59,7 @@ scroll = [
 	"reth-primitives/scroll",
 	"reth-provider/scroll",
 	"reth-evm/scroll",
-	"reth-scroll-state-commitment/scroll",
 	"reth-scroll-evm/scroll",
 	"reth-scroll-engine/scroll"
-]
-mpt = [
-	"reth-scroll-chainspec/mpt",
-	"reth-scroll-state-commitment/mpt"
 ]
 skip-state-root-validation = []

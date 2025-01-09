@@ -21,12 +21,14 @@ use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,
     ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
 };
-use reth_revm::primitives::{
-    BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
-    ResultAndState,
+use reth_revm::{
+    database::StateProviderDatabase,
+    primitives::{
+        BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
+        ResultAndState,
+    },
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-use reth_scroll_execution::FinalizeExecution;
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
     TransactionPool,
@@ -258,10 +260,7 @@ pub trait LoadPendingBlock:
             .provider()
             .history_by_block_hash(parent_hash)
             .map_err(Self::Error::from_eth_err)?;
-        #[cfg(not(feature = "scroll"))]
-        let state = reth_revm::database::StateProviderDatabase::new(state_provider);
-        #[cfg(feature = "scroll")]
-        let state = reth_scroll_storage::ScrollStateProviderDatabase::new(state_provider);
+        let state = StateProviderDatabase::new(state_provider);
         let mut db = State::builder().with_database(state).with_bundle_update().build();
 
         let mut cumulative_gas_used = 0;
@@ -413,7 +412,7 @@ pub trait LoadPendingBlock:
         // merge all transitions into bundle state.
         db.merge_transitions(BundleRetention::PlainState);
 
-        let bundle_state = db.finalize();
+        let bundle_state = db.take_bundle();
         let hashed_state = db.database.hashed_post_state(&bundle_state);
 
         // calculate the state root

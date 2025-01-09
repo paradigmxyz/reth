@@ -189,11 +189,9 @@ serde-bincode-compat = [
 	"reth-trie-common/serde-bincode-compat",
 ]
 scroll = [
-	"reth-trie-common/scroll",
 	"reth-primitives-traits/scroll",
 	"reth-testing-utils/scroll",
 	"reth-scroll-primitives",
-	"reth-chainspec/scroll",
 ]
 
 [[bench]]

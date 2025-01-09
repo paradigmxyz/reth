@@ -23,12 +23,9 @@ jobs:
           - type: optimism
             args: --bin op-reth --workspace --lib --examples --tests --benches --locked
             features: "optimism asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
-          - type: scroll-bmpt
+          - type: scroll
             args: --bin scroll-reth --workspace --lib --examples --tests --benches --locked
-            features: "scroll asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
-          - type: scroll-mpt
-            args: --bin scroll-reth-mpt --workspace --lib --examples --tests --benches --locked
-            features: "scroll skip-state-root-validation mpt asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+            features: "scroll skip-state-root-validation asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
           - type: book
             args: --manifest-path book/sources/Cargo.toml --workspace --bins
             features: ""
@@ -110,7 +107,6 @@ jobs:
       - run: cargo hack check --workspace --exclude op-reth --exclude scroll-reth --exclude scroll-reth-mpt
       - run: cargo check -p op-reth --features "optimism"
       - run: cargo check -p scroll-reth --features "scroll"
-      - run: cargo check -p scroll-reth-mpt --features "scroll"
 
   msrv:
     name: MSRV / ${{ matrix.network }}

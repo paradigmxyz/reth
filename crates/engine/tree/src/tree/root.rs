@@ -227,13 +227,7 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
             trace!(target: "engine::root", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
-            // TODO (scroll): once we transition to the sdk pattern, a solution
-            // needs to be found for this.
-            let info = if destroyed {
-                None
-            } else {
-                Some(reth_primitives::Account::from_account_info(&account.info))
-            };
+            let info = if destroyed { None } else { Some(account.info.into()) };
             hashed_state.accounts.insert(hashed_address, info);
 
             let mut changed_storage_iter = account
@@ -861,10 +855,6 @@ mod tests {
             } else {
                 Some(revm_account.info.code_hash)
             },
-            #[cfg(feature = "scroll")]
-            account_extension: revm_account.info.code.as_ref().map(|code| {
-                reth_scroll_primitives::AccountExtension::from_bytecode(&code.original_byte_slice())
-            }),
         }
     }
 

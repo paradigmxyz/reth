@@ -29,8 +29,6 @@ use std::sync::LazyLock;
 
 extern crate alloc;
 
-use reth_scroll_state_commitment as _;
-
 mod constants;
 pub use constants::{
     SCROLL_DEV_L1_CONFIG, SCROLL_DEV_L1_MESSAGE_QUEUE_ADDRESS, SCROLL_DEV_L1_PROXY_ADDRESS,
@@ -235,9 +233,6 @@ impl ScrollChainSpec {
             difficulty: self.genesis.difficulty,
             nonce: self.genesis.nonce.into(),
             extra_data: self.genesis.extra_data.clone(),
-            #[cfg(not(feature = "mpt"))]
-            state_root: reth_scroll_state_commitment::state_root_ref_unhashed(&self.genesis.alloc),
-            #[cfg(feature = "mpt")]
             state_root: reth_trie_common::root::state_root_ref_unhashed(&self.genesis.alloc),
             timestamp: self.genesis.timestamp,
             mix_hash: self.genesis.mix_hash,
@@ -386,7 +381,7 @@ mod tests {
         let scroll_mainnet =
             ScrollChainSpecBuilder::scroll_mainnet().build(ScrollChainConfig::mainnet());
         assert_eq!(
-            b256!("bbc05efd412b7cd47a2ed0e5ddfcf87af251e414ea4c801d78b6784513180a80"),
+            b256!("908789cb20d00fc6070093f142aa8d02c21cfb0a9b9cfd4621d8cf0255234c0f"),
             scroll_mainnet.genesis_hash()
         );
     }
@@ -396,7 +391,7 @@ mod tests {
         let scroll_sepolia =
             ScrollChainSpecBuilder::scroll_sepolia().build(ScrollChainConfig::sepolia());
         assert_eq!(
-            b256!("aa62d1a8b2bffa9e5d2368b63aae0d98d54928bd713125e3fd9e5c896c68592c"),
+            b256!("5e756a466b785b67e247b18c410d962866a53af97f09948016e9239b2054c94f"),
             scroll_sepolia.genesis_hash()
         );
     }
@@ -408,23 +403,23 @@ mod tests {
             &[
                 (
                     Head { number: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0xea, 0x6b, 0x56, 0xca]), next: 5220340 },
+                    ForkId { hash: ForkHash([0x56, 0xe1, 0xec, 0xfd]), next: 5220340 },
                 ),
                 (
                     Head { number: 5220340, ..Default::default() },
-                    ForkId { hash: ForkHash([0xee, 0x46, 0xae, 0x2a]), next: 7096836 },
+                    ForkId { hash: ForkHash([0x8f, 0x57, 0x36, 0x0b]), next: 7096836 },
                 ),
                 (
                     Head { number: 7096836, ..Default::default() },
-                    ForkId { hash: ForkHash([0x18, 0xd3, 0xc8, 0xd9]), next: 1724227200 },
+                    ForkId { hash: ForkHash([0x9d, 0xf0, 0x1d, 0x89]), next: 1724227200 },
                 ),
                 (
                     Head { number: 7096836, timestamp: 1724227200, ..Default::default() },
-                    ForkId { hash: ForkHash([0xcc, 0xeb, 0x09, 0xb0]), next: 1725264000 },
+                    ForkId { hash: ForkHash([0x98, 0x08, 0x9e, 0xee]), next: 1725264000 },
                 ),
                 (
                     Head { number: 7096836, timestamp: 1725264000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x21, 0xa2, 0x07, 0x54]), next: 0 },
+                    ForkId { hash: ForkHash([0x16, 0x22, 0xae, 0x35]), next: 0 },
                 ),
             ],
         );
@@ -437,23 +432,23 @@ mod tests {
             &[
                 (
                     Head { number: 0, ..Default::default() },
-                    ForkId { hash: ForkHash([0x25, 0xfa, 0xe4, 0x54]), next: 3747132 },
+                    ForkId { hash: ForkHash([0x2a, 0xd3, 0xf4, 0x42]), next: 3747132 },
                 ),
                 (
                     Head { number: 3747132, ..Default::default() },
-                    ForkId { hash: ForkHash([0xda, 0x76, 0xc2, 0x2d]), next: 4740239 },
+                    ForkId { hash: ForkHash([0xa5, 0x8f, 0xa5, 0x60]), next: 4740239 },
                 ),
                 (
                     Head { number: 4740239, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9f, 0xb4, 0x75, 0xf1]), next: 1723622400 },
+                    ForkId { hash: ForkHash([0x2a, 0x22, 0xef, 0x69]), next: 1723622400 },
                 ),
                 (
                     Head { number: 4740239, timestamp: 1723622400, ..Default::default() },
-                    ForkId { hash: ForkHash([0xe9, 0x26, 0xd4, 0x9b]), next: 1724832000 },
+                    ForkId { hash: ForkHash([0x4d, 0xe3, 0x20, 0x97]), next: 1724832000 },
                 ),
                 (
                     Head { number: 4740239, timestamp: 1724832000, ..Default::default() },
-                    ForkId { hash: ForkHash([0x69, 0xf3, 0x7e, 0xde]), next: 0 },
+                    ForkId { hash: ForkHash([0x6a, 0xef, 0xc3, 0x0a]), next: 0 },
                 ),
             ],
         );

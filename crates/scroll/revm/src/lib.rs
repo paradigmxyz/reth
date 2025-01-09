@@ -4,20 +4,6 @@
 #![warn(unused_crate_dependencies)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(all(not(feature = "std"), feature = "scroll"))]
-extern crate alloc as std;
-
-#[cfg(feature = "serde")]
-use serde as _;
-
-#[cfg(feature = "scroll")]
-pub mod states;
-#[cfg(all(feature = "scroll", feature = "test-utils"))]
-mod test_utils;
-
-#[cfg(feature = "scroll")]
-pub use crate::states::ScrollAccountInfo as AccountInfo;
-#[cfg(not(feature = "scroll"))]
 pub use revm::primitives::AccountInfo;
 
 #[cfg(all(feature = "optimism", not(feature = "scroll")))]
@@ -33,11 +19,6 @@ pub use revm::{
     ContextPrecompile, ContextPrecompiles, Evm, EvmBuilder, EvmContext, GetInspector, Inspector,
     JournaledState,
 };
-
-/// Shared module, available for all feature flags.
-pub mod shared {
-    pub use revm::{db::states::BundleState, primitives::AccountInfo};
-}
 
 /// Match the `revm` module structure
 pub mod handler {
@@ -61,25 +42,14 @@ pub mod precompile {
 
 /// Match the `revm-primitives` module structure
 pub mod primitives {
-    #[cfg(feature = "scroll")]
-    pub use crate::states::ScrollAccountInfo as AccountInfo;
     pub use revm::primitives::*;
 }
 
 /// Match the `revm` module structure
 pub mod db {
-    #[cfg(feature = "scroll")]
-    pub use crate::states::{
-        ScrollBundleAccount as BundleAccount, ScrollBundleState as BundleState,
-    };
     pub use revm::db::*;
     /// Match the `revm` module structure
     pub mod states {
-        #[cfg(feature = "scroll")]
-        pub use crate::states::{
-            ScrollBundleBuilder as BundleBuilder, ScrollBundleState as BundleState,
-            ScrollPlainStateReverts as PlainStateReverts, ScrollStateChangeset as StateChangeset,
-        };
         pub use revm::db::states::*;
     }
 }

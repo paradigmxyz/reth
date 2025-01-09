@@ -116,7 +116,7 @@ dependencies = [
  "num_enum",
  "proptest",
  "serde",
- "strum 0.26.3",
+ "strum",
 ]
 
 [[package]]
@@ -565,7 +565,7 @@ dependencies = [
  "jsonwebtoken",
  "rand 0.8.5",
  "serde",
- "strum 0.26.3",
+ "strum",
 ]
 
 [[package]]
@@ -696,7 +696,7 @@ checksum = "4436b4b96d265eb17daea26eb31525c3076d024d10901e446790afbd2f7eeaf5"
 dependencies = [
  "alloy-sol-macro-input",
  "const-hex",
- "heck 0.5.0",
+ "heck",
  "indexmap 2.7.0",
  "proc-macro-error2",
  "proc-macro2",
@@ -714,7 +714,7 @@ checksum = "e5f58698a18b96faa8513519de112b79a96010b4ff84264ce54a217c52a8e98b"
 dependencies = [
  "const-hex",
  "dunce",
- "heck 0.5.0",
+ "heck",
  "proc-macro2",
  "quote",
  "syn 2.0.94",
@@ -1858,7 +1858,7 @@ version = "4.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ac6a0c7b1a9e9a5186361f67dfa1b88213572f427fb9ab038efb2bd8c582dab"
 dependencies = [
- "heck 0.5.0",
+ "heck",
  "proc-macro2",
  "quote",
  "syn 2.0.94",
@@ -1978,8 +1978,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24f165e7b643266ea80cb858aed492ad9280e3e05ce24d4a99d7d7b889b6a4d9"
 dependencies = [
  "crossterm",
- "strum 0.26.3",
- "strum_macros 0.26.4",
+ "strum",
+ "strum_macros",
  "unicode-width 0.2.0",
 ]
 
@@ -2757,7 +2757,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1e6a265c649f3f5979b601d26f1d05ada116434c87741c9493cb56218f76cbc"
 dependencies = [
- "heck 0.5.0",
+ "heck",
  "proc-macro2",
  "quote",
  "syn 2.0.94",
@@ -2921,7 +2921,6 @@ dependencies = [
  "reth-evm-ethereum",
  "reth-node-ethereum",
  "reth-primitives",
- "reth-scroll-execution",
  "reth-scroll-revm",
 ]
 
@@ -3591,14 +3590,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gobuild"
-version = "0.1.0-alpha.2"
-source = "git+https://github.com/scroll-tech/gobuild.git#24935c2b8f677841f22acd6710957621bb294e0e"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3696,12 +3687,6 @@ dependencies = [
  "byteorder",
  "num-traits",
 ]
-
-[[package]]
-name = "heck"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95505c38b4572b2d910cecb0281560f54b440a19336cbbcb27bf6ce6adc6f5a8"
 
 [[package]]
 name = "heck"
@@ -4550,7 +4535,7 @@ version = "0.24.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c06c01ae0007548e73412c08e2285ffe5d723195bf268bce67b1b77c3bb2a14d"
 dependencies = [
- "heck 0.5.0",
+ "heck",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
@@ -5283,17 +5268,6 @@ name = "num-conv"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51d515d32fb182ee37cda2ccdcb92950d6a3c2893aa280e540671c2cd0f3b1d9"
-
-[[package]]
-name = "num-derive"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "876a53fff98e03a936a674b29568b0e605f06b29372c2489ff4de23f1949743d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
 
 [[package]]
 name = "num-format"
@@ -6335,8 +6309,8 @@ dependencies = [
  "itertools 0.13.0",
  "lru",
  "paste",
- "strum 0.26.3",
- "strum_macros 0.26.4",
+ "strum",
+ "strum_macros",
  "unicode-segmentation",
  "unicode-truncate",
  "unicode-width 0.1.14",
@@ -6731,8 +6705,6 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-scroll-revm",
- "reth-scroll-state-commitment",
- "reth-scroll-storage",
  "reth-stages-api",
  "reth-storage-errors",
  "reth-testing-utils",
@@ -7051,7 +7023,7 @@ dependencies = [
  "rustc-hash 2.1.0",
  "serde",
  "serde_json",
- "strum 0.26.3",
+ "strum",
  "sysinfo",
  "tempfile",
  "test-fuzz",
@@ -7108,7 +7080,6 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
- "reth-scroll-primitives",
  "reth-stages-types",
  "reth-trie",
  "reth-trie-db",
@@ -7452,9 +7423,6 @@ dependencies = [
  "reth-prune-types",
  "reth-revm",
  "reth-rpc-types-compat",
- "reth-scroll-primitives",
- "reth-scroll-state-commitment",
- "reth-scroll-storage",
  "reth-stages",
  "reth-stages-api",
  "reth-static-file",
@@ -7494,8 +7462,6 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-rpc-types-compat",
- "reth-scroll-execution",
- "reth-scroll-storage",
  "reth-trie",
  "revm-primitives",
  "serde",
@@ -7727,7 +7693,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-revm",
- "reth-scroll-execution",
  "reth-scroll-revm",
  "reth-storage-errors",
  "revm-primitives",
@@ -7751,7 +7716,6 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-revm",
- "reth-scroll-execution",
  "reth-scroll-primitives",
  "reth-testing-utils",
  "revm-primitives",
@@ -7825,7 +7789,6 @@ dependencies = [
  "reth-provider",
  "reth-prune-types",
  "reth-revm",
- "reth-scroll-storage",
  "reth-stages-api",
  "reth-tasks",
  "reth-testing-utils",
@@ -7917,9 +7880,7 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-rpc-api",
- "reth-scroll-execution",
  "reth-scroll-revm",
- "reth-scroll-storage",
  "reth-tracing",
  "reth-trie",
  "serde",
@@ -8291,7 +8252,7 @@ dependencies = [
  "secp256k1",
  "serde",
  "shellexpand",
- "strum 0.26.3",
+ "strum",
  "thiserror 2.0.9",
  "tokio",
  "toml",
@@ -8520,7 +8481,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-revm",
- "reth-scroll-execution",
  "reth-scroll-revm",
  "revm-primitives",
  "thiserror 2.0.9",
@@ -8860,7 +8820,6 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "reth-codecs",
- "reth-scroll-primitives",
  "reth-scroll-revm",
  "secp256k1",
  "serde",
@@ -8915,7 +8874,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-trie",
  "reth-trie-db",
- "strum 0.26.3",
+ "strum",
  "tempfile",
  "tokio",
  "tracing",
@@ -8984,7 +8943,6 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-prune-types",
- "reth-scroll-primitives",
  "reth-scroll-revm",
  "reth-storage-api",
  "reth-storage-errors",
@@ -9047,7 +9005,6 @@ dependencies = [
  "reth-rpc-server-types",
  "reth-rpc-types-compat",
  "reth-scroll-revm",
- "reth-scroll-storage",
  "reth-tasks",
  "reth-testing-utils",
  "reth-transaction-pool",
@@ -9226,9 +9183,7 @@ dependencies = [
  "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-rpc-types-compat",
- "reth-scroll-execution",
  "reth-scroll-revm",
- "reth-scroll-storage",
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie-common",
@@ -9309,7 +9264,7 @@ dependencies = [
  "reth-errors",
  "reth-network-api",
  "serde",
- "strum 0.26.3",
+ "strum",
 ]
 
 [[package]]
@@ -9345,7 +9300,6 @@ dependencies = [
  "reth-network-peers",
  "reth-primitives-traits",
  "reth-scroll-forks",
- "reth-scroll-state-commitment",
  "reth-trie-common",
  "serde",
  "serde_json",
@@ -9413,20 +9367,11 @@ dependencies = [
  "reth-revm",
  "reth-scroll-chainspec",
  "reth-scroll-consensus",
- "reth-scroll-execution",
  "reth-scroll-forks",
  "reth-scroll-primitives",
  "reth-scroll-revm",
  "thiserror 2.0.9",
  "tracing",
-]
-
-[[package]]
-name = "reth-scroll-execution"
-version = "1.1.4"
-dependencies = [
- "reth-revm",
- "reth-scroll-storage",
 ]
 
 [[package]]
@@ -9464,7 +9409,6 @@ dependencies = [
  "reth-scroll-chainspec",
  "reth-scroll-engine",
  "reth-scroll-evm",
- "reth-scroll-state-commitment",
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-db",
@@ -9483,7 +9427,6 @@ dependencies = [
  "bincode",
  "bytes",
  "modular-bitfield",
- "poseidon-bn254 0.1.0 (git+https://github.com/scroll-tech/poseidon-bn254?rev=526a64a)",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
@@ -9497,59 +9440,7 @@ dependencies = [
 name = "reth-scroll-revm"
 version = "1.1.4"
 dependencies = [
- "reth-scroll-primitives",
  "revm",
- "serde",
-]
-
-[[package]]
-name = "reth-scroll-state-commitment"
-version = "1.1.4"
-dependencies = [
- "alloy-consensus",
- "alloy-genesis",
- "alloy-primitives",
- "alloy-rlp",
- "itertools 0.13.0",
- "metrics",
- "poseidon-bn254 0.1.0 (git+https://github.com/scroll-tech/poseidon-bn254?rev=526a64a)",
- "proptest",
- "proptest-arbitrary-interop",
- "rayon",
- "reth-db",
- "reth-db-api",
- "reth-execution-errors",
- "reth-metrics",
- "reth-node-types",
- "reth-primitives",
- "reth-primitives-traits",
- "reth-provider",
- "reth-scroll-execution",
- "reth-scroll-primitives",
- "reth-scroll-state-commitment",
- "reth-scroll-trie",
- "reth-storage-api",
- "reth-trie",
- "reth-trie-common",
- "reth-trie-db",
- "reth-trie-parallel",
- "tracing",
- "zktrie",
- "zktrie_rust",
-]
-
-[[package]]
-name = "reth-scroll-storage"
-version = "1.1.4"
-dependencies = [
- "alloy-primitives",
- "eyre",
- "reth-codecs",
- "reth-primitives-traits",
- "reth-revm",
- "reth-scroll-primitives",
- "reth-scroll-revm",
- "reth-storage-errors",
 ]
 
 [[package]]
@@ -9559,8 +9450,8 @@ dependencies = [
  "alloy-primitives",
  "alloy-trie",
  "hex-literal",
+ "poseidon-bn254 0.1.0 (git+https://github.com/scroll-tech/poseidon-bn254?rev=526a64a)",
  "proptest-arbitrary-interop",
- "reth-scroll-primitives",
  "reth-trie",
  "tracing",
 ]
@@ -9605,7 +9496,6 @@ dependencies = [
  "reth-prune-types",
  "reth-revm",
  "reth-scroll-primitives",
- "reth-scroll-storage",
  "reth-stages-api",
  "reth-static-file",
  "reth-storage-errors",
@@ -9697,7 +9587,7 @@ dependencies = [
  "derive_more",
  "reth-nippy-jar",
  "serde",
- "strum 0.26.3",
+ "strum",
 ]
 
 [[package]]
@@ -9894,11 +9784,9 @@ dependencies = [
  "proptest-arbitrary-interop",
  "reth-codecs",
  "reth-primitives-traits",
- "reth-scroll-primitives",
  "serde",
  "serde_json",
  "serde_with",
- "smallvec",
 ]
 
 [[package]]
@@ -10496,18 +10384,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "scroll-reth-mpt"
-version = "1.1.4"
-dependencies = [
- "clap",
- "reth-cli-util",
- "reth-node-builder",
- "reth-provider",
- "reth-scroll-cli",
- "reth-scroll-node",
-]
-
-[[package]]
 name = "sdd"
 version = "3.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11034,30 +10910,11 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "strum"
-version = "0.24.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
-
-[[package]]
-name = "strum"
 version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
 dependencies = [
- "strum_macros 0.26.4",
-]
-
-[[package]]
-name = "strum_macros"
-version = "0.24.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e385be0d24f186b4ce2f9982191e7101bb737312ad61c1f2f984f34bcf85d59"
-dependencies = [
- "heck 0.4.1",
- "proc-macro2",
- "quote",
- "rustversion",
- "syn 1.0.109",
+ "strum_macros",
 ]
 
 [[package]]
@@ -11066,7 +10923,7 @@ version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
 dependencies = [
- "heck 0.5.0",
+ "heck",
  "proc-macro2",
  "quote",
  "rustversion",
@@ -11244,7 +11101,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7e6b4c7391a38f0f026972ec2200bcfd1ec45533aa266fdae5858d011afc500"
 dependencies = [
  "darling",
- "heck 0.5.0",
+ "heck",
  "itertools 0.13.0",
  "once_cell",
  "prettyplease",
@@ -12668,30 +12525,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.94",
-]
-
-[[package]]
-name = "zktrie"
-version = "0.3.0"
-source = "git+https://github.com/scroll-tech/zktrie.git?rev=309160464c1cd2b87a578ed6d9b6e98205ae4640#309160464c1cd2b87a578ed6d9b6e98205ae4640"
-dependencies = [
- "gobuild",
- "zktrie_rust",
-]
-
-[[package]]
-name = "zktrie_rust"
-version = "0.3.0"
-source = "git+https://github.com/scroll-tech/zktrie.git?rev=309160464c1cd2b87a578ed6d9b6e98205ae4640#309160464c1cd2b87a578ed6d9b6e98205ae4640"
-dependencies = [
- "hex",
- "lazy_static",
- "log",
- "num",
- "num-derive",
- "num-traits",
- "strum 0.24.1",
- "strum_macros 0.24.3",
 ]
 
 [[package]]

@@ -19,9 +19,9 @@ use reth_trie_db::MerklePatriciaTrie;
 
 /// The Scroll node implementation.
 #[derive(Clone, Debug)]
-pub struct ScrollNodeMpt;
+pub struct ScrollNode;
 
-impl ScrollNodeMpt {
+impl ScrollNode {
     /// Returns a [`ComponentsBuilder`] configured for a regular Ethereum node.
     pub fn components<Node>() -> ComponentsBuilder<
         Node,
@@ -51,7 +51,7 @@ impl ScrollNodeMpt {
     }
 }
 
-impl<N> Node<N> for ScrollNodeMpt
+impl<N> Node<N> for ScrollNode
 where
     N: FullNodeTypes<Types = Self>,
 {
@@ -77,11 +77,11 @@ where
     }
 }
 
-impl NodeTypesWithEngine for ScrollNodeMpt {
+impl NodeTypesWithEngine for ScrollNode {
     type Engine = EthEngineTypes;
 }
 
-impl NodeTypes for ScrollNodeMpt {
+impl NodeTypes for ScrollNode {
     // TODO(scroll): update to scroll primitives when we introduce the revm SDK pattern.
     type Primitives = EthPrimitives;
     type ChainSpec = ScrollChainSpec;

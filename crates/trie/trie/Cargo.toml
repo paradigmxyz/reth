@@ -81,16 +81,7 @@ test-utils = [
     "reth-stages-types/test-utils",
     "reth-primitives-traits/test-utils"
 ]
-scroll = [
-	"revm/scroll",
-	"reth-primitives-traits/scroll",
-	"reth-trie-common/scroll"
-]
-mpt = [
-	"revm/scroll",
-	"reth-primitives-traits/scroll",
-	"reth-trie-common/mpt"
-]
+scroll = ["revm/scroll"]
 
 [[bench]]
 name = "hash_post_state"

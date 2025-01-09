@@ -632,21 +632,14 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
-                #[cfg(not(feature = "scroll"))]
-                let db = StateProviderDatabase::new(&state_provider);
-                #[cfg(feature = "scroll")]
-                let db = reth_scroll_storage::ScrollStateProviderDatabase::new(&state_provider);
-                let block_executor = this.inner.block_executor.executor(db);
+                let block_executor =
+                    this.inner.block_executor.executor(StateProviderDatabase::new(&state_provider));
 
                 let mut witness_record = ExecutionWitnessRecord::default();
 
                 let _ = block_executor
                     .execute_with_state_closure(&(*block).clone().unseal(), |statedb: &State<_>| {
-                        witness_record.record_executed_state(
-                            statedb,
-                            #[cfg(feature = "scroll")]
-                            &statedb.database.post_execution_context,
-                        );
+                        witness_record.record_executed_state(statedb);
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;
 

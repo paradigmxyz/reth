@@ -1,7 +1,6 @@
 use crate::{hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
-use reth_trie_common::unpack_nibbles;
 
 /// Represents a branch node in the trie.
 #[derive(Debug)]
@@ -107,7 +106,7 @@ where
             if let Some((hashed_key, value)) = self.current_hashed_entry.take() {
                 // If the walker's key is less than the unpacked hashed key,
                 // reset the checked status and continue
-                if self.walker.key().is_some_and(|key| key < &unpack_nibbles(hashed_key)) {
+                if self.walker.key().is_some_and(|key| key < &Nibbles::unpack(hashed_key)) {
                     self.current_walker_key_checked = false;
                     continue
                 }

@@ -93,7 +93,6 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
 }
 
 fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> Option<RethAccount> {
-    #[allow(clippy::needless_update)]
     match revm_account.status {
         AccountStatus::SelfDestructed => None,
         _ => Some(RethAccount {
@@ -104,7 +103,6 @@ fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> Option<RethAccoun
             } else {
                 Some(revm_account.info.code_hash)
             },
-            ..Default::default()
         }),
     }
 }

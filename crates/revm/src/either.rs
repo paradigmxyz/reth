@@ -1,5 +1,5 @@
 use alloy_primitives::{Address, B256, U256};
-use revm::{primitives::Bytecode, shared::AccountInfo, Database};
+use revm::{primitives::Bytecode, AccountInfo, Database};
 
 /// An enum type that can hold either of two different [`Database`] implementations.
 ///

@@ -198,10 +198,7 @@ fn holesky_deposit_contract_proof() {
         info:  Some(Account {
             balance: U256::ZERO,
             nonce: 0,
-            bytecode_hash: Some(B256::from_str("0x2034f79e0e33b0ae6bef948532021baceb116adf2616478703bec6b17329f1cc").unwrap()),
-            #[cfg(feature = "scroll")]
-            account_extension: Some(reth_scroll_primitives::AccountExtension::empty())
-
+            bytecode_hash: Some(B256::from_str("0x2034f79e0e33b0ae6bef948532021baceb116adf2616478703bec6b17329f1cc").unwrap())
         }),
         storage_root: B256::from_str("0x556a482068355939c95a3412bdb21213a301483edb1b64402fb66ac9f3583599").unwrap(),
         proof: convert_to_proof([

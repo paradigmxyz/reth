@@ -5,7 +5,7 @@ use super::{
 use alloy_primitives::{hex, B256};
 use alloy_trie::TrieMask;
 use core::{fmt, ops::Range, slice::Iter};
-use reth_scroll_primitives::poseidon::{hash_with_domain, Fr, PrimeField};
+use poseidon_bn254::{hash_with_domain, Fr, PrimeField};
 
 #[allow(unused_imports)]
 use alloc::vec::Vec;

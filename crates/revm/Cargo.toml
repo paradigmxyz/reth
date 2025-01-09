@@ -21,9 +21,6 @@ reth-storage-api.workspace = true
 reth-trie = { workspace = true, optional = true }
 reth-primitives-traits.workspace = true
 
-# scroll
-reth-scroll-primitives = { workspace = true, optional = true }
-
 # alloy
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
@@ -65,10 +62,8 @@ serde = [
 	"reth-primitives-traits/serde",
 	"reth-trie?/serde",
 	"reth-ethereum-forks/serde",
-    "reth-scroll-primitives?/serde"
 ]
 scroll = [
-    "reth-scroll-primitives",
     "reth-primitives-traits/scroll",
     "reth-trie?/scroll"
 ]

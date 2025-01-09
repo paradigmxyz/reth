@@ -34,9 +34,6 @@ reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-tracing.workspace = true
 
-# scroll
-reth-scroll-storage = { workspace = true, optional = true }
-
 # alloy
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
@@ -96,6 +93,4 @@ scroll = [
 	"reth-primitives-traits/scroll",
 	"reth-node-api/scroll",
 	"reth-blockchain-tree/scroll",
-	"reth-db-common/scroll",
-	"reth-scroll-storage/scroll"
 ]

@@ -8,13 +8,18 @@
 extern crate alloc;
 
 mod branch;
-mod hash_builder;
+
+mod constants;
+pub use constants::EMPTY_ROOT_HASH;
+
+mod key;
 mod leaf;
 mod sub_tree;
 
+mod hash_builder;
 pub use hash_builder::HashBuilder;
 
-use reth_scroll_primitives::poseidon::Fr;
+use poseidon_bn254::Fr;
 
 /// The hashing domain for leaf nodes.
 pub const LEAF_NODE_DOMAIN: Fr = Fr::from_raw([4, 0, 0, 0]);

@@ -15,34 +15,17 @@ workspace = true
 # revm
 revm = { version = "19.0.0", default-features = false }
 
-# scroll
-reth-scroll-primitives = { workspace = true, optional = true }
-
-# misc
-serde = { workspace = true, optional = true }
-
 [features]
 default = ["std"]
 dev = ["revm/dev"]
-arbitrary = [
-	"revm/arbitrary",
-	"reth-scroll-primitives?/arbitrary"
-]
+arbitrary = ["revm/arbitrary"]
 asm-keccak = ["revm/asm-keccak"]
 c-kzg = ["revm/c-kzg"]
 optimism = ["revm/optimism"]
-serde = [
-	"revm/serde",
-	"dep:serde",
-	"reth-scroll-primitives?/serde"
-]
-scroll = ["revm/scroll-poseidon-codehash", "reth-scroll-primitives/poseidon"]
+serde = ["revm/serde"]
+scroll = ["revm/scroll-poseidon-codehash"]
 test-utils = ["revm/test-utils"]
-std = [
-	"revm/std",
-	"serde?/std"
-]
-mpt = []
+std = ["revm/std"]
 
 blst = ["revm/blst"]
 optional_block_gas_limit =  ["revm/optional_block_gas_limit"]

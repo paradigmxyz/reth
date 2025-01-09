@@ -30,16 +30,11 @@ reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-revm.workspace = true
-reth-scroll-primitives = { workspace = true, optional = true }
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie.workspace = true
-
-# scroll
-reth-scroll-state-commitment = { workspace = true, optional = true }
-reth-scroll-storage = { workspace = true, optional = true }
 
 # alloy
 alloy-consensus.workspace = true
@@ -129,14 +124,6 @@ test-utils = [
     "reth-trie-sparse/test-utils",
     "reth-prune-types?/test-utils",
     "reth-trie-db/test-utils",
-	"reth-trie-parallel/test-utils",
-    "reth-scroll-state-commitment?/test-utils"
+    "reth-trie-parallel/test-utils",
 ]
-scroll = [
-    "reth-scroll-primitives",
-    "reth-scroll-storage/scroll",
-    "reth-scroll-state-commitment/scroll"
-]
-skip-state-root-validation = [
-    "reth-stages/skip-state-root-validation"
-]
+skip-state-root-validation = ["reth-stages/skip-state-root-validation"]

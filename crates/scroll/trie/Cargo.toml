@@ -12,10 +12,15 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
-reth-scroll-primitives = { workspace = true, features = ["poseidon"] }
+# reth
 reth-trie.workspace = true
-alloy-trie = { workspace = true, features = ["serde"] }
+
+# alloy
 alloy-primitives.workspace = true
+alloy-trie = { workspace = true, features = ["serde"] }
+
+# misc
+poseidon-bn254 = { workspace = true, features = ["bn254"] }
 tracing.workspace = true
 
 [dev-dependencies]
@@ -24,4 +29,3 @@ proptest-arbitrary-interop.workspace = true
 
 [features]
 scroll = ["reth-trie/scroll"]
-mpt = ["reth-trie/mpt"]

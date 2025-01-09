@@ -102,19 +102,15 @@ members = [
     "crates/rpc/rpc-types-compat/",
     "crates/rpc/rpc/",
     "crates/scroll/bin/scroll-reth",
-    "crates/scroll/bin/scroll-reth-mpt",
     "crates/scroll/chainspec",
     "crates/scroll/cli",
     "crates/scroll/consensus",
     "crates/scroll/engine",
     "crates/scroll/evm",
-    "crates/scroll/execution",
     "crates/scroll/hardforks",
     "crates/scroll/node",
     "crates/scroll/primitives",
     "crates/scroll/revm",
-    "crates/scroll/storage",
-    "crates/scroll/state-commitment",
     "crates/scroll/trie",
     "crates/stages/api/",
     "crates/stages/stages/",
@@ -426,14 +422,11 @@ reth-scroll-cli = { path = "crates/scroll/cli" }
 reth-scroll-consensus = { path = "crates/scroll/consensus" }
 reth-scroll-engine = { path = "crates/scroll/engine" }
 reth-scroll-evm = { path = "crates/scroll/evm" }
-reth-scroll-execution = { path = "crates/scroll/execution" }
 reth-scroll-forks = { path = "crates/scroll/hardforks" }
 reth-scroll-node = { path = "crates/scroll/node" }
 reth-scroll-primitives = { path = "crates/scroll/primitives" }
-reth-scroll-state-commitment = { path = "crates/scroll/state-commitment" }
 reth-scroll-trie = { path = "crates/scroll/trie" }
 reth-scroll-revm = { path = "crates/scroll/revm" }
-reth-scroll-storage = { path = "crates/scroll/storage" }
 reth-stages = { path = "crates/stages/stages" }
 reth-stages-api = { path = "crates/stages/api" }
 reth-stages-types = { path = "crates/stages/types" }

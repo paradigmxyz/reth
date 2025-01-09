@@ -103,10 +103,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
             let this = self.clone();
             self.spawn_with_state_at_block(block, move |state| {
-                #[cfg(feature = "scroll")]
-                let mut db =
-                    CacheDB::new(reth_scroll_storage::ScrollStateProviderDatabase::new(state));
-                #[cfg(not(feature = "scroll"))]
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
                 let mut gas_used = 0;
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =

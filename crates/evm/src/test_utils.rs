@@ -14,9 +14,8 @@ use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{BlockWithSenders, EthPrimitives, NodePrimitives, Receipt, Receipts};
 use reth_prune_types::PruneModes;
-use reth_scroll_execution::FinalizeExecution;
 use reth_storage_errors::provider::ProviderError;
-use revm::{db::BundleState, State};
+use revm::State;
 use revm_primitives::db::Database;
 use std::{fmt::Display, sync::Arc};
 
@@ -36,20 +35,13 @@ impl MockExecutorProvider {
 impl BlockExecutorProvider for MockExecutorProvider {
     type Primitives = EthPrimitives;
 
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>>
-        = Self
-    where
-        State<DB>: FinalizeExecution<Output = BundleState>;
+    type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
-    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>
-        = Self
-    where
-        State<DB>: FinalizeExecution<Output = BundleState>;
+    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
     fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
-        State<DB>: FinalizeExecution<Output = BundleState>,
     {
         self.clone()
     }
@@ -57,7 +49,6 @@ impl BlockExecutorProvider for MockExecutorProvider {
     fn batch_executor<DB>(&self, _: DB) -> Self::BatchExecutor<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
-        State<DB>: FinalizeExecution<Output = BundleState>,
     {
         self.clone()
     }

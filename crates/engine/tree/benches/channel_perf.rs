@@ -1,7 +1,6 @@
 //! Benchmark comparing `std::sync::mpsc` and `crossbeam` channels for `StateRootTask`.
 
 #![allow(missing_docs)]
-#![allow(clippy::needless_update)]
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use proptest::test_runner::TestRunner;
@@ -27,7 +26,6 @@ fn create_bench_state(num_accounts: usize) -> EvmState {
                 balance: U256::from(100),
                 nonce: 10,
                 code_hash: B256::from_slice(&rng.gen::<[u8; 32]>()),
-                code: Default::default(),
                 ..Default::default()
             },
             storage,

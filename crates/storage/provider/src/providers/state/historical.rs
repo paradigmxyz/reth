@@ -624,49 +624,13 @@ mod tests {
         )
         .unwrap();
 
-        let acc_plain = Account {
-            nonce: 100,
-            balance: U256::ZERO,
-            bytecode_hash: None,
-            #[cfg(feature = "scroll")]
-            account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
-        };
-        let acc_at15 = Account {
-            nonce: 15,
-            balance: U256::ZERO,
-            bytecode_hash: None,
-            #[cfg(feature = "scroll")]
-            account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
-        };
-        let acc_at10 = Account {
-            nonce: 10,
-            balance: U256::ZERO,
-            bytecode_hash: None,
-            #[cfg(feature = "scroll")]
-            account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
-        };
-        let acc_at7 = Account {
-            nonce: 7,
-            balance: U256::ZERO,
-            bytecode_hash: None,
-            #[cfg(feature = "scroll")]
-            account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
-        };
-        let acc_at3 = Account {
-            nonce: 3,
-            balance: U256::ZERO,
-            bytecode_hash: None,
-            #[cfg(feature = "scroll")]
-            account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
-        };
+        let acc_plain = Account { nonce: 100, balance: U256::ZERO, bytecode_hash: None };
+        let acc_at15 = Account { nonce: 15, balance: U256::ZERO, bytecode_hash: None };
+        let acc_at10 = Account { nonce: 10, balance: U256::ZERO, bytecode_hash: None };
+        let acc_at7 = Account { nonce: 7, balance: U256::ZERO, bytecode_hash: None };
+        let acc_at3 = Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None };
 
-        let higher_acc_plain = Account {
-            nonce: 4,
-            balance: U256::ZERO,
-            bytecode_hash: None,
-            #[cfg(feature = "scroll")]
-            account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
-        };
+        let higher_acc_plain = Account { nonce: 4, balance: U256::ZERO, bytecode_hash: None };
 
         // setup
         tx.put::<tables::AccountChangeSets>(1, AccountBeforeTx { address: ADDRESS, info: None })

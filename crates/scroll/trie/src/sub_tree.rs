@@ -2,7 +2,7 @@ use super::{BRANCH_NODE_LBRT_DOMAIN, BRANCH_NODE_LTRB_DOMAIN};
 use alloy_primitives::{hex, B256};
 use alloy_trie::Nibbles;
 use core::fmt;
-use reth_scroll_primitives::poseidon::{hash_with_domain, Fr, PrimeField};
+use poseidon_bn254::{hash_with_domain, Fr, PrimeField};
 
 /// [`SubTreeRef`] is a structure that allows for calculation of the root of a sparse binary Merkle
 /// tree consisting of a single leaf node.

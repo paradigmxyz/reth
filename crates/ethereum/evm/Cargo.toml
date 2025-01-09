@@ -24,9 +24,6 @@ reth-consensus.workspace = true
 revm-primitives.workspace = true
 reth-primitives-traits.workspace = true
 
-# scroll
-reth-scroll-execution.workspace = true
-
 # Alloy
 alloy-primitives.workspace = true
 alloy-eips.workspace = true

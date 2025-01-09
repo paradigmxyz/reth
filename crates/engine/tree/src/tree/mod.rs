@@ -46,7 +46,7 @@ use reth_provider::{
 };
 use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
-use reth_trie_parallel::root::ParallelStateRootError;
+use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::EvmState;
 use std::{
     cmp::Ordering,
@@ -73,6 +73,7 @@ pub use config::TreeConfig;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::InvalidBlockHook;
+use reth_revm::database::StateProviderDatabase;
 
 pub mod root;
 
@@ -2213,12 +2214,7 @@ where
         }
 
         trace!(target: "engine::tree", block=?block.num_hash(), "Executing block");
-        // TODO(scroll): remove once issue #76 is completed.
-        #[cfg(feature = "scroll")]
-        let db = reth_scroll_storage::ScrollStateProviderDatabase::new(&state_provider);
-        #[cfg(not(feature = "scroll"))]
-        let db = reth_revm::database::StateProviderDatabase::new(&state_provider);
-        let executor = self.executor_provider.executor(db);
+        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
 
         let block_number = block.number();
         let block_hash = block.hash();
@@ -2404,13 +2400,7 @@ where
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
-        #[cfg(feature = "scroll")]
-        let parallel_state_root =
-            reth_scroll_state_commitment::ParallelStateRoot::new(consistent_view, input);
-        #[cfg(not(feature = "scroll"))]
-        let parallel_state_root =
-            reth_trie_parallel::root::ParallelStateRoot::new(consistent_view, input);
-        parallel_state_root.incremental_root_with_updates()
+        ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
 
     /// Computes the trie input at the provided parent hash.

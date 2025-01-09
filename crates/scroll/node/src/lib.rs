@@ -15,4 +15,4 @@ mod storage;
 pub use storage::ScrollStorage;
 
 mod node;
-pub use node::{ScrollNodeBmpt, ScrollNodeMpt};
+pub use node::ScrollNode;

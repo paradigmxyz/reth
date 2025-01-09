@@ -42,9 +42,6 @@ alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 revm.workspace = true
 
-# scroll
-reth-scroll-primitives = { workspace = true, optional = true }
-
 # optimism
 reth-optimism-primitives = { workspace = true, optional = true }
 
@@ -119,7 +116,7 @@ serde = [
     "reth-execution-types/serde",
     "reth-trie-db/serde",
     "reth-trie/serde",
-    "reth-scroll-primitives?/serde"
+    "reth-scroll-primitives/serde"
 ]
 test-utils = [
     "reth-db/test-utils",
@@ -148,5 +145,4 @@ scroll = [
     "reth-trie/scroll",
     "reth-execution-types/scroll",
     "reth-evm/scroll",
-    "reth-scroll-primitives"
 ]

@@ -63,9 +63,6 @@ revm = { workspace = true, features = [
 ] }
 revm-primitives = { workspace = true, features = ["serde"] }
 
-# scroll
-reth-scroll-storage = { workspace = true, optional = true }
-
 # rpc
 jsonrpsee.workspace = true
 http.workspace = true
@@ -113,8 +110,6 @@ scroll = [
     "reth-testing-utils/scroll",
     "reth-evm-ethereum/scroll",
     "reth-rpc-eth-api/scroll",
-    "reth-scroll-storage/scroll",
-    "reth-chainspec/scroll",
     "revm-primitives/scroll",
     "revm/scroll",
 ]

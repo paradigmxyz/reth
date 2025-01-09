@@ -13,11 +13,10 @@ use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
-    db::states::bundle_state::BundleRetention, primitives::EnvWithHandlerCfg, DatabaseCommit,
-    StateBuilder,
+    database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
+    primitives::EnvWithHandlerCfg, DatabaseCommit, StateBuilder,
 };
 use reth_rpc_api::DebugApiClient;
-use reth_scroll_execution::FinalizeExecution;
 use reth_tracing::tracing::warn;
 use reth_trie::{updates::TrieUpdates, HashedStorage};
 use serde::Serialize;
@@ -72,11 +71,10 @@ where
 
         // Setup database.
         let provider = self.provider.state_by_block_hash(parent_header.hash())?;
-        #[cfg(not(feature = "scroll"))]
-        let state = reth_revm::database::StateProviderDatabase::new(&provider);
-        #[cfg(feature = "scroll")]
-        let state = reth_scroll_storage::ScrollStateProviderDatabase::new(&provider);
-        let mut db = StateBuilder::new().with_database(state).with_bundle_update().build();
+        let mut db = StateBuilder::new()
+            .with_database(StateProviderDatabase::new(&provider))
+            .with_bundle_update()
+            .build();
 
         // Setup environment for the execution.
         let EvmEnv { cfg_env_with_handler_cfg, block_env } =
@@ -126,7 +124,7 @@ where
         db.merge_transitions(BundleRetention::Reverts);
 
         // Take the bundle state
-        let mut bundle_state = db.finalize();
+        let mut bundle_state = db.take_bundle();
 
         // Initialize a map of preimages.
         let mut state_preimages = HashMap::default();
@@ -138,15 +136,6 @@ where
         let mut hashed_state = db.database.hashed_post_state(&bundle_state);
         for (address, account) in db.cache.accounts {
             let hashed_address = provider.hash_key(address.as_ref());
-            #[cfg(feature = "scroll")]
-            let hashed_account = account.account.as_ref().map(|a| {
-                Into::<reth_scroll_revm::AccountInfo>::into((
-                    a.info.clone(),
-                    &db.database.post_execution_context,
-                ))
-                .into()
-            });
-            #[cfg(not(feature = "scroll"))]
             let hashed_account = account.account.as_ref().map(|a| a.info.clone().into());
             hashed_state.accounts.insert(hashed_address, hashed_account);
 

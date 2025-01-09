@@ -36,9 +36,6 @@ reth-optimism-chainspec.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives.workspace = true
 
-# scroll
-reth-scroll-execution.workspace = true
-
 # revm
 revm.workspace = true
 revm-primitives.workspace = true

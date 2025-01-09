@@ -80,10 +80,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use reth_revm as _;
-#[cfg(feature = "scroll")]
-use reth_scroll_primitives as _;
-
 #[allow(missing_docs)]
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

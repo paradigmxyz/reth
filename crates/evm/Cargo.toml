@@ -24,10 +24,8 @@ reth-prune-types.workspace = true
 reth-revm.workspace = true
 reth-storage-errors.workspace = true
 
-# scroll
 revm.workspace = true
 revm-primitives.workspace = true
-reth-scroll-execution.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -71,7 +69,6 @@ test-utils = [
     "reth-revm/test-utils",
     "revm/test-utils",
     "reth-prune-types/test-utils",
-    "reth-scroll-execution/test-utils"
 ]
 scroll = [
     "revm/scroll",
@@ -79,5 +76,4 @@ scroll = [
     "reth-primitives/scroll",
     "reth-revm/scroll",
     "reth-execution-types/scroll",
-    "reth-scroll-execution/scroll"
 ]

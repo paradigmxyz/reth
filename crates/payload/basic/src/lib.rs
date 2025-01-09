@@ -203,12 +203,7 @@ where
                 // this only includes changed accounts and storage but is better than nothing
                 let storage =
                     acc.storage.iter().map(|(key, slot)| (*key, slot.present_value)).collect();
-                cached.insert_account(
-                    addr,
-                    #[allow(clippy::useless_conversion)]
-                    info.into(),
-                    storage,
-                );
+                cached.insert_account(addr, info, storage);
             }
         }
 

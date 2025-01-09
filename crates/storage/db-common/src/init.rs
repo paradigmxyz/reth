@@ -234,12 +234,6 @@ where
                     nonce: account.nonce.unwrap_or_default(),
                     balance: account.balance,
                     bytecode_hash,
-                    #[cfg(feature = "scroll")]
-                    account_extension: Some(
-                        reth_scroll_primitives::AccountExtension::from_bytecode(
-                            account.code.as_ref().unwrap_or_default(),
-                        ),
-                    ),
                 }),
                 storage,
             ),

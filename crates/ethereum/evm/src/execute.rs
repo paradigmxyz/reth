@@ -23,8 +23,7 @@ use reth_evm::{
     ConfigureEvm, TxEnvOverrides,
 };
 use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
-use reth_revm::db::{states::bundle_state::BundleRetention, BundleState, State};
-use reth_scroll_execution::FinalizeExecution;
+use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
     EnvWithHandlerCfg, ResultAndState,
@@ -72,15 +71,12 @@ where
 {
     type Primitives = EthPrimitives;
 
-    type Strategy<DB: Database<Error: Into<ProviderError> + Display>>
-        = EthExecutionStrategy<DB, EvmConfig>
-    where
-        State<DB>: FinalizeExecution<Output = BundleState>;
+    type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
+        EthExecutionStrategy<DB, EvmConfig>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
         DB: Database<Error: Into<ProviderError> + Display>,
-        State<DB>: FinalizeExecution<Output = BundleState>,
     {
         let state =
             State::builder().with_database(db).with_bundle_update().without_state_clear().build();
@@ -137,7 +133,6 @@ where
 impl<DB, EvmConfig> BlockExecutionStrategy for EthExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
-    State<DB>: FinalizeExecution<Output = BundleState>,
     EvmConfig: ConfigureEvm<
         Header = alloy_consensus::Header,
         Transaction = reth_primitives::TransactionSigned,
@@ -291,11 +286,6 @@ where
         self.system_caller.with_state_hook(hook);
     }
 
-    fn finish(&mut self) -> BundleState {
-        self.state_mut().merge_transitions(BundleRetention::Reverts);
-        self.state_mut().finalize()
-    }
-
     fn validate_block_post_execution(
         &self,
         block: &BlockWithSenders,
@@ -360,10 +350,6 @@ mod tests {
             balance: U256::ZERO,
             bytecode_hash: Some(keccak256(BEACON_ROOTS_CODE.clone())),
             nonce: 1,
-            #[cfg(feature = "scroll")]
-            account_extension: Some(reth_scroll_primitives::AccountExtension::from_bytecode(
-                &BEACON_ROOTS_CODE,
-            )),
         };
 
         db.insert_account(
@@ -383,10 +369,6 @@ mod tests {
             nonce: 1,
             balance: U256::ZERO,
             bytecode_hash: Some(keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
-            #[cfg(feature = "scroll")]
-            account_extension: Some(reth_scroll_primitives::AccountExtension::from_bytecode(
-                &WITHDRAWAL_REQUEST_PREDEPLOY_CODE,
-            )),
         };
 
         db.insert_account(
@@ -692,10 +674,6 @@ mod tests {
             balance: U256::ZERO,
             bytecode_hash: Some(keccak256(HISTORY_STORAGE_CODE.clone())),
             nonce: 1,
-            #[cfg(feature = "scroll")]
-            account_extension: Some(reth_scroll_primitives::AccountExtension::from_bytecode(
-                &HISTORY_STORAGE_CODE,
-            )),
         };
 
         db.insert_account(
@@ -998,13 +976,7 @@ mod tests {
 
         db.insert_account(
             sender_address,
-            Account {
-                nonce: 1,
-                balance: U256::from(ETH_TO_WEI),
-                bytecode_hash: None,
-                #[cfg(feature = "scroll")]
-                account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
-            },
+            Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
             None,
             HashMap::default(),
         );
@@ -1079,13 +1051,7 @@ mod tests {
         // Insert the sender account into the state with a nonce of 1 and a balance of 1 ETH in Wei
         db.insert_account(
             sender_address,
-            Account {
-                nonce: 1,
-                balance: U256::from(ETH_TO_WEI),
-                bytecode_hash: None,
-                #[cfg(feature = "scroll")]
-                account_extension: Some(reth_scroll_primitives::AccountExtension::empty()),
-            },
+            Account { nonce: 1, balance: U256::from(ETH_TO_WEI), bytecode_hash: None },
             None,
             HashMap::default(),
         );
@@ -1157,7 +1123,7 @@ mod tests {
         let initial_balance = 100;
         db.insert_account(
             withdrawal_recipient,
-            Account { balance: U256::from(initial_balance), nonce: 1, ..Default::default() },
+            Account { balance: U256::from(initial_balance), nonce: 1, bytecode_hash: None },
             None,
             HashMap::default(),
         );

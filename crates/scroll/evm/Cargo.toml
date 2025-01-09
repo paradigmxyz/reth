@@ -34,7 +34,6 @@ alloy-eips.workspace = true
 
 # scroll
 reth-scroll-consensus.workspace = true
-reth-scroll-execution.workspace = true
 
 # misc
 auto_impl.workspace = true
@@ -44,7 +43,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 eyre.workspace = true
-reth-scroll-execution = { workspace = true, features = ["test-utils"] }
 reth-scroll-primitives.workspace = true
 
 [features]
@@ -53,12 +51,9 @@ optimism = [
 	"revm/optimism"
 ]
 scroll = [
-	"reth-chainspec/scroll",
 	"reth-evm/scroll",
 	"reth-primitives/scroll",
-	"reth-primitives-traits/scroll",
 	"reth-revm/scroll",
 	"reth-scroll-consensus/scroll",
-	"reth-scroll-execution/scroll",
 	"revm/scroll"
 ]
