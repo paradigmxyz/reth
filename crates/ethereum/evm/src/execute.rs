@@ -197,8 +197,17 @@ where
                     error: Box::new(new_err),
                 }
             })?;
+            dbg!("execute transactions", &result_and_state.state);
+            dbg!("execute transactions gas used", &result_and_state.result.gas_used());
+            dbg!("execute transactions result", &result_and_state.result);
+
+
             self.system_caller.on_state(&result_and_state.state);
+            dbg!("on state", &result_and_state.state);
+            dbg!("on state gas used", &result_and_state.result.gas_used());
+            dbg!("on state result", &result_and_state.result);
             let ResultAndState { result, state } = result_and_state;
+ 
             evm.db_mut().commit(state);
 
             // append gas used
@@ -219,6 +228,8 @@ where
                 },
             );
         }
+        dbg!("receipts", &receipts);
+        dbg!("cumulative_gas_used");
         Ok(ExecuteOutput { receipts, gas_used: cumulative_gas_used })
     }
 

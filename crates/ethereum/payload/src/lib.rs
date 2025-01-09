@@ -243,6 +243,8 @@ where
 
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
+        tracing::info!(target: "payload_builder", ?pool_tx);
+
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
             // we can't fit this transaction into the block, so we need to mark it as invalid
