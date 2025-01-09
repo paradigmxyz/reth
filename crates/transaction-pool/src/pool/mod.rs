@@ -426,8 +426,8 @@ where
         self.delete_discarded_blobs(discarded.iter());
     }
 
-    pub fn update_da_limits(&self, max_da_tx_size: Option<u64>, max_da_block_size: Option<u64>) {
-        self.pool.write().update_da_limits(max_da_tx_size, max_da_block_size)
+    pub fn update_da_limits(&self, max_da_tx_size: Option<u64>) {
+        self.pool.write().update_da_limits(max_da_tx_size)
     }
 
     /// Add a single validated transaction into the pool.

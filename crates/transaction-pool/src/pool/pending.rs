@@ -6,7 +6,6 @@ use crate::{
     },
     Priority, SubPoolLimit, TransactionOrdering, ValidPoolTransaction,
 };
-use revm_primitives::U256;
 use rustc_hash::FxHashMap;
 use std::{
     cmp::Ordering,

@@ -496,7 +496,7 @@ pub trait TransactionPool: Send + Sync + Clone {
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
 
-    fn update_da_limits(&self, max_tx_da_size: Option<u64>, max_block_da_size: Option<u64>);
+    fn update_da_limits(&self, max_tx_da_size: Option<u64>);
 }
 
 /// Extension for [TransactionPool] trait that allows to set the current block info.

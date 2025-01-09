@@ -316,7 +316,7 @@ impl TransactionPool for NoopTransactionPool {
         Ok(vec![None; versioned_hashes.len()])
     }
 
-    fn update_da_limits(&self, _max_da_tx_size: Option<u64>, _max_da_block_size: Option<u64>) {}
+    fn update_da_limits(&self, _max_da_tx_size: Option<u64>) {}
 }
 
 /// A [`TransactionValidator`] that does nothing.
