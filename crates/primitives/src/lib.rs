@@ -71,10 +71,8 @@ pub use c_kzg as kzg;
 /// Read more: <https://github.com/bincode-org/bincode/issues/326>
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
-    pub use super::{
-        block::serde_bincode_compat::*,
-        transaction::{serde_bincode_compat as transaction, serde_bincode_compat::*},
-    };
+    pub use super::transaction::{serde_bincode_compat as transaction, serde_bincode_compat::*};
+    pub use reth_primitives_traits::serde_bincode_compat::*;
 }
 
 /// Temp helper struct for integrating [`NodePrimitives`].
