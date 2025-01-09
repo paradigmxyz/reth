@@ -742,13 +742,22 @@ impl<P> RevealedSparseTrie<P> {
 
                                 // Determine whether we need to set trie mask bit.
                                 let should_set_tree_mask_bit =
-                                    // A branch or an extension node explicitly set the
-                                    // `store_in_db_trie` flag
-                                    node_type.store_in_db_trie() ||
-                                    // Set the flag according to whether a child node was
-                                    // pre-calculated (`calculated = false`), meaning that it wasn't
-                                    // in the database
-                                    !calculated;
+                                    // A blinded node has the tree mask bit set
+                                    (
+                                        node_type.is_hash() &&
+                                        self.branch_node_tree_masks
+                                            .get(&path)
+                                            .is_some_and(|mask| mask.is_bit_set(last_child_nibble))
+                                    ) ||
+                                    (
+                                        // A branch or an extension node explicitly set the
+                                        // `store_in_db_trie` flag
+                                        node_type.store_in_db_trie() ||
+                                        // Set the flag according to whether a child node was
+                                        // pre-calculated (`calculated = false`), meaning that it wasn't
+                                        // in the database
+                                        !calculated
+                                    );
                                 if should_set_tree_mask_bit {
                                     tree_mask.set_bit(last_child_nibble);
                                 }
