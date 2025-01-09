@@ -752,11 +752,11 @@ impl<P> RevealedSparseTrie<P> {
                                     (
                                         // A branch or an extension node explicitly set the
                                         // `store_in_db_trie` flag
-                                        node_type.store_in_db_trie() ||
+                                        node_type.store_in_db_trie()
                                         // Set the flag according to whether a child node was
                                         // pre-calculated (`calculated = false`), meaning that it wasn't
                                         // in the database
-                                        !calculated
+                                        // !calculated
                                     );
                                 if should_set_tree_mask_bit {
                                     tree_mask.set_bit(last_child_nibble);
