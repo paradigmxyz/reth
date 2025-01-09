@@ -37,13 +37,14 @@ mod block_bincode {
     /// #[derive(Serialize, Deserialize)]
     /// struct Data<T: SerdeBincodeCompat, H: SerdeBincodeCompat> {
     ///     #[serde_as(as = "serde_bincode_compat::Block<'_, T, H>")]
-    ///     body: alloy_consensus::Block<T>,
+    ///     body: alloy_consensus::Block<T, H>,
     /// }
     /// ```
     #[derive(derive_more::Debug, Serialize, Deserialize)]
     #[debug(bound())]
     pub struct Block<'a, T: SerdeBincodeCompat, H: SerdeBincodeCompat> {
         header: H::BincodeRepr<'a>,
+        #[serde(bound = "BlockBody<'a, T>: Serialize + serde::de::DeserializeOwned")]
         body: BlockBody<'a, T>,
     }
 
