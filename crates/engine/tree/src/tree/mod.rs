@@ -2337,6 +2337,8 @@ where
                 return Err(err.into())
             }
 
+            dbg!("insert_inner creating hashed_state", &output.state);
+            dbg!("insert_innercreating hashed_state", &output.receipts);
             let hashed_state = self.provider.hashed_post_state(&output.state);
 
             trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
@@ -2431,6 +2433,7 @@ where
 
         let (state_root, trie_output, hashed_state, output, root_elapsed) = state_root_result;
 
+        println!("about to check state root vs given in header");
         if state_root != block.header().state_root() {
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(

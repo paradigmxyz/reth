@@ -200,12 +200,15 @@ where
             dbg!("execute transactions", &result_and_state.state);
             dbg!("execute transactions gas used", &result_and_state.result.gas_used());
             dbg!("execute transactions result", &result_and_state.result);
-
+            let old_result_and_state = result_and_state.clone();
 
             self.system_caller.on_state(&result_and_state.state);
-            dbg!("on state", &result_and_state.state);
-            dbg!("on state gas used", &result_and_state.result.gas_used());
-            dbg!("on state result", &result_and_state.result);
+            // dbg!("on state", &result_and_state.state);
+            // dbg!("on state gas used", &result_and_state.result.gas_used());
+            // dbg!("on state result", &result_and_state.result);
+
+            dbg!(result_and_state == old_result_and_state);
+
             let ResultAndState { result, state } = result_and_state;
  
             evm.db_mut().commit(state);
