@@ -1370,7 +1370,8 @@ mod tests {
         state: impl IntoIterator<Item = (Nibbles, Account)> + Clone,
         destroyed_accounts: B256HashSet,
         proof_targets: impl IntoIterator<Item = Nibbles>,
-    ) -> (B256, TrieUpdates, ProofNodes, HashMap<Nibbles, TrieMask>) {
+    ) -> (B256, TrieUpdates, ProofNodes, HashMap<Nibbles, TrieMask>, HashMap<Nibbles, TrieMask>)
+    {
         let mut account_rlp = Vec::new();
 
         let mut hash_builder = HashBuilder::default()
@@ -1417,12 +1418,19 @@ mod tests {
             .iter()
             .map(|(path, node)| (path.clone(), node.hash_mask))
             .collect();
+        let branch_node_tree_masks = hash_builder
+            .updated_branch_nodes
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .map(|(path, node)| (path.clone(), node.tree_mask))
+            .collect();
 
         let mut trie_updates = TrieUpdates::default();
         let removed_keys = node_iter.walker.take_removed_keys();
         trie_updates.finalize(hash_builder, removed_keys, destroyed_accounts);
 
-        (root, trie_updates, proof_nodes, branch_node_hash_masks)
+        (root, trie_updates, proof_nodes, branch_node_hash_masks, branch_node_tree_masks)
     }
 
     /// Assert that the sparse trie nodes and the proof nodes from the hash builder are equal.
@@ -1484,7 +1492,7 @@ mod tests {
             account_rlp
         };
 
-        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
+        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
             run_hash_builder([(key.clone(), value())], Default::default(), [key.clone()]);
 
         let mut sparse = RevealedSparseTrie::default().with_updates(true);
@@ -1509,7 +1517,7 @@ mod tests {
             account_rlp
         };
 
-        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
+        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
             run_hash_builder(
                 paths.iter().cloned().zip(std::iter::repeat_with(value)),
                 Default::default(),
@@ -1538,7 +1546,7 @@ mod tests {
             account_rlp
         };
 
-        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
+        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
             run_hash_builder(
                 paths.iter().cloned().zip(std::iter::repeat_with(value)),
                 Default::default(),
@@ -1575,7 +1583,7 @@ mod tests {
             account_rlp
         };
 
-        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
+        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
             run_hash_builder(
                 paths.iter().sorted_unstable().cloned().zip(std::iter::repeat_with(value)),
                 Default::default(),
@@ -1613,7 +1621,7 @@ mod tests {
             account_rlp
         };
 
-        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
+        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
             run_hash_builder(
                 paths.iter().cloned().zip(std::iter::repeat_with(|| old_value)),
                 Default::default(),
@@ -1631,7 +1639,7 @@ mod tests {
         assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
 
-        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
+        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
             run_hash_builder(
                 paths.iter().cloned().zip(std::iter::repeat_with(|| new_value)),
                 Default::default(),
@@ -1905,7 +1913,7 @@ mod tests {
         ));
 
         let mut sparse =
-            RevealedSparseTrie::from_root(branch.clone(), Some(TrieMask::new(0b01)), false)
+            RevealedSparseTrie::from_root(branch.clone(), Some(TrieMask::new(0b01)), None, false)
                 .unwrap();
 
         // Reveal a branch node and one of its children
@@ -1913,8 +1921,8 @@ mod tests {
         // Branch (Mask = 11)
         // ├── 0 -> Hash (Path = 0)
         // └── 1 -> Leaf (Path = 1)
-        sparse.reveal_node(Nibbles::default(), branch, Some(TrieMask::new(0b01))).unwrap();
-        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
+        sparse.reveal_node(Nibbles::default(), branch, Some(TrieMask::new(0b01)), None).unwrap();
+        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None, None).unwrap();
 
         // Removing a blinded leaf should result in an error
         assert_matches!(
@@ -1938,7 +1946,7 @@ mod tests {
         ));
 
         let mut sparse =
-            RevealedSparseTrie::from_root(branch.clone(), Some(TrieMask::new(0b01)), false)
+            RevealedSparseTrie::from_root(branch.clone(), Some(TrieMask::new(0b01)), None, false)
                 .unwrap();
 
         // Reveal a branch node and one of its children
@@ -1946,8 +1954,8 @@ mod tests {
         // Branch (Mask = 11)
         // ├── 0 -> Hash (Path = 0)
         // └── 1 -> Leaf (Path = 1)
-        sparse.reveal_node(Nibbles::default(), branch, Some(TrieMask::new(0b01))).unwrap();
-        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None).unwrap();
+        sparse.reveal_node(Nibbles::default(), branch, Some(TrieMask::new(0b01)), None).unwrap();
+        sparse.reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), None, None).unwrap();
 
         // Removing a non-existent leaf should be a noop
         let sparse_old = sparse.clone();
@@ -1985,7 +1993,7 @@ mod tests {
 
                     // Insert state updates into the hash builder and calculate the root
                     state.extend(update);
-                    let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
+                    let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
                         run_hash_builder(
                             state.clone(),
                             Default::default(),
@@ -2016,7 +2024,7 @@ mod tests {
                     let sparse_root = updated_sparse.root();
                     let sparse_updates = updated_sparse.take_updates();
 
-                    let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _) =
+                    let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
                         run_hash_builder(
                             state.clone(),
                             Default::default(),
@@ -2097,24 +2105,29 @@ mod tests {
         };
 
         // Generate the proof for the root node and initialize the sparse trie with it
-        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) = run_hash_builder(
-            [(key1(), value()), (key3(), value())],
-            Default::default(),
-            [Nibbles::default()],
-        );
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
+            run_hash_builder(
+                [(key1(), value()), (key3(), value())],
+                Default::default(),
+                [Nibbles::default()],
+            );
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             branch_node_hash_masks.get(&Nibbles::default()).copied(),
+            branch_node_tree_masks.get(&Nibbles::default()).copied(),
             false,
         )
         .unwrap();
 
         // Generate the proof for the first key and reveal it in the sparse trie
-        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) =
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
             run_hash_builder([(key1(), value()), (key3(), value())], Default::default(), [key1()]);
         for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
-            sparse.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask).unwrap();
+            let tree_mask = branch_node_tree_masks.get(&path).copied();
+            sparse
+                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask, tree_mask)
+                .unwrap();
         }
 
         // Check that the branch node exists with only two nibbles set
@@ -2133,11 +2146,14 @@ mod tests {
         );
 
         // Generate the proof for the third key and reveal it in the sparse trie
-        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) =
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
             run_hash_builder([(key1(), value()), (key3(), value())], Default::default(), [key3()]);
         for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
-            sparse.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask).unwrap();
+            let tree_mask = branch_node_tree_masks.get(&path).copied();
+            sparse
+                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask, tree_mask)
+                .unwrap();
         }
 
         // Check that nothing changed in the branch node
@@ -2148,7 +2164,7 @@ mod tests {
 
         // Generate the nodes for the full trie with all three key using the hash builder, and
         // compare them to the sparse trie
-        let (_, _, hash_builder_proof_nodes, _) = run_hash_builder(
+        let (_, _, hash_builder_proof_nodes, _, _) = run_hash_builder(
             [(key1(), value()), (key2(), value()), (key3(), value())],
             Default::default(),
             [key1(), key2(), key3()],
@@ -2175,28 +2191,34 @@ mod tests {
         let value = || Account::default();
 
         // Generate the proof for the root node and initialize the sparse trie with it
-        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) = run_hash_builder(
-            [(key1(), value()), (key2(), value()), (key3(), value())],
-            Default::default(),
-            [Nibbles::default()],
-        );
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
+            run_hash_builder(
+                [(key1(), value()), (key2(), value()), (key3(), value())],
+                Default::default(),
+                [Nibbles::default()],
+            );
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             branch_node_hash_masks.get(&Nibbles::default()).copied(),
+            branch_node_tree_masks.get(&Nibbles::default()).copied(),
             false,
         )
         .unwrap();
 
         // Generate the proof for the children of the root branch node and reveal it in the sparse
         // trie
-        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) = run_hash_builder(
-            [(key1(), value()), (key2(), value()), (key3(), value())],
-            Default::default(),
-            [key1(), Nibbles::from_nibbles_unchecked([0x01])],
-        );
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
+            run_hash_builder(
+                [(key1(), value()), (key2(), value()), (key3(), value())],
+                Default::default(),
+                [key1(), Nibbles::from_nibbles_unchecked([0x01])],
+            );
         for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
-            sparse.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask).unwrap();
+            let tree_mask = branch_node_tree_masks.get(&path).copied();
+            sparse
+                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask, tree_mask)
+                .unwrap();
         }
 
         // Check that the branch node exists
@@ -2215,14 +2237,18 @@ mod tests {
         );
 
         // Generate the proof for the third key and reveal it in the sparse trie
-        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) = run_hash_builder(
-            [(key1(), value()), (key2(), value()), (key3(), value())],
-            Default::default(),
-            [key2()],
-        );
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
+            run_hash_builder(
+                [(key1(), value()), (key2(), value()), (key3(), value())],
+                Default::default(),
+                [key2()],
+            );
         for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
-            sparse.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask).unwrap();
+            let tree_mask = branch_node_tree_masks.get(&path).copied();
+            sparse
+                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask, tree_mask)
+                .unwrap();
         }
 
         // Check that nothing changed in the extension node
@@ -2253,14 +2279,16 @@ mod tests {
         };
 
         // Generate the proof for the root node and initialize the sparse trie with it
-        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) = run_hash_builder(
-            [(key1(), value()), (key2(), value())],
-            Default::default(),
-            [Nibbles::default()],
-        );
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
+            run_hash_builder(
+                [(key1(), value()), (key2(), value())],
+                Default::default(),
+                [Nibbles::default()],
+            );
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             branch_node_hash_masks.get(&Nibbles::default()).copied(),
+            branch_node_tree_masks.get(&Nibbles::default()).copied(),
             false,
         )
         .unwrap();
@@ -2281,11 +2309,14 @@ mod tests {
         );
 
         // Generate the proof for the first key and reveal it in the sparse trie
-        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks) =
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
             run_hash_builder([(key1(), value()), (key2(), value())], Default::default(), [key1()]);
         for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
-            sparse.reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask).unwrap();
+            let tree_mask = branch_node_tree_masks.get(&path).copied();
+            sparse
+                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask, tree_mask)
+                .unwrap();
         }
 
         // Check that the branch node wasn't overwritten by the extension node in the proof
@@ -2379,7 +2410,7 @@ mod tests {
             account_rlp
         };
 
-        let (hash_builder_root, hash_builder_updates, _, _) = run_hash_builder(
+        let (hash_builder_root, hash_builder_updates, _, _, _) = run_hash_builder(
             [(key1(), value()), (key2(), value())],
             Default::default(),
             [Nibbles::default()],

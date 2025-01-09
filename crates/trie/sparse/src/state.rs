@@ -680,6 +680,7 @@ mod tests {
                         Nibbles::from_nibbles([0x1]),
                         TrieMask::new(0b00),
                     )]),
+                    branch_node_tree_masks: HashMap::default(),
                     storages: HashMap::from_iter([
                         (
                             address_1,
@@ -687,6 +688,7 @@ mod tests {
                                 root,
                                 subtree: storage_proof_nodes.clone(),
                                 branch_node_hash_masks: storage_branch_node_hash_masks.clone(),
+                                branch_node_tree_masks: HashMap::default(),
                             },
                         ),
                         (
@@ -695,6 +697,7 @@ mod tests {
                                 root,
                                 subtree: storage_proof_nodes,
                                 branch_node_hash_masks: storage_branch_node_hash_masks,
+                                branch_node_tree_masks: HashMap::default(),
                             },
                         ),
                     ]),
