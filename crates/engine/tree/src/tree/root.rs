@@ -278,7 +278,7 @@ pub struct StateRootTask<'env, Factory, BPF: BlindedProviderFactory> {
     thread_pool: &'env rayon::ThreadPool,
 }
 
-impl<'env, Factory, ABP, SBP, BPF> StateRootTask<'env, Factory, BPF>
+impl<'env, Factory, BPF> StateRootTask<'env, Factory, BPF>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader>
         + StateCommitmentProvider
@@ -286,12 +286,9 @@ where
         + Send
         + Sync
         + 'static,
-    ABP: BlindedProvider + Send + Sync + 'env,
-    SBP: BlindedProvider + Send + Sync + 'env,
-    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP>
-        + Send
-        + Sync
-        + 'env,
+    BPF: BlindedProviderFactory + Send + Sync + 'env,
+    BPF::AccountNodeProvider: BlindedProvider + Send + Sync + 'env,
+    BPF::StorageNodeProvider: BlindedProvider + Send + Sync + 'env,
 {
     /// Creates a new state root task with the unified message channel
     pub fn new(
@@ -759,16 +756,16 @@ where
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
 /// time it took.
-fn update_sparse_trie<ABP, SBP, BPF>(
+fn update_sparse_trie<BPF>(
     mut trie: Box<SparseStateTrie<BPF>>,
     multiproof: MultiProof,
     targets: MultiProofTargets,
     state: HashedPostState,
 ) -> SparseStateTrieResult<(Box<SparseStateTrie<BPF>>, Duration)>
 where
-    ABP: BlindedProvider + Send + Sync,
-    SBP: BlindedProvider + Send + Sync,
-    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP> + Send + Sync,
+    BPF: BlindedProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
+    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
 {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
