@@ -182,6 +182,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
                 runner.run_command_until_exit(|ctx| command.execute::<EthereumNode>(ctx))
             }
             Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<EthereumNode>()),
+            Commands::BitfinityResetEvmState(builder) => runner
+                .run_until_ctrl_c(async move { builder.build().await.unwrap().execute().await }),
         }
     }
 
@@ -237,6 +239,12 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
     Prune(prune::PruneCommand<C>),
+
+    /// Export state to EVM canister
+    #[command(name = "bitfinity-reset-evm-state")]
+    BitfinityResetEvmState(
+        crate::commands::bitfinity_reset_evm_state::BitfinityResetEvmStateCommandBuilder,
+    ),
 }
 
 #[cfg(test)]
