@@ -28,7 +28,6 @@ reth-node-api.workspace = true
 reth-network-api.workspace = true
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
-reth-node-types.workspace = true
 
 # op-reth
 reth-optimism-chainspec.workspace = true

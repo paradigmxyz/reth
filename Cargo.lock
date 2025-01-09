@@ -8442,7 +8442,6 @@ dependencies = [
  "reth-network-api",
  "reth-node-api",
  "reth-node-builder",
- "reth-node-types",
  "reth-optimism-chainspec",
  "reth-optimism-consensus",
  "reth-optimism-evm",

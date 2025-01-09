@@ -257,7 +257,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
     }
 
-    pub fn update_da_limits(&mut self, mut da_tx_size: Option<u64>, mut da_block_size: Option<u64>) {
+    pub fn update_da_limits(
+        &mut self,
+        mut da_tx_size: Option<u64>,
+        mut da_block_size: Option<u64>
+    ) {
         std::mem::swap(&mut self.all_transactions.max_da_tx_size, &mut da_tx_size);
         std::mem::swap(&mut self.all_transactions.max_da_block_size, &mut da_block_size);
 

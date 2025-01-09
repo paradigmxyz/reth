@@ -3,12 +3,11 @@
 use alloy_primitives::U64;
 use jsonrpsee_core::{async_trait, RpcResult};
 pub use op_alloy_rpc_jsonrpsee::traits::MinerApiExtServer;
-use reth_node_api::{FullNodeTypes, NodeTypesWithEngine};
+use reth_node_types::TxTy;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_payload_builder::config::OpDAConfig;
 use reth_optimism_primitives::OpPrimitives;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use reth_node_types::TxTy;
 
 use tracing::debug;
 
@@ -30,8 +29,9 @@ impl<Pool> OpMinerExtApi<Pool> {
 
 #[async_trait]
 impl<Pool> MinerApiExtServer for OpMinerExtApi<Pool>
-where 
-Pool: TransactionPool<Transaction: PoolTransaction> + Unpin + 'static {
+where
+    Pool: TransactionPool<Transaction: PoolTransaction> + Unpin + 'static
+{
     /// Handler for `miner_setMaxDASize` RPC method.
     async fn set_max_da_size(&self, max_tx_size: U64, max_block_size: U64) -> RpcResult<bool> {
         debug!(target: "rpc", "Setting max DA size: tx={}, block={}", max_tx_size, max_block_size);

@@ -883,9 +883,10 @@ where
 
         while let Some(tx) = best_txs.next(()) {
             let tx_exceeds_block_size = info.cumulative_gas_used + tx.gas_limit() > block_gas_limit;
-            let tx_exceeds_da_size = block_da_limit.is_some_and(|da_limit| info.cumulative_da_bytes_used + tx.da_usage() > da_limit);
+            let tx_exceeds_da_size = block_da_limit
+                .is_some_and(|da_limit| info.cumulative_da_bytes_used + tx.da_usage() > da_limit);
 
-            if  tx_exceeds_block_size || tx_exceeds_da_size {
+            if tx_exceeds_block_size || tx_exceeds_da_size {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
