@@ -2372,8 +2372,13 @@ where
                                 "Task state root finished"
                             );
 
-                            if task_state_root != block.header().state_root() {
-                                debug!(target: "engine::tree", "Task state root does not match block state root");
+                            if task_state_root != block.header().state_root() ||
+                                self.config.always_compare_trie_updates()
+                            {
+                                if task_state_root != block.header().state_root() {
+                                    debug!(target: "engine::tree", "Task state root does not match block state root");
+                                }
+
                                 let (regular_root, regular_updates) =
                                     state_provider.state_root_with_updates(hashed_state.clone())?;
 
