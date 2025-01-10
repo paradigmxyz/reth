@@ -91,8 +91,8 @@ impl Case for BlockchainTestCase {
 
                 // Insert initial test state into the provider.
                 provider.insert_historical_block(
-                    SealedBlock::seal_parts(
-                        case.genesis_block_header.clone(),
+                    SealedBlock::<reth_primitives::Block>::from_sealed_parts(
+                        case.genesis_block_header.clone().into(),
                         BlockBody::default(),
                     )
                     .try_recover()
@@ -113,8 +113,7 @@ impl Case for BlockchainTestCase {
                 let last_block = case.blocks.iter().try_fold(None, |_, block| {
                     let decoded =
                         SealedBlock::<reth_primitives::Block>::decode(&mut block.rlp.as_ref())?;
-                    provider
-                        .insert_historical_block(decoded.clone().try_with_senders().unwrap())?;
+                    provider.insert_historical_block(decoded.clone().try_recover().unwrap())?;
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;
                 provider
