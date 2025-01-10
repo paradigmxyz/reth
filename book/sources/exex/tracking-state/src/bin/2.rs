@@ -6,7 +6,11 @@ use std::{
 
 use alloy_primitives::BlockNumber;
 use futures_util::{FutureExt, TryStreamExt};
-use reth::{api::{Block, BlockBody, FullNodeComponents}, builder::NodeTypes, primitives::EthPrimitives};
+use reth::{
+    api::{Block, BlockBody, FullNodeComponents},
+    builder::NodeTypes,
+    primitives::EthPrimitives,
+};
 use reth_exex::{ExExContext, ExExEvent};
 use reth_node_ethereum::EthereumNode;
 use reth_tracing::tracing::info;
