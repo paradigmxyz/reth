@@ -33,8 +33,8 @@ pub struct Proof<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: TriePrefixSetsMut,
-    /// Flag indicating whether to include branch node hash masks in the proof.
-    collect_branch_node_hash_masks: bool,
+    /// Flag indicating whether to include branch node masks in the proof.
+    collect_branch_node_masks: bool,
 }
 
 impl<T, H> Proof<T, H> {
@@ -44,7 +44,7 @@ impl<T, H> Proof<T, H> {
             trie_cursor_factory: t,
             hashed_cursor_factory: h,
             prefix_sets: TriePrefixSetsMut::default(),
-            collect_branch_node_hash_masks: false,
+            collect_branch_node_masks: false,
         }
     }
 
@@ -54,7 +54,7 @@ impl<T, H> Proof<T, H> {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
-            collect_branch_node_hash_masks: self.collect_branch_node_hash_masks,
+            collect_branch_node_masks: self.collect_branch_node_masks,
         }
     }
 
@@ -64,7 +64,7 @@ impl<T, H> Proof<T, H> {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
-            collect_branch_node_hash_masks: self.collect_branch_node_hash_masks,
+            collect_branch_node_masks: self.collect_branch_node_masks,
         }
     }
 
@@ -74,9 +74,9 @@ impl<T, H> Proof<T, H> {
         self
     }
 
-    /// Set the flag indicating whether to include branch node hash masks in the proof.
-    pub const fn with_branch_node_hash_masks(mut self, branch_node_hash_masks: bool) -> Self {
-        self.collect_branch_node_hash_masks = branch_node_hash_masks;
+    /// Set the flag indicating whether to include branch node masks in the proof.
+    pub const fn with_branch_node_masks(mut self, branch_node_masks: bool) -> Self {
+        self.collect_branch_node_masks = branch_node_masks;
         self
     }
 }
@@ -117,7 +117,7 @@ where
         let retainer = targets.keys().map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
-            .with_updates(self.collect_branch_node_hash_masks);
+            .with_updates(self.collect_branch_node_masks);
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
@@ -144,7 +144,7 @@ where
                         hashed_address,
                     )
                     .with_prefix_set_mut(storage_prefix_set)
-                    .with_branch_node_hash_masks(self.collect_branch_node_hash_masks)
+                    .with_branch_node_masks(self.collect_branch_node_masks)
                     .storage_multiproof(proof_targets.unwrap_or_default())?;
 
                     // Encode account
@@ -164,18 +164,23 @@ where
         }
         let _ = hash_builder.root();
         let account_subtree = hash_builder.take_proof_nodes();
-        let branch_node_hash_masks = if self.collect_branch_node_hash_masks {
-            hash_builder
-                .updated_branch_nodes
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(path, node)| (path, node.hash_mask))
-                .collect()
+        let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
+            let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
+            (
+                updated_branch_nodes
+                    .iter()
+                    .map(|(path, node)| (path.clone(), node.hash_mask))
+                    .collect(),
+                updated_branch_nodes
+                    .into_iter()
+                    .map(|(path, node)| (path, node.tree_mask))
+                    .collect(),
+            )
         } else {
-            HashMap::default()
+            (HashMap::default(), HashMap::default())
         };
 
-        Ok(MultiProof { account_subtree, branch_node_hash_masks, storages })
+        Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
     }
 }
 
@@ -190,8 +195,8 @@ pub struct StorageProof<T, H> {
     hashed_address: B256,
     /// The set of storage slot prefixes that have changed.
     prefix_set: PrefixSetMut,
-    /// Flag indicating whether to include branch node hash masks in the proof.
-    collect_branch_node_hash_masks: bool,
+    /// Flag indicating whether to include branch node masks in the proof.
+    collect_branch_node_masks: bool,
 }
 
 impl<T, H> StorageProof<T, H> {
@@ -207,7 +212,7 @@ impl<T, H> StorageProof<T, H> {
             hashed_cursor_factory: h,
             hashed_address,
             prefix_set: PrefixSetMut::default(),
-            collect_branch_node_hash_masks: false,
+            collect_branch_node_masks: false,
         }
     }
 
@@ -218,7 +223,7 @@ impl<T, H> StorageProof<T, H> {
             hashed_cursor_factory: self.hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
-            collect_branch_node_hash_masks: self.collect_branch_node_hash_masks,
+            collect_branch_node_masks: self.collect_branch_node_masks,
         }
     }
 
@@ -229,7 +234,7 @@ impl<T, H> StorageProof<T, H> {
             hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
-            collect_branch_node_hash_masks: self.collect_branch_node_hash_masks,
+            collect_branch_node_masks: self.collect_branch_node_masks,
         }
     }
 
@@ -239,9 +244,9 @@ impl<T, H> StorageProof<T, H> {
         self
     }
 
-    /// Set the flag indicating whether to include branch node hash masks in the proof.
-    pub const fn with_branch_node_hash_masks(mut self, branch_node_hash_masks: bool) -> Self {
-        self.collect_branch_node_hash_masks = branch_node_hash_masks;
+    /// Set the flag indicating whether to include branch node masks in the proof.
+    pub const fn with_branch_node_masks(mut self, branch_node_masks: bool) -> Self {
+        self.collect_branch_node_masks = branch_node_masks;
         self
     }
 }
@@ -282,7 +287,7 @@ where
         let retainer = ProofRetainer::from_iter(target_nibbles);
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
-            .with_updates(self.collect_branch_node_hash_masks);
+            .with_updates(self.collect_branch_node_masks);
         let mut storage_node_iter = TrieNodeIter::new(walker, hashed_storage_cursor);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
@@ -300,17 +305,22 @@ where
 
         let root = hash_builder.root();
         let subtree = hash_builder.take_proof_nodes();
-        let branch_node_hash_masks = if self.collect_branch_node_hash_masks {
-            hash_builder
-                .updated_branch_nodes
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(path, node)| (path, node.hash_mask))
-                .collect()
+        let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
+            let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
+            (
+                updated_branch_nodes
+                    .iter()
+                    .map(|(path, node)| (path.clone(), node.hash_mask))
+                    .collect(),
+                updated_branch_nodes
+                    .into_iter()
+                    .map(|(path, node)| (path, node.tree_mask))
+                    .collect(),
+            )
         } else {
-            HashMap::default()
+            (HashMap::default(), HashMap::default())
         };
 
-        Ok(StorageMultiProof { root, subtree, branch_node_hash_masks })
+        Ok(StorageMultiProof { root, subtree, branch_node_hash_masks, branch_node_tree_masks })
     }
 }

@@ -2372,13 +2372,24 @@ where
                                 "Task state root finished"
                             );
 
-                            if task_state_root != block.header().state_root() {
-                                debug!(target: "engine::tree", "Task state root does not match block state root");
+                            if task_state_root != block.header().state_root() ||
+                                self.config.always_compare_trie_updates()
+                            {
+                                if task_state_root != block.header().state_root() {
+                                    debug!(target: "engine::tree", "Task state root does not match block state root");
+                                }
+
                                 let (regular_root, regular_updates) =
                                     state_provider.state_root_with_updates(hashed_state.clone())?;
 
                                 if regular_root == block.header().state_root() {
-                                    compare_trie_updates(&task_trie_updates, &regular_updates);
+                                    let provider = self.provider.database_provider_ro()?;
+                                    compare_trie_updates(
+                                        provider.tx_ref(),
+                                        task_trie_updates.clone(),
+                                        regular_updates,
+                                    )
+                                    .map_err(ProviderError::from)?;
                                 } else {
                                     debug!(target: "engine::tree", "Regular state root does not match block state root");
                                 }
