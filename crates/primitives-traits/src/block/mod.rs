@@ -14,7 +14,7 @@ use alloy_consensus::Header;
 use alloy_rlp::{Decodable, Encodable};
 
 use crate::{
-    BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde,
+    BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde, SealedHeader,
     SignedTransaction,
 };
 
@@ -69,6 +69,11 @@ pub trait Block:
 
     /// Create new block instance.
     fn new(header: Self::Header, body: Self::Body) -> Self;
+
+    /// Create new a sealed block instance from a sealed header and the block body.
+    fn new_sealed(header: SealedHeader<Self::Header>, body: Self::Body) -> SealedBlock<Self> {
+        SealedBlock::from_sealed_parts(header, body)
+    }
 
     /// Returns reference to block header.
     fn header(&self) -> &Self::Header;

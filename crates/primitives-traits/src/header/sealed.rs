@@ -68,6 +68,17 @@ impl<H: Sealable> SealedHeader<H> {
     }
 }
 
+impl<H> SealedHeader<&H> {
+    /// Clones the header and returns a new sealed header.
+    pub fn cloned(self) -> SealedHeader<H>
+    where
+        H: Clone,
+    {
+        let (header, hash) = self.split();
+        SealedHeader::new(header.clone(), hash)
+    }
+}
+
 impl<H: alloy_consensus::BlockHeader> SealedHeader<H> {
     /// Return the number hash tuple.
     pub fn num_hash(&self) -> BlockNumHash {

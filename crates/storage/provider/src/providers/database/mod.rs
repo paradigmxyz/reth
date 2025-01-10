@@ -703,10 +703,8 @@ mod tests {
         {
             let provider = factory.provider_rw().unwrap();
             assert_matches!(
-                provider.insert_block(
-                    block.clone().try_with_senders().unwrap(),
-                    StorageLocation::Database
-                ),
+                provider
+                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
                 Ok(_)
             );
             assert_matches!(
@@ -727,10 +725,8 @@ mod tests {
             };
             let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
             assert_matches!(
-                provider.insert_block(
-                    block.clone().try_with_senders().unwrap(),
-                    StorageLocation::Database
-                ),
+                provider
+                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
                 Ok(_)
             );
             assert_matches!(provider.transaction_sender(0), Ok(None));

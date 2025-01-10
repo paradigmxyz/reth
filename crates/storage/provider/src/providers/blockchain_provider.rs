@@ -1508,19 +1508,22 @@ mod tests {
 
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
-            Some(database_block.clone().unseal())
+            Some(database_block.clone().into_block())
         );
-        assert_eq!(provider.block_by_id(block_hash.into()).unwrap(), Some(database_block.unseal()));
+        assert_eq!(
+            provider.block_by_id(block_hash.into()).unwrap(),
+            Some(database_block.into_block())
+        );
 
         let block_number = in_memory_block.number;
         let block_hash = in_memory_block.hash();
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
-            Some(in_memory_block.clone().unseal())
+            Some(in_memory_block.clone().into_block())
         );
         assert_eq!(
             provider.block_by_id(block_hash.into()).unwrap(),
-            Some(in_memory_block.unseal())
+            Some(in_memory_block.into_block())
         );
 
         Ok(())
@@ -2326,14 +2329,14 @@ mod tests {
         test_by_block_range!([
             (headers_range, |block: &SealedBlock| block.header().clone()),
             (sealed_headers_range, |block: &SealedBlock| block.clone_sealed_header()),
-            (block_range, |block: &SealedBlock| block.clone().unseal()),
+            (block_range, |block: &SealedBlock| block.clone().into_block()),
             (block_with_senders_range, |block: &SealedBlock| block
                 .clone()
-                .unseal::<reth_primitives::Block>()
+                .into_block::<reth_primitives::Block>()
                 .with_senders_unchecked(vec![])),
             (sealed_block_with_senders_range, |block: &SealedBlock| block
                 .clone()
-                .with_senders_unchecked(vec![])),
+                .with_senders(vec![])),
             (transactions_by_block_range, |block: &SealedBlock| block.body().transactions.clone()),
         ]);
 
@@ -2494,7 +2497,7 @@ mod tests {
                 block,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     BlockHashOrNumber::Hash(block.hash()),
-                    Some(block.clone().unseal())
+                    Some(block.clone().into_block())
                 ),
                 BlockHashOrNumber::Hash(B256::random())
             ),
@@ -2503,7 +2506,7 @@ mod tests {
                 block,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     BlockHashOrNumber::Number(block.number),
-                    Some(block.clone().unseal())
+                    Some(block.clone().into_block())
                 ),
                 BlockHashOrNumber::Number(u64::MAX)
             ),
@@ -2524,7 +2527,7 @@ mod tests {
                 block_with_senders,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
-                    block.clone().unseal::<reth_primitives::Block>().with_recovered_senders()
+                    block.clone().into_block::<reth_primitives::Block>().with_recovered_senders()
                 ),
                 (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
             ),
@@ -2533,7 +2536,7 @@ mod tests {
                 block_with_senders,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
-                    block.clone().unseal::<reth_primitives::Block>().with_recovered_senders()
+                    block.clone().into_block::<reth_primitives::Block>().with_recovered_senders()
                 ),
                 (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
             ),
@@ -2545,7 +2548,7 @@ mod tests {
                     Some(
                         block
                             .clone()
-                            .unseal::<reth_primitives::Block>()
+                            .into_block::<reth_primitives::Block>()
                             .with_recovered_senders()
                             .unwrap()
                             .seal_unchecked(block.hash())
@@ -2561,7 +2564,7 @@ mod tests {
                     Some(
                         block
                             .clone()
-                            .unseal::<reth_primitives::Block>()
+                            .into_block::<reth_primitives::Block>()
                             .with_recovered_senders()
                             .unwrap()
                             .seal_unchecked(block.hash())

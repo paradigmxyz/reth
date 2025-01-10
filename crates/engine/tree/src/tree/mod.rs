@@ -1650,7 +1650,7 @@ where
                 .tree_state
                 .block_by_hash(hash)
                 // TODO: clone for compatibility. should we return an Arc here?
-                .map(|block| block.as_ref().clone().unseal());
+                .map(|block| block.as_ref().clone().into_block());
         }
         Ok(block)
     }

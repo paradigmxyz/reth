@@ -42,6 +42,20 @@ impl<B> SealedBlock<B> {
     pub fn split(self) -> (B, BlockHash) {
         (self.block, self.hash)
     }
+
+    /// Consumes the type and returns the block.
+    #[doc(alias = "unseal")]
+    pub fn into_block(self) -> B {
+        self.block
+    }
+
+    /// Clones the wrapped block.
+    pub fn clone_block(&self) -> B
+    where
+        B: Clone,
+    {
+        self.block.clone()
+    }
 }
 
 impl<B> SealedBlock<B>

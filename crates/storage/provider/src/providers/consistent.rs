@@ -718,8 +718,9 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
             range,
             |db_provider, range, predicate| db_provider.sealed_headers_while(range, predicate),
             |block_state, predicate| {
-                let header = block_state.block_ref().block().sealed_header();
-                predicate(header).then(|| header.clone())
+                // TODO(mattsse): get rid of clone
+                let header = block_state.block_ref().block().clone_sealed_header();
+                predicate(&header).then(|| header)
             },
             predicate,
         )
@@ -804,11 +805,11 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
                 self.get_in_memory_or_storage_by_block(
                     hash.into(),
                     |db_provider| db_provider.find_block_by_hash(hash, source),
-                    |block_state| Ok(Some(block_state.block_ref().block().clone().unseal())),
+                    |block_state| Ok(Some(block_state.block_ref().block().clone_block())),
                 )
             }
             BlockSource::Pending => {
-                Ok(self.canonical_in_memory_state.pending_block().map(|block| block.unseal()))
+                Ok(self.canonical_in_memory_state.pending_block().map(|block| block.into_block()))
             }
         }
     }
@@ -817,7 +818,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.block(id),
-            |block_state| Ok(Some(block_state.block_ref().block().clone().unseal())),
+            |block_state| Ok(Some(block_state.block_ref().block().clone_block())),
         )
     }
 
@@ -871,7 +872,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.block_range(range),
-            |block_state, _| Some(block_state.block_ref().block().clone().unseal()),
+            |block_state, _| Some(block_state.block_ref().block().clone_block()),
             |_| true,
         )
     }
@@ -1629,7 +1630,7 @@ mod tests {
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
             provider_rw.insert_historical_block(
-                block.clone().try_with_senders().expect("failed to seal block with senders"),
+                block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
         provider_rw.commit()?;
@@ -1728,7 +1729,7 @@ mod tests {
         provider_rw.append_blocks_with_state(
             database_blocks
                 .into_iter()
-                .map(|b| b.try_with_senders().expect("failed to seal block with senders"))
+                .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
             &ExecutionOutcome {
                 bundle: BundleState::new(

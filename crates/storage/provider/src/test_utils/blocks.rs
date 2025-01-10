@@ -64,7 +64,7 @@ pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
 }
 
 pub(crate) static TEST_BLOCK: LazyLock<SealedBlock> = LazyLock::new(|| {
-    SealedBlock::new(
+    SealedBlock::from_sealed_parts(
         SealedHeader::new(
             Header {
                 parent_hash: hex!(
@@ -163,7 +163,7 @@ impl Default for BlockchainTestData {
 
 /// Genesis block
 pub fn genesis() -> SealedBlock {
-    SealedBlock::new(
+    SealedBlock::from_sealed_parts(
         SealedHeader::new(
             Header { number: 0, difficulty: U256::from(1), ..Default::default() },
             B256::ZERO,
@@ -238,9 +238,9 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
     header.number = number;
     header.state_root = state_root;
     header.parent_hash = B256::ZERO;
-    let block = SealedBlock::new(SealedHeader::seal(header), body);
+    let block = SealedBlock::from_sealed_parts(SealedHeader::seal(header), body);
 
-    (SealedBlockWithSenders::new_unhashed(block, vec![Address::new([0x30; 20])]), execution_outcome)
+    (SealedBlockWithSenders::new_sealed(block, vec![Address::new([0x30; 20])]), execution_outcome)
 }
 
 /// Block two that points to block 1

@@ -225,6 +225,11 @@ impl<B: Block> RecoveredBlock<B> {
         SealedBlock::new(self.block.clone(), hash)
     }
 
+    /// Consumes the block and returns the block's body.
+    pub fn into_body(self) -> B::Body {
+        self.block.into_body()
+    }
+
     /// Consumes the block and returns the [`SealedBlock`] and drops the recovered senders.
     pub fn into_sealed_block(self) -> SealedBlock<B> {
         let hash = self.hash();

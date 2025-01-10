@@ -23,7 +23,7 @@ where
         client,
         ExecutionPayloadInputV2 {
             execution_payload: ExecutionPayloadV1::from_block_slow::<TransactionSigned>(
-                &block.unseal(),
+                &block.into_block(),
             ),
             withdrawals: None,
         },
