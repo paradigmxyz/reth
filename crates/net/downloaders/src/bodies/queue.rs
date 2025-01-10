@@ -10,7 +10,7 @@ use reth_network_p2p::{
     error::DownloadResult,
 };
 use reth_primitives::SealedHeader;
-use reth_primitives_traits::InMemorySize;
+use reth_primitives_traits::Block;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -20,19 +20,19 @@ use std::{
 /// The wrapper around [`FuturesUnordered`] that keeps information
 /// about the blocks currently being requested.
 #[derive(Debug)]
-pub(crate) struct BodiesRequestQueue<H, B: BodiesClient> {
+pub(crate) struct BodiesRequestQueue<B: Block, C: BodiesClient<Body = B::Body>> {
     /// Inner body request queue.
-    inner: FuturesUnordered<BodiesRequestFuture<H, B>>,
+    inner: FuturesUnordered<BodiesRequestFuture<B, C>>,
     /// The downloader metrics.
     metrics: BodyDownloaderMetrics,
     /// Last requested block number.
     pub(crate) last_requested_block_number: Option<BlockNumber>,
 }
 
-impl<H, B> BodiesRequestQueue<H, B>
+impl<B, C> BodiesRequestQueue<B, C>
 where
-    B: BodiesClient + 'static,
-    H: BlockHeader,
+    B: Block,
+    C: BodiesClient<Body = B::Body> + 'static,
 {
     /// Create new instance of request queue.
     pub(crate) fn new(metrics: BodyDownloaderMetrics) -> Self {
@@ -58,9 +58,9 @@ where
     /// Expects a sorted list of headers.
     pub(crate) fn push_new_request(
         &mut self,
-        client: Arc<B>,
-        consensus: Arc<dyn Consensus<H, B::Body, Error = ConsensusError>>,
-        request: Vec<SealedHeader<H>>,
+        client: Arc<C>,
+        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+        request: Vec<SealedHeader<B::Header>>,
     ) {
         // Set last max requested block number
         self.last_requested_block_number = request
@@ -78,12 +78,12 @@ where
     }
 }
 
-impl<H, B> Stream for BodiesRequestQueue<H, B>
+impl<B, C> Stream for BodiesRequestQueue<B, C>
 where
-    H: BlockHeader + Send + Sync + Unpin + 'static,
-    B: BodiesClient<Body: InMemorySize> + 'static,
+    B: Block + 'static,
+    C: BodiesClient<Body = B::Body> + 'static,
 {
-    type Item = DownloadResult<Vec<BlockResponse<H, B::Body>>>;
+    type Item = DownloadResult<Vec<BlockResponse<B>>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut().inner.poll_next_unpin(cx)

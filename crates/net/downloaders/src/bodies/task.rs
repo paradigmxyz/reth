@@ -6,6 +6,7 @@ use reth_network_p2p::{
     bodies::downloader::{BodyDownloader, BodyDownloaderResult},
     error::DownloadResult,
 };
+use reth_primitives_traits::Block;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
     fmt::Debug,
@@ -17,7 +18,6 @@ use std::{
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tokio_util::sync::PollSender;
-use reth_primitives_traits::Block;
 
 /// The maximum number of [`BodyDownloaderResult`]s to hold in the buffer.
 pub const BODIES_TASK_BUFFER_SIZE: usize = 4;
@@ -30,7 +30,6 @@ pub struct TaskDownloader<B: Block> {
     from_downloader: ReceiverStream<BodyDownloaderResult<B>>,
     to_downloader: UnboundedSender<RangeInclusive<BlockNumber>>,
 }
-
 
 impl<B: Block + 'static> TaskDownloader<B> {
     /// Spawns the given `downloader` via [`tokio::task::spawn`] returns a [`TaskDownloader`] that's
@@ -51,11 +50,11 @@ impl<B: Block + 'static> TaskDownloader<B> {
     /// use std::{fmt::Debug, sync::Arc};
     ///
     /// fn t<
-    ///     B: BodiesClient<Body: Debug + InMemorySize> + 'static,
+    ///     B: BodiesClient<Block: Debug + InMemorySize> + 'static,
     ///     Provider: HeaderProvider<Header = alloy_consensus::Header> + Unpin + 'static,
     /// >(
     ///     client: Arc<B>,
-    ///     consensus: Arc<dyn Consensus<Provider::Header, B::Body, Error = ConsensusError>>,
+    ///     consensus: Arc<dyn Consensus<Provider::Header, B::Block, Error = ConsensusError>>,
     ///     provider: Provider,
     /// ) {
     ///     let downloader = BodiesDownloaderBuilder::default().build(client, consensus, provider);
@@ -91,9 +90,7 @@ impl<B: Block + 'static> TaskDownloader<B> {
     }
 }
 
-impl<B: Block>
-    BodyDownloader for TaskDownloader<B>
-{
+impl<B: Block> BodyDownloader for TaskDownloader<B> {
     type Block = B;
 
     fn set_download_range(&mut self, range: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
