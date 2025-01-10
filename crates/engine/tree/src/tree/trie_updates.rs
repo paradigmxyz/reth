@@ -145,20 +145,17 @@ pub(super) fn compare_trie_updates(
         let (task, regular) = (task.storage_tries.remove(&key), regular.storage_tries.remove(&key));
         if task != regular {
             let mut storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(key)?;
-            if task.is_some() != regular.is_some() {
+            if let Some((left, right)) = task.as_ref().zip(regular.as_ref()) {
+                let storage_diff =
+                    compare_storage_trie_updates(&mut storage_trie_cursor, left, right)?;
+                if storage_diff.has_differences() {
+                    diff.storage_tries.insert(key, StorageTrieDiffEntry::Value(storage_diff));
+                }
+            } else {
                 diff.storage_tries.insert(
                     key,
                     StorageTrieDiffEntry::Existence(task.is_some(), regular.is_some()),
                 );
-            }
-
-            let storage_diff = compare_storage_trie_updates(
-                &mut storage_trie_cursor,
-                &task.unwrap_or_default(),
-                &regular.unwrap_or_default(),
-            )?;
-            if storage_diff.has_differences() {
-                diff.storage_tries.insert(key, StorageTrieDiffEntry::Value(storage_diff));
             }
         }
     }
