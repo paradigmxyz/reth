@@ -720,7 +720,7 @@ pub enum PoolUpdateKind {
 ///
 /// This is used to update the pool state accordingly.
 #[derive(Clone, Debug)]
-pub struct CanonicalStateUpdate<'a, B> {
+pub struct CanonicalStateUpdate<'a, B: Block> {
     /// Hash of the tip block.
     pub new_tip: &'a SealedBlock<B>,
     /// EIP-1559 Base fee of the _next_ (pending) block
@@ -749,7 +749,7 @@ where
     }
 
     /// Returns the hash of the tip block.
-    pub const fn hash(&self) -> B256 {
+    pub fn hash(&self) -> B256 {
         self.new_tip.hash()
     }
 
