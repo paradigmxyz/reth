@@ -17,6 +17,7 @@ use std::{
 use tokio::sync::{mpsc, mpsc::UnboundedSender};
 use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 use tokio_util::sync::PollSender;
+use reth_primitives_traits::Block;
 
 /// The maximum number of [`BodyDownloaderResult`]s to hold in the buffer.
 pub const BODIES_TASK_BUFFER_SIZE: usize = 4;
@@ -24,15 +25,14 @@ pub const BODIES_TASK_BUFFER_SIZE: usize = 4;
 /// A [BodyDownloader] that drives a spawned [BodyDownloader] on a spawned task.
 #[derive(Debug)]
 #[pin_project]
-pub struct TaskDownloader<H, B> {
+pub struct TaskDownloader<B: Block> {
     #[pin]
-    from_downloader: ReceiverStream<BodyDownloaderResult<H, B>>,
+    from_downloader: ReceiverStream<BodyDownloaderResult<B>>,
     to_downloader: UnboundedSender<RangeInclusive<BlockNumber>>,
 }
 
-// === impl TaskDownloader ===
 
-impl<H: Send + Sync + Unpin + 'static, B: Send + Sync + Unpin + 'static> TaskDownloader<H, B> {
+impl<B: Block + 'static> TaskDownloader<B> {
     /// Spawns the given `downloader` via [`tokio::task::spawn`] returns a [`TaskDownloader`] that's
     /// connected to that task.
     ///
@@ -64,7 +64,7 @@ impl<H: Send + Sync + Unpin + 'static, B: Send + Sync + Unpin + 'static> TaskDow
     /// ```
     pub fn spawn<T>(downloader: T) -> Self
     where
-        T: BodyDownloader<Header = H, Body = B> + 'static,
+        T: BodyDownloader<Block = B> + 'static,
     {
         Self::spawn_with(downloader, &TokioTaskExecutor::default())
     }
@@ -73,7 +73,7 @@ impl<H: Send + Sync + Unpin + 'static, B: Send + Sync + Unpin + 'static> TaskDow
     /// that's connected to that task.
     pub fn spawn_with<T, S>(downloader: T, spawner: &S) -> Self
     where
-        T: BodyDownloader<Header = H, Body = B> + 'static,
+        T: BodyDownloader<Block = B> + 'static,
         S: TaskSpawner,
     {
         let (bodies_tx, bodies_rx) = mpsc::channel(BODIES_TASK_BUFFER_SIZE);
@@ -91,11 +91,10 @@ impl<H: Send + Sync + Unpin + 'static, B: Send + Sync + Unpin + 'static> TaskDow
     }
 }
 
-impl<H: Debug + Send + Sync + Unpin + 'static, B: Debug + Send + Sync + Unpin + 'static>
-    BodyDownloader for TaskDownloader<H, B>
+impl<B: Block>
+    BodyDownloader for TaskDownloader<B>
 {
-    type Header = H;
-    type Body = B;
+    type Block = B;
 
     fn set_download_range(&mut self, range: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
         let _ = self.to_downloader.send(range);
@@ -103,8 +102,8 @@ impl<H: Debug + Send + Sync + Unpin + 'static, B: Debug + Send + Sync + Unpin + 
     }
 }
 
-impl<H, B> Stream for TaskDownloader<H, B> {
-    type Item = BodyDownloaderResult<H, B>;
+impl<B: Block> Stream for TaskDownloader<B> {
+    type Item = BodyDownloaderResult<B>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.project().from_downloader.poll_next(cx)
@@ -114,7 +113,7 @@ impl<H, B> Stream for TaskDownloader<H, B> {
 /// A [`BodyDownloader`] that runs on its own task
 struct SpawnedDownloader<T: BodyDownloader> {
     updates: UnboundedReceiverStream<RangeInclusive<BlockNumber>>,
-    bodies_tx: PollSender<BodyDownloaderResult<T::Header, T::Body>>,
+    bodies_tx: PollSender<BodyDownloaderResult<T::Block>>,
     downloader: T,
 }
 
