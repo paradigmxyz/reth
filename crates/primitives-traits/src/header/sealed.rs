@@ -1,4 +1,4 @@
-use crate::InMemorySize;
+use crate::{sync::OnceLock, InMemorySize};
 pub use alloy_consensus::Header;
 use alloy_consensus::Sealed;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
@@ -7,7 +7,6 @@ use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
 use derive_more::{AsRef, Deref};
-use std::{hash::Hasher, sync::OnceLock};
 
 /// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
 /// to modify header.
@@ -54,6 +53,11 @@ impl<H> SealedHeader<H> {
     /// Extract raw header that can be modified.
     pub fn unseal(self) -> H {
         self.header
+    }
+
+    /// Converts from &`SealedHeader`<H> to `SealedHeader`<&H>.
+    pub fn sealed_ref(&self) -> SealedHeader<&H> {
+        SealedHeader { hash: self.hash.clone(), header: &self.header }
     }
 }
 
@@ -111,7 +115,7 @@ impl<H: Sealable> PartialEq for SealedHeader<H> {
 }
 
 impl<H: Sealable> core::hash::Hash for SealedHeader<H> {
-    fn hash<Ha: Hasher>(&self, state: &mut Ha) {
+    fn hash<Ha: core::hash::Hasher>(&self, state: &mut Ha) {
         self.hash().hash(state)
     }
 }
