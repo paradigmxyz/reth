@@ -2,7 +2,6 @@
 
 use crate::{
     block::SealedBlock,
-    sync::OnceLock,
     transaction::signed::{RecoveryError, SignedTransactionIntoRecoveredExt},
     Block, BlockBody, InMemorySize, SealedHeader,
 };
