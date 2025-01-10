@@ -720,7 +720,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
             |block_state, predicate| {
                 // TODO(mattsse): get rid of clone
                 let header = block_state.block_ref().block().clone_sealed_header();
-                predicate(&header).then(|| header)
+                predicate(&header).then_some(header)
             },
             predicate,
         )

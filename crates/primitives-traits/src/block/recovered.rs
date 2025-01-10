@@ -13,7 +13,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable};
 use derive_more::Deref;
 
 /// A block with senders recovered from transactions.
-#[derive(Debug, Clone, PartialEq, Eq, Deref)]
+#[derive(Debug, Clone, Deref)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RecoveredBlock<B> {
     /// Block hash
@@ -279,6 +279,16 @@ impl<B: Block> RecoveredBlock<B> {
     /// Retrieves the block number
     pub fn number(&self) -> BlockNumber {
         self.header().number()
+    }
+}
+
+impl<B: Block> Eq for RecoveredBlock<B> {}
+
+impl<B: Block> PartialEq for RecoveredBlock<B> {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash_ref().eq(other.hash_ref()) &&
+            self.block.eq(&other.block) &&
+            self.senders.eq(&other.senders)
     }
 }
 

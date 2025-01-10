@@ -2333,7 +2333,8 @@ mod tests {
             (block_with_senders_range, |block: &SealedBlock| block.clone().try_recover().unwrap()),
             (sealed_block_with_senders_range, |block: &SealedBlock| block
                 .clone()
-                .with_senders(vec![])),
+                .try_recover()
+                .unwrap()),
             (transactions_by_block_range, |block: &SealedBlock| block.body().transactions.clone()),
         ]);
 
@@ -2524,7 +2525,7 @@ mod tests {
                 block_with_senders,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
-                    block.clone().into_block().with_recovered_senders()
+                    block.clone().try_recover().ok()
                 ),
                 (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
             ),
@@ -2533,7 +2534,7 @@ mod tests {
                 block_with_senders,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
-                    block.clone().into_block().with_recovered_senders()
+                    block.clone().try_recover().ok()
                 ),
                 (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
             ),
@@ -2542,7 +2543,7 @@ mod tests {
                 sealed_block_with_senders,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
-                    block.clone().into_block().with_recovered_senders()
+                    block.clone().try_recover().ok()
                 ),
                 (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
             ),
@@ -2551,7 +2552,7 @@ mod tests {
                 sealed_block_with_senders,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
-                    block.clone().into_block().with_recovered_senders()
+                    block.clone().try_recover().ok()
                 ),
                 (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
             ),
