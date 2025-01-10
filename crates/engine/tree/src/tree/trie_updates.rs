@@ -98,8 +98,8 @@ pub(super) fn compare_trie_updates(
 ) -> Result<(), DatabaseError> {
     let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
 
-    let task = adjust_trie_updates(task);
-    let regular = adjust_trie_updates(regular);
+    let mut task = adjust_trie_updates(task);
+    let mut regular = adjust_trie_updates(regular);
 
     let mut diff = TrieUpdatesDiff::default();
 
@@ -112,10 +112,10 @@ pub(super) fn compare_trie_updates(
         .cloned()
         .collect::<HashSet<_>>()
     {
-        let (left, right) = (task.account_nodes.get(&key), regular.account_nodes.get(&key));
+        let (left, right) = (task.account_nodes.remove(&key), regular.account_nodes.remove(&key));
 
-        if !branch_nodes_equal(&mut account_trie_cursor, &key, left, right)? {
-            diff.account_nodes.insert(key, (left.cloned(), right.cloned()));
+        if !branch_nodes_equal(&mut account_trie_cursor, &key, left.as_ref(), right.as_ref())? {
+            diff.account_nodes.insert(key, (left, right));
         }
     }
 
@@ -142,18 +142,26 @@ pub(super) fn compare_trie_updates(
         .copied()
         .collect::<HashSet<_>>()
     {
-        let (left, right) = (task.storage_tries.get(&key), regular.storage_tries.get(&key));
-        if left != right {
-            if let Some((left, right)) = left.zip(right) {
-                let mut storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(key)?;
+        let (task, regular) = (task.storage_tries.remove(&key), regular.storage_tries.remove(&key));
+        if task != regular {
+            let mut storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(key)?;
+            if let Some((left, right)) = task.as_ref().zip(regular.as_ref()) {
                 let storage_diff =
                     compare_storage_trie_updates(&mut storage_trie_cursor, left, right)?;
                 if storage_diff.has_differences() {
                     diff.storage_tries.insert(key, StorageTrieDiffEntry::Value(storage_diff));
                 }
-            } else {
-                diff.storage_tries
-                    .insert(key, StorageTrieDiffEntry::Existence(left.is_some(), right.is_some()));
+            } else if compare_storage_trie_updates(
+                &mut storage_trie_cursor,
+                &task.clone().unwrap_or_default(),
+                &regular.clone().unwrap_or_default(),
+            )?
+            .has_differences()
+            {
+                diff.storage_tries.insert(
+                    key,
+                    StorageTrieDiffEntry::Existence(task.is_some(), regular.is_some()),
+                );
             }
         }
     }
