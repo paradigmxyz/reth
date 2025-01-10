@@ -10,7 +10,7 @@ use reth_evm::execute::{
     BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
-use reth_primitives::{BlockExt, BlockWithSenders, Receipt};
+use reth_primitives::{BlockWithSenders, Receipt};
 use reth_primitives_traits::{format_gas_throughput, SignedTransaction};
 use reth_provider::{
     BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
@@ -107,10 +107,9 @@ where
             let execute_start = Instant::now();
 
             // Unseal the block for execution
-            let (block, senders) = block.split();
-            let (header, body) = block.split();
-            let (unsealed_header, hash) = header.split();
-            let block = P::Block::new(unsealed_header, body).with_senders_unchecked(senders);
+            let (block, senders) = block.split_sealed();
+            let (header, body) = block.split_sealed_header_body();
+            let block = P::Block::new_sealed(header, body).with_senders(senders);
 
             executor.execute_and_verify_one(&block)?;
             execution_duration += execute_start.elapsed();
@@ -118,7 +117,7 @@ where
             // TODO(alexey): report gas metrics using `block.header.gas_used`
 
             // Seal the block back and save it
-            blocks.push(block.seal_unchecked(hash));
+            blocks.push(block);
 
             // Check if we should commit now
             let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
@@ -206,7 +205,7 @@ where
             self.provider.history_by_block_number(block_number.saturating_sub(1))?,
         ));
 
-        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body().transactions().len(), "Executing block");
+        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.body().transaction_count(), "Executing block");
 
         let block_execution_output = executor.execute(&block_with_senders)?;
 
@@ -310,8 +309,7 @@ mod tests {
             let (block, mut execution_output) = res?;
             execution_output.state.reverts.sort();
 
-            let sealed_block_with_senders = blocks_and_execution_outcomes[i].0.clone();
-            let expected_block = sealed_block_with_senders.unseal();
+            let expected_block = blocks_and_execution_outcomes[i].0.clone();
             let expected_output = &blocks_and_execution_outcomes[i].1;
 
             assert_eq!(block, expected_block);

@@ -77,9 +77,8 @@ where
 
     // Commit the block's execution outcome to the database
     let provider_rw = provider_factory.provider_rw()?;
-    let block = block.clone().seal_slow();
     provider_rw.append_blocks_with_state(
-        vec![block],
+        vec![block.clone()],
         &execution_outcome,
         Default::default(),
         Default::default(),
@@ -181,9 +180,6 @@ where
     let block_output2 =
         execute_block_and_commit_to_database(&provider_factory, chain_spec, &block2)?;
 
-    let block1 = block1.seal_slow();
-    let block2 = block2.seal_slow();
-
     Ok(vec![(block1, block_output1), (block2, block_output2)])
 }
 
@@ -206,9 +202,6 @@ where
 
     let mut execution_outcome = executor.execute_and_verify_batch(vec![&block1, &block2])?;
     execution_outcome.state_mut().reverts.sort();
-
-    let block1 = block1.seal_slow();
-    let block2 = block2.seal_slow();
 
     // Commit the block's execution outcome to the database
     let provider_rw = provider_factory.provider_rw()?;

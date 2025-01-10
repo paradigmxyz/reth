@@ -473,10 +473,8 @@ mod tests {
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         );
         let provider_rw = provider_factory.provider_rw()?;
-        provider_rw.insert_block(
-            node_head_block.clone().try_recover().ok_or_eyre("failed to recover senders")?,
-            StorageLocation::Database,
-        )?;
+        provider_rw
+            .insert_block(node_head_block.clone().try_recover()?, StorageLocation::Database)?;
         provider_rw.commit()?;
 
         let node_head = Head {
@@ -494,8 +492,7 @@ mod tests {
                     node_head.number + 1,
                     BlockParams { parent: Some(node_head.hash), ..Default::default() },
                 )
-                .try_recover()
-                .ok_or_eyre("failed to recover senders")?],
+                .try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -565,8 +562,7 @@ mod tests {
                     ..Default::default()
                 }
                 .seal_slow()
-                .try_recover()
-                .ok_or_eyre("failed to recover senders")?],
+                .try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -611,8 +607,7 @@ mod tests {
             genesis_block.number + 1,
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         )
-        .try_with_senders::<reth_primitives::Block>()
-        .ok_or_eyre("failed to recover senders")?;
+        .try_recover()?;
         let node_head = Head {
             number: node_head_block.number,
             hash: node_head_block.hash(),
@@ -638,10 +633,7 @@ mod tests {
         let exex_head = ExExHead { block: exex_head_block.num_hash() };
         let exex_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![exex_head_block
-                    .clone()
-                    .try_recover()
-                    .ok_or_eyre("failed to recover senders")?],
+                vec![exex_head_block.clone().try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -655,8 +647,7 @@ mod tests {
                     node_head.number + 1,
                     BlockParams { parent: Some(node_head.hash), ..Default::default() },
                 )
-                .try_recover()
-                .ok_or_eyre("failed to recover senders")?],
+                .try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -713,10 +704,7 @@ mod tests {
         );
         let exex_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![exex_head_block
-                    .clone()
-                    .try_recover()
-                    .ok_or_eyre("failed to recover senders")?],
+                vec![exex_head_block.clone().try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -736,8 +724,7 @@ mod tests {
                     genesis_block.number + 1,
                     BlockParams { parent: Some(genesis_hash), ..Default::default() },
                 )
-                .try_recover()
-                .ok_or_eyre("failed to recover senders")?],
+                .try_recover()?],
                 Default::default(),
                 None,
             )),

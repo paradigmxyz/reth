@@ -278,8 +278,7 @@ mod tests {
         // execute first block
         let (block, mut execution_output) = backfill_stream.next().await.unwrap().unwrap();
         execution_output.state.reverts.sort();
-        let sealed_block_with_senders = blocks_and_execution_outcomes[0].0.clone();
-        let expected_block = sealed_block_with_senders.unseal();
+        let expected_block = blocks_and_execution_outcomes[0].0.clone();
         let expected_output = &blocks_and_execution_outcomes[0].1;
         assert_eq!(block, expected_block);
         assert_eq!(&execution_output, expected_output);
