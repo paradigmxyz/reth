@@ -59,6 +59,13 @@ where
         Self::from_parts(header, body, hash)
     }
 
+    /// Converts this block into a [`RecoveredBlock`] with the given senders
+    ///
+    /// Note: This method assumes the senders are correct and does not validate them.
+    pub fn with_senders(self, senders: Vec<Address>) -> RecoveredBlock<B> {
+        RecoveredBlock::new_sealed(self, senders)
+    }
+
     /// Converts this block into a [`RecoveredBlock`] with the given senders if the number of
     /// senders is equal to the number of transactions in the block and recovers the senders from
     /// the transactions, if

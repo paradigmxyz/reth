@@ -306,10 +306,12 @@ mod tests {
         let tx = TransactionSigned::default();
         body.transactions.push(tx);
 
-        let block: SealedBlockWithSenders =
-            SealedBlock::new(SealedHeader::seal(alloy_consensus::Header::default()), body)
-                .seal_with_senders()
-                .unwrap();
+        let block = SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
+            SealedHeader::seal(alloy_consensus::Header::default()),
+            body,
+        )
+        .try_recover()
+        .unwrap();
 
         // Create a clone of the default block and customize it to act as block1.
         let mut block1 = block.clone();
@@ -372,10 +374,13 @@ mod tests {
         // Define block1 for the old chain segment, which will be reverted.
         let mut body = BlockBody::<TransactionSigned>::default();
         body.transactions.push(TransactionSigned::default());
-        let mut old_block1: SealedBlockWithSenders =
-            SealedBlock::new(SealedHeader::seal(alloy_consensus::Header::default()), body)
-                .seal_with_senders()
-                .unwrap();
+        let mut old_block1 =
+            SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
+                SealedHeader::seal(alloy_consensus::Header::default()),
+                body,
+            )
+            .try_recover()
+            .unwrap();
         old_block1.set_block_number(1);
         old_block1.set_hash(B256::new([0x01; 32]));
 
@@ -400,10 +405,13 @@ mod tests {
         // Define block2 for the new chain segment, which will be committed.
         let mut body = BlockBody::<TransactionSigned>::default();
         body.transactions.push(TransactionSigned::default());
-        let mut new_block1: SealedBlockWithSenders =
-            SealedBlock::new(SealedHeader::seal(alloy_consensus::Header::default()), body)
-                .seal_with_senders()
-                .unwrap();
+        let mut new_block1 =
+            SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
+                SealedHeader::seal(alloy_consensus::Header::default()),
+                body,
+            )
+            .try_recover()
+            .unwrap();
         new_block1.set_block_number(2);
         new_block1.set_hash(B256::new([0x02; 32]));
 

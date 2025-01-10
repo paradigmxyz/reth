@@ -32,6 +32,7 @@ impl<B> RecoveredBlock<B> {
     pub fn new(block: B, senders: Vec<Address>, hash: BlockHash) -> Self {
         Self { hash: hash.into(), block, senders }
     }
+
     /// Creates a new recovered block instance with the given senders as provided
     pub fn new_unhashed(block: B, senders: Vec<Address>) -> Self {
         Self { hash: Default::default(), block, senders }
@@ -59,6 +60,13 @@ impl<B> RecoveredBlock<B> {
 }
 
 impl<B: Block> RecoveredBlock<B> {
+    /// Creates a new recovered block instance with the given [`SealedBlock`] and senders as
+    /// provided
+    pub fn new_sealed(block: SealedBlock<B>, senders: Vec<Address>) -> Self {
+        let (block, hash) = block.split();
+        Self::new(block, senders, hash)
+    }
+
     /// A safer variant of [`Self::new_unhashed`] that checks if the number of senders is equal to
     /// the number of transactions in the block and recovers the senders from the transactions, if
     /// not using [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction)

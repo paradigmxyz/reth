@@ -20,7 +20,7 @@ use reth_primitives::{
     BlockBody, EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredTx, SealedBlock,
     SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
 };
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{Account, Block};
 use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};
@@ -168,7 +168,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             ..Default::default()
         };
 
-        let block = SealedBlock::new(
+        let block = SealedBlock::from_sealed_parts(
             SealedHeader::seal(header),
             BlockBody {
                 transactions: transactions.into_iter().map(|tx| tx.into_tx()).collect(),
@@ -177,8 +177,11 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             },
         );
 
-        SealedBlockWithSenders::try_new_unhashed(block, vec![self.signer; num_txs as usize])
-            .unwrap()
+        SealedBlockWithSenders::try_recover_sealed_with_senders(
+            block,
+            vec![self.signer; num_txs as usize],
+        )
+        .unwrap()
     }
 
     /// Creates a fork chain with the given base block.
@@ -192,7 +195,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         for _ in 0..length {
             let block = self.generate_random_block(parent.number + 1, parent.hash());
-            parent = block.block.clone();
+            parent = block.clone_sealed_block();
             fork.push(block);
         }
 
@@ -208,7 +211,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     ) -> ExecutedBlock {
         let block_with_senders = self.generate_random_block(block_number, parent_hash);
 
-        let (block, senders) = block_with_senders.split();
+        let (block, senders) = block_with_senders.split_sealed();
         ExecutedBlock::new(
             Arc::new(block),
             Arc::new(senders),

@@ -15,7 +15,7 @@ use reth_primitives::{
     BlockWithSenders, EthPrimitives, NodePrimitives, Receipts, SealedBlock, SealedBlockFor,
     SealedBlockWithSenders, SealedHeader,
 };
-use reth_primitives_traits::{Block, BlockBody as _, SignedTransaction};
+use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
@@ -471,7 +471,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns the `SealedBlock` corresponding to the pending state.
-    pub fn pending_block(&self) -> Option<SealedBlock<N::BlockHeader, N::BlockBody>> {
+    pub fn pending_block(&self) -> Option<SealedBlock<N::Block>> {
         self.pending_state().map(|block_state| block_state.block_ref().block().clone())
     }
 
@@ -481,7 +481,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         N::SignedTx: SignedTransaction,
     {
         self.pending_state()
-            .and_then(|block_state| block_state.block_ref().block().clone().seal_with_senders())
+            .and_then(|block_state| block_state.block_ref().block().clone().try_recover().ok())
     }
 
     /// Returns a tuple with the `SealedBlock` corresponding to the pending
@@ -640,15 +640,14 @@ impl<N: NodePrimitives> BlockState<N> {
     pub fn block_with_senders(&self) -> BlockWithSenders<N::Block> {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
-        let (header, body) = block.split();
-        BlockWithSenders::new_unchecked(N::Block::new(header.unseal(), body), senders)
+        block.with_senders(senders)
     }
 
     /// Returns the sealed block with senders for the state.
     pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders<N::Block> {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
-        SealedBlockWithSenders::new_unhashed(block, senders)
+        SealedBlockWithSenders::new_sealed(block, senders)
     }
 
     /// Returns the hash of executed block that determines the state.
@@ -840,7 +839,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     ///
     /// Note: this clones the block and senders.
     pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders<N::Block> {
-        SealedBlockWithSenders::new_unhashed((*self.block).clone(), (*self.senders).clone())
+        SealedBlockWithSenders::new_sealed((*self.block).clone(), (*self.senders).clone())
     }
 
     /// Returns a reference to the block's execution outcome
@@ -1326,7 +1325,7 @@ mod tests {
         // Check the pending block with senders
         assert_eq!(
             state.pending_block_with_senders().unwrap(),
-            block2.block().clone().seal_with_senders().unwrap()
+            block2.block().clone().try_recover().unwrap()
         );
 
         // Check the pending block and receipts
