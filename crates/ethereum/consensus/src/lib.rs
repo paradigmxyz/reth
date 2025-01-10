@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use alloy_consensus::{BlockHeader, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::{eip7840::BlobParams, merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -24,7 +24,7 @@ use reth_consensus_common::validation::{
 use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt, SealedBlock, SealedHeader};
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
-    Block,
+    Block, BlockHeader,
 };
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 

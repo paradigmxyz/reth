@@ -1,11 +1,14 @@
 //! Collection of methods for block validation.
 
-use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{
+    constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader as _, EMPTY_OMMER_ROOT_HASH,
+};
 use alloy_eips::{calc_next_block_base_fee, eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::SealedBlock;
-use reth_primitives_traits::{Block, BlockBody, GotExpected, SealedHeader};
+use reth_primitives_traits::{
+    Block, BlockBody, BlockHeader, GotExpected, SealedBlock, SealedHeader,
+};
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]

@@ -14,7 +14,6 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
-reth-primitives.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
@@ -23,6 +22,7 @@ alloy-consensus.workspace = true
 alloy-eips.workspace = true
 
 [dev-dependencies]
+reth-primitives.workspace = true
 alloy-consensus.workspace = true
 rand.workspace = true
 
@@ -34,6 +34,6 @@ std = [
 	"alloy-primitives/std",
 	"reth-chainspec/std",
 	"reth-consensus/std",
-	"reth-primitives/std",
-	"reth-primitives-traits/std"
+	"reth-primitives-traits/std",
+	"reth-primitives/std"
 ]

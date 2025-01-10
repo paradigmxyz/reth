@@ -13,7 +13,7 @@
 extern crate alloc;
 
 use alloc::sync::Arc;
-use alloy_consensus::{BlockHeader, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{BlockHeader as _, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B64, U256};
 use reth_chainspec::EthereumHardforks;
@@ -33,7 +33,7 @@ use reth_primitives::{BlockWithSenders, GotExpected, SealedHeader};
 
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
-use reth_primitives_traits::{block::SealedBlock, Block, BlockBody};
+use reth_primitives_traits::{Block, BlockBody, BlockHeader, SealedBlock};
 
 mod validation;
 pub use validation::validate_block_post_execution;

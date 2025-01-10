@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{BlockNumber, Sealable, B256};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
 use reth_db::tables;
@@ -344,7 +344,7 @@ where
 
 /// Check that the computed state root matches the root in the expected header.
 #[inline]
-fn validate_state_root<H: BlockHeader + Debug>(
+fn validate_state_root<H: BlockHeader + Sealable + Debug>(
     got: B256,
     expected: SealedHeader<H>,
     target_block: BlockNumber,

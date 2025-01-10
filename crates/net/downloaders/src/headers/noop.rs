@@ -1,3 +1,4 @@
+use alloy_primitives::Sealable;
 use futures::Stream;
 use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, SyncTarget},
@@ -11,7 +12,9 @@ use std::fmt::Debug;
 #[non_exhaustive]
 pub struct NoopHeaderDownloader<H>(std::marker::PhantomData<H>);
 
-impl<H: Debug + Send + Sync + Unpin + 'static> HeaderDownloader for NoopHeaderDownloader<H> {
+impl<H: Sealable + Debug + Send + Sync + Unpin + 'static> HeaderDownloader
+    for NoopHeaderDownloader<H>
+{
     type Header = H;
 
     fn update_local_head(&mut self, _: SealedHeader<H>) {}
@@ -21,7 +24,7 @@ impl<H: Debug + Send + Sync + Unpin + 'static> HeaderDownloader for NoopHeaderDo
     fn set_batch_size(&mut self, _: usize) {}
 }
 
-impl<H> Stream for NoopHeaderDownloader<H> {
+impl<H: Sealable> Stream for NoopHeaderDownloader<H> {
     type Item = Result<Vec<SealedHeader<H>>, HeadersDownloaderError<H>>;
 
     fn poll_next(
