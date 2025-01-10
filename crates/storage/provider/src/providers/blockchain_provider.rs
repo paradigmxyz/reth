@@ -907,7 +907,7 @@ mod tests {
             }
 
             provider_rw.insert_historical_block(
-                block.clone().seal_with_senders().expect("failed to seal block with senders"),
+                block.clone().try_with_senders().expect("failed to seal block with senders"),
             )?;
         }
 
@@ -1027,7 +1027,7 @@ mod tests {
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
             provider_rw.insert_historical_block(
-                block.clone().seal_with_senders().expect("failed to seal block with senders"),
+                block.clone().try_with_senders().expect("failed to seal block with senders"),
             )?;
         }
         provider_rw.commit()?;
@@ -1125,7 +1125,7 @@ mod tests {
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
             provider_rw.insert_historical_block(
-                block.clone().seal_with_senders().expect("failed to seal block with senders"),
+                block.clone().try_with_senders().expect("failed to seal block with senders"),
             )?;
         }
         provider_rw.commit()?;
@@ -1806,7 +1806,7 @@ mod tests {
         provider_rw.append_blocks_with_state(
             database_blocks
                 .into_iter()
-                .map(|b| b.seal_with_senders().expect("failed to seal block with senders"))
+                .map(|b| b.try_with_senders().expect("failed to seal block with senders"))
                 .collect(),
             &ExecutionOutcome {
                 bundle: BundleState::new(

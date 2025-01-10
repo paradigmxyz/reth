@@ -704,7 +704,7 @@ mod tests {
             let provider = factory.provider_rw().unwrap();
             assert_matches!(
                 provider.insert_block(
-                    block.clone().try_seal_with_senders().unwrap(),
+                    block.clone().try_with_senders().unwrap(),
                     StorageLocation::Database
                 ),
                 Ok(_)
@@ -728,7 +728,7 @@ mod tests {
             let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
             assert_matches!(
                 provider.insert_block(
-                    block.clone().try_seal_with_senders().unwrap(),
+                    block.clone().try_with_senders().unwrap(),
                     StorageLocation::Database
                 ),
                 Ok(_)
@@ -752,7 +752,7 @@ mod tests {
 
             assert_matches!(
                 provider.insert_block(
-                    block.clone().try_seal_with_senders().unwrap(),
+                    block.clone().try_with_senders().unwrap(),
                     StorageLocation::Database
                 ),
                 Ok(_)

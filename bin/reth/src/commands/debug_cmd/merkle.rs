@@ -154,7 +154,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         for block in blocks.into_iter().rev() {
             let block_number = block.number;
             let sealed_block = block
-                .try_seal_with_senders::<BlockTy<N>>()
+                .try_with_senders::<BlockTy<N>>()
                 .map_err(|block| eyre::eyre!("Error sealing block with senders: {block:?}"))?;
             trace!(target: "reth::cli", block_number, "Executing block");
 

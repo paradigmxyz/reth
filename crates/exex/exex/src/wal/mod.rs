@@ -281,7 +281,7 @@ mod tests {
             .into_iter()
             .map(|block| {
                 block
-                    .seal_with_senders::<reth_primitives::Block>()
+                    .try_with_senders::<reth_primitives::Block>()
                     .ok_or_eyre("failed to recover senders")
             })
             .collect::<eyre::Result<Vec<_>>>()?;
@@ -290,14 +290,14 @@ mod tests {
             1,
             BlockParams { parent: Some(blocks[0].hash()), ..Default::default() },
         )
-        .seal_with_senders::<reth_primitives::Block>()
+        .try_with_senders::<reth_primitives::Block>()
         .ok_or_eyre("failed to recover senders")?;
         let block_2_reorged = random_block(
             &mut rng,
             2,
             BlockParams { parent: Some(blocks[1].hash()), ..Default::default() },
         )
-        .seal_with_senders::<reth_primitives::Block>()
+        .try_with_senders::<reth_primitives::Block>()
         .ok_or_eyre("failed to recover senders")?;
 
         // Create notifications for the above blocks.

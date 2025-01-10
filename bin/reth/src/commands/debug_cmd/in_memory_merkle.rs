@@ -172,7 +172,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         provider_rw.insert_historical_block(
             block
                 .clone()
-                .try_seal_with_senders()
+                .try_with_senders()
                 .map_err(|_| BlockValidationError::SenderRecoveryError)?,
         )?;
         provider_rw.write_state(

@@ -195,10 +195,10 @@ mod tests {
         let storage: Storage = Storage::new(&temp_dir)?;
 
         let old_block = random_block(&mut rng, 0, Default::default())
-            .seal_with_senders()
+            .try_with_senders()
             .ok_or_eyre("failed to recover senders")?;
         let new_block = random_block(&mut rng, 0, Default::default())
-            .seal_with_senders()
+            .try_with_senders()
             .ok_or_eyre("failed to recover senders")?;
 
         let notification = ExExNotification::ChainReorged {

@@ -349,7 +349,7 @@ where
                     versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
                 }),
             )?
-            .try_seal_with_senders()
+            .try_with_senders()
             .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
 
         self.validate_message_against_block(
@@ -382,7 +382,7 @@ where
                     },
                 ),
             )?
-            .try_seal_with_senders()
+            .try_with_senders()
             .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
 
         self.validate_message_against_block(

@@ -95,7 +95,7 @@ impl Case for BlockchainTestCase {
                         case.genesis_block_header.clone().into(),
                         BlockBody::default(),
                     )
-                    .try_seal_with_senders()
+                    .try_with_senders()
                     .unwrap(),
                 )?;
                 case.pre.write_to_db(provider.tx_ref())?;
@@ -112,9 +112,8 @@ impl Case for BlockchainTestCase {
                 // Decode and insert blocks, creating a chain of blocks for the test case.
                 let last_block = case.blocks.iter().try_fold(None, |_, block| {
                     let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-                    provider.insert_historical_block(
-                        decoded.clone().try_seal_with_senders().unwrap(),
-                    )?;
+                    provider
+                        .insert_historical_block(decoded.clone().try_with_senders().unwrap())?;
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;
                 provider
