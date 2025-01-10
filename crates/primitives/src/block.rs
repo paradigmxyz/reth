@@ -20,6 +20,7 @@ pub type SealedBlock<B = Block> = reth_primitives_traits::block::SealedBlock<B>;
 pub type SealedBlockFor<B = Block> = reth_primitives_traits::block::SealedBlock<B>;
 
 /// Ethereum recovered block
+#[deprecated(note = "Use `RecoveredBlock` instead")]
 pub type BlockWithSenders<B = Block> = reth_primitives_traits::block::RecoveredBlock<B>;
 
 /// Ethereum recovered block

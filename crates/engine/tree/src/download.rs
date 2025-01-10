@@ -69,7 +69,7 @@ where
     inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
-    set_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlockWithSenders<B>>>,
+    set_buffered_blocks: BinaryHeap<Reverse<OrderedRecoveredBlock<B>>>,
     /// Engine download metrics.
     metrics: BlockDownloaderMetrics,
     /// Pending events to be emitted.
@@ -230,7 +230,7 @@ where
                         .into_iter()
                         .map(|b| {
                             let senders = b.senders().unwrap_or_default();
-                            OrderedSealedBlockWithSenders(RecoveredBlock::new_sealed(b, senders))
+                            OrderedRecoveredBlock(RecoveredBlock::new_sealed(b, senders))
                         })
                         .map(Reverse),
                 );
@@ -267,29 +267,29 @@ where
 /// A wrapper type around [`RecoveredBlock`] that implements the [Ord]
 /// trait by block number.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct OrderedSealedBlockWithSenders<B: Block>(RecoveredBlock<B>);
+struct OrderedRecoveredBlock<B: Block>(RecoveredBlock<B>);
 
-impl<B: Block> PartialOrd for OrderedSealedBlockWithSenders<B> {
+impl<B: Block> PartialOrd for OrderedRecoveredBlock<B> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<B: Block> Ord for OrderedSealedBlockWithSenders<B> {
+impl<B: Block> Ord for OrderedRecoveredBlock<B> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.number().cmp(&other.0.number())
     }
 }
 
-impl<B: Block> From<SealedBlock<B>> for OrderedSealedBlockWithSenders<B> {
+impl<B: Block> From<SealedBlock<B>> for OrderedRecoveredBlock<B> {
     fn from(block: SealedBlock<B>) -> Self {
         let senders = block.senders().unwrap_or_default();
         Self(RecoveredBlock::new_sealed(block, senders))
     }
 }
 
-impl<B: Block> From<OrderedSealedBlockWithSenders<B>> for RecoveredBlock<B> {
-    fn from(value: OrderedSealedBlockWithSenders<B>) -> Self {
+impl<B: Block> From<OrderedRecoveredBlock<B>> for RecoveredBlock<B> {
+    fn from(value: OrderedRecoveredBlock<B>) -> Self {
         value.0
     }
 }

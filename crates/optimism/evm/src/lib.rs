@@ -532,7 +532,7 @@ mod tests {
 
     #[test]
     fn receipts_by_block_hash() {
-        // Create a default SealedBlockWithSenders object
+        // Create a default recovered block
         let block: RecoveredBlock<OpBlock> = Default::default();
 
         // Define block hashes for block1 and block2

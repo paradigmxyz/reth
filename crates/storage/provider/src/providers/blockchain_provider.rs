@@ -301,7 +301,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
     }
 
     fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        Ok(self.canonical_in_memory_state.pending_block_with_senders())
+        Ok(self.canonical_in_memory_state.pending_recovered_block())
     }
 
     fn pending_block_and_receipts(

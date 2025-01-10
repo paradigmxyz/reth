@@ -124,7 +124,7 @@ pub trait BlockWriter: Send + Sync {
     ///
     /// # Parameters
     ///
-    /// - `blocks`: Vector of `SealedBlockWithSenders` instances to append.
+    /// - `blocks`: Vector of `RecoveredBlock` instances to append.
     /// - `state`: Post-state information to update after appending.
     ///
     /// # Returns

@@ -474,8 +474,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.pending_state().map(|block_state| block_state.block_ref().block().clone())
     }
 
-    /// Returns the `SealedBlockWithSenders` corresponding to the pending state.
-    pub fn pending_block_with_senders(&self) -> Option<RecoveredBlock<N::Block>>
+    /// Returns the `RecoveredBlock` corresponding to the pending state.
+    pub fn pending_recovered_block(&self) -> Option<RecoveredBlock<N::Block>>
     where
         N::SignedTx: SignedTransaction,
     {
@@ -1323,7 +1323,7 @@ mod tests {
 
         // Check the pending block with senders
         assert_eq!(
-            state.pending_block_with_senders().unwrap(),
+            state.pending_recovered_block().unwrap(),
             block2.block().clone().try_recover().unwrap()
         );
 
