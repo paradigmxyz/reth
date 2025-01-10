@@ -30,7 +30,7 @@ where
     async fn send_raw_transaction_conditional(
         &self,
         bytes: Bytes,
-        condition: ConditionalOptions,
+        _condition: ConditionalOptions,
     ) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?bytes, "Serving eth_sendRawTransactionConditional");
         Ok(EthTransactions::send_raw_transaction(self, bytes).await?)
