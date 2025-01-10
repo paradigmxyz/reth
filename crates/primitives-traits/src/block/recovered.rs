@@ -9,7 +9,7 @@ use crate::{
 use alloc::vec::Vec;
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, B256};
 use derive_more::Deref;
 
 /// A block with senders recovered from transactions.
@@ -279,6 +279,16 @@ impl<B: Block> RecoveredBlock<B> {
     /// Retrieves the block number
     pub fn number(&self) -> BlockNumber {
         self.header().number()
+    }
+
+    /// Retrieves the parent hash of the block
+    pub fn parent_hash(&self) -> B256 {
+        self.header().parent_hash()
+    }
+
+    /// Retrieves the timestamp of the block
+    pub fn timestamp(&self) -> u64 {
+        self.header().timestamp()
     }
 }
 

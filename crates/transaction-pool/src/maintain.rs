@@ -20,7 +20,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, SealedHeader};
-use reth_primitives_traits::{NodePrimitives, SignedTransaction};
+use reth_primitives_traits::{Block, NodePrimitives, SignedTransaction};
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -272,11 +272,13 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                 // fees for the next block: `new_tip+1`
                 let pending_block_base_fee = new_tip
+                    .header()
                     .next_block_base_fee(
                         chain_spec.base_fee_params_at_timestamp(new_tip.timestamp() + 12),
                     )
                     .unwrap_or_default();
-                let pending_block_blob_fee = new_tip.next_block_blob_fee(BlobParams::cancun());
+                let pending_block_blob_fee =
+                    new_tip.header().next_block_blob_fee(BlobParams::cancun());
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
@@ -346,7 +348,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                 // update the pool first
                 let update = CanonicalStateUpdate {
-                    new_tip: &new_tip.block,
+                    // TODO(mattsse): remove clone
+                    new_tip: &new_tip.clone_sealed_block(),
                     pending_block_base_fee,
                     pending_block_blob_fee,
                     changed_accounts,
@@ -375,11 +378,12 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                 // fees for the next block: `tip+1`
                 let pending_block_base_fee = tip
+                    .header()
                     .next_block_base_fee(
                         chain_spec.base_fee_params_at_timestamp(tip.timestamp() + 12),
                     )
                     .unwrap_or_default();
-                let pending_block_blob_fee = tip.next_block_blob_fee(BlobParams::cancun());
+                let pending_block_blob_fee = tip.header().next_block_blob_fee(BlobParams::cancun());
 
                 let first_block = blocks.first();
                 trace!(
@@ -397,7 +401,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     maintained_state = MaintainedPoolState::Drifted;
                     debug!(target: "txpool", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
-                        block_gas_limit: tip.gas_limit(),
+                        block_gas_limit: tip.header().gas_limit(),
                         last_seen_block_hash: tip.hash(),
                         last_seen_block_number: tip.number(),
                         pending_basefee: pending_block_base_fee,
@@ -430,7 +434,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                 // Canonical update
                 let update = CanonicalStateUpdate {
-                    new_tip: &tip.block,
+                    // TODO(mattsse): remove clone
+                    new_tip: &tip.clone_sealed_block(),
                     pending_block_base_fee,
                     pending_block_blob_fee,
                     changed_accounts,

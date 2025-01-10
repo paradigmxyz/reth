@@ -24,7 +24,7 @@ use alloy_eips::{
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{InvalidTransactionError, SealedBlock};
-use reth_primitives_traits::{BlockBody, GotExpected};
+use reth_primitives_traits::{Block, GotExpected};
 use reth_storage_api::{StateProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -106,10 +106,9 @@ where
         self.validate_all(transactions)
     }
 
-    fn on_new_head_block<H, B>(&self, new_tip_block: &SealedBlock<H, B>)
+    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
     where
-        H: reth_primitives_traits::BlockHeader,
-        B: BlockBody,
+        B: Block,
     {
         self.inner.on_new_head_block(new_tip_block.header())
     }

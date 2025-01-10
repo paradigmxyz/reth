@@ -127,8 +127,8 @@ mod tests {
         let tx3_hash = B256::random(); // Non-EIP-4844 transaction
 
         // Creating a first block with EIP-4844 transactions
-        let block1 = SealedBlockWithSenders::new_unhashed(
-            SealedBlock::new(
+        let block1 = SealedBlockWithSenders::new_sealed(
+            SealedBlock::from_sealed_parts(
                 SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
                 BlockBody {
                     transactions: vec![
@@ -157,8 +157,8 @@ mod tests {
 
         // Creating a second block with EIP-1559 and EIP-2930 transactions
         // Note: This block does not contain any EIP-4844 transactions
-        let block2 = SealedBlockWithSenders::new_unhashed(
-            SealedBlock::new(
+        let block2 = SealedBlockWithSenders::new_sealed(
+            SealedBlock::from_sealed_parts(
                 SealedHeader::new(Header { number: 11, ..Default::default() }, B256::random()),
                 BlockBody {
                     transactions: vec![
