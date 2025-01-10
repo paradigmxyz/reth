@@ -33,10 +33,6 @@ pub struct Command<C: ChainSpecParser> {
     /// Custom URL to download the snapshot from
     #[arg(long, short, required = true)]
     url: String,
-
-    /// Whether to automatically decompress the snapshot after downloading
-    #[arg(long, short)]
-    decompress: bool,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
@@ -56,19 +52,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         download_snapshot(&self.url, &snapshot_path).await?;
 
         info!("Snapshot downloaded successfully to {:?}", snapshot_path);
-        if self.decompress {
-            info!("Decompressing snapshot...");
-            decompress_snapshot(&snapshot_path, data_dir.data_dir())?;
-            info!("Snapshot decompressed successfully");
+        info!("Decompressing snapshot...");
+        
+        decompress_snapshot(&snapshot_path, data_dir.data_dir())?;
+        info!("Snapshot decompressed successfully");
 
-            // Clean up compressed file
-            fs::remove_file(&snapshot_path).await?;
-        } else {
-            info!(
-                "Please extract the snapshot using: tar --use-compress-program=lz4 -xf {:?}",
-                snapshot_path
-            );
-        }
+        // Clean up compressed file
+        fs::remove_file(&snapshot_path).await?;
 
         Ok(())
     }
