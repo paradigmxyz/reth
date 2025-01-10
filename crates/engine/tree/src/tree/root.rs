@@ -748,7 +748,7 @@ where
         config.prefix_sets,
         thread_pool,
     )
-    .with_branch_node_hash_masks(true)
+    .with_branch_node_masks(true)
     .multiproof(proof_targets)?)
 }
 
