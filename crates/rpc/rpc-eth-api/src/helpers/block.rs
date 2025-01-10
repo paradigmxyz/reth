@@ -1,7 +1,10 @@
 //! Database access for `eth_` block RPC methods. Loads block and receipt data w.r.t. network.
 
-use std::sync::Arc;
-
+use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
+use crate::{
+    node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
+    RpcReceipt,
+};
 use alloy_eips::BlockId;
 use alloy_primitives::Sealable;
 use alloy_rlp::Encodable;
@@ -9,18 +12,13 @@ use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives::{SealedBlockFor, SealedBlockWithSenders};
+use reth_primitives_traits::Block as _;
 use reth_provider::{
     BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt,
 };
 use reth_rpc_types_compat::block::from_block;
 use revm_primitives::U256;
-
-use crate::{
-    node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
-    RpcReceipt,
-};
-
-use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
+use std::sync::Arc;
 
 /// Result type of the fetched block receipts.
 pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
@@ -65,7 +63,7 @@ pub trait EthBlocks: LoadBlock {
             let block_hash = block.hash();
 
             let block = from_block(
-                (*block).clone().unseal(),
+                (*block).clone(),
                 full.into(),
                 Some(block_hash),
                 self.tx_resp_builder(),
@@ -105,7 +103,7 @@ pub trait EthBlocks: LoadBlock {
                 .get_sealed_block_with_senders(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?
-                .map(|b| b.body().transactions().len()))
+                .map(|b| b.body().transaction_count()))
         }
     }
 
@@ -143,7 +141,7 @@ pub trait EthBlocks: LoadBlock {
 
                 // If no pending block from provider, build the pending block locally.
                 if let Some((block, receipts)) = self.local_pending_block().await? {
-                    return Ok(Some((block.block, Arc::new(receipts))));
+                    return Ok(Some((block.into_sealed_block(), Arc::new(receipts))));
                 }
             }
 
@@ -155,7 +153,7 @@ pub trait EthBlocks: LoadBlock {
                     .get_block_and_receipts(block_hash)
                     .await
                     .map_err(Self::Error::from_eth_err)
-                    .map(|b| b.map(|(b, r)| (b.block.clone(), r)))
+                    .map(|b| b.map(|(b, r)| (b.clone_sealed_block(), r)))
             }
 
             Ok(None)

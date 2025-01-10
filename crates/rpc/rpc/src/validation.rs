@@ -102,11 +102,13 @@ where
         message: BidTrace,
         registered_gas_limit: u64,
     ) -> Result<(), ValidationApiError> {
-        self.validate_message_against_header(block.sealed_header(), &message)?;
+        // TODO(mattsse): optimize clone
+        let header = block.clone_sealed_header();
+        self.validate_message_against_header(&header, &message)?;
 
-        self.consensus.validate_header_with_total_difficulty(block.sealed_header(), U256::MAX)?;
-        self.consensus.validate_header(block.sealed_header())?;
-        self.consensus.validate_block_pre_execution(&block)?;
+        self.consensus.validate_header_with_total_difficulty(&header, U256::MAX)?;
+        self.consensus.validate_header(&header)?;
+        self.consensus.validate_block_pre_execution(&block.clone_sealed_block())?;
 
         if !self.disallow.is_empty() {
             if self.disallow.contains(&block.beneficiary()) {
@@ -115,7 +117,7 @@ where
             if self.disallow.contains(&message.proposer_fee_recipient) {
                 return Err(ValidationApiError::Blacklist(message.proposer_fee_recipient))
             }
-            for (sender, tx) in block.senders_iter().zip(block.transactions()) {
+            for (sender, tx) in block.senders_iter().zip(block.body().transactions()) {
                 if self.disallow.contains(sender) {
                     return Err(ValidationApiError::Blacklist(*sender))
                 }
@@ -136,8 +138,13 @@ where
             )
             .into())
         }
-        self.consensus.validate_header_against_parent(block.sealed_header(), &latest_header)?;
-        self.validate_gas_limit(registered_gas_limit, &latest_header, block.sealed_header())?;
+        self.consensus
+            .validate_header_against_parent(&block.clone_sealed_header(), &latest_header)?;
+        self.validate_gas_limit(
+            registered_gas_limit,
+            &latest_header,
+            &block.clone_sealed_header(),
+        )?;
 
         let latest_header_hash = latest_header.hash();
         let state_provider = self.provider.state_by_block_hash(latest_header_hash)?;
@@ -147,7 +154,6 @@ where
         let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
         let executor = self.executor_provider.executor(cached_db);
 
-        let block = block.unseal();
         let mut accessed_blacklisted = None;
         let output = executor.execute_with_state_closure(&block, |state| {
             if !self.disallow.is_empty() {

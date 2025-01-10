@@ -15,7 +15,7 @@ use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, Tra
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, SealedBlockWithSenders};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{Block, SignedTransaction};
 use reth_provider::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
@@ -320,7 +320,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
-                if let Some(tx) = block.transactions().get(index) {
+                if let Some(tx) = block.body().transactions().get(index) {
                     return Ok(Some(tx.encoded_2718().into()))
                 }
             }

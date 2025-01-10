@@ -9,7 +9,7 @@ use crate::{
 use alloc::vec::Vec;
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, B256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Bloom, Bytes, Sealable, B256, B64, U256};
 use derive_more::Deref;
 
 /// A block with senders recovered from transactions.
@@ -275,20 +275,91 @@ impl<B: Block> RecoveredBlock<B> {
     pub fn into_transactions(self) -> Vec<<B::Body as BlockBody>::Transaction> {
         self.block.split().1.into_transactions()
     }
+}
 
-    /// Retrieves the block number
-    pub fn number(&self) -> BlockNumber {
-        self.header().number()
-    }
-
-    /// Retrieves the parent hash of the block
-    pub fn parent_hash(&self) -> B256 {
+impl<B: Block> BlockHeader for RecoveredBlock<B> {
+    fn parent_hash(&self) -> B256 {
         self.header().parent_hash()
     }
 
-    /// Retrieves the timestamp of the block
-    pub fn timestamp(&self) -> u64 {
+    fn ommers_hash(&self) -> B256 {
+        self.header().ommers_hash()
+    }
+
+    fn beneficiary(&self) -> Address {
+        self.header().beneficiary()
+    }
+
+    fn state_root(&self) -> B256 {
+        self.header().state_root()
+    }
+
+    fn transactions_root(&self) -> B256 {
+        self.header().transactions_root()
+    }
+
+    fn receipts_root(&self) -> B256 {
+        self.header().receipts_root()
+    }
+
+    fn withdrawals_root(&self) -> Option<B256> {
+        self.header().withdrawals_root()
+    }
+
+    fn logs_bloom(&self) -> Bloom {
+        self.header().logs_bloom()
+    }
+
+    fn difficulty(&self) -> U256 {
+        self.header().difficulty()
+    }
+
+    fn number(&self) -> BlockNumber {
+        self.header().number()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.header().gas_limit()
+    }
+
+    fn gas_used(&self) -> u64 {
+        self.header().gas_used()
+    }
+
+    fn timestamp(&self) -> u64 {
         self.header().timestamp()
+    }
+
+    fn mix_hash(&self) -> Option<B256> {
+        self.header().mix_hash()
+    }
+
+    fn nonce(&self) -> Option<B64> {
+        self.header().nonce()
+    }
+
+    fn base_fee_per_gas(&self) -> Option<u64> {
+        self.header().base_fee_per_gas()
+    }
+
+    fn blob_gas_used(&self) -> Option<u64> {
+        self.header().blob_gas_used()
+    }
+
+    fn excess_blob_gas(&self) -> Option<u64> {
+        self.header().excess_blob_gas()
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.header().parent_beacon_block_root()
+    }
+
+    fn requests_hash(&self) -> Option<B256> {
+        self.header().requests_hash()
+    }
+
+    fn extra_data(&self) -> &Bytes {
+        self.header().extra_data()
     }
 }
 

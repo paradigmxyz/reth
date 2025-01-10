@@ -1,7 +1,6 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
-use std::{fmt::Display, sync::Arc};
-
+use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 use crate::{FromEvmError, RpcNodeCore};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
@@ -10,7 +9,7 @@ use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::SealedBlockWithSenders;
-use reth_primitives_traits::{BlockBody, SignedTransaction};
+use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
 use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
@@ -22,8 +21,7 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use revm_primitives::{
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState,
 };
-
-use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
+use std::{fmt::Display, sync::Arc};
 
 /// Executes CPU heavy tasks.
 pub trait Trace:
@@ -350,7 +348,7 @@ pub trait Trace:
                 // prepare transactions, we do everything upfront to reduce time spent with open
                 // state
                 let max_transactions =
-                    highest_index.map_or(block.body().transactions().len(), |highest| {
+                    highest_index.map_or(block.body().transaction_count(), |highest| {
                         // we need + 1 because the index is 0-based
                         highest as usize + 1
                     });

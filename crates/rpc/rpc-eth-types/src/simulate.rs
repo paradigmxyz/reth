@@ -178,7 +178,7 @@ where
         calls.push(call);
     }
 
-    let block = BlockWithSenders::new_unchecked(block, senders);
+    let block = BlockWithSenders::new_unhashed(block, senders);
 
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };

@@ -192,7 +192,7 @@ where
             };
 
         self.trace_block(
-            Arc::new(block.with_senders_unchecked(senders).seal_slow()),
+            Arc::new(block.with_senders_unchecked(senders)),
             cfg_env_with_handler_cfg,
             block_env,
             opts,
@@ -639,7 +639,7 @@ where
                 let mut witness_record = ExecutionWitnessRecord::default();
 
                 let _ = block_executor
-                    .execute_with_state_closure(&(*block).clone().unseal(), |statedb: &State<_>| {
+                    .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
                         witness_record.record_executed_state(statedb);
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;

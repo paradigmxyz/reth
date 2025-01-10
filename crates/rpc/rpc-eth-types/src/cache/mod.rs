@@ -304,7 +304,7 @@ where
                     }
                     Either::Right(transaction_tx) => {
                         let _ = transaction_tx.send(res.clone().map(|maybe_block| {
-                            maybe_block.map(|block| block.block.body().transactions().to_vec())
+                            maybe_block.map(|block| block.body().transactions().to_vec())
                         }));
                     }
                 }
@@ -350,7 +350,7 @@ where
                     }
                     Either::Right(transaction_tx) => {
                         let _ = transaction_tx.send(res.clone().map(|maybe_block| {
-                            maybe_block.map(|block| block.block.body().transactions().to_vec())
+                            maybe_block.map(|block| block.body().transactions().to_vec())
                         }));
                     }
                 }
@@ -593,7 +593,7 @@ impl<B: Block, R: Clone> ChainChange<B, R> {
             .blocks_and_receipts()
             .map(|(block, receipts)| {
                 let block_receipts =
-                    BlockReceipts { block_hash: block.block.hash(), receipts: receipts.clone() };
+                    BlockReceipts { block_hash: block.hash(), receipts: receipts.clone() };
                 (block.clone(), block_receipts)
             })
             .unzip();

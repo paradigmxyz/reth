@@ -15,8 +15,8 @@ use reth_evm::{
     env::EvmEnv, state_change::post_block_withdrawals_balance_increments,
     system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes,
 };
-use reth_primitives::{BlockExt, InvalidTransactionError, SealedBlockWithSenders};
-use reth_primitives_traits::Receipt;
+use reth_primitives::{InvalidTransactionError, SealedBlockWithSenders};
+use reth_primitives_traits::{Block, Receipt};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,
     ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
@@ -426,6 +426,6 @@ pub trait LoadPendingBlock:
             results,
         );
 
-        Ok((SealedBlockWithSenders::new_unhashed(block.seal_slow(), senders), receipts))
+        Ok((SealedBlockWithSenders::new_unhashed(block, senders), receipts))
     }
 }
