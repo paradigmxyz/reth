@@ -1155,7 +1155,7 @@ mod tests {
             let expected = blocks
                 .iter()
                 .cloned()
-                .map(|b| Some(ExecutionPayloadBodyV1::from_block(b.into_block::<Block>())))
+                .map(|b| Some(ExecutionPayloadBodyV1::from_block(b.into_block())))
                 .collect::<Vec<_>>();
 
             let res = api.get_payload_bodies_by_range_v1(start, count).await.unwrap();
@@ -1197,7 +1197,7 @@ mod tests {
                     if first_missing_range.contains(&b.number) {
                         None
                     } else {
-                        Some(ExecutionPayloadBodyV1::from_block(b.into_block::<Block>()))
+                        Some(ExecutionPayloadBodyV1::from_block(b.into_block()))
                     }
                 })
                 .collect::<Vec<_>>();
@@ -1216,7 +1216,7 @@ mod tests {
                     {
                         None
                     } else {
-                        Some(ExecutionPayloadBodyV1::from_block(b.into_block::<Block>()))
+                        Some(ExecutionPayloadBodyV1::from_block(b.into_block()))
                     }
                 })
                 .collect::<Vec<_>>();

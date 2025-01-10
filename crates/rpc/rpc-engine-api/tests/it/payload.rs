@@ -33,7 +33,7 @@ fn payload_body_roundtrip() {
         BlockRangeParams { tx_count: 0..2, ..Default::default() },
     ) {
         let payload_body: ExecutionPayloadBodyV1 =
-            ExecutionPayloadBodyV1::from_block(block.clone().into_block::<Block>());
+            ExecutionPayloadBodyV1::from_block(block.clone().into_block());
 
         assert_eq!(
             Ok(block.body().transactions.clone()),
