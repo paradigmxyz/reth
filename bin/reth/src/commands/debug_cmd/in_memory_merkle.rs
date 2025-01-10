@@ -21,12 +21,11 @@ use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_api::{BlockTy, NodePrimitives};
 use reth_node_ethereum::EthExecutorProvider;
-use reth_primitives::BlockExt;
+use reth_primitives::{BlockExt, EthPrimitives};
 use reth_provider::{
     providers::ProviderNodeTypes, AccountExtReader, ChainSpecProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, HashingWriter, HeaderProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StateWriter, StorageLocation,
-    StorageReader,
+    HashedPostStateProvider, HashingWriter, LatestStateProviderRef, OriginalValuesKnown,
+    ProviderFactory, StageCheckpointReader, StateWriter, StorageLocation, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
@@ -89,7 +88,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
@@ -148,19 +147,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let db = StateProviderDatabase::new(&state_provider);
 
         let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
-
-        let merkle_block_td =
-            provider.header_td_by_number(merkle_block_number)?.unwrap_or_default();
         let block_execution_output = executor.execute(
-            (
-                &block
-                    .clone()
-                    .unseal::<BlockTy<N>>()
-                    .with_recovered_senders()
-                    .ok_or(BlockValidationError::SenderRecoveryError)?,
-                merkle_block_td + block.difficulty,
-            )
-                .into(),
+            &block
+                .clone()
+                .unseal::<BlockTy<N>>()
+                .with_recovered_senders()
+                .ok_or(BlockValidationError::SenderRecoveryError)?,
         )?;
         let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number));
 

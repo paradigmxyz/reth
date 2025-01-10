@@ -26,10 +26,11 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{PayloadAttributes, PayloadBuilderAttributes};
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{EthPrimitives, Head, SealedBlock, SealedHeader};
+use reth_primitives::{Head, SealedBlock, SealedHeader};
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockIdReader, BlockReader, BlockSource, CanonChainTracker,
-    ChainSpecProvider, ProviderError, StageCheckpointReader,
+    providers::{ProviderNodeTypes, TreeNodeTypes},
+    BlockIdReader, BlockReader, BlockSource, CanonChainTracker, ChainSpecProvider, ProviderError,
+    StageCheckpointReader,
 };
 use reth_stages_api::{ControlFlow, Pipeline, PipelineTarget, StageId};
 use reth_tasks::TaskSpawner;
@@ -84,15 +85,9 @@ const MAX_INVALID_HEADERS: u32 = 512u32;
 pub const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
 
 /// Helper trait expressing requirements for node types to be used in engine.
-pub trait EngineNodeTypes:
-    ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine
-{
-}
+pub trait EngineNodeTypes: ProviderNodeTypes + NodeTypesWithEngine {}
 
-impl<T> EngineNodeTypes for T where
-    T: ProviderNodeTypes<Primitives = EthPrimitives> + NodeTypesWithEngine
-{
-}
+impl<T> EngineNodeTypes for T where T: ProviderNodeTypes + NodeTypesWithEngine {}
 
 /// Represents a pending forkchoice update.
 ///
@@ -172,6 +167,8 @@ type PendingForkchoiceUpdate<PayloadAttributes> =
 /// # Panics
 ///
 /// If the future is polled more than once. Leads to undefined state.
+///
+/// Note: soon deprecated. See `reth_engine_service::EngineService`.
 #[must_use = "Future does nothing unless polled"]
 #[allow(missing_debug_implementations)]
 pub struct BeaconConsensusEngine<N, BT, Client>
@@ -232,7 +229,7 @@ where
 
 impl<N, BT, Client> BeaconConsensusEngine<N, BT, Client>
 where
-    N: EngineNodeTypes,
+    N: TreeNodeTypes,
     BT: BlockchainTreeEngine
         + BlockReader<Block = BlockTy<N>, Header = HeaderTy<N>>
         + BlockIdReader
@@ -302,7 +299,7 @@ where
         hooks: EngineHooks,
     ) -> RethResult<(Self, BeaconConsensusEngineHandle<N::Engine>)> {
         let event_sender = EventSender::default();
-        let handle = BeaconConsensusEngineHandle::new(to_engine, event_sender.clone());
+        let handle = BeaconConsensusEngineHandle::new(to_engine);
         let sync = EngineSyncController::new(
             pipeline,
             client,
@@ -1801,7 +1798,7 @@ where
 /// receiver and forwarding them to the blockchain tree.
 impl<N, BT, Client> Future for BeaconConsensusEngine<N, BT, Client>
 where
-    N: EngineNodeTypes,
+    N: TreeNodeTypes,
     Client: EthBlockClient + 'static,
     BT: BlockchainTreeEngine
         + BlockReader<Block = BlockTy<N>, Header = HeaderTy<N>>
@@ -2066,7 +2063,7 @@ mod tests {
         // consensus engine is still idle because no FCUs were received
         let _ = env
             .send_new_payload(
-                block_to_payload_v1(SealedBlock::default()),
+                block_to_payload_v1(SealedBlock::<_>::default()),
                 ExecutionPayloadSidecar::none(),
             )
             .await;
@@ -2463,7 +2460,7 @@ mod tests {
                     .chain(MAINNET.chain)
                     .genesis(MAINNET.genesis.clone())
                     .london_activated()
-                    .paris_at_ttd(U256::from(3))
+                    .paris_at_ttd(U256::from(3), 3)
                     .build(),
             );
 
@@ -2777,8 +2774,7 @@ mod tests {
                 .with_real_consensus()
                 .build();
 
-            let genesis =
-                SealedBlock { header: chain_spec.sealed_genesis_header(), ..Default::default() };
+            let genesis = SealedBlock::new(chain_spec.sealed_genesis_header(), Default::default());
             let block1 = random_block(
                 &mut rng,
                 1,

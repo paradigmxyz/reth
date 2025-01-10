@@ -1,9 +1,11 @@
 #![allow(missing_docs)]
-use alloy_primitives::U256;
+use alloy_primitives::{
+    private::proptest::test_runner::{RngAlgorithm, TestRng},
+    U256,
+};
 use criterion::*;
 use futures::StreamExt;
 use pprof::criterion::{Output, PProfProfiler};
-use rand::thread_rng;
 use reth_network::{test_utils::Testnet, NetworkEventListenerProvider};
 use reth_network_api::Peers;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
@@ -49,7 +51,9 @@ pub fn broadcast_ingress_bench(c: &mut Criterion) {
                         }
 
                         // prepare some transactions
-                        let mut gen = TransactionGenerator::new(thread_rng());
+                        let mut gen = TransactionGenerator::new(TestRng::deterministic_rng(
+                            RngAlgorithm::ChaCha,
+                        ));
                         let num_broadcasts = 10;
                         for _ in 0..num_broadcasts {
                             for _ in 0..2 {
@@ -60,7 +64,7 @@ pub fn broadcast_ingress_bench(c: &mut Criterion) {
                                     tx.sender(),
                                     ExtendedAccount::new(0, U256::from(100_000_000)),
                                 );
-                                txs.push(Arc::new(tx.transaction().clone().into_signed()));
+                                txs.push(Arc::new(tx.transaction().clone().into_tx()));
                                 peer1.send_transactions(peer0_id, txs);
                             }
                         }

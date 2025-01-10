@@ -12,14 +12,15 @@ use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
-    proofs, sign_message, Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader,
-    StorageEntry, Transaction, TransactionSigned,
+    proofs, Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
+    TransactionSigned,
 };
+
+use reth_primitives_traits::crypto::secp256k1::sign_message;
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
-    collections::{hash_map::DefaultHasher, BTreeMap},
-    hash::Hasher,
+    collections::BTreeMap,
     ops::{Range, RangeInclusive},
 };
 
@@ -69,12 +70,17 @@ impl Default for BlockRangeParams {
 /// If `SEED` is not set, a random seed is used.
 pub fn rng() -> StdRng {
     if let Ok(seed) = std::env::var("SEED") {
-        let mut hasher = DefaultHasher::new();
-        hasher.write(seed.as_bytes());
-        StdRng::seed_from_u64(hasher.finish())
+        rng_with_seed(seed.as_bytes())
     } else {
         StdRng::from_rng(thread_rng()).expect("could not build rng")
     }
+}
+
+/// Returns a random number generator from a specific seed, as bytes.
+pub fn rng_with_seed(seed: &[u8]) -> StdRng {
+    let mut seed_bytes = [0u8; 32];
+    seed_bytes[..seed.len().min(32)].copy_from_slice(seed);
+    StdRng::from_seed(seed_bytes)
 }
 
 /// Generates a range of random [`SealedHeader`]s.
@@ -228,10 +234,10 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
         ..Default::default()
     };
 
-    SealedBlock {
-        header: SealedHeader::seal(header),
-        body: BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
-    }
+    SealedBlock::new(
+        SealedHeader::seal(header),
+        BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
+    )
 }
 
 /// Generate a range of random blocks.
@@ -259,7 +265,7 @@ pub fn random_block_range<R: Rng>(
             idx,
             BlockParams {
                 parent: Some(
-                    blocks.last().map(|block: &SealedBlock| block.header.hash()).unwrap_or(parent),
+                    blocks.last().map(|block: &SealedBlock| block.hash()).unwrap_or(parent),
                 ),
                 tx_count: Some(tx_count),
                 ommers_count: None,
@@ -465,8 +471,10 @@ mod tests {
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
     use alloy_primitives::{hex, PrimitiveSignature as Signature};
-    use reth_primitives::public_key_to_address;
-    use reth_primitives_traits::SignedTransaction;
+    use reth_primitives_traits::{
+        crypto::secp256k1::{public_key_to_address, sign_message},
+        SignedTransaction,
+    };
     use std::str::FromStr;
 
     #[test]

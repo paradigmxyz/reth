@@ -19,7 +19,6 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::logs_utils;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
-use reth_rpc_types_compat::transaction::from_recovered;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, PoolConsensusTx, TransactionPool};
 use serde::Serialize;
@@ -119,10 +118,11 @@ where
                     Params::Bool(true) => {
                         // full transaction objects requested
                         let stream = pubsub.full_pending_transaction_stream().filter_map(|tx| {
-                            let tx_value = match from_recovered(
-                                tx.transaction.to_consensus(),
-                                pubsub.eth_api.tx_resp_builder(),
-                            ) {
+                            let tx_value = match pubsub
+                                .eth_api
+                                .tx_resp_builder()
+                                .fill_pending(tx.transaction.to_consensus())
+                            {
                                 Ok(tx) => Some(tx),
                                 Err(err) => {
                                     error!(target = "rpc",

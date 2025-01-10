@@ -218,16 +218,15 @@ where
         limit: usize,
     ) -> EthResult<Option<(B256, Vec<U256>)>> {
         // check the cache (this will hit the disk if the block is not cached)
-        let block = match self.cache.get_sealed_block_with_senders(block_hash).await? {
-            Some(block) => block,
-            None => return Ok(None),
+        let Some(block) = self.cache.get_sealed_block_with_senders(block_hash).await? else {
+            return Ok(None)
         };
 
         let base_fee_per_gas = block.base_fee_per_gas();
         let parent_hash = block.parent_hash();
 
         // sort the functions by ascending effective tip first
-        let sorted_transactions = block.body.transactions().iter().sorted_by_cached_key(|tx| {
+        let sorted_transactions = block.body().transactions().iter().sorted_by_cached_key(|tx| {
             if let Some(base_fee) = base_fee_per_gas {
                 (*tx).effective_tip_per_gas(base_fee)
             } else {

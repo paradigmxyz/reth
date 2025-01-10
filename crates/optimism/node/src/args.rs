@@ -38,23 +38,12 @@ pub struct RollupArgs {
     #[arg(long = "rollup.discovery.v4", default_value = "false")]
     pub discovery_v4: bool,
 
-    /// Enable the experimental engine features on reth binary
-    ///
-    /// DEPRECATED: experimental engine is default now, use --engine.legacy to enable the legacy
-    /// functionality
-    #[arg(long = "engine.experimental", default_value = "false")]
-    pub experimental: bool,
-
-    /// Enable the legacy engine on reth binary
-    #[arg(long = "engine.legacy", default_value = "false")]
-    pub legacy: bool,
-
     /// Configure persistence threshold for engine experimental.
-    #[arg(long = "engine.persistence-threshold", conflicts_with = "legacy", default_value_t = DEFAULT_PERSISTENCE_THRESHOLD)]
+    #[arg(long = "engine.persistence-threshold", default_value_t = DEFAULT_PERSISTENCE_THRESHOLD)]
     pub persistence_threshold: u64,
 
     /// Configure the target number of blocks to keep in memory.
-    #[arg(long = "engine.memory-block-buffer-target", conflicts_with = "legacy", default_value_t = DEFAULT_MEMORY_BLOCK_BUFFER_TARGET)]
+    #[arg(long = "engine.memory-block-buffer-target", default_value_t = DEFAULT_MEMORY_BLOCK_BUFFER_TARGET)]
     pub memory_block_buffer_target: u64,
 }
 
@@ -66,8 +55,6 @@ impl Default for RollupArgs {
             enable_genesis_walkback: false,
             compute_pending_block: false,
             discovery_v4: false,
-            experimental: false,
-            legacy: false,
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
         }

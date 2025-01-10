@@ -21,7 +21,7 @@ pub(crate) fn zip_blocks<'a, H: Clone + BlockHeader + 'a, B>(
             if header.is_empty() {
                 BlockResponse::Empty(header.clone())
             } else {
-                BlockResponse::Full(SealedBlock { header: header.clone(), body })
+                BlockResponse::Full(SealedBlock::new(header.clone(), body))
             }
         })
         .collect()

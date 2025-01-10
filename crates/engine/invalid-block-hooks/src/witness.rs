@@ -1,12 +1,13 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, B256, U256};
+use alloy_primitives::{keccak256, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use eyre::OptionExt;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
-    state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm,
+    env::EvmEnv, state_change::post_block_balance_increments, system_calls::SystemCaller,
+    ConfigureEvm,
 };
 use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
 use reth_primitives_traits::SignedTransaction;
@@ -77,12 +78,17 @@ where
             .build();
 
         // Setup environment for the execution.
-        let (cfg, block_env) = self.evm_config.cfg_and_block_env(block.header(), U256::MAX);
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } =
+            self.evm_config.cfg_and_block_env(block.header());
 
         // Setup EVM
         let mut evm = self.evm_config.evm_with_env(
             &mut db,
-            EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default()),
+            EnvWithHandlerCfg::new_with_cfg_env(
+                cfg_env_with_handler_cfg,
+                block_env,
+                Default::default(),
+            ),
         );
 
         let mut system_caller =
@@ -110,7 +116,6 @@ where
         let balance_increments = post_block_balance_increments(
             self.provider.chain_spec().as_ref(),
             &block.clone().unseal().block,
-            U256::MAX,
         );
 
         // increment balances

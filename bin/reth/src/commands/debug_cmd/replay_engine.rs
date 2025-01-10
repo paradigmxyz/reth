@@ -15,12 +15,14 @@ use reth_config::Config;
 use reth_consensus::FullConsensus;
 use reth_db::DatabaseEnv;
 use reth_engine_util::engine_store::{EngineMessageStore, StoredEngineApiMessage};
+use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_fs_util as fs;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_node_api::{EngineApiMessageVersion, NodePrimitives, NodeTypesWithDBAdapter};
 use reth_node_ethereum::{EthEngineTypes, EthEvmConfig, EthExecutorProvider};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+use reth_primitives::EthPrimitives;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     CanonStateSubscriptions, ChainSpecProvider, ProviderFactory,
@@ -86,7 +88,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug replay-engine` command
-    pub async fn execute<N: CliNodeTypes<Engine = EthEngineTypes, ChainSpec = C::ChainSpec>>(
+    pub async fn execute<
+        N: CliNodeTypes<Engine = EthEngineTypes, Primitives = EthPrimitives, ChainSpec = C::ChainSpec>,
+    >(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
@@ -123,6 +127,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         // Set up payload builder
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             EthEvmConfig::new(provider_factory.chain_spec()),
+            EthereumBuilderConfig::new(Default::default()),
         );
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(

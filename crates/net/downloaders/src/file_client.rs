@@ -340,7 +340,7 @@ impl<B: FullBlock> BodiesClient for FileClient<B> {
 
 impl<B: FullBlock> DownloadClient for FileClient<B> {
     fn report_bad_message(&self, _peer_id: PeerId) {
-        warn!("Reported a bad message on a file client, the file may be corrupted or invalid");
+        trace!("Reported a bad message on a file client, the file may be corrupted or invalid");
         // noop
     }
 
@@ -464,9 +464,9 @@ impl ChunkedFileReader {
     }
 
     /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
-    pub async fn next_receipts_chunk<T, D>(&mut self) -> Result<Option<T>, T::Error>
+    pub async fn next_receipts_chunk<T>(&mut self) -> Result<Option<T>, T::Error>
     where
-        T: FromReceiptReader<D>,
+        T: FromReceiptReader,
     {
         let Some(next_chunk_byte_len) = self.read_next_chunk().await? else { return Ok(None) };
 

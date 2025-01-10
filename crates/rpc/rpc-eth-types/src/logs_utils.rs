@@ -92,7 +92,7 @@ where
                 if transaction_hash.is_none() {
                     transaction_hash = match &provider_or_block {
                         ProviderOrBlock::Block(block) => {
-                            block.body.transactions().get(receipt_idx).map(|t| t.trie_hash())
+                            block.body().transactions().get(receipt_idx).map(|t| t.trie_hash())
                         }
                         ProviderOrBlock::Provider(provider) => {
                             let first_tx_num = match loaded_first_tx_num {

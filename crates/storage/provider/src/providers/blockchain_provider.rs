@@ -4,12 +4,12 @@ use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
     ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProvider,
-    DatabaseProviderFactory, EvmEnvProvider, FullProvider, HashedPostStateProvider, HeaderProvider,
-    ProviderError, ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    DatabaseProviderFactory, FullProvider, HashedPostStateProvider, HeaderProvider, ProviderError,
+    ProviderFactory, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
     StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_consensus::Header;
+use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
@@ -23,19 +23,19 @@ use reth_chain_state::{
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::{models::BlockNumberAddress, transaction::DbTx, Database};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_evm::ConfigureEvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
     Account, Block, BlockWithSenders, EthPrimitives, NodePrimitives, Receipt, SealedBlock,
-    SealedBlockFor, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionMeta,
-    TransactionSigned,
+    SealedBlockFor, SealedBlockWithSenders, SealedHeader, StorageEntry, TransactionSigned,
 };
 use reth_primitives_traits::BlockBody as _;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    DBProvider, NodePrimitivesProvider, StateCommitmentProvider, StorageChangeSetReader,
+    BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, OmmersProvider,
+    StateCommitmentProvider, StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
@@ -314,17 +314,6 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider2<N> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        self.consistent_provider()?.ommers(id)
-    }
-
-    fn block_body_indices(
-        &self,
-        number: BlockNumber,
-    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.consistent_provider()?.block_body_indices(number)
-    }
-
     /// Returns the block with senders with matching number or hash from database.
     ///
     /// **NOTE: If [`TransactionVariant::NoHash`] is provided then the transactions have invalid
@@ -472,9 +461,20 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider2<N> {
     ) -> ProviderResult<Option<Withdrawals>> {
         self.consistent_provider()?.withdrawals_by_block(id, timestamp)
     }
+}
 
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        self.consistent_provider()?.latest_withdrawal()
+impl<N: ProviderNodeTypes> OmmersProvider for BlockchainProvider2<N> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+        self.consistent_provider()?.ommers(id)
+    }
+}
+
+impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider2<N> {
+    fn block_body_indices(
+        &self,
+        number: BlockNumber,
+    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        self.consistent_provider()?.block_body_indices(number)
     }
 }
 
@@ -489,45 +489,6 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider2<N> {
 
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
         self.consistent_provider()?.get_all_checkpoints()
-    }
-}
-
-impl<N: ProviderNodeTypes> EvmEnvProvider<HeaderTy<N>> for BlockchainProvider2<N> {
-    fn fill_env_with_header<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
-        header: &HeaderTy<N>,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        self.consistent_provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
-    }
-
-    fn fill_cfg_env_at<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        at: BlockHashOrNumber,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        self.consistent_provider()?.fill_cfg_env_at(cfg, at, evm_config)
-    }
-
-    fn fill_cfg_env_with_header<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        header: &HeaderTy<N>,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = HeaderTy<N>>,
-    {
-        self.consistent_provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }
 }
 
@@ -740,9 +701,7 @@ where
     }
 }
 
-impl<N: NodeTypesWithDB<Primitives = EthPrimitives>> CanonStateSubscriptions
-    for BlockchainProvider2<N>
-{
+impl<N: ProviderNodeTypes> CanonStateSubscriptions for BlockchainProvider2<N> {
     fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives> {
         self.canonical_in_memory_state.subscribe_canon_state()
     }
@@ -782,7 +741,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider2<N> {
 
 impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider2<N> {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         self.consistent_provider()?.basic_account(address)
     }
 }
@@ -837,13 +796,13 @@ mod tests {
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
-    use reth_primitives::{BlockExt, Receipt, SealedBlock, StaticFileSegment};
+    use reth_primitives::{BlockExt, EthPrimitives, Receipt, SealedBlock, StaticFileSegment};
     use reth_primitives_traits::{BlockBody as _, SignedTransaction};
     use reth_storage_api::{
-        BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource,
-        ChangeSetReader, DatabaseProviderFactory, HeaderProvider, ReceiptProvider,
-        ReceiptProviderIdExt, StateProviderFactory, TransactionVariant, TransactionsProvider,
-        WithdrawalsProvider,
+        BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
+        BlockReaderIdExt, BlockSource, ChangeSetReader, DatabaseProviderFactory, HeaderProvider,
+        OmmersProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory,
+        TransactionVariant, TransactionsProvider, WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -918,7 +877,7 @@ mod tests {
         let receipts: Vec<Vec<_>> = database_blocks
             .iter()
             .chain(in_memory_blocks.iter())
-            .map(|block| block.body.transactions.iter())
+            .map(|block| block.body().transactions.iter())
             .map(|tx| tx.map(|tx| random_receipt(rng, tx, Some(2))).collect())
             .collect();
 
@@ -943,7 +902,7 @@ mod tests {
             transactions_writer.increment_block(block.number)?;
             receipts_writer.increment_block(block.number)?;
 
-            for (tx, receipt) in block.body.transactions().iter().zip(receipts) {
+            for (tx, receipt) in block.body().transactions().zip(receipts) {
                 transactions_writer.append_transaction(tx_num, tx)?;
                 receipts_writer.append_receipt(tx_num, receipt)?;
                 tx_num += 1;
@@ -1289,11 +1248,11 @@ mod tests {
         // First in memory block ommers should be found
         assert_eq!(
             provider.ommers(first_in_mem_block.number.into())?,
-            Some(first_in_mem_block.body.ommers.clone())
+            Some(first_in_mem_block.body().ommers.clone())
         );
         assert_eq!(
             provider.ommers(first_in_mem_block.hash().into())?,
-            Some(first_in_mem_block.body.ommers.clone())
+            Some(first_in_mem_block.body().ommers.clone())
         );
 
         // A random hash should return None as the block number is not found
@@ -1429,7 +1388,7 @@ mod tests {
         let factory = create_test_provider_factory();
 
         // Generate a random block to initialise the blockchain provider.
-        let mut test_block_builder = TestBlockBuilder::default();
+        let mut test_block_builder = TestBlockBuilder::eth();
         let block_1 = test_block_builder.generate_random_block(0, B256::ZERO);
         let block_hash_1 = block_1.hash();
 
@@ -1496,7 +1455,7 @@ mod tests {
             "Expected withdrawals_by_block to return empty list if block does not exist"
         );
 
-        for block in blocks.clone() {
+        for block in blocks {
             assert_eq!(
                 provider
                     .withdrawals_by_block(
@@ -1504,19 +1463,10 @@ mod tests {
                         shainghai_timestamp
                     )?
                     .unwrap(),
-                block.body.withdrawals.unwrap(),
+                block.body().withdrawals.clone().unwrap(),
                 "Expected withdrawals_by_block to return correct withdrawals"
             );
         }
-
-        let canonical_block_num = provider.best_block_number().unwrap();
-        let canonical_block = blocks.get(canonical_block_num as usize).unwrap();
-
-        assert_eq!(
-            Some(provider.latest_withdrawal()?.unwrap()),
-            canonical_block.body.withdrawals.clone().unwrap().pop(),
-            "Expected latest withdrawal to be equal to last withdrawal entry in canonical block"
-        );
 
         Ok(())
     }
@@ -1556,7 +1506,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
@@ -1565,7 +1515,7 @@ mod tests {
         assert_eq!(provider.block_by_id(block_hash.into()).unwrap(), Some(database_block.unseal()));
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
         assert_eq!(
             provider.block_by_id(block_number.into()).unwrap(),
             Some(in_memory_block.clone().unseal())
@@ -1649,7 +1599,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert_eq!(
             provider.header_by_id(block_number.into()).unwrap(),
@@ -1670,7 +1620,7 @@ mod tests {
         );
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
 
         assert_eq!(
             provider.header_by_id(block_number.into()).unwrap(),
@@ -1707,27 +1657,27 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            database_block.body.ommers
+            database_block.body().ommers
         );
         assert_eq!(
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            database_block.body.ommers
+            database_block.body().ommers
         );
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
 
         assert_eq!(
             provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            in_memory_block.body.ommers
+            in_memory_block.body().ommers
         );
         assert_eq!(
             provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            in_memory_block.body.ommers
+            in_memory_block.body().ommers
         );
 
         Ok(())
@@ -1747,7 +1697,7 @@ mod tests {
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
 
         let block_number = database_block.number;
-        let block_hash = database_block.header.hash();
+        let block_hash = database_block.hash();
 
         assert!(!receipts.get(database_block.number as usize).unwrap().is_empty());
         assert!(!provider
@@ -1765,7 +1715,7 @@ mod tests {
         );
 
         let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.header.hash();
+        let block_hash = in_memory_block.hash();
 
         assert_eq!(
             provider.receipts_by_block_id(block_number.into())?.unwrap(),
@@ -2204,9 +2154,9 @@ mod tests {
             $(
                 // Since data moves for each tried method, need to recalculate everything
                 let db_tx_count =
-                    database_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
+                    database_blocks.iter().map(|b| b.transaction_count()).sum::<usize>() as u64;
                 let in_mem_tx_count =
-                    in_memory_blocks.iter().map(|b| b.body.transactions.len()).sum::<usize>() as u64;
+                    in_memory_blocks.iter().map(|b| b.transaction_count()).sum::<usize>() as u64;
 
                 let db_range = 0..=(db_tx_count - 1);
                 let in_mem_range = db_tx_count..=(in_mem_tx_count + db_range.end());
@@ -2285,7 +2235,7 @@ mod tests {
                 .senders()
                 .unwrap()),
             (transactions_by_tx_range, |block: &SealedBlock, _: &Vec<Vec<Receipt>>| block
-                .body
+                .body()
                 .transactions
                 .clone()),
             (receipts_by_tx_range, |block: &SealedBlock, receipts: &Vec<Vec<Receipt>>| receipts
@@ -2384,7 +2334,7 @@ mod tests {
             (sealed_block_with_senders_range, |block: &SealedBlock| block
                 .clone()
                 .with_senders_unchecked(vec![])),
-            (transactions_by_block_range, |block: &SealedBlock| block.body.transactions.clone()),
+            (transactions_by_block_range, |block: &SealedBlock| block.body().transactions.clone()),
         ]);
 
         Ok(())
@@ -2441,13 +2391,13 @@ mod tests {
         let mut in_memory_blocks: std::collections::VecDeque<_> = in_memory_blocks.into();
 
         $(
-            let tx_hash = |block: &SealedBlock| block.body.transactions[0].hash();
+            let tx_hash = |block: &SealedBlock| block.body().transactions[0].hash();
             let tx_num = |block: &SealedBlock| {
                 database_blocks
                     .iter()
                     .chain(in_memory_blocks.iter())
                     .take_while(|b| b.number < block.number)
-                    .map(|b| b.body.transactions.len())
+                    .map(|b| b.transaction_count())
                     .sum::<usize>() as u64
             };
 
@@ -2468,7 +2418,7 @@ mod tests {
                     .iter()
                     .chain(in_memory_blocks.iter())
                     .take_while(|b| b.number < block.number)
-                    .map(|b| b.body.transactions.len())
+                    .map(|b| b.transaction_count())
                     .sum::<usize>() as u64
             };
 
@@ -2564,7 +2514,7 @@ mod tests {
                     block.number,
                     Some(StoredBlockBodyIndices {
                         first_tx_num: tx_num,
-                        tx_count: block.body.transactions.len() as u64
+                        tx_count: block.transaction_count() as u64
                     })
                 ),
                 u64::MAX
@@ -2598,7 +2548,7 @@ mod tests {
                             .unseal::<reth_primitives::Block>()
                             .with_recovered_senders()
                             .unwrap()
-                            .seal(block.hash())
+                            .seal_unchecked(block.hash())
                     )
                 ),
                 (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
@@ -2614,7 +2564,7 @@ mod tests {
                             .unseal::<reth_primitives::Block>()
                             .with_recovered_senders()
                             .unwrap()
-                            .seal(block.hash())
+                            .seal_unchecked(block.hash())
                     )
                 ),
                 (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
@@ -2633,7 +2583,7 @@ mod tests {
                 transaction_by_id,
                 |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
-                    Some(block.body.transactions[test_tx_index].clone())
+                    Some(block.body().transactions[test_tx_index].clone())
                 ),
                 u64::MAX
             ),
@@ -2642,7 +2592,7 @@ mod tests {
                 transaction_by_id_unhashed,
                 |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
-                    Some(block.body.transactions[test_tx_index].clone())
+                    Some(block.body().transactions[test_tx_index].clone())
                 ),
                 u64::MAX
             ),
@@ -2651,7 +2601,7 @@ mod tests {
                 transaction_by_hash,
                 |block: &SealedBlock, _: TxNumber, tx_hash: B256, _: &Vec<Vec<Receipt>>| (
                     tx_hash,
-                    Some(block.body.transactions[test_tx_index].clone())
+                    Some(block.body().transactions[test_tx_index].clone())
                 ),
                 B256::random()
             ),
@@ -2669,7 +2619,7 @@ mod tests {
                 transactions_by_block,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     BlockHashOrNumber::Number(block.number),
-                    Some(block.body.transactions.clone())
+                    Some(block.body().transactions.clone())
                 ),
                 BlockHashOrNumber::Number(u64::MAX)
             ),
@@ -2678,7 +2628,7 @@ mod tests {
                 transactions_by_block,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     BlockHashOrNumber::Hash(block.hash()),
-                    Some(block.body.transactions.clone())
+                    Some(block.body().transactions.clone())
                 ),
                 BlockHashOrNumber::Number(u64::MAX)
             ),
@@ -2687,7 +2637,7 @@ mod tests {
                 transaction_sender,
                 |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
-                    block.body.transactions[test_tx_index].recover_signer()
+                    block.body().transactions[test_tx_index].recover_signer()
                 ),
                 u64::MAX
             ),
@@ -2762,7 +2712,7 @@ mod tests {
              canonical_in_memory_state: CanonicalInMemoryState,
              _factory: ProviderFactory<MockNodeTypesWithDB>| {
                 if let Some(tx) = canonical_in_memory_state.transaction_by_hash(hash) {
-                    return Ok::<_, ProviderError>(Some(tx))
+                    return Ok::<_, ProviderError>(Some(tx));
                 }
                 panic!("should not be in database");
                 // _factory.transaction_by_hash(hash)
@@ -2773,18 +2723,18 @@ mod tests {
             // This will persist block 1 AFTER a database is created. Moving it from memory to
             // storage.
             persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
-            let to_be_persisted_tx = in_memory_blocks[0].body.transactions[0].clone();
+            let to_be_persisted_tx = in_memory_blocks[0].body().transactions[0].clone();
 
             // Even though the block exists, given the order of provider queries done in the method
             // above, we do not see it.
-            assert_eq!(
+            assert!(matches!(
                 old_transaction_hash_fn(
                     to_be_persisted_tx.hash(),
                     provider.canonical_in_memory_state(),
                     provider.database.clone()
                 ),
                 Ok(None)
-            );
+            ));
         }
 
         // CORRECT BEHAVIOUR
@@ -2792,16 +2742,16 @@ mod tests {
             // This will persist block 1 AFTER a database is created. Moving it from memory to
             // storage.
             persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[1].number);
-            let to_be_persisted_tx = in_memory_blocks[1].body.transactions[0].clone();
+            let to_be_persisted_tx = in_memory_blocks[1].body().transactions[0].clone();
 
-            assert_eq!(
+            assert!(matches!(
                 correct_transaction_hash_fn(
                     to_be_persisted_tx.hash(),
                     provider.canonical_in_memory_state(),
                     provider.database
                 ),
                 Ok(Some(to_be_persisted_tx))
-            );
+            ));
         }
 
         Ok(())

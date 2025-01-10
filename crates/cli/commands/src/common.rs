@@ -15,7 +15,6 @@ use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
     dirs::{ChainPath, DataDirPath},
 };
-use reth_primitives::EthPrimitives;
 use reth_provider::{
     providers::{NodeTypesForProvider, StaticFileProvider},
     ProviderFactory, StaticFileProviderFactory,
@@ -107,7 +106,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
     /// Returns a [`ProviderFactory`] after executing consistency checks.
     ///
     /// If it's a read-write environment and an issue is found, it will attempt to heal (including a
-    /// pipeline unwind). Otherwise, it will print out an warning, advising the user to restart the
+    /// pipeline unwind). Otherwise, it will print out a warning, advising the user to restart the
     /// node to heal.
     fn create_provider_factory<N: CliNodeTypes>(
         &self,
@@ -198,11 +197,5 @@ impl AccessRights {
 
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`](reth_node_builder::NodeTypes) in CLI.
-pub trait CliNodeTypes:
-    NodeTypesWithEngine + NodeTypesForProvider<Primitives = EthPrimitives>
-{
-}
-impl<N> CliNodeTypes for N where
-    N: NodeTypesWithEngine + NodeTypesForProvider<Primitives = EthPrimitives>
-{
-}
+pub trait CliNodeTypes: NodeTypesWithEngine + NodeTypesForProvider {}
+impl<N> CliNodeTypes for N where N: NodeTypesWithEngine + NodeTypesForProvider {}

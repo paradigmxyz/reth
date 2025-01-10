@@ -458,7 +458,7 @@ TxPool:
 
           [default: 7]
 
-      --txpool.gas-limit <GAS_LIMIT>
+      --txpool.gas-limit <ENFORCED_GAS_LIMIT>
           The default enforced gas limit for transactions entering the pool
 
           [default: 30000000]
@@ -508,13 +508,13 @@ TxPool:
           [default: 200]
 
 Builder:
-      --builder.extradata <EXTRADATA>
+      --builder.extradata <EXTRA_DATA>
           Block extra data set by the payload builder
 
           [default: reth/<VERSION>/<OS>]
 
       --builder.gaslimit <GAS_LIMIT>
-          Target gas ceiling for built blocks
+          Target gas limit for built blocks
 
           [default: 30000000]
 

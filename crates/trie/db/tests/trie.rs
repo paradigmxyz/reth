@@ -21,7 +21,7 @@ use reth_trie::{
     triehash::KeccakHasher,
     updates::StorageTrieUpdates,
     BranchNodeCompact, HashBuilder, IntermediateStateRootState, Nibbles, StateRoot,
-    StateRootProgress, StorageRoot, TrieAccount, TrieMask,
+    StateRootProgress, StorageRoot, TrieMask,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
 use std::{collections::BTreeMap, ops::Mul, str::FromStr, sync::Arc};
@@ -284,7 +284,7 @@ fn test_state_root_with_state(state: State) {
 }
 
 fn encode_account(account: Account, storage_root: Option<B256>) -> Vec<u8> {
-    let account = TrieAccount::from((account, storage_root.unwrap_or(EMPTY_ROOT_HASH)));
+    let account = account.into_trie_account(storage_root.unwrap_or(EMPTY_ROOT_HASH));
     let mut account_rlp = Vec::with_capacity(account.length());
     account.encode(&mut account_rlp);
     account_rlp

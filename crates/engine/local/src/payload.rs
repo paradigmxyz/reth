@@ -39,13 +39,11 @@ where
                 .chain_spec
                 .is_cancun_active_at_timestamp(timestamp)
                 .then(B256::random),
-            target_blobs_per_block: None,
-            max_blobs_per_block: None,
         }
     }
 }
 
-#[cfg(feature = "optimism")]
+#[cfg(feature = "op")]
 impl<ChainSpec> PayloadAttributesBuilder<op_alloy_rpc_types_engine::OpPayloadAttributes>
     for LocalPayloadAttributesBuilder<ChainSpec>
 where

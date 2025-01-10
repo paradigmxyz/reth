@@ -196,7 +196,7 @@ impl OpHardfork {
                 Self::Ecotone => Some(1710374401),
                 Self::Fjord => Some(1720627201),
                 Self::Granite => Some(1726070401),
-                Self::Holocene => None,
+                Self::Holocene => Some(1736445601),
                 Self::Isthmus => todo!(),
             },
         )
@@ -220,7 +220,11 @@ impl OpHardfork {
             (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(105235063)),
             (
                 EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD { fork_block: Some(105235063), total_difficulty: U256::ZERO },
+                ForkCondition::TTD {
+                    activation_block_number: 105235063,
+                    fork_block: Some(105235063),
+                    total_difficulty: U256::ZERO,
+                },
             ),
             (Self::Bedrock.boxed(), ForkCondition::Block(105235063)),
             (Self::Regolith.boxed(), ForkCondition::Timestamp(0)),
@@ -230,6 +234,7 @@ impl OpHardfork {
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
             (Self::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
+            (Self::Holocene.boxed(), ForkCondition::Timestamp(1736445601)),
         ])
     }
 
@@ -251,7 +256,11 @@ impl OpHardfork {
             (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
             (
                 EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+                ForkCondition::TTD {
+                    activation_block_number: 0,
+                    fork_block: Some(0),
+                    total_difficulty: U256::ZERO,
+                },
             ),
             (Self::Bedrock.boxed(), ForkCondition::Block(0)),
             (Self::Regolith.boxed(), ForkCondition::Timestamp(0)),
@@ -283,7 +292,11 @@ impl OpHardfork {
             (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
             (
                 EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+                ForkCondition::TTD {
+                    activation_block_number: 0,
+                    fork_block: Some(0),
+                    total_difficulty: U256::ZERO,
+                },
             ),
             (Self::Bedrock.boxed(), ForkCondition::Block(0)),
             (Self::Regolith.boxed(), ForkCondition::Timestamp(0)),
@@ -315,7 +328,11 @@ impl OpHardfork {
             (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
             (
                 EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+                ForkCondition::TTD {
+                    activation_block_number: 0,
+                    fork_block: Some(0),
+                    total_difficulty: U256::ZERO,
+                },
             ),
             (Self::Bedrock.boxed(), ForkCondition::Block(0)),
             (Self::Regolith.boxed(), ForkCondition::Timestamp(0)),
@@ -325,6 +342,7 @@ impl OpHardfork {
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
             (Self::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
+            (Self::Holocene.boxed(), ForkCondition::Timestamp(1736445601)),
         ])
     }
 }

@@ -67,7 +67,7 @@ impl<T, S, D> EngineHandler<T, S, D> {
 
 impl<T, S, D> ChainHandler for EngineHandler<T, S, D>
 where
-    T: EngineRequestHandler<Block = reth_primitives::Block>,
+    T: EngineRequestHandler<Block = D::Block>,
     S: Stream + Send + Sync + Unpin + 'static,
     <S as Stream>::Item: Into<T::Request>,
     D: BlockDownloader,

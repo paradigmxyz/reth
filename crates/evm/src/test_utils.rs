@@ -2,8 +2,8 @@
 
 use crate::{
     execute::{
-        BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionInput,
-        BlockExecutionOutput, BlockExecutionStrategy, BlockExecutorProvider, Executor,
+        BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionOutput,
+        BlockExecutionStrategy, BlockExecutorProvider, Executor,
     },
     system_calls::OnStateHook,
 };
@@ -55,7 +55,7 @@ impl BlockExecutorProvider for MockExecutorProvider {
 }
 
 impl<DB> Executor<DB> for MockExecutorProvider {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Input<'a> = &'a BlockWithSenders;
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
@@ -97,7 +97,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
 }
 
 impl<DB> BatchExecutor<DB> for MockExecutorProvider {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Input<'a> = &'a BlockWithSenders;
     type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 
