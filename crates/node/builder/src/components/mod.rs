@@ -27,7 +27,9 @@ use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::{NetworkHandle, NetworkPrimitives};
 use reth_network_api::FullNetwork;
-use reth_node_api::{BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, PayloadBuilder, TxTy};
+use reth_node_api::{
+    BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, PayloadBuilder, TxTy,
+};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -53,9 +55,7 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
         + 'static;
 
     /// Network API.
-    type Network: FullNetwork<
-        Client: BlockClient<Header = HeaderTy<T::Types>, Body = BodyTy<T::Types>>,
-    >;
+    type Network: FullNetwork<Client: BlockClient<Block = BlockTy<T::Types>>>;
 
     /// Builds new blocks.
     type PayloadBuilder: PayloadBuilder<PayloadType = <T::Types as NodeTypesWithEngine>::Engine>
@@ -102,7 +102,11 @@ pub struct Components<Node: FullNodeTypes, N: NetworkPrimitives, Pool, EVM, Exec
 impl<Node, Pool, EVM, Executor, Cons, N> NodeComponents<Node>
     for Components<Node, N, Pool, EVM, Executor, Cons>
 where
-    N: NetworkPrimitives<BlockHeader = HeaderTy<Node::Types>, BlockBody = BodyTy<Node::Types>>,
+    N: NetworkPrimitives<
+        BlockHeader = HeaderTy<Node::Types>,
+        BlockBody = BodyTy<Node::Types>,
+        Block = BlockTy<Node::Types>,
+    >,
     Node: FullNodeTypes,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
