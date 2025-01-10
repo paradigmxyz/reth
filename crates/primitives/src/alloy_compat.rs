@@ -5,29 +5,8 @@ use alloc::string::ToString;
 use alloy_consensus::TxEnvelope;
 use alloy_network::{AnyRpcTransaction, AnyTxEnvelope};
 use alloy_serde::WithOtherFields;
-//
-// impl<B, T> TryFrom<AnyRpcBlock> for SealedBlock<B>
-// where
-//     B: Block<Header= Header, Body = BlockBody<T>>,
-//     T: TryFrom<AnyRpcTransaction, Error = alloy_rpc_types::ConversionError>,
-// {
-//     type Error = alloy_rpc_types::ConversionError;
-//
-//     fn try_from(block: AnyRpcBlock) -> Result<Self, Self::Error> {
-//         let block = block.inner;
-//         let block_hash = block.header.hash;
-//         let block = block.try_map_transactions(|tx| tx.try_into())?;
-//
-//         Ok(Self::new(
-//             SealedHeader::new(block.header.inner.into_header_with_defaults(), block_hash),
-//             BlockBody {
-//                 transactions: block.transactions.into_transactions().collect(),
-//                 ommers: Default::default(),
-//                 withdrawals: block.withdrawals.map(|w| w.into_inner().into()),
-//             },
-//         ))
-//     }
-// }
+
+use op_alloy_consensus as _;
 
 impl TryFrom<AnyRpcTransaction> for TransactionSigned {
     type Error = alloy_rpc_types::ConversionError;
