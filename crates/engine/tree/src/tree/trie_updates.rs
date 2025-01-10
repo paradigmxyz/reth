@@ -198,7 +198,7 @@ fn branch_nodes_equal(
 ) -> bool {
     if let (Some(task), Some(regular)) = (task.as_ref(), regular.as_ref()) {
         task.state_mask == regular.state_mask &&
-        // We do not compare the tree mask because it is known to be mismatching
+            task.tree_mask == regular.tree_mask &&
             task.hash_mask == regular.hash_mask &&
             task.hashes == regular.hashes &&
             task.root_hash == regular.root_hash
