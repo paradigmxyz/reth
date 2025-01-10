@@ -75,6 +75,7 @@ impl<P: NodePrimitives> From<CanonStateNotification<P>> for ExExNotification<P> 
 pub(super) mod serde_bincode_compat {
     use reth_execution_types::serde_bincode_compat::Chain;
     use reth_primitives::{EthPrimitives, NodePrimitives};
+    use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
     use std::sync::Arc;
@@ -99,7 +100,7 @@ pub(super) mod serde_bincode_compat {
     #[serde(bound = "")]
     pub enum ExExNotification<'a, N = EthPrimitives>
     where
-        N: NodePrimitives,
+        N: NodePrimitives<Block: SerdeBincodeCompat>,
     {
         ChainCommitted { new: Chain<'a, N> },
         ChainReorged { old: Chain<'a, N>, new: Chain<'a, N> },
@@ -108,7 +109,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<'a, N> From<&'a super::ExExNotification<N>> for ExExNotification<'a, N>
     where
-        N: NodePrimitives,
+        N: NodePrimitives<Block: SerdeBincodeCompat>,
     {
         fn from(value: &'a super::ExExNotification<N>) -> Self {
             match value {
@@ -130,7 +131,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<'a, N> From<ExExNotification<'a, N>> for super::ExExNotification<N>
     where
-        N: NodePrimitives,
+        N: NodePrimitives<Block: SerdeBincodeCompat>,
     {
         fn from(value: ExExNotification<'a, N>) -> Self {
             match value {
