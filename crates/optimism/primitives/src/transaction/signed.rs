@@ -32,7 +32,7 @@ use reth_primitives_traits::{
 };
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
-use revm_optimism::transaction::estimate_tx_compressed_size;
+use revm_optimism::estimate_tx_compressed_size;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
