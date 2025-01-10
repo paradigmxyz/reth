@@ -53,7 +53,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         info!("Snapshot downloaded successfully to {:?}", snapshot_path);
         info!("Decompressing snapshot...");
-        
+
         decompress_snapshot(&snapshot_path, data_dir.data_dir())?;
         info!("Snapshot decompressed successfully");
 
