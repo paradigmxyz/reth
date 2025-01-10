@@ -236,7 +236,7 @@ where
         validate_version_specific_fields(self.chain_spec(), version, attributes.into())?;
 
         // custom validation logic - ensure that the custom field is not zero
-        if attributes.custom == 0 {
+        if attributes.inner.custom == 0 {
             return Err(EngineObjectValidationError::invalid_params(
                 CustomError::CustomFieldIsNotZero,
             ))
