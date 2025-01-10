@@ -2381,8 +2381,8 @@ where
                                     let provider = self.provider.database_provider_ro()?;
                                     compare_trie_updates(
                                         provider.tx_ref(),
-                                        &task_trie_updates,
-                                        &regular_updates,
+                                        task_trie_updates.clone(),
+                                        regular_updates,
                                     )
                                     .map_err(ProviderError::from)?;
                                 } else {

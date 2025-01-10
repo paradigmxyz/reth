@@ -93,10 +93,13 @@ impl StorageTrieUpdatesDiff {
 /// the differences if there's any.
 pub(super) fn compare_trie_updates(
     tx: &impl DbTx,
-    task: &TrieUpdates,
-    regular: &TrieUpdates,
+    task: TrieUpdates,
+    regular: TrieUpdates,
 ) -> Result<(), DatabaseError> {
     let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
+
+    let task = adjust_trie_updates(task);
+    let regular = adjust_trie_updates(regular);
 
     let mut diff = TrieUpdatesDiff::default();
 
@@ -202,6 +205,36 @@ fn compare_storage_trie_updates(
     }
 
     Ok(diff)
+}
+
+/// Filters the removed nodes of both account trie updates and storage trie updates, so that they
+/// don't include those nodes that were also updated.
+fn adjust_trie_updates(trie_updates: TrieUpdates) -> TrieUpdates {
+    TrieUpdates {
+        removed_nodes: trie_updates
+            .removed_nodes
+            .into_iter()
+            .filter(|key| !trie_updates.account_nodes.contains_key(key))
+            .collect(),
+        storage_tries: trie_updates
+            .storage_tries
+            .into_iter()
+            .map(|(address, updates)| {
+                (
+                    address,
+                    StorageTrieUpdates {
+                        removed_nodes: updates
+                            .removed_nodes
+                            .into_iter()
+                            .filter(|key| !updates.storage_nodes.contains_key(key))
+                            .collect(),
+                        ..updates
+                    },
+                )
+            })
+            .collect(),
+        ..trie_updates
+    }
 }
 
 /// Compares the branch nodes from state root task and regular state root calculation.
