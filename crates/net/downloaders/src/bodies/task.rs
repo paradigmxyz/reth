@@ -45,19 +45,21 @@ impl<B: Block + 'static> TaskDownloader<B> {
     /// use reth_consensus::{Consensus, ConsensusError};
     /// use reth_downloaders::bodies::{bodies::BodiesDownloaderBuilder, task::TaskDownloader};
     /// use reth_network_p2p::bodies::client::BodiesClient;
-    /// use reth_primitives_traits::InMemorySize;
+    /// use reth_primitives_traits::{Block, InMemorySize};
     /// use reth_storage_api::HeaderProvider;
     /// use std::{fmt::Debug, sync::Arc};
     ///
     /// fn t<
-    ///     B: BodiesClient<Block: Debug + InMemorySize> + 'static,
-    ///     Provider: HeaderProvider<Header = alloy_consensus::Header> + Unpin + 'static,
+    ///     B: Block,
+    ///     C: BodiesClient<Body = B::Body> + 'static,
+    ///     Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
     /// >(
-    ///     client: Arc<B>,
-    ///     consensus: Arc<dyn Consensus<Provider::Header, B::Block, Error = ConsensusError>>,
+    ///     client: Arc<C>,
+    ///     consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
     ///     provider: Provider,
     /// ) {
-    ///     let downloader = BodiesDownloaderBuilder::default().build(client, consensus, provider);
+    ///     let downloader =
+    ///         BodiesDownloaderBuilder::default().build::<B, _, _>(client, consensus, provider);
     ///     let downloader = TaskDownloader::spawn(downloader);
     /// }
     /// ```
@@ -193,7 +195,7 @@ mod tests {
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),
         );
-        let downloader = BodiesDownloaderBuilder::default().build(
+        let downloader = BodiesDownloaderBuilder::default().build::<reth_primitives::Block, _, _>(
             client.clone(),
             Arc::new(TestConsensus::default()),
             factory,
@@ -215,7 +217,7 @@ mod tests {
         reth_tracing::init_test_tracing();
         let factory = create_test_provider_factory();
 
-        let downloader = BodiesDownloaderBuilder::default().build(
+        let downloader = BodiesDownloaderBuilder::default().build::<reth_primitives::Block, _, _>(
             Arc::new(TestBodiesClient::default()),
             Arc::new(TestConsensus::default()),
             factory,

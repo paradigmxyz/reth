@@ -546,11 +546,12 @@ mod tests {
 
         let client: Arc<FileClient> =
             Arc::new(FileClient::from_file(file.into()).await.unwrap().with_bodies(bodies.clone()));
-        let mut downloader = BodiesDownloaderBuilder::default().build(
-            client.clone(),
-            Arc::new(TestConsensus::default()),
-            factory,
-        );
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .build::<reth_primitives::Block, _, _>(
+                client.clone(),
+                Arc::new(TestConsensus::default()),
+                factory,
+            );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(
@@ -628,11 +629,12 @@ mod tests {
         // insert headers in db for the bodies downloader
         insert_headers(factory.db_ref().db(), &headers);
 
-        let mut downloader = BodiesDownloaderBuilder::default().build(
-            client.clone(),
-            Arc::new(TestConsensus::default()),
-            factory,
-        );
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .build::<reth_primitives::Block, _, _>(
+                client.clone(),
+                Arc::new(TestConsensus::default()),
+                factory,
+            );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(
