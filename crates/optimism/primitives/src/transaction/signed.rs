@@ -44,6 +44,8 @@ pub struct OpTransactionSigned {
     pub hash: OnceLock<TxHash>,
     /// The transaction signature values
     pub signature: Signature,
+    /// Memoized estimated compressed size of the transaction.
+    compressed_size: Option<u64>,
     /// Raw transaction info
     #[deref]
     #[as_ref]
@@ -65,7 +67,7 @@ impl OpTransactionSigned {
     ///
     /// Note: this only calculates the hash on the first [`OpTransactionSigned::hash`] call.
     pub fn new_unhashed(transaction: OpTypedTransaction, signature: Signature) -> Self {
-        Self { hash: Default::default(), signature, transaction }
+        Self { hash: Default::default(), signature, transaction, compressed_size: None }
     }
 
     /// Returns whether this transaction is a deposit.
@@ -74,13 +76,24 @@ impl OpTransactionSigned {
     }
 
     /// Returns the estimated compressed size of a transaction.
-    pub fn da_usage(&self) -> u64 {
-        let mut tx_ser: Vec<u8> = Vec::new();
-        // TODO: check handling of deposit/blob txs - I think they're treated as 0 usage
-        self.transaction.legacy().unwrap().eip2718_encode(&self.signature, &mut tx_ser);
+    pub fn compressed_size(&mut self) -> u64 {
+        if let Some(usage) = self.compressed_size {
+            return usage
+        }
+        let compressed_size = match &self.transaction {
+            OpTypedTransaction::Legacy(tx) => {
+                let mut tx_ser: Vec<u8> = Vec::new();
 
-        estimate_tx_compressed_size(&tx_ser)
-            .wrapping_div(1_000_000u64)
+                tx.eip2718_encode(&self.signature, &mut tx_ser);
+        
+                estimate_tx_compressed_size(&tx_ser)
+                    .wrapping_div(1_000_000u64)
+            },
+            _ => 0,
+        };
+
+        self.compressed_size = Some(compressed_size);
+        compressed_size
     }
 }
 
@@ -518,7 +531,7 @@ impl reth_codecs::Compact for OpTransactionSigned {
             OpTypedTransaction::from_compact(buf, transaction_type)
         };
 
-        (Self { signature, transaction, hash: Default::default() }, buf)
+        (Self { signature, transaction, hash: Default::default(), compressed_size: None }, buf)
     }
 }
 
@@ -592,7 +605,7 @@ impl TryFrom<OpTransactionSigned> for OpPooledTransaction {
 
     fn try_from(value: OpTransactionSigned) -> Result<Self, Self::Error> {
         let hash = *value.tx_hash();
-        let OpTransactionSigned { hash: _, signature, transaction } = value;
+        let OpTransactionSigned { hash: _, signature, transaction, .. } = value;
 
         match transaction {
             OpTypedTransaction::Legacy(tx) => {
@@ -680,6 +693,7 @@ pub mod serde_bincode_compat {
     impl<'a> From<OpTransactionSigned<'a>> for super::OpTransactionSigned {
         fn from(value: OpTransactionSigned<'a>) -> Self {
             Self {
+                compressed_size: None,
                 hash: value.hash.into(),
                 signature: value.signature,
                 transaction: value.transaction.into(),

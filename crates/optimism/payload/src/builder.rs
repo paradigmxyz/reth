@@ -879,11 +879,14 @@ where
         let mut evm = self.evm_config.evm_with_env(&mut *db, env);
 
         while let Some(tx) = best_txs.next(()) {
+            let mut cloned_tx = tx.clone_tx();
+
             let tx_exceeds_da_size = tx_da_limit
-                .is_some_and(|da_limit| tx.da_usage() > da_limit);
+                .is_some_and(|da_limit| cloned_tx.compressed_size() > da_limit);
             let tx_exceeds_block_size = info.cumulative_gas_used + tx.gas_limit() > block_gas_limit;
             let tx_exceeds_block_da_size = block_da_limit
-                .is_some_and(|da_limit| info.cumulative_da_bytes_used + tx.da_usage() > da_limit);
+                .is_some_and(|da_limit| info.cumulative_da_bytes_used + cloned_tx.compressed_size() > da_limit);
+
 
             if tx_exceeds_block_size || tx_exceeds_block_da_size || tx_exceeds_da_size {
                 // we can't fit this transaction into the block, so we need to mark it as
@@ -940,7 +943,7 @@ where
             // add gas used by the transaction to cumulative gas used, before creating the
             // receipt
             info.cumulative_gas_used += gas_used;
-            info.cumulative_da_bytes_used += tx.da_usage();
+            info.cumulative_da_bytes_used += tx.compressed_size();
 
             let receipt = alloy_consensus::Receipt {
                 status: Eip658Value::Eip658(result.is_success()),
