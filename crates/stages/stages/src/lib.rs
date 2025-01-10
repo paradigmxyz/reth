@@ -34,7 +34,7 @@
 //! # use reth_consensus::test_utils::TestConsensus;
 //! #
 //! # let chain_spec = MAINNET.clone();
-//! # let consensus: Arc<dyn Consensus<Error = ConsensusError>> = Arc::new(TestConsensus::default());
+//! # let consensus: Arc<dyn Consensus<reth_primitives::Block, Error = ConsensusError>> = Arc::new(TestConsensus::default());
 //! # let headers_downloader = ReverseHeadersDownloaderBuilder::default().build(
 //! #    Arc::new(TestHeadersClient::default()),
 //! #    consensus.clone().as_header_validator()

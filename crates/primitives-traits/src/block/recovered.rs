@@ -39,7 +39,7 @@ impl<B> RecoveredBlock<B> {
     }
 
     /// Returns the recovered senders.
-    pub fn sender(&self) -> &[Address] {
+    pub fn senders(&self) -> &[Address] {
         &self.senders
     }
 

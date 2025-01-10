@@ -78,14 +78,11 @@ where
 
 impl<Client, B> BasicBlockDownloader<Client, B>
 where
-    Client: BlockClient<Header = B::Header, Body = B::Body> + 'static,
+    Client: BlockClient<Block = B> + 'static,
     B: Block,
 {
     /// Create a new instance
-    pub fn new(
-        client: Client,
-        consensus: Arc<dyn Consensus<Client::Header, Client::Body, Error = ConsensusError>>,
-    ) -> Self {
+    pub fn new(client: Client, consensus: Arc<dyn Consensus<B, Error = ConsensusError>>) -> Self {
         Self {
             full_block_client: FullBlockClient::new(client, consensus),
             inflight_full_block_requests: Vec::new(),
@@ -192,7 +189,7 @@ where
 
 impl<Client, B> BlockDownloader for BasicBlockDownloader<Client, B>
 where
-    Client: BlockClient<Header = B::Header, Body = B::Body>,
+    Client: BlockClient<Block = B>,
     B: Block,
 {
     type Block = B;
@@ -233,7 +230,7 @@ where
                         .into_iter()
                         .map(|b| {
                             let senders = b.senders().unwrap_or_default();
-                            OrderedSealedBlockWithSenders(SealedBlockWithSenders::new_unhashed(
+                            OrderedSealedBlockWithSenders(SealedBlockWithSenders::new_sealed(
                                 b, senders,
                             ))
                         })
@@ -289,7 +286,7 @@ impl<B: Block> Ord for OrderedSealedBlockWithSenders<B> {
 impl<B: Block> From<SealedBlockFor<B>> for OrderedSealedBlockWithSenders<B> {
     fn from(block: SealedBlockFor<B>) -> Self {
         let senders = block.senders().unwrap_or_default();
-        Self(SealedBlockWithSenders::new_unhashed(block, senders))
+        Self(SealedBlockWithSenders::new_sealed(block, senders))
     }
 }
 

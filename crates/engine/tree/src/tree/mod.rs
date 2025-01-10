@@ -1603,11 +1603,11 @@ where
             .provider
             .sealed_block_with_senders(hash.into(), TransactionVariant::WithHash)?
             .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?
-            .split();
+            .split_sealed();
         let execution_output = self
             .provider
-            .get_state(block.number())?
-            .ok_or_else(|| ProviderError::StateForNumberNotFound(block.number()))?;
+            .get_state(block.header().number())?
+            .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
         let hashed_state = self.provider.hashed_post_state(execution_output.state());
 
         Ok(Some(ExecutedBlock {
@@ -1802,7 +1802,9 @@ where
         &self,
         block: &SealedBlockWithSenders<N::Block>,
     ) -> Result<(), ConsensusError> {
-        if let Err(e) = self.consensus.validate_header_with_total_difficulty(block, U256::MAX) {
+        if let Err(e) =
+            self.consensus.validate_header_with_total_difficulty(block.header(), U256::MAX)
+        {
             error!(
                 target: "engine::tree",
                 ?block,
@@ -1812,12 +1814,13 @@ where
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
+        // TODO(mattsse): get rid of clone
+        if let Err(e) = self.consensus.validate_header(&block.clone_sealed_header()) {
             error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_block_pre_execution(block) {
+        if let Err(e) = self.consensus.validate_block_pre_execution(&block.clone_sealed_block()) {
             error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
@@ -1872,9 +1875,10 @@ where
         &mut self,
         block: SealedBlockFor<N::Block>,
     ) -> Result<(), InsertBlockError<N::Block>> {
-        match block.try_recover() {
+        // TODO(mattsse): remove clone
+        match block.clone().try_recover() {
             Ok(block) => self.buffer_block(block),
-            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
+            Err(_) => Err(InsertBlockError::sender_recovery_error(block)),
         }
     }
 
@@ -1884,7 +1888,7 @@ where
         block: SealedBlockWithSenders<N::Block>,
     ) -> Result<(), InsertBlockError<N::Block>> {
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertBlockError::consensus_error(err, block.block))
+            return Err(InsertBlockError::consensus_error(err, block.into_sealed_block()))
         }
         self.state.buffer.insert_block(block);
         Ok(())
@@ -2196,9 +2200,10 @@ where
         &mut self,
         block: SealedBlockFor<N::Block>,
     ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
-        match block.try_with_senders() {
+        // TODO(mattsse): fix clones
+        match block.clone().try_recover() {
             Ok(block) => self.insert_block(block),
-            Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
+            Err(_) => Err(InsertBlockError::sender_recovery_error(block)),
         }
     }
 
@@ -2207,7 +2212,7 @@ where
         block: SealedBlockWithSenders<N::Block>,
     ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
         self.insert_block_inner(block.clone())
-            .map_err(|kind| InsertBlockError::new(block.block, kind))
+            .map_err(|kind| InsertBlockError::new(block.into_sealed_block(), kind))
     }
 
     fn insert_block_inner(
@@ -2251,8 +2256,9 @@ where
                 block.parent_hash().into(),
             ))
         })?;
-        if let Err(e) =
-            self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
+        if let Err(e) = self
+            .consensus
+            .validate_header_against_parent(&block.clone_sealed_header(), &parent_block)
         {
             warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
             return Err(e.into())
@@ -2270,8 +2276,7 @@ where
 
         let block_number = block.number();
         let block_hash = block.hash();
-        let sealed_block = Arc::new(block.block.clone());
-        let block = block.unseal();
+        let sealed_block = Arc::new(block.clone_sealed_block());
 
         let persistence_not_in_progress = !self.persistence_state.in_progress();
 
@@ -2333,12 +2338,7 @@ where
                 PostExecutionInput::new(&output.receipts, &output.requests),
             ) {
                 // call post-block hook
-                self.invalid_block_hook.on_invalid_block(
-                    &parent_block,
-                    &block.clone().seal_slow(),
-                    &output,
-                    None,
-                );
+                self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
                 return Err(err.into())
             }
 
@@ -2440,7 +2440,7 @@ where
             // call post-block hook
             self.invalid_block_hook.on_invalid_block(
                 &parent_block,
-                &block.clone().seal_slow(),
+                &block,
                 &output,
                 Some((&trie_output, state_root)),
             );
@@ -2824,6 +2824,7 @@ mod tests {
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_primitives::{Block, BlockExt, EthPrimitives};
+    use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
     use reth_trie::{updates::TrieUpdates, HashedPostState};
@@ -3006,10 +3007,7 @@ mod tests {
                 blocks
                     .into_iter()
                     .map(|b| {
-                        SealedBlockWithSenders::new_unhashed(
-                            (*b.block).clone(),
-                            b.senders().clone(),
-                        )
+                        SealedBlockWithSenders::new_sealed(b.block().clone(), b.senders().clone())
                     })
                     .collect(),
             );
@@ -3097,7 +3095,7 @@ mod tests {
         }
 
         async fn send_new_payload(&mut self, block: SealedBlockWithSenders) {
-            let payload = block_to_payload_v3(block.block.clone());
+            let payload = block_to_payload_v3(block.clone_sealed_block());
             self.tree
                 .on_new_payload(
                     payload.into(),
@@ -3136,7 +3134,7 @@ mod tests {
             chain: impl IntoIterator<Item = SealedBlockWithSenders> + Clone,
         ) {
             for block in chain {
-                self.check_fork_block_added(block.block.hash()).await;
+                self.check_fork_block_added(block.hash()).await;
             }
         }
 
@@ -3168,7 +3166,7 @@ mod tests {
                     block,
                     _,
                 )) => {
-                    assert!(block.hash() == expected_hash);
+                    assert_eq!(block.hash(), expected_hash);
                 }
                 _ => panic!("Unexpected event: {:#?}", event),
             }
@@ -3179,9 +3177,8 @@ mod tests {
             let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
 
             for block in &blocks {
-                let unsealed_block = block.clone().unseal();
-                block_data.push((block.hash(), unsealed_block.clone().block));
-                headers_data.push((block.hash(), unsealed_block.header.clone()));
+                block_data.push((block.hash(), block.block().clone()));
+                headers_data.push((block.hash(), block.header().clone()));
             }
 
             self.provider.extend_blocks(block_data);
@@ -3374,7 +3371,7 @@ mod tests {
 
         // ensure block is buffered
         let buffered = test_harness.tree.state.buffer.block(&hash).unwrap();
-        assert_eq!(buffered.block, sealed);
+        assert_eq!(buffered.clone_sealed_block(), sealed);
     }
 
     #[test]
@@ -3714,7 +3711,7 @@ mod tests {
 
         for block in &chain_a {
             test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
-                block: Arc::new(block.block.clone()),
+                block: Arc::new(block.clone_sealed_block()),
                 senders: Arc::new(block.senders().to_vec()),
                 execution_output: Arc::new(ExecutionOutcome::default()),
                 hashed_state: Arc::new(HashedPostState::default()),
@@ -3725,7 +3722,7 @@ mod tests {
 
         for block in &chain_b {
             test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
-                block: Arc::new(block.block.clone()),
+                block: Arc::new(block.clone_sealed_block()),
                 senders: Arc::new(block.senders().to_vec()),
                 execution_output: Arc::new(ExecutionOutcome::default()),
                 hashed_state: Arc::new(HashedPostState::default()),
@@ -3737,19 +3734,19 @@ mod tests {
         let mut expected_new = Vec::new();
         for block in &chain_b {
             // reorg to chain from block b
-            let result = test_harness.tree.on_new_head(block.block.hash()).unwrap();
+            let result = test_harness.tree.on_new_head(block.hash()).unwrap();
             assert_matches!(result, Some(NewCanonicalChain::Reorg { .. }));
 
             expected_new.push(block);
             if let Some(NewCanonicalChain::Reorg { new, old }) = result {
                 assert_eq!(new.len(), expected_new.len());
                 for (index, block) in expected_new.iter().enumerate() {
-                    assert_eq!(new[index].block.hash(), block.block.hash());
+                    assert_eq!(new[index].block.hash(), block.hash());
                 }
 
                 assert_eq!(old.len(), chain_a.len());
                 for (index, block) in chain_a.iter().enumerate() {
-                    assert_eq!(old[index].block.hash(), block.block.hash());
+                    assert_eq!(old[index].block.hash(), block.hash());
                 }
             }
 
@@ -3918,9 +3915,7 @@ mod tests {
 
         let backfill_tip_block = main_chain[(backfill_finished_block_number - 1) as usize].clone();
         // add block to mock provider to enable persistence clean up.
-        test_harness
-            .provider
-            .add_block(backfill_tip_block.hash(), backfill_tip_block.block.unseal());
+        test_harness.provider.add_block(backfill_tip_block.hash(), backfill_tip_block.into_block());
         test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
 
         let event = test_harness.from_tree_rx.recv().await.unwrap();
@@ -4136,7 +4131,7 @@ mod tests {
 
         // extend base chain
         let extension_chain = test_harness.block_builder.create_fork(old_head, 5);
-        let fork_block = extension_chain.last().unwrap().block.clone();
+        let fork_block = extension_chain.last().unwrap().clone_sealed_block();
 
         test_harness.setup_range_insertion_for_valid_chain(extension_chain.clone());
         test_harness.insert_chain(extension_chain).await;
@@ -4234,7 +4229,7 @@ mod tests {
 
         // extend base chain
         let extension_chain = test_harness.block_builder.create_fork(old_head, 5);
-        let fork_block = extension_chain.last().unwrap().block.clone();
+        let fork_block = extension_chain.last().unwrap().clone_sealed_block();
         test_harness.insert_chain(extension_chain).await;
 
         // fcu to old_head
@@ -4304,7 +4299,7 @@ mod tests {
             test_harness.send_new_payload(block.clone()).await;
 
             if index < side_chain.len() - invalid_index - 1 {
-                test_harness.send_fcu(block.block.hash(), ForkchoiceStatus::Valid).await;
+                test_harness.send_fcu(block.hash(), ForkchoiceStatus::Valid).await;
             }
         }
 

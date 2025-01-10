@@ -647,11 +647,10 @@ mod tests {
         let sealed_blocks = sealed_headers
             .iter()
             .map(|header| {
-                SealedBlockWithSenders::try_new_unhashed(
-                    SealedBlock::new(header.clone(), BlockBody::default()),
+                SealedBlockWithSenders::new_sealed(
+                    SealedBlock::from_sealed_parts(header.clone(), BlockBody::default()),
                     vec![],
                 )
-                .unwrap()
             })
             .collect();
 

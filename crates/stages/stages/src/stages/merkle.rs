@@ -525,7 +525,7 @@ mod tests {
                 stage_progress,
                 BlockParams { parent: preblocks.last().map(|b| b.hash()), ..Default::default() },
             )
-            .split();
+            .split_sealed_header_body();
             let mut header = header.unseal();
 
             header.state_root = state_root(
@@ -534,7 +534,10 @@ mod tests {
                     .into_iter()
                     .map(|(address, account)| (address, (account, std::iter::empty()))),
             );
-            let sealed_head = SealedBlock::new(SealedHeader::seal(header), body);
+            let sealed_head = SealedBlock::<reth_primitives::Block>::from_sealed_parts(
+                SealedHeader::seal(header),
+                body,
+            );
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
@@ -584,8 +587,8 @@ mod tests {
             let static_file_provider = self.db.factory.static_file_provider();
             let mut writer =
                 static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-            let mut last_header = last_block.header().clone();
-            last_header.state_root = root;
+            let mut last_header = last_block.clone_sealed_header();
+            last_header.set_state_root(root);
 
             let hash = last_header.hash_slow();
             writer.prune_headers(1).unwrap();

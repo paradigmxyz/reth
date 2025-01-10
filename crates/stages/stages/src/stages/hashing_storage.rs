@@ -344,7 +344,9 @@ mod tests {
                 BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..3, ..Default::default() },
             );
 
-            self.db.insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
+            let headers =
+                blocks.iter().map(|block| block.clone_sealed_header()).collect::<Vec<_>>();
+            self.db.insert_headers(headers.iter())?;
 
             let iter = blocks.iter();
             let mut next_tx_num = 0;

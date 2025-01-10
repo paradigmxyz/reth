@@ -1019,7 +1019,7 @@ mod tests {
         let mut block = Block::default();
         block.body.transactions.push(TransactionSigned::default());
         let block = BlockWithSenders::try_new_unhashed(block.clone(), vec![]).unwrap();
-        assert_eq!(block.sender().len(), 1);
+        assert_eq!(block.senders().len(), 1);
     }
 
     #[test]

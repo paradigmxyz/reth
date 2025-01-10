@@ -64,7 +64,7 @@ impl AccountHashingStage {
     ) -> Result<Vec<(alloy_primitives::Address, reth_primitives::Account)>, StageError>
     where
         N::Primitives: reth_primitives_traits::FullNodePrimitives<
-            BlockBody = reth_primitives::BlockBody,
+            Block = reth_primitives::Block,
             BlockHeader = reth_primitives::Header,
         >,
     {
