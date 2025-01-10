@@ -248,7 +248,7 @@ where
         };
         drop(evm);
 
-        let mut balance_increments = post_block_balance_increments(&self.chain_spec, &block.block);
+        let mut balance_increments = post_block_balance_increments(&self.chain_spec, block.block());
 
         // Irregular state change at Ethereum DAO hardfork
         if self.chain_spec.fork(EthereumHardfork::Dao).transitions_at_block(block.number) {
@@ -409,7 +409,7 @@ mod tests {
 
         // attempt to execute a block without parent beacon block root, expect err
         let err = executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block {
                     header: header.clone(),
                     body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
@@ -430,7 +430,7 @@ mod tests {
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block {
                     header: header.clone(),
                     body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
@@ -490,7 +490,7 @@ mod tests {
         // attempt to execute an empty block with parent beacon block root, this should not fail
         provider
             .batch_executor(StateProviderDatabase::new(&db))
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block {
                     header,
                     body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
@@ -534,7 +534,7 @@ mod tests {
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block {
                     header,
                     body: BlockBody { transactions: vec![], ommers: vec![], withdrawals: None },
@@ -570,7 +570,7 @@ mod tests {
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
         header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
         let _err = executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block { header: header.clone(), body: Default::default() },
                 vec![],
             ))
@@ -585,7 +585,7 @@ mod tests {
         // now try to process the genesis block again, this time ensuring that a system contract
         // call does not occur
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -633,7 +633,7 @@ mod tests {
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block { header: header.clone(), body: Default::default() },
                 vec![],
             ))
@@ -703,7 +703,7 @@ mod tests {
 
         // attempt to execute an empty block, this should not fail
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -740,7 +740,7 @@ mod tests {
 
         // attempt to execute genesis block, this should not fail
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -784,7 +784,7 @@ mod tests {
 
         // attempt to execute the fork activation block, this should not fail
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -835,7 +835,7 @@ mod tests {
 
         // attempt to execute the fork activation block, this should not fail
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -868,7 +868,7 @@ mod tests {
 
         // attempt to execute the genesis block, this should not fail
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -897,7 +897,7 @@ mod tests {
         let header_hash = header.hash_slow();
 
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -929,7 +929,7 @@ mod tests {
         };
 
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
                 Block { header, body: Default::default() },
                 vec![],
             ))
@@ -1132,7 +1132,7 @@ mod tests {
 
         let header = Header { timestamp: 1, number: 1, ..Header::default() };
 
-        let block = &BlockWithSenders::new_unchecked(
+        let block = &BlockWithSenders::new_unhashed(
             Block {
                 header,
                 body: BlockBody {
