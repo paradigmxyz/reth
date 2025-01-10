@@ -6,7 +6,7 @@ use alloy_consensus::TxEnvelope;
 use alloy_network::{AnyRpcTransaction, AnyTxEnvelope};
 use alloy_serde::WithOtherFields;
 
-use op_alloy_consensus as _;
+use op_alloy_rpc_types as _;
 
 impl TryFrom<AnyRpcTransaction> for TransactionSigned {
     type Error = alloy_rpc_types::ConversionError;
