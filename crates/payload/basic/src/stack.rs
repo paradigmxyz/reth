@@ -7,7 +7,7 @@ use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Address, B256, U256};
 use reth_payload_builder::PayloadId;
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives::{NodePrimitives, SealedBlockFor};
+use reth_primitives::{NodePrimitives, SealedBlock};
 
 use alloy_eips::eip7685::Requests;
 use std::{error::Error, fmt};
@@ -155,7 +155,7 @@ where
 {
     type Primitives = L::Primitives;
 
-    fn block(&self) -> &SealedBlockFor<<L::Primitives as NodePrimitives>::Block> {
+    fn block(&self) -> &SealedBlock<<L::Primitives as NodePrimitives>::Block> {
         match self {
             Self::Left(l) => l.block(),
             Self::Right(r) => r.block(),

@@ -407,7 +407,7 @@ mod tests {
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{BlockBody, SealedBlock, SealedBlockWithSenders};
+    use reth_primitives::{BlockBody, RecoveredBlock, SealedBlock};
     use reth_provider::{BlockWriter, ProviderFactory, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{self, random_header, random_header_range};
@@ -647,7 +647,7 @@ mod tests {
         let sealed_blocks = sealed_headers
             .iter()
             .map(|header| {
-                SealedBlockWithSenders::new_sealed(
+                RecoveredBlock::new_sealed(
                     SealedBlock::from_sealed_parts(header.clone(), BlockBody::default()),
                     vec![],
                 )

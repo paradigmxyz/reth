@@ -22,7 +22,7 @@ use reth_payload_primitives::{
     PayloadOrAttributes, PayloadTypes,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Block, NodePrimitives, SealedBlock, SealedBlockFor};
+use reth_primitives::{Block, NodePrimitives, SealedBlock};
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::sync::Arc;
 
@@ -54,7 +54,7 @@ where
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
 
     fn block_to_payload(
-        block: SealedBlockFor<
+        block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> (ExecutionPayload, ExecutionPayloadSidecar) {

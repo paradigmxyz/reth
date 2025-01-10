@@ -38,7 +38,7 @@ use reth::{
     },
     network::NetworkHandle,
     payload::ExecutionPayloadValidator,
-    primitives::{Block, EthPrimitives, SealedBlockFor, TransactionSigned},
+    primitives::{Block, EthPrimitives, SealedBlock, TransactionSigned},
     providers::{CanonStateSubscriptions, EthStorage, StateProviderFactory},
     rpc::{
         compat::engine::payload::block_to_payload,
@@ -177,7 +177,7 @@ impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
 
     fn block_to_payload(
-        block: SealedBlockFor<
+        block: SealedBlock<
                 <<Self::BuiltPayload as reth_node_api::BuiltPayload>::Primitives as reth_node_api::NodePrimitives>::Block,
             >,
     ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
@@ -211,7 +211,7 @@ impl PayloadValidator for CustomEngineValidator {
         &self,
         payload: ExecutionPayload,
         sidecar: ExecutionPayloadSidecar,
-    ) -> Result<SealedBlockFor<Self::Block>, PayloadError> {
+    ) -> Result<SealedBlock<Self::Block>, PayloadError> {
         self.inner.ensure_well_formed_payload(payload, sidecar)
     }
 }

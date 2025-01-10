@@ -5,14 +5,14 @@ use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_optimism_primitives::{OpBlock, OpReceipt};
-use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected};
+use reth_primitives::{gas_spent_by_transactions, GotExpected, RecoveredBlock};
 
 /// Validate a block with regard to execution results:
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
 pub fn validate_block_post_execution(
-    block: &BlockWithSenders<OpBlock>,
+    block: &RecoveredBlock<OpBlock>,
     chain_spec: &ChainSpec,
     receipts: &[OpReceipt],
 ) -> Result<(), ConsensusError> {

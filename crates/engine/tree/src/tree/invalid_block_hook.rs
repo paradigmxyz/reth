@@ -1,6 +1,6 @@
 use alloy_primitives::B256;
 use reth_engine_primitives::InvalidBlockHook;
-use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::BlockExecutionOutput;
 use reth_trie::updates::TrieUpdates;
 
@@ -13,7 +13,7 @@ impl<N: NodePrimitives> InvalidBlockHook<N> for NoopInvalidBlockHook {
     fn on_invalid_block(
         &self,
         _parent_header: &SealedHeader<N::BlockHeader>,
-        _block: &SealedBlockWithSenders<N::Block>,
+        _block: &RecoveredBlock<N::Block>,
         _output: &BlockExecutionOutput<N::Receipt>,
         _trie_updates: Option<(&TrieUpdates, B256)>,
     ) {
@@ -33,7 +33,7 @@ impl<N: NodePrimitives> InvalidBlockHook<N> for InvalidBlockHooks<N> {
     fn on_invalid_block(
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
-        block: &SealedBlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {

@@ -7,7 +7,7 @@ use alloy_consensus::BlockHeader;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives::BlockWithSenders;
+use reth_primitives::RecoveredBlock;
 use revm_primitives::EvmState;
 use std::time::Instant;
 
@@ -68,7 +68,7 @@ pub struct ExecutorMetrics {
 }
 
 impl ExecutorMetrics {
-    fn metered<F, R, B>(&self, block: &BlockWithSenders<B>, f: F) -> R
+    fn metered<F, R, B>(&self, block: &RecoveredBlock<B>, f: F) -> R
     where
         F: FnOnce() -> R,
         B: reth_primitives_traits::Block,
@@ -97,13 +97,13 @@ impl ExecutorMetrics {
     pub fn execute_metered<'a, E, DB, O, Error, B>(
         &self,
         executor: E,
-        input: &'a BlockWithSenders<B>,
+        input: &'a RecoveredBlock<B>,
         state_hook: Box<dyn OnStateHook>,
     ) -> Result<BlockExecutionOutput<O>, Error>
     where
         E: Executor<
             DB,
-            Input<'a> = &'a BlockWithSenders<B>,
+            Input<'a> = &'a RecoveredBlock<B>,
             Output = BlockExecutionOutput<O>,
             Error = Error,
         >,
@@ -131,9 +131,9 @@ impl ExecutorMetrics {
     }
 
     /// Execute the given block and update metrics for the execution.
-    pub fn metered_one<F, R, B>(&self, input: &BlockWithSenders<B>, f: F) -> R
+    pub fn metered_one<F, R, B>(&self, input: &RecoveredBlock<B>, f: F) -> R
     where
-        F: FnOnce(&BlockWithSenders<B>) -> R,
+        F: FnOnce(&RecoveredBlock<B>) -> R,
         B: reth_primitives_traits::Block,
     {
         self.metered(input, || f(input))
@@ -158,7 +158,7 @@ mod tests {
 
     impl Executor<()> for MockExecutor {
         type Input<'a>
-            = &'a BlockWithSenders
+            = &'a RecoveredBlock<reth_primitives::Block>
         where
             Self: 'a;
         type Output = BlockExecutionOutput<()>;
@@ -229,7 +229,7 @@ mod tests {
     fn test_executor_metrics_hook_metrics_recorded() {
         let snapshotter = setup_test_recorder();
         let metrics = ExecutorMetrics::default();
-        let input = BlockWithSenders::default();
+        let input = RecoveredBlock::default();
 
         let (tx, _rx) = mpsc::channel();
         let expected_output = 42;
@@ -278,7 +278,7 @@ mod tests {
     #[test]
     fn test_executor_metrics_hook_called() {
         let metrics = ExecutorMetrics::default();
-        let input = BlockWithSenders::default();
+        let input = RecoveredBlock::default();
 
         let (tx, rx) = mpsc::channel();
         let expected_output = 42;

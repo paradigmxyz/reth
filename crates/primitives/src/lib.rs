@@ -33,13 +33,14 @@ pub use reth_static_file_types as static_file;
 pub mod transaction;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use block::{generate_valid_header, valid_header_strategy};
-pub use block::{
-    Block, BlockBody, BlockWithSenders, SealedBlock, SealedBlockFor, SealedBlockWithSenders,
-};
+pub use block::{Block, BlockBody, SealedBlock};
+#[allow(deprecated)]
+pub use block::{BlockWithSenders, SealedBlockFor, SealedBlockWithSenders};
+
 pub use receipt::{gas_spent_by_transactions, Receipt, Receipts};
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
-    LogData, NodePrimitives, SealedHeader, StorageEntry,
+    LogData, NodePrimitives, RecoveredBlock, SealedHeader, StorageEntry,
 };
 pub use static_file::StaticFileSegment;
 

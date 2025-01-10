@@ -21,7 +21,7 @@ use reth_consensus_common::validation::{
     validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
     validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
-use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt, SealedBlock, SealedHeader};
+use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
     Block, BlockHeader,
@@ -103,7 +103,7 @@ where
 {
     fn validate_block_post_execution(
         &self,
-        block: &BlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec, input.receipts, input.requests)

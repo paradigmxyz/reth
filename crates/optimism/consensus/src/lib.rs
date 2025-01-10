@@ -29,7 +29,7 @@ use reth_consensus_common::validation::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
-use reth_primitives::{BlockWithSenders, GotExpected, SealedHeader};
+use reth_primitives::{GotExpected, RecoveredBlock, SealedHeader};
 
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
@@ -57,7 +57,7 @@ impl OpBeaconConsensus {
 impl FullConsensus<OpPrimitives> for OpBeaconConsensus {
     fn validate_block_post_execution(
         &self,
-        block: &BlockWithSenders<OpBlock>,
+        block: &RecoveredBlock<OpBlock>,
         input: PostExecutionInput<'_, OpReceipt>,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec, input.receipts)

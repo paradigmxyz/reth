@@ -12,7 +12,7 @@ use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{BlockWithSenders, EthPrimitives, NodePrimitives, Receipt, Receipts};
+use reth_primitives::{EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredBlock};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm::State;
@@ -55,7 +55,7 @@ impl BlockExecutorProvider for MockExecutorProvider {
 }
 
 impl<DB> Executor<DB> for MockExecutorProvider {
-    type Input<'a> = &'a BlockWithSenders;
+    type Input<'a> = &'a RecoveredBlock<reth_primitives::Block>;
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
@@ -97,7 +97,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
 }
 
 impl<DB> BatchExecutor<DB> for MockExecutorProvider {
-    type Input<'a> = &'a BlockWithSenders;
+    type Input<'a> = &'a RecoveredBlock<reth_primitives::Block>;
     type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 

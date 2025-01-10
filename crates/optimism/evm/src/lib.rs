@@ -206,7 +206,7 @@ mod tests {
     };
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
-    use reth_primitives::{Account, Log, Receipts, SealedBlockWithSenders};
+    use reth_primitives::{Account, Log, Receipts, RecoveredBlock};
     use reth_revm::{
         db::{BundleState, CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
@@ -533,7 +533,7 @@ mod tests {
     #[test]
     fn receipts_by_block_hash() {
         // Create a default SealedBlockWithSenders object
-        let block: SealedBlockWithSenders<OpBlock> = Default::default();
+        let block: RecoveredBlock<OpBlock> = Default::default();
 
         // Define block hashes for block1 and block2
         let block1_hash = B256::new([0x01; 32]);

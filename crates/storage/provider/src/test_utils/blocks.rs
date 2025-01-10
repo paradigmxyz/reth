@@ -12,7 +12,7 @@ use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_node_types::NodeTypes;
 use reth_primitives::{
-    Account, BlockBody, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, Transaction,
+    Account, BlockBody, Receipt, RecoveredBlock, SealedBlock, SealedHeader, Transaction,
     TransactionSigned, TxType,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
@@ -127,7 +127,7 @@ pub struct BlockchainTestData {
     /// Genesis
     pub genesis: SealedBlock,
     /// Blocks with its execution result
-    pub blocks: Vec<(SealedBlockWithSenders, ExecutionOutcome)>,
+    pub blocks: Vec<(RecoveredBlock<reth_primitives::Block>, ExecutionOutcome)>,
 }
 
 impl BlockchainTestData {
@@ -192,7 +192,7 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
 }
 
 /// Block one that points to genesis
-fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
+fn block1(number: BlockNumber) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
     // block changes
     let account1: Address = [0x60; 20].into();
     let account2: Address = [0x61; 20].into();
@@ -239,7 +239,7 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
     header.parent_hash = B256::ZERO;
     let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders::new_sealed(block, vec![Address::new([0x30; 20])]), execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::new([0x30; 20])]), execution_outcome)
 }
 
 /// Block two that points to block 1
@@ -247,7 +247,7 @@ fn block2(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (SealedBlockWithSenders, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
     // block changes
     let account: Address = [0x60; 20].into();
     let slot = U256::from(5);
@@ -302,7 +302,7 @@ fn block2(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
 }
 
 /// Block three that points to block 2
@@ -310,7 +310,7 @@ fn block3(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (SealedBlockWithSenders, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -365,7 +365,7 @@ fn block3(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
 }
 
 /// Block four that points to block 3
@@ -373,7 +373,7 @@ fn block4(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (SealedBlockWithSenders, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -453,7 +453,7 @@ fn block4(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
 }
 
 /// Block five that points to block 4
@@ -461,7 +461,7 @@ fn block5(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (SealedBlockWithSenders, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -538,5 +538,5 @@ fn block5(
     header.parent_hash = parent_hash;
     let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
 }

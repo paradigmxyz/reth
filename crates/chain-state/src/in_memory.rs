@@ -12,8 +12,7 @@ use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_metrics::{metrics::Gauge, Metrics};
 use reth_primitives::{
-    BlockWithSenders, EthPrimitives, NodePrimitives, Receipts, SealedBlock, SealedBlockFor,
-    SealedBlockWithSenders, SealedHeader,
+    EthPrimitives, NodePrimitives, Receipts, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 use reth_storage_api::StateProviderBox;
@@ -160,7 +159,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
 }
 
 type PendingBlockAndReceipts<N> =
-    (SealedBlockFor<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
+    (SealedBlock<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
 
 /// This type is responsible for providing the blocks, receipts, and state for
 /// all canonical blocks not on disk yet and keeps track of the block range that
@@ -476,7 +475,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns the `SealedBlockWithSenders` corresponding to the pending state.
-    pub fn pending_block_with_senders(&self) -> Option<SealedBlockWithSenders<N::Block>>
+    pub fn pending_block_with_senders(&self) -> Option<RecoveredBlock<N::Block>>
     where
         N::SignedTx: SignedTransaction,
     {
@@ -637,17 +636,17 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Returns the block with senders for the state.
-    pub fn block_with_senders(&self) -> BlockWithSenders<N::Block> {
+    pub fn block_with_senders(&self) -> RecoveredBlock<N::Block> {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
         block.with_senders(senders)
     }
 
     /// Returns the sealed block with senders for the state.
-    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders<N::Block> {
+    pub fn sealed_block_with_senders(&self) -> RecoveredBlock<N::Block> {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
-        SealedBlockWithSenders::new_sealed(block, senders)
+        RecoveredBlock::new_sealed(block, senders)
     }
 
     /// Returns the hash of executed block that determines the state.
@@ -802,7 +801,7 @@ impl<N: NodePrimitives> BlockState<N> {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// Sealed block the rest of fields refer to.
-    pub block: Arc<SealedBlockFor<N::Block>>,
+    pub block: Arc<SealedBlock<N::Block>>,
     /// Block's senders.
     pub senders: Arc<Vec<Address>>,
     /// Block's execution outcome.
@@ -816,7 +815,7 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
 impl<N: NodePrimitives> ExecutedBlock<N> {
     /// [`ExecutedBlock`] constructor.
     pub const fn new(
-        block: Arc<SealedBlockFor<N::Block>>,
+        block: Arc<SealedBlock<N::Block>>,
         senders: Arc<Vec<Address>>,
         execution_output: Arc<ExecutionOutcome<N::Receipt>>,
         hashed_state: Arc<HashedPostState>,
@@ -826,7 +825,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     }
 
     /// Returns a reference to the executed block.
-    pub fn block(&self) -> &SealedBlockFor<N::Block> {
+    pub fn block(&self) -> &SealedBlock<N::Block> {
         &self.block
     }
 
@@ -835,11 +834,11 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         &self.senders
     }
 
-    /// Returns a [`SealedBlockWithSenders`]
+    /// Returns a [`RecoveredBlock`]
     ///
     /// Note: this clones the block and senders.
-    pub fn sealed_block_with_senders(&self) -> SealedBlockWithSenders<N::Block> {
-        SealedBlockWithSenders::new_sealed((*self.block).clone(), (*self.senders).clone())
+    pub fn sealed_block_with_senders(&self) -> RecoveredBlock<N::Block> {
+        RecoveredBlock::new_sealed((*self.block).clone(), (*self.senders).clone())
     }
 
     /// Returns a reference to the block's execution outcome
@@ -929,7 +928,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     ///
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
-    pub fn tip(&self) -> &SealedBlockFor<N::Block> {
+    pub fn tip(&self) -> &SealedBlock<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => {
                 new.last().expect("non empty blocks").block()

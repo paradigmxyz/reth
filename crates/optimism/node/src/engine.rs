@@ -20,7 +20,7 @@ use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpBlock;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::SealedBlockFor;
+use reth_primitives::SealedBlock;
 use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::sync::Arc;
 
@@ -51,7 +51,7 @@ where
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
 
     fn block_to_payload(
-        block: SealedBlockFor<
+        block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
@@ -96,7 +96,7 @@ impl PayloadValidator for OpEngineValidator {
         &self,
         payload: ExecutionPayload,
         sidecar: ExecutionPayloadSidecar,
-    ) -> Result<SealedBlockFor<Self::Block>, PayloadError> {
+    ) -> Result<SealedBlock<Self::Block>, PayloadError> {
         self.inner.ensure_well_formed_payload(payload, sidecar)
     }
 }

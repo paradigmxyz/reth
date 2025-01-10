@@ -8,7 +8,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::B256;
 use derive_more::Constructor;
-use reth_primitives::{Receipt, SealedBlockWithSenders};
+use reth_primitives::{Receipt, RecoveredBlock};
 use reth_primitives_traits::Block;
 use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 
@@ -27,7 +27,7 @@ pub struct PendingBlockEnv<B: Block = reth_primitives::Block, R = Receipt> {
 #[derive(Clone, Debug)]
 pub enum PendingBlockEnvOrigin<B: Block = reth_primitives::Block, R = Receipt> {
     /// The pending block as received from the CL.
-    ActualPending(SealedBlockWithSenders<B>, Vec<R>),
+    ActualPending(RecoveredBlock<B>, Vec<R>),
     /// The _modified_ header of the latest block.
     ///
     /// This derives the pending state based on the latest header by modifying:
@@ -44,7 +44,7 @@ impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
     }
 
     /// Consumes the type and returns the actual pending block.
-    pub fn into_actual_pending(self) -> Option<SealedBlockWithSenders<B>> {
+    pub fn into_actual_pending(self) -> Option<RecoveredBlock<B>> {
         match self {
             Self::ActualPending(block, _) => Some(block),
             _ => None,
@@ -81,7 +81,7 @@ pub struct PendingBlock<B: Block, R> {
     /// Timestamp when the pending block is considered outdated.
     pub expires_at: Instant,
     /// The locally built pending block.
-    pub block: SealedBlockWithSenders<B>,
+    pub block: RecoveredBlock<B>,
     /// The receipts for the pending block
     pub receipts: Vec<R>,
 }

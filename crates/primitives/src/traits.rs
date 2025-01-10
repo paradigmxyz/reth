@@ -1,11 +1,11 @@
-use crate::{BlockWithSenders, SealedBlock};
+use crate::{RecoveredBlock, SealedBlock};
 use alloc::vec::Vec;
 use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
 use revm_primitives::{Address, B256};
 
 /// Extension trait for [`reth_primitives_traits::Block`] implementations
 /// allowing for conversions into common block parts containers such as [`SealedBlock`],
-/// [`BlockWithSenders`], etc.
+/// [`RecoveredBlock`], etc.
 pub trait BlockExt: Block {
     /// Calculate the header hash and seal the block so that it can't be changed.
     fn seal_slow(self) -> SealedBlock<Self> {
@@ -27,7 +27,7 @@ pub trait BlockExt: Block {
         self.body().recover_signers()
     }
 
-    /// Transform into a [`BlockWithSenders`].
+    /// Transform into a [`RecoveredBlock`].
     ///
     /// # Panics
     ///
@@ -36,24 +36,21 @@ pub trait BlockExt: Block {
     ///
     /// Note: this is expected to be called with blocks read from disk.
     #[track_caller]
-    fn with_senders_unchecked(self, senders: Vec<Address>) -> BlockWithSenders<Self>
+    fn with_senders_unchecked(self, senders: Vec<Address>) -> RecoveredBlock<Self>
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
         self.try_with_senders_unchecked(senders).expect("stored block is valid")
     }
 
-    /// Transform into a [`BlockWithSenders`] using the given senders.
+    /// Transform into a [`RecoveredBlock`] using the given senders.
     ///
     /// If the number of senders does not match the number of transactions in the block, this falls
     /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
     ///
     /// Returns an error if a signature is invalid.
     #[track_caller]
-    fn try_with_senders_unchecked(
-        self,
-        senders: Vec<Address>,
-    ) -> Result<BlockWithSenders<Self>, Self>
+    fn try_with_senders_unchecked(self, senders: Vec<Address>) -> Result<RecoveredBlock<Self>, Self>
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
@@ -64,19 +61,19 @@ pub trait BlockExt: Block {
             senders
         };
 
-        Ok(BlockWithSenders::new_unhashed(self, senders))
+        Ok(RecoveredBlock::new_unhashed(self, senders))
     }
 
-    /// **Expensive**. Transform into a [`BlockWithSenders`] by recovering senders in the contained
+    /// **Expensive**. Transform into a [`RecoveredBlock`] by recovering senders in the contained
     /// transactions.
     ///
     /// Returns `None` if a transaction is invalid.
-    fn with_recovered_senders(self) -> Option<BlockWithSenders<Self>>
+    fn with_recovered_senders(self) -> Option<RecoveredBlock<Self>>
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
         let senders = self.senders()?;
-        Some(BlockWithSenders::new_unhashed(self, senders))
+        Some(RecoveredBlock::new_unhashed(self, senders))
     }
 }
 

@@ -9,7 +9,7 @@ use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
     api::Block,
-    primitives::SealedBlockWithSenders,
+    primitives::RecoveredBlock,
     providers::CanonStateNotification,
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
@@ -98,7 +98,7 @@ where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     P: TransactionPoolExt + Unpin + 'static,
 {
-    fn process_block(&mut self, block: &SealedBlockWithSenders) {
+    fn process_block(&mut self, block: &RecoveredBlock<reth::primitives::Block>) {
         let txs: Vec<_> = block
             .body()
             .transactions()
@@ -230,7 +230,7 @@ where
 async fn fetch_blobs_for_block(
     client: reqwest::Client,
     url: String,
-    block: SealedBlockWithSenders,
+    block: RecoveredBlock<reth::primitives::Block>,
     txs: Vec<(reth::primitives::TransactionSigned, usize)>,
 ) -> Result<Vec<BlobTransactionEvent>, SideCarError> {
     let response = match client.get(url).header("Accept", "application/json").send().await {

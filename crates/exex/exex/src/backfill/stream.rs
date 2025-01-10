@@ -7,7 +7,7 @@ use futures::{
 };
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
 use reth_node_api::NodePrimitives;
-use reth_primitives::{BlockWithSenders, EthPrimitives};
+use reth_primitives::{EthPrimitives, RecoveredBlock};
 use reth_provider::{BlockReader, Chain, StateProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
@@ -38,7 +38,7 @@ struct BackfillTaskOutput<T> {
 type BackfillTasks<T> = FuturesOrdered<JoinHandle<BackfillTaskOutput<T>>>;
 
 type SingleBlockStreamItem<N = EthPrimitives> = (
-    BlockWithSenders<<N as NodePrimitives>::Block>,
+    RecoveredBlock<<N as NodePrimitives>::Block>,
     BlockExecutionOutput<<N as NodePrimitives>::Receipt>,
 );
 type BatchBlockStreamItem<N = EthPrimitives> = Chain<N>;

@@ -6,7 +6,7 @@ use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::{
     Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
 };
-use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, BlockWithSenders};
+use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, RecoveredBlock};
 use reth_primitives_traits::{Block as BlockTrait, BlockBody, SignedTransaction};
 
 use crate::transaction::TransactionCompat;
@@ -17,7 +17,7 @@ use crate::transaction::TransactionCompat;
 /// If a `block_hash` is provided, then this is used, otherwise the block hash is computed.
 #[expect(clippy::type_complexity)]
 pub fn from_block<T, B>(
-    block: BlockWithSenders<B>,
+    block: RecoveredBlock<B>,
     kind: BlockTransactionsKind,
     block_hash: Option<B256>,
     tx_resp_builder: &T,
@@ -40,7 +40,7 @@ where
 /// This will populate the `transactions` field with only the hashes of the transactions in the
 /// block: [`BlockTransactions::Hashes`]
 pub fn from_block_with_tx_hashes<T, B>(
-    block: BlockWithSenders<B>,
+    block: RecoveredBlock<B>,
     block_hash: Option<B256>,
 ) -> Block<T, Header<B::Header>>
 where
@@ -64,7 +64,7 @@ where
 /// [`TransactionCompat::Transaction`] objects: [`BlockTransactions::Full`]
 #[expect(clippy::type_complexity)]
 pub fn from_block_full<T, B>(
-    block: BlockWithSenders<B>,
+    block: RecoveredBlock<B>,
     block_hash: Option<B256>,
     tx_resp_builder: &T,
 ) -> Result<Block<T::Transaction, Header<B::Header>>, T::Error>

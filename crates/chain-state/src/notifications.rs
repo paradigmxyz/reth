@@ -3,7 +3,7 @@
 use alloy_eips::eip2718::Encodable2718;
 use derive_more::{Deref, DerefMut};
 use reth_execution_types::{BlockReceipts, Chain};
-use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_storage_api::NodePrimitivesProvider;
 use std::{
     pin::Pin,
@@ -123,7 +123,7 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
     ///
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
-    pub fn tip(&self) -> &SealedBlockWithSenders<N::Block> {
+    pub fn tip(&self) -> &RecoveredBlock<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.tip(),
         }
@@ -221,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_commit_notification() {
-        let block: SealedBlockWithSenders = Default::default();
+        let block: RecoveredBlock<reth_primitives::Block> = Default::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
 
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn test_reorg_notification() {
-        let block: SealedBlockWithSenders = Default::default();
+        let block: RecoveredBlock<reth_primitives::Block> = Default::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
         let block3_hash = B256::new([0x03; 32]);

@@ -16,8 +16,8 @@ use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_primitives::{
-    BlockWithSenders, EthPrimitives, GotExpected, GotExpectedBoxed, InvalidTransactionError,
-    NodePrimitives, Receipt, SealedBlock, SealedHeader,
+    EthPrimitives, GotExpected, GotExpectedBoxed, InvalidTransactionError, NodePrimitives, Receipt,
+    RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_primitives_traits::{constants::MINIMUM_GAS_LIMIT, Block};
 
@@ -56,7 +56,7 @@ pub trait FullConsensus<N: NodePrimitives = EthPrimitives>: AsConsensus<N::Block
     /// Note: validating blocks does not include other validations of the Consensus
     fn validate_block_post_execution(
         &self,
-        block: &BlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         input: PostExecutionInput<'_, N::Receipt>,
     ) -> Result<(), ConsensusError>;
 }

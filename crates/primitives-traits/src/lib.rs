@@ -52,7 +52,7 @@ pub mod block;
 pub use block::{
     body::{BlockBody, FullBlockBody},
     header::{BlockHeader, FullBlockHeader},
-    Block, FullBlock, SealedBlock,
+    Block, FullBlock, RecoveredBlock, SealedBlock,
 };
 
 mod encoded;

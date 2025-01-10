@@ -17,7 +17,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{OpBlock, OpPrimitives, OpTransactionSigned};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{transaction::WithEncoded, SealedBlockFor};
+use reth_primitives::{transaction::WithEncoded, SealedBlock};
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
@@ -135,7 +135,7 @@ pub struct OpBuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// The built block
-    pub(crate) block: Arc<SealedBlockFor<OpBlock>>,
+    pub(crate) block: Arc<SealedBlock<OpBlock>>,
     /// Block execution data for the payload, if any.
     pub(crate) executed_block: Option<ExecutedBlock<OpPrimitives>>,
     /// The fees of the block
@@ -155,7 +155,7 @@ impl OpBuiltPayload {
     /// Initializes the payload with the given initial block.
     pub const fn new(
         id: PayloadId,
-        block: Arc<SealedBlockFor<OpBlock>>,
+        block: Arc<SealedBlock<OpBlock>>,
         fees: U256,
         chain_spec: Arc<OpChainSpec>,
         attributes: OpPayloadBuilderAttributes,
@@ -170,7 +170,7 @@ impl OpBuiltPayload {
     }
 
     /// Returns the built block(sealed)
-    pub fn block(&self) -> &SealedBlockFor<OpBlock> {
+    pub fn block(&self) -> &SealedBlock<OpBlock> {
         &self.block
     }
 
@@ -188,7 +188,7 @@ impl OpBuiltPayload {
 impl BuiltPayload for OpBuiltPayload {
     type Primitives = OpPrimitives;
 
-    fn block(&self) -> &SealedBlockFor<OpBlock> {
+    fn block(&self) -> &SealedBlock<OpBlock> {
         &self.block
     }
 
@@ -208,7 +208,7 @@ impl BuiltPayload for OpBuiltPayload {
 impl BuiltPayload for &OpBuiltPayload {
     type Primitives = OpPrimitives;
 
-    fn block(&self) -> &SealedBlockFor<OpBlock> {
+    fn block(&self) -> &SealedBlock<OpBlock> {
         (**self).block()
     }
 

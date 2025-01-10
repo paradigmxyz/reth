@@ -1,7 +1,7 @@
 use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput};
 use alloy_primitives::U256;
 use core::sync::atomic::{AtomicBool, Ordering};
-use reth_primitives::{BlockWithSenders, NodePrimitives, SealedBlock, SealedHeader};
+use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_primitives_traits::Block;
 
 /// Consensus engine implementation for testing
@@ -50,7 +50,7 @@ impl TestConsensus {
 impl<N: NodePrimitives> FullConsensus<N> for TestConsensus {
     fn validate_block_post_execution(
         &self,
-        _block: &BlockWithSenders<N::Block>,
+        _block: &RecoveredBlock<N::Block>,
         _input: PostExecutionInput<'_, N::Receipt>,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {

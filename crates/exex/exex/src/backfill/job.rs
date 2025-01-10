@@ -10,7 +10,7 @@ use reth_evm::execute::{
     BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
-use reth_primitives::{BlockWithSenders, Receipt};
+use reth_primitives::{Receipt, RecoveredBlock};
 use reth_primitives_traits::{format_gas_throughput, SignedTransaction};
 use reth_provider::{
     BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
@@ -150,7 +150,7 @@ where
 /// Single block Backfill job started for a specific range.
 ///
 /// It implements [`Iterator`] which executes a block each time the
-/// iterator is advanced and yields ([`BlockWithSenders`], [`BlockExecutionOutput`])
+/// iterator is advanced and yields ([`RecoveredBlock`], [`BlockExecutionOutput`])
 #[derive(Debug, Clone)]
 pub struct SingleBlockBackfillJob<E, P> {
     pub(crate) executor: E,
@@ -165,7 +165,7 @@ where
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     type Item = BackfillJobResult<(
-        BlockWithSenders<P::Block>,
+        RecoveredBlock<P::Block>,
         BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
     )>;
 
@@ -182,7 +182,11 @@ where
     /// Converts the single block backfill job into a stream.
     pub fn into_stream(
         self,
-    ) -> StreamBackfillJob<E, P, (BlockWithSenders, BlockExecutionOutput<Receipt>)> {
+    ) -> StreamBackfillJob<
+        E,
+        P,
+        (RecoveredBlock<reth_primitives::Block>, BlockExecutionOutput<Receipt>),
+    > {
         self.into()
     }
 
@@ -191,7 +195,7 @@ where
         &self,
         block_number: u64,
     ) -> BackfillJobResult<(
-        BlockWithSenders<P::Block>,
+        RecoveredBlock<P::Block>,
         BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
     )> {
         // Fetch the block with senders for execution.

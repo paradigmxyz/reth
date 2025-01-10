@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::SealedBlockWithSenders;
+use reth_primitives::RecoveredBlock;
 use reth_provider::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderError, ProviderReceipt,
@@ -546,7 +546,7 @@ where
     ) -> Result<
         Option<(
             Arc<Vec<ProviderReceipt<Eth::Provider>>>,
-            Option<Arc<SealedBlockWithSenders<ProviderBlock<Eth::Provider>>>>,
+            Option<Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
         )>,
         EthFilterError,
     > {

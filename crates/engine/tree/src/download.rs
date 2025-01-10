@@ -9,7 +9,7 @@ use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
 };
-use reth_primitives::{SealedBlockFor, SealedBlockWithSenders};
+use reth_primitives::{RecoveredBlock, SealedBlock};
 use reth_primitives_traits::Block;
 use std::{
     cmp::{Ordering, Reverse},
@@ -45,7 +45,7 @@ pub enum DownloadAction {
 #[derive(Debug)]
 pub enum DownloadOutcome<B: Block> {
     /// Downloaded blocks.
-    Blocks(Vec<SealedBlockWithSenders<B>>),
+    Blocks(Vec<RecoveredBlock<B>>),
     /// New download started.
     NewDownloadStarted {
         /// How many blocks are pending in this download.
@@ -230,9 +230,7 @@ where
                         .into_iter()
                         .map(|b| {
                             let senders = b.senders().unwrap_or_default();
-                            OrderedSealedBlockWithSenders(SealedBlockWithSenders::new_sealed(
-                                b, senders,
-                            ))
+                            OrderedSealedBlockWithSenders(RecoveredBlock::new_sealed(b, senders))
                         })
                         .map(Reverse),
                 );
@@ -249,7 +247,7 @@ where
         }
 
         // drain all unique element of the block buffer if there are any
-        let mut downloaded_blocks: Vec<SealedBlockWithSenders<B>> =
+        let mut downloaded_blocks: Vec<RecoveredBlock<B>> =
             Vec::with_capacity(self.set_buffered_blocks.len());
         while let Some(block) = self.set_buffered_blocks.pop() {
             // peek ahead and pop duplicates
@@ -266,10 +264,10 @@ where
     }
 }
 
-/// A wrapper type around [`SealedBlockWithSenders`] that implements the [Ord]
+/// A wrapper type around [`RecoveredBlock`] that implements the [Ord]
 /// trait by block number.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct OrderedSealedBlockWithSenders<B: Block>(SealedBlockWithSenders<B>);
+struct OrderedSealedBlockWithSenders<B: Block>(RecoveredBlock<B>);
 
 impl<B: Block> PartialOrd for OrderedSealedBlockWithSenders<B> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
@@ -283,14 +281,14 @@ impl<B: Block> Ord for OrderedSealedBlockWithSenders<B> {
     }
 }
 
-impl<B: Block> From<SealedBlockFor<B>> for OrderedSealedBlockWithSenders<B> {
-    fn from(block: SealedBlockFor<B>) -> Self {
+impl<B: Block> From<SealedBlock<B>> for OrderedSealedBlockWithSenders<B> {
+    fn from(block: SealedBlock<B>) -> Self {
         let senders = block.senders().unwrap_or_default();
-        Self(SealedBlockWithSenders::new_sealed(block, senders))
+        Self(RecoveredBlock::new_sealed(block, senders))
     }
 }
 
-impl<B: Block> From<OrderedSealedBlockWithSenders<B>> for SealedBlockWithSenders<B> {
+impl<B: Block> From<OrderedSealedBlockWithSenders<B>> for RecoveredBlock<B> {
     fn from(value: OrderedSealedBlockWithSenders<B>) -> Self {
         value.0
     }

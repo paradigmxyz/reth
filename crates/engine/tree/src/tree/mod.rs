@@ -36,8 +36,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
-    EthPrimitives, GotExpected, NodePrimitives, SealedBlockFor, SealedBlockWithSenders,
-    SealedHeader,
+    EthPrimitives, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_primitives_traits::Block;
 use reth_provider::{
@@ -147,7 +146,7 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Returns the block by hash.
-    fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlockFor<N::Block>>> {
+    fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlock<N::Block>>> {
         self.blocks_by_hash.get(&hash).map(|b| b.block.clone())
     }
 
@@ -737,7 +736,7 @@ where
     /// block request processing isn't blocked for a long time.
     fn on_downloaded(
         &mut self,
-        mut blocks: Vec<SealedBlockWithSenders<N::Block>>,
+        mut blocks: Vec<RecoveredBlock<N::Block>>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         if blocks.is_empty() {
             // nothing to execute
@@ -1798,10 +1797,7 @@ where
 
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
-    fn validate_block(
-        &self,
-        block: &SealedBlockWithSenders<N::Block>,
-    ) -> Result<(), ConsensusError> {
+    fn validate_block(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
         if let Err(e) =
             self.consensus.validate_header_with_total_difficulty(block.header(), U256::MAX)
         {
@@ -1873,7 +1869,7 @@ where
     /// Returns an error if sender recovery failed or inserting into the buffer failed.
     fn buffer_block_without_senders(
         &mut self,
-        block: SealedBlockFor<N::Block>,
+        block: SealedBlock<N::Block>,
     ) -> Result<(), InsertBlockError<N::Block>> {
         // TODO(mattsse): remove clone
         match block.clone().try_recover() {
@@ -1885,7 +1881,7 @@ where
     /// Pre-validates the block and inserts it into the buffer.
     fn buffer_block(
         &mut self,
-        block: SealedBlockWithSenders<N::Block>,
+        block: RecoveredBlock<N::Block>,
     ) -> Result<(), InsertBlockError<N::Block>> {
         if let Err(err) = self.validate_block(&block) {
             return Err(InsertBlockError::consensus_error(err, block.into_sealed_block()))
@@ -2143,7 +2139,7 @@ where
     #[instrument(level = "trace", skip_all, fields(block_hash = %block.hash(), block_num = %block.number(),), target = "engine::tree")]
     fn on_downloaded_block(
         &mut self,
-        block: SealedBlockWithSenders<N::Block>,
+        block: RecoveredBlock<N::Block>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
@@ -2198,7 +2194,7 @@ where
 
     fn insert_block_without_senders(
         &mut self,
-        block: SealedBlockFor<N::Block>,
+        block: SealedBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
         // TODO(mattsse): fix clones
         match block.clone().try_recover() {
@@ -2209,7 +2205,7 @@ where
 
     fn insert_block(
         &mut self,
-        block: SealedBlockWithSenders<N::Block>,
+        block: RecoveredBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
         self.insert_block_inner(block.clone())
             .map_err(|kind| InsertBlockError::new(block.into_sealed_block(), kind))
@@ -2217,7 +2213,7 @@ where
 
     fn insert_block_inner(
         &mut self,
-        block: SealedBlockWithSenders<N::Block>,
+        block: RecoveredBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertBlockErrorKind> {
         debug!(target: "engine::tree", block=?block.num_hash(), parent = ?block.parent_hash(), state_root = ?block.state_root(), "Inserting new block into tree");
 
@@ -3017,9 +3013,7 @@ mod tests {
             self.persist_blocks(
                 blocks
                     .into_iter()
-                    .map(|b| {
-                        SealedBlockWithSenders::new_sealed(b.block().clone(), b.senders().clone())
-                    })
+                    .map(|b| RecoveredBlock::new_sealed(b.block().clone(), b.senders().clone()))
                     .collect(),
             );
 
@@ -3040,7 +3034,7 @@ mod tests {
 
         fn insert_block(
             &mut self,
-            block: SealedBlockWithSenders,
+            block: RecoveredBlock<reth_primitives::Block>,
         ) -> Result<InsertPayloadOk, InsertBlockError<Block>> {
             let execution_outcome = self.block_builder.get_execution_outcome(block.clone());
             self.extend_execution_outcome([execution_outcome]);
@@ -3105,7 +3099,7 @@ mod tests {
             }
         }
 
-        async fn send_new_payload(&mut self, block: SealedBlockWithSenders) {
+        async fn send_new_payload(&mut self, block: RecoveredBlock<reth_primitives::Block>) {
             let payload = block_to_payload_v3(block.clone_sealed_block());
             self.tree
                 .on_new_payload(
@@ -3120,7 +3114,7 @@ mod tests {
 
         async fn insert_chain(
             &mut self,
-            chain: impl IntoIterator<Item = SealedBlockWithSenders> + Clone,
+            chain: impl IntoIterator<Item = RecoveredBlock<reth_primitives::Block>> + Clone,
         ) {
             for block in chain.clone() {
                 self.insert_block(block.clone()).unwrap();
@@ -3142,7 +3136,7 @@ mod tests {
 
         async fn check_fork_chain_insertion(
             &mut self,
-            chain: impl IntoIterator<Item = SealedBlockWithSenders> + Clone,
+            chain: impl IntoIterator<Item = RecoveredBlock<reth_primitives::Block>> + Clone,
         ) {
             for block in chain {
                 self.check_fork_block_added(block.hash()).await;
@@ -3151,7 +3145,7 @@ mod tests {
 
         async fn check_canon_chain_insertion(
             &mut self,
-            chain: impl IntoIterator<Item = SealedBlockWithSenders> + Clone,
+            chain: impl IntoIterator<Item = RecoveredBlock<reth_primitives::Block>> + Clone,
         ) {
             for block in chain.clone() {
                 self.check_canon_block_added(block.hash()).await;
@@ -3183,7 +3177,7 @@ mod tests {
             }
         }
 
-        fn persist_blocks(&self, blocks: Vec<SealedBlockWithSenders>) {
+        fn persist_blocks(&self, blocks: Vec<RecoveredBlock<reth_primitives::Block>>) {
             let mut block_data: Vec<(B256, Block)> = Vec::with_capacity(blocks.len());
             let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
 
@@ -3196,13 +3190,16 @@ mod tests {
             self.provider.extend_headers(headers_data);
         }
 
-        fn setup_range_insertion_for_valid_chain(&mut self, chain: Vec<SealedBlockWithSenders>) {
+        fn setup_range_insertion_for_valid_chain(
+            &mut self,
+            chain: Vec<RecoveredBlock<reth_primitives::Block>>,
+        ) {
             self.setup_range_insertion_for_chain(chain, None)
         }
 
         fn setup_range_insertion_for_invalid_chain(
             &mut self,
-            chain: Vec<SealedBlockWithSenders>,
+            chain: Vec<RecoveredBlock<reth_primitives::Block>>,
             index: usize,
         ) {
             self.setup_range_insertion_for_chain(chain, Some(index))
@@ -3210,7 +3207,7 @@ mod tests {
 
         fn setup_range_insertion_for_chain(
             &mut self,
-            chain: Vec<SealedBlockWithSenders>,
+            chain: Vec<RecoveredBlock<reth_primitives::Block>>,
             invalid_index: Option<usize>,
         ) {
             // setting up execution outcomes for the chain, the blocks will be

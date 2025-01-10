@@ -16,15 +16,14 @@ pub type BlockBody<T = TransactionSigned> = alloy_consensus::BlockBody<T>;
 pub type SealedBlock<B = Block> = reth_primitives_traits::block::SealedBlock<B>;
 
 /// Helper type for constructing the block
-// TODO(mattsse): remove alias
+#[deprecated(note = "Use `RecoveredBlock` instead")]
 pub type SealedBlockFor<B = Block> = reth_primitives_traits::block::SealedBlock<B>;
 
 /// Ethereum recovered block
-// TODO(mattsse): deprecate alias
 pub type BlockWithSenders<B = Block> = reth_primitives_traits::block::RecoveredBlock<B>;
 
 /// Ethereum recovered block
-// TODO(mattsse): deprecate alias
+#[deprecated(note = "Use `RecoveredBlock` instead")]
 pub type SealedBlockWithSenders<B = Block> = reth_primitives_traits::block::RecoveredBlock<B>;
 
 #[cfg(test)]
@@ -36,7 +35,7 @@ mod tests {
     };
     use alloy_primitives::{hex_literal::hex, B256};
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives_traits::BlockBody;
+    use reth_primitives_traits::{BlockBody, RecoveredBlock};
     use std::str::FromStr;
 
     const fn _traits() {
@@ -198,9 +197,9 @@ mod tests {
 
     #[test]
     fn block_with_senders() {
-        let mut block = Block::default();
+        let mut block: Block = Block::default();
         block.body.transactions.push(TransactionSigned::default());
-        let block = BlockWithSenders::try_new_unhashed(block.clone(), vec![]).unwrap();
+        let block = RecoveredBlock::try_new_unhashed(block.clone(), vec![]).unwrap();
         assert_eq!(block.senders().len(), 1);
     }
 

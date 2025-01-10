@@ -8,9 +8,7 @@ use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN
 use reth_evm::execute::{BatchExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_node_api::FullNodePrimitives;
-use reth_primitives::{
-    Block, BlockBody, BlockExt, BlockWithSenders, Receipt, SealedBlockWithSenders, Transaction,
-};
+use reth_primitives::{Block, BlockBody, BlockExt, Receipt, RecoveredBlock, Transaction};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
     ProviderFactory,
@@ -53,7 +51,7 @@ pub(crate) fn chain_spec(address: Address) -> Arc<ChainSpec> {
 pub(crate) fn execute_block_and_commit_to_database<N>(
     provider_factory: &ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
-    block: &BlockWithSenders,
+    block: &RecoveredBlock<reth_primitives::Block>,
 ) -> eyre::Result<BlockExecutionOutput<Receipt>>
 where
     N: ProviderNodeTypes<
@@ -91,7 +89,8 @@ where
 fn blocks(
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
-) -> eyre::Result<(BlockWithSenders, BlockWithSenders)> {
+) -> eyre::Result<(RecoveredBlock<reth_primitives::Block>, RecoveredBlock<reth_primitives::Block>)>
+{
     // First block has a transaction that transfers some ETH to zero address
     let block1 = Block {
         header: Header {
@@ -163,7 +162,7 @@ pub(crate) fn blocks_and_execution_outputs<N>(
     provider_factory: ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
-) -> eyre::Result<Vec<(SealedBlockWithSenders, BlockExecutionOutput<Receipt>)>>
+) -> eyre::Result<Vec<(RecoveredBlock<reth_primitives::Block>, BlockExecutionOutput<Receipt>)>>
 where
     N: ProviderNodeTypes<
         Primitives: FullNodePrimitives<
@@ -187,7 +186,7 @@ pub(crate) fn blocks_and_execution_outcome<N>(
     provider_factory: ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
-) -> eyre::Result<(Vec<SealedBlockWithSenders>, ExecutionOutcome)>
+) -> eyre::Result<(Vec<RecoveredBlock<reth_primitives::Block>>, ExecutionOutcome)>
 where
     N: ProviderNodeTypes,
     N::Primitives:

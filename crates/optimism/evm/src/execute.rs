@@ -23,7 +23,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt, OpTransactionSigned};
-use reth_primitives::BlockWithSenders;
+use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::SignedTransaction;
 use reth_revm::{Database, State};
 use revm_primitives::{db::DatabaseCommit, EnvWithHandlerCfg, ResultAndState};
@@ -134,7 +134,7 @@ where
 
     fn apply_pre_execution_changes(
         &mut self,
-        block: &BlockWithSenders<OpBlock>,
+        block: &RecoveredBlock<OpBlock>,
     ) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
@@ -163,7 +163,7 @@ where
 
     fn execute_transactions(
         &mut self,
-        block: &BlockWithSenders<OpBlock>,
+        block: &RecoveredBlock<OpBlock>,
     ) -> Result<ExecuteOutput<OpReceipt>, Self::Error> {
         let env = self.evm_env_for_block(&block.header);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
@@ -263,7 +263,7 @@ where
 
     fn apply_post_execution_changes(
         &mut self,
-        block: &BlockWithSenders<OpBlock>,
+        block: &RecoveredBlock<OpBlock>,
         _receipts: &[OpReceipt],
     ) -> Result<Requests, Self::Error> {
         let balance_increments =
@@ -293,7 +293,7 @@ where
 
     fn validate_block_post_execution(
         &self,
-        block: &BlockWithSenders<OpBlock>,
+        block: &RecoveredBlock<OpBlock>,
         receipts: &[OpReceipt],
         _requests: &Requests,
     ) -> Result<(), ConsensusError> {
@@ -420,7 +420,7 @@ mod tests {
 
         // Attempt to execute a block with one deposit and one non-deposit transaction
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
+            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
                     body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
@@ -496,7 +496,7 @@ mod tests {
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unhashed(
+            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
                     body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },

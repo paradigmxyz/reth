@@ -9,7 +9,7 @@ use reth_evm::{
     env::EvmEnv, state_change::post_block_balance_increments, system_calls::SystemCaller,
     ConfigureEvm,
 };
-use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
@@ -59,7 +59,7 @@ where
     fn on_invalid_block<N>(
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
-        block: &SealedBlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()>
@@ -312,7 +312,7 @@ where
     fn on_invalid_block(
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
-        block: &SealedBlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {

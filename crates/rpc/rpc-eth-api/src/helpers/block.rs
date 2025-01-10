@@ -11,7 +11,7 @@ use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives::{SealedBlockFor, SealedBlockWithSenders};
+use reth_primitives::{RecoveredBlock, SealedBlock};
 use reth_primitives_traits::Block as _;
 use reth_provider::{
     BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt,
@@ -25,7 +25,7 @@ pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 /// Result type of the fetched block and its receipts.
 pub type BlockAndReceiptsResult<Eth> = Result<
     Option<(
-        SealedBlockFor<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
+        SealedBlock<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
         Arc<Vec<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>>,
     )>,
     <Eth as EthApiTypes>::Error,
@@ -217,7 +217,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
         block_id: BlockId,
     ) -> impl Future<
         Output = Result<
-            Option<Arc<SealedBlockWithSenders<<Self::Provider as BlockReader>::Block>>>,
+            Option<Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>>,
             Self::Error,
         >,
     > + Send {
