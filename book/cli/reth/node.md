@@ -703,6 +703,9 @@ Engine:
       --engine.state-root-task
           Enable state root task
 
+      --engine.state-root-task-compare-updates
+          Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout

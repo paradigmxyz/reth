@@ -43,6 +43,9 @@ pub struct TreeConfig {
     max_execute_block_batch_size: usize,
     /// Whether to use the new state root task calculation method instead of parallel calculation
     use_state_root_task: bool,
+    /// Whether to always compare trie updates from the state root task to the trie updates from
+    /// the regular state root calculation.
+    always_compare_trie_updates: bool,
 }
 
 impl Default for TreeConfig {
@@ -54,6 +57,7 @@ impl Default for TreeConfig {
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
             use_state_root_task: false,
+            always_compare_trie_updates: false,
         }
     }
 }
@@ -67,6 +71,7 @@ impl TreeConfig {
         max_invalid_header_cache_length: u32,
         max_execute_block_batch_size: usize,
         use_state_root_task: bool,
+        always_compare_trie_updates: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -75,6 +80,7 @@ impl TreeConfig {
             max_invalid_header_cache_length,
             max_execute_block_batch_size,
             use_state_root_task,
+            always_compare_trie_updates,
         }
     }
 
@@ -106,6 +112,12 @@ impl TreeConfig {
     /// Returns whether to use the state root task calculation method.
     pub const fn use_state_root_task(&self) -> bool {
         self.use_state_root_task
+    }
+
+    /// Returns whether to always compare trie updates from the state root task to the trie updates
+    /// from the regular state root calculation.
+    pub const fn always_compare_trie_updates(&self) -> bool {
+        self.always_compare_trie_updates
     }
 
     /// Setter for persistence threshold.
@@ -150,6 +162,16 @@ impl TreeConfig {
     /// Setter for whether to use the new state root task calculation method.
     pub const fn with_state_root_task(mut self, use_state_root_task: bool) -> Self {
         self.use_state_root_task = use_state_root_task;
+        self
+    }
+
+    /// Setter for whether to always compare trie updates from the state root task to the trie
+    /// updates from the regular state root calculation.
+    pub const fn with_always_compare_trie_updates(
+        mut self,
+        always_compare_trie_updates: bool,
+    ) -> Self {
+        self.always_compare_trie_updates = always_compare_trie_updates;
         self
     }
 }
