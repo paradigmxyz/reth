@@ -1,12 +1,10 @@
-use std::{io::Write, path::Path, process::Command as ProcessCommand, sync::Arc};
-use tokio::{fs, io::AsyncWriteExt};
-
 use clap::Parser;
 use eyre::Result;
 use reqwest::Client;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_node_core::args::DatadirArgs;
+use std::{fs, io::Write, path::Path, process::Command as ProcessCommand, sync::Arc};
 use tracing::info;
 
 const SNAPSHOT_FILE: &str = "snapshot.tar.lz4";
@@ -40,7 +38,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
     pub async fn execute<N>(self) -> Result<()> {
         let data_dir = self.datadir.resolve_datadir(self.chain.chain());
         let snapshot_path = data_dir.data_dir().join(SNAPSHOT_FILE);
-        fs::create_dir_all(&data_dir).await?;
+        fs::create_dir_all(&data_dir)?;
 
         info!(
             chain = %self.chain.chain(),
@@ -58,7 +56,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         info!("Snapshot decompressed successfully");
 
         // Clean up compressed file
-        fs::remove_file(&snapshot_path).await?;
+        fs::remove_file(&snapshot_path)?;
 
         Ok(())
     }
@@ -70,11 +68,11 @@ async fn download_snapshot(url: &str, target_path: &Path) -> Result<()> {
     let mut response = client.get(url).send().await?.error_for_status()?;
 
     let total_size = response.content_length().unwrap_or(0);
-    let mut file = fs::File::create(&target_path).await?;
+    let mut file = fs::File::create(target_path)?;
     let mut downloaded = 0u64;
 
     while let Some(chunk) = response.chunk().await? {
-        file.write_all(&chunk).await?;
+        file.write_all(&chunk)?;
         downloaded += chunk.len() as u64;
 
         if total_size > 0 {
