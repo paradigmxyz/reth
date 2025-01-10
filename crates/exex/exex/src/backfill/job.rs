@@ -90,11 +90,6 @@ where
             // Fetch the block
             let fetch_block_start = Instant::now();
 
-            let td = self
-                .provider
-                .header_td_by_number(block_number)?
-                .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-
             // we need the block's transactions along with their hashes
             let block = self
                 .provider
@@ -106,23 +101,24 @@ where
             cumulative_gas += block.gas_used();
 
             // Configure the executor to use the current state.
-            trace!(target: "exex::backfill", number = block_number, txs = block.body.transactions().len(), "Executing block");
+            trace!(target: "exex::backfill", number = block_number, txs = block.body().transactions().len(), "Executing block");
 
             // Execute the block
             let execute_start = Instant::now();
 
             // Unseal the block for execution
             let (block, senders) = block.into_components();
-            let (unsealed_header, hash) = block.header.split();
-            let block = P::Block::new(unsealed_header, block.body).with_senders_unchecked(senders);
+            let (header, body) = block.split_header_body();
+            let (unsealed_header, hash) = header.split();
+            let block = P::Block::new(unsealed_header, body).with_senders_unchecked(senders);
 
-            executor.execute_and_verify_one((&block, td).into())?;
+            executor.execute_and_verify_one(&block)?;
             execution_duration += execute_start.elapsed();
 
             // TODO(alexey): report gas metrics using `block.header.gas_used`
 
             // Seal the block back and save it
-            blocks.push(block.seal(hash));
+            blocks.push(block.seal_unchecked(hash));
 
             // Check if we should commit now
             let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
@@ -199,11 +195,6 @@ where
         BlockWithSenders<P::Block>,
         BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
     )> {
-        let td = self
-            .provider
-            .header_td_by_number(block_number)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-
         // Fetch the block with senders for execution.
         let block_with_senders = self
             .provider
@@ -217,7 +208,7 @@ where
 
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body().transactions().len(), "Executing block");
 
-        let block_execution_output = executor.execute((&block_with_senders, td).into())?;
+        let block_execution_output = executor.execute(&block_with_senders)?;
 
         Ok((block_with_senders, block_execution_output))
     }
@@ -236,8 +227,6 @@ impl<E, P> From<BackfillJob<E, P>> for SingleBlockBackfillJob<E, P> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use crate::{
         backfill::test_utils::{blocks_and_execution_outputs, chain_spec, to_execution_outcome},
         BackfillJobFactory,
@@ -245,12 +234,13 @@ mod tests {
     use reth_blockchain_tree::noop::NoopBlockchainTree;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::public_key_to_address;
+    use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };
     use reth_testing_utils::generators;
     use secp256k1::Keypair;
+    use std::sync::Arc;
 
     #[test]
     fn test_backfill() -> eyre::Result<()> {

@@ -1,17 +1,17 @@
+use core::fmt;
+
 use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, BlockchainTreePendingStateProvider, CanonStateNotifications,
     CanonStateSubscriptions, ChainSpecProvider, ChainStateBlockReader, ChangeSetReader,
-    DatabaseProviderFactory, EvmEnvProvider, FullExecutionDataProvider, HeaderProvider,
-    NodePrimitivesProvider, ProviderError, PruneCheckpointReader, ReceiptProvider,
-    ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox, StateProviderFactory,
-    StaticFileProviderFactory, TransactionVariant, TransactionsProvider, TreeViewer,
-    WithdrawalsProvider,
+    DatabaseProviderFactory, FullExecutionDataProvider, HeaderProvider, NodePrimitivesProvider,
+    ProviderError, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProviderBox, StateProviderFactory, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider, TreeViewer, WithdrawalsProvider,
 };
-use alloy_consensus::Header;
+use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{
-    eip4895::{Withdrawal, Withdrawals},
-    BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
+    eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
 };
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use alloy_rpc_types_engine::ForkchoiceState;
@@ -24,19 +24,20 @@ use reth_chain_state::{ChainInfoTracker, ForkChoiceNotifications, ForkChoiceSubs
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::table::Value;
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_evm::ConfigureEvmEnv;
 use reth_node_types::{
-    BlockTy, FullNodePrimitives, HeaderTy, NodeTypes, NodeTypesWithDB, ReceiptTy, TxTy,
+    BlockTy, FullNodePrimitives, HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithEngine,
+    ReceiptTy, TxTy,
 };
 use reth_primitives::{
     Account, BlockWithSenders, EthPrimitives, Receipt, SealedBlock, SealedBlockFor,
-    SealedBlockWithSenders, SealedHeader, TransactionMeta,
+    SealedBlockWithSenders, SealedHeader,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::CanonChainTracker;
+use reth_storage_api::{
+    BlockBodyIndicesProvider, CanonChainTracker, OmmersProvider, StateCommitmentProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
-use revm::primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 use std::{
     collections::BTreeMap,
     ops::{RangeBounds, RangeInclusive},
@@ -104,8 +105,14 @@ impl<T> ProviderNodeTypes for T where T: NodeTypesForProvider + NodeTypesWithDB 
 
 /// A helper trait with requirements for [`NodeTypesForProvider`] to be used within legacy
 /// blockchain tree.
-pub trait NodeTypesForTree: NodeTypesForProvider<Primitives = EthPrimitives> {}
-impl<T> NodeTypesForTree for T where T: NodeTypesForProvider<Primitives = EthPrimitives> {}
+pub trait NodeTypesForTree:
+    NodeTypesForProvider<Primitives = EthPrimitives> + NodeTypesWithEngine
+{
+}
+impl<T> NodeTypesForTree for T where
+    T: NodeTypesForProvider<Primitives = EthPrimitives> + NodeTypesWithEngine
+{
+}
 
 /// Helper trait with requirements for [`ProviderNodeTypes`] to be used within legacy blockchain
 /// tree.
@@ -117,7 +124,6 @@ impl<T> TreeNodeTypes for T where T: ProviderNodeTypes + NodeTypesForTree {}
 /// This type serves as the main entry point for interacting with the blockchain and provides data
 /// from database storage and from the blockchain tree (pending state etc.) It is a simple wrapper
 /// type that holds an instance of the database and the blockchain tree.
-#[allow(missing_debug_implementations)]
 pub struct BlockchainProvider<N: NodeTypesWithDB> {
     /// Provider type used to access the database.
     database: ProviderFactory<N>,
@@ -248,6 +254,10 @@ impl<N: ProviderNodeTypes> DatabaseProviderFactory for BlockchainProvider<N> {
     fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
         self.database.database_provider_rw()
     }
+}
+
+impl<N: ProviderNodeTypes> StateCommitmentProvider for BlockchainProvider<N> {
+    type StateCommitment = N::StateCommitment;
 }
 
 impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
@@ -392,17 +402,6 @@ impl<N: TreeNodeTypes> BlockReader for BlockchainProvider<N> {
         &self,
     ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Receipt>)>> {
         Ok(self.tree.pending_block_and_receipts())
-    }
-
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
-        self.database.ommers(id)
-    }
-
-    fn block_body_indices(
-        &self,
-        number: BlockNumber,
-    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.database.block_body_indices(number)
     }
 
     /// Returns the block with senders with matching number or hash from database.
@@ -570,9 +569,20 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider<N> {
     ) -> ProviderResult<Option<Withdrawals>> {
         self.database.withdrawals_by_block(id, timestamp)
     }
+}
 
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        self.database.latest_withdrawal()
+impl<N: TreeNodeTypes> OmmersProvider for BlockchainProvider<N> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Header>>> {
+        self.database.ommers(id)
+    }
+}
+
+impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider<N> {
+    fn block_body_indices(
+        &self,
+        number: BlockNumber,
+    ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        self.database.block_body_indices(number)
     }
 }
 
@@ -587,45 +597,6 @@ impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {
 
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
         self.database.provider()?.get_all_checkpoints()
-    }
-}
-
-impl<N: TreeNodeTypes> EvmEnvProvider for BlockchainProvider<N> {
-    fn fill_env_with_header<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
-        header: &Header,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        self.database.provider()?.fill_env_with_header(cfg, block_env, header, evm_config)
-    }
-
-    fn fill_cfg_env_at<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        at: BlockHashOrNumber,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        self.database.provider()?.fill_cfg_env_at(cfg, at, evm_config)
-    }
-
-    fn fill_cfg_env_with_header<EvmConfig>(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        header: &Header,
-        evm_config: EvmConfig,
-    ) -> ProviderResult<()>
-    where
-        EvmConfig: ConfigureEvmEnv<Header = Header>,
-    {
-        self.database.provider()?.fill_cfg_env_with_header(cfg, header, evm_config)
     }
 }
 
@@ -979,7 +950,13 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
 
 impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider<N> {
     /// Get basic account information.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         self.database.provider()?.basic_account(address)
+    }
+}
+
+impl<N: NodeTypesWithDB> fmt::Debug for BlockchainProvider<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BlockchainProvider").finish_non_exhaustive()
     }
 }

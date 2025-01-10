@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use alloy_primitives::{
     keccak256,
-    map::{HashMap, HashSet},
+    map::{B256HashMap, HashMap},
     Address, BlockNumber, Bytes, StorageKey, B256, U256,
 };
 use reth_primitives::{Account, Bytecode};
@@ -12,7 +12,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher,
-    MultiProof, StorageMultiProof, StorageProof, TrieInput,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Mock state for testing
@@ -47,8 +47,8 @@ impl StateProviderTest {
 }
 
 impl AccountReader for StateProviderTest {
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>> {
-        Ok(self.accounts.get(&address).map(|(_, acc)| *acc))
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        Ok(self.accounts.get(address).map(|(_, acc)| *acc))
     }
 }
 
@@ -136,7 +136,7 @@ impl StateProofProvider for StateProviderTest {
     fn multiproof(
         &self,
         _input: TrieInput,
-        _targets: HashMap<B256, HashSet<B256>>,
+        _targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
         unimplemented!("proof generation is not supported")
     }
@@ -145,7 +145,7 @@ impl StateProofProvider for StateProviderTest {
         &self,
         _input: TrieInput,
         _target: HashedPostState,
-    ) -> ProviderResult<HashMap<B256, Bytes>> {
+    ) -> ProviderResult<B256HashMap<Bytes>> {
         unimplemented!("witness generation is not supported")
     }
 }
@@ -165,7 +165,7 @@ impl StateProvider for StateProviderTest {
         Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).copied()))
     }
 
-    fn bytecode_by_hash(&self, code_hash: B256) -> ProviderResult<Option<Bytecode>> {
-        Ok(self.contracts.get(&code_hash).cloned())
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        Ok(self.contracts.get(code_hash).cloned())
     }
 }

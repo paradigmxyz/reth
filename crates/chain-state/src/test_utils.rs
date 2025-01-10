@@ -5,7 +5,10 @@ use crate::{
     CanonStateSubscriptions,
 };
 use alloy_consensus::{Header, Transaction as _, TxEip1559, EMPTY_ROOT_HASH};
-use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip7685::Requests};
+use alloy_eips::{
+    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, INITIAL_BASE_FEE},
+    eip7685::Requests,
+};
 use alloy_primitives::{Address, BlockNumber, B256, U256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
@@ -17,6 +20,7 @@ use reth_primitives::{
     BlockBody, EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredTx, SealedBlock,
     SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
 };
+use reth_primitives_traits::Account;
 use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};
@@ -30,7 +34,7 @@ use tokio::sync::broadcast::{self, Sender};
 /// Functionality to build blocks for tests and help with assertions about
 /// their execution.
 #[derive(Debug)]
-pub struct TestBlockBuilder<N: NodePrimitives = reth_primitives::EthPrimitives> {
+pub struct TestBlockBuilder<N: NodePrimitives = EthPrimitives> {
     /// The account that signs all the block's transactions.
     pub signer: Address,
     /// Private key for signing.
@@ -62,7 +66,7 @@ impl<N: NodePrimitives> Default for TestBlockBuilder<N> {
     }
 }
 
-impl TestBlockBuilder {
+impl<N: NodePrimitives> TestBlockBuilder<N> {
     /// Signer pk setter.
     pub fn with_signer_pk(mut self, signer_pk: PrivateKeySigner) -> Self {
         self.signer = signer_pk.address();
@@ -90,7 +94,7 @@ impl TestBlockBuilder {
     ) -> SealedBlockWithSenders {
         let mut rng = thread_rng();
 
-        let mock_tx = |nonce: u64| -> RecoveredTx {
+        let mock_tx = |nonce: u64| -> RecoveredTx<_> {
             let tx = Transaction::Eip1559(TxEip1559 {
                 chain_id: self.chain_spec.chain.id(),
                 nonce,
@@ -108,7 +112,7 @@ impl TestBlockBuilder {
 
         let num_txs = rng.gen_range(0..5);
         let signer_balance_decrease = Self::single_tx_cost() * U256::from(num_txs);
-        let transactions: Vec<RecoveredTx> = (0..num_txs)
+        let transactions: Vec<RecoveredTx<_>> = (0..num_txs)
             .map(|_| {
                 let tx = mock_tx(self.signer_build_account_info.nonce);
                 self.signer_build_account_info.nonce += 1;
@@ -137,24 +141,22 @@ impl TestBlockBuilder {
             number,
             parent_hash,
             gas_used: transactions.len() as u64 * MIN_TRANSACTION_GAS,
-            gas_limit: self.chain_spec.max_gas_limit,
             mix_hash: B256::random(),
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
             transactions_root: calculate_transaction_root(
-                &transactions.clone().into_iter().map(|tx| tx.into_signed()).collect::<Vec<_>>(),
+                &transactions.clone().into_iter().map(|tx| tx.into_tx()).collect::<Vec<_>>(),
             ),
             receipts_root: calculate_receipt_root(&receipts),
             beneficiary: Address::random(),
             state_root: state_root_unhashed(HashMap::from([(
                 self.signer,
-                (
-                    AccountInfo {
-                        balance: initial_signer_balance - signer_balance_decrease,
-                        nonce: num_txs,
-                        ..Default::default()
-                    },
-                    EMPTY_ROOT_HASH,
-                ),
+                Account {
+                    balance: initial_signer_balance - signer_balance_decrease,
+                    nonce: num_txs,
+                    ..Default::default()
+                }
+                .into_trie_account(EMPTY_ROOT_HASH),
             )])),
             // use the number as the timestamp so it is monotonically increasing
             timestamp: number +
@@ -166,14 +168,14 @@ impl TestBlockBuilder {
             ..Default::default()
         };
 
-        let block = SealedBlock {
-            header: SealedHeader::seal(header),
-            body: BlockBody {
-                transactions: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
+        let block = SealedBlock::new(
+            SealedHeader::seal(header),
+            BlockBody {
+                transactions: transactions.into_iter().map(|tx| tx.into_tx()).collect(),
                 ommers: Vec::new(),
                 withdrawals: Some(vec![].into()),
             },
-        };
+        );
 
         SealedBlockWithSenders::new(block, vec![self.signer; num_txs as usize]).unwrap()
     }
@@ -257,7 +259,7 @@ impl TestBlockBuilder {
     /// updated.
     pub fn get_execution_outcome(&mut self, block: SealedBlockWithSenders) -> ExecutionOutcome {
         let receipts = block
-            .body
+            .body()
             .transactions
             .iter()
             .enumerate()
@@ -271,7 +273,7 @@ impl TestBlockBuilder {
 
         let mut bundle_state_builder = BundleState::builder(block.number..=block.number);
 
-        for tx in &block.body.transactions {
+        for tx in &block.body().transactions {
             self.signer_execute_account_info.balance -= Self::single_tx_cost();
             bundle_state_builder = bundle_state_builder.state_present_account_info(
                 self.signer,
@@ -291,6 +293,13 @@ impl TestBlockBuilder {
         );
 
         execution_outcome.with_receipts(Receipts::from(receipts))
+    }
+}
+
+impl TestBlockBuilder {
+    /// Creates a `TestBlockBuilder` configured for Ethereum primitives.
+    pub fn eth() -> Self {
+        Self::default()
     }
 }
 /// A test `ChainEventSubscriptions`

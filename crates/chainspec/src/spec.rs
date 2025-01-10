@@ -1,23 +1,25 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec, LazyLock, OnceLock};
+use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
-use alloy_consensus::constants::EMPTY_WITHDRAWALS;
-use alloy_eips::{
-    eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
-    eip7685::EMPTY_REQUESTS_HASH,
-};
-use alloy_genesis::Genesis;
-use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
-use derive_more::From;
-
 use alloy_consensus::{
     constants::{
-        DEV_GENESIS_HASH, HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+        DEV_GENESIS_HASH, EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, MAINNET_GENESIS_HASH,
+        SEPOLIA_GENESIS_HASH,
     },
     Header,
 };
-use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
+use alloy_eips::{
+    eip1559::INITIAL_BASE_FEE,
+    eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
+    eip7685::EMPTY_REQUESTS_HASH,
+    eip7840::{BlobParams, BlobScheduleItem},
+};
+use alloy_genesis::Genesis;
+use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
+use alloy_trie::root::state_root_ref_unhashed;
+use derive_more::From;
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
     ForkFilter, ForkFilterKey, ForkHash, ForkId, Hardfork, Hardforks, Head, DEV_HARDFORKS,
@@ -27,9 +29,6 @@ use reth_network_peers::{
     sepolia_nodes, NodeRecord,
 };
 use reth_primitives_traits::SealedHeader;
-use reth_trie_common::root::state_root_ref_unhashed;
-
-use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec, LazyLock, OnceLock};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
@@ -52,8 +51,8 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
         prune_delete_limit: 20000,
+        blob_params: HardforkBlobParams::default(),
         bitfinity_evm_url: Default::default(),
     };
     spec.genesis.config.dao_fork_support = true;
@@ -78,8 +77,8 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
         prune_delete_limit: 10000,
+        blob_params: HardforkBlobParams::default(),
         bitfinity_evm_url: Default::default(),
     };
     spec.genesis.config.dao_fork_support = true;
@@ -102,8 +101,8 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             b256!("649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-        max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
         prune_delete_limit: 10000,
+        blob_params: HardforkBlobParams::default(),
         bitfinity_evm_url: Default::default(),
     };
     spec.genesis.config.dao_fork_support = true;
@@ -163,6 +162,43 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
 
+/// A container for hardforks that use eip-7804 blobs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HardforkBlobParams {
+    /// Configuration for blob-related calculations for the Cancun hardfork.
+    pub cancun: BlobParams,
+    /// Configuration for blob-related calculations for the Prague hardfork.
+    pub prague: BlobParams,
+}
+
+impl HardforkBlobParams {
+    /// Constructs params for chainspec from a provided blob schedule.
+    /// Falls back to defaults if the schedule is empty.
+    pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobScheduleItem>) -> Self {
+        let extract = |key: &str, default: fn() -> BlobParams| {
+            blob_schedule
+                .get(key)
+                .map(|item| BlobParams {
+                    target_blob_count: item.target_blob_count,
+                    max_blob_count: item.max_blob_count,
+                    ..default()
+                })
+                .unwrap_or_else(default) // Use default if key is missing
+        };
+
+        Self {
+            cancun: extract("cancun", BlobParams::cancun),
+            prague: extract("prague", BlobParams::prague),
+        }
+    }
+}
+
+impl Default for HardforkBlobParams {
+    fn default() -> Self {
+        Self { cancun: BlobParams::cancun(), prague: BlobParams::prague() }
+    }
+}
+
 impl core::ops::Deref for ChainSpec {
     type Target = ChainHardforks;
 
@@ -211,12 +247,12 @@ pub struct ChainSpec {
     /// The parameters that configure how a block's base fee is computed
     pub base_fee_params: BaseFeeParamsKind,
 
-    /// The maximum gas limit
-    pub max_gas_limit: u64,
-
     /// The delete limit for pruner, per run.
     pub prune_delete_limit: usize,
 
+    /// The settings passed for blob configurations for specific hardforks.
+    pub blob_params: HardforkBlobParams,
+    
     /// The URL of the Bitfinity EVM RPC endpoint
     pub bitfinity_evm_url: Option<String>,
 }
@@ -232,14 +268,19 @@ impl Default for ChainSpec {
             hardforks: Default::default(),
             deposit_contract: Default::default(),
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
-            max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             prune_delete_limit: MAINNET.prune_delete_limit,
+            blob_params: Default::default(),
             bitfinity_evm_url: Default::default(),
         }
     }
 }
 
 impl ChainSpec {
+    /// Converts the given [`Genesis`] into a [`ChainSpec`].
+    pub fn from_genesis(genesis: Genesis) -> Self {
+        genesis.into()
+    }
+
     /// Get information about the chain itself
     pub const fn chain(&self) -> Chain {
         self.chain
@@ -255,6 +296,12 @@ impl ChainSpec {
     #[inline]
     pub fn is_optimism_mainnet(&self) -> bool {
         self.chain == Chain::optimism_mainnet()
+    }
+
+    /// Returns the known paris block, if it exists.
+    #[inline]
+    pub fn paris_block(&self) -> Option<u64> {
+        self.paris_block_and_final_difficulty.map(|(block, _)| block)
     }
 
     /// Get the genesis block specification.
@@ -288,7 +335,7 @@ impl ChainSpec {
             if self.is_cancun_active_at_timestamp(self.genesis.timestamp) {
                 let blob_gas_used = self.genesis.blob_gas_used.unwrap_or(0);
                 let excess_blob_gas = self.genesis.excess_blob_gas.unwrap_or(0);
-                (Some(B256::ZERO), Some(blob_gas_used as u64), Some(excess_blob_gas as u64))
+                (Some(B256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
             } else {
                 (None, None, None)
             };
@@ -307,11 +354,11 @@ impl ChainSpec {
             timestamp: self.genesis.timestamp,
             mix_hash: self.genesis.mix_hash,
             beneficiary: self.genesis.coinbase,
-            base_fee_per_gas: base_fee_per_gas.map(Into::into),
+            base_fee_per_gas,
             withdrawals_root,
             parent_beacon_block_root,
-            blob_gas_used: blob_gas_used.map(Into::into),
-            excess_blob_gas: excess_blob_gas.map(Into::into),
+            blob_gas_used,
+            excess_blob_gas,
             requests_hash,
             ..Default::default()
         }
@@ -406,7 +453,7 @@ impl ChainSpec {
 
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
-        DisplayHardforks::new(&self, self.paris_block_and_final_difficulty.map(|(block, _)| block))
+        DisplayHardforks::new(&self)
     }
 
     /// Get the fork id for the given hardfork.
@@ -456,9 +503,18 @@ impl ChainSpec {
         ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
 
-    /// Compute the [`ForkId`] for the given [`Head`] following eip-6122 spec
+    /// Compute the [`ForkId`] for the given [`Head`] following eip-6122 spec.
+    ///
+    /// Note: In case there are multiple hardforks activated at the same block or timestamp, only
+    /// the first gets applied.
     pub fn fork_id(&self, head: &Head) -> ForkId {
         let mut forkhash = ForkHash::from(self.genesis_hash());
+
+        // this tracks the last applied block or timestamp fork. This is necessary for optimism,
+        // because for the optimism hardforks both the optimism and the corresponding ethereum
+        // hardfork can be configured in `ChainHardforks` if it enables ethereum equivalent
+        // functionality (e.g. additional header,body fields) This is set to 0 so that all
+        // block based hardforks are skipped in the following loop
         let mut current_applied = 0;
 
         // handle all block forks before handling timestamp based forks. see: https://eips.ethereum.org/EIPS/eip-6122
@@ -469,6 +525,7 @@ impl ChainSpec {
             ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if cond.active_at_head(head) {
+                    // skip duplicated hardforks: hardforks enabled at genesis block
                     if block != current_applied {
                         forkhash += block;
                         current_applied = block;
@@ -485,10 +542,12 @@ impl ChainSpec {
         //
         // this filter ensures that no block-based forks are returned
         for timestamp in self.hardforks.forks_iter().filter_map(|(_, cond)| {
+            // ensure we only get timestamp forks activated __after__ the genesis block
             cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
         }) {
             let cond = ForkCondition::Timestamp(timestamp);
             if cond.active_at_head(head) {
+                // skip duplicated hardfork activated at the same timestamp
                 if timestamp != current_applied {
                     forkhash += timestamp;
                     current_applied = timestamp;
@@ -608,12 +667,20 @@ impl From<Genesis> for ChainSpec {
             .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
             .collect::<Vec<_>>();
 
-        // Paris
+        // We expect no new networks to be configured with the merge, so we ignore the TTD field
+        // and merge netsplit block from external genesis files. All existing networks that have
+        // merged should have a static ChainSpec already (namely mainnet and sepolia).
         let paris_block_and_final_difficulty =
             if let Some(ttd) = genesis.config.terminal_total_difficulty {
                 hardforks.push((
                     EthereumHardfork::Paris.boxed(),
                     ForkCondition::TTD {
+                        // NOTE: this will not work properly if the merge is not activated at
+                        // genesis, and there is no merge netsplit block
+                        activation_block_number: genesis
+                            .config
+                            .merge_netsplit_block
+                            .unwrap_or_default(),
                         total_difficulty: ttd,
                         fork_block: genesis.config.merge_netsplit_block,
                     },
@@ -655,6 +722,9 @@ impl From<Genesis> for ChainSpec {
         // append the remaining unknown hardforks to ensure we don't filter any out
         ordered_hardforks.append(&mut hardforks);
 
+        // Extract blob parameters directly from blob_schedule
+        let blob_params = HardforkBlobParams::from_schedule(&genesis.config.blob_schedule);
+
         // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
         // have the deployment block in the genesis file, so we use block zero. We use the same
         // deposit topic as the mainnet contract if we have the deposit contract address in the
@@ -670,6 +740,7 @@ impl From<Genesis> for ChainSpec {
             hardforks: ChainHardforks::new(ordered_hardforks),
             paris_block_and_final_difficulty,
             deposit_contract,
+            blob_params,
             ..Default::default()
         }
     }
@@ -770,10 +841,10 @@ impl ChainSpecBuilder {
     /// Enable the Paris hardfork at the given TTD.
     ///
     /// Does not set the merge netsplit block.
-    pub fn paris_at_ttd(self, ttd: U256) -> Self {
+    pub fn paris_at_ttd(self, ttd: U256, activation_block_number: BlockNumber) -> Self {
         self.with_fork(
             EthereumHardfork::Paris,
-            ForkCondition::TTD { total_difficulty: ttd, fork_block: None },
+            ForkCondition::TTD { activation_block_number, total_difficulty: ttd, fork_block: None },
         )
     }
 
@@ -851,7 +922,11 @@ impl ChainSpecBuilder {
         self = self.london_activated();
         self.hardforks.insert(
             EthereumHardfork::Paris,
-            ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+            ForkCondition::TTD {
+                activation_block_number: 0,
+                total_difficulty: U256::ZERO,
+                fork_block: None,
+            },
         );
         self
     }
@@ -893,8 +968,8 @@ impl ChainSpecBuilder {
     pub fn build(self) -> ChainSpec {
         let paris_block_and_final_difficulty = {
             self.hardforks.get(EthereumHardfork::Paris).and_then(|cond| {
-                if let ForkCondition::TTD { fork_block, total_difficulty } = cond {
-                    fork_block.map(|fork_block| (fork_block, total_difficulty))
+                if let ForkCondition::TTD { total_difficulty, activation_block_number, .. } = cond {
+                    Some((activation_block_number, total_difficulty))
                 } else {
                     None
                 }
@@ -955,17 +1030,14 @@ pub fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
 
 #[cfg(test)]
 mod tests {
-    use core::ops::Deref;
-    use std::{collections::HashMap, str::FromStr};
-
+    use super::*;
     use alloy_chains::Chain;
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
-    use alloy_trie::EMPTY_ROOT_HASH;
+    use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
+    use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
-    use reth_trie_common::TrieAccount;
-
-    use super::*;
+    use std::{collections::HashMap, str::FromStr};
 
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
@@ -1138,6 +1210,7 @@ Post-merge hard forks (timestamp based):
             .with_fork(
                 EthereumHardfork::Paris,
                 ForkCondition::TTD {
+                    activation_block_number: 101,
                     fork_block: Some(101),
                     total_difficulty: U256::from(10_790_000),
                 },
@@ -1171,6 +1244,7 @@ Post-merge hard forks (timestamp based):
         // Fork::ConditionTTD test case without a new chain spec to demonstrate ChainSpec::satisfy
         // is independent of ChainSpec for this(these - including ForkCondition::Block) match arm(s)
         let fork_cond_ttd_no_new_spec = fork_cond_block_only_case.satisfy(ForkCondition::TTD {
+            activation_block_number: 101,
             fork_block: None,
             total_difficulty: U256::from(10_790_000),
         });

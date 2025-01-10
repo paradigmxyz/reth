@@ -2,7 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip4895::Withdrawal;
-use alloy_primitives::{map::HashMap, Address, U256};
+use alloy_primitives::{map::HashMap, Address};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc;
 use reth_primitives_traits::BlockBody;
@@ -15,7 +15,6 @@ use reth_primitives_traits::BlockBody;
 pub fn post_block_balance_increments<ChainSpec, Block>(
     chain_spec: &ChainSpec,
     block: &Block,
-    total_difficulty: U256,
 ) -> HashMap<Address, u128>
 where
     ChainSpec: EthereumHardforks,
@@ -24,12 +23,7 @@ where
     let mut balance_increments = HashMap::default();
 
     // Add block rewards if they are enabled.
-    if let Some(base_block_reward) = calc::base_block_reward(
-        chain_spec,
-        block.header().number(),
-        block.header().difficulty(),
-        total_difficulty,
-    ) {
+    if let Some(base_block_reward) = calc::base_block_reward(chain_spec, block.header().number()) {
         // Ommer rewards
         if let Some(ommers) = block.body().ommers() {
             for ommer in ommers {

@@ -207,82 +207,7 @@ async fn start_reth_node(
     import_data: Option<ImportData>,
 ) -> (
     EthJsonRpcClient<ReqwestClient>,
-    NodeHandle<
-        NodeAdapter<
-            FullNodeTypesAdapter<
-                NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
-                BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-            >,
-            Components<
-                FullNodeTypesAdapter<
-                    NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
-                    BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-                >,
-                Pool<
-                    TransactionValidationTaskExecutor<
-                        EthTransactionValidator<
-                            BlockchainProvider<
-                                NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
-                            >,
-                            EthPooledTransaction,
-                        >,
-                    >,
-                    CoinbaseTipOrdering<EthPooledTransaction>,
-                    DiskFileBlobStore,
-                >,
-                EthEvmConfig,
-                BasicBlockExecutorProvider<EthExecutionStrategyFactory>,
-                Arc<dyn FullConsensus>,
-            >,
-        >,
-        RpcAddOns<
-            NodeAdapter<
-                FullNodeTypesAdapter<
-                    NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
-                    BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-                >,
-                Components<
-                    FullNodeTypesAdapter<
-                        NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
-                        BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-                    >,
-                    Pool<
-                        TransactionValidationTaskExecutor<
-                            EthTransactionValidator<
-                                BlockchainProvider<
-                                    NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
-                                >,
-                                EthPooledTransaction,
-                            >,
-                        >,
-                        CoinbaseTipOrdering<EthPooledTransaction>,
-                        DiskFileBlobStore,
-                    >,
-                    EthEvmConfig,
-                    BasicBlockExecutorProvider<EthExecutionStrategyFactory>,
-                    Arc<dyn FullConsensus>,
-                >,
-            >,
-            EthApi<
-                BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-                Pool<
-                    TransactionValidationTaskExecutor<
-                        EthTransactionValidator<
-                            BlockchainProvider<
-                                NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
-                            >,
-                            EthPooledTransaction,
-                        >,
-                    >,
-                    CoinbaseTipOrdering<EthPooledTransaction>,
-                    DiskFileBlobStore,
-                >,
-                NetworkHandle,
-                EthEvmConfig,
-            >,
-            EthereumEngineValidatorBuilder,
-        >,
-    >,
+    NodeHandle<NodeAdapter<FullNodeTypesAdapter<EthereumNode, Arc<DatabaseEnv>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>, Components<FullNodeTypesAdapter<EthereumNode, Arc<DatabaseEnv>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>, reth_network::EthNetworkPrimitives, Pool<TransactionValidationTaskExecutor<EthTransactionValidator<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>, EthPooledTransaction>>, CoinbaseTipOrdering<EthPooledTransaction>, DiskFileBlobStore>, EthEvmConfig, BasicBlockExecutorProvider<EthExecutionStrategyFactory>, Arc<dyn FullConsensus>>>, RpcAddOns<NodeAdapter<FullNodeTypesAdapter<EthereumNode, Arc<DatabaseEnv>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>, Components<FullNodeTypesAdapter<EthereumNode, Arc<DatabaseEnv>, BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>>, reth_network::EthNetworkPrimitives, Pool<TransactionValidationTaskExecutor<EthTransactionValidator<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>, EthPooledTransaction>>, CoinbaseTipOrdering<EthPooledTransaction>, DiskFileBlobStore>, EthEvmConfig, BasicBlockExecutorProvider<EthExecutionStrategyFactory>, Arc<dyn FullConsensus>>>, EthApi<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>, Pool<TransactionValidationTaskExecutor<EthTransactionValidator<BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>, EthPooledTransaction>>, CoinbaseTipOrdering<EthPooledTransaction>, DiskFileBlobStore>, NetworkHandle, EthEvmConfig>, EthereumEngineValidatorBuilder>>,
 ) {
     let tasks = TaskManager::current();
 
@@ -345,6 +270,7 @@ async fn mock_eth_server_start(methods: impl Into<Methods>) -> (ServerHandle, So
     (handle, server_address)
 }
 
+/// Eth server mock for local testing
 pub mod eth_server {
 
     use alloy_rlp::Bytes;
@@ -355,31 +281,40 @@ pub mod eth_server {
 
     #[rpc(server, namespace = "eth")]
     pub trait Eth {
+        /// Returns the current gas price.
         #[method(name = "gasPrice")]
         async fn gas_price(&self) -> RpcResult<U256>;
 
+        /// Returns the current max priority fee per gas.
         #[method(name = "maxPriorityFeePerGas")]
         async fn max_priority_fee_per_gas(&self) -> RpcResult<U256>;
 
+        /// Sends a raw transaction.
         #[method(name = "sendRawTransaction")]
         async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256>;
 
+        /// Returns the genesis balances.
         #[method(name = "getGenesisBalances", aliases = ["ic_getGenesisBalances"])]
         async fn get_genesis_balances(&self) -> RpcResult<Vec<(Address, U256)>>;
 
+        /// Returns the last certified block.
         #[method(name = "getLastCertifiedBlock", aliases = ["ic_getLastCertifiedBlock"])]
         async fn get_last_certified_block(
             &self,
         ) -> RpcResult<CertifiedResult<did::Block<did::H256>>>;
     }
 
+    /// Eth server implementation for local testing
     #[derive(Debug)]
     pub struct EthImpl {
+        /// Current gas price
         pub gas_price: u128,
+        /// Current max priority fee per gas
         pub max_priority_fee_per_gas: u128,
     }
 
     impl EthImpl {
+        /// Create a new Eth server implementation
         pub fn new() -> Self {
             Self { gas_price: rand::random(), max_priority_fee_per_gas: rand::random() }
         }

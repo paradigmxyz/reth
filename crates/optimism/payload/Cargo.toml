@@ -33,19 +33,21 @@ reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-forks.workspace = true
+reth-optimism-primitives.workspace = true
 
 # ethereum
 revm.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-op-alloy-rpc-types-engine.workspace = true
+op-alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
 op-alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-debug.workspace = true
 alloy-consensus.workspace = true
 
 # misc
+derive_more.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
@@ -57,5 +59,6 @@ optimism = [
 	"reth-optimism-evm/optimism",
 	"revm/optimism",
 	"reth-execution-types/optimism",
-	"reth-optimism-consensus/optimism"
+	"reth-optimism-consensus/optimism",
+	"reth-optimism-primitives/optimism"
 ]

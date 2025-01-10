@@ -4,11 +4,12 @@ pub mod body;
 pub mod header;
 
 use alloc::fmt;
+use alloy_consensus::Header;
 use alloy_rlp::{Decodable, Encodable};
 
 use crate::{
-    BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeArbitrary,
-    MaybeSerde,
+    BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde,
+    SignedTransaction,
 };
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
@@ -42,7 +43,6 @@ pub trait Block:
     + Eq
     + InMemorySize
     + MaybeSerde
-    + MaybeArbitrary
     + Encodable
     + Decodable
 {
@@ -63,4 +63,28 @@ pub trait Block:
 
     /// Splits the block into its header and body.
     fn split(self) -> (Self::Header, Self::Body);
+}
+
+impl<T> Block for alloy_consensus::Block<T>
+where
+    T: SignedTransaction,
+{
+    type Header = Header;
+    type Body = alloy_consensus::BlockBody<T>;
+
+    fn new(header: Self::Header, body: Self::Body) -> Self {
+        Self { header, body }
+    }
+
+    fn header(&self) -> &Self::Header {
+        &self.header
+    }
+
+    fn body(&self) -> &Self::Body {
+        &self.body
+    }
+
+    fn split(self) -> (Self::Header, Self::Body) {
+        (self.header, self.body)
+    }
 }

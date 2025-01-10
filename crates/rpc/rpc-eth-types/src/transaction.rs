@@ -6,10 +6,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
 use reth_primitives::{RecoveredTx, TransactionSigned};
 use reth_primitives_traits::SignedTransaction;
-use reth_rpc_types_compat::{
-    transaction::{from_recovered, from_recovered_with_block_context},
-    TransactionCompat,
-};
+use reth_rpc_types_compat::TransactionCompat;
 
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -47,7 +44,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
         resp_builder: &Builder,
     ) -> Result<Builder::Transaction, Builder::Error> {
         match self {
-            Self::Pool(tx) => from_recovered(tx, resp_builder),
+            Self::Pool(tx) => resp_builder.fill_pending(tx),
             Self::Block { transaction, index, block_hash, block_number, base_fee } => {
                 let tx_info = TransactionInfo {
                     hash: Some(transaction.trie_hash()),
@@ -57,7 +54,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
                     base_fee: base_fee.map(u128::from),
                 };
 
-                from_recovered_with_block_context(transaction, tx_info, resp_builder)
+                resp_builder.fill(transaction, tx_info)
             }
         }
     }

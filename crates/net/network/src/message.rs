@@ -99,7 +99,7 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a response to a request for receipts.
     Receipts {
         /// The receiver channel for the response to a receipts request.
-        response: oneshot::Receiver<RequestResult<Receipts>>,
+        response: oneshot::Receiver<RequestResult<Receipts<N::Receipt>>>,
     },
 }
 
@@ -150,7 +150,7 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a result containing node data or an error.
     NodeData(RequestResult<Vec<Bytes>>),
     /// Represents a result containing receipts or an error.
-    Receipts(RequestResult<Vec<Vec<ReceiptWithBloom<reth_primitives::Receipt>>>>),
+    Receipts(RequestResult<Vec<Vec<ReceiptWithBloom<N::Receipt>>>>),
 }
 
 // === impl PeerResponseResult ===

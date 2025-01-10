@@ -408,10 +408,8 @@ pub enum RpcInvalidTransactionError {
     #[error("blob transaction missing blob hashes")]
     BlobTransactionMissingBlobHashes,
     /// Blob transaction has too many blobs
-    #[error("blob transaction exceeds max blobs per block; got {have}, max {max}")]
+    #[error("blob transaction exceeds max blobs per block; got {have}")]
     TooManyBlobs {
-        /// The maximum number of blobs allowed.
-        max: usize,
         /// The number of blobs in the transaction.
         have: usize,
     },
@@ -522,7 +520,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobGasPriceGreaterThanMax => Self::BlobFeeCapTooLow,
             InvalidTransaction::EmptyBlobs => Self::BlobTransactionMissingBlobHashes,
             InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
-            InvalidTransaction::TooManyBlobs { max, have } => Self::TooManyBlobs { max, have },
+            InvalidTransaction::TooManyBlobs { have } => Self::TooManyBlobs { have },
             InvalidTransaction::BlobCreateTransaction => Self::BlobTransactionIsCreate,
             InvalidTransaction::EofCrateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
             InvalidTransaction::AuthorizationListNotSupported => {
@@ -579,7 +577,7 @@ impl From<reth_primitives::InvalidTransactionError> for RpcInvalidTransactionErr
 /// Represents a reverted transaction and its output data.
 ///
 /// Displays "execution reverted(: reason)?" if the reason is a string.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub struct RevertError {
     /// The transaction output data
     ///
@@ -616,8 +614,6 @@ impl std::fmt::Display for RevertError {
         Ok(())
     }
 }
-
-impl core::error::Error for RevertError {}
 
 /// A helper error type that's mainly used to mirror `geth` Txpool's error messages
 #[derive(Debug, thiserror::Error)]
@@ -791,7 +787,7 @@ mod tests {
         assert_eq!(err.message(), "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::number(100000)).into();
-        assert_eq!(err.message(), "block not found: number 0x186a0");
+        assert_eq!(err.message(), "block not found: 0x186a0");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::latest()).into();
         assert_eq!(err.message(), "block not found: latest");

@@ -6,7 +6,7 @@ use jsonrpsee::{
     http_client::{transport::HttpBackend, HttpClient},
 };
 use reth_chainspec::EthereumHardforks;
-use reth_node_api::EngineTypes;
+use reth_node_api::{EngineTypes, NodePrimitives};
 use reth_node_builder::BuiltPayload;
 use reth_payload_builder::PayloadId;
 use reth_payload_primitives::PayloadBuilderAttributes;
@@ -17,14 +17,16 @@ use std::{marker::PhantomData, sync::Arc};
 
 /// Helper for engine api operations
 #[derive(Debug)]
-pub struct EngineApiTestContext<E, ChainSpec> {
+pub struct EngineApiTestContext<E, ChainSpec, N: NodePrimitives> {
     pub chain_spec: Arc<ChainSpec>,
-    pub canonical_stream: CanonStateNotificationStream,
+    pub canonical_stream: CanonStateNotificationStream<N>,
     pub engine_api_client: HttpClient<AuthClientService<HttpBackend>>,
     pub _marker: PhantomData<E>,
 }
 
-impl<E: EngineTypes, ChainSpec: EthereumHardforks> EngineApiTestContext<E, ChainSpec> {
+impl<E: EngineTypes, ChainSpec: EthereumHardforks, N: NodePrimitives>
+    EngineApiTestContext<E, ChainSpec, N>
+{
     /// Retrieves a v3 payload from the engine api
     pub async fn get_payload_v3(
         &self,

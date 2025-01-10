@@ -20,7 +20,7 @@ use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_core::{args::BitfinityImportArgs, dirs::ChainPath};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_events::node::NodeEvent;
-use reth_primitives::SealedHeader;
+use reth_primitives::{EthPrimitives, SealedHeader};
 use reth_provider::providers::BlockchainProvider;
 use reth_provider::{
     BlockNumReader, CanonChainTracker, ChainSpecProvider, DatabaseProviderFactory, HeaderProvider,
@@ -28,9 +28,7 @@ use reth_provider::{
 };
 use reth_prune::PruneModes;
 use reth_stages::{
-    prelude::*,
-    stages::{ExecutionStage, SenderRecoveryStage},
-    ExecutionStageThresholds, Pipeline, StageSet,
+    prelude::*, stages::{ExecutionStage, SenderRecoveryStage}, ExecutionStageThresholds, Pipeline, StageSet
 };
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -219,7 +217,7 @@ impl BitfinityImportCommand {
         static_file_producer: StaticFileProducer<
             ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
         >,
-    ) -> eyre::Result<(TypedPipeline, impl Stream<Item = NodeEvent>)>
+    ) -> eyre::Result<(TypedPipeline, impl Stream<Item = NodeEvent<EthPrimitives>>)>
     where
         C: Consensus + 'static,
     {

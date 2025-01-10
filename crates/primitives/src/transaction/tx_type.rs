@@ -11,24 +11,6 @@ use derive_more::Display;
 use reth_primitives_traits::InMemorySize;
 use serde::{Deserialize, Serialize};
 
-/// Identifier parameter for legacy transaction
-#[cfg(any(test, feature = "reth-codec"))]
-pub const COMPACT_IDENTIFIER_LEGACY: usize = 0;
-
-/// Identifier parameter for EIP-2930 transaction
-#[cfg(any(test, feature = "reth-codec"))]
-pub const COMPACT_IDENTIFIER_EIP2930: usize = 1;
-
-/// Identifier parameter for EIP-1559 transaction
-#[cfg(any(test, feature = "reth-codec"))]
-pub const COMPACT_IDENTIFIER_EIP1559: usize = 2;
-
-/// For backwards compatibility purposes only 2 bits of the type are encoded in the identifier
-/// parameter. In the case of a [`COMPACT_EXTENDED_IDENTIFIER_FLAG`], the full transaction type is
-/// read from the buffer as a single byte.
-#[cfg(any(test, feature = "reth-codec"))]
-pub const COMPACT_EXTENDED_IDENTIFIER_FLAG: usize = 3;
-
 /// Transaction Type
 ///
 /// Currently being used as 2-bit type when encoding it to `reth_codecs::Compact` on
@@ -96,8 +78,6 @@ impl Typed2718 for TxType {
         (*self).into()
     }
 }
-
-impl reth_primitives_traits::TxType for TxType {}
 
 impl InMemorySize for TxType {
     /// Calculates a heuristic for the in-memory size of the [`TxType`].
@@ -258,16 +238,8 @@ impl Decodable for TxType {
 mod tests {
     use super::*;
     use alloy_primitives::hex;
-    use reth_codecs::Compact;
-    use reth_primitives_traits::TxType as _;
+    use reth_codecs::{txtype::*, Compact};
     use rstest::rstest;
-
-    #[test]
-    fn is_broadcastable() {
-        assert!(TxType::Legacy.is_broadcastable_in_full());
-        assert!(TxType::Eip1559.is_broadcastable_in_full());
-        assert!(!TxType::Eip4844.is_broadcastable_in_full());
-    }
 
     #[rstest]
     #[case(U64::from(LEGACY_TX_TYPE_ID), Ok(TxType::Legacy))]

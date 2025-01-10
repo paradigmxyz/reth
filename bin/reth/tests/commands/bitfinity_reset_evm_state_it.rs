@@ -153,7 +153,7 @@ async fn bitfinity_test_reset_should_extract_all_accounts_data() {
             let mut accounts_with_storage_values = 0;
             for (executor_account_address, executor_account) in &executor_accounts.data {
                 let account =
-                    provider.basic_account(executor_account_address.0 .0.into()).unwrap().unwrap();
+                    provider.basic_account(&executor_account_address.0 .0.into()).unwrap().unwrap();
 
                 if let Some(bytecode) = &executor_account.bytecode {
                     accounts_with_code += 1;

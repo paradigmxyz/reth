@@ -73,7 +73,7 @@ where
         let hash_map = accounts_before.iter().try_fold(
             HashMap::default(),
             |mut hash_map, account_before| -> RethResult<_> {
-                let current_balance = state.account_balance(account_before.address)?;
+                let current_balance = state.account_balance(&account_before.address)?;
                 let prev_balance = account_before.info.map(|info| info.balance);
                 if current_balance != prev_balance {
                     hash_map.insert(account_before.address, current_balance.unwrap_or_default());

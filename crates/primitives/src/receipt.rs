@@ -9,12 +9,9 @@ use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use bytes::BufMut;
 use derive_more::{DerefMut, From, IntoIterator};
-use reth_primitives_traits::receipt::ReceiptExt;
 use serde::{Deserialize, Serialize};
 
 use crate::TxType;
-#[cfg(feature = "reth-codec")]
-use reth_zstd_compressors::{RECEIPT_COMPRESSOR, RECEIPT_DECOMPRESSOR};
 
 /// Retrieves gas spent by transactions as a vector of tuples (transaction index, gas used).
 pub use reth_primitives_traits::receipt::gas_spent_by_transactions;
@@ -24,7 +21,10 @@ pub use reth_primitives_traits::receipt::gas_spent_by_transactions;
     Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable, Serialize, Deserialize,
 )]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::CompactZstd))]
-#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests)]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_zstd(
+    compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
+    decompressor = reth_zstd_compressors::RECEIPT_DECOMPRESSOR
+))]
 #[rlp(trailing)]
 pub struct Receipt {
     /// Receipt type.
@@ -250,8 +250,8 @@ impl TxReceipt for Receipt {
         alloy_primitives::logs_bloom(self.logs.iter())
     }
 
-    fn cumulative_gas_used(&self) -> u128 {
-        self.cumulative_gas_used as u128
+    fn cumulative_gas_used(&self) -> u64 {
+        self.cumulative_gas_used
     }
 
     fn logs(&self) -> &[Log] {
@@ -266,15 +266,6 @@ impl Typed2718 for Receipt {
 }
 
 impl reth_primitives_traits::Receipt for Receipt {}
-
-impl ReceiptExt for Receipt {
-    fn receipts_root(_receipts: &[&Self]) -> B256 {
-        #[cfg(feature = "optimism")]
-        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
-        #[cfg(not(feature = "optimism"))]
-        crate::proofs::calculate_receipt_root_no_memo(_receipts)
-    }
-}
 
 impl InMemorySize for Receipt {
     /// Calculates a heuristic for the in-memory size of the [Receipt].

@@ -35,18 +35,18 @@ bytes.workspace = true
 
 [features]
 reth-codec = [
-	"dep:reth-codecs",
-	"dep:bytes",
-	"dep:modular-bitfield",
-	"reth-trie-common/reth-codec"
+    "dep:reth-codecs",
+    "dep:bytes",
+    "dep:modular-bitfield",
+    "reth-trie-common/reth-codec",
 ]
 test-utils = [
-	"dep:arbitrary",
-	"reth-codecs/test-utils",
-	"reth-trie-common/test-utils"
+    "dep:arbitrary",
+    "reth-codecs?/test-utils",
+    "reth-trie-common/test-utils",
 ]
 arbitrary = [
-	"alloy-primitives/arbitrary",
-	"reth-codecs/arbitrary",
-	"reth-trie-common/arbitrary"
+    "alloy-primitives/arbitrary",
+    "reth-codecs?/arbitrary",
+    "reth-trie-common/arbitrary",
 ]

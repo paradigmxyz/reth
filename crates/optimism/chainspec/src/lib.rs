@@ -29,6 +29,7 @@ pub use dev::OP_DEV;
 #[cfg(not(feature = "std"))]
 pub(crate) use once_cell::sync::Lazy as LazyLock;
 pub use op::OP_MAINNET;
+use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
 pub use op_sepolia::OP_SEPOLIA;
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract, EthChainSpec,
@@ -192,7 +193,7 @@ pub struct OpChainSpec {
 }
 
 impl OpChainSpec {
-    /// Extracts the Holcene 1599 parameters from the encoded extradata from the parent header.
+    /// Extracts the Holocene 1599 parameters from the encoded extra data from the parent header.
     ///
     /// Caution: Caller must ensure that holocene is active in the parent header.
     ///
@@ -201,8 +202,8 @@ impl OpChainSpec {
         &self,
         parent: &Header,
         timestamp: u64,
-    ) -> Result<u64, DecodeError> {
-        let (denominator, elasticity) = decode_holocene_1559_params(&parent.extra_data)?;
+    ) -> Result<u64, EIP1559ParamError> {
+        let (elasticity, denominator) = decode_holocene_extra_data(&parent.extra_data)?;
         let base_fee = if elasticity == 0 && denominator == 0 {
             parent
                 .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
@@ -221,13 +222,11 @@ impl OpChainSpec {
         &self,
         parent: &Header,
         timestamp: u64,
-    ) -> Result<U256, DecodeError> {
+    ) -> Result<U256, EIP1559ParamError> {
         // > if Holocene is active in parent_header.timestamp, then the parameters from
         // > parent_header.extraData are used.
-        let is_holocene_activated = self.inner.is_fork_active_at_timestamp(
-            reth_optimism_forks::OpHardfork::Holocene,
-            parent.timestamp,
-        );
+        let is_holocene_activated =
+            self.inner.is_fork_active_at_timestamp(OpHardfork::Holocene, parent.timestamp);
 
         // If we are in the Holocene, we need to use the base fee params
         // from the parent block's extra data.
@@ -242,40 +241,6 @@ impl OpChainSpec {
             ))
         }
     }
-}
-
-#[derive(Clone, Debug, Display, Eq, PartialEq)]
-/// Error type for decoding Holocene 1559 parameters
-pub enum DecodeError {
-    #[display("Insufficient data to decode")]
-    /// Insufficient data to decode
-    InsufficientData,
-    #[display("Invalid denominator parameter")]
-    /// Invalid denominator parameter
-    InvalidDenominator,
-    #[display("Invalid elasticity parameter")]
-    /// Invalid elasticity parameter
-    InvalidElasticity,
-}
-
-impl core::error::Error for DecodeError {
-    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        // None of the errors have sub-errors
-        None
-    }
-}
-
-/// Extracts the Holcene 1599 parameters from the encoded form:
-/// <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#eip1559params-encoding>
-pub fn decode_holocene_1559_params(extra_data: &[u8]) -> Result<(u32, u32), DecodeError> {
-    if extra_data.len() < 9 {
-        return Err(DecodeError::InsufficientData);
-    }
-    let denominator: [u8; 4] =
-        extra_data[1..5].try_into().map_err(|_| DecodeError::InvalidDenominator)?;
-    let elasticity: [u8; 4] =
-        extra_data[5..9].try_into().map_err(|_| DecodeError::InvalidElasticity)?;
-    Ok((u32::from_be_bytes(denominator), u32::from_be_bytes(elasticity)))
 }
 
 impl EthChainSpec for OpChainSpec {
@@ -315,10 +280,6 @@ impl EthChainSpec for OpChainSpec {
 
     fn genesis(&self) -> &Genesis {
         self.inner.genesis()
-    }
-
-    fn max_gas_limit(&self) -> u64 {
-        self.inner.max_gas_limit()
     }
 
     fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
@@ -394,21 +355,15 @@ impl From<Genesis> for OpChainSpec {
             .filter_map(|(hardfork, opt)| opt.map(|block| (hardfork, ForkCondition::Block(block))))
             .collect::<Vec<_>>();
 
-        // Paris
-        let paris_block_and_final_difficulty =
-            if let Some(ttd) = genesis.config.terminal_total_difficulty {
-                block_hardforks.push((
-                    EthereumHardfork::Paris.boxed(),
-                    ForkCondition::TTD {
-                        total_difficulty: ttd,
-                        fork_block: genesis.config.merge_netsplit_block,
-                    },
-                ));
-
-                genesis.config.merge_netsplit_block.map(|block| (block, ttd))
-            } else {
-                None
-            };
+        // We set the paris hardfork for OP networks to zero
+        block_hardforks.push((
+            EthereumHardfork::Paris.boxed(),
+            ForkCondition::TTD {
+                activation_block_number: 0,
+                total_difficulty: U256::ZERO,
+                fork_block: genesis.config.merge_netsplit_block,
+            },
+        ));
 
         // Time-based hardforks
         let time_hardfork_opts = [
@@ -452,7 +407,9 @@ impl From<Genesis> for OpChainSpec {
                 chain: genesis.config.chain_id.into(),
                 genesis,
                 hardforks: ChainHardforks::new(ordered_hardforks),
-                paris_block_and_final_difficulty,
+                // We assume no OP network merges, and set the paris block and total difficulty to
+                // zero
+                paris_block_and_final_difficulty: Some((0, U256::ZERO)),
                 base_fee_params: optimism_genesis_info.base_fee_params,
                 ..Default::default()
             },
@@ -513,7 +470,7 @@ mod tests {
     use std::sync::Arc;
 
     use alloy_genesis::{ChainConfig, Genesis};
-    use alloy_primitives::{b256, Bytes};
+    use alloy_primitives::{b256, hex, Bytes};
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition, ForkHash, ForkId, Head};
     use reth_optimism_forks::{OpHardfork, OpHardforks};
@@ -557,7 +514,11 @@ mod tests {
                 ),
                 (
                     Head { number: 0, timestamp: 1726070401, ..Default::default() },
-                    ForkId { hash: ForkHash([0xbc, 0x38, 0xf9, 0xca]), next: 0 },
+                    ForkId { hash: ForkHash([0xbc, 0x38, 0xf9, 0xca]), next: 1736445601 },
+                ),
+                (
+                    Head { number: 0, timestamp: 1736445601, ..Default::default() },
+                    ForkId { hash: ForkHash([0x3a, 0x2a, 0xf1, 0x83]), next: 0 },
                 ),
             ],
         );
@@ -728,7 +689,7 @@ mod tests {
     #[test]
     fn latest_base_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0xbc, 0x38, 0xf9, 0xca]), next: 0 },
+            ForkId { hash: ForkHash([0x3a, 0x2a, 0xf1, 0x83]), next: 0 },
             BASE_MAINNET.latest_fork_id()
         )
     }
@@ -737,7 +698,7 @@ mod tests {
     fn latest_base_mainnet_fork_id_with_builder() {
         let base_mainnet = OpChainSpecBuilder::base_mainnet().build();
         assert_eq!(
-            ForkId { hash: ForkHash([0xbc, 0x38, 0xf9, 0xca]), next: 0 },
+            ForkId { hash: ForkHash([0x3a, 0x2a, 0xf1, 0x83]), next: 0 },
             base_mainnet.latest_fork_id()
         )
     }
@@ -1041,10 +1002,10 @@ mod tests {
             // OpHardfork::Isthmus.boxed(),
         ];
 
-        assert!(expected_hardforks
-            .iter()
-            .zip(hardforks.iter())
-            .all(|(expected, actual)| &**expected == *actual));
+        for (expected, actual) in expected_hardforks.iter().zip(hardforks.iter()) {
+            println!("got {expected:?}, {actual:?}");
+            assert_eq!(&**expected, &**actual);
+        }
         assert_eq!(expected_hardforks.len(), hardforks.len());
     }
 
@@ -1079,7 +1040,6 @@ mod tests {
                 paris_block_and_final_difficulty: Some((0, U256::from(0))),
                 hardforks,
                 base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
-                max_gas_limit: crate::constants::BASE_SEPOLIA_MAX_GAS_LIMIT,
                 prune_delete_limit: 10000,
                 ..Default::default()
             },
@@ -1129,5 +1089,22 @@ mod tests {
                     .unwrap_or_default()
             )
         );
+    }
+
+    // <https://sepolia.basescan.org/block/19773628>
+    #[test]
+    fn test_get_base_fee_holocene_extra_data_set_base_sepolia() {
+        let op_chain_spec = BASE_SEPOLIA.clone();
+        let parent = Header {
+            base_fee_per_gas: Some(507),
+            gas_used: 4847634,
+            gas_limit: 60000000,
+            extra_data: hex!("00000000fa0000000a").into(),
+            timestamp: 1735315544,
+            ..Default::default()
+        };
+
+        let base_fee = op_chain_spec.next_block_base_fee(&parent, 1735315546).unwrap();
+        assert_eq!(base_fee, U256::from(507));
     }
 }

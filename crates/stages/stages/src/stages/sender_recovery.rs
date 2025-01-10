@@ -59,7 +59,7 @@ impl Default for SenderRecoveryStage {
 impl<Provider> Stage<Provider> for SenderRecoveryStage
 where
     Provider: DBProvider<Tx: DbTxMut>
-        + BlockReader<Header = reth_primitives::Header>
+        + BlockReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + StatsReader
         + PruneCheckpointReader,
@@ -146,8 +146,7 @@ fn recover_range<Provider, CURSOR>(
     senders_cursor: &mut CURSOR,
 ) -> Result<(), StageError>
 where
-    Provider:
-        DBProvider + HeaderProvider<Header = reth_primitives::Header> + StaticFileProviderFactory,
+    Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Sending batch for processing");
@@ -377,8 +376,8 @@ mod tests {
     use reth_primitives::{SealedBlock, TransactionSigned};
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::{
-        providers::StaticFileWriter, DatabaseProviderFactory, PruneCheckpointWriter,
-        StaticFileProviderFactory, TransactionsProvider,
+        providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
+        PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_api::StageUnitCheckpoint;
@@ -478,7 +477,7 @@ mod tests {
         let expected_progress = seed
             .iter()
             .find(|x| {
-                tx_count += x.body.transactions.len();
+                tx_count += x.transaction_count();
                 tx_count as u64 > threshold
             })
             .map(|x| x.number)
@@ -537,7 +536,7 @@ mod tests {
         let mut tx_senders = Vec::new();
         let mut tx_number = 0;
         for block in &blocks[..=max_processed_block] {
-            for transaction in &block.body.transactions {
+            for transaction in &block.body().transactions {
                 if block.number > max_pruned_block {
                     tx_senders
                         .push((tx_number, transaction.recover_signer().expect("recover signer")));
@@ -556,7 +555,7 @@ mod tests {
                     tx_number: Some(
                         blocks[..=max_pruned_block as usize]
                             .iter()
-                            .map(|block| block.body.transactions.len() as u64)
+                            .map(|block| block.transaction_count() as u64)
                             .sum(),
                     ),
                     prune_mode: PruneMode::Full,
@@ -571,9 +570,9 @@ mod tests {
             EntitiesCheckpoint {
                 processed: blocks[..=max_processed_block]
                     .iter()
-                    .map(|block| block.body.transactions.len() as u64)
+                    .map(|block| block.transaction_count() as u64)
                     .sum(),
-                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum()
+                total: blocks.iter().map(|block| block.transaction_count() as u64).sum()
             }
         );
     }

@@ -12,14 +12,14 @@ use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{
-    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
-    ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes,
+    env::EvmEnv, state_change::post_block_withdrawals_balance_increments,
+    system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes,
 };
 use reth_primitives::{BlockExt, InvalidTransactionError, SealedBlockWithSenders};
-use reth_primitives_traits::receipt::ReceiptExt;
+use reth_primitives_traits::Receipt;
 use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ProviderBlock, ProviderError,
-    ProviderHeader, ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
+    BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,
+    ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
 };
 use reth_revm::{
     database::StateProviderDatabase,
@@ -47,8 +47,7 @@ pub trait LoadPendingBlock:
             HeaderResponse = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
         >,
     > + RpcNodeCore<
-        Provider: BlockReaderIdExt<Receipt: ReceiptExt>
-                      + EvmEnvProvider<ProviderHeader<Self::Provider>>
+        Provider: BlockReaderIdExt<Receipt: Receipt>
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
@@ -87,13 +86,11 @@ pub trait LoadPendingBlock:
                 // Note: for the PENDING block we assume it is past the known merge block and
                 // thus this will not fail when looking up the total
                 // difficulty value for the blockenv.
-                let (cfg, block_env) = self
-                    .provider()
-                    .env_with_header(block.header(), self.evm_config().clone())
-                    .map_err(Self::Error::from_eth_err)?;
+                let EvmEnv { cfg_env_with_handler_cfg, block_env } =
+                    self.evm_config().cfg_and_block_env(block.header());
 
                 return Ok(PendingBlockEnv::new(
-                    cfg,
+                    cfg_env_with_handler_cfg,
                     block_env,
                     PendingBlockEnvOrigin::ActualPending(block, receipts),
                 ));
@@ -108,7 +105,7 @@ pub trait LoadPendingBlock:
             .map_err(Self::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
 
-        let (cfg, block_env) = self
+        let EvmEnv { cfg_env_with_handler_cfg, block_env } = self
             .evm_config()
             .next_cfg_and_block_env(
                 &latest,
@@ -116,13 +113,14 @@ pub trait LoadPendingBlock:
                     timestamp: latest.timestamp() + 12,
                     suggested_fee_recipient: latest.beneficiary(),
                     prev_randao: B256::random(),
+                    gas_limit: latest.gas_limit(),
                 },
             )
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
 
         Ok(PendingBlockEnv::new(
-            cfg,
+            cfg_env_with_handler_cfg,
             block_env,
             PendingBlockEnvOrigin::DerivedFromLatest(latest.hash()),
         ))
@@ -207,8 +205,8 @@ pub trait LoadPendingBlock:
     fn assemble_block(
         &self,
         block_env: &BlockEnv,
-        parent_hash: revm_primitives::B256,
-        state_root: revm_primitives::B256,
+        parent_hash: B256,
+        state_root: B256,
         transactions: Vec<ProviderTx<Self::Provider>>,
         receipts: &[ProviderReceipt<Self::Provider>],
     ) -> ProviderBlock<Self::Provider>;
@@ -217,8 +215,8 @@ pub trait LoadPendingBlock:
     fn assemble_block_and_receipts(
         &self,
         block_env: &BlockEnv,
-        parent_hash: revm_primitives::B256,
-        state_root: revm_primitives::B256,
+        parent_hash: B256,
+        state_root: B256,
         transactions: Vec<ProviderTx<Self::Provider>>,
         results: Vec<ExecutionResult>,
     ) -> (ProviderBlock<Self::Provider>, Vec<ProviderReceipt<Self::Provider>>) {
@@ -343,7 +341,7 @@ pub trait LoadPendingBlock:
             let env = Env::boxed(
                 cfg.cfg_env.clone(),
                 block_env.clone(),
-                Self::evm_config(self).tx_env(tx.as_signed(), tx.signer()),
+                Self::evm_config(self).tx_env(tx.tx(), tx.signer()),
             );
 
             let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
@@ -395,7 +393,7 @@ pub trait LoadPendingBlock:
             cumulative_gas_used += gas_used;
 
             // append transaction to the list of executed transactions
-            let (tx, sender) = tx.to_components();
+            let (tx, sender) = tx.into_parts();
             executed_txs.push(tx);
             senders.push(sender);
             results.push(result);

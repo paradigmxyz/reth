@@ -7,12 +7,8 @@ use crate::{
     ReceiptProvider, StageCheckpointReader, StatsReader, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, WithdrawalsProvider,
 };
-use alloy_consensus::Header;
-use alloy_eips::{
-    eip2718::Encodable2718,
-    eip4895::{Withdrawal, Withdrawals},
-    BlockHashOrNumber,
-};
+use alloy_consensus::{transaction::TransactionMeta, Header};
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -39,11 +35,11 @@ use reth_primitives::{
     },
     transaction::recover_signers,
     BlockWithSenders, Receipt, SealedBlockFor, SealedBlockWithSenders, SealedHeader,
-    StaticFileSegment, TransactionMeta, TransactionSigned,
+    StaticFileSegment, TransactionSigned,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{PipelineTarget, StageId};
-use reth_storage_api::DBProvider;
+use reth_storage_api::{BlockBodyIndicesProvider, DBProvider, OmmersProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
@@ -1628,16 +1624,6 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        // Required data not present in static_files
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        // Required data not present in static_files
-        Err(ProviderError::UnsupportedProvider)
-    }
-
     fn block_with_senders(
         &self,
         _id: BlockHashOrNumber,
@@ -1685,8 +1671,17 @@ impl<N: NodePrimitives> WithdrawalsProvider for StaticFileProvider<N> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
+}
 
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
+impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileProvider<N> {
+    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+        // Required data not present in static_files
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl<N: Send + Sync> BlockBodyIndicesProvider for StaticFileProvider<N> {
+    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }

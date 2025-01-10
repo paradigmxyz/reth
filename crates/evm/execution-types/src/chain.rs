@@ -25,7 +25,7 @@ use revm::db::BundleState;
 /// # Warning
 ///
 /// A chain of blocks should not be empty.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Chain<N: NodePrimitives = reth_primitives::EthPrimitives> {
     /// All blocks in this chain.
@@ -41,6 +41,16 @@ pub struct Chain<N: NodePrimitives = reth_primitives::EthPrimitives> {
     /// NOTE: Currently, trie updates are present only for
     /// single-block chains that extend the canonical chain.
     trie_updates: Option<TrieUpdates>,
+}
+
+impl<N: NodePrimitives> Default for Chain<N> {
+    fn default() -> Self {
+        Self {
+            blocks: Default::default(),
+            execution_outcome: Default::default(),
+            trie_updates: Default::default(),
+        }
+    }
 }
 
 impl<N: NodePrimitives> Chain<N> {
@@ -244,7 +254,7 @@ impl<N: NodePrimitives> Chain<N> {
             self.blocks().iter().zip(self.execution_outcome.receipts().iter())
         {
             let mut tx_receipts = Vec::with_capacity(receipts.len());
-            for (tx, receipt) in block.body.transactions().iter().zip(receipts.iter()) {
+            for (tx, receipt) in block.body().transactions().iter().zip(receipts.iter()) {
                 tx_receipts.push((
                     tx.trie_hash(),
                     receipt.as_ref().expect("receipts have not been pruned").clone(),
@@ -364,9 +374,11 @@ impl<N: NodePrimitives> Chain<N> {
 
 /// Wrapper type for `blocks` display in `Chain`
 #[derive(Debug)]
-pub struct DisplayBlocksChain<'a>(pub &'a BTreeMap<BlockNumber, SealedBlockWithSenders>);
+pub struct DisplayBlocksChain<'a, B: reth_primitives_traits::Block>(
+    pub &'a BTreeMap<BlockNumber, SealedBlockWithSenders<B>>,
+);
 
-impl fmt::Display for DisplayBlocksChain<'_> {
+impl<B: reth_primitives_traits::Block> fmt::Display for DisplayBlocksChain<'_, B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut list = f.debug_list();
         let mut values = self.0.values().map(|block| block.num_hash());
@@ -425,7 +437,7 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
     /// Returns an iterator over all transactions in the chain.
     #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &<B::Body as BlockBody>::Transaction> + '_ {
-        self.blocks.values().flat_map(|block| block.body.transactions().iter())
+        self.blocks.values().flat_map(|block| block.body().transactions().iter())
     }
 
     /// Returns an iterator over all transactions and their senders.
@@ -527,6 +539,7 @@ pub(super) mod serde_bincode_compat {
     use reth_primitives::{
         serde_bincode_compat::SealedBlockWithSenders, EthPrimitives, NodePrimitives,
     };
+    use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, Block};
     use reth_trie_common::serde_bincode_compat::updates::TrieUpdates;
     use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
@@ -564,7 +577,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<B> Serialize for SealedBlocksWithSenders<'_, B>
     where
-        B: reth_primitives_traits::Block,
+        B: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
     {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -582,7 +595,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<'de, B> Deserialize<'de> for SealedBlocksWithSenders<'_, B>
     where
-        B: reth_primitives_traits::Block,
+        B: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
     {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
@@ -681,8 +694,25 @@ pub(super) mod serde_bincode_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::B256;
+    use alloy_consensus::TxType;
+    use alloy_primitives::{Address, B256};
+    use reth_ethereum_primitives::Receipt;
+    use reth_primitives::Receipts;
     use revm::primitives::{AccountInfo, HashMap};
+
+    // TODO: this is temporary, until we fully switch over to `reth_ethereum_primitives` for the
+    // `Receipt` type in `EthPrimitives`.
+    #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[non_exhaustive]
+    struct TestPrimitives;
+
+    impl reth_primitives_traits::NodePrimitives for TestPrimitives {
+        type Block = reth_primitives::Block;
+        type BlockHeader = alloy_consensus::Header;
+        type BlockBody = reth_primitives::BlockBody;
+        type SignedTx = reth_primitives::TransactionSigned;
+        type Receipt = Receipt;
+    }
 
     #[test]
     fn chain_append() {
@@ -697,10 +727,10 @@ mod tests {
         let mut block3 = block.clone();
         let mut block4 = block;
 
-        block1.block.header.set_hash(block1_hash);
-        block2.block.header.set_hash(block2_hash);
-        block3.block.header.set_hash(block3_hash);
-        block4.block.header.set_hash(block4_hash);
+        block1.block.set_hash(block1_hash);
+        block2.block.set_hash(block2_hash);
+        block3.block.set_hash(block3_hash);
+        block4.block.set_hash(block4_hash);
 
         block3.set_parent_hash(block2_hash);
 
@@ -815,10 +845,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn receipts_by_block_hash() {
-        use reth_primitives::{Receipt, Receipts, TxType};
-
         // Create a default SealedBlockWithSenders object
         let block: SealedBlockWithSenders = Default::default();
 
@@ -865,7 +892,7 @@ mod tests {
 
         // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
         // including block1_hash and block2_hash, and the execution_outcome
-        let chain: Chain = Chain {
+        let chain: Chain<TestPrimitives> = Chain {
             blocks: BTreeMap::from([(10, block1), (11, block2)]),
             execution_outcome: execution_outcome.clone(),
             ..Default::default()

@@ -464,7 +464,10 @@ impl<H, B> OrderedBodiesResponse<H, B> {
     }
 }
 
-impl<H: BlockHeader, B> OrderedBodiesResponse<H, B> {
+impl<H, B> OrderedBodiesResponse<H, B>
+where
+    H: BlockHeader,
+{
     /// Returns the block number of the first element
     ///
     /// # Panics
@@ -675,8 +678,10 @@ mod tests {
         );
 
         let headers = blocks.iter().map(|block| block.header.clone()).collect::<Vec<_>>();
-        let bodies =
-            blocks.into_iter().map(|block| (block.hash(), block.body)).collect::<HashMap<_, _>>();
+        let bodies = blocks
+            .into_iter()
+            .map(|block| (block.hash(), block.into_body()))
+            .collect::<HashMap<_, _>>();
 
         insert_headers(db.db(), &headers);
 

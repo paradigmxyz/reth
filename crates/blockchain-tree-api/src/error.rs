@@ -55,7 +55,7 @@ pub enum BlockchainTreeError {
 }
 
 /// Canonical Errors
-#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone)]
 pub enum CanonicalError {
     /// Error originating from validation operations.
     #[error(transparent)]
@@ -73,7 +73,7 @@ pub enum CanonicalError {
     #[error("transaction error on commit: {0}")]
     CanonicalCommit(String),
     /// Error indicating that a previous optimistic sync target was re-orged
-    #[error("transaction error on revert: {0}")]
+    #[error("optimistic sync target was re-orged at block: {0}")]
     OptimisticTargetRevert(BlockNumber),
 }
 
@@ -166,40 +166,15 @@ impl std::fmt::Debug for InsertBlockError {
     }
 }
 
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to insert block (hash={}, number={}, parent_hash={}): {kind}",
+        .block.hash(),
+        .block.number,
+        .block.parent_hash)]
 struct InsertBlockErrorData {
     block: SealedBlock,
+    #[source]
     kind: InsertBlockErrorKind,
-}
-
-impl std::fmt::Display for InsertBlockErrorData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Failed to insert block (hash={}, number={}, parent_hash={}): {}",
-            self.block.hash(),
-            self.block.number,
-            self.block.parent_hash,
-            self.kind
-        )
-    }
-}
-
-impl std::fmt::Debug for InsertBlockErrorData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("InsertBlockError")
-            .field("error", &self.kind)
-            .field("hash", &self.block.hash())
-            .field("number", &self.block.number)
-            .field("parent_hash", &self.block.parent_hash)
-            .field("num_txs", &self.block.body.transactions.len())
-            .finish_non_exhaustive()
-    }
-}
-
-impl core::error::Error for InsertBlockErrorData {
-    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        Some(&self.kind)
-    }
 }
 
 impl InsertBlockErrorData {
@@ -212,22 +187,16 @@ impl InsertBlockErrorData {
     }
 }
 
+#[derive(thiserror::Error)]
+#[error("Failed to insert block (hash={}, number={}, parent_hash={}): {}",
+    .block.hash(),
+    .block.number(),
+    .block.parent_hash(),
+    .kind)]
 struct InsertBlockErrorDataTwo<B: Block> {
     block: SealedBlockFor<B>,
+    #[source]
     kind: InsertBlockErrorKindTwo,
-}
-
-impl<B: Block> std::fmt::Display for InsertBlockErrorDataTwo<B> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Failed to insert block (hash={}, number={}, parent_hash={}): {}",
-            self.block.hash(),
-            self.block.number(),
-            self.block.parent_hash(),
-            self.kind
-        )
-    }
 }
 
 impl<B: Block> std::fmt::Debug for InsertBlockErrorDataTwo<B> {
@@ -237,14 +206,8 @@ impl<B: Block> std::fmt::Debug for InsertBlockErrorDataTwo<B> {
             .field("hash", &self.block.hash())
             .field("number", &self.block.number())
             .field("parent_hash", &self.block.parent_hash())
-            .field("num_txs", &self.block.body.transactions().len())
+            .field("num_txs", &self.block.body().transactions().len())
             .finish_non_exhaustive()
-    }
-}
-
-impl<B: Block> core::error::Error for InsertBlockErrorDataTwo<B> {
-    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        Some(&self.kind)
     }
 }
 

@@ -39,12 +39,12 @@ where
 
     fn fill(
         &self,
-        tx: RecoveredTx,
+        tx: RecoveredTx<TransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
         let hash = tx.hash();
-        let TransactionSigned { transaction, signature, .. } = tx.into_signed();
+        let TransactionSigned { transaction, signature, .. } = tx.into_tx();
 
         let inner: TxEnvelope = match transaction {
             reth_primitives::Transaction::Legacy(tx) => {
@@ -109,7 +109,6 @@ where
                 TxEip4844Variant::TxEip4844WithSidecar(tx) => &mut tx.tx.input,
             },
             TxEnvelope::Eip7702(tx) => &mut tx.tx_mut().input,
-            _ => return,
         };
         *input = input.slice(..4);
     }

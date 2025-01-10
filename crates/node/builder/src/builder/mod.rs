@@ -7,8 +7,9 @@ use crate::{
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
-    DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
+    BlockReaderFor, DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
 };
+use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
 use reth_blockchain_tree::externals::NodeTypesForTree;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
@@ -20,7 +21,7 @@ use reth_db_api::{
 use reth_exex::ExExContext;
 use reth_network::{
     transactions::TransactionsManagerConfig, NetworkBuilder, NetworkConfig, NetworkConfigBuilder,
-    NetworkHandle, NetworkManager,
+    NetworkHandle, NetworkManager, NetworkPrimitives,
 };
 use reth_node_api::{
     FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
@@ -34,11 +35,10 @@ use reth_node_core::{
 };
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    BlockReader, ChainSpecProvider, FullProvider,
+    ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
-use revm_primitives::EnvKzgSettings;
 use secp256k1::SecretKey;
 use std::sync::Arc;
 use tracing::{info, trace, warn};
@@ -50,10 +50,8 @@ pub use states::*;
 
 /// The adapter type for a reth node with the builtin provider type
 // Note: we need to hardcode this because custom components might depend on it in associated types.
-pub type RethFullAdapter<DB, Types> = FullNodeTypesAdapter<
-    NodeTypesWithDBAdapter<Types, DB>,
-    BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>,
->;
+pub type RethFullAdapter<DB, Types> =
+    FullNodeTypesAdapter<Types, DB, BlockchainProvider<NodeTypesWithDBAdapter<Types, DB>>>;
 
 #[allow(clippy::doc_markdown)]
 #[cfg_attr(doc, aquamarine::aquamarine)]
@@ -252,7 +250,7 @@ where
     /// Configures the types of the node and the provider type that will be used by the node.
     pub fn with_types_and_provider<T, P>(
         self,
-    ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<NodeTypesWithDBAdapter<T, DB>, P>>
+    ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>
     where
         T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
@@ -313,9 +311,7 @@ where
     /// Configures the types of the node and the provider type that will be used by the node.
     pub fn with_types_and_provider<T, P>(
         self,
-    ) -> WithLaunchContext<
-        NodeBuilderWithTypes<FullNodeTypesAdapter<NodeTypesWithDBAdapter<T, DB>, P>>,
-    >
+    ) -> WithLaunchContext<NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>>
     where
         T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
@@ -648,20 +644,21 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
-    pub fn start_network<Pool>(&self, builder: NetworkBuilder<(), ()>, pool: Pool) -> NetworkHandle
+    pub fn start_network<N, Pool>(
+        &self,
+        builder: NetworkBuilder<(), (), N>,
+        pool: Pool,
+    ) -> NetworkHandle<N>
     where
+        N: NetworkPrimitives,
         Pool: TransactionPool<
                 Transaction: PoolTransaction<
-                    Consensus = reth_primitives::TransactionSigned,
-                    Pooled = reth_primitives::PooledTransactionsElement,
+                    Consensus = N::BroadcastedTransaction,
+                    Pooled = N::PooledTransaction,
                 >,
             > + Unpin
             + 'static,
-        Node::Provider: BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
-        >,
+        Node::Provider: BlockReaderFor<N>,
     {
         self.start_network_with(builder, pool, Default::default())
     }
@@ -672,25 +669,22 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
-    pub fn start_network_with<Pool>(
+    pub fn start_network_with<Pool, N>(
         &self,
-        builder: NetworkBuilder<(), ()>,
+        builder: NetworkBuilder<(), (), N>,
         pool: Pool,
         tx_config: TransactionsManagerConfig,
-    ) -> NetworkHandle
+    ) -> NetworkHandle<N>
     where
+        N: NetworkPrimitives,
         Pool: TransactionPool<
                 Transaction: PoolTransaction<
-                    Consensus = reth_primitives::TransactionSigned,
-                    Pooled = reth_primitives::PooledTransactionsElement,
+                    Consensus = N::BroadcastedTransaction,
+                    Pooled = N::PooledTransaction,
                 >,
             > + Unpin
             + 'static,
-        Node::Provider: BlockReader<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            Header = reth_primitives::Header,
-        >,
+        Node::Provider: BlockReaderFor<N>,
     {
         let (handle, network, txpool, eth) = builder
             .transactions(pool, tx_config)
@@ -734,11 +728,12 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     }
 
     /// Builds the [`NetworkConfig`].
-    pub fn build_network_config(
+    pub fn build_network_config<N>(
         &self,
-        network_builder: NetworkConfigBuilder,
-    ) -> NetworkConfig<Node::Provider>
+        network_builder: NetworkConfigBuilder<N>,
+    ) -> NetworkConfig<Node::Provider, N>
     where
+        N: NetworkPrimitives,
         Node::Types: NodeTypes<ChainSpec: Hardforks>,
     {
         network_builder.build(self.provider.clone())
@@ -747,20 +742,29 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
 
 impl<Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>> BuilderContext<Node> {
     /// Creates the [`NetworkBuilder`] for the node.
-    pub async fn network_builder(&self) -> eyre::Result<NetworkBuilder<(), ()>> {
+    pub async fn network_builder<N>(&self) -> eyre::Result<NetworkBuilder<(), (), N>>
+    where
+        N: NetworkPrimitives,
+    {
         let network_config = self.network_config()?;
         let builder = NetworkManager::builder(network_config).await?;
         Ok(builder)
     }
 
     /// Returns the default network config for the node.
-    pub fn network_config(&self) -> eyre::Result<NetworkConfig<Node::Provider>> {
+    pub fn network_config<N>(&self) -> eyre::Result<NetworkConfig<Node::Provider, N>>
+    where
+        N: NetworkPrimitives,
+    {
         let network_builder = self.network_config_builder();
         Ok(self.build_network_config(network_builder?))
     }
 
     /// Get the [`NetworkConfigBuilder`].
-    pub fn network_config_builder(&self) -> eyre::Result<NetworkConfigBuilder> {
+    pub fn network_config_builder<N>(&self) -> eyre::Result<NetworkConfigBuilder<N>>
+    where
+        N: NetworkPrimitives,
+    {
         let secret_key = self.network_secret(&self.config().datadir())?;
         let default_peers_path = self.config().datadir().known_peers();
         let builder = self
