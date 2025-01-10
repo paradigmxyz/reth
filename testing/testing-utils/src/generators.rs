@@ -12,11 +12,11 @@ use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
-    proofs, Account, BlockBody, BlockExt, Log, Receipt, SealedBlock, SealedHeader, StorageEntry,
-    Transaction, TransactionSigned,
+    proofs, Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
+    TransactionSigned,
 };
 
-use reth_primitives_traits::crypto::secp256k1::sign_message;
+use reth_primitives_traits::{crypto::secp256k1::sign_message, Block as _};
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},

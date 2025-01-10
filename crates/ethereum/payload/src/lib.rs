@@ -30,10 +30,11 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     proofs::{self},
-    Block, BlockBody, BlockExt, EthereumHardforks, InvalidTransactionError, Receipt,
-    TransactionSigned,
+    Block, BlockBody, EthereumHardforks, InvalidTransactionError, Receipt, TransactionSigned,
 };
+use reth_primitives_traits::Block as _;
 use reth_revm::database::StateProviderDatabase;
+use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, noop::NoopTransactionPool, BestTransactions,
     BestTransactionsAttributes, PoolTransaction, TransactionPool, ValidPoolTransaction,
@@ -51,7 +52,6 @@ use tracing::{debug, trace, warn};
 
 mod config;
 pub use config::*;
-use reth_storage_api::StateProviderFactory;
 
 type BestTransactionsIter<Pool> = Box<
     dyn BestTransactions<Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>,

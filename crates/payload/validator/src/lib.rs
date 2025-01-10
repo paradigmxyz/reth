@@ -12,7 +12,7 @@ use alloy_rpc_types::engine::{
     ExecutionPayload, ExecutionPayloadSidecar, MaybeCancunPayloadFields, PayloadError,
 };
 use reth_chainspec::EthereumHardforks;
-use reth_primitives::{BlockExt, SealedBlock};
+use reth_primitives::SealedBlock;
 use reth_primitives_traits::{Block, SignedTransaction};
 use std::sync::Arc;
 

@@ -24,9 +24,8 @@ use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
-use reth_primitives::{
-    BlockExt, EthPrimitives, SealedBlock, SealedHeader, Transaction, TransactionSigned,
-};
+use reth_primitives::{EthPrimitives, SealedBlock, SealedHeader, Transaction, TransactionSigned};
+use reth_primitives_traits::Block as _;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,

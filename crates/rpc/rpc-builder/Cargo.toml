@@ -50,6 +50,7 @@ tokio-util = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 
 [dev-dependencies]
+reth-primitives-traits.workspace = true
 reth-chainspec.workspace = true
 reth-network-api.workspace = true
 reth-network-peers.workspace = true

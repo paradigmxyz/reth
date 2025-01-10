@@ -5,7 +5,7 @@ use reth_chainspec::ChainSpecBuilder;
 use reth_db::{open_db_read_only, DatabaseEnv};
 use reth_node_ethereum::EthereumNode;
 use reth_node_types::NodeTypesWithDBAdapter;
-use reth_primitives::{BlockExt, SealedHeader, TransactionSigned};
+use reth_primitives::{SealedBlock, SealedHeader, TransactionSigned};
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
     ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,
@@ -134,7 +134,7 @@ fn block_provider_example<T: BlockReader<Block = reth_primitives::Block>>(
     let block = provider.block(number.into())?.ok_or(eyre::eyre!("block num not found"))?;
 
     // Can seal the block to cache the hash, like the Header above.
-    let sealed_block = block.clone().seal_slow();
+    let sealed_block = SealedBlock::seal(block.clone());
 
     // Can also query the block by hash directly
     let block_by_hash = provider

@@ -8,7 +8,8 @@ use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN
 use reth_evm::execute::{BatchExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_node_api::FullNodePrimitives;
-use reth_primitives::{Block, BlockBody, BlockExt, Receipt, RecoveredBlock, Transaction};
+use reth_primitives::{Block, BlockBody, Receipt, RecoveredBlock, Transaction};
+use reth_primitives_traits::Block as _;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
     ProviderFactory,

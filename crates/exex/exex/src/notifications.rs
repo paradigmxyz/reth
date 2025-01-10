@@ -435,16 +435,16 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::Wal;
-
     use super::*;
+    use crate::Wal;
     use alloy_consensus::Header;
     use alloy_eips::BlockNumHash;
     use eyre::OptionExt;
     use futures::StreamExt;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::{Block, BlockExt};
+    use reth_primitives::Block;
+    use reth_primitives_traits::Block as _;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,
         Chain, DatabaseProviderFactory, StorageLocation,

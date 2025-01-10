@@ -1,6 +1,7 @@
 use crate::job::EmptyBlockPayloadJob;
 use alloy_eips::BlockNumberOrTag;
 use reth::{
+    api::Block,
     providers::{BlockReaderIdExt, BlockSource, StateProviderFactory},
     tasks::TaskSpawner,
     transaction_pool::TransactionPool,
@@ -8,7 +9,7 @@ use reth::{
 use reth_basic_payload_builder::{BasicPayloadJobGeneratorConfig, PayloadBuilder, PayloadConfig};
 use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::{PayloadBuilderError, PayloadJobGenerator};
-use reth_primitives::{BlockExt, SealedHeader};
+use reth_primitives::SealedHeader;
 use std::sync::Arc;
 
 /// The generator type that creates new jobs that builds empty blocks.

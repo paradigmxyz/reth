@@ -27,6 +27,7 @@ reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-node-ethereum.workspace = true
 reth-payload-builder.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tasks.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }

@@ -45,12 +45,14 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{BlockExt, EthPrimitives, Head, RecoveredBlock, TransactionSigned};
-use reth_provider::{providers::StaticFileProvider, BlockReader, EthStorage, ProviderFactory};
+use reth_primitives::{EthPrimitives, Head, RecoveredBlock, TransactionSigned};
+use reth_primitives_traits::Block as _;
+use reth_provider::{
+    providers::{BlockchainProvider, StaticFileProvider},
+    BlockReader, EthStorage, ProviderFactory,
+};
 use reth_tasks::TaskManager;
 use reth_transaction_pool::test_utils::{testing_pool, TestPool};
-
-use reth_provider::providers::BlockchainProvider;
 use tempfile::TempDir;
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver};

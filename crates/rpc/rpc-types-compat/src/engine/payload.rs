@@ -121,7 +121,8 @@ mod tests {
         CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
         ExecutionPayloadV2, ExecutionPayloadV3,
     };
-    use reth_primitives::{Block, BlockExt, TransactionSigned};
+    use reth_primitives::{Block, TransactionSigned};
+    use reth_primitives_traits::Block as _;
 
     #[test]
     fn roundtrip_payload_to_block() {

@@ -20,7 +20,7 @@ use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
 };
-use reth_primitives::{BlockExt, NodePrimitives, ReceiptWithBloom, RecoveredBlock};
+use reth_primitives::{NodePrimitives, ReceiptWithBloom, RecoveredBlock};
 use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
 use reth_provider::{
     BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, ProviderBlock,
