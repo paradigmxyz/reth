@@ -42,10 +42,11 @@ pub struct OpTransactionSigned {
     /// Transaction hash
     #[cfg_attr(feature = "serde", serde(skip))]
     pub hash: OnceLock<TxHash>,
+    /// Memoized estimated compressed size of the transaction.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    compressed_size: Option<u64>,
     /// The transaction signature values
     pub signature: Signature,
-    /// Memoized estimated compressed size of the transaction.
-    compressed_size: Option<u64>,
     /// Raw transaction info
     #[deref]
     #[as_ref]
