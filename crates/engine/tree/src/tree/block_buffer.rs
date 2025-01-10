@@ -192,7 +192,7 @@ mod tests {
     fn create_block<R: Rng>(rng: &mut R, number: u64, parent: BlockHash) -> SealedBlockWithSenders {
         let block =
             random_block(rng, number, BlockParams { parent: Some(parent), ..Default::default() });
-        block.try_with_senders().unwrap()
+        block.try_recover().unwrap()
     }
 
     /// Assert that all buffer collections have the same data length.

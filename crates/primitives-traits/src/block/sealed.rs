@@ -62,6 +62,11 @@ impl<B> SealedBlock<B>
 where
     B: Block,
 {
+    /// Creates the [`SealedBlock`] from the block's parts by hashing the header.
+    pub fn seal_parts(header: B::Header, body: B::Body) -> Self {
+        Self::seal(B::new(header, body))
+    }
+
     /// Creates the [`SealedBlock`] from the block's parts.
     pub fn from_parts(header: B::Header, body: B::Body, hash: BlockHash) -> Self {
         Self::new(B::new(header, body), hash)
@@ -132,6 +137,13 @@ where
     /// Returns reference to block body.
     pub fn body(&self) -> &B::Body {
         self.block.body()
+    }
+
+    /// Recovers all senders from the transactions in the block.
+    ///
+    /// Returns `None` if any of the transactions fail to recover the sender.
+    pub fn senders(&self) -> Option<Vec<Address>> {
+        self.body().recover_signers()
     }
 
     /// Return the number hash tuple.

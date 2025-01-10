@@ -907,7 +907,7 @@ mod tests {
             }
 
             provider_rw.insert_historical_block(
-                block.clone().try_with_senders().expect("failed to seal block with senders"),
+                block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
 
@@ -1027,7 +1027,7 @@ mod tests {
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
             provider_rw.insert_historical_block(
-                block.clone().try_with_senders().expect("failed to seal block with senders"),
+                block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
         provider_rw.commit()?;
@@ -1069,21 +1069,21 @@ mod tests {
         // Now the block should be found in memory
         assert_eq!(
             provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Any)?,
-            Some(first_in_mem_block.clone().into())
+            Some(first_in_mem_block.clone().into_block())
         );
         assert_eq!(
             provider.find_block_by_hash(first_in_mem_block.hash(), BlockSource::Canonical)?,
-            Some(first_in_mem_block.clone().into())
+            Some(first_in_mem_block.clone().into_block())
         );
 
         // Find the first block in database by hash
         assert_eq!(
             provider.find_block_by_hash(first_db_block.hash(), BlockSource::Any)?,
-            Some(first_db_block.clone().into())
+            Some(first_db_block.clone().into_block())
         );
         assert_eq!(
             provider.find_block_by_hash(first_db_block.hash(), BlockSource::Canonical)?,
-            Some(first_db_block.clone().into())
+            Some(first_db_block.clone().into_block())
         );
 
         // No pending block in database
@@ -1101,7 +1101,7 @@ mod tests {
         // Now the last block should be found in memory
         assert_eq!(
             provider.find_block_by_hash(last_in_mem_block.hash(), BlockSource::Pending)?,
-            Some(last_in_mem_block.clone().into())
+            Some(last_in_mem_block.clone().into_block())
         );
 
         Ok(())
@@ -1125,7 +1125,7 @@ mod tests {
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
             provider_rw.insert_historical_block(
-                block.clone().try_with_senders().expect("failed to seal block with senders"),
+                block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
         provider_rw.commit()?;
@@ -1159,21 +1159,21 @@ mod tests {
         // First in memory block should be found
         assert_eq!(
             provider.block(BlockHashOrNumber::Hash(first_in_mem_block.hash()))?,
-            Some(first_in_mem_block.clone().into())
+            Some(first_in_mem_block.clone().into_block())
         );
         assert_eq!(
             provider.block(BlockHashOrNumber::Number(first_in_mem_block.number))?,
-            Some(first_in_mem_block.clone().into())
+            Some(first_in_mem_block.clone().into_block())
         );
 
         // First database block should be found
         assert_eq!(
             provider.block(BlockHashOrNumber::Hash(first_db_block.hash()))?,
-            Some(first_db_block.clone().into())
+            Some(first_db_block.clone().into_block())
         );
         assert_eq!(
             provider.block(BlockHashOrNumber::Number(first_db_block.number))?,
-            Some(first_db_block.clone().into())
+            Some(first_db_block.clone().into_block())
         );
 
         Ok(())
@@ -1211,7 +1211,7 @@ mod tests {
 
         assert_eq!(
             provider.pending_block_with_senders()?,
-            Some(reth_primitives::SealedBlockWithSenders::new_unhashed(
+            Some(reth_primitives::SealedBlockWithSenders::new_sealed(
                 block.clone(),
                 block.senders().unwrap()
             ))
@@ -1809,7 +1809,7 @@ mod tests {
         provider_rw.append_blocks_with_state(
             database_blocks
                 .into_iter()
-                .map(|b| b.try_with_senders().expect("failed to seal block with senders"))
+                .map(|b| b.try_recover().expect("failed to seal block with senders"))
                 .collect(),
             &ExecutionOutcome {
                 bundle: BundleState::new(
@@ -2330,10 +2330,7 @@ mod tests {
             (headers_range, |block: &SealedBlock| block.header().clone()),
             (sealed_headers_range, |block: &SealedBlock| block.clone_sealed_header()),
             (block_range, |block: &SealedBlock| block.clone().into_block()),
-            (block_with_senders_range, |block: &SealedBlock| block
-                .clone()
-                .into_block::<reth_primitives::Block>()
-                .with_senders_unchecked(vec![])),
+            (block_with_senders_range, |block: &SealedBlock| block.clone().try_recover().unwrap()),
             (sealed_block_with_senders_range, |block: &SealedBlock| block
                 .clone()
                 .with_senders(vec![])),
@@ -2527,7 +2524,7 @@ mod tests {
                 block_with_senders,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
-                    block.clone().into_block::<reth_primitives::Block>().with_recovered_senders()
+                    block.clone().into_block().with_recovered_senders()
                 ),
                 (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
             ),
@@ -2536,7 +2533,7 @@ mod tests {
                 block_with_senders,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
-                    block.clone().into_block::<reth_primitives::Block>().with_recovered_senders()
+                    block.clone().into_block().with_recovered_senders()
                 ),
                 (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
             ),
@@ -2545,14 +2542,7 @@ mod tests {
                 sealed_block_with_senders,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Number(block.number), TransactionVariant::WithHash),
-                    Some(
-                        block
-                            .clone()
-                            .into_block::<reth_primitives::Block>()
-                            .with_recovered_senders()
-                            .unwrap()
-                            .seal_unchecked(block.hash())
-                    )
+                    block.clone().into_block().with_recovered_senders()
                 ),
                 (BlockHashOrNumber::Number(u64::MAX), TransactionVariant::WithHash)
             ),
@@ -2561,14 +2551,7 @@ mod tests {
                 sealed_block_with_senders,
                 |block: &SealedBlock, _: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     (BlockHashOrNumber::Hash(block.hash()), TransactionVariant::WithHash),
-                    Some(
-                        block
-                            .clone()
-                            .into_block::<reth_primitives::Block>()
-                            .with_recovered_senders()
-                            .unwrap()
-                            .seal_unchecked(block.hash())
-                    )
+                    block.clone().into_block().with_recovered_senders()
                 ),
                 (BlockHashOrNumber::Hash(B256::random()), TransactionVariant::WithHash)
             ),

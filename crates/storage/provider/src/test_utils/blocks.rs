@@ -232,13 +232,12 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
         b256!("5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd")
     );
 
-    let (header, mut body) = TEST_BLOCK.clone().split();
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
-    let mut header = header.unseal();
     header.number = number;
     header.state_root = state_root;
     header.parent_hash = B256::ZERO;
-    let block = SealedBlock::from_sealed_parts(SealedHeader::seal(header), body);
+    let block = SealedBlock::seal_parts(header, body);
 
     (SealedBlockWithSenders::new_sealed(block, vec![Address::new([0x30; 20])]), execution_outcome)
 }
@@ -294,17 +293,16 @@ fn block2(
         b256!("90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8")
     );
 
-    let (header, mut body) = TEST_BLOCK.clone().split();
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
 
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
-    let mut header = header.unseal();
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    let block = SealedBlock::new(SealedHeader::seal(header), body);
+    let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders::new_unhashed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (SealedBlockWithSenders::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
 }
 
 /// Block three that points to block 2
@@ -359,16 +357,15 @@ fn block3(
     extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
-    let (header, mut body) = TEST_BLOCK.clone().split();
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
-    let mut header = header.unseal();
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    let block = SealedBlock::new(SealedHeader::seal(header), body);
+    let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders::new_unhashed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (SealedBlockWithSenders::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
 }
 
 /// Block four that points to block 3
@@ -448,16 +445,15 @@ fn block4(
     extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
-    let (header, mut body) = TEST_BLOCK.clone().split();
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
-    let mut header = header.unseal();
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    let block = SealedBlock::new(SealedHeader::seal(header), body);
+    let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders::new_unhashed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (SealedBlockWithSenders::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
 }
 
 /// Block five that points to block 4
@@ -534,14 +530,13 @@ fn block5(
     extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
-    let (header, mut body) = TEST_BLOCK.clone().split();
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
-    let mut header = header.unseal();
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    let block = SealedBlock::new(SealedHeader::seal(header), body);
+    let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders::new_unhashed(block, vec![Address::new([0x31; 20])]), execution_outcome)
+    (SealedBlockWithSenders::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
 }

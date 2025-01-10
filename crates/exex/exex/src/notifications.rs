@@ -474,7 +474,7 @@ mod tests {
         );
         let provider_rw = provider_factory.provider_rw()?;
         provider_rw.insert_block(
-            node_head_block.clone().try_with_senders().ok_or_eyre("failed to recover senders")?,
+            node_head_block.clone().try_recover().ok_or_eyre("failed to recover senders")?,
             StorageLocation::Database,
         )?;
         provider_rw.commit()?;
@@ -494,7 +494,7 @@ mod tests {
                     node_head.number + 1,
                     BlockParams { parent: Some(node_head.hash), ..Default::default() },
                 )
-                .try_with_senders()
+                .try_recover()
                 .ok_or_eyre("failed to recover senders")?],
                 Default::default(),
                 None,
@@ -565,7 +565,7 @@ mod tests {
                     ..Default::default()
                 }
                 .seal_slow()
-                .try_with_senders()
+                .try_recover()
                 .ok_or_eyre("failed to recover senders")?],
                 Default::default(),
                 None,
@@ -640,7 +640,7 @@ mod tests {
             new: Arc::new(Chain::new(
                 vec![exex_head_block
                     .clone()
-                    .try_with_senders()
+                    .try_recover()
                     .ok_or_eyre("failed to recover senders")?],
                 Default::default(),
                 None,
@@ -655,7 +655,7 @@ mod tests {
                     node_head.number + 1,
                     BlockParams { parent: Some(node_head.hash), ..Default::default() },
                 )
-                .try_with_senders()
+                .try_recover()
                 .ok_or_eyre("failed to recover senders")?],
                 Default::default(),
                 None,
@@ -715,7 +715,7 @@ mod tests {
             new: Arc::new(Chain::new(
                 vec![exex_head_block
                     .clone()
-                    .try_with_senders()
+                    .try_recover()
                     .ok_or_eyre("failed to recover senders")?],
                 Default::default(),
                 None,
@@ -736,7 +736,7 @@ mod tests {
                     genesis_block.number + 1,
                     BlockParams { parent: Some(genesis_hash), ..Default::default() },
                 )
-                .try_with_senders()
+                .try_recover()
                 .ok_or_eyre("failed to recover senders")?],
                 Default::default(),
                 None,

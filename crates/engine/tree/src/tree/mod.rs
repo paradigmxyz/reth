@@ -1872,7 +1872,7 @@ where
         &mut self,
         block: SealedBlockFor<N::Block>,
     ) -> Result<(), InsertBlockError<N::Block>> {
-        match block.try_with_senders() {
+        match block.try_recover() {
             Ok(block) => self.buffer_block(block),
             Err(block) => Err(InsertBlockError::sender_recovery_error(block)),
         }
