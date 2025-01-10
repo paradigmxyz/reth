@@ -2,10 +2,13 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     B256,
 };
+use reth_db::{transaction::DbTx, DatabaseError};
 use reth_trie::{
+    trie_cursor::{TrieCursor, TrieCursorFactory},
     updates::{StorageTrieUpdates, TrieUpdates},
     BranchNodeCompact, Nibbles,
 };
+use reth_trie_db::DatabaseTrieCursorFactory;
 use tracing::debug;
 
 #[derive(Debug, Default)]
@@ -88,10 +91,17 @@ impl StorageTrieUpdatesDiff {
 
 /// Compares the trie updates from state root task and regular state root calculation, and logs
 /// the differences if there's any.
-pub(super) fn compare_trie_updates(task: &TrieUpdates, regular: &TrieUpdates) {
+pub(super) fn compare_trie_updates(
+    tx: &impl DbTx,
+    task: &TrieUpdates,
+    regular: &TrieUpdates,
+) -> Result<(), DatabaseError> {
+    let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
+
     let mut diff = TrieUpdatesDiff::default();
 
     // compare account nodes
+    let mut account_trie_cursor = trie_cursor_factory.account_trie_cursor()?;
     for key in task
         .account_nodes
         .keys()
@@ -101,7 +111,7 @@ pub(super) fn compare_trie_updates(task: &TrieUpdates, regular: &TrieUpdates) {
     {
         let (left, right) = (task.account_nodes.get(&key), regular.account_nodes.get(&key));
 
-        if !branch_nodes_equal(left, right) {
+        if !branch_nodes_equal(&mut account_trie_cursor, &key, left, right)? {
             diff.account_nodes.insert(key, (left.cloned(), right.cloned()));
         }
     }
@@ -116,7 +126,7 @@ pub(super) fn compare_trie_updates(task: &TrieUpdates, regular: &TrieUpdates) {
     {
         let (left, right) =
             (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
-        if left != right {
+        if left != right && account_trie_cursor.seek_exact(key.clone())?.is_some() {
             diff.removed_nodes.insert(key, (left, right));
         }
     }
@@ -132,7 +142,9 @@ pub(super) fn compare_trie_updates(task: &TrieUpdates, regular: &TrieUpdates) {
         let (left, right) = (task.storage_tries.get(&key), regular.storage_tries.get(&key));
         if left != right {
             if let Some((left, right)) = left.zip(right) {
-                let storage_diff = compare_storage_trie_updates(left, right);
+                let mut storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(key)?;
+                let storage_diff =
+                    compare_storage_trie_updates(&mut storage_trie_cursor, left, right)?;
                 if storage_diff.has_differences() {
                     diff.storage_tries.insert(key, StorageTrieDiffEntry::Value(storage_diff));
                 }
@@ -145,12 +157,15 @@ pub(super) fn compare_trie_updates(task: &TrieUpdates, regular: &TrieUpdates) {
 
     // log differences
     diff.log_differences();
+
+    Ok(())
 }
 
 fn compare_storage_trie_updates(
+    trie_cursor: &mut impl TrieCursor,
     task: &StorageTrieUpdates,
     regular: &StorageTrieUpdates,
-) -> StorageTrieUpdatesDiff {
+) -> Result<StorageTrieUpdatesDiff, DatabaseError> {
     let mut diff = StorageTrieUpdatesDiff {
         is_deleted: (task.is_deleted != regular.is_deleted)
             .then_some((task.is_deleted, regular.is_deleted)),
@@ -166,7 +181,7 @@ fn compare_storage_trie_updates(
         .collect::<HashSet<_>>()
     {
         let (left, right) = (task.storage_nodes.get(&key), regular.storage_nodes.get(&key));
-        if !branch_nodes_equal(left, right) {
+        if !branch_nodes_equal(trie_cursor, &key, left, right)? {
             diff.storage_nodes.insert(key, (left.cloned(), right.cloned()));
         }
     }
@@ -181,28 +196,42 @@ fn compare_storage_trie_updates(
     {
         let (left, right) =
             (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
-        if left != right {
+        if left != right && trie_cursor.seek_exact(key.clone())?.is_some() {
             diff.removed_nodes.insert(key, (left, right));
         }
     }
 
-    diff
+    Ok(diff)
 }
 
 /// Compares the branch nodes from state root task and regular state root calculation.
 ///
+/// If one of the branch nodes is [`None`], it means it's not updated and the other is compared to
+/// the branch node from the database.
+///
 /// Returns `true` if they are equal.
 fn branch_nodes_equal(
+    trie_cursor: &mut impl TrieCursor,
+    key: &Nibbles,
     task: Option<&BranchNodeCompact>,
     regular: Option<&BranchNodeCompact>,
-) -> bool {
-    if let (Some(task), Some(regular)) = (task.as_ref(), regular.as_ref()) {
-        task.state_mask == regular.state_mask &&
-            task.tree_mask == regular.tree_mask &&
-            task.hash_mask == regular.hash_mask &&
-            task.hashes == regular.hashes &&
-            task.root_hash == regular.root_hash
-    } else {
-        task == regular
-    }
+) -> Result<bool, DatabaseError> {
+    Ok(match (task, regular) {
+        (Some(task), Some(regular)) => {
+            task.state_mask == regular.state_mask &&
+                task.tree_mask == regular.tree_mask &&
+                task.hash_mask == regular.hash_mask &&
+                task.hashes == regular.hashes &&
+                task.root_hash == regular.root_hash
+        }
+        (None, None) => true,
+        _ => {
+            let db_branch_node = trie_cursor.seek_exact(key.clone())?.map(|x| x.1);
+            if task.is_some() {
+                task == db_branch_node.as_ref()
+            } else {
+                regular == db_branch_node.as_ref()
+            }
+        }
+    })
 }
