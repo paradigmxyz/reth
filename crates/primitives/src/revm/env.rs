@@ -82,6 +82,11 @@ pub enum CliqueSignerRecoveryError {
     #[error("Invalid extra data length")]
     InvalidExtraData,
     /// Recovery failed.
+    #[cfg(feature = "k256")]
+    #[error("Invalid signature: {0}")]
+    InvalidSignature(#[from] k256::ecdsa::Error),
+    /// Recovery failed.
+    #[cfg(not(feature = "k256"))]
     #[error("Invalid signature: {0}")]
     InvalidSignature(#[from] secp256k1::Error),
 }
@@ -212,7 +217,11 @@ fn fill_tx_env_with_system_contract_call(
             enveloped_tx: Some(Bytes::default()),
         },
         #[cfg(feature = "taiko")]
-        taiko: revm_primitives::TaikoFields { treasury: Address::default(), is_anchor: false, basefee_ratio: 0u8 },
+        taiko: revm_primitives::TaikoFields {
+            treasury: Address::default(),
+            is_anchor: false,
+            basefee_ratio: 0u8,
+        },
     };
 
     // ensure the block gas limit is >= the tx
