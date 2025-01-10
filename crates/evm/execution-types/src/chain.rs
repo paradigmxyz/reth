@@ -706,7 +706,6 @@ mod tests {
     use alloy_primitives::{Address, B256};
     use reth_ethereum_primitives::Receipt;
     use reth_primitives::Receipts;
-    use reth_primitives_traits::test_utils::TestBlock;
     use revm::primitives::{AccountInfo, HashMap};
 
     // TODO: this is temporary, until we fully switch over to `reth_ethereum_primitives` for the
@@ -867,8 +866,8 @@ mod tests {
         let mut block2 = block;
 
         // Set the hashes of block1 and block2
-        block1.block.set_hash(block1_hash);
-        block2.block.set_hash(block2_hash);
+        block1.set_hash(block1_hash);
+        block2.set_hash(block2_hash);
 
         // Create a random receipt object, receipt1
         let receipt1 = Receipt {

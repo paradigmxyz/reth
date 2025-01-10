@@ -178,11 +178,10 @@ impl<H: crate::test_utils::TestHeader> SealedHeader<H> {
 /// Bincode-compatible [`SealedHeader`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
+    use crate::serde_bincode_compat::SerdeBincodeCompat;
     use alloy_primitives::BlockHash;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
-
-    use crate::serde_bincode_compat::SerdeBincodeCompat;
 
     /// Bincode-compatible [`super::SealedHeader`] serde implementation.
     ///

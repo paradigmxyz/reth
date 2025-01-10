@@ -327,6 +327,44 @@ where
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
+impl<B: crate::test_utils::TestBlock> RecoveredBlock<B> {
+    /// Updates the block header.
+    pub fn set_header(&mut self, header: B::Header) {
+        *self.header_mut() = header
+    }
+
+    /// Updates the block hash.
+    pub fn set_hash(&mut self, hash: BlockHash) {
+        self.hash = hash.into();
+    }
+
+    /// Returns a mutable reference to the header.
+    pub fn header_mut(&mut self) -> &mut B::Header {
+        self.block.header_mut()
+    }
+
+    /// Updates the parent block hash.
+    pub fn set_parent_hash(&mut self, hash: BlockHash) {
+        crate::test_utils::TestBlock::set_parent_hash(self.block_mut(), hash);
+    }
+
+    /// Updates the block number.
+    pub fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
+        crate::test_utils::TestBlock::set_block_number(self.block_mut(), number);
+    }
+
+    /// Updates the block state root.
+    pub fn set_state_root(&mut self, state_root: alloy_primitives::B256) {
+        crate::test_utils::TestBlock::set_state_root(self.block_mut(), state_root);
+    }
+
+    /// Updates the block difficulty.
+    pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
+        crate::test_utils::TestBlock::set_difficulty(self.block_mut(), difficulty);
+    }
+}
+
 /// Bincode-compatible [`RecoveredBlock`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
