@@ -44,7 +44,7 @@ pub struct OpTransactionSigned {
     pub hash: OnceLock<TxHash>,
     /// Memoized estimated compressed size of the transaction.
     #[cfg_attr(feature = "serde", serde(skip))]
-    compressed_size: Option<u64>,
+    compressed_size: OnceLock<u64>,
     /// The transaction signature values
     pub signature: Signature,
     /// Raw transaction info
@@ -68,7 +68,7 @@ impl OpTransactionSigned {
     ///
     /// Note: this only calculates the hash on the first [`OpTransactionSigned::hash`] call.
     pub fn new_unhashed(transaction: OpTypedTransaction, signature: Signature) -> Self {
-        Self { hash: Default::default(), signature, transaction, compressed_size: None }
+        Self { hash: Default::default(), signature, transaction, compressed_size: Default::default() }
     }
 
     /// Returns whether this transaction is a deposit.
@@ -77,11 +77,8 @@ impl OpTransactionSigned {
     }
 
     /// Returns the estimated compressed size of a transaction.
-    pub fn compressed_size(&mut self) -> u64 {
-        if let Some(usage) = self.compressed_size {
-            return usage
-        }
-        let compressed_size = match &self.transaction {
+    pub fn compressed_size(&self) -> u64 {
+        *self.compressed_size.get_or_init(|| match &self.transaction {
             OpTypedTransaction::Legacy(tx) => {
                 let mut tx_ser: Vec<u8> = Vec::new();
 
@@ -91,10 +88,7 @@ impl OpTransactionSigned {
                     .wrapping_div(1_000_000u64)
             },
             _ => 0,
-        };
-
-        self.compressed_size = Some(compressed_size);
-        compressed_size
+        })
     }
 }
 
@@ -532,7 +526,7 @@ impl reth_codecs::Compact for OpTransactionSigned {
             OpTypedTransaction::from_compact(buf, transaction_type)
         };
 
-        (Self { signature, transaction, hash: Default::default(), compressed_size: None }, buf)
+        (Self { signature, transaction, hash: Default::default(), compressed_size: Default::default() }, buf)
     }
 }
 
@@ -694,7 +688,7 @@ pub mod serde_bincode_compat {
     impl<'a> From<OpTransactionSigned<'a>> for super::OpTransactionSigned {
         fn from(value: OpTransactionSigned<'a>) -> Self {
             Self {
-                compressed_size: None,
+                compressed_size: Default::default(),
                 hash: value.hash.into(),
                 signature: value.signature,
                 transaction: value.transaction.into(),
