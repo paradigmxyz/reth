@@ -25,7 +25,6 @@ pub(crate) fn bsc_chain_spec() -> Arc<ChainSpec> {
         base_fee_params: reth_chainspec::BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 0,
         blob_params: Default::default(),
-        max_gas_limit: 140_000_000,
         bitfinity_evm_url: None,
     }
     .into()

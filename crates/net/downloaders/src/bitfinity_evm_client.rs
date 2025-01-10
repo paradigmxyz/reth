@@ -163,7 +163,13 @@ impl BitfinityEvmClient {
                 let mut body = reth_primitives::BlockBody::default();
                 for tx in block.transactions {
                     let decoded_tx =
-                        TransactionSigned::decode(&mut tx.rlp_encoded_2718().to_vec().as_slice())?;
+                        TransactionSigned::decode(&mut tx.rlp_encoded_2718().map_err(|e| {
+                            error!(target: "downloaders::bitfinity_evm_client", begin_block, "Error encoding transaction: {:?}", e);
+                            RemoteClientError::ProviderError(format!(
+                                "Error fetching block {}: {:?}",
+                                begin_block, e
+                            ))
+                        })?.to_vec().as_slice())?;
                     body.transactions.push(decoded_tx);
                 }
 
@@ -311,13 +317,13 @@ impl BitfinityEvmClient {
                 (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
                 (
                     EthereumHardfork::Paris.boxed(),
-                    ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::from(0) },
+                    ForkCondition::TTD { activation_block_number: 0, fork_block: Some(0), total_difficulty: U256::from(0) },
                 ),
             ]),
             deposit_contract: None,
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: 0,
-            max_gas_limit: 0,
+            blob_params: Default::default(),
             bitfinity_evm_url: Some(rpc),
         };
 
@@ -443,7 +449,14 @@ impl BlockCertificateChecker {
             Certificate::from_cbor(&self.certified_data.certificate).map_err(|e| {
                 RemoteClientError::CertificateError(format!("failed to parse certificate: {e}"))
             })?;
-        certificate.verify(self.evmc_principal.as_ref(), &self.ic_root_key).map_err(|e| {
+
+        let current_time_ns = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("Should be able to get the time")
+        .as_nanos();
+        let allowed_certificate_time_offset = Duration::from_secs(120).as_nanos();
+
+        certificate.verify(self.evmc_principal.as_ref(), &self.ic_root_key, &current_time_ns, &allowed_certificate_time_offset).map_err(|e| {
             RemoteClientError::CertificateError(format!("certificate validation error: {e}"))
         })?;
 

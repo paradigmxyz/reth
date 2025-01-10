@@ -7275,7 +7275,6 @@ dependencies = [
  "reth-trie",
  "reth-trie-db",
  "revm-primitives",
- "rlp 0.6.1",
  "serde_json",
  "serial_test",
  "similar-asserts",
@@ -7949,7 +7948,6 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
- "rlp 0.6.1",
  "serde_json",
  "tempfile",
  "thiserror 2.0.10",
@@ -10301,16 +10299,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rlp"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa24e92bb2a83198bb76d661a71df9f7076b8c420b8696e4d3d97d50d94479e3"
-dependencies = [
- "bytes",
- "rustc-hex",
-]
-
-[[package]]
 name = "rmp"
 version = "0.8.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10407,7 +10395,7 @@ dependencies = [
  "primitive-types",
  "proptest",
  "rand 0.8.5",
- "rlp 0.5.2",
+ "rlp",
  "ruint-macro",
  "serde",
  "valuable",
@@ -11979,7 +11967,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1631b201eb031b563d2e85ca18ec8092508e262a3196ce9bd10a67ec87b9f5c"
 dependencies = [
  "hash-db",
- "rlp 0.5.2",
+ "rlp",
 ]
 
 [[package]]
