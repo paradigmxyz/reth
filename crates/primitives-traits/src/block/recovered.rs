@@ -482,15 +482,15 @@ pub(super) mod serde_bincode_compat {
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
-    /// use reth_primitives_traits::{block::SealedBlock, serde_bincode_compat};
+    /// use reth_primitives_traits::{block::RecoveredBlock, serde_bincode_compat, Block};
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
     ///
     /// #[serde_as]
     /// #[derive(Serialize, Deserialize)]
-    /// struct Data<T: SerdeBincodeCompat> {
-    ///     #[serde_as(as = "serde_bincode_compat::RecoveredBlock<'a, T>")]
-    ///     header: RecoveredBlock<T>,
+    /// struct Data<T: Block + serde_bincode_compat::SerdeBincodeCompat> {
+    ///     #[serde_as(as = "serde_bincode_compat::RecoveredBlock<'_, T>")]
+    ///     block: RecoveredBlock<T>,
     /// }
     /// ```
     #[derive(derive_more::Debug, Serialize, Deserialize)]

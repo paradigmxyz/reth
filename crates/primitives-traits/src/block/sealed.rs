@@ -316,9 +316,9 @@ pub(super) mod serde_bincode_compat {
     ///
     /// #[serde_as]
     /// #[derive(Serialize, Deserialize)]
-    /// struct Data<T: SerdeBincodeCompat> {
-    ///     #[serde_as(as = "serde_bincode_compat::SealedBlock2<'a, T>")]
-    ///     header: SealedBlock<T>,
+    /// struct Data<T: serde_bincode_compat::SerdeBincodeCompat> {
+    ///     #[serde_as(as = "serde_bincode_compat::SealedBlock<'_, T>")]
+    ///     block: SealedBlock<T>,
     /// }
     /// ```
     #[derive(derive_more::Debug, Serialize, Deserialize)]

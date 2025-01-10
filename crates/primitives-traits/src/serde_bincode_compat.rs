@@ -5,7 +5,7 @@ pub use super::{
     block::{serde_bincode_compat as block, serde_bincode_compat::*},
     header::{serde_bincode_compat as header, serde_bincode_compat::*},
 };
-pub use block_bincode::BlockBody;
+pub use block_bincode::{Block, BlockBody};
 
 /// Trait for types that can be serialized and deserialized using bincode.
 pub trait SerdeBincodeCompat: Sized + 'static {
@@ -29,6 +29,7 @@ mod block_bincode {
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
+    /// use alloy_consensus::Block;
     /// use reth_primitives_traits::serde_bincode_compat::{self, SerdeBincodeCompat};
     /// use serde::{Deserialize, Serialize};
     /// use serde_with::serde_as;
@@ -37,7 +38,7 @@ mod block_bincode {
     /// #[derive(Serialize, Deserialize)]
     /// struct Data<T: SerdeBincodeCompat, H: SerdeBincodeCompat> {
     ///     #[serde_as(as = "serde_bincode_compat::Block<'_, T, H>")]
-    ///     body: alloy_consensus::Block<T, H>,
+    ///     body: Block<T, H>,
     /// }
     /// ```
     #[derive(derive_more::Debug, Serialize, Deserialize)]
@@ -65,7 +66,7 @@ mod block_bincode {
     }
 
     impl<T: SerdeBincodeCompat, H: SerdeBincodeCompat> SerializeAs<alloy_consensus::Block<T, H>>
-        for Block<'_, H, T>
+        for Block<'_, T, H>
     {
         fn serialize_as<S>(
             source: &alloy_consensus::Block<T, H>,
