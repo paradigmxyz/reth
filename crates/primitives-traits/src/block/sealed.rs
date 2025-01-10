@@ -32,7 +32,19 @@ impl<B: Block> SealedBlock<B> {
         Self { header: SealedHeader::new(header, hash), body }
     }
 
-    /// Header hash.
+    /// Creates a SealedBlock from the block without the available hash
+    pub fn new_unhashed(block: B) -> Self {
+        let (header, body) = block.split();
+        Self { header: SealedHeader::new_unhashed(header), body }
+    }
+
+    /// Returns a reference to the block hash.
+    #[inline]
+    pub fn hash_ref(&self) -> &BlockHash {
+        self.header.hash_ref()
+    }
+
+    /// Returns the block hash.
     #[inline]
     pub fn hash(&self) -> B256 {
         self.header.hash()
@@ -296,7 +308,22 @@ where
 }
 
 #[cfg(any(test, feature = "test-utils"))]
-impl<B: crate::test_utils::TestBlock> SealedBlock<B> {}
+impl<B: crate::test_utils::TestBlock> SealedBlock<B> {
+    /// Returns a mutable reference to the header.
+    pub fn header_mut(&mut self) -> &mut B::Header {
+        self.header.header_mut()
+    }
+
+    /// Updates the block hash.
+    pub fn set_hash(&mut self, hash: BlockHash) {
+        self.header.set_hash(hash)
+    }
+
+    /// Returns a mutable reference to the header.
+    pub fn block_mut(&mut self) -> &mut B::Body {
+        &mut self.body
+    }
+}
 
 /// Bincode-compatible [`SealedBlock`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]

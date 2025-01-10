@@ -15,27 +15,24 @@ use derive_more::Deref;
 /// A block with senders recovered from transactions.
 #[derive(Debug, Clone, Deref)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct RecoveredBlock<B> {
-    /// Block hash
-    #[cfg_attr(feature = "serde", serde(skip))]
-    hash: OnceLock<BlockHash>,
+pub struct RecoveredBlock<B: Block> {
     /// Block
     #[deref]
-    block: B,
+    block: SealedBlock<B>,
     /// List of senders that match the transactions in the block
     senders: Vec<Address>,
 }
 
-impl<B> RecoveredBlock<B> {
+impl<B: Block> RecoveredBlock<B> {
     /// Creates a new recovered block instance with the given senders as provided and the block
     /// hash.
     pub fn new(block: B, senders: Vec<Address>, hash: BlockHash) -> Self {
-        Self { hash: hash.into(), block, senders }
+        Self { block: SealedBlock::new(block, hash), senders }
     }
 
     /// Creates a new recovered block instance with the given senders as provided
     pub fn new_unhashed(block: B, senders: Vec<Address>) -> Self {
-        Self { hash: Default::default(), block, senders }
+        Self { block: SealedBlock::new_unhashed(block), senders }
     }
 
     /// Returns the recovered senders.
@@ -50,12 +47,12 @@ impl<B> RecoveredBlock<B> {
 
     /// Consumes the type and returns the inner block.
     pub fn into_block(self) -> B {
-        self.block
+        self.block.into_block()
     }
 
     /// Returns a reference to the inner block.
-    pub const fn block(&self) -> &B {
-        &self.block
+    pub fn block(&self) -> &B {
+        todo!()
     }
 }
 
@@ -63,8 +60,7 @@ impl<B: Block> RecoveredBlock<B> {
     /// Creates a new recovered block instance with the given [`SealedBlock`] and senders as
     /// provided
     pub fn new_sealed(block: SealedBlock<B>, senders: Vec<Address>) -> Self {
-        let (block, hash) = block.split();
-        Self::new(block, senders, hash)
+        Self { block, senders }
     }
 
     /// A safer variant of [`Self::new_unhashed`] that checks if the number of senders is equal to
@@ -196,7 +192,7 @@ impl<B: Block> RecoveredBlock<B> {
 
     /// Returns the block hash.
     pub fn hash_ref(&self) -> &BlockHash {
-        self.hash.get_or_init(|| self.block.header().hash_slow())
+        self.block.hash_ref()
     }
 
     /// Returns a copy of the block hash.
@@ -221,8 +217,7 @@ impl<B: Block> RecoveredBlock<B> {
 
     /// Clones the wrapped block and returns the [`SealedBlock`] sealed with the hash.
     pub fn clone_sealed_block(&self) -> SealedBlock<B> {
-        let hash = self.hash();
-        SealedBlock::new(self.block.clone(), hash)
+        self.block.clone()
     }
 
     /// Consumes the block and returns the block's body.
@@ -232,20 +227,18 @@ impl<B: Block> RecoveredBlock<B> {
 
     /// Consumes the block and returns the [`SealedBlock`] and drops the recovered senders.
     pub fn into_sealed_block(self) -> SealedBlock<B> {
-        let hash = self.hash();
-        SealedBlock::new(self.block, hash)
+        self.block
     }
 
     /// Consumes the type and returns its components.
     pub fn split_sealed(self) -> (SealedBlock<B>, Vec<Address>) {
-        let hash = self.hash();
-        (SealedBlock::new(self.block, hash), self.senders)
+        (self.block, self.senders)
     }
 
     /// Consumes the type and returns its components.
     #[doc(alias = "into_components")]
     pub fn split(self) -> (B, Vec<Address>) {
-        (self.block, self.senders)
+        (self.block.into_block(), self.senders)
     }
 
     /// Returns an iterator over all transactions and their sender.
@@ -263,7 +256,8 @@ impl<B: Block> RecoveredBlock<B> {
     ) -> impl Iterator<Item = Recovered<<B::Body as BlockBody>::Transaction>> {
         self.block
             .split()
-            .1
+            .0
+            .into_body()
             .into_transactions()
             .into_iter()
             .zip(self.senders)
@@ -273,7 +267,7 @@ impl<B: Block> RecoveredBlock<B> {
     /// Consumes the block and returns the transactions of the block.
     #[inline]
     pub fn into_transactions(self) -> Vec<<B::Body as BlockBody>::Transaction> {
-        self.block.split().1.into_transactions()
+        self.block.split().0.into_body().into_transactions()
     }
 }
 
@@ -373,32 +367,22 @@ impl<B: Block> PartialEq for RecoveredBlock<B> {
     }
 }
 
-impl<B: Default> Default for RecoveredBlock<B> {
+impl<B: Block + Default> Default for RecoveredBlock<B> {
     #[inline]
     fn default() -> Self {
         Self::new_unhashed(B::default(), Default::default())
     }
 }
 
-impl<B: InMemorySize> InMemorySize for RecoveredBlock<B> {
+impl<B: Block> InMemorySize for RecoveredBlock<B> {
     #[inline]
     fn size(&self) -> usize {
-        self.block.size() +
-            core::mem::size_of::<BlockHash>() +
-            self.senders.len() * core::mem::size_of::<Address>()
+        self.block.size() + self.senders.len() * core::mem::size_of::<Address>()
     }
 }
 
 #[cfg(any(test, feature = "test-utils"))]
-impl<B> RecoveredBlock<B>
-where
-    B: Block,
-{
-    /// Returns a mutable reference to the block.
-    pub fn block_mut(&mut self) -> &mut B {
-        &mut self.block
-    }
-
+impl<B: Block> RecoveredBlock<B> {
     /// Returns a mutable reference to the recovered senders.
     pub fn senders_mut(&mut self) -> &mut Vec<Address> {
         &mut self.senders
@@ -440,12 +424,17 @@ impl<B: crate::test_utils::TestBlock> RecoveredBlock<B> {
 
     /// Updates the block hash.
     pub fn set_hash(&mut self, hash: BlockHash) {
-        self.hash = hash.into();
+        self.block.header_mut().set
     }
 
     /// Returns a mutable reference to the header.
     pub fn header_mut(&mut self) -> &mut B::Header {
         self.block.header_mut()
+    }
+
+    /// Returns a mutable reference to the header.
+    pub fn block_mut(&mut self) -> &mut B::Body {
+        self.block.body_mut()
     }
 
     /// Updates the parent block hash.
