@@ -1,7 +1,7 @@
 //! Implements a state provider that has a shared cache in front of it.
 use alloy_primitives::{map::B256HashMap, Address, StorageKey, StorageValue, B256};
 use metrics::Gauge;
-use moka::sync::CacheBuilder;
+use moka::{sync::CacheBuilder, PredicateError};
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives::{Account, Bytecode};
@@ -9,6 +9,7 @@ use reth_provider::{
     AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
     StateRootProvider, StorageRootProvider,
 };
+use reth_revm::db::BundleState;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
@@ -41,6 +42,74 @@ where
         metrics: CachedStateMetrics,
     ) -> Self {
         Self { state_provider, caches, metrics }
+    }
+}
+
+impl<S> CachedStateProvider<S> {
+    /// Creates a new [`SavedCache`] from the given state updates, block hash, and account storage
+    /// roots.
+    ///
+    /// This does not update the code cache, because no changes are required to the code cache on
+    /// state change.
+    ///
+    /// NOTE: Consumers should ensure that these caches are not in use by a state provider for a
+    /// previous block - otherwise, this update will cause that state provider to contain future
+    /// state, which would be incorrect.
+    pub(crate) fn save_cache(
+        self,
+        executed_block_hash: B256,
+        state_updates: &BundleState,
+    ) -> Result<SavedCache, PredicateError> {
+        let Self { caches, metrics, state_provider: _ } = self;
+
+        for (addr, account) in &state_updates.state {
+            // If the account was not modified, as in not changed and not destroyed, then we have
+            // nothing to do w.r.t. this particular account and can move on
+            if !account.status.is_not_modified() {
+                continue
+            }
+
+            // if the account was destroyed, invalidate from the account / storage caches
+            if account.was_destroyed() {
+                // invalidate the account cache entry if destroyed
+                caches.account_cache.invalidate(addr);
+
+                // have to dereference here or else the closure moves the state update's lifetime
+                // into the closure / out of the method body
+                let addr = *addr;
+
+                // we also do not need to keep track of the returned PredicateId string
+                caches
+                    .storage_cache
+                    .invalidate_entries_if(move |(account_addr, _), _| addr == *account_addr)?;
+                continue
+            }
+
+            // if we have an account that was modified, but it has a `None` account info, some wild
+            // error has occurred because this state should be unrepresentable. An account with
+            // `None` current info, should be destroyed.
+            let Some(ref account_info) = account.info else {
+                todo!("error handling - a modified account has None info")
+            };
+
+            // insert will update if present, so we just use the new account info as the new value
+            // for the account cache
+            caches.account_cache.insert(*addr, Some(Account::from(account_info)));
+
+            // now we iterate over all storage and make updates to the cached storage values
+            for (storage_key, slot) in &account.storage {
+                // we convert the storage key from U256 to B256 because that is how it's represented
+                // in the cache
+                caches
+                    .storage_cache
+                    .insert((*addr, (*storage_key).into()), Some(slot.present_value));
+            }
+        }
+
+        // create a saved cache with the executed block hash, same metrics, and updated caches
+        let saved_cache = SavedCache { hash: executed_block_hash, caches, metrics };
+
+        Ok(saved_cache)
     }
 }
 
@@ -269,7 +338,10 @@ impl ProviderCacheBuilder {
         ProviderCaches {
             code_cache: CacheBuilder::new(self.code_cache_size)
                 .build_with_hasher(DefaultHashBuilder::default()),
+            // we build the storage cache with closure invalidation so we can use
+            // `invalidate_entries_if` for storage invalidation
             storage_cache: CacheBuilder::new(self.storage_cache_size)
+                .support_invalidation_closures()
                 .build_with_hasher(DefaultHashBuilder::default()),
             account_cache: CacheBuilder::new(self.account_cache_size)
                 .build_with_hasher(DefaultHashBuilder::default()),
@@ -284,5 +356,31 @@ impl Default for ProviderCacheBuilder {
         //
         // See: https://github.com/moka-rs/moka/wiki#admission-and-eviction-policies
         Self { code_cache_size: 1000000, storage_cache_size: 1000000, account_cache_size: 1000000 }
+    }
+}
+
+/// A saved cache that has been used for executing a specific block, which has been updated for its
+/// execution.
+#[derive(Debug)]
+pub(crate) struct SavedCache {
+    /// The hash of the block these caches were used to execute.
+    hash: B256,
+
+    /// The caches used for the provider.
+    caches: ProviderCaches,
+
+    /// Metrics for the cached state provider
+    metrics: CachedStateMetrics,
+}
+
+impl SavedCache {
+    /// Returns the hash for this cache
+    pub(crate) const fn executed_block_hash(&self) -> B256 {
+        self.hash
+    }
+
+    /// Splits the cache into its caches and metrics, consuming it.
+    pub(crate) fn split(self) -> (ProviderCaches, CachedStateMetrics) {
+        (self.caches, self.metrics)
     }
 }

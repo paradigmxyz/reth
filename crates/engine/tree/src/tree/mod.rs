@@ -19,6 +19,7 @@ use alloy_rpc_types_engine::{
     PayloadValidationError,
 };
 use block_buffer::BlockBuffer;
+use cached_state::SavedCache;
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
@@ -533,6 +534,8 @@ where
     invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
+    /// The most recent cache used for execution.
+    most_recent_cache: Option<SavedCache>,
     /// state root task thread pool
     state_root_task_pool: Arc<rayon::ThreadPool>,
 }
@@ -626,6 +629,7 @@ where
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
+            most_recent_cache: None,
             state_root_task_pool,
         }
     }
@@ -2199,6 +2203,19 @@ where
         Ok(None)
     }
 
+    /// This fetches the most recent saved cache, using the hash of the block we are trying to
+    /// execute on top of.
+    ///
+    /// If the hash does not match the saved cache's hash, then the only saved cache doesn't contain
+    /// state useful for this block's execution, and we return `None`.
+    ///
+    /// If there is no cache saved, this returns `None`.
+    ///
+    /// This `take`s the cache, to avoid cloning the entire cache.
+    fn take_latest_cache(&mut self, parent_hash: B256) -> Option<SavedCache> {
+        self.most_recent_cache.take_if(|cache| cache.executed_block_hash() == parent_hash)
+    }
+
     fn insert_block_without_senders(
         &mut self,
         block: SealedBlock<N::Block>,
@@ -2269,8 +2286,13 @@ where
 
         // Use cached state provider before executing, this does nothing currently, will be used in
         // prewarming
-        let caches = ProviderCacheBuilder::default().build_caches();
-        let cache_metrics = CachedStateMetrics::zeroed();
+        let (caches, cache_metrics) =
+            if let Some(cache) = self.take_latest_cache(block.parent_hash()) {
+                cache.split()
+            } else {
+                (ProviderCacheBuilder::default().build_caches(), CachedStateMetrics::zeroed())
+            };
+
         let state_provider =
             CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
@@ -2381,6 +2403,12 @@ where
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
+
+        // apply state updates to cache and save it
+        let Ok(saved_cache) = state_provider.save_cache(sealed_block.hash(), &output.state) else {
+            todo!("error bubbling for save_cache errors")
+        };
+        self.most_recent_cache = Some(saved_cache);
 
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
