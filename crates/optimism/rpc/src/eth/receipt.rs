@@ -10,6 +10,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_primitives_traits::Block;
 use reth_provider::{ChainSpecProvider, ReceiptProvider, TransactionsProvider};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};

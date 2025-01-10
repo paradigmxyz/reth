@@ -304,8 +304,7 @@ pub async fn test_exex_context_with_chain_spec(
         .block_by_hash(genesis_hash)?
         .ok_or_else(|| eyre::eyre!("genesis block not found"))?
         .seal_slow()
-        .try_with_senders::<reth_primitives::Block>()
-        .ok_or_else(|| eyre::eyre!("failed to recover senders"))?;
+        .try_recover()?;
 
     let head = Head {
         number: genesis.number,

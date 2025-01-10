@@ -20,7 +20,7 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_node_api::{BlockTy, BodyTy, HeaderTy};
+use reth_node_api::BlockTy;
 use reth_node_core::version::SHORT_VERSION;
 use reth_node_events::node::NodeEvent;
 use reth_provider::{
@@ -169,7 +169,7 @@ pub fn build_import_pipeline<N, C, E>(
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent<N::Primitives>>)>
 where
     N: ProviderNodeTypes + CliNodeTypes,
-    C: Consensus<HeaderTy<N>, BodyTy<N>, Error = ConsensusError> + 'static,
+    C: Consensus<BlockTy<N>, Error = ConsensusError> + 'static,
     E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     if !file_client.has_canonical_blocks() {

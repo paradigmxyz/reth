@@ -31,7 +31,6 @@ alloy-eips = { workspace = true, features = ["serde"] }
 alloy-trie = { workspace = true, features = ["serde"] }
 
 # optimism
-op-alloy-rpc-types = { workspace = true, optional = true }
 op-alloy-consensus = { workspace = true, features = [
 	"arbitrary",
 	"serde",
@@ -116,7 +115,6 @@ std = [
 	"secp256k1?/std",
 	"reth-trie-common/std",
 	"op-alloy-consensus?/std",
-	"op-alloy-rpc-types?/std",
 	"serde_json/std",
 	"reth-chainspec/std"
 ]
@@ -141,7 +139,6 @@ arbitrary = [
 	"alloy-rpc-types?/arbitrary",
 	"alloy-serde?/arbitrary",
 	"op-alloy-consensus?/arbitrary",
-	"op-alloy-rpc-types?/arbitrary",
 	"reth-codecs?/arbitrary",
 	"alloy-trie/arbitrary",
 	"reth-trie-common/arbitrary",
@@ -164,7 +161,6 @@ optimism = [
 alloy-compat = [
 	"dep:alloy-rpc-types",
 	"dep:alloy-serde",
-	"dep:op-alloy-rpc-types",
     "dep:alloy-network",
 ]
 test-utils = [

@@ -80,8 +80,7 @@ where
             .provider()
             .block_with_senders(block_id, Default::default())
             .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?
-            .seal_unchecked(latest.hash());
+            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
         let receipts = self
             .provider()

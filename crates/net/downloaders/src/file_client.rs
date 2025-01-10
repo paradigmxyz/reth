@@ -11,6 +11,7 @@ use reth_network_p2p::{
     error::RequestError,
     headers::client::{HeadersClient, HeadersDirection, HeadersFut, HeadersRequest},
     priority::Priority,
+    BlockClient,
 };
 use reth_network_peers::PeerId;
 use reth_primitives::SealedHeader;
@@ -40,7 +41,7 @@ pub const DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 1_000_000_000;
 /// transactions in memory for use in the bodies stage.
 ///
 /// This reads the entire file into memory, so it is not suitable for large files.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileClient<B: Block = reth_primitives::Block> {
     /// The buffered headers retrieved when fetching new bodies.
     headers: HashMap<BlockNumber, B::Header>,
@@ -348,6 +349,10 @@ impl<B: FullBlock> DownloadClient for FileClient<B> {
         // no such thing as connected peers when we are just using a file
         1
     }
+}
+
+impl<B: FullBlock> BlockClient for FileClient<B> {
+    type Block = B;
 }
 
 /// Chunks file into several [`FileClient`]s.

@@ -1,6 +1,6 @@
 //! Command for debugging execution.
 
-use crate::{args::NetworkArgs, utils::get_single_header};
+use crate::{api::BlockTy, args::NetworkArgs, utils::get_single_header};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use clap::Parser;
@@ -64,7 +64,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         &self,
         config: &Config,
         client: Client,
-        consensus: Arc<dyn Consensus<Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<BlockTy<N>, Error = ConsensusError>>,
         provider_factory: ProviderFactory<N>,
         task_executor: &TaskExecutor,
         static_file_producer: StaticFileProducer<ProviderFactory<N>>,
@@ -172,7 +172,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let Environment { provider_factory, config, data_dir } =
             self.env.init::<N>(AccessRights::RW)?;
 
-        let consensus: Arc<dyn Consensus<Error = ConsensusError>> =
+        let consensus: Arc<dyn Consensus<BlockTy<N>, Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
         // Configure and build network
