@@ -94,9 +94,12 @@ where
                 // wrapper is hack to get around 'higher-ranked lifetime error', see
                 // <https://github.com/rust-lang/rust/issues/100013>
                 let db = db.0;
+                let tx_gas_limit = env.tx.gas_limit;
 
                 let (res, _) = this.eth_api().inspect(&mut *db, env, &mut inspector)?;
                 let trace_res = inspector
+                    .with_transaction_gas_limit(tx_gas_limit)
+                    .with_transaction_gas_used(res.result.gas_used())
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_request.trace_types, &db)
                     .map_err(Eth::Error::from_eth_err)?;
@@ -125,10 +128,13 @@ where
         );
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
+        let tx_gas_limit = env.tx.gas_limit;
 
         self.eth_api()
             .spawn_trace_at_with_state(env, config, at, move |inspector, res, db| {
                 inspector
+                    .with_transaction_gas_limit(tx_gas_limit)
+                    .with_transaction_gas_used(res.result.gas_used())
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &db)
                     .map_err(Eth::Error::from_eth_err)
@@ -166,11 +172,14 @@ where
                         &mut db,
                         Default::default(),
                     )?;
+                    let tx_gas_limit = env.tx.gas_limit;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
                     let (res, _) = this.eth_api().inspect(&mut db, env, &mut inspector)?;
 
                     let trace_res = inspector
+                        .with_transaction_gas_limit(tx_gas_limit)
+                        .with_transaction_gas_used(res.result.gas_used())
                         .into_parity_builder()
                         .into_trace_results_with_state(&res, &trace_types, &db)
                         .map_err(Eth::Error::from_eth_err)?;
@@ -199,13 +208,19 @@ where
     ) -> Result<TraceResults, Eth::Error> {
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
         self.eth_api()
-            .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, db| {
-                let trace_res = inspector
-                    .into_parity_builder()
-                    .into_trace_results_with_state(&res, &trace_types, &db)
-                    .map_err(Eth::Error::from_eth_err)?;
-                Ok(trace_res)
-            })
+            .spawn_trace_transaction_in_block(
+                hash,
+                config,
+                move |_, tx_gas_limit, inspector, res, db| {
+                    let trace_res = inspector
+                        .with_transaction_gas_limit(tx_gas_limit)
+                        .with_transaction_gas_used(res.result.gas_used())
+                        .into_parity_builder()
+                        .into_trace_results_with_state(&res, &trace_types, &db)
+                        .map_err(Eth::Error::from_eth_err)?;
+                    Ok(trace_res)
+                },
+            )
             .await
             .transpose()
             .ok_or(EthApiError::TransactionNotFound)?
@@ -292,9 +307,12 @@ where
                 Some(block.clone()),
                 None,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, _, _, _| {
-                    let mut traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                move |tx_info, tx_gas_limit, inspector, res, _, _| {
+                    let mut traces = inspector
+                        .with_transaction_gas_limit(tx_gas_limit)
+                        .with_transaction_gas_used(res.gas_used())
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info);
                     traces.retain(|trace| matcher.matches(&trace.trace));
                     Ok(Some(traces))
                 },
@@ -359,9 +377,12 @@ where
             .spawn_trace_transaction_in_block(
                 hash,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, _, _| {
-                    let traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                move |tx_info, tx_gas_limit, inspector, res, _| {
+                    let traces = inspector
+                        .with_transaction_gas_limit(tx_gas_limit)
+                        .with_transaction_gas_used(res.result.gas_used())
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info);
                     Ok(traces)
                 },
             )
@@ -377,9 +398,12 @@ where
             block_id,
             None,
             TracingInspectorConfig::default_parity(),
-            |tx_info, inspector, _, _, _| {
-                let traces =
-                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+            |tx_info, tx_gas_limit, inspector, res, _, _| {
+                let traces = inspector
+                    .with_transaction_gas_limit(tx_gas_limit)
+                    .with_transaction_gas_used(res.gas_used())
+                    .into_parity_builder()
+                    .into_localized_transaction_traces(tx_info);
                 Ok(traces)
             },
         );
@@ -414,9 +438,12 @@ where
                 block_id,
                 None,
                 TracingInspectorConfig::from_parity_config(&trace_types),
-                move |tx_info, inspector, res, state, db| {
-                    let mut full_trace =
-                        inspector.into_parity_builder().into_trace_results(&res, &trace_types);
+                move |tx_info, tx_gas_limit, inspector, res, state, db| {
+                    let mut full_trace = inspector
+                        .with_transaction_gas_limit(tx_gas_limit)
+                        .with_transaction_gas_used(res.gas_used())
+                        .into_parity_builder()
+                        .into_trace_results(&res, &trace_types);
 
                     // If statediffs were requested, populate them with the account balance and
                     // nonce from pre-state
@@ -445,7 +472,7 @@ where
             .spawn_trace_transaction_in_block_with_inspector(
                 tx_hash,
                 OpcodeGasInspector::default(),
-                move |_tx_info, inspector, _res, _| {
+                move |_tx_info, _tx_gas_limit, inspector, _res, _| {
                     let trace = TransactionOpcodeGas {
                         transaction_hash: tx_hash,
                         opcode_gas: inspector.opcode_gas_iter().collect(),
@@ -470,7 +497,7 @@ where
                 block_id,
                 None,
                 OpcodeGasInspector::default,
-                move |tx_info, inspector, _res, _, _| {
+                move |tx_info, _tx_gas_limit, inspector, _res, _, _| {
                     let trace = TransactionOpcodeGas {
                         transaction_hash: tx_info.hash.expect("tx hash is set"),
                         opcode_gas: inspector.opcode_gas_iter().collect(),

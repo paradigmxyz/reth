@@ -100,7 +100,7 @@ where
             .spawn_trace_transaction_in_block_with_inspector(
                 tx_hash,
                 TransferInspector::new(false),
-                |_tx_info, inspector, _, _| Ok(inspector.into_transfers()),
+                |_tx_info, _tx_gas_limit, inspector, _, _| Ok(inspector.into_transfers()),
             )
             .await
             .map_err(Into::into)?
@@ -146,7 +146,9 @@ where
             .spawn_trace_transaction_in_block(
                 tx_hash,
                 TracingInspectorConfig::default_parity(),
-                move |_tx_info, inspector, _, _| Ok(inspector.into_traces().into_nodes()),
+                move |_tx_info, _tx_gas_limit, inspector, _, _| {
+                    Ok(inspector.into_traces().into_nodes())
+                },
             )
             .await
             .map_err(Into::into)?
@@ -351,7 +353,7 @@ where
                 num.into(),
                 None,
                 TracingInspectorConfig::default_parity(),
-                |tx_info, inspector, _, _, _| {
+                |tx_info, _, inspector, _, _, _| {
                     Ok(inspector.into_parity_builder().into_localized_transaction_traces(tx_info))
                 },
             )

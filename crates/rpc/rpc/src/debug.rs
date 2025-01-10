@@ -427,11 +427,11 @@ where
                             .inner
                             .eth_api
                             .spawn_with_call_at(call, at, overrides, move |db, env| {
-                                let (_res, env) =
-                                    this.eth_api().inspect(db, env, &mut inspector)?;
+                                let (res, env) = this.eth_api().inspect(db, env, &mut inspector)?;
                                 let tx_info = TransactionInfo::default();
                                 let frame: FlatCallFrame = inspector
                                     .with_transaction_gas_limit(env.tx.gas_limit)
+                                    .with_transaction_gas_used(res.result.gas_used())
                                     .into_parity_builder()
                                     .into_localized_transaction_traces(tx_info);
                                 Ok(frame)

@@ -149,6 +149,7 @@ pub trait Trace:
         Self: LoadPendingBlock + LoadTransaction + Call,
         F: FnOnce(
                 TransactionInfo,
+                u64, // tx gas limit
                 TracingInspector,
                 ResultAndState,
                 StateCacheDb<'_>,
@@ -179,6 +180,7 @@ pub trait Trace:
         Self: LoadPendingBlock + LoadTransaction + Call,
         F: FnOnce(
                 TransactionInfo,
+                u64, // tx gas limit
                 Insp,
                 ResultAndState,
                 StateCacheDb<'_>,
@@ -228,9 +230,10 @@ pub trait Trace:
                     block_env,
                     RpcNodeCore::evm_config(&this).tx_env(tx.tx(), tx.signer()),
                 );
+                let tx_gas_limit = env.tx.gas_limit;
                 let (res, _) =
                     this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
-                f(tx_info, inspector, res, db)
+                f(tx_info, tx_gas_limit, inspector, res, db)
             })
             .await
             .map(Some)
@@ -255,6 +258,7 @@ pub trait Trace:
         Self: LoadBlock,
         F: Fn(
                 TransactionInfo,
+                u64, // tx gas limit
                 TracingInspector,
                 ExecutionResult,
                 &EvmState,
@@ -295,6 +299,7 @@ pub trait Trace:
         Self: LoadBlock,
         F: Fn(
                 TransactionInfo,
+                u64, // tx gas limit
                 Insp,
                 ExecutionResult,
                 &EvmState,
@@ -379,12 +384,13 @@ pub trait Trace:
                         block_env.clone(),
                         tx,
                     );
+                    let tx_gas_limit = env.tx.gas_limit;
 
                     let mut inspector = inspector_setup();
                     let (res, _) =
                         this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
                     let ResultAndState { result, state } = res;
-                    results.push(f(tx_info, inspector, result, &state, &db)?);
+                    results.push(f(tx_info, tx_gas_limit, inspector, result, &state, &db)?);
 
                     // need to apply the state changes of this transaction before executing the
                     // next transaction, but only if there's a next transaction
@@ -423,6 +429,7 @@ pub trait Trace:
         // state and db
         F: Fn(
                 TransactionInfo,
+                u64, // tx gas limit
                 TracingInspector,
                 ExecutionResult,
                 &EvmState,
@@ -462,6 +469,7 @@ pub trait Trace:
         // state and db
         F: Fn(
                 TransactionInfo,
+                u64, // tx gas limit
                 Insp,
                 ExecutionResult,
                 &EvmState,
