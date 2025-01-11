@@ -102,13 +102,11 @@ where
         message: BidTrace,
         registered_gas_limit: u64,
     ) -> Result<(), ValidationApiError> {
-        // TODO(mattsse): optimize clone
-        let header = block.clone_sealed_header();
-        self.validate_message_against_header(&header, &message)?;
+        self.validate_message_against_header(block.sealed_header(), &message)?;
 
-        self.consensus.validate_header_with_total_difficulty(&header, U256::MAX)?;
-        self.consensus.validate_header(&header)?;
-        self.consensus.validate_block_pre_execution(&block.clone_sealed_block())?;
+        self.consensus.validate_header_with_total_difficulty(block.sealed_header(), U256::MAX)?;
+        self.consensus.validate_header(block.sealed_header())?;
+        self.consensus.validate_block_pre_execution(block.sealed_block())?;
 
         if !self.disallow.is_empty() {
             if self.disallow.contains(&block.beneficiary()) {

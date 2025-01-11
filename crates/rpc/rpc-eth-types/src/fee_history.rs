@@ -235,10 +235,9 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
         tokio::select! {
             res = &mut fetch_missing_block =>  {
                 if let Ok(res) = res {
-                    // TODO(mattsse): simplify this
                     let res = res.as_ref()
-                        .map(|(b, r)| (b.clone_sealed_block(), r));
-                    fee_history_cache.insert_blocks(res.as_ref().map(|(b, r)|(b, (*r).clone())).into_iter()).await;
+                        .map(|(b, r)| (b.sealed_block(), r.clone()));
+                    fee_history_cache.insert_blocks(res).await;
                 }
             }
             event = events.next() =>  {

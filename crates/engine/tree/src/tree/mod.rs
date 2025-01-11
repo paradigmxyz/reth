@@ -1810,13 +1810,12 @@ where
             return Err(e)
         }
 
-        // TODO(mattsse): get rid of clone
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_block_pre_execution(&block.clone_sealed_block()) {
+        if let Err(e) = self.consensus.validate_block_pre_execution(block.sealed_block()) {
             error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }

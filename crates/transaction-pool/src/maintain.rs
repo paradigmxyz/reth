@@ -348,8 +348,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                 // update the pool first
                 let update = CanonicalStateUpdate {
-                    // TODO(mattsse): remove clone
-                    new_tip: &new_tip.clone_sealed_block(),
+                    new_tip: new_tip.sealed_block(),
                     pending_block_base_fee,
                     pending_block_blob_fee,
                     changed_accounts,
@@ -434,8 +433,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                 // Canonical update
                 let update = CanonicalStateUpdate {
-                    // TODO(mattsse): remove clone
-                    new_tip: &tip.clone_sealed_block(),
+                    new_tip: tip.sealed_block(),
                     pending_block_base_fee,
                     pending_block_blob_fee,
                     changed_accounts,

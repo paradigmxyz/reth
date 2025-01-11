@@ -71,9 +71,12 @@ impl<B: Block> RecoveredBlock<B> {
     pub fn into_block(self) -> B {
         self.block.into_block()
     }
-}
 
-impl<B: Block> RecoveredBlock<B> {
+    /// Returns a reference to the sealed block.
+    pub const fn sealed_block(&self) -> &SealedBlock<B> {
+        &self.block
+    }
+
     /// Creates a new recovered block instance with the given [`SealedBlock`] and senders as
     /// provided
     pub const fn new_sealed(block: SealedBlock<B>, senders: Vec<Address>) -> Self {
@@ -227,14 +230,24 @@ impl<B: Block> RecoveredBlock<B> {
         BlockWithParent { parent: self.header().parent_hash(), block: self.num_hash() }
     }
 
+    /// Clone the header.
+    pub fn clone_header(&self) -> B::Header {
+        self.header().clone()
+    }
+
     /// Clones the internal header and returns a [`SealedHeader`] sealed with the hash.
     pub fn clone_sealed_header(&self) -> SealedHeader<B::Header> {
-        SealedHeader::new(self.header().clone(), self.hash())
+        SealedHeader::new(self.clone_header(), self.hash())
     }
 
     /// Clones the wrapped block and returns the [`SealedBlock`] sealed with the hash.
     pub fn clone_sealed_block(&self) -> SealedBlock<B> {
         self.block.clone()
+    }
+
+    /// Consumes the block and returns the block's header.
+    pub fn into_header(self) -> B::Header {
+        self.block.into_header()
     }
 
     /// Consumes the block and returns the block's body.
