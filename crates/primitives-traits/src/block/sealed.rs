@@ -106,10 +106,7 @@ impl<B: Block> SealedBlock<B> {
     }
 
     /// Clones the wrapped block.
-    pub fn clone_block(&self) -> B
-    where
-        B: Clone,
-    {
+    pub fn clone_block(&self) -> B {
         B::new(self.header.clone_header(), self.body.clone())
     }
 
