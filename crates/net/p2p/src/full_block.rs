@@ -196,7 +196,7 @@ where
                     match res {
                         Ok(maybe_header) => {
                             let (peer, maybe_header) =
-                                maybe_header.map(|h| h.map(SealedHeader::seal)).split();
+                                maybe_header.map(|h| h.map(SealedHeader::seal_slow)).split();
                             if let Some(header) = maybe_header {
                                 if header.hash() == this.hash {
                                     this.header = Some(header);
@@ -448,7 +448,7 @@ where
 
     fn on_headers_response(&mut self, headers: WithPeerId<Vec<Client::Header>>) {
         let (peer, mut headers_falling) =
-            headers.map(|h| h.into_iter().map(SealedHeader::seal).collect::<Vec<_>>()).split();
+            headers.map(|h| h.into_iter().map(SealedHeader::seal_slow).collect::<Vec<_>>()).split();
 
         // fill in the response if it's the correct length
         if headers_falling.len() == self.count as usize {
@@ -688,7 +688,7 @@ mod tests {
             header.parent_hash = hash;
             header.number += 1;
 
-            sealed_header = SealedHeader::seal(header);
+            sealed_header = SealedHeader::seal_slow(header);
 
             client.insert(sealed_header.clone(), body.clone());
         }

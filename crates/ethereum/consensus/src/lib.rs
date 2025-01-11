@@ -360,7 +360,7 @@ mod tests {
         };
 
         assert_eq!(
-            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::seal(header,)),
+            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::seal_slow(header,)),
             Ok(())
         );
     }

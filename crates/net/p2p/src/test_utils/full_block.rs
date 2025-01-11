@@ -134,10 +134,9 @@ impl TestFullBlockClient {
     pub fn highest_block(&self) -> Option<SealedBlock> {
         self.headers.lock().iter().max_by_key(|(_, header)| header.number).and_then(
             |(hash, header)| {
-                self.bodies
-                    .lock()
-                    .get(hash)
-                    .map(|body| SealedBlock::from_parts(header.clone(), body.clone(), *hash))
+                self.bodies.lock().get(hash).map(|body| {
+                    SealedBlock::from_parts_unchecked(header.clone(), body.clone(), *hash)
+                })
             },
         )
     }

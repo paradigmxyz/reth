@@ -82,12 +82,12 @@ pub trait Block:
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
     fn seal(self, hash: B256) -> SealedBlock<Self> {
-        SealedBlock::new(self, hash)
+        SealedBlock::new_unchecked(self, hash)
     }
 
     /// Calculate the header hash and seal the block so that it can't be changed.
     fn seal_slow(self) -> SealedBlock<Self> {
-        SealedBlock::seal(self)
+        SealedBlock::seal_slow(self)
     }
 
     /// Returns reference to block header.

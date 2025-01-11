@@ -125,7 +125,7 @@ pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> 
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
-    SealedHeader::seal(header)
+    SealedHeader::seal_slow(header)
 }
 
 /// Generates a random legacy [Transaction].

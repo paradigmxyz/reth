@@ -108,7 +108,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.header_by_number_or_tag(BlockNumberOrTag::Latest) {
-        let latest = SealedHeader::seal(latest);
+        let latest = SealedHeader::seal_slow(latest);
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
             block_gas_limit: latest.gas_limit(),

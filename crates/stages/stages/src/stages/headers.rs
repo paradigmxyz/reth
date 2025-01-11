@@ -521,7 +521,7 @@ mod tests {
                             // validate the header
                             let header = provider.header_by_number(block_num)?;
                             assert!(header.is_some());
-                            let header = SealedHeader::seal(header.unwrap());
+                            let header = SealedHeader::seal_slow(header.unwrap());
                             assert_eq!(header.hash(), hash);
 
                             // validate the header total difficulty

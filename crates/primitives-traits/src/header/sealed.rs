@@ -72,6 +72,12 @@ impl<H> SealedHeader<H> {
 }
 
 impl<H: Sealable> SealedHeader<H> {
+    /// Hashes the header and creates a sealed header.
+    pub fn seal_slow(header: H) -> Self {
+        let hash = header.hash_slow();
+        Self::new(header, hash)
+    }
+
     /// Returns the block hash.
     ///
     /// Note: if the hash has not been computed yet, this will compute the hash:
@@ -83,12 +89,6 @@ impl<H: Sealable> SealedHeader<H> {
     /// Returns a copy of the block hash.
     pub fn hash(&self) -> BlockHash {
         *self.hash_ref()
-    }
-
-    /// Hashes the header and creates a sealed header.
-    pub fn seal(header: H) -> Self {
-        let hash = header.hash_slow();
-        Self::new(header, hash)
     }
 
     /// This is the inverse of [`Header::seal_slow`] which returns the raw header and hash.
@@ -143,7 +143,7 @@ impl<H: InMemorySize> InMemorySize for SealedHeader<H> {
 
 impl<H: Sealable + Default> Default for SealedHeader<H> {
     fn default() -> Self {
-        Self::seal(H::default())
+        Self::seal_slow(H::default())
     }
 }
 
@@ -187,7 +187,7 @@ where
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let header = H::arbitrary(u)?;
 
-        Ok(Self::seal(header))
+        Ok(Self::seal_slow(header))
     }
 }
 

@@ -169,7 +169,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         };
 
         let block = SealedBlock::from_sealed_parts(
-            SealedHeader::seal(header),
+            SealedHeader::seal_slow(header),
             BlockBody {
                 transactions: transactions.into_iter().map(|tx| tx.into_tx()).collect(),
                 ommers: Vec::new(),

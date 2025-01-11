@@ -1267,11 +1267,11 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
             BlockNumberOrTag::Safe => Ok(self.canonical_in_memory_state.get_safe_header()),
             BlockNumberOrTag::Earliest => self
                 .header_by_number(0)?
-                .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal(h)))),
+                .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h)))),
             BlockNumberOrTag::Pending => Ok(self.canonical_in_memory_state.pending_sealed_header()),
             BlockNumberOrTag::Number(num) => self
                 .header_by_number(num)?
-                .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal(h)))),
+                .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h)))),
         }
     }
 
@@ -1281,7 +1281,7 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
     ) -> ProviderResult<Option<SealedHeader<HeaderTy<N>>>> {
         Ok(match id {
             BlockId::Number(num) => self.sealed_header_by_number_or_tag(num)?,
-            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(SealedHeader::seal),
+            BlockId::Hash(hash) => self.header(&hash.block_hash)?.map(SealedHeader::seal_slow),
         })
     }
 

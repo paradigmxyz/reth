@@ -117,7 +117,7 @@ impl<B: FullBlock> FileClient<B> {
     /// Clones and returns the highest header of this client has or `None` if empty. Seals header
     /// before returning.
     pub fn tip_header(&self) -> Option<SealedHeader<B::Header>> {
-        self.headers.get(&self.max_block()?).map(|h| SealedHeader::seal(h.clone()))
+        self.headers.get(&self.max_block()?).map(|h| SealedHeader::seal_slow(h.clone()))
     }
 
     /// Returns true if all blocks are canonical (no gaps)

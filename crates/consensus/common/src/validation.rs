@@ -383,7 +383,7 @@ mod tests {
             withdrawals: Some(Withdrawals::default()),
         };
 
-        let block = SealedBlock::seal(alloy_consensus::Block { header, body });
+        let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
 
         // 10 blobs times the blob gas per blob.
         let expected_blob_gas_used = 10 * DATA_GAS_PER_BLOB;

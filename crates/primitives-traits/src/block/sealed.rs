@@ -26,9 +26,20 @@ pub struct SealedBlock<B: Block> {
 }
 
 impl<B: Block> SealedBlock<B> {
+    /// Hashes the header and creates a sealed block.
+    ///
+    /// This calculates the header hash. To create a [`SealedBlock`] without calculating the hash
+    /// upfront see [`SealedBlock::new_unhashed`]
+    pub fn seal_slow(block: B) -> Self {
+        let hash = block.header().hash_slow();
+        Self::new_unchecked(block, hash)
+    }
+
     /// Create a new sealed block instance using the block.
+    ///
+    /// Caution: This assumes the given hash is the block's hash.
     #[inline]
-    pub fn new(block: B, hash: BlockHash) -> Self {
+    pub fn new_unchecked(block: B, hash: BlockHash) -> Self {
         let (header, body) = block.split();
         Self { header: SealedHeader::new(header, hash), body }
     }
@@ -37,6 +48,31 @@ impl<B: Block> SealedBlock<B> {
     pub fn new_unhashed(block: B) -> Self {
         let (header, body) = block.split();
         Self { header: SealedHeader::new_unhashed(header), body }
+    }
+
+    /// Creates the [`SealedBlock`] from the block's parts by hashing the header.
+    ///
+    ///
+    /// This calculates the header hash. To create a [`SealedBlock`] from its parts without
+    /// calculating the hash upfront see [`SealedBlock::from_parts_unhashed`]
+    pub fn seal_parts(header: B::Header, body: B::Body) -> Self {
+        Self::seal_slow(B::new(header, body))
+    }
+
+    /// Creates the [`SealedBlock`] from the block's parts without calculating the hash upfront.
+    pub fn from_parts_unhashed(header: B::Header, body: B::Body) -> Self {
+        Self::new_unhashed(B::new(header, body))
+    }
+
+    /// Creates the [`SealedBlock`] from the block's parts.
+    pub fn from_parts_unchecked(header: B::Header, body: B::Body, hash: BlockHash) -> Self {
+        Self::new_unchecked(B::new(header, body), hash)
+    }
+
+    /// Creates the [`SealedBlock`] from the [`SealedHeader`] and the body.
+    pub fn from_sealed_parts(header: SealedHeader<B::Header>, body: B::Body) -> Self {
+        let (header, hash) = header.split();
+        Self::from_parts_unchecked(header, body, hash)
     }
 
     /// Returns a reference to the block hash.
@@ -75,24 +111,6 @@ impl<B: Block> SealedBlock<B> {
         B: Clone,
     {
         B::new(self.header.clone_header(), self.body.clone())
-    }
-}
-
-impl<B: Block> SealedBlock<B> {
-    /// Creates the [`SealedBlock`] from the block's parts by hashing the header.
-    pub fn seal_parts(header: B::Header, body: B::Body) -> Self {
-        Self::seal(B::new(header, body))
-    }
-
-    /// Creates the [`SealedBlock`] from the block's parts.
-    pub fn from_parts(header: B::Header, body: B::Body, hash: BlockHash) -> Self {
-        Self::new(B::new(header, body), hash)
-    }
-
-    /// Creates the [`SealedBlock`] from the [`SealedHeader`] and the body.
-    pub fn from_sealed_parts(header: SealedHeader<B::Header>, body: B::Body) -> Self {
-        let (header, hash) = header.split();
-        Self::from_parts(header, body, hash)
     }
 
     /// Converts this block into a [`RecoveredBlock`] with the given senders
@@ -257,20 +275,12 @@ impl<B: Block> SealedBlock<B> {
     }
 }
 
-impl<B: Block> SealedBlock<B> {
-    /// Hashes the header and creates a sealed block.
-    pub fn seal(block: B) -> Self {
-        let hash = block.header().hash_slow();
-        Self::new(block, hash)
-    }
-}
-
 impl<B> From<B> for SealedBlock<B>
 where
     B: Block,
 {
     fn from(block: B) -> Self {
-        Self::seal(block)
+        Self::seal_slow(block)
     }
 }
 
@@ -279,7 +289,7 @@ where
     B: Block + Default,
 {
     fn default() -> Self {
-        Self::seal(Default::default())
+        Self::seal_slow(Default::default())
     }
 }
 
@@ -307,7 +317,7 @@ impl<B: Block> Encodable for SealedBlock<B> {
 impl<B: Block> Decodable for SealedBlock<B> {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let block = B::decode(buf)?;
-        Ok(Self::seal(block))
+        Ok(Self::seal_slow(block))
     }
 }
 
@@ -325,7 +335,7 @@ where
 {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         let block = B::arbitrary(u)?;
-        Ok(Self::seal(block))
+        Ok(Self::seal_slow(block))
     }
 }
 

@@ -251,7 +251,8 @@ where
     ) -> Result<(), ReverseHeadersDownloaderError<H::Header>> {
         let mut validated = Vec::with_capacity(headers.len());
 
-        let sealed_headers = headers.into_par_iter().map(SealedHeader::seal).collect::<Vec<_>>();
+        let sealed_headers =
+            headers.into_par_iter().map(SealedHeader::seal_slow).collect::<Vec<_>>();
         for parent in sealed_headers {
             // Validate that the header is the parent header of the last validated header.
             if let Some(validated_header) =
@@ -378,7 +379,7 @@ where
                 }
 
                 let header = headers.swap_remove(0);
-                let target = SealedHeader::seal(header);
+                let target = SealedHeader::seal_slow(header);
 
                 match sync_target {
                     SyncTargetBlock::Hash(hash) | SyncTargetBlock::HashAndNumber { hash, .. } => {

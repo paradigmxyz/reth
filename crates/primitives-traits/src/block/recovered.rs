@@ -47,7 +47,7 @@ impl<B: Block> RecoveredBlock<B> {
     ///
     /// Note: This expects that the given senders match the transactions in the block.
     pub fn new(block: B, senders: Vec<Address>, hash: BlockHash) -> Self {
-        Self { block: SealedBlock::new(block, hash), senders }
+        Self { block: SealedBlock::new_unchecked(block, hash), senders }
     }
 
     /// Creates a new recovered block instance with the given senders as provided.
@@ -96,7 +96,7 @@ impl<B: Block> RecoveredBlock<B> {
             senders
         } else {
             let Ok(senders) = block.body().try_recover_signers() else {
-                return Err(SealedBlockRecoveryError::new(SealedBlock::new(block, hash)));
+                return Err(SealedBlockRecoveryError::new(SealedBlock::new_unchecked(block, hash)));
             };
             senders
         };
@@ -116,7 +116,7 @@ impl<B: Block> RecoveredBlock<B> {
             senders
         } else {
             let Ok(senders) = block.body().try_recover_signers_unchecked() else {
-                return Err(SealedBlockRecoveryError::new(SealedBlock::new(block, hash)));
+                return Err(SealedBlockRecoveryError::new(SealedBlock::new_unchecked(block, hash)));
             };
             senders
         };

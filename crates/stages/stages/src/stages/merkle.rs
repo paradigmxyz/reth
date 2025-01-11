@@ -277,7 +277,7 @@ where
         // Reset the checkpoint
         self.save_execution_checkpoint(provider, None)?;
 
-        validate_state_root(trie_root, SealedHeader::seal(target_block), to_block)?;
+        validate_state_root(trie_root, SealedHeader::seal_slow(target_block), to_block)?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(to_block)
@@ -330,7 +330,7 @@ where
                 .header_by_number(input.unwind_to)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
 
-            validate_state_root(block_root, SealedHeader::seal(target), input.unwind_to)?;
+            validate_state_root(block_root, SealedHeader::seal_slow(target), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
             provider.write_trie_updates(&updates)?;
@@ -535,7 +535,7 @@ mod tests {
                     .map(|(address, account)| (address, (account, std::iter::empty()))),
             );
             let sealed_head = SealedBlock::<reth_primitives::Block>::from_sealed_parts(
-                SealedHeader::seal(header),
+                SealedHeader::seal_slow(header),
                 body,
             );
 

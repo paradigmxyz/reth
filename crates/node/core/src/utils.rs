@@ -49,7 +49,7 @@ where
         eyre::bail!("Invalid number of headers received. Expected: 1. Received: 0")
     };
 
-    let header = SealedHeader::seal(header);
+    let header = SealedHeader::seal_slow(header);
 
     let valid = match id {
         BlockHashOrNumber::Hash(hash) => header.hash() == hash,

@@ -22,7 +22,7 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
         proofs::calculate_transaction_root(&transformed.body.transactions);
     transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.body.ommers);
     block_to_payload(SealedBlock::from_sealed_parts(
-        SealedHeader::seal(transformed.header),
+        SealedHeader::seal_slow(transformed.header),
         transformed.body,
     ))
     .0
