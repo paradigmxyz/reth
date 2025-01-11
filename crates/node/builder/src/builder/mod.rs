@@ -17,6 +17,7 @@ use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
+use reth_engine_tree::tree::TreeConfig;
 use reth_exex::ExExContext;
 use reth_network::{
     transactions::TransactionsManagerConfig, NetworkBuilder, NetworkConfig, NetworkConfigBuilder,
@@ -563,8 +564,16 @@ where
     > {
         let Self { builder, task_executor } = self;
 
+        let engine_tree_config = TreeConfig::default()
+            .with_persistence_threshold(builder.config.engine.persistence_threshold)
+            .with_memory_block_buffer_target(builder.config.engine.memory_block_buffer_target)
+            .with_state_root_task(builder.config.engine.state_root_task_enabled)
+            .with_always_compare_trie_updates(
+                builder.config.engine.state_root_task_compare_updates,
+            );
+
         let launcher =
-            EngineNodeLauncher::new(task_executor, builder.config.datadir(), Default::default());
+            EngineNodeLauncher::new(task_executor, builder.config.datadir(), engine_tree_config);
         builder.launch_with(launcher).await
     }
 }
