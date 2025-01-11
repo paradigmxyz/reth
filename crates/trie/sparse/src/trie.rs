@@ -817,7 +817,7 @@ impl<P> RevealedSparseTrie<P> {
                                 tree_mask,
                                 hash_mask,
                                 hashes,
-                                hash.filter(|_| path.len() == 0),
+                                hash.filter(|_| path.is_empty()),
                             );
                             updates.updated_nodes.insert(path.clone(), branch_node);
                         }

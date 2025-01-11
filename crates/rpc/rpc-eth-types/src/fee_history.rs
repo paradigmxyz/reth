@@ -101,7 +101,7 @@ impl FeeHistoryCache {
             entries.pop_first();
         }
 
-        if entries.len() == 0 {
+        if entries.is_empty() {
             self.inner.upper_bound.store(0, SeqCst);
             self.inner.lower_bound.store(0, SeqCst);
             return
