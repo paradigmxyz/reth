@@ -885,7 +885,6 @@ where
             let tx_exceeds_block_da_size = block_da_limit
                 .is_some_and(|da_limit| info.cumulative_da_bytes_used + tx.compressed_size() > da_limit);
 
-
             if tx_exceeds_block_size || tx_exceeds_block_da_size || tx_exceeds_da_size {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from

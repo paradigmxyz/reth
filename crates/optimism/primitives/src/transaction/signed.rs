@@ -78,16 +78,11 @@ impl OpTransactionSigned {
 
     /// Returns the estimated compressed size of a transaction.
     pub fn compressed_size(&self) -> u64 {
-        *self.compressed_size.get_or_init(|| match &self.transaction {
-            OpTypedTransaction::Legacy(tx) => {
-                let mut tx_ser: Vec<u8> = Vec::new();
-
-                tx.eip2718_encode(&self.signature, &mut tx_ser);
-        
-                estimate_tx_compressed_size(&tx_ser)
-                    .wrapping_div(1_000_000u64)
-            },
-            _ => 0,
+        *self.compressed_size.get_or_init(|| {
+            let mut tx_ser: Vec<u8> = Vec::new();
+            self.encode_2718(&mut tx_ser);
+            estimate_tx_compressed_size(&tx_ser)
+                .wrapping_div(1_000_000u64)
         })
     }
 }
