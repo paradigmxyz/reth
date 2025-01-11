@@ -11,7 +11,9 @@ use alloy_rpc_types_engine::{
 use reth_primitives::{Block, SealedBlock};
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 
-/// Converts [`SealedBlock`] to [`ExecutionPayload`]
+/// Converts [`SealedBlock`] to [`ExecutionPayload`].
+///
+/// TODO(mattsse): remove after next alloy bump
 pub fn block_to_payload<T: SignedTransaction>(
     value: SealedBlock<Block<T>>,
 ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
