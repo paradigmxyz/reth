@@ -15,6 +15,9 @@ pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincod
 impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
 
 /// Abstraction for block's body.
+///
+/// This type is a container for everything that is included in a block except the header.
+/// For ethereum this includes transactions, ommers, and withdrawals.
 pub trait BlockBody:
     Send
     + Sync

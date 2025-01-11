@@ -8,8 +8,13 @@ use bytes::BufMut;
 use core::mem;
 use derive_more::{AsRef, Deref};
 
-/// A [`Header`] that is sealed at a precalculated hash, use [`SealedHeader::unseal()`] if you want
-/// to modify header.
+/// Seals the header with the block hash.
+///
+/// This type uses lazy sealing to avoid hashing the header until it is needed:
+///
+/// [`SealedHeader::new_unhashed`] creates a sealed header without hashing the header.
+/// [`SealedHeader::new`] creates a sealed header with the corresponding block hash.
+/// [`SealedHeader::hash`] computes the hash if it has not been computed yet.
 #[derive(Debug, Clone, AsRef, Deref)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -63,6 +68,9 @@ impl<H> SealedHeader<H> {
 
 impl<H: Sealable> SealedHeader<H> {
     /// Returns the block hash.
+    ///
+    /// Note: if the hash has not been computed yet, this will compute the hash:
+    /// [`Sealable::hash_slow`].
     pub fn hash_ref(&self) -> &BlockHash {
         self.hash.get_or_init(|| self.header.hash_slow())
     }

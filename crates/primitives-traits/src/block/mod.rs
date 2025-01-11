@@ -44,9 +44,10 @@ impl<T> FullBlock for T where
 pub type BlockTx<B> = <<B as Block>::Body as BlockBody>::Transaction;
 
 /// Abstraction of block data type.
-// todo: make sealable super-trait, depends on <https://github.com/paradigmxyz/reth/issues/11449>
-// todo: make with senders extension trait, so block can be impl by block type already containing
-// senders
+///
+/// This type defines the structure of a block in the blockchain.
+/// A [`Block`] is composed of a header and a body.
+/// It is expected that a block can always be completely reconstructed from its header and body.
 pub trait Block:
     Send
     + Sync
@@ -65,7 +66,8 @@ pub trait Block:
     /// Header part of the block.
     type Header: BlockHeader;
 
-    /// The block's body contains the transactions in the block.
+    /// The block's body contains the transactions in the block and additional data, e.g.
+    /// withdrawals in ethereum.
     type Body: BlockBody<OmmerHeader = Self::Header>;
 
     /// Create new block instance.

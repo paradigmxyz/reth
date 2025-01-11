@@ -11,7 +11,22 @@ use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bloom, Bytes, B256, B64, U256};
 use derive_more::Deref;
 
-/// A block with senders recovered from transactions.
+/// A block with senders recovered from the block's transactions.
+///
+/// This type is a [`SealedBlock`] with a list of senders that match the transactions in the block.
+///
+/// ## Sealing
+///
+/// This type uses lazy sealing to avoid hashing the header until it is needed:
+///
+/// [`RecoveredBlock::new_unhashed`] creates a recovered block without hashing the header.
+/// [`RecoveredBlock::new`] creates a recovered block with the corresponding block hash.
+///
+/// ## Recovery
+///
+/// Sender recovery is fallible and can fail if any of the transactions fail to recover the sender.
+/// A [`SealedBlock`] can be upgraded to a [`RecoveredBlock`] using the
+/// [`RecoveredBlock::try_recover`] or [`SealedBlock::try_recover`] method.
 #[derive(Debug, Clone, Deref)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RecoveredBlock<B: Block> {
@@ -29,11 +44,15 @@ pub struct RecoveredBlock<B: Block> {
 impl<B: Block> RecoveredBlock<B> {
     /// Creates a new recovered block instance with the given senders as provided and the block
     /// hash.
+    ///
+    /// Note: This expects that the given senders match the transactions in the block.
     pub fn new(block: B, senders: Vec<Address>, hash: BlockHash) -> Self {
         Self { block: SealedBlock::new(block, hash), senders }
     }
 
-    /// Creates a new recovered block instance with the given senders as provided
+    /// Creates a new recovered block instance with the given senders as provided.
+    ///
+    /// Note: This expects that the given senders match the transactions in the block.
     pub fn new_unhashed(block: B, senders: Vec<Address>) -> Self {
         Self { block: SealedBlock::new_unhashed(block), senders }
     }

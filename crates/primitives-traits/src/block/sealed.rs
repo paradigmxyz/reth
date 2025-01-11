@@ -12,9 +12,10 @@ use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::ops::Deref;
 
-/// Sealed full block.
+/// Sealed full block composed of the block's header and body.
 ///
-/// This type wraps the block type together with the block hash.
+/// This type uses lazy sealing to avoid hashing the header until it is needed, see also
+/// [`SealedHeader`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SealedBlock<B: Block> {
