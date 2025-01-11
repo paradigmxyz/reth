@@ -97,6 +97,11 @@ pub trait Block:
     /// Splits the block into its header and body.
     fn split(self) -> (Self::Header, Self::Body);
 
+    /// Returns a tuple of references to the block's header and body.
+    fn split_ref(&self) -> (&Self::Header, &Self::Body) {
+        (self.header(), self.body())
+    }
+
     /// Consumes the block and returns the header.
     fn into_header(self) -> Self::Header {
         self.split().0

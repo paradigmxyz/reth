@@ -296,6 +296,28 @@ impl<B: Block> Decodable for SealedBlock<B> {
     }
 }
 
+// impl<B:Block> Block for SealedBlock<B> {
+//     type Header = B::Header;
+//     type Body = B::Header;
+//
+//     fn new(header: Self::Header, body: Self::Body) -> Self {
+//         Self::new_unhashed(B::new(header, body))
+//     }
+//
+//     fn header(&self) -> &Self::Header {
+//         self.header.header()
+//     }
+//
+//     fn body(&self) -> &Self::Body {
+//         &self.body
+//     }
+//
+//     fn split(self) -> (Self::Header, Self::Body) {
+//         let header = self.header.unseal();
+//         (header, self.body)
+//     }
+// }
+
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a, B> arbitrary::Arbitrary<'a> for SealedBlock<B>
 where
@@ -328,73 +350,76 @@ impl<B: crate::test_utils::TestBlock> SealedBlock<B> {
 /// Bincode-compatible [`SealedBlock`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
-    use crate::{
-        serde_bincode_compat::{self, SerdeBincodeCompat},
-        Block, SealedHeader,
-    };
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    use serde_with::{serde_as, DeserializeAs, SerializeAs};
+    // use crate::{
+    //     serde_bincode_compat::{self, SerdeBincodeCompat},
+    //     Block, SealedHeader,
+    // };
+    // use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    // use serde_with::{serde_as, DeserializeAs, SerializeAs};
+    // use crate::serde_bincode_compat::{BincodeReprFor, NoBincodeCompat};
+    //
+    // /// Bincode-compatible [`super::SealedBlock`] serde implementation.
+    // ///
+    // /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    // /// ```rust
+    // /// use reth_primitives_traits::{block::SealedBlock, serde_bincode_compat::{self,
+    // SerdeBincodeCompat}, Block}; /// use serde::{Deserialize, Serialize};
+    // /// use serde_with::serde_as;
+    // ///
+    // /// #[serde_as]
+    // /// #[derive(Serialize, Deserialize)]
+    // /// struct Data<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> {
+    // ///     #[serde_as(as = "serde_bincode_compat::SealedBlock<'_, T>")]
+    // ///     block: SealedBlock<T>,
+    // /// }
+    // /// ```
+    // #[serde_as]
+    // #[derive(derive_more::Debug, Serialize, Deserialize)]
+    // pub struct SealedBlock<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> {
+    //     #[serde_as(as = "serde_bincode_compat::SealedHeader<'a, T::Header>")]
+    //     #[serde(bound = "SealedHeader<BincodeReprFor<'a, T::Header>>: Serialize +
+    // serde::de::DeserializeOwned")]     header: SealedHeader<BincodeReprFor<'a, T::Header>>,
+    //     block: BincodeReprFor<'a, T::Body>,
+    // }
+    //
+    // impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> From<&'a
+    // super::SealedBlock<T>> for SealedBlock<'a, T> {     fn from(value: &'a
+    // super::SealedBlock<T>) -> Self {         todo!()
+    //         // Self { header: (&value.header).into(), block: (&value.body).into() }
+    //     }
+    // }
+    //
+    // impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> From<SealedBlock<'a,
+    // T>> for super::SealedBlock<T> {     fn from(value: SealedBlock<'a, T>) -> Self {
+    //         todo!()
+    //         // Self { hash: value.header, body: value.block.into() }
+    //     }
+    // }
+    //
+    // impl<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>
+    // SerializeAs<super::SealedBlock<T>> for SealedBlock<'_, T> {
+    //     fn serialize_as<S>(source: &super::SealedBlock<T>, serializer: S) -> Result<S::Ok,
+    // S::Error>     where
+    //         S: Serializer,
+    //     {
+    //         todo!()
+    //         // SealedBlock::from(source).serialize(serializer)
+    //     }
+    // }
+    //
+    // impl<'de, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> DeserializeAs<'de,
+    // super::SealedBlock<T>>     for SealedBlock<'de, T>
+    // {
+    //     fn deserialize_as<D>(deserializer: D) -> Result<super::SealedBlock<T>, D::Error>
+    //     where
+    //         D: Deserializer<'de>,
+    //     {
+    //         todo!()
+    //         // SealedBlock::deserialize(deserializer).map(Into::into)
+    //     }
+    // }
 
-    /// Bincode-compatible [`super::SealedBlock`] serde implementation.
-    ///
-    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
-    /// ```rust
-    /// use reth_primitives_traits::{block::SealedBlock, serde_bincode_compat, Block};
-    /// use serde::{Deserialize, Serialize};
-    /// use serde_with::serde_as;
-    ///
-    /// #[serde_as]
-    /// #[derive(Serialize, Deserialize)]
-    /// struct Data<T: Block + serde_bincode_compat::SerdeBincodeCompat> {
-    ///     #[serde_as(as = "serde_bincode_compat::SealedBlock<'_, T>")]
-    ///     block: SealedBlock<T>,
-    /// }
-    /// ```
-    #[serde_as]
-    #[derive(derive_more::Debug, Serialize, Deserialize)]
-    #[debug(bound(T::BincodeRepr<'a>: core::fmt::Debug))]
-    pub struct SealedBlock<'a, T: Block + SerdeBincodeCompat> {
-        // header: SealedHeader<T::Header>,
-        block: T::BincodeRepr<'a>,
-    }
-
-    impl<'a, T: Block + SerdeBincodeCompat> From<&'a super::SealedBlock<T>> for SealedBlock<'a, T> {
-        fn from(value: &'a super::SealedBlock<T>) -> Self {
-            todo!()
-            // Self { header: value.hash, block: (&value.body).into() }
-        }
-    }
-
-    impl<'a, T: Block + SerdeBincodeCompat> From<SealedBlock<'a, T>> for super::SealedBlock<T> {
-        fn from(value: SealedBlock<'a, T>) -> Self {
-            todo!()
-            // Self { hash: value.header, body: value.block.into() }
-        }
-    }
-
-    impl<T: Block + SerdeBincodeCompat> SerializeAs<super::SealedBlock<T>> for SealedBlock<'_, T> {
-        fn serialize_as<S>(source: &super::SealedBlock<T>, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            todo!()
-            // SealedBlock::from(source).serialize(serializer)
-        }
-    }
-
-    impl<'de, T: Block + SerdeBincodeCompat> DeserializeAs<'de, super::SealedBlock<T>>
-        for SealedBlock<'de, T>
-    {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::SealedBlock<T>, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            todo!()
-            // SealedBlock::deserialize(deserializer).map(Into::into)
-        }
-    }
-
-    impl<T: Block + SerdeBincodeCompat> SerdeBincodeCompat for super::SealedBlock<T> {
-        type BincodeRepr<'a> = SealedBlock<'a, T>;
-    }
+    // impl<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> SerdeBincodeCompat for
+    // super::SealedBlock<T> {     type BincodeRepr<'a> = SealedBlock<'a, T>;
+    // }
 }
