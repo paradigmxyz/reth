@@ -847,7 +847,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.block_with_senders(id, transaction_kind),
-            |block_state| Ok(Some(block_state.block_with_senders())),
+            |block_state| Ok(Some(block_state.clone_recovered_block())),
         )
     }
 
@@ -859,7 +859,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.sealed_block_with_senders(id, transaction_kind),
-            |block_state| Ok(Some(block_state.sealed_block_with_senders())),
+            |block_state| Ok(Some(block_state.clone_recovered_block())),
         )
     }
 
@@ -879,7 +879,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.block_with_senders_range(range),
-            |block_state, _| Some(block_state.block_with_senders()),
+            |block_state, _| Some(block_state.clone_recovered_block()),
             |_| true,
         )
     }
@@ -891,7 +891,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.sealed_block_with_senders_range(range),
-            |block_state, _| Some(block_state.sealed_block_with_senders()),
+            |block_state, _| Some(block_state.clone_recovered_block()),
             |_| true,
         )
     }

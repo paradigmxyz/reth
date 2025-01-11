@@ -635,15 +635,8 @@ impl<N: NodePrimitives> BlockState<N> {
         &self.block
     }
 
-    /// Returns the block with senders for the state.
-    pub fn block_with_senders(&self) -> RecoveredBlock<N::Block> {
-        let block = self.block.block().clone();
-        let senders = self.block.senders().clone();
-        block.with_senders(senders)
-    }
-
-    /// Returns the sealed block with senders for the state.
-    pub fn sealed_block_with_senders(&self) -> RecoveredBlock<N::Block> {
+    /// Returns a clone of the block with recovered senders for the state.
+    pub fn clone_recovered_block(&self) -> RecoveredBlock<N::Block> {
         let block = self.block.block().clone();
         let senders = self.block.senders().clone();
         RecoveredBlock::new_sealed(block, senders)
@@ -837,7 +830,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     /// Returns a [`RecoveredBlock`]
     ///
     /// Note: this clones the block and senders.
-    pub fn sealed_block_with_senders(&self) -> RecoveredBlock<N::Block> {
+    pub fn clone_recovered_block(&self) -> RecoveredBlock<N::Block> {
         RecoveredBlock::new_sealed((*self.block).clone(), (*self.senders).clone())
     }
 
@@ -897,7 +890,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
             Self::Commit { new } => {
                 let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
                     chain.append_block(
-                        exec.sealed_block_with_senders(),
+                        exec.clone_recovered_block(),
                         exec.execution_outcome().clone(),
                     );
                     chain
@@ -907,14 +900,14 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
             Self::Reorg { new, old } => {
                 let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
                     chain.append_block(
-                        exec.sealed_block_with_senders(),
+                        exec.clone_recovered_block(),
                         exec.execution_outcome().clone(),
                     );
                     chain
                 }));
                 let old = Arc::new(old.iter().fold(Chain::default(), |mut chain, exec| {
                     chain.append_block(
-                        exec.sealed_block_with_senders(),
+                        exec.clone_recovered_block(),
                         exec.execution_outcome().clone(),
                     );
                     chain
@@ -1527,7 +1520,7 @@ mod tests {
             chain_commit.to_chain_notification(),
             CanonStateNotification::Commit {
                 new: Arc::new(Chain::new(
-                    vec![block0.sealed_block_with_senders(), block1.sealed_block_with_senders()],
+                    vec![block0.clone_recovered_block(), block1.clone_recovered_block()],
                     sample_execution_outcome.clone(),
                     None
                 ))
@@ -1544,12 +1537,12 @@ mod tests {
             chain_reorg.to_chain_notification(),
             CanonStateNotification::Reorg {
                 old: Arc::new(Chain::new(
-                    vec![block1.sealed_block_with_senders(), block2.sealed_block_with_senders()],
+                    vec![block1.clone_recovered_block(), block2.clone_recovered_block()],
                     sample_execution_outcome.clone(),
                     None
                 )),
                 new: Arc::new(Chain::new(
-                    vec![block1a.sealed_block_with_senders(), block2a.sealed_block_with_senders()],
+                    vec![block1a.clone_recovered_block(), block2a.clone_recovered_block()],
                     sample_execution_outcome,
                     None
                 ))
