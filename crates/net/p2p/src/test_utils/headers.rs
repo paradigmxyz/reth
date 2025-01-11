@@ -163,7 +163,6 @@ impl Stream for TestDownload {
                     headers.sort_unstable_by_key(|h| h.number);
                     headers.into_iter().for_each(|h| this.buffer.push(h));
                     this.done = true;
-                    continue
                 }
                 Err(err) => {
                     this.done = true;

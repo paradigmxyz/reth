@@ -253,7 +253,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
 
             // Check if the sender is a contract
-            if self.get_code(sender, None).await?.len() > 0 {
+            if !self.get_code(sender, None).await?.is_empty() {
                 return Ok(None);
             }
 
