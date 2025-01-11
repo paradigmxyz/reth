@@ -153,7 +153,7 @@ impl TestStageDB {
             let segment_header = writer.user_header();
             if segment_header.block_end().is_none() && segment_header.expected_block_start() == 0 {
                 for block_number in 0..header.number {
-                    let mut prev = header.clone().unseal();
+                    let mut prev = header.clone_header();
                     prev.number = block_number;
                     writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
                 }

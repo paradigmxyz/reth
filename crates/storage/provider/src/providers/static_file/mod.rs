@@ -110,7 +110,7 @@ mod tests {
             let hash = header.hash();
 
             tx.put::<CanonicalHeaders>(header.number, hash).unwrap();
-            tx.put::<Headers>(header.number, header.clone().unseal()).unwrap();
+            tx.put::<Headers>(header.number, header.clone_header()).unwrap();
             tx.put::<HeaderTerminalDifficulties>(header.number, td.into()).unwrap();
             tx.put::<HeaderNumbers>(hash, header.number).unwrap();
         }

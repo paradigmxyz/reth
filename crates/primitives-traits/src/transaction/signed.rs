@@ -212,6 +212,6 @@ pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
 impl<T> SignedTransactionIntoRecoveredExt for T where T: SignedTransaction {}
 
 /// Opaque error type for sender recovery.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Default, thiserror::Error)]
 #[error("Failed to recover the signer")]
 pub struct RecoveryError;

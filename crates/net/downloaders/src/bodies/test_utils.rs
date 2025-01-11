@@ -46,7 +46,7 @@ pub(crate) fn insert_headers(db: &DatabaseEnv, headers: &[SealedHeader]) {
     db.update(|tx| {
         for header in headers {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash()).unwrap();
-            tx.put::<tables::Headers>(header.number, header.clone().unseal()).unwrap();
+            tx.put::<tables::Headers>(header.number, header.clone_header()).unwrap();
         }
     })
     .expect("failed to commit")

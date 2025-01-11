@@ -535,7 +535,7 @@ mod tests {
             }
 
             async fn after_execution(&self, headers: Self::Seed) -> Result<(), TestRunnerError> {
-                self.client.extend(headers.iter().map(|h| h.clone().unseal())).await;
+                self.client.extend(headers.iter().map(|h| h.clone_header())).await;
                 let tip = if headers.is_empty() {
                     let tip = random_header(&mut generators::rng(), 0, None);
                     self.db.insert_headers(std::iter::once(&tip))?;
@@ -610,7 +610,7 @@ mod tests {
         let headers = runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
 
-        runner.client.extend(headers.iter().rev().map(|h| h.clone().unseal())).await;
+        runner.client.extend(headers.iter().rev().map(|h| h.clone_header())).await;
 
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();
@@ -692,7 +692,7 @@ mod tests {
         let headers = runner.seed_execution(input).expect("failed to seed execution");
         let rx = runner.execute(input);
 
-        runner.client.extend(headers.iter().rev().map(|h| h.clone().unseal())).await;
+        runner.client.extend(headers.iter().rev().map(|h| h.clone_header())).await;
 
         // skip `after_execution` hook for linear downloader
         let tip = headers.last().unwrap();

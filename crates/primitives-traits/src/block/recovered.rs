@@ -1,7 +1,7 @@
 //! Recovered Block variant.
 
 use crate::{
-    block::SealedBlock,
+    block::{error::SealedBlockRecoveryError, SealedBlock},
     transaction::signed::{RecoveryError, SignedTransactionIntoRecoveredExt},
     Block, BlockBody, InMemorySize, SealedHeader,
 };
@@ -91,11 +91,14 @@ impl<B: Block> RecoveredBlock<B> {
         block: B,
         senders: Vec<Address>,
         hash: BlockHash,
-    ) -> Result<Self, RecoveryError> {
+    ) -> Result<Self, SealedBlockRecoveryError<B>> {
         let senders = if block.body().transaction_count() == senders.len() {
             senders
         } else {
-            block.body().try_recover_signers()?
+            let Ok(senders) = block.body().try_recover_signers() else {
+                return Err(SealedBlockRecoveryError::new(SealedBlock::new(block, hash)));
+            };
+            senders
         };
         Ok(Self::new(block, senders, hash))
     }
@@ -108,11 +111,14 @@ impl<B: Block> RecoveredBlock<B> {
         block: B,
         senders: Vec<Address>,
         hash: BlockHash,
-    ) -> Result<Self, RecoveryError> {
+    ) -> Result<Self, SealedBlockRecoveryError<B>> {
         let senders = if block.body().transaction_count() == senders.len() {
             senders
         } else {
-            block.body().try_recover_signers_unchecked()?
+            let Ok(senders) = block.body().try_recover_signers_unchecked() else {
+                return Err(SealedBlockRecoveryError::new(SealedBlock::new(block, hash)));
+            };
+            senders
         };
         Ok(Self::new(block, senders, hash))
     }
@@ -168,8 +174,10 @@ impl<B: Block> RecoveredBlock<B> {
     /// [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction).
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
-    pub fn try_recover_sealed(block: SealedBlock<B>) -> Result<Self, RecoveryError> {
-        let senders = block.body().try_recover_signers()?;
+    pub fn try_recover_sealed(block: SealedBlock<B>) -> Result<Self, SealedBlockRecoveryError<B>> {
+        let Ok(senders) = block.body().try_recover_signers() else {
+            return Err(SealedBlockRecoveryError::new(block));
+        };
         let (block, hash) = block.split();
         Ok(Self::new(block, senders, hash))
     }
@@ -178,8 +186,12 @@ impl<B: Block> RecoveredBlock<B> {
     /// [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction).
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
-    pub fn try_recover_sealed_unchecked(block: SealedBlock<B>) -> Result<Self, RecoveryError> {
-        let senders = block.body().try_recover_signers_unchecked()?;
+    pub fn try_recover_sealed_unchecked(
+        block: SealedBlock<B>,
+    ) -> Result<Self, SealedBlockRecoveryError<B>> {
+        let Ok(senders) = block.body().try_recover_signers_unchecked() else {
+            return Err(SealedBlockRecoveryError::new(block));
+        };
         let (block, hash) = block.split();
         Ok(Self::new(block, senders, hash))
     }
@@ -193,7 +205,7 @@ impl<B: Block> RecoveredBlock<B> {
     pub fn try_recover_sealed_with_senders(
         block: SealedBlock<B>,
         senders: Vec<Address>,
-    ) -> Result<Self, RecoveryError> {
+    ) -> Result<Self, SealedBlockRecoveryError<B>> {
         let (block, hash) = block.split();
         Self::try_new(block, senders, hash)
     }
@@ -205,7 +217,7 @@ impl<B: Block> RecoveredBlock<B> {
     pub fn try_recover_sealed_with_senders_unchecked(
         block: SealedBlock<B>,
         senders: Vec<Address>,
-    ) -> Result<Self, RecoveryError> {
+    ) -> Result<Self, SealedBlockRecoveryError<B>> {
         let (block, hash) = block.split();
         Self::try_new_unchecked(block, senders, hash)
     }

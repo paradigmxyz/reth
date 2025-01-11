@@ -7,6 +7,7 @@ pub(crate) mod recovered;
 pub use recovered::RecoveredBlock;
 
 pub mod body;
+pub mod error;
 pub mod header;
 
 use alloc::fmt;

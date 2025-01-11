@@ -1,8 +1,8 @@
 //! Sealed block types
 
 use crate::{
-    block::RecoveredBlock, transaction::signed::RecoveryError, Block, BlockBody, GotExpected,
-    InMemorySize, SealedHeader,
+    block::{error::BlockRecoveryError, RecoveredBlock},
+    Block, BlockBody, GotExpected, InMemorySize, SealedHeader,
 };
 use alloc::vec::Vec;
 use alloy_consensus::BlockHeader;
@@ -108,7 +108,7 @@ impl<B: Block> SealedBlock<B> {
     pub fn try_with_senders(
         self,
         senders: Vec<Address>,
-    ) -> Result<RecoveredBlock<B>, RecoveryError> {
+    ) -> Result<RecoveredBlock<B>, BlockRecoveryError<Self>> {
         RecoveredBlock::try_recover_sealed_with_senders(self, senders)
     }
 
@@ -122,7 +122,7 @@ impl<B: Block> SealedBlock<B> {
     pub fn try_with_senders_unchecked(
         self,
         senders: Vec<Address>,
-    ) -> Result<RecoveredBlock<B>, RecoveryError> {
+    ) -> Result<RecoveredBlock<B>, BlockRecoveryError<Self>> {
         RecoveredBlock::try_recover_sealed_with_senders_unchecked(self, senders)
     }
 
@@ -130,7 +130,7 @@ impl<B: Block> SealedBlock<B> {
     /// [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction).
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
-    pub fn try_recover(self) -> Result<RecoveredBlock<B>, RecoveryError> {
+    pub fn try_recover(self) -> Result<RecoveredBlock<B>, BlockRecoveryError<Self>> {
         RecoveredBlock::try_recover_sealed(self)
     }
 
@@ -138,7 +138,7 @@ impl<B: Block> SealedBlock<B> {
     /// [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction).
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
-    pub fn try_recover_unchecked(self) -> Result<RecoveredBlock<B>, RecoveryError> {
+    pub fn try_recover_unchecked(self) -> Result<RecoveredBlock<B>, BlockRecoveryError<Self>> {
         RecoveredBlock::try_recover_sealed_unchecked(self)
     }
 

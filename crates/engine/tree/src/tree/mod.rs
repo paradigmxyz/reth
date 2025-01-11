@@ -1870,10 +1870,9 @@ where
         &mut self,
         block: SealedBlock<N::Block>,
     ) -> Result<(), InsertBlockError<N::Block>> {
-        // TODO(mattsse): remove clone
-        match block.clone().try_recover() {
+        match block.try_recover() {
             Ok(block) => self.buffer_block(block),
-            Err(_) => Err(InsertBlockError::sender_recovery_error(block)),
+            Err(err) => Err(InsertBlockError::sender_recovery_error(err.into_inner())),
         }
     }
 
@@ -2195,10 +2194,9 @@ where
         &mut self,
         block: SealedBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
-        // TODO(mattsse): fix clones
-        match block.clone().try_recover() {
+        match block.try_recover() {
             Ok(block) => self.insert_block(block),
-            Err(_) => Err(InsertBlockError::sender_recovery_error(block)),
+            Err(err) => Err(InsertBlockError::sender_recovery_error(err.into_inner())),
         }
     }
 

@@ -577,10 +577,10 @@ mod tests {
         let file = tempfile::tempfile().unwrap();
         let client: Arc<FileClient> = Arc::new(
             FileClient::from_file(file.into()).await.unwrap().with_headers(HashMap::from([
-                (0u64, p0.clone().unseal()),
-                (1, p1.clone().unseal()),
-                (2, p2.clone().unseal()),
-                (3, p3.clone().unseal()),
+                (0u64, p0.clone_header()),
+                (1, p1.clone_header()),
+                (2, p2.clone_header()),
+                (3, p3.clone_header()),
             ])),
         );
 
