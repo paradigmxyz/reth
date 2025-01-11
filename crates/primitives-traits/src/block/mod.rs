@@ -112,6 +112,12 @@ pub trait Block:
         self.split().1
     }
 
+    /// Returns the rlp length of the block with the given header and body.
+    fn rlp_length(header: &Self::Header, body: &Self::Body) -> usize {
+        // TODO(mattsse): replace default impl with <https://github.com/alloy-rs/alloy/pull/1906>
+        header.length() + body.length()
+    }
+
     /// Expensive operation that recovers transaction signer.
     fn senders(&self) -> Option<Vec<Address>>
     where

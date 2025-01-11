@@ -16,7 +16,7 @@ use reth_evm::{
     system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes,
 };
 use reth_primitives::{InvalidTransactionError, RecoveredBlock};
-use reth_primitives_traits::{Block, Receipt};
+use reth_primitives_traits::Receipt;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,
     ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,

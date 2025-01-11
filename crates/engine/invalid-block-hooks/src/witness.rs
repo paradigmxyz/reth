@@ -10,7 +10,7 @@ use reth_evm::{
     ConfigureEvm,
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase, db::states::bundle_state::BundleRetention,

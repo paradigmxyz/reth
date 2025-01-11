@@ -15,7 +15,7 @@ use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, Tra
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, RecoveredBlock};
-use reth_primitives_traits::{Block, SignedTransaction};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,

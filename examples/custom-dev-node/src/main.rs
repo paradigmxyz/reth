@@ -9,7 +9,6 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures_util::StreamExt;
 use reth::{
-    api::Block,
     builder::{NodeBuilder, NodeHandle},
     providers::CanonStateSubscriptions,
     rpc::api::eth::helpers::EthTransactions,

@@ -18,7 +18,7 @@ use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_primitives_traits::{constants::GAS_LIMIT_BOUND_DIVISOR, Block as _, BlockBody};
+use reth_primitives_traits::{constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock};
 use reth_provider::{BlockExecutionOutput, BlockReaderIdExt, StateProviderFactory};
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
@@ -257,7 +257,7 @@ where
     /// to checking the latest block transaction.
     fn ensure_payment(
         &self,
-        block: &<E::Primitives as NodePrimitives>::Block,
+        block: &SealedBlock<<E::Primitives as NodePrimitives>::Block>,
         output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {

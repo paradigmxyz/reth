@@ -8,7 +8,6 @@ use eyre::Result;
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
-    api::Block,
     primitives::RecoveredBlock,
     providers::CanonStateNotification,
     transaction_pool::{BlobStoreError, TransactionPoolExt},

@@ -18,7 +18,6 @@ use alloy_primitives::{
 use core::fmt::Display;
 use reth_consensus::ConsensusError;
 use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
-use reth_primitives_traits::Block;
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{

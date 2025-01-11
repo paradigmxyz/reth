@@ -3,7 +3,7 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures::StreamExt;
 use reth_chainspec::ChainSpec;
-use reth_node_api::{Block, BlockBody, FullNodeComponents, FullNodePrimitives, NodeTypes};
+use reth_node_api::{BlockBody, FullNodeComponents, FullNodePrimitives, NodeTypes};
 use reth_node_builder::{
     rpc::RethRpcAddOns, EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig, NodeHandle,
 };

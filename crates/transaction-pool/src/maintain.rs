@@ -20,7 +20,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, SealedHeader};
-use reth_primitives_traits::{Block, NodePrimitives, SignedTransaction};
+use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{

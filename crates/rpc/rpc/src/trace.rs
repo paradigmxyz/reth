@@ -17,7 +17,7 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
 use reth_consensus_common::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
 use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
-use reth_primitives_traits::{Block, BlockBody, BlockHeader};
+use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::TraceApiServer;

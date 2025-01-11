@@ -5,7 +5,7 @@ use crate::{
     EthEvmConfig,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::Transaction;
+use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::{eip6110, eip7685::Requests};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
@@ -23,6 +23,7 @@ use reth_evm::{
     ConfigureEvm, TxEnvOverrides,
 };
 use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
+use reth_primitives_traits::BlockBody;
 use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
@@ -153,13 +154,13 @@ where
     ) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
-            (*self.chain_spec).is_spurious_dragon_active_at_block(block.header.number);
+            (*self.chain_spec).is_spurious_dragon_active_at_block(block.number());
         self.state.set_state_clear_flag(state_clear_flag);
 
-        let env = self.evm_env_for_block(&block.header);
+        let env = self.evm_env_for_block(block.header());
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
-        self.system_caller.apply_pre_execution_changes(&block.header, &mut evm)?;
+        self.system_caller.apply_pre_execution_changes(block.header(), &mut evm)?;
 
         Ok(())
     }
@@ -168,15 +169,15 @@ where
         &mut self,
         block: &RecoveredBlock<reth_primitives::Block>,
     ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
-        let env = self.evm_env_for_block(&block.header);
+        let env = self.evm_env_for_block(block.header());
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
         let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body.transactions.len());
+        let mut receipts = Vec::with_capacity(block.body().transaction_count());
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
-            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
+            let block_available_gas = block.gas_limit() - cumulative_gas_used;
             if transaction.gas_limit() > block_available_gas {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
@@ -230,7 +231,7 @@ where
         block: &RecoveredBlock<reth_primitives::Block>,
         receipts: &[Receipt],
     ) -> Result<Requests, Self::Error> {
-        let env = self.evm_env_for_block(&block.header);
+        let env = self.evm_env_for_block(block.header());
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
         let requests = if self.chain_spec.is_prague_active_at_timestamp(block.timestamp) {

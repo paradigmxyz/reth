@@ -151,6 +151,11 @@ impl<B: Block> SealedBlock<B> {
         &self.body
     }
 
+    /// Returns the length of the block.
+    pub fn rlp_length(&self) -> usize {
+        B::rlp_length(self.header(), self.body())
+    }
+
     /// Recovers all senders from the transactions in the block.
     ///
     /// Returns `None` if any of the transactions fail to recover the sender.

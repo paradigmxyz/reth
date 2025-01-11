@@ -19,7 +19,7 @@ use futures::Future;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv};
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{Block, SignedTransaction};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockIdReader, ChainSpecProvider, ProviderHeader};
 use reth_revm::{
     database::StateProviderDatabase,

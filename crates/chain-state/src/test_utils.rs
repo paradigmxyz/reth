@@ -20,7 +20,7 @@ use reth_primitives::{
     BlockBody, EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredBlock, RecoveredTx,
     SealedBlock, SealedHeader, Transaction, TransactionSigned,
 };
-use reth_primitives_traits::{Account, Block};
+use reth_primitives_traits::Account;
 use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};

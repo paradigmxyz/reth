@@ -2,7 +2,7 @@
 
 use crate::{l1::ensure_create2_deployer, OpBlockExecutionError, OpEvmConfig};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::{Eip658Value, Header, Receipt, Transaction as _};
+use alloy_consensus::{BlockHeader, Eip658Value, Header, Receipt, Transaction as _};
 use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
@@ -24,7 +24,7 @@ use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_primitives::RecoveredBlock;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_revm::{Database, State};
 use revm_primitives::{db::DatabaseCommit, EnvWithHandlerCfg, ResultAndState};
 use tracing::trace;
@@ -138,10 +138,10 @@ where
     ) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
-            (*self.chain_spec).is_spurious_dragon_active_at_block(block.header.number);
+            (*self.chain_spec).is_spurious_dragon_active_at_block(block.number());
         self.state.set_state_clear_flag(state_clear_flag);
 
-        let env = self.evm_env_for_block(&block.header);
+        let env = self.evm_env_for_block(block.header());
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
         self.system_caller.apply_beacon_root_contract_call(
@@ -165,18 +165,18 @@ where
         &mut self,
         block: &RecoveredBlock<OpBlock>,
     ) -> Result<ExecuteOutput<OpReceipt>, Self::Error> {
-        let env = self.evm_env_for_block(&block.header);
+        let env = self.evm_env_for_block(block.header());
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
         let is_regolith =
             self.chain_spec.fork(OpHardfork::Regolith).active_at_timestamp(block.timestamp);
 
         let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body.transactions.len());
+        let mut receipts = Vec::with_capacity(block.body().transaction_count());
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
-            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
+            let block_available_gas = block.gas_limit() - cumulative_gas_used;
             if transaction.gas_limit() > block_available_gas &&
                 (is_regolith || !transaction.is_deposit())
             {

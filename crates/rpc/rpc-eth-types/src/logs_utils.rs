@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{FilteredParams, Log};
 use reth_chainspec::ChainInfo;
 use reth_errors::ProviderError;
 use reth_primitives::RecoveredBlock;
-use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_storage_api::{BlockReader, ProviderBlock};
 use std::sync::Arc;
 

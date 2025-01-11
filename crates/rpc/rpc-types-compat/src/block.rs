@@ -50,7 +50,7 @@ where
     let transactions = block.body().transaction_hashes_iter().copied().collect();
 
     from_block_with_transactions(
-        block.length(),
+        block.rlp_length(),
         block_hash,
         block.into_block(),
         BlockTransactions::Hashes(transactions),
@@ -78,7 +78,7 @@ where
 
     // NOTE: we can safely remove the body here because not needed to finalize the `Block` in
     // `from_block_with_transactions`, however we need to compute the length before
-    let block_length = block.length();
+    let block_length = block.rlp_length();
     let transactions = block.body().transactions().to_vec();
     let transactions_with_senders = transactions.into_iter().zip(block.senders_iter().copied());
     let transactions = transactions_with_senders

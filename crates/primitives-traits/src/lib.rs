@@ -1,3 +1,4 @@
+#![doc = include_str!("../README.md")]
 //! Commonly used types and traits in Reth.
 //!
 //! This crate contains various primitive traits used across reth's components.

@@ -9,7 +9,7 @@ use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives::RecoveredBlock;
-use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{

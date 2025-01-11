@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use alloy_consensus::{constants::ETH_TO_WEI, Header, TxEip2930};
+use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader, Header, TxEip2930};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{b256, Address, TxKind, U256};
 use eyre::OptionExt;
@@ -72,7 +72,7 @@ where
     block_execution_output.state.reverts.sort();
 
     // Convert the block execution output to an execution outcome for committing to the database
-    let execution_outcome = to_execution_outcome(block.number, &block_execution_output);
+    let execution_outcome = to_execution_outcome(block.number(), &block_execution_output);
 
     // Commit the block's execution outcome to the database
     let provider_rw = provider_factory.provider_rw()?;
@@ -127,7 +127,7 @@ fn blocks(
     // Second block resends the same transaction with increased nonce
     let block2 = Block {
         header: Header {
-            parent_hash: block1.header.hash_slow(),
+            parent_hash: block1.hash(),
             receipts_root: b256!(
                 "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
             ),
