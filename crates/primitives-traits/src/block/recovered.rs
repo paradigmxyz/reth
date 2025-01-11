@@ -17,6 +17,10 @@ use derive_more::Deref;
 pub struct RecoveredBlock<B: Block> {
     /// Block
     #[deref]
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound = "SealedBlock<B>: serde::Serialize + serde::de::DeserializeOwned")
+    )]
     block: SealedBlock<B>,
     /// List of senders that match the transactions in the block
     senders: Vec<Address>,
@@ -460,83 +464,87 @@ impl<B: crate::test_utils::TestBlock> RecoveredBlock<B> {
 /// Bincode-compatible [`RecoveredBlock`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
-    // use crate::{serde_bincode_compat::{self, SerdeBincodeCompat}, Block, SealedBlock,
-    // SealedHeader}; use alloc::{borrow::Cow, vec::Vec};
-    // use alloy_primitives::{Address, BlockHash};
-    // use serde::{Deserialize, Deserializer, Serialize, Serializer};
-    // use serde_with::{DeserializeAs, SerializeAs};
-    // use crate::serde_bincode_compat::{BincodeReprFor, NoBincodeCompat};
-    // use serde_with::serde_as;
-    //
-    // /// Bincode-compatible [`super::RecoveredBlock`] serde implementation.
-    // ///
-    // /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
-    // /// ```rust
-    // /// use reth_primitives_traits::{block::RecoveredBlock, serde_bincode_compat::{self,
-    // SerdeBincodeCompat}, Block}; /// use serde::{Deserialize, Serialize};
-    // /// use serde_with::serde_as;
-    // ///
-    // /// #[serde_as]
-    // /// #[derive(Serialize, Deserialize)]
-    // /// struct Data<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> {
-    // ///     #[serde_as(as = "serde_bincode_compat::RecoveredBlock<'_, T>")]
-    // ///     block: RecoveredBlock<T>,
-    // /// }
-    // /// ```
-    // #[derive(derive_more::Debug, Serialize, Deserialize)]
-    // pub struct RecoveredBlock<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>
-    // {     #[serde(bound = "serde_bincode_compat::SealedBlock<'a, T>: Serialize +
-    // serde::de::DeserializeOwned")]     block: serde_bincode_compat::SealedBlock<'a, T>,
-    //     senders: Cow<'a, Vec<Address>>,
-    // }
-    //
-    // impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> From<&'a
-    // super::RecoveredBlock<T>>     for RecoveredBlock<'a, T>
-    // {
-    //     fn from(value: &'a super::RecoveredBlock<T>) -> Self {
-    //         todo!()
-    //         // Self {
-    //         //     block: (&value.block).into(),
-    //         //     senders: Cow::Borrowed(&value.senders),
-    //         // }
-    //     }
-    // }
-    //
-    // impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>
-    // From<RecoveredBlock<'a, T>> for super::RecoveredBlock<T> {     fn from(value:
-    // RecoveredBlock<'a, T>) -> Self {         // Self::new(value.block.into(),
-    // value.senders.into_owned(), value.hash)         todo!()
-    //     }
-    // }
-    //
-    // impl<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>
-    // SerializeAs<super::RecoveredBlock<T>>     for RecoveredBlock<'_, T>
-    // {
-    //     fn serialize_as<S>(
-    //         source: &super::RecoveredBlock<T>,
-    //         serializer: S,
-    //     ) -> Result<S::Ok, S::Error>
-    //     where
-    //         S: Serializer,
-    //     {
-    //         todo!()
-    //         // RecoveredBlock::from(source).serialize(serializer)
-    //     }
-    // }
-    //
-    // impl<'de, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> DeserializeAs<'de,
-    // super::RecoveredBlock<T>>     for RecoveredBlock<'de, T>
-    // {
-    //     fn deserialize_as<D>(deserializer: D) -> Result<super::RecoveredBlock<T>, D::Error>
-    //     where
-    //         D: Deserializer<'de>,
-    //     {
-    //         todo!()
-    //        // RecoveredBlock::deserialize(deserializer).map(Into::into)
-    //     }
-    // }
+    use crate::{
+        serde_bincode_compat::{self, SerdeBincodeCompat},
+        Block,
+    };
+    use alloc::{borrow::Cow, vec::Vec};
+    use alloy_primitives::Address;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
 
-    // impl<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> SerdeBincodeCompat for
-    // super::RecoveredBlock<T> {     type BincodeRepr<'a> = RecoveredBlock<'a, T>;
-    // }
+    /// Bincode-compatible [`super::RecoveredBlock`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_primitives_traits::{
+    ///     block::RecoveredBlock,
+    ///     serde_bincode_compat::{self, SerdeBincodeCompat},
+    ///     Block,
+    /// };
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> {
+    ///     #[serde_as(as = "serde_bincode_compat::RecoveredBlock<'_, T>")]
+    ///     block: RecoveredBlock<T>,
+    /// }
+    /// ```
+    #[derive(derive_more::Debug, Serialize, Deserialize)]
+    pub struct RecoveredBlock<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> {
+        #[serde(
+            bound = "serde_bincode_compat::SealedBlock<'a, T>: Serialize + serde::de::DeserializeOwned"
+        )]
+        block: serde_bincode_compat::SealedBlock<'a, T>,
+        senders: Cow<'a, Vec<Address>>,
+    }
+
+    impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>
+        From<&'a super::RecoveredBlock<T>> for RecoveredBlock<'a, T>
+    {
+        fn from(value: &'a super::RecoveredBlock<T>) -> Self {
+            Self { block: (&value.block).into(), senders: Cow::Borrowed(&value.senders) }
+        }
+    }
+
+    impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>
+        From<RecoveredBlock<'a, T>> for super::RecoveredBlock<T>
+    {
+        fn from(value: RecoveredBlock<'a, T>) -> Self {
+            Self::new_sealed(value.block.into(), value.senders.into_owned())
+        }
+    }
+
+    impl<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>
+        SerializeAs<super::RecoveredBlock<T>> for RecoveredBlock<'_, T>
+    {
+        fn serialize_as<S>(
+            source: &super::RecoveredBlock<T>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            RecoveredBlock::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>
+        DeserializeAs<'de, super::RecoveredBlock<T>> for RecoveredBlock<'de, T>
+    {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::RecoveredBlock<T>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            RecoveredBlock::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    impl<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> SerdeBincodeCompat
+        for super::RecoveredBlock<T>
+    {
+        type BincodeRepr<'a> = RecoveredBlock<'a, T>;
+    }
 }
