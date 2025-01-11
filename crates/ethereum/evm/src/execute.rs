@@ -252,10 +252,10 @@ where
         };
         drop(evm);
 
-        let mut balance_increments = post_block_balance_increments(&self.chain_spec, block.block());
+        let mut balance_increments = post_block_balance_increments(&self.chain_spec, block);
 
         // Irregular state change at Ethereum DAO hardfork
-        if self.chain_spec.fork(EthereumHardfork::Dao).transitions_at_block(block.number) {
+        if self.chain_spec.fork(EthereumHardfork::Dao).transitions_at_block(block.number()) {
             // drain balances from hardcoded addresses.
             let drained_balance: u128 = self
                 .state

@@ -266,8 +266,7 @@ where
         block: &RecoveredBlock<OpBlock>,
         _receipts: &[OpReceipt],
     ) -> Result<Requests, Self::Error> {
-        let balance_increments =
-            post_block_balance_increments(&self.chain_spec.clone(), block.block());
+        let balance_increments = post_block_balance_increments(&self.chain_spec.clone(), block);
         // increment balances
         self.state
             .increment_balances(balance_increments.clone())

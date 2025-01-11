@@ -3182,7 +3182,7 @@ mod tests {
             let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
 
             for block in &blocks {
-                block_data.push((block.hash(), block.block().clone()));
+                block_data.push((block.hash(), block.clone_block()));
                 headers_data.push((block.hash(), block.header().clone()));
             }
 

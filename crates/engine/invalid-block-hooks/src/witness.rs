@@ -114,7 +114,7 @@ where
         // use U256::MAX here for difficulty, because fetching it is annoying
         // NOTE: This is not mut because we are not doing the DAO irregular state change here
         let balance_increments =
-            post_block_balance_increments(self.provider.chain_spec().as_ref(), block.block());
+            post_block_balance_increments(self.provider.chain_spec().as_ref(), block);
 
         // increment balances
         db.increment_balances(balance_increments)?;

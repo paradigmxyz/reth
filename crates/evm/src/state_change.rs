@@ -5,6 +5,7 @@ use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::{map::HashMap, Address};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus_common::calc;
+use reth_primitives::SealedBlock;
 use reth_primitives_traits::BlockBody;
 
 /// Collect all balance changes at the end of the block.
@@ -14,7 +15,7 @@ use reth_primitives_traits::BlockBody;
 #[inline]
 pub fn post_block_balance_increments<ChainSpec, Block>(
     chain_spec: &ChainSpec,
-    block: &Block,
+    block: &SealedBlock<Block>,
 ) -> HashMap<Address, u128>
 where
     ChainSpec: EthereumHardforks,
