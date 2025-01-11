@@ -580,9 +580,7 @@ mod tests {
                         ..Default::default()
                     },
                 );
-                let headers =
-                    blocks.iter().map(|block| block.clone_sealed_header()).collect::<Vec<_>>();
-                self.db.insert_headers_with_td(headers.iter())?;
+                self.db.insert_headers_with_td(blocks.iter().map(|block| block.sealed_header()))?;
                 if let Some(progress) = blocks.get(start as usize) {
                     // Insert last progress data
                     {

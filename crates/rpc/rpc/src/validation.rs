@@ -138,13 +138,8 @@ where
             )
             .into())
         }
-        self.consensus
-            .validate_header_against_parent(&block.clone_sealed_header(), &latest_header)?;
-        self.validate_gas_limit(
-            registered_gas_limit,
-            &latest_header,
-            &block.clone_sealed_header(),
-        )?;
+        self.consensus.validate_header_against_parent(block.sealed_header(), &latest_header)?;
+        self.validate_gas_limit(registered_gas_limit, &latest_header, block.sealed_header())?;
 
         let latest_header_hash = latest_header.hash();
         let state_provider = self.provider.state_by_block_hash(latest_header_hash)?;

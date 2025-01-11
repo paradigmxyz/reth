@@ -175,7 +175,12 @@ impl<B: Block> SealedBlock<B> {
     }
 
     /// Returns the Sealed header.
-    pub fn sealed_header(&self) -> SealedHeader<&B::Header> {
+    pub const fn sealed_header(&self) -> &SealedHeader<B::Header> {
+        &self.header
+    }
+
+    /// Returns the wrapped `SealedHeader<B::Header>` as `SealedHeader<&B::Header>`.
+    pub fn sealed_header_ref(&self) -> SealedHeader<&B::Header> {
         SealedHeader::new(self.header(), self.hash())
     }
 
@@ -301,28 +306,6 @@ impl<B: Block> Decodable for SealedBlock<B> {
         Ok(Self::seal(block))
     }
 }
-
-// impl<B:Block> Block for SealedBlock<B> {
-//     type Header = B::Header;
-//     type Body = B::Header;
-//
-//     fn new(header: Self::Header, body: Self::Body) -> Self {
-//         Self::new_unhashed(B::new(header, body))
-//     }
-//
-//     fn header(&self) -> &Self::Header {
-//         self.header.header()
-//     }
-//
-//     fn body(&self) -> &Self::Body {
-//         &self.body
-//     }
-//
-//     fn split(self) -> (Self::Header, Self::Body) {
-//         let header = self.header.unseal();
-//         (header, self.body)
-//     }
-// }
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a, B> arbitrary::Arbitrary<'a> for SealedBlock<B>

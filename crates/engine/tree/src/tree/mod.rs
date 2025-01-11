@@ -1811,7 +1811,7 @@ where
         }
 
         // TODO(mattsse): get rid of clone
-        if let Err(e) = self.consensus.validate_header(&block.clone_sealed_header()) {
+        if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
@@ -2252,9 +2252,8 @@ where
                 block.parent_hash().into(),
             ))
         })?;
-        if let Err(e) = self
-            .consensus
-            .validate_header_against_parent(&block.clone_sealed_header(), &parent_block)
+        if let Err(e) =
+            self.consensus.validate_header_against_parent(block.sealed_header(), &parent_block)
         {
             warn!(target: "engine::tree", ?block, "Failed to validate header {} against parent: {e}", block.hash());
             return Err(e.into())
