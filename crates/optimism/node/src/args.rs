@@ -35,6 +35,7 @@ pub struct RollupArgs {
     pub discovery_v4: bool,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for RollupArgs {
     fn default() -> Self {
         Self {
