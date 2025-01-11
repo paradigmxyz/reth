@@ -55,7 +55,12 @@ impl<H> SealedHeader<H> {
         self.header.clone()
     }
 
-    /// Extract raw header that can be modified.
+    /// Consumes the type and returns the wrapped header.
+    pub fn into_header(self) -> H {
+        self.header
+    }
+
+    /// Consumes the type and returns the wrapped header.
     pub fn unseal(self) -> H {
         self.header
     }

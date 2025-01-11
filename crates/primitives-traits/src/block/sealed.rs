@@ -7,7 +7,7 @@ use crate::{
 use alloc::vec::Vec;
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
-use alloy_primitives::{Address, BlockHash, Sealable, B256};
+use alloy_primitives::{Address, BlockHash, Sealable, Sealed, B256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::ops::Deref;
@@ -59,8 +59,12 @@ impl<B: Block> SealedBlock<B> {
     }
 
     /// Consumes the type and returns the block.
-    #[doc(alias = "unseal")]
     pub fn into_block(self) -> B {
+        self.unseal()
+    }
+
+    /// Consumes the type and returns the block.
+    pub fn unseal(self) -> B {
         let header = self.header.unseal();
         B::new(header, self.body)
     }
@@ -304,6 +308,13 @@ impl<B: Block> Decodable for SealedBlock<B> {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let block = B::decode(buf)?;
         Ok(Self::seal(block))
+    }
+}
+
+impl<B: Block> From<SealedBlock<B>> for Sealed<B> {
+    fn from(value: SealedBlock<B>) -> Self {
+        let (block, hash) = value.split();
+        Self::new_unchecked(block, hash)
     }
 }
 
