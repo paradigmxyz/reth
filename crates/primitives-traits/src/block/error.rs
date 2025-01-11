@@ -8,7 +8,7 @@ pub type SealedBlockRecoveryError<B> = BlockRecoveryError<crate::SealedBlock<B>>
 /// Error when recovering a block from [`SealedBlock`](crate::SealedBlock) to
 /// [`RecoveredBlock`](crate::RecoveredBlock).
 ///
-/// This error is returned when the block recovery fails and contains the errornous block, because
+/// This error is returned when the block recovery fails and contains the erroneous block, because
 /// recovering a block takes ownership of the block.
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("Failed to recover the block")]

@@ -10,7 +10,7 @@ pub mod body;
 pub mod error;
 pub mod header;
 
-use alloc::fmt;
+use alloc::{fmt, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::{Address, B256};
 use alloy_rlp::{Decodable, Encodable};
