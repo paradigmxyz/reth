@@ -19,6 +19,11 @@ pub struct EngineArgs {
     /// Enable state root task
     #[arg(long = "engine.state-root-task", conflicts_with = "legacy")]
     pub state_root_task_enabled: bool,
+
+    /// Enable comparing trie updates from the state root task to the trie updates from the regular
+    /// state root calculation.
+    #[arg(long = "engine.state-root-task-compare-updates", conflicts_with = "legacy")]
+    pub state_root_task_compare_updates: bool,
 }
 
 impl Default for EngineArgs {
@@ -27,6 +32,7 @@ impl Default for EngineArgs {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             state_root_task_enabled: false,
+            state_root_task_compare_updates: false,
         }
     }
 }

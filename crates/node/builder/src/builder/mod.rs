@@ -567,7 +567,10 @@ where
         let engine_tree_config = TreeConfig::default()
             .with_persistence_threshold(builder.config.engine.persistence_threshold)
             .with_memory_block_buffer_target(builder.config.engine.memory_block_buffer_target)
-            .with_state_root_task(builder.config.engine.state_root_task_enabled);
+            .with_state_root_task(builder.config.engine.state_root_task_enabled)
+            .with_always_compare_trie_updates(
+                builder.config.engine.state_root_task_compare_updates,
+            );
 
         let launcher =
             EngineNodeLauncher::new(task_executor, builder.config.datadir(), engine_tree_config);
