@@ -65,7 +65,7 @@ impl<S> CachedStateProvider<S> {
         for (addr, account) in &state_updates.state {
             // If the account was not modified, as in not changed and not destroyed, then we have
             // nothing to do w.r.t. this particular account and can move on
-            if !account.status.is_not_modified() {
+            if account.status.is_not_modified() {
                 continue
             }
 
