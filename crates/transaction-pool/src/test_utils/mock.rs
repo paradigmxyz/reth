@@ -1651,7 +1651,7 @@ mod tests {
     #[test]
     fn test_mock_transaction_factory() {
         let mut factory = MockTransactionFactory::default();
-        
+     
         // Test legacy transaction creation
         let legacy = factory.create_legacy();
         assert_eq!(legacy.transaction.tx_type(), TxType::Legacy);
@@ -1681,7 +1681,8 @@ mod tests {
         }
         
         // Test EIP1559 transaction set
-        let eip1559_set = MockTransactionSet::dependent(sender, nonce_start, count, TxType::Eip1559);
+        let eip1559_set =
+            MockTransactionSet::dependent(sender, nonce_start, count, TxType::Eip1559);
         assert_eq!(eip1559_set.transactions.len(), count);
         for (idx, tx) in eip1559_set.transactions.iter().enumerate() {
             assert_eq!(tx.tx_type(), TxType::Eip1559);
