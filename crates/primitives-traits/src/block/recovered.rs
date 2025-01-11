@@ -8,7 +8,7 @@ use crate::{
 use alloc::vec::Vec;
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
-use alloy_primitives::{Address, BlockHash, BlockNumber, Bloom, Bytes, B256, B64, U256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Bloom, Bytes, Sealed, B256, B64, U256};
 use derive_more::Deref;
 
 /// A block with senders recovered from the block's transactions.
@@ -423,6 +423,23 @@ impl<B: Block> InMemorySize for RecoveredBlock<B> {
     }
 }
 
+impl<B: Block> From<RecoveredBlock<B>> for Sealed<B> {
+    fn from(value: RecoveredBlock<B>) -> Self {
+        value.block.into()
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a, B> arbitrary::Arbitrary<'a> for RecoveredBlock<B>
+where
+    B: Block + arbitrary::Arbitrary<'a>,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let block = B::arbitrary(u)?;
+        Ok(Self::try_recover(block).unwrap())
+    }
+}
+
 #[cfg(any(test, feature = "test-utils"))]
 impl<B: Block> RecoveredBlock<B> {
     /// Returns a mutable reference to the recovered senders.
@@ -443,17 +460,6 @@ where
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.block
-    }
-}
-
-#[cfg(any(test, feature = "arbitrary"))]
-impl<'a, B> arbitrary::Arbitrary<'a> for RecoveredBlock<B>
-where
-    B: Block + arbitrary::Arbitrary<'a>,
-{
-    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let block = B::arbitrary(u)?;
-        Ok(Self::try_recover(block).unwrap())
     }
 }
 
