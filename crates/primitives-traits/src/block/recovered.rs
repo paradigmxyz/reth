@@ -62,7 +62,7 @@ impl<B: Block> RecoveredBlock<B> {
 impl<B: Block> RecoveredBlock<B> {
     /// Creates a new recovered block instance with the given [`SealedBlock`] and senders as
     /// provided
-    pub fn new_sealed(block: SealedBlock<B>, senders: Vec<Address>) -> Self {
+    pub const fn new_sealed(block: SealedBlock<B>, senders: Vec<Address>) -> Self {
         Self { block, senders }
     }
 
@@ -427,7 +427,7 @@ impl<B: crate::test_utils::TestBlock> RecoveredBlock<B> {
 
     /// Updates the block hash.
     pub fn set_hash(&mut self, hash: BlockHash) {
-        self.block.header_mut().set
+        self.block.set_hash(hash)
     }
 
     /// Returns a mutable reference to the header.
@@ -442,22 +442,22 @@ impl<B: crate::test_utils::TestBlock> RecoveredBlock<B> {
 
     /// Updates the parent block hash.
     pub fn set_parent_hash(&mut self, hash: BlockHash) {
-        crate::test_utils::TestBlock::set_parent_hash(self.block_mut(), hash);
+        self.block.set_parent_hash(hash);
     }
 
     /// Updates the block number.
     pub fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
-        crate::test_utils::TestBlock::set_block_number(self.block_mut(), number);
+        self.block.set_block_number(number);
     }
 
     /// Updates the block state root.
     pub fn set_state_root(&mut self, state_root: alloy_primitives::B256) {
-        crate::test_utils::TestBlock::set_state_root(self.block_mut(), state_root);
+        self.block.set_state_root(state_root);
     }
 
     /// Updates the block difficulty.
     pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
-        crate::test_utils::TestBlock::set_difficulty(self.block_mut(), difficulty);
+        self.block.set_difficulty(difficulty);
     }
 }
 

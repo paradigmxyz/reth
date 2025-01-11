@@ -32,7 +32,7 @@ impl<B: Block> SealedBlock<B> {
         Self { header: SealedHeader::new(header, hash), body }
     }
 
-    /// Creates a SealedBlock from the block without the available hash
+    /// Creates a `SealedBlock` from the block without the available hash
     pub fn new_unhashed(block: B) -> Self {
         let (header, body) = block.split();
         Self { header: SealedHeader::new_unhashed(header), body }
@@ -93,7 +93,7 @@ impl<B: Block> SealedBlock<B> {
     /// Converts this block into a [`RecoveredBlock`] with the given senders
     ///
     /// Note: This method assumes the senders are correct and does not validate them.
-    pub fn with_senders(self, senders: Vec<Address>) -> RecoveredBlock<B> {
+    pub const fn with_senders(self, senders: Vec<Address>) -> RecoveredBlock<B> {
         RecoveredBlock::new_sealed(self, senders)
     }
 
@@ -342,8 +342,28 @@ impl<B: crate::test_utils::TestBlock> SealedBlock<B> {
     }
 
     /// Returns a mutable reference to the header.
-    pub fn block_mut(&mut self) -> &mut B::Body {
+    pub fn body_mut(&mut self) -> &mut B::Body {
         &mut self.body
+    }
+
+    /// Updates the parent block hash.
+    pub fn set_parent_hash(&mut self, hash: BlockHash) {
+        self.header.set_parent_hash(hash)
+    }
+
+    /// Updates the block number.
+    pub fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
+        self.header.set_block_number(number)
+    }
+
+    /// Updates the block state root.
+    pub fn set_state_root(&mut self, state_root: alloy_primitives::B256) {
+        self.header.set_state_root(state_root)
+    }
+
+    /// Updates the block difficulty.
+    pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
+        self.header.set_difficulty(difficulty)
     }
 }
 
