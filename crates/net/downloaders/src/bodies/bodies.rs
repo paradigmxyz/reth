@@ -285,7 +285,7 @@ where
 
 impl<B, C, Provider> BodiesDownloader<B, C, Provider>
 where
-    B: Block,
+    B: Block + 'static,
     C: BodiesClient<Body = B::Body> + 'static,
     Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
 {
@@ -305,7 +305,7 @@ where
 
 impl<B, C, Provider> BodyDownloader for BodiesDownloader<B, C, Provider>
 where
-    B: Block,
+    B: Block + 'static,
     C: BodiesClient<Body = B::Body> + 'static,
     Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
 {
@@ -356,7 +356,7 @@ where
 
 impl<B, C, Provider> Stream for BodiesDownloader<B, C, Provider>
 where
-    B: Block,
+    B: Block + 'static,
     C: BodiesClient<Body = B::Body> + 'static,
     Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
 {

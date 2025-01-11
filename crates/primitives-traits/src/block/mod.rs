@@ -62,7 +62,6 @@ pub trait Block:
     + MaybeSerde
     + Encodable
     + Decodable
-    + 'static
 {
     /// Header part of the block.
     type Header: BlockHeader;

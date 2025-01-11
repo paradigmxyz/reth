@@ -557,22 +557,25 @@ pub(super) mod serde_bincode_compat {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct Chain<'a, N = EthPrimitives>
     where
-        N: NodePrimitives<Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>,
+        N: NodePrimitives<
+            Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
+        >,
     {
-        blocks: SealedBlocksWithSenders<'a, N::Block>,
+        blocks: RecoveredB<'a, N::Block>,
         execution_outcome: Cow<'a, ExecutionOutcome<N::Receipt>>,
         trie_updates: Option<TrieUpdates<'a>>,
     }
 
     #[derive(Debug)]
-    struct SealedBlocksWithSenders<
+    struct RecoveredB<
         'a,
-        B: reth_primitives_traits::Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
+        B: reth_primitives_traits::Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>
+            + 'static,
     >(Cow<'a, BTreeMap<BlockNumber, reth_primitives::RecoveredBlock<B>>>);
 
-    impl<B> Serialize for SealedBlocksWithSenders<'_, B>
+    impl<B> Serialize for RecoveredB<'_, B>
     where
-        B: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
+        B: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
     {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -588,9 +591,9 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de, B> Deserialize<'de> for SealedBlocksWithSenders<'_, B>
+    impl<'de, B> Deserialize<'de> for RecoveredB<'_, B>
     where
-        B: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>,
+        B: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
     {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
@@ -605,11 +608,13 @@ pub(super) mod serde_bincode_compat {
 
     impl<'a, N> From<&'a super::Chain<N>> for Chain<'a, N>
     where
-        N: NodePrimitives<Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>,
+        N: NodePrimitives<
+            Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
+        >,
     {
         fn from(value: &'a super::Chain<N>) -> Self {
             Self {
-                blocks: SealedBlocksWithSenders(Cow::Borrowed(&value.blocks)),
+                blocks: RecoveredB(Cow::Borrowed(&value.blocks)),
                 execution_outcome: Cow::Borrowed(&value.execution_outcome),
                 trie_updates: value.trie_updates.as_ref().map(Into::into),
             }
@@ -618,7 +623,9 @@ pub(super) mod serde_bincode_compat {
 
     impl<'a, N> From<Chain<'a, N>> for super::Chain<N>
     where
-        N: NodePrimitives<Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>,
+        N: NodePrimitives<
+            Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
+        >,
     {
         fn from(value: Chain<'a, N>) -> Self {
             Self {
@@ -631,7 +638,9 @@ pub(super) mod serde_bincode_compat {
 
     impl<N> SerializeAs<super::Chain<N>> for Chain<'_, N>
     where
-        N: NodePrimitives<Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>,
+        N: NodePrimitives<
+            Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
+        >,
     {
         fn serialize_as<S>(source: &super::Chain<N>, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -643,7 +652,9 @@ pub(super) mod serde_bincode_compat {
 
     impl<'de, N> DeserializeAs<'de, super::Chain<N>> for Chain<'de, N>
     where
-        N: NodePrimitives<Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>,
+        N: NodePrimitives<
+            Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
+        >,
     {
         fn deserialize_as<D>(deserializer: D) -> Result<super::Chain<N>, D::Error>
         where

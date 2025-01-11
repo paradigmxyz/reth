@@ -380,14 +380,17 @@ pub(super) mod serde_bincode_compat {
     ///
     /// #[serde_as]
     /// #[derive(Serialize, Deserialize)]
-    /// struct Data<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> {
+    /// struct Data<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static> {
     ///     #[serde_as(as = "serde_bincode_compat::SealedBlock<'_, T>")]
     ///     block: SealedBlock<T>,
     /// }
     /// ```
     #[serde_as]
     #[derive(derive_more::Debug, Serialize, Deserialize)]
-    pub struct SealedBlock<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> {
+    pub struct SealedBlock<
+        'a,
+        T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
+    > {
         #[serde(
             bound = "serde_bincode_compat::SealedHeader<'a, T::Header>: Serialize + serde::de::DeserializeOwned"
         )]
@@ -395,7 +398,7 @@ pub(super) mod serde_bincode_compat {
         body: BincodeReprFor<'a, T::Body>,
     }
 
-    impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>
+    impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static>
         From<&'a super::SealedBlock<T>> for SealedBlock<'a, T>
     {
         fn from(value: &'a super::SealedBlock<T>) -> Self {
@@ -403,7 +406,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>
+    impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static>
         From<SealedBlock<'a, T>> for super::SealedBlock<T>
     {
         fn from(value: SealedBlock<'a, T>) -> Self {
@@ -411,7 +414,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>
+    impl<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static>
         SerializeAs<super::SealedBlock<T>> for SealedBlock<'_, T>
     {
         fn serialize_as<S>(source: &super::SealedBlock<T>, serializer: S) -> Result<S::Ok, S::Error>
@@ -422,7 +425,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>>
+    impl<'de, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static>
         DeserializeAs<'de, super::SealedBlock<T>> for SealedBlock<'de, T>
     {
         fn deserialize_as<D>(deserializer: D) -> Result<super::SealedBlock<T>, D::Error>
@@ -433,8 +436,8 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>> SerdeBincodeCompat
-        for super::SealedBlock<T>
+    impl<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static>
+        SerdeBincodeCompat for super::SealedBlock<T>
     {
         type BincodeRepr<'a> = SealedBlock<'a, T>;
     }

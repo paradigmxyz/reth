@@ -60,7 +60,7 @@ impl<H> SealedHeader<H> {
         self.header
     }
 
-    /// Converts from &`SealedHeader`<H> to `SealedHeader`<&H>.
+    /// Converts from &`SealedHeader<H>` to `SealedHeader<&H>`.
     pub fn sealed_ref(&self) -> SealedHeader<&H> {
         SealedHeader { hash: self.hash.clone(), header: &self.header }
     }

@@ -50,7 +50,7 @@ impl<B: Block + 'static> TaskDownloader<B> {
     /// use std::{fmt::Debug, sync::Arc};
     ///
     /// fn t<
-    ///     B: Block,
+    ///     B: Block + 'static,
     ///     C: BodiesClient<Body = B::Body> + 'static,
     ///     Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
     /// >(
@@ -92,7 +92,7 @@ impl<B: Block + 'static> TaskDownloader<B> {
     }
 }
 
-impl<B: Block> BodyDownloader for TaskDownloader<B> {
+impl<B: Block + 'static> BodyDownloader for TaskDownloader<B> {
     type Block = B;
 
     fn set_download_range(&mut self, range: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
@@ -101,7 +101,7 @@ impl<B: Block> BodyDownloader for TaskDownloader<B> {
     }
 }
 
-impl<B: Block> Stream for TaskDownloader<B> {
+impl<B: Block + 'static> Stream for TaskDownloader<B> {
     type Item = BodyDownloaderResult<B>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

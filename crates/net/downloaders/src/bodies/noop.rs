@@ -14,7 +14,7 @@ pub struct NoopBodiesDownloader<B> {
     _block: std::marker::PhantomData<B>,
 }
 
-impl<B: Block> BodyDownloader for NoopBodiesDownloader<B> {
+impl<B: Block + 'static> BodyDownloader for NoopBodiesDownloader<B> {
     type Block = B;
 
     fn set_download_range(&mut self, _: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
@@ -22,7 +22,7 @@ impl<B: Block> BodyDownloader for NoopBodiesDownloader<B> {
     }
 }
 
-impl<B: Block> Stream for NoopBodiesDownloader<B> {
+impl<B: Block + 'static> Stream for NoopBodiesDownloader<B> {
     type Item = Result<Vec<BlockResponse<B>>, DownloadError>;
 
     fn poll_next(
