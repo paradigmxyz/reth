@@ -59,14 +59,8 @@ pub trait EthBlocks: LoadBlock {
     {
         async move {
             let Some(block) = self.block_with_senders(block_id).await? else { return Ok(None) };
-            let block_hash = block.hash();
 
-            let block = from_block(
-                (*block).clone(),
-                full.into(),
-                Some(block_hash),
-                self.tx_resp_builder(),
-            )?;
+            let block = from_block((*block).clone(), full.into(), self.tx_resp_builder())?;
             Ok(Some(block))
         }
     }

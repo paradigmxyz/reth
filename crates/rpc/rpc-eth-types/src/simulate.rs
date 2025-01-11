@@ -183,6 +183,6 @@ where
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = from_block(block, txs_kind, None, tx_resp_builder)?;
+    let block = from_block(block, txs_kind, tx_resp_builder)?;
     Ok(SimulatedBlock { inner: block, calls })
 }
