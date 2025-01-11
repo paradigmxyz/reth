@@ -7,7 +7,7 @@ use std::{
 use alloy_primitives::BlockNumber;
 use futures_util::{FutureExt, TryStreamExt};
 use reth::{
-    api::{Block, BlockBody, FullNodeComponents},
+    api::{BlockBody, FullNodeComponents},
     builder::NodeTypes,
     primitives::EthPrimitives,
 };
