@@ -331,7 +331,6 @@ impl FilterAnnouncement for EthMessageFilter {
     }
 }
 
-// TODO(eip7702): update tests as needed
 #[cfg(test)]
 mod test {
     use super::*;
@@ -512,6 +511,122 @@ mod test {
         expected_data.insert(hashes[0], None);
 
         assert_eq!(expected_data, partially_valid_data.into_data())
+    }
+
+    #[test]
+    fn eth68_announcement_eip7702_tx() {
+        let types = vec![TxType::Eip7702 as u8, TxType::Legacy as u8];
+        let sizes = vec![MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE];
+        let hashes = vec![
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb")
+                .unwrap(),
+        ];
+
+        let announcement = NewPooledTransactionHashes68 {
+            types: types.clone(),
+            sizes: sizes.clone(),
+            hashes: hashes.clone(),
+        };
+
+        let filter = EthMessageFilter::default();
+
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let (outcome, valid_data) = filter.filter_valid_entries_68(partially_valid_data);
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let mut expected_data = HashMap::default();
+        expected_data.insert(hashes[0], Some((types[0], sizes[0])));
+        expected_data.insert(hashes[1], Some((types[1], sizes[1])));
+
+        assert_eq!(expected_data, valid_data.into_data());
+    }
+
+    #[test]
+    fn eth68_announcement_eip7702_tx_size_validation() {
+        let types = vec![TxType::Eip7702 as u8, TxType::Eip7702 as u8, TxType::Eip7702 as u8];
+        // Test with different sizes: too small, reasonable, too large
+        let sizes = vec![
+            1,                    // too small
+            MAX_MESSAGE_SIZE / 2, // reasonable size
+            MAX_MESSAGE_SIZE + 1, // too large
+        ];
+        let hashes = vec![
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcccc")
+                .unwrap(),
+        ];
+
+        let announcement = NewPooledTransactionHashes68 {
+            types: types.clone(),
+            sizes: sizes.clone(),
+            hashes: hashes.clone(),
+        };
+
+        let filter = EthMessageFilter::default();
+
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let (outcome, valid_data) = filter.filter_valid_entries_68(partially_valid_data);
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let mut expected_data = HashMap::default();
+
+        for i in 0..3 {
+            expected_data.insert(hashes[i], Some((types[i], sizes[i])));
+        }
+
+        assert_eq!(expected_data, valid_data.into_data());
+    }
+
+    #[test]
+    fn eth68_announcement_mixed_tx_types() {
+        let types = vec![
+            TxType::Legacy as u8,
+            TxType::Eip7702 as u8,
+            TxType::Eip1559 as u8,
+            TxType::Eip4844 as u8,
+        ];
+        let sizes = vec![MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE];
+        let hashes = vec![
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcccc")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefdddd")
+                .unwrap(),
+        ];
+
+        let announcement = NewPooledTransactionHashes68 {
+            types: types.clone(),
+            sizes: sizes.clone(),
+            hashes: hashes.clone(),
+        };
+
+        let filter = EthMessageFilter::default();
+
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let (outcome, valid_data) = filter.filter_valid_entries_68(partially_valid_data);
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let mut expected_data = HashMap::default();
+        // All transaction types should be included as they are valid
+        for i in 0..4 {
+            expected_data.insert(hashes[i], Some((types[i], sizes[i])));
+        }
+
+        assert_eq!(expected_data, valid_data.into_data());
     }
 
     #[test]
