@@ -76,6 +76,12 @@ pub enum Subcommands {
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
     /// Execute `p2p` command
     pub async fn execute<N: NetworkPrimitives>(self) -> eyre::Result<()> {
+        if let Subcommands::Rlpx(command) = self.command {
+            // rlpx subcommand skip network setup.
+            command.execute().await?;
+            return Ok(());
+        }
+
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
@@ -155,9 +161,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 let body = result.into_iter().next().unwrap();
                 println!("Successfully downloaded body: {body:?}")
             }
-            Subcommands::Rlpx(command) => {
-                command.execute().await?;
-            }
+            _ => {}
         }
 
         Ok(())

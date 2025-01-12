@@ -1,12 +1,19 @@
 //! RLPx subcommand of P2P Debugging tool.
 
+use std::time::Instant;
+
 use clap::{Parser, Subcommand};
+use futures::{SinkExt, StreamExt};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{HelloMessage, UnauthedP2PStream};
 use reth_network::config::rng_secret_key;
 use reth_network_peers::{pk2id, AnyNode};
 use secp256k1::SECP256K1;
-use tokio::net::TcpStream;
+use tokio::{
+    net::TcpStream,
+    sync::oneshot::error::TryRecvError,
+    time::{self, Duration},
+};
 
 /// RLPx commands
 #[derive(Parser, Debug)]
@@ -31,13 +38,40 @@ impl Command {
                 let peer_id = pk2id(&key.public_key(SECP256K1));
                 let hello = HelloMessage::builder(peer_id).build();
 
-                let (_, their_hello) =
+                let (mut p2p_stream, their_hello) =
                     UnauthedP2PStream::new(ecies_stream).handshake(hello).await?;
 
                 println!("{:#?}", their_hello);
+
+                let mut rx = p2p_stream.subscribe_pong();
+
+                p2p_stream.send_ping();
+                p2p_stream.flush().await?;
+
+                let start_time = Instant::now();
+                let time_duration = Duration::from_secs(3);
+
+                loop {
+                    tokio::select! {
+                        Some(_) = p2p_stream.next() => {
+                            match rx.try_recv() {
+                                Ok(_) => {
+                                    println!("sucessfully ping");
+                                    return Ok(());
+                                },
+                                Err(TryRecvError::Empty) => {},
+                                _ => return Err(eyre::eyre!("failed to get pong from node {}", node)),
+                            }
+                        },
+                        _ = time::sleep(Duration::from_millis(100)) => {
+                            if start_time.elapsed() >= time_duration {
+                                return Err(eyre::eyre!("timeout to get pong from node {}", node));
+                            }
+                        },
+                    }
+                }
             }
         }
-        Ok(())
     }
 }
 
