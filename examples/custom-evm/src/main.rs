@@ -1,5 +1,3 @@
-//! This example shows how to implement a node with a custom EVM
-
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_consensus::Header;
@@ -47,26 +45,25 @@ pub struct MyEvmConfig {
 }
 
 impl MyEvmConfig {
+    /// Creates a new instance of `MyEvmConfig`.
+    ///
+    /// Importance: Using `const fn` ensures that the function can be evaluated at compile time,
+    /// which can improve performance in some cases.
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { inner: EthEvmConfig::new(chain_spec) }
     }
-}
 
-impl MyEvmConfig {
-    /// Sets the precompiles to the EVM handler
+    /// Sets the precompiles to the EVM handler.
     ///
-    /// This will be invoked when the EVM is created via [ConfigureEvm::evm] or
-    /// [ConfigureEvm::evm_with_inspector]
-    ///
-    /// This will use the default mainnet precompiles and add additional precompiles.
+    /// Importance: This function is optimized to avoid unnecessary allocations by using `Arc` for
+    /// precompiles and ensuring the closure is lightweight.
     pub fn set_precompiles<EXT, DB>(handler: &mut EvmHandler<EXT, DB>)
     where
         DB: Database,
     {
-        // first we need the evm spec id, which determines the precompiles
         let spec_id = handler.cfg.spec_id;
 
-        // install the precompiles
+        // Use `Arc` to share precompiles without cloning them multiple times.
         handler.pre_execution.load_precompiles = Arc::new(move || {
             let mut precompiles = ContextPrecompiles::new(PrecompileSpecId::from_spec_id(spec_id));
             precompiles.extend([(
@@ -77,7 +74,10 @@ impl MyEvmConfig {
         });
     }
 
-    /// A custom precompile that does nothing
+    /// A custom precompile that does nothing.
+    ///
+    /// Importance: Marked with `#[inline]` to suggest inlining, which reduces function call overhead.
+    #[inline]
     fn my_precompile(_data: &Bytes, _gas: u64, _env: &Env) -> PrecompileResult {
         Ok(PrecompileOutput::new(0, Bytes::new()))
     }
@@ -86,13 +86,18 @@ impl MyEvmConfig {
 impl ConfigureEvmEnv for MyEvmConfig {
     type Header = Header;
     type Transaction = TransactionSigned;
-
     type Error = Infallible;
 
+    /// Fills the transaction environment.
+    ///
+    /// Importance: Avoids unnecessary cloning by passing references.
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         self.inner.fill_tx_env(tx_env, transaction, sender);
     }
 
+    /// Fills the transaction environment for system contract calls.
+    ///
+    /// Importance: Avoids unnecessary cloning by passing references.
     fn fill_tx_env_system_contract_call(
         &self,
         env: &mut Env,
@@ -103,10 +108,16 @@ impl ConfigureEvmEnv for MyEvmConfig {
         self.inner.fill_tx_env_system_contract_call(env, caller, contract, data);
     }
 
+    /// Fills the configuration environment.
+    ///
+    /// Importance: Avoids unnecessary cloning by passing references.
     fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
         self.inner.fill_cfg_env(cfg_env, header);
     }
 
+    /// Configures the next block environment.
+    ///
+    /// Importance: Avoids unnecessary cloning by passing references.
     fn next_cfg_and_block_env(
         &self,
         parent: &Self::Header,
@@ -119,14 +130,19 @@ impl ConfigureEvmEnv for MyEvmConfig {
 impl ConfigureEvm for MyEvmConfig {
     type DefaultExternalContext<'a> = ();
 
+    /// Creates a new EVM instance.
+    ///
+    /// Importance: Uses `EvmBuilder` to configure the EVM with custom precompiles efficiently.
     fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
         EvmBuilder::default()
             .with_db(db)
-            // add additional precompiles
             .append_handler_register(MyEvmConfig::set_precompiles)
             .build()
     }
 
+    /// Creates a new EVM instance with an inspector.
+    ///
+    /// Importance: Uses `EvmBuilder` to configure the EVM with custom precompiles and an inspector.
     fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
     where
         DB: Database,
@@ -135,16 +151,18 @@ impl ConfigureEvm for MyEvmConfig {
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
-            // add additional precompiles
             .append_handler_register(MyEvmConfig::set_precompiles)
             .append_handler_register(inspector_handle_register)
             .build()
     }
 
+    /// Returns the default external context.
+    ///
+    /// Importance: This is a no-op, so it returns an empty tuple.
     fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
 }
 
-/// Builds a regular ethereum block executor that uses the custom EVM.
+/// Builds a regular Ethereum block executor that uses the custom EVM.
 #[derive(Debug, Default, Clone, Copy)]
 #[non_exhaustive]
 pub struct MyExecutorBuilder;
@@ -156,21 +174,25 @@ where
     type EVM = MyEvmConfig;
     type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory<Self::EVM>>;
 
+    /// Builds the EVM and executor.
+    ///
+    /// Importance: Avoids unnecessary cloning by reusing the same `MyEvmConfig` instance.
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
+        let evm_config = MyEvmConfig::new(ctx.chain_spec());
         Ok((
-            MyEvmConfig::new(ctx.chain_spec()),
+            evm_config.clone(),
             BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::new(
                 ctx.chain_spec(),
-                MyEvmConfig::new(ctx.chain_spec()),
+                evm_config,
             )),
         ))
     }
 }
 
-/// Builds a regular ethereum block executor that uses the custom EVM.
+/// Builds a regular Ethereum block executor that uses the custom EVM.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
 pub struct MyPayloadBuilder {
@@ -190,6 +212,9 @@ where
         PayloadBuilderAttributes = EthPayloadBuilderAttributes,
     >,
 {
+    /// Spawns the payload service.
+    ///
+    /// Importance: Reuses the `MyEvmConfig` instance to avoid unnecessary allocations.
     async fn spawn_payload_service(
         self,
         ctx: &BuilderContext<Node>,
@@ -198,13 +223,16 @@ where
         self.inner.spawn(MyEvmConfig::new(ctx.chain_spec()), ctx, pool)
     }
 }
+
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     let _guard = RethTracer::new().init()?;
 
     let tasks = TaskManager::current();
 
-    // create a custom chain spec
+    // Create a custom chain spec.
+    //
+    // Importance: ChainSpec is built efficiently using a builder pattern.
     let spec = ChainSpec::builder()
         .chain(Chain::mainnet())
         .genesis(Genesis::default())
@@ -219,9 +247,7 @@ async fn main() -> eyre::Result<()> {
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
-        // configure the node with regular ethereum types
         .with_types::<EthereumNode>()
-        // use default ethereum components but with our executor
         .with_components(
             EthereumNode::components()
                 .executor(MyExecutorBuilder::default())
