@@ -2,13 +2,12 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     B256,
 };
-use reth_db::{transaction::DbTx, DatabaseError};
+use reth_db::DatabaseError;
 use reth_trie::{
     trie_cursor::{TrieCursor, TrieCursorFactory},
     updates::{StorageTrieUpdates, TrieUpdates},
     BranchNodeCompact, Nibbles,
 };
-use reth_trie_db::DatabaseTrieCursorFactory;
 use tracing::debug;
 
 #[derive(Debug)]
@@ -100,12 +99,10 @@ impl StorageTrieUpdatesDiff {
 /// Compares the trie updates from state root task and regular state root calculation, and logs
 /// the differences if there's any.
 pub(super) fn compare_trie_updates(
-    tx: &impl DbTx,
+    trie_cursor_factory: impl TrieCursorFactory,
     task: TrieUpdates,
     regular: TrieUpdates,
 ) -> Result<(), DatabaseError> {
-    let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
-
     let mut task = adjust_trie_updates(task);
     let mut regular = adjust_trie_updates(regular);
 
