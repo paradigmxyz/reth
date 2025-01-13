@@ -204,7 +204,7 @@ impl<T: Clone + Sync + Send + 'static> Stream for ForkChoiceStream<T> {
         loop {
             match ready!(self.as_mut().project().st.poll_next(cx)) {
                 Some(Some(notification)) => return Poll::Ready(Some(notification)),
-                Some(None) => continue,
+                Some(None) => {}
                 None => return Poll::Ready(None),
             }
         }

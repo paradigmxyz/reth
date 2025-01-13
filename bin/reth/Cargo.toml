@@ -118,6 +118,12 @@ jemalloc-prof = [
 ]
 tracy-allocator = ["reth-cli-util/tracy-allocator"]
 
+# Because jemalloc is default and preferred over snmalloc when both features are
+# enabled, `--no-default-features` should be used when enabling snmalloc or
+# snmalloc-native.
+snmalloc = ["reth-cli-util/snmalloc"]
+snmalloc-native = ["reth-cli-util/snmalloc-native"]
+
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]
