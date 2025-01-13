@@ -7,12 +7,12 @@ use alloy_primitives::B256;
 use alloy_trie::root::ordered_trie_root_with_encoder;
 use reth_chainspec::ChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
-use reth_optimism_primitives::OpReceipt;
+use reth_optimism_primitives::{DepositReceipt, OpReceipt};
 use reth_primitives::ReceiptWithBloom;
 
 /// Calculates the receipt root for a header.
-pub(crate) fn calculate_receipt_root_optimism(
-    receipts: &[ReceiptWithBloom<OpReceipt>],
+pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
+    receipts: &[ReceiptWithBloom<R>],
     chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> B256 {
@@ -28,7 +28,7 @@ pub(crate) fn calculate_receipt_root_optimism(
             .iter()
             .cloned()
             .map(|mut r| {
-                if let OpReceipt::Deposit(receipt) = &mut r.receipt {
+                if let Some(receipt) = r.receipt.as_deposit_receipt_mut() {
                     receipt.deposit_nonce = None;
                 }
                 r
