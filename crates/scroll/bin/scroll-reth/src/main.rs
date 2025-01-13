@@ -7,7 +7,7 @@ static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::ne
 fn main() {
     use clap::Parser;
     use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher};
-    use reth_provider::providers::BlockchainProvider2;
+    use reth_provider::providers::BlockchainProvider;
     use reth_scroll_cli::{Cli, ScrollChainSpecParser, ScrollRollupArgs};
     use reth_scroll_node::{ScrollAddOns, ScrollNode};
     reth_cli_util::sigsegv_handler::install();
@@ -18,12 +18,14 @@ fn main() {
     }
 
     if let Err(err) = Cli::<ScrollChainSpecParser, ScrollRollupArgs>::parse()
-        .run::<_, _, ScrollNode>(|builder, rollup_args| async move {
+        .run::<_, _, ScrollNode>(|builder, _| async move {
             let engine_tree_config = TreeConfig::default()
-                .with_persistence_threshold(rollup_args.persistence_threshold)
-                .with_memory_block_buffer_target(rollup_args.memory_block_buffer_target);
+                .with_persistence_threshold(builder.config().engine.persistence_threshold)
+                .with_memory_block_buffer_target(
+                    builder.config().engine.memory_block_buffer_target,
+                );
             let handle = builder
-                .with_types_and_provider::<ScrollNode, BlockchainProvider2<_>>()
+                .with_types_and_provider::<ScrollNode, BlockchainProvider<_>>()
                 .with_components(ScrollNode::components())
                 .with_add_ons(ScrollAddOns::default())
                 .launch_with_fn(|builder| {

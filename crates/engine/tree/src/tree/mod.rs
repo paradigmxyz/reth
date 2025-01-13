@@ -44,6 +44,7 @@ use reth_provider::{
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
+use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
@@ -2377,8 +2378,8 @@ where
                                     debug!(target: "engine::tree", "Task state root does not match block state root");
                                 }
 
-                                let (regular_root, regular_updates) =
-                                    state_provider.state_root_with_updates(hashed_state.clone())?;
+                                let (regular_root, regular_updates) = state_provider
+                                    .state_root_from_state_with_updates(hashed_state.clone())?;
 
                                 if regular_root == block.header().state_root() {
                                     let provider = self.provider.database_provider_ro()?;
@@ -2398,8 +2399,8 @@ where
                         Err(error) => {
                             info!(target: "engine::tree", ?error, "Failed to wait for state root task result");
                             // Fall back to sequential calculation
-                            let (root, updates) =
-                                state_provider.state_root_from_state_with_updates(hashed_state.clone())?;
+                            let (root, updates) = state_provider
+                                .state_root_from_state_with_updates(hashed_state.clone())?;
                             (root, updates, root_time.elapsed())
                         }
                     }
@@ -2420,8 +2421,8 @@ where
                             error,
                         ))) => {
                             debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
-                            let (root, updates) =
-                                state_provider.state_root_from_state_with_updates(hashed_state.clone())?;
+                            let (root, updates) = state_provider
+                                .state_root_from_state_with_updates(hashed_state.clone())?;
                             (root, updates, root_time.elapsed())
                         }
                         Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),

@@ -401,8 +401,6 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
-                #[cfg(feature = "scroll")]
-                l1_fee: U256::ZERO,
             })]],
         };
 
@@ -464,8 +462,6 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![],
                 success: true,
-                #[cfg(feature = "scroll")]
-                l1_fee: U256::ZERO,
             })]],
         };
 
@@ -500,8 +496,6 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-                #[cfg(feature = "scroll")]
-                l1_fee: U256::ZERO,
             })]],
         };
 
@@ -533,8 +527,6 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-                #[cfg(feature = "scroll")]
-                l1_fee: U256::ZERO,
             })]],
         };
 
@@ -561,8 +553,6 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-                #[cfg(feature = "scroll")]
-                l1_fee: U256::ZERO,
             })]
         );
     }
@@ -576,8 +566,6 @@ mod tests {
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-                #[cfg(feature = "scroll")]
-                l1_fee: U256::ZERO,
             })]],
         };
 
@@ -625,8 +613,6 @@ mod tests {
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "scroll")]
-            l1_fee: U256::ZERO,
         };
 
         // Create a Receipts object with a vector of receipt vectors
@@ -675,8 +661,6 @@ mod tests {
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "scroll")]
-            l1_fee: U256::ZERO,
         };
 
         // Create a Receipts object containing the receipt.
@@ -720,8 +704,6 @@ mod tests {
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "scroll")]
-            l1_fee: U256::ZERO,
         };
 
         // Create a Receipts object with a vector of receipt vectors

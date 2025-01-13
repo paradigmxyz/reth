@@ -670,9 +670,9 @@ snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 # op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "debfc29" }
 
 [patch.crates-io]
-revm = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v51" }
-revm-primitives = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v51" }
-revm-interpreter = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v51" }
+revm = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v53" }
+revm-primitives = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v53" }
+revm-interpreter = { git = "https://github.com/scroll-tech/revm.git", branch = "scroll-evm-executor/reth/v53" }
 
 ff = { git = "https://github.com/scroll-tech/ff", branch = "feat/sp1" }
 

@@ -121,7 +121,6 @@ scroll = [
     "reth-node-core/scroll",
     "reth-node-api/scroll",
     "reth-exex/scroll",
-    "reth-blockchain-tree/scroll",
     "reth-rpc-eth-types/scroll",
     "reth-stages/scroll",
     "reth-invalid-block-hooks/scroll"

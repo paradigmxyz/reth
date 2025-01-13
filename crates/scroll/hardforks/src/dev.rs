@@ -1,4 +1,4 @@
-use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
+use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;

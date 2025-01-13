@@ -9727,8 +9727,8 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "19.0.0"
-source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v51#73610d7435b592c40e25b7ffe2000320c42b7f5f"
+version = "19.2.0"
+source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v53#6826cb6e2aae1b3bfcac48c73b146d5b009f83cf"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -9762,7 +9762,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "15.0.0"
-source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v51#73610d7435b592c40e25b7ffe2000320c42b7f5f"
+source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v53#6826cb6e2aae1b3bfcac48c73b146d5b009f83cf"
 dependencies = [
  "cfg-if",
  "revm-primitives",
@@ -9772,7 +9772,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "16.0.0"
-source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v51#73610d7435b592c40e25b7ffe2000320c42b7f5f"
+source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v53#6826cb6e2aae1b3bfcac48c73b146d5b009f83cf"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -9791,7 +9791,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "15.1.0"
-source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v51#73610d7435b592c40e25b7ffe2000320c42b7f5f"
+source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v53#6826cb6e2aae1b3bfcac48c73b146d5b009f83cf"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",

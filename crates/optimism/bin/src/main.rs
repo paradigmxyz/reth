@@ -11,7 +11,7 @@ fn main() {
     use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher, Node};
     use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
     use reth_optimism_node::{args::RollupArgs, OpNode};
-    use reth_provider::providers::BlockchainProvider2;
+    use reth_provider::providers::BlockchainProvider;
     use tracing as _;
     reth_cli_util::sigsegv_handler::install();
 

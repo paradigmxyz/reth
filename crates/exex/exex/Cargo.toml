@@ -91,5 +91,4 @@ scroll = [
 	"reth-revm/scroll",
 	"reth-primitives-traits/scroll",
 	"reth-node-api/scroll",
-	"reth-blockchain-tree/scroll",
 ]

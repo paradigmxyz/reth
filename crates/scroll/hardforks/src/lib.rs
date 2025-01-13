@@ -11,28 +11,32 @@ mod dev;
 pub use dev::DEV_HARDFORKS;
 pub use hardfork::ScrollHardfork;
 
-use reth_ethereum_forks::EthereumHardforks;
+use reth_ethereum_forks::{EthereumHardforks, ForkCondition};
 
 /// Extends [`EthereumHardforks`] with scroll helper methods.
 pub trait ScrollHardforks: EthereumHardforks {
+    /// Retrieves [`ForkCondition`] by an [`ScrollHardfork`]. If `fork` is not present, returns
+    /// [`ForkCondition::Never`].
+    fn scroll_fork_activation(&self, fork: ScrollHardfork) -> ForkCondition;
+
     /// Convenience method to check if [`Bernoulli`](ScrollHardfork::Bernoulli) is active at a given
     /// block number.
     fn is_bernoulli_active_at_block(&self, block_number: u64) -> bool {
-        self.fork(ScrollHardfork::Bernoulli).active_at_block(block_number)
+        self.scroll_fork_activation(ScrollHardfork::Bernoulli).active_at_block(block_number)
     }
 
     /// Returns `true` if [`Curie`](ScrollHardfork::Curie) is active at given block block number.
     fn is_curie_active_at_block(&self, block_number: u64) -> bool {
-        self.fork(ScrollHardfork::Curie).active_at_block(block_number)
+        self.scroll_fork_activation(ScrollHardfork::Curie).active_at_block(block_number)
     }
 
     /// Returns `true` if [`Darwin`](ScrollHardfork::Darwin) is active at given block timestamp.
     fn is_darwin_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.fork(ScrollHardfork::Darwin).active_at_timestamp(timestamp)
+        self.scroll_fork_activation(ScrollHardfork::Darwin).active_at_timestamp(timestamp)
     }
 
     /// Returns `true` if [`DarwinV2`](ScrollHardfork::DarwinV2) is active at given block timestamp.
     fn is_darwin_v2_active_at_timestamp(&self, timestamp: u64) -> bool {
-        self.fork(ScrollHardfork::DarwinV2).active_at_timestamp(timestamp)
+        self.scroll_fork_activation(ScrollHardfork::DarwinV2).active_at_timestamp(timestamp)
     }
 }
