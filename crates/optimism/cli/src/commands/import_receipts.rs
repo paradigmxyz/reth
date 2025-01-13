@@ -26,7 +26,7 @@ use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use tracing::{debug, info, trace, warn};
 
-use crate::receipt_file_codec::HackReceiptFileCodec;
+use crate::receipt_file_codec::OpGethReceiptFileCodec;
 
 /// Initializes the database with the genesis block.
 #[derive(Debug, Parser)]
@@ -38,7 +38,7 @@ pub struct ImportReceiptsOpCommand<C: ChainSpecParser> {
     #[arg(long, value_name = "CHUNK_LEN", verbatim_doc_comment)]
     chunk_len: Option<u64>,
 
-    /// The path to a receipts file for import. File must use `HackReceiptFileCodec` (used for
+    /// The path to a receipts file for import. File must use `OpGethReceiptFileCodec` (used for
     /// exporting OP chain segment below Bedrock block via testinprod/op-geth).
     ///
     /// <https://github.com/testinprod-io/op-geth/pull/1>
@@ -161,7 +161,7 @@ where
         .expect("transaction static files must exist before importing receipts");
 
     while let Some(file_client) =
-        reader.next_receipts_chunk::<ReceiptFileClient<HackReceiptFileCodec<OpReceipt>>>().await?
+        reader.next_receipts_chunk::<ReceiptFileClient<OpGethReceiptFileCodec<OpReceipt>>>().await?
     {
         if highest_block_receipts == highest_block_transactions {
             warn!(target: "reth::cli",  highest_block_receipts, highest_block_transactions, "Ignoring all other blocks in the file since we have reached the desired height");
