@@ -18,6 +18,7 @@
 extern crate alloc;
 
 use crate::builder::RethEvmBuilder;
+use alloc::boxed::Box;
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
