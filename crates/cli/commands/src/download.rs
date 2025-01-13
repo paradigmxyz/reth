@@ -32,7 +32,19 @@ pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
     datadir: DatadirArgs,
 
-    #[arg(long, short)]
+    #[arg(
+        long,
+        short,
+        help = "Custom URL to download the snapshot from",
+        long_help = "Specify a snapshot URL or let the command propose a default one.\n\
+        \n\
+        Available snapshot sources:\n\
+        - https://downloads.merkle.io (default, mainnet archive)\n\
+        - https://publicnode.com/snapshots (full nodes & testnets)\n\
+        \n\
+        If no URL is provided, the latest mainnet archive snapshot\n\
+        will be proposed for download from merkle.io"
+    )]
     url: Option<String>,
 }
 
