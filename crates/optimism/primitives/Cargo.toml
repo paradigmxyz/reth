@@ -23,7 +23,6 @@ alloy-consensus.workspace = true
 alloy-rlp.workspace = true
 alloy-eips.workspace = true
 revm-primitives = { workspace = true, optional = true }
-revm-optimism = { git = "https://github.com/bluealloy/revm.git", optional = false }
 secp256k1 = { workspace = true, optional = true }
 
 # op
