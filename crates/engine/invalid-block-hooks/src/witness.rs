@@ -6,15 +6,14 @@ use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
-    env::EvmEnv, state_change::post_block_balance_increments, system_calls::SystemCaller,
-    ConfigureEvm,
+    state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm,
 };
 use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
-    database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
-    primitives::EnvWithHandlerCfg, DatabaseCommit, StateBuilder,
+    database::StateProviderDatabase, db::states::bundle_state::BundleRetention, DatabaseCommit,
+    StateBuilder,
 };
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
@@ -77,19 +76,8 @@ where
             .with_bundle_update()
             .build();
 
-        // Setup environment for the execution.
-        let EvmEnv { cfg_env_with_handler_cfg, block_env } =
-            self.evm_config.cfg_and_block_env(block.header());
-
         // Setup EVM
-        let mut evm = self.evm_config.evm_with_env(
-            &mut db,
-            EnvWithHandlerCfg::new_with_cfg_env(
-                cfg_env_with_handler_cfg,
-                block_env,
-                Default::default(),
-            ),
-        );
+        let mut evm = self.evm_config.evm_for_block(&mut db, block.header());
 
         let mut system_caller =
             SystemCaller::new(self.evm_config.clone(), self.provider.chain_spec());

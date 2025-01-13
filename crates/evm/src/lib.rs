@@ -18,6 +18,7 @@
 extern crate alloc;
 
 use crate::builder::RethEvmBuilder;
+use alloc::boxed::Box;
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
@@ -41,7 +42,6 @@ pub mod system_calls;
 pub mod test_utils;
 
 /// Trait for configuring the EVM for executing full blocks.
-#[auto_impl::auto_impl(&, Arc)]
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// Associated type for the default external context that should be configured for the EVM.
     type DefaultExternalContext<'a>;
@@ -68,6 +68,31 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         evm.modify_spec_id(env.spec_id());
         evm.context.evm.env = env.env;
         evm
+    }
+
+    /// Returns a new EVM with the given database configured with `cfg` and `block_env`
+    /// configuration derived from the given header. Relies on
+    /// [`ConfigureEvmEnv::cfg_and_block_env`].
+    ///
+    /// # Caution
+    ///
+    /// This does not initialize the tx environment.
+    fn evm_for_block<DB: Database>(
+        &self,
+        db: DB,
+        header: &Self::Header,
+    ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+        let EvmEnv {
+            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg { cfg_env, handler_cfg },
+            block_env,
+        } = self.cfg_and_block_env(header);
+        self.evm_with_env(
+            db,
+            EnvWithHandlerCfg {
+                env: Box::new(Env { cfg: cfg_env, block: block_env, tx: Default::default() }),
+                handler_cfg,
+            },
+        )
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
@@ -107,6 +132,59 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 
     /// Provides the default external context.
     fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a>;
+}
+
+impl<'b, T> ConfigureEvm for &'b T
+where
+    T: ConfigureEvm,
+    &'b T: ConfigureEvmEnv<Header = T::Header>,
+{
+    type DefaultExternalContext<'a> = T::DefaultExternalContext<'a>;
+
+    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {
+        (*self).default_external_context()
+    }
+
+    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+        (*self).evm(db)
+    }
+
+    fn evm_for_block<DB: Database>(
+        &self,
+        db: DB,
+        header: &Self::Header,
+    ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+        (*self).evm_for_block(db, header)
+    }
+
+    fn evm_with_env<DB: Database>(
+        &self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+    ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+        (*self).evm_with_env(db, env)
+    }
+
+    fn evm_with_env_and_inspector<DB, I>(
+        &self,
+        db: DB,
+        env: EnvWithHandlerCfg,
+        inspector: I,
+    ) -> Evm<'_, I, DB>
+    where
+        DB: Database,
+        I: GetInspector<DB>,
+    {
+        (*self).evm_with_env_and_inspector(db, env, inspector)
+    }
+
+    fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
+    where
+        DB: Database,
+        I: GetInspector<DB>,
+    {
+        (*self).evm_with_inspector(db, inspector)
+    }
 }
 
 /// This represents the set of methods used to configure the EVM's environment before block
