@@ -31,5 +31,8 @@ serde.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, default-features = false, features = ["sync"] }
 
+[dev-dependencies]
+assert_matches.workspace = true
+
 [features]
 op = ["dep:op-alloy-rpc-types-engine"]
