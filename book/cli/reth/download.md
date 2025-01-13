@@ -6,7 +6,7 @@ Downloads and optionally decompresses node snapshots from a URL
 $ reth download --help
 ```
 ```txt
-Usage: reth download [OPTIONS] --url <URL>
+Usage: reth download [OPTIONS]
 
 Options:
       --chain <CHAIN_OR_PATH>
@@ -48,7 +48,14 @@ Datadir:
           The absolute path to store static files in.
 
   -u, --url <URL>
-          Custom URL to download the snapshot from
+          Specify a snapshot URL or let the command propose a default one.
+
+          Available snapshot sources:
+          - https://downloads.merkle.io (default, mainnet archive)
+          - https://publicnode.com/snapshots (full nodes & testnets)
+
+          If no URL is provided, the latest mainnet archive snapshot
+          will be proposed for download from merkle.io
 
   -d, --decompress
           Whether to automatically decompress the snapshot after downloading
