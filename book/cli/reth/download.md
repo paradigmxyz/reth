@@ -57,9 +57,6 @@ Datadir:
           If no URL is provided, the latest mainnet archive snapshot
           will be proposed for download from merkle.io
 
-  -d, --decompress
-          Whether to automatically decompress the snapshot after downloading
-
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
