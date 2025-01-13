@@ -56,7 +56,7 @@ impl Command {
                         Some(_) = p2p_stream.next() => {
                             match rx.try_recv() {
                                 Ok(_) => {
-                                    println!("sucessfully ping");
+                                    println!("successfully ping");
                                     return Ok(());
                                 },
                                 Err(TryRecvError::Empty) => {},
