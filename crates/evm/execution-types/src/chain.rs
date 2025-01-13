@@ -561,19 +561,19 @@ pub(super) mod serde_bincode_compat {
             Block: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
         >,
     {
-        blocks: RecoveredB<'a, N::Block>,
+        blocks: RecoveredBlocks<'a, N::Block>,
         execution_outcome: Cow<'a, ExecutionOutcome<N::Receipt>>,
         trie_updates: Option<TrieUpdates<'a>>,
     }
 
     #[derive(Debug)]
-    struct RecoveredB<
+    struct RecoveredBlocks<
         'a,
         B: reth_primitives_traits::Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat>
             + 'static,
     >(Cow<'a, BTreeMap<BlockNumber, reth_primitives::RecoveredBlock<B>>>);
 
-    impl<B> Serialize for RecoveredB<'_, B>
+    impl<B> Serialize for RecoveredBlocks<'_, B>
     where
         B: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
     {
@@ -591,7 +591,7 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de, B> Deserialize<'de> for RecoveredB<'_, B>
+    impl<'de, B> Deserialize<'de> for RecoveredBlocks<'_, B>
     where
         B: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static,
     {
@@ -614,7 +614,7 @@ pub(super) mod serde_bincode_compat {
     {
         fn from(value: &'a super::Chain<N>) -> Self {
             Self {
-                blocks: RecoveredB(Cow::Borrowed(&value.blocks)),
+                blocks: RecoveredBlocks(Cow::Borrowed(&value.blocks)),
                 execution_outcome: Cow::Borrowed(&value.execution_outcome),
                 trie_updates: value.trie_updates.as_ref().map(Into::into),
             }
