@@ -26,17 +26,17 @@ use reth_downloaders::{file_client::FileClientError, receipt_file_client::Receip
 /// It's recommended to use [`with_capacity`](tokio_util::codec::FramedRead::with_capacity) to set
 /// the capacity of the framed reader to the size of the file.
 #[derive(Debug)]
-pub struct HackReceiptFileCodec<R = Receipt>(core::marker::PhantomData<R>);
+pub struct OpGethReceiptFileCodec<R = Receipt>(core::marker::PhantomData<R>);
 
-impl<R> Default for HackReceiptFileCodec<R> {
+impl<R> Default for OpGethReceiptFileCodec<R> {
     fn default() -> Self {
         Self(Default::default())
     }
 }
 
-impl<R> Decoder for HackReceiptFileCodec<R>
+impl<R> Decoder for OpGethReceiptFileCodec<R>
 where
-    R: TryFrom<HackReceipt, Error: Into<FileClientError>>,
+    R: TryFrom<OpGethReceipt, Error: Into<FileClientError>>,
 {
     type Item = Option<ReceiptWithBlockNumber<R>>;
     type Error = FileClientError;
@@ -47,7 +47,7 @@ where
         }
 
         let buf_slice = &mut src.as_ref();
-        let receipt = HackReceiptContainer::decode(buf_slice)
+        let receipt = OpGethReceiptContainer::decode(buf_slice)
             .map_err(|err| Self::Error::Rlp(err, src.to_vec()))?
             .0;
         src.advance(src.len() - buf_slice.len());
@@ -68,7 +68,7 @@ where
 
 /// See <https://github.com/testinprod-io/op-geth/pull/1>
 #[derive(Debug, PartialEq, Eq, RlpDecodable)]
-pub struct HackReceipt {
+pub struct OpGethReceipt {
     tx_type: u8,
     post_state: Bytes,
     status: u64,
@@ -90,13 +90,13 @@ pub struct HackReceipt {
 
 #[derive(Debug, PartialEq, Eq, RlpDecodable)]
 #[rlp(trailing)]
-struct HackReceiptContainer(Option<HackReceipt>);
+struct OpGethReceiptContainer(Option<OpGethReceipt>);
 
-impl TryFrom<HackReceipt> for Receipt {
+impl TryFrom<OpGethReceipt> for Receipt {
     type Error = &'static str;
 
-    fn try_from(exported_receipt: HackReceipt) -> Result<Self, Self::Error> {
-        let HackReceipt { tx_type, status, cumulative_gas_used, logs, .. } = exported_receipt;
+    fn try_from(exported_receipt: OpGethReceipt) -> Result<Self, Self::Error> {
+        let OpGethReceipt { tx_type, status, cumulative_gas_used, logs, .. } = exported_receipt;
 
         #[allow(clippy::needless_update)]
         Ok(Self {
@@ -109,10 +109,10 @@ impl TryFrom<HackReceipt> for Receipt {
     }
 }
 
-impl TryFrom<HackReceipt> for OpReceipt {
+impl TryFrom<OpGethReceipt> for OpReceipt {
     type Error = &'static str;
 
-    fn try_from(exported_receipt: HackReceipt) -> Result<Self, Self::Error> {
+    fn try_from(exported_receipt: OpGethReceipt) -> Result<Self, Self::Error> {
         let Receipt {
             tx_type,
             success,
@@ -152,10 +152,10 @@ pub(crate) mod test {
 
     pub(crate) const HACK_RECEIPT_ENCODED_BLOCK_3: &[u8] = &hex!("f90271f9026e8080018301c60db9010000000000000000000000000000000000000000400000000000000000008000000000000000000000000000000000004000000000000000000000400004000000100000000000000000000000000000000000000000000000000000000000004000000000000000000000040000000000400080000400000000000000100000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000008100000000000000000000000000000000000004000000000000000000000000008000000000000000000010000000000000000000000000000400000000000000001000000000000000000000000002000f8faf89c948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff884a092e98423f8adac6e64d0608e519fd1cefb861498385c6dee70d58fc926ddc68ca000000000000000000000000000000000000000000000000000000000d101e54ba00000000000000000000000000000000000000000000000000000000000014218a0000000000000000000000000fa011d8d6c26f13abe2cefed38226e401b2b8a9980f85a948ce8c13d816fe6daf12d6fd9e4952e1fc88850aff842a0fe25c73e3b9089fac37d55c4c7efcba6f04af04cebd2fc4d6d7dbb07e1e5234fa000000000000000000000000000000000000000000000007ed8842f062774800080a08fab01dcec1da547e90a77597999e9153ff788fa6451d1cc942064427bd995019400000000000000000000000000000000000000008301c60da0da4509fe0ca03202ddbe4f68692c132d689ee098433691040ece18c3a45d44c50380018212c2821c2383312e35");
 
-    fn hack_receipt_1() -> HackReceipt {
+    fn hack_receipt_1() -> OpGethReceipt {
         let receipt = receipt_block_1();
 
-        HackReceipt {
+        OpGethReceipt {
             tx_type: receipt.receipt.tx_type as u8,
             post_state: Bytes::default(),
             status: receipt.receipt.success as u64,
@@ -354,7 +354,7 @@ pub(crate) mod test {
     fn decode_hack_receipt() {
         let receipt = hack_receipt_1();
 
-        let decoded = HackReceiptContainer::decode(&mut &HACK_RECEIPT_ENCODED_BLOCK_1[..])
+        let decoded = OpGethReceiptContainer::decode(&mut &HACK_RECEIPT_ENCODED_BLOCK_1[..])
             .unwrap()
             .0
             .unwrap();
@@ -373,7 +373,7 @@ pub(crate) mod test {
 
         let encoded = &mut BytesMut::from(&receipt_1_to_3[..]);
 
-        let mut codec = HackReceiptFileCodec::default();
+        let mut codec = OpGethReceiptFileCodec::default();
 
         // test
 
