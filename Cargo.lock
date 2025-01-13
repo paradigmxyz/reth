@@ -8519,6 +8519,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
+ "assert_matches",
  "op-alloy-rpc-types-engine",
  "reth-chain-state",
  "reth-chainspec",
