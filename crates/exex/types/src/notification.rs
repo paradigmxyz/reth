@@ -100,7 +100,7 @@ pub(super) mod serde_bincode_compat {
     #[serde(bound = "")]
     pub enum ExExNotification<'a, N = EthPrimitives>
     where
-        N: NodePrimitives<Block: SerdeBincodeCompat>,
+        N: NodePrimitives,
     {
         ChainCommitted { new: Chain<'a, N> },
         ChainReorged { old: Chain<'a, N>, new: Chain<'a, N> },
@@ -109,7 +109,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<'a, N> From<&'a super::ExExNotification<N>> for ExExNotification<'a, N>
     where
-        N: NodePrimitives<Block: SerdeBincodeCompat>,
+        N: NodePrimitives,
     {
         fn from(value: &'a super::ExExNotification<N>) -> Self {
             match value {
@@ -131,7 +131,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<'a, N> From<ExExNotification<'a, N>> for super::ExExNotification<N>
     where
-        N: NodePrimitives<Block: SerdeBincodeCompat>,
+        N: NodePrimitives,
     {
         fn from(value: ExExNotification<'a, N>) -> Self {
             match value {
