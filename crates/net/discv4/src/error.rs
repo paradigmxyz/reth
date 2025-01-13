@@ -2,7 +2,7 @@
 
 use tokio::sync::{mpsc::error::SendError, oneshot::error::RecvError};
 
-/// Error thrown when decoding a UDP packet.
+/// Error thrown when decoding an UDP packet.
 #[derive(Debug, thiserror::Error)]
 pub enum DecodePacketError {
     /// Failed to RLP decode the packet.

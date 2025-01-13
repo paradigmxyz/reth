@@ -24,7 +24,7 @@ pub struct DiscoveredPeersMetrics {
     kbucket_peers_raw_total: Gauge,
     /// Total discovered peers that are inserted into [`discv5::Discv5`]'s kbuckets.
     ///
-    /// This is a subset of the total established sessions, in which all peers advertise a udp
+    /// This is a subset of the total established sessions, in which all peers advertise an udp
     /// socket in their node record which is reachable from the local node. Only these peers make
     /// it into [`discv5::Discv5`]'s kbuckets and will hence be included in queries.
     ///

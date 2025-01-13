@@ -274,7 +274,7 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     command_tx: mpsc::UnboundedSender<TransactionsCommand<N>>,
     /// Incoming commands from [`TransactionsHandle`].
     ///
-    /// This will only receive commands if a user manually sends a command to the manager through
+    /// This will only receive commands if an user manually sends a command to the manager through
     /// the [`TransactionsHandle`] to interact with this type directly.
     command_rx: UnboundedReceiverStream<TransactionsCommand<N>>,
     /// A stream that yields new __pending__ transactions.

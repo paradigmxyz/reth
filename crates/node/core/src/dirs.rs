@@ -83,7 +83,7 @@ pub trait XdgPath {
     fn resolve() -> Option<PathBuf>;
 }
 
-/// A wrapper type that either parses a user-given path or defaults to an
+/// A wrapper type that either parses an user-given path or defaults to an
 /// OS-specific path.
 ///
 /// The [`FromStr`] implementation supports shell expansions and common patterns such as `~` for the
