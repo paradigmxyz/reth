@@ -2,14 +2,13 @@
 
 use crate::{l1::ensure_create2_deployer, OpBlockExecutionError, OpEvmConfig};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::{Eip658Value, Header, Receipt, Transaction as _};
+use alloy_consensus::{Eip658Value, Receipt, Transaction as _};
 use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_evm::{
-    env::EvmEnv,
     execute::{
         balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
         BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
@@ -26,7 +25,7 @@ use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt, OpTransactionSi
 use reth_primitives::BlockWithSenders;
 use reth_primitives_traits::SignedTransaction;
 use reth_revm::{Database, State};
-use revm_primitives::{db::DatabaseCommit, EnvWithHandlerCfg, ResultAndState};
+use revm_primitives::{db::DatabaseCommit, ResultAndState};
 use tracing::trace;
 
 /// Factory for [`OpExecutionStrategy`].
@@ -104,21 +103,6 @@ where
     }
 }
 
-impl<DB, EvmConfig> OpExecutionStrategy<DB, EvmConfig>
-where
-    DB: Database<Error: Into<ProviderError> + Display>,
-    EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
-{
-    /// Configures a new evm configuration and block environment for the given block.
-    ///
-    /// Caution: this does not initialize the tx environment.
-    fn evm_env_for_block(&self, header: &Header) -> EnvWithHandlerCfg {
-        let evm_env = self.evm_config.cfg_and_block_env(header);
-        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
-        EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, Default::default())
-    }
-}
-
 impl<DB, EvmConfig> BlockExecutionStrategy for OpExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
@@ -141,8 +125,7 @@ where
             (*self.chain_spec).is_spurious_dragon_active_at_block(block.header.number);
         self.state.set_state_clear_flag(state_clear_flag);
 
-        let env = self.evm_env_for_block(&block.header);
-        let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
+        let mut evm = self.evm_config.evm_for_block(&mut self.state, &block.header);
 
         self.system_caller.apply_beacon_root_contract_call(
             block.timestamp,
@@ -165,8 +148,7 @@ where
         &mut self,
         block: &BlockWithSenders<OpBlock>,
     ) -> Result<ExecuteOutput<OpReceipt>, Self::Error> {
-        let env = self.evm_env_for_block(&block.header);
-        let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
+        let mut evm = self.evm_config.evm_for_block(&mut self.state, &block.header);
 
         let is_regolith =
             self.chain_spec.fork(OpHardfork::Regolith).active_at_timestamp(block.timestamp);
@@ -318,7 +300,7 @@ impl OpExecutorProvider {
 mod tests {
     use super::*;
     use crate::OpChainSpec;
-    use alloy_consensus::TxEip1559;
+    use alloy_consensus::{Header, TxEip1559};
     use alloy_primitives::{
         b256, Address, PrimitiveSignature as Signature, StorageKey, StorageValue, U256,
     };
