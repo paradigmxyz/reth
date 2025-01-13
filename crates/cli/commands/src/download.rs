@@ -15,7 +15,8 @@ use std::{
 use tracing::info;
 
 // 1MB chunks
-const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+const MERKLE_BASE_URL: &str = "https://downloads.merkle.io/";
 
 #[derive(Debug, Parser, Clone)]
 pub struct Command<C: ChainSpecParser> {
@@ -31,8 +32,8 @@ pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
     datadir: DatadirArgs,
 
-    #[arg(long, short, required = true)]
-    url: String,
+    #[arg(long, short)]
+    url: Option<String>,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
@@ -40,14 +41,33 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let data_dir = self.datadir.resolve_datadir(self.chain.chain());
         fs::create_dir_all(&data_dir)?;
 
+        // URL handling logic
+        let url = if let Some(url) = self.url {
+            url
+        } else {
+            let latest_url = get_latest_snapshot_url().await?;
+            info!("No URL specified. Latest snapshot available as mainnet archive: {}", latest_url);
+
+            print!("Do you want to use this snapshot? [Y/n] ");
+            std::io::stdout().flush()?;
+
+            let mut response = String::new();
+            std::io::stdin().read_line(&mut response)?;
+
+            match response.trim().to_lowercase().as_str() {
+                "" | "y" | "yes" => latest_url,
+                _ => return Err(eyre::eyre!("Please specify a snapshot URL using --url")),
+            }
+        };
+
         info!(
             chain = %self.chain.chain(),
             dir = ?data_dir.data_dir(),
-            url = %self.url,
+            url = %url,
             "Starting snapshot download and extraction"
         );
 
-        stream_and_extract(&self.url, data_dir.data_dir()).await?;
+        stream_and_extract(&url, data_dir.data_dir()).await?;
         info!("Snapshot downloaded and extracted successfully");
 
         Ok(())
@@ -102,12 +122,12 @@ impl DownloadProgress {
         let mut size = size as f64;
         let mut unit_index = 0;
 
-        while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+        while size >= 1024.0 && unit_index < BYTE_UNITS.len() - 1 {
             size /= 1024.0;
             unit_index += 1;
         }
 
-        format!("{:.2}{}", size, UNITS[unit_index])
+        format!("{:.2}{}", size, BYTE_UNITS[unit_index])
     }
 
     /// Updates progress bar and ensures child processes are still running
@@ -128,7 +148,7 @@ impl DownloadProgress {
             let progress = (self.downloaded as f64 / self.total_size as f64) * 100.0;
 
             print!(
-                "\rDownloading and extracting... {:.1}% ({} / {})",
+                "\rDownloading and extracting... {:.2}% ({} / {})",
                 progress, formatted_downloaded, formatted_total
             );
             std::io::stdout().flush()?;
@@ -152,7 +172,7 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
         )
     })?;
 
-    let mut global_progress = DownloadProgress::new(total_size);
+    let mut global_progress: DownloadProgress = DownloadProgress::new(total_size);
 
     // Setup processing pipeline: download -> lz4 -> tar
     let mut lz4_process = spawn_lz4_process()?;
@@ -189,4 +209,24 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     }
 
     Ok(())
+}
+
+// Builds default URL for latest r mainnet archive  snapshot
+async fn get_latest_snapshot_url() -> Result<String> {
+    let latest_url = format!("{}/latest.txt", MERKLE_BASE_URL);
+    let filename = Client::new()
+        .get(latest_url)
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?
+        .trim()
+        .to_string();
+
+    if !filename.ends_with(".tar.lz4") {
+        return Err(eyre::eyre!("Unexpected snapshot filename format: {}", filename));
+    }
+
+    Ok(format!("{}/{}", MERKLE_BASE_URL, filename))
 }
