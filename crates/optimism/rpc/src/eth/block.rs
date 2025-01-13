@@ -1,6 +1,6 @@
 //! Loads and formats OP block RPC response.
 
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::BlockId;
 use op_alloy_network::Network;
 use op_alloy_rpc_types::OpTransactionReceipt;
@@ -8,7 +8,6 @@ use reth_chainspec::ChainSpecProvider;
 use reth_node_api::BlockBody;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_primitives::TransactionMeta;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_rpc_eth_api::{
@@ -41,11 +40,11 @@ where
             let excess_blob_gas = block.excess_blob_gas();
             let timestamp = block.timestamp();
 
-            let l1_block_info =
-                reth_optimism_evm::extract_l1_info(&block.body).map_err(OpEthApiError::from)?;
+            let mut l1_block_info =
+                reth_optimism_evm::extract_l1_info(block.body()).map_err(OpEthApiError::from)?;
 
             return block
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .zip(receipts.iter())
@@ -61,13 +60,18 @@ where
                         timestamp,
                     };
 
+                    // We must clear this cache as different L2 transactions can have different
+                    // L1 costs. A potential improvement here is to only clear the cache if the
+                    // new transaction input has changed, since otherwise the L1 cost wouldn't.
+                    l1_block_info.clear_tx_l1_cost();
+
                     Ok(OpReceiptBuilder::new(
                         &self.inner.eth_api.provider().chain_spec(),
                         tx,
                         meta,
                         receipt,
                         &receipts,
-                        l1_block_info.clone(),
+                        &mut l1_block_info,
                     )?
                     .build())
                 })

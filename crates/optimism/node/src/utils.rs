@@ -8,14 +8,14 @@ use reth_e2e_test_utils::{
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Optimism Node Helper type
 pub(crate) type OpNode =
-    NodeHelperType<OtherOpNode, BlockchainProvider2<NodeTypesWithDBAdapter<OtherOpNode, TmpDB>>>;
+    NodeHelperType<OtherOpNode, BlockchainProvider<NodeTypesWithDBAdapter<OtherOpNode, TmpDB>>>;
 
 /// Creates the initial setup with `num_nodes` of the node config, started and connected.
 pub async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {

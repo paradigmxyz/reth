@@ -6,6 +6,7 @@ use crate::{
     to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
     TransactionsProvider,
 };
+use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
@@ -17,8 +18,7 @@ use reth_db::{
     table::{Decompress, Value},
 };
 use reth_node_types::NodePrimitives;
-use reth_primitives::{transaction::recover_signers, SealedHeader, TransactionMeta};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{SealedHeader, SignedTransaction};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     fmt::Debug,
@@ -296,7 +296,8 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
         let txs = self.transactions_by_tx_range(range)?;
-        recover_signers(&txs, txs.len()).ok_or(ProviderError::SenderRecoveryError)
+        reth_primitives_traits::transaction::recover::recover_signers(&txs)
+            .ok_or(ProviderError::SenderRecoveryError)
     }
 
     fn transaction_sender(&self, num: TxNumber) -> ProviderResult<Option<Address>> {

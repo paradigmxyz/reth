@@ -2,13 +2,16 @@
 
 use crate::{BlockBody, SealedBlock, Transaction, TransactionSigned};
 use alloc::string::ToString;
-use alloy_consensus::TxEnvelope;
+use alloy_consensus::{Header, TxEnvelope};
 use alloy_network::{AnyRpcBlock, AnyRpcTransaction, AnyTxEnvelope};
 use alloy_serde::WithOtherFields;
 use op_alloy_rpc_types as _;
 use reth_primitives_traits::SealedHeader;
 
-impl TryFrom<AnyRpcBlock> for SealedBlock {
+impl<T> TryFrom<AnyRpcBlock> for SealedBlock<Header, BlockBody<T>>
+where
+    T: TryFrom<AnyRpcTransaction, Error = alloy_rpc_types::ConversionError>,
+{
     type Error = alloy_rpc_types::ConversionError;
 
     fn try_from(block: AnyRpcBlock) -> Result<Self, Self::Error> {
@@ -16,14 +19,14 @@ impl TryFrom<AnyRpcBlock> for SealedBlock {
         let block_hash = block.header.hash;
         let block = block.try_map_transactions(|tx| tx.try_into())?;
 
-        Ok(Self {
-            header: SealedHeader::new(block.header.inner.into_header_with_defaults(), block_hash),
-            body: BlockBody {
+        Ok(Self::new(
+            SealedHeader::new(block.header.inner.into_header_with_defaults(), block_hash),
+            BlockBody {
                 transactions: block.transactions.into_transactions().collect(),
                 ommers: Default::default(),
                 withdrawals: block.withdrawals.map(|w| w.into_inner().into()),
             },
-        })
+        ))
     }
 }
 

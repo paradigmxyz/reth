@@ -131,11 +131,11 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         }
 
         if self.is_cancun_active_at_timestamp(sealed_block.timestamp) {
-            if sealed_block.header.blob_gas_used.is_none() {
+            if sealed_block.blob_gas_used.is_none() {
                 // cancun active but blob gas used not present
                 return Err(PayloadError::PostCancunBlockWithoutBlobGasUsed)
             }
-            if sealed_block.header.excess_blob_gas.is_none() {
+            if sealed_block.excess_blob_gas.is_none() {
                 // cancun active but excess blob gas not present
                 return Err(PayloadError::PostCancunBlockWithoutExcessBlobGas)
             }
@@ -144,15 +144,15 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
                 return Err(PayloadError::PostCancunWithoutCancunFields)
             }
         } else {
-            if sealed_block.body.has_eip4844_transactions() {
+            if sealed_block.body().has_eip4844_transactions() {
                 // cancun not active but blob transactions present
                 return Err(PayloadError::PreCancunBlockWithBlobTransactions)
             }
-            if sealed_block.header.blob_gas_used.is_some() {
+            if sealed_block.blob_gas_used.is_some() {
                 // cancun not active but blob gas used present
                 return Err(PayloadError::PreCancunBlockWithBlobGasUsed)
             }
-            if sealed_block.header.excess_blob_gas.is_some() {
+            if sealed_block.excess_blob_gas.is_some() {
                 // cancun not active but excess blob gas present
                 return Err(PayloadError::PreCancunBlockWithExcessBlobGas)
             }
@@ -163,13 +163,13 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         }
 
         let shanghai_active = self.is_shanghai_active_at_timestamp(sealed_block.timestamp);
-        if !shanghai_active && sealed_block.body.withdrawals.is_some() {
+        if !shanghai_active && sealed_block.body().withdrawals.is_some() {
             // shanghai not active but withdrawals present
             return Err(PayloadError::PreShanghaiBlockWithWithdrawals)
         }
 
         if !self.is_prague_active_at_timestamp(sealed_block.timestamp) &&
-            sealed_block.body.has_eip7702_transactions()
+            sealed_block.body().has_eip7702_transactions()
         {
             return Err(PayloadError::PrePragueBlockWithEip7702Transactions)
         }

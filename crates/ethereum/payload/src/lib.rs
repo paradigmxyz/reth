@@ -285,7 +285,7 @@ where
         }
 
         // Configure the environment for the tx.
-        *evm.tx_mut() = evm_config.tx_env(tx.as_signed(), tx.signer());
+        *evm.tx_mut() = evm_config.tx_env(tx.tx(), tx.signer());
 
         let ResultAndState { result, state } = match evm.transact() {
             Ok(res) => res,
@@ -354,7 +354,7 @@ where
 
         // append sender and transaction to the respective lists
         executed_senders.push(tx.signer());
-        executed_txs.push(tx.into_signed());
+        executed_txs.push(tx.into_tx());
     }
 
     // check if we have a better block
@@ -492,7 +492,7 @@ where
     };
 
     let sealed_block = Arc::new(block.seal_slow());
-    debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.header, "sealed built block");
+    debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
 
     // create the executed block data
     let executed = ExecutedBlock {

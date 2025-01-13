@@ -6,7 +6,7 @@ use crate::{
 use alloc::{fmt, vec::Vec};
 use alloy_consensus::{Header, Transaction};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256};
 
 /// Helper trait that unifies all behaviour required by transaction to support full node operations.
 pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
@@ -38,6 +38,15 @@ pub trait BlockBody:
     /// Returns reference to transactions in block.
     fn transactions(&self) -> &[Self::Transaction];
 
+    /// Returns an iterator over all transaction hashes in the block body.
+    fn transaction_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
+        self.transactions().iter().map(|tx| tx.tx_hash())
+    }
+
+    /// Returns the number of the transactions in the block.
+    fn transaction_count(&self) -> usize {
+        self.transactions().len()
+    }
     /// Consume the block body and return a [`Vec`] of transactions.
     fn into_transactions(self) -> Vec<Self::Transaction>;
 
@@ -96,6 +105,25 @@ pub trait BlockBody:
     #[doc(alias = "raw_transactions")]
     fn encoded_2718_transactions(&self) -> Vec<Bytes> {
         self.encoded_2718_transactions_iter().map(Into::into).collect()
+    }
+
+    /// Recover signer addresses for all transactions in the block body.
+    fn recover_signers(&self) -> Option<Vec<Address>>
+    where
+        Self::Transaction: SignedTransaction,
+    {
+        crate::transaction::recover::recover_signers(self.transactions())
+    }
+
+    /// Recover signer addresses for all transactions in the block body _without ensuring that the
+    /// signature has a low `s` value_.
+    ///
+    /// Returns `None`, if some transaction's signature is invalid.
+    fn recover_signers_unchecked(&self) -> Option<Vec<Address>>
+    where
+        Self::Transaction: SignedTransaction,
+    {
+        crate::transaction::recover::recover_signers_unchecked(self.transactions())
     }
 }
 

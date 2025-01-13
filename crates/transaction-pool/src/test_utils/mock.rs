@@ -30,8 +30,7 @@ use rand::{
 };
 use reth_primitives::{
     transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
-    PooledTransaction, PooledTransactionsElementEcRecovered, RecoveredTx, Transaction,
-    TransactionSigned, TxType,
+    PooledTransaction, RecoveredTx, Transaction, TransactionSigned, TxType,
 };
 use reth_primitives_traits::InMemorySize;
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
@@ -685,7 +684,7 @@ impl PoolTransaction for MockTransaction {
     fn try_consensus_into_pooled(
         tx: RecoveredTx<Self::Consensus>,
     ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
-        let (tx, signer) = tx.to_components();
+        let (tx, signer) = tx.into_parts();
         Self::Pooled::try_from(tx)
             .map(|tx| tx.with_signer(signer))
             .map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)
@@ -871,7 +870,7 @@ impl EthPoolTransaction for MockTransaction {
         self,
         sidecar: Arc<BlobTransactionSidecar>,
     ) -> Option<RecoveredTx<Self::Pooled>> {
-        let (tx, signer) = self.into_consensus().to_components();
+        let (tx, signer) = self.into_consensus().into_parts();
         tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
             .map(|tx| tx.with_signer(signer))
             .ok()
@@ -881,7 +880,7 @@ impl EthPoolTransaction for MockTransaction {
         tx: RecoveredTx<Self::Consensus>,
         sidecar: BlobTransactionSidecar,
     ) -> Option<Self> {
-        let (tx, signer) = tx.to_components();
+        let (tx, signer) = tx.into_parts();
         tx.try_into_pooled_eip4844(sidecar)
             .map(|tx| tx.with_signer(signer))
             .ok()
@@ -904,12 +903,12 @@ impl EthPoolTransaction for MockTransaction {
     }
 }
 
-impl TryFrom<RecoveredTx> for MockTransaction {
+impl TryFrom<RecoveredTx<TransactionSigned>> for MockTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from(tx: RecoveredTx) -> Result<Self, Self::Error> {
+    fn try_from(tx: RecoveredTx<TransactionSigned>) -> Result<Self, Self::Error> {
         let sender = tx.signer();
-        let transaction = tx.into_signed();
+        let transaction = tx.into_tx();
         let hash = transaction.hash();
         let size = transaction.size();
 
@@ -1045,20 +1044,21 @@ impl TryFrom<RecoveredTx> for MockTransaction {
     }
 }
 
-impl From<PooledTransactionsElementEcRecovered> for MockTransaction {
-    fn from(tx: PooledTransactionsElementEcRecovered) -> Self {
-        tx.into_ecrecovered_transaction().try_into().expect(
+impl From<RecoveredTx<PooledTransaction>> for MockTransaction {
+    fn from(tx: RecoveredTx<PooledTransaction>) -> Self {
+        let (tx, signer) = tx.into_parts();
+        RecoveredTx::<TransactionSigned>::new_unchecked(tx.into(), signer).try_into().expect(
             "Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction",
         )
     }
 }
 
-impl From<MockTransaction> for RecoveredTx {
+impl From<MockTransaction> for RecoveredTx<TransactionSigned> {
     fn from(tx: MockTransaction) -> Self {
         let signed_tx =
             TransactionSigned::new(tx.clone().into(), Signature::test_signature(), *tx.hash());
 
-        Self::from_signed_transaction(signed_tx, tx.sender())
+        Self::new_unchecked(signed_tx, tx.sender())
     }
 }
 
@@ -1180,7 +1180,7 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
 
         arb::<(TransactionSigned, Address)>()
             .prop_map(|(signed_transaction, signer)| {
-                RecoveredTx::from_signed_transaction(signed_transaction, signer)
+                RecoveredTx::new_unchecked(signed_transaction, signer)
                     .try_into()
                     .expect("Failed to create an Arbitrary MockTransaction via RecoveredTx")
             })

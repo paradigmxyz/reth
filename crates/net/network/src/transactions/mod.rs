@@ -1538,7 +1538,7 @@ impl<T: SignedTransaction> PropagateTransaction<T> {
     {
         let size = tx.encoded_length();
         let transaction = tx.transaction.clone_into_consensus();
-        let transaction = Arc::new(transaction.into_signed());
+        let transaction = Arc::new(transaction.into_tx());
         Self { size, transaction }
     }
 
@@ -2026,7 +2026,7 @@ mod tests {
                     transactions
                         .on_network_event(NetworkEvent::Peer(PeerEvent::SessionEstablished(info)))
                 }
-                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => {}
                 ev => {
                     error!("unexpected event {ev:?}")
                 }
@@ -2097,7 +2097,7 @@ mod tests {
                     // to insert a new peer in transactions peerset
                     transactions.on_network_event(ev);
                 }
-                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => {}
                 _ => {
                     error!("unexpected event {ev:?}")
                 }
@@ -2166,7 +2166,7 @@ mod tests {
                     // to insert a new peer in transactions peerset
                     transactions.on_network_event(ev);
                 }
-                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => {}
                 ev => {
                     error!("unexpected event {ev:?}")
                 }
@@ -2241,7 +2241,7 @@ mod tests {
                 NetworkEvent::Peer(PeerEvent::SessionEstablished(_)) => {
                     transactions.on_network_event(ev);
                 }
-                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => continue,
+                NetworkEvent::Peer(PeerEvent::PeerAdded(_peer_id)) => {}
                 ev => {
                     error!("unexpected event {ev:?}")
                 }

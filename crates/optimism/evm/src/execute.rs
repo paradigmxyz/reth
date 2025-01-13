@@ -420,13 +420,13 @@ mod tests {
 
         // Attempt to execute a block with one deposit and one non-deposit transaction
         executor
-            .execute_and_verify_one(&BlockWithSenders {
-                block: Block {
+            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+                Block {
                     header,
                     body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
                 },
-                senders: vec![addr, addr],
-            })
+                vec![addr, addr],
+            ))
             .unwrap();
 
         let receipts = executor.receipts();
@@ -496,13 +496,13 @@ mod tests {
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
-            .execute_and_verify_one(&BlockWithSenders {
-                block: Block {
+            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+                Block {
                     header,
                     body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
                 },
-                senders: vec![addr, addr],
-            })
+                vec![addr, addr],
+            ))
             .expect("Executing a block while canyon is active should not fail");
 
         let receipts = executor.receipts();

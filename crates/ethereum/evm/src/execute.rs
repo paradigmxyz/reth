@@ -5,7 +5,7 @@ use crate::{
     EthEvmConfig,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::Transaction as _;
+use alloy_consensus::Transaction;
 use alloy_eips::{eip6110, eip7685::Requests};
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
@@ -116,14 +116,14 @@ where
 impl<DB, EvmConfig> EthExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
-    EvmConfig: ConfigureEvm<Header = alloy_consensus::Header>,
+    EvmConfig: ConfigureEvm,
 {
     /// Configures a new evm configuration and block environment for the given block.
     ///
     /// # Caution
     ///
     /// This does not initialize the tx environment.
-    fn evm_env_for_block(&self, header: &alloy_consensus::Header) -> EnvWithHandlerCfg {
+    fn evm_env_for_block(&self, header: &EvmConfig::Header) -> EnvWithHandlerCfg {
         let EvmEnv { cfg_env_with_handler_cfg, block_env } =
             self.evm_config.cfg_and_block_env(header);
         EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, Default::default())
@@ -156,7 +156,7 @@ where
         let env = self.evm_env_for_block(&block.header);
         let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
 
-        self.system_caller.apply_pre_execution_changes(&block.block, &mut evm)?;
+        self.system_caller.apply_pre_execution_changes(&block.header, &mut evm)?;
 
         Ok(())
     }
@@ -332,9 +332,8 @@ mod tests {
         BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider, Executor,
     };
     use reth_execution_types::BlockExecutionOutput;
-    use reth_primitives::{
-        public_key_to_address, Account, Block, BlockBody, BlockExt, Transaction,
-    };
+    use reth_primitives::{Account, Block, BlockBody, BlockExt, Transaction};
+    use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
     use reth_revm::{
         database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
     };
@@ -421,10 +420,10 @@ mod tests {
                 "Executing cancun block without parent beacon block root field should fail",
             );
 
-        assert_eq!(
+        assert!(matches!(
             err.as_validation().unwrap().clone(),
             BlockValidationError::MissingParentBeaconBlockRoot
-        );
+        ));
 
         // fix header, set a gas limit
         header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
@@ -1098,13 +1097,13 @@ mod tests {
         // Check if the execution result is an error and assert the specific error type
         match exec_result {
             Ok(_) => panic!("Expected block gas limit error"),
-            Err(err) => assert_eq!(
+            Err(err) => assert!(matches!(
                 *err.as_validation().unwrap(),
                 BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: 2_500_000,
                     block_available_gas: 1_500_000,
                 }
-            ),
+            )),
         }
     }
 

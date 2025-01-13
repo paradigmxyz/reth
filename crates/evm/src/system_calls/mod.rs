@@ -94,26 +94,25 @@ where
     Chainspec: EthereumHardforks,
 {
     /// Apply pre execution changes.
-    pub fn apply_pre_execution_changes<DB, Ext, Block>(
+    pub fn apply_pre_execution_changes<DB, Ext>(
         &mut self,
-        block: &Block,
+        header: &EvmConfig::Header,
         evm: &mut Evm<'_, Ext, DB>,
     ) -> Result<(), BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
-        Block: reth_primitives_traits::Block<Header = EvmConfig::Header>,
     {
         self.apply_blockhashes_contract_call(
-            block.header().timestamp(),
-            block.header().number(),
-            block.header().parent_hash(),
+            header.timestamp(),
+            header.number(),
+            header.parent_hash(),
             evm,
         )?;
         self.apply_beacon_root_contract_call(
-            block.header().timestamp(),
-            block.header().number(),
-            block.header().parent_beacon_block_root(),
+            header.timestamp(),
+            header.number(),
+            header.parent_beacon_block_root(),
             evm,
         )?;
 

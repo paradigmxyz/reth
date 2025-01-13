@@ -6,7 +6,6 @@ pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives_traits::Block as _;
 pub use reth_storage_errors::provider::ProviderError;
 
 use crate::{system_calls::OnStateHook, TxEnvOverrides};
@@ -19,6 +18,7 @@ use alloy_primitives::{
 use core::fmt::Display;
 use reth_consensus::ConsensusError;
 use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt};
+use reth_primitives_traits::Block;
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{

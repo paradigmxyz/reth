@@ -622,7 +622,6 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                                     OnIncomingMessageOutcome::NoCapacity(msg) => {
                                         // failed to send due to lack of capacity
                                         this.pending_message_to_session = Some(msg);
-                                        continue 'receive
                                     }
                                 }
                             }

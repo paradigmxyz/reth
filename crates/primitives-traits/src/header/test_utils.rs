@@ -1,9 +1,44 @@
-//! Test utilities to generate random valid headers.
+//! Test utilities for the block header.
 
 use alloy_consensus::Header;
-use alloy_primitives::B256;
+use alloy_primitives::{BlockHash, BlockNumber, B256, U256};
 use proptest::{arbitrary::any, prop_compose};
 use proptest_arbitrary_interop::arb;
+
+/// A helper trait for [`Header`]s that allows for mutable access to the headers values.
+///
+/// This allows for modifying the header for testing purposes.
+pub trait TestHeader {
+    /// Updates the parent block hash.
+    fn set_parent_hash(&mut self, hash: BlockHash);
+
+    /// Updates the block number.
+    fn set_block_number(&mut self, number: BlockNumber);
+
+    /// Updates the block state root.
+    fn set_state_root(&mut self, state_root: B256);
+
+    /// Updates the block difficulty.
+    fn set_difficulty(&mut self, difficulty: U256);
+}
+
+impl TestHeader for Header {
+    fn set_parent_hash(&mut self, hash: BlockHash) {
+        self.parent_hash = hash
+    }
+
+    fn set_block_number(&mut self, number: BlockNumber) {
+        self.number = number;
+    }
+
+    fn set_state_root(&mut self, state_root: B256) {
+        self.state_root = state_root;
+    }
+
+    fn set_difficulty(&mut self, difficulty: U256) {
+        self.difficulty = difficulty;
+    }
+}
 
 /// Generates a header which is valid __with respect to past and future forks__. This means, for
 /// example, that if the withdrawals root is present, the base fee per gas is also present.

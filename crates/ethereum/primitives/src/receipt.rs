@@ -20,7 +20,6 @@ use serde::{Deserialize, Serialize};
 ))]
 pub struct Receipt {
     /// Receipt type.
-    #[serde(with = "tx_type_serde")]
     pub tx_type: TxType,
     /// If transaction is executed successfully.
     ///
@@ -185,25 +184,3 @@ impl InMemorySize for Receipt {
 }
 
 impl reth_primitives_traits::Receipt for Receipt {}
-
-/// TODO: Remove once <https://github.com/alloy-rs/alloy/pull/1780> is released.
-mod tx_type_serde {
-    use alloy_primitives::{U64, U8};
-
-    use super::*;
-
-    pub(crate) fn serialize<S>(tx_type: &TxType, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let value: U8 = (*tx_type).into();
-        value.serialize(serializer)
-    }
-
-    pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<TxType, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        U64::deserialize(deserializer)?.try_into().map_err(serde::de::Error::custom)
-    }
-}

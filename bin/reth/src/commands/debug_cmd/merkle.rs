@@ -3,14 +3,13 @@ use crate::{args::NetworkArgs, utils::get_single_header};
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
-use reth_consensus::Consensus;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_db::tables;
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_evm::execute::{BatchExecutor, BlockExecutorProvider};
@@ -18,7 +17,7 @@ use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
 use reth_node_api::{BlockTy, NodePrimitives};
-use reth_node_ethereum::EthExecutorProvider;
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
 use reth_primitives::EthPrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockNumReader, BlockWriter, ChainSpecProvider,
@@ -129,7 +128,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         info!(target: "reth::cli", target_block_number=self.to, "Finished downloading tip of block range");
 
         // build the full block client
-        let consensus: Arc<dyn Consensus> =
+        let consensus: Arc<dyn Consensus<Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
         let block_range_client = FullBlockClient::new(fetch_client, consensus);
 
@@ -169,7 +168,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             let execution_outcome = executor.finalize();
 
             provider_rw.write_state(
-                execution_outcome,
+                &execution_outcome,
                 OriginalValuesKnown::Yes,
                 StorageLocation::Database,
             )?;

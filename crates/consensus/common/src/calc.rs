@@ -1,6 +1,6 @@
 use alloy_consensus::constants::ETH_TO_WEI;
 use alloy_primitives::BlockNumber;
-use reth_chainspec::{EthereumHardfork, EthereumHardforks, Hardforks};
+use reth_chainspec::EthereumHardforks;
 
 /// Calculates the base block reward.
 ///
@@ -35,10 +35,13 @@ pub fn base_block_reward<ChainSpec: EthereumHardforks>(
 /// Calculates the base block reward __before__ the merge (Paris hardfork).
 ///
 /// Caution: The caller must ensure that the block number is before the merge.
-pub fn base_block_reward_pre_merge(chain_spec: impl Hardforks, block_number: BlockNumber) -> u128 {
-    if chain_spec.fork(EthereumHardfork::Constantinople).active_at_block(block_number) {
+pub fn base_block_reward_pre_merge(
+    chain_spec: impl EthereumHardforks,
+    block_number: BlockNumber,
+) -> u128 {
+    if chain_spec.is_constantinople_active_at_block(block_number) {
         ETH_TO_WEI * 2
-    } else if chain_spec.fork(EthereumHardfork::Byzantium).active_at_block(block_number) {
+    } else if chain_spec.is_byzantium_active_at_block(block_number) {
         ETH_TO_WEI * 3
     } else {
         ETH_TO_WEI * 5
