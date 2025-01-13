@@ -24,7 +24,7 @@ pub trait OpReceiptBuilder<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 
     /// Builds a receipt given a transaction and the result of the execution.
     ///
-    /// Note: this method should return `None` if the transaction is a deposit transaction. In that
+    /// Note: this method should return `Err` if the transaction is a deposit transaction. In that
     /// case, the `build_deposit_receipt` method will be called.
     fn build_receipt<'a>(
         &self,
