@@ -72,4 +72,11 @@ impl TrieInput {
         self.nodes.extend_ref(nodes);
         self.state.extend_ref(state);
     }
+
+    /// Extends the input with the given input.
+    pub fn extend(&mut self, input: Self) {
+        self.nodes.extend(input.nodes);
+        self.state.extend(input.state);
+        self.prefix_sets.extend(input.prefix_sets);
+    }
 }

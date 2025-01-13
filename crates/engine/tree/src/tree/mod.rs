@@ -1665,12 +1665,17 @@ where
     /// requested state belongs to a block that is not connected to the canonical chain.
     ///
     /// Returns an error if we failed to fetch the state from the database.
-    fn state_provider(&self, hash: B256) -> ProviderResult<Option<StateProviderBox>> {
+    fn state_provider(&self, hash: B256) -> ProviderResult<Option<(StateProviderBox, TrieInput)>> {
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
             debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory");
             // the block leads back to the canonical chain
             let historical = self.provider.state_by_block_hash(historical)?;
-            return Ok(Some(Box::new(MemoryOverlayStateProvider::new(historical, blocks))))
+            let overlay = MemoryOverlayStateProvider::new(historical, blocks);
+            let trie_state = overlay.trie_state().clone();
+            return Ok(Some((
+                Box::new(overlay),
+                TrieInput::new(trie_state.nodes, trie_state.state, TriePrefixSetsMut::default()),
+            )))
         }
 
         // the hash could belong to an unknown block or a persisted block
@@ -1678,7 +1683,7 @@ where
             debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database");
             // the block is known and persisted
             let historical = self.provider.state_by_block_hash(hash)?;
-            return Ok(Some(historical))
+            return Ok(Some((historical, TrieInput::default())))
         }
 
         debug!(target: "engine::tree", %hash, "no canonical state found for block");
@@ -2227,7 +2232,8 @@ where
         self.validate_block(&block)?;
 
         trace!(target: "engine::tree", block=?block.num_hash(), parent=?block.parent_hash(), "Fetching block state provider");
-        let Some(state_provider) = self.state_provider(block.parent_hash())? else {
+        let Some((state_provider, mut trie_input)) = self.state_provider(block.parent_hash())?
+        else {
             // we don't have the state required to execute this block, buffering it and find the
             // missing parent block
             let missing_ancestor = self
@@ -2281,11 +2287,12 @@ where
             {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
-                let state_root_config = StateRootConfig::new_from_input(
-                    consistent_view.clone(),
+                trie_input.extend(
                     self.compute_trie_input(consistent_view.clone(), block.header().parent_hash())
                         .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
                 );
+                let state_root_config =
+                    StateRootConfig::new_from_input(consistent_view.clone(), trie_input);
 
                 let provider_ro = consistent_view.provider_ro()?;
                 let nodes_sorted = state_root_config.nodes_sorted.clone();

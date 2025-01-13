@@ -24,7 +24,9 @@ pub use notifications::{
 };
 
 mod memory_overlay;
-pub use memory_overlay::{MemoryOverlayStateProvider, MemoryOverlayStateProviderRef};
+pub use memory_overlay::{
+    MemoryOverlayStateProvider, MemoryOverlayStateProviderRef, MemoryOverlayTrieState,
+};
 
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers

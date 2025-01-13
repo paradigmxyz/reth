@@ -50,7 +50,7 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     }
 
     /// Return lazy-loaded trie state aggregated from in-memory blocks.
-    fn trie_state(&self) -> &MemoryOverlayTrieState {
+    pub fn trie_state(&self) -> &MemoryOverlayTrieState {
         self.trie_state.get_or_init(|| {
             let mut trie_state = MemoryOverlayTrieState::default();
             for block in self.in_memory.iter().rev() {
@@ -241,9 +241,9 @@ impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
 
 /// The collection of data necessary for trie-related operations for [`MemoryOverlayStateProvider`].
 #[derive(Clone, Default, Debug)]
-pub(crate) struct MemoryOverlayTrieState {
+pub struct MemoryOverlayTrieState {
     /// The collection of aggregated in-memory trie updates.
-    pub(crate) nodes: TrieUpdates,
+    pub nodes: TrieUpdates,
     /// The collection of hashed state from in-memory blocks.
-    pub(crate) state: HashedPostState,
+    pub state: HashedPostState,
 }
