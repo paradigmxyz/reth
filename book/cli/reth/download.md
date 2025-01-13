@@ -1,6 +1,6 @@
 # reth download
 
-Downloads and optionally decompresses node snapshots from a URL
+Downloads and extracts node snapshots
 
 ```bash
 $ reth download --help
