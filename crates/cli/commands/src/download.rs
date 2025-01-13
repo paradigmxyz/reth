@@ -6,12 +6,16 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_node_core::args::DatadirArgs;
 use std::{
     fs,
-    io::{self, Write},
+    io::Write,
     path::Path,
-    process::{Command as ProcessCommand, Stdio},
+    process::{Child, Command as ProcessCommand, Stdio},
     sync::Arc,
+    time::Instant,
 };
-use tracing::{info, warn};
+use tracing::info;
+
+// 1MB chunks
+const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
 
 #[derive(Debug, Parser, Clone)]
 pub struct Command<C: ChainSpecParser> {
@@ -50,110 +54,125 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
     }
 }
 
+/// Spawns lz4 process for streaming decompression
+fn spawn_lz4_process() -> Result<Child> {
+    ProcessCommand::new("lz4")
+        .arg("-d") // Decompress
+        .arg("-") // Read from stdin
+        .arg("-") // Write to stdout
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => {
+                eyre::eyre!("lz4 command not found. Please ensure lz4 is installed on your system")
+            }
+            _ => e.into(),
+        })
+}
+
+/// Spawns tar process to extract streaming data to target directory
+fn spawn_tar_process(target_dir: &Path, lz4_stdout: Stdio) -> Result<Child> {
+    Ok(ProcessCommand::new("tar")
+        .arg("-xf")
+        .arg("-") // Read from stdin
+        .arg("-C")
+        .arg(target_dir)
+        .stdin(lz4_stdout)
+        .stderr(Stdio::inherit())
+        .spawn()?)
+}
+
+// Monitor process status and display progress every 100ms to avoid overwhelming stdout
+struct DownloadProgress {
+    downloaded: u64,
+    total_size: u64,
+    last_displayed: std::time::Instant,
+}
+
+impl DownloadProgress {
+    /// Creates new progress tracker with given total size
+    fn new(total_size: u64) -> Self {
+        Self { downloaded: 0, total_size, last_displayed: Instant::now() }
+    }
+
+    /// Converts bytes to human readable format (B, KB, MB, GB)
+    fn format_size(size: u64) -> String {
+        let mut size = size as f64;
+        let mut unit_index = 0;
+
+        while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+            size /= 1024.0;
+            unit_index += 1;
+        }
+
+        format!("{:.2}{}", size, UNITS[unit_index])
+    }
+
+    /// Updates progress bar and ensures child processes are still running
+    fn update(&mut self, chunk_size: u64, lz4: &mut Child, tar: &mut Child) -> Result<()> {
+        self.downloaded += chunk_size;
+
+        if self.last_displayed.elapsed() >= std::time::Duration::from_millis(100) {
+            // Check process status
+            if let Ok(Some(status)) = lz4.try_wait() {
+                return Err(eyre::eyre!("lz4 process exited prematurely with status: {}", status));
+            }
+            if let Ok(Some(status)) = tar.try_wait() {
+                return Err(eyre::eyre!("tar process exited prematurely with status: {}", status));
+            }
+            // Display progress
+            let formatted_downloaded = Self::format_size(self.downloaded);
+            let formatted_total = Self::format_size(self.total_size);
+            let progress = (self.downloaded as f64 / self.total_size as f64) * 100.0;
+
+            print!(
+                "\rDownloading and extracting... {:.1}% ({} / {})",
+                progress, formatted_downloaded, formatted_total
+            );
+            std::io::stdout().flush()?;
+
+            self.last_displayed = Instant::now();
+        }
+
+        Ok(())
+    }
+}
+
+/// Downloads snapshot and pipes it through lz4 decompression into tar extraction
 async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
     let client = Client::new();
     let mut response = client.get(url).send().await?.error_for_status()?;
-    let total_size = response.content_length().unwrap_or(0);
-    let mut downloaded = 0u64;
 
-    // Create lz4 decompression process
-    let mut lz4_process = ProcessCommand::new("lz4")
-        .arg("-d")  // Decompress
-        .arg("-")   // Read from stdin
-        .arg("-")   // Write to stdout
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+    // Require content-length for progress tracking and download validation
+    let total_size = response.content_length().ok_or_else(|| {
+        eyre::eyre!(
+            "Server did not provide Content-Length header. This is required for snapshot downloads"
+        )
+    })?;
 
-    // Create tar extraction process
-    let mut tar_process = ProcessCommand::new("tar")
-        .arg("-xf")
-        .arg("-")   // Read from stdin
-        .arg("-C")
-        .arg(target_dir)
-        .stdin(lz4_process.stdout.take().expect("Failed to get lz4 stdout"))
-        .stderr(Stdio::piped())
-        .spawn()?;
+    let mut global_progress = DownloadProgress::new(total_size);
+
+    // Setup processing pipeline: download -> lz4 -> tar
+    let mut lz4_process = spawn_lz4_process()?;
+    let mut tar_process = spawn_tar_process(
+        target_dir,
+        lz4_process.stdout.take().expect("Failed to get lz4 stdout").into(),
+    )?;
 
     let mut lz4_stdin = lz4_process.stdin.take().expect("Failed to get lz4 stdin");
-    let lz4_stderr = lz4_process.stderr.take().expect("Failed to get lz4 stderr");
-    let tar_stderr = tar_process.stderr.take().expect("Failed to get tar stderr");
-
-    // Spawn threads to monitor stderr of both processes
-    let lz4_stderr_thread = std::thread::spawn(move || {
-        let mut reader = io::BufReader::new(lz4_stderr);
-        let mut line = String::new();
-        while io::BufRead::read_line(&mut reader, &mut line).unwrap_or(0) > 0 {
-            warn!("lz4 stderr: {}", line.trim());
-            line.clear();
-        }
-    });
-
-    let tar_stderr_thread = std::thread::spawn(move || {
-        let mut reader = io::BufReader::new(tar_stderr);
-        let mut line = String::new();
-        while io::BufRead::read_line(&mut reader, &mut line).unwrap_or(0) > 0 {
-            warn!("tar stderr: {}", line.trim());
-            line.clear();
-        }
-    });
-
-    let chunk_size = 1024 * 1024; // 1MB chunks
-    let mut buffer = Vec::with_capacity(chunk_size);
 
     // Stream download chunks through the pipeline
     while let Some(chunk) = response.chunk().await? {
-        buffer.extend_from_slice(&chunk);
-        
-        while buffer.len() >= chunk_size {
-            let write_size = chunk_size.min(buffer.len());
-            match lz4_stdin.write_all(&buffer[..write_size]) {
-                Ok(_) => {
-                    buffer.drain(..write_size);
-                }
-                Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
-                    // Check if processes are still running
-                    if let Ok(Some(status)) = lz4_process.try_wait() {
-                        return Err(eyre::eyre!(
-                            "lz4 process exited prematurely with status: {}",
-                            status
-                        ));
-                    }
-                    if let Ok(Some(status)) = tar_process.try_wait() {
-                        return Err(eyre::eyre!(
-                            "tar process exited prematurely with status: {}",
-                            status
-                        ));
-                    }
-                    return Err(eyre::eyre!("Pipeline broken"));
-                }
-                Err(e) => return Err(e.into()),
-            }
-        }
-
-        downloaded += chunk.len() as u64;
-        if total_size > 0 {
-            let progress = (downloaded as f64 / total_size as f64) * 100.0;
-            print!("\rDownloading and extracting... {:.1}%", progress);
-            std::io::stdout().flush()?;
-        }
+        lz4_stdin.write_all(&chunk)?;
+        global_progress.update(chunk.len() as u64, &mut lz4_process, &mut tar_process)?;
     }
 
-    // Write any remaining data
-    if !buffer.is_empty() {
-        lz4_stdin.write_all(&buffer)?;
-    }
-
-    // Close stdin and wait for processes to finish
+    // Cleanup and verify process completion
     drop(lz4_stdin);
-    
     let lz4_status = lz4_process.wait()?;
     let tar_status = tar_process.wait()?;
-
-    // Join stderr monitoring threads
-    lz4_stderr_thread.join().unwrap_or(());
-    tar_stderr_thread.join().unwrap_or(());
 
     if !lz4_status.success() {
         return Err(eyre::eyre!(
@@ -169,6 +188,5 @@ async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
         ));
     }
 
-    println!(); // New line after progress
     Ok(())
 }
