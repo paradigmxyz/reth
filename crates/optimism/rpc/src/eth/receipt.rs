@@ -40,7 +40,7 @@ where
                 meta.block_hash.into(),
             )))?;
 
-        let l1_block_info =
+        let mut l1_block_info =
             reth_optimism_evm::extract_l1_info(block.body()).map_err(OpEthApiError::from)?;
 
         Ok(OpReceiptBuilder::new(
@@ -49,7 +49,7 @@ where
             meta,
             &receipt,
             &receipts,
-            l1_block_info,
+            &mut l1_block_info,
         )?
         .build())
     }
@@ -107,7 +107,7 @@ impl OpReceiptFieldsBuilder {
         mut self,
         chain_spec: &OpChainSpec,
         tx: &OpTransactionSigned,
-        mut l1_block_info: revm::L1BlockInfo,
+        l1_block_info: &mut revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
         let raw_tx = tx.encoded_2718();
         let timestamp = self.block_timestamp;
@@ -199,7 +199,7 @@ impl OpReceiptBuilder {
         meta: TransactionMeta,
         receipt: &OpReceipt,
         all_receipts: &[OpReceipt],
-        l1_block_info: revm::L1BlockInfo,
+        l1_block_info: &mut revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
         let timestamp = meta.timestamp;
         let core_receipt =
@@ -298,14 +298,14 @@ mod test {
             ..Default::default()
         };
 
-        let l1_block_info =
+        let mut l1_block_info =
             reth_optimism_evm::extract_l1_info(&block.body).expect("should extract l1 info");
 
         // test
         assert!(OP_MAINNET.is_fjord_active_at_timestamp(BLOCK_124665056_TIMESTAMP));
 
         let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP)
-            .l1_block_info(&OP_MAINNET, &tx_1, l1_block_info)
+            .l1_block_info(&OP_MAINNET, &tx_1, &mut l1_block_info)
             .expect("should parse revm l1 info")
             .build();
 
@@ -363,7 +363,7 @@ mod test {
             body: BlockBody { transactions: vec![tx_0], ..Default::default() },
             ..Default::default()
         };
-        let l1_block_info =
+        let mut l1_block_info =
             reth_optimism_evm::extract_l1_info(&block.body).expect("should extract l1 info");
 
         // https://basescan.org/tx/0xf9420cbaf66a2dda75a015488d37262cbfd4abd0aad7bb2be8a63e14b1fa7a94
@@ -371,7 +371,7 @@ mod test {
         let tx_1 = OpTransactionSigned::decode_2718(&mut &tx[..]).unwrap();
 
         let receipt_meta = OpReceiptFieldsBuilder::new(1730216981)
-            .l1_block_info(&BASE_MAINNET, &tx_1, l1_block_info)
+            .l1_block_info(&BASE_MAINNET, &tx_1, &mut l1_block_info)
             .expect("should parse revm l1 info")
             .build();
 
