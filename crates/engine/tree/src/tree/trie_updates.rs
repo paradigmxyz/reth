@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use alloy_primitives::{
     map::{HashMap, HashSet},
     B256,
@@ -96,8 +98,8 @@ impl StorageTrieUpdatesDiff {
     }
 }
 
-/// Compares the trie updates from state root task and regular state root calculation, and logs
-/// the differences if there's any.
+/// Compares the trie updates from state root task, regular state root calculation and database,
+/// and logs the differences if there's any.
 pub(super) fn compare_trie_updates(
     trie_cursor_factory: impl TrieCursorFactory,
     task: TrieUpdates,
@@ -115,7 +117,7 @@ pub(super) fn compare_trie_updates(
         .keys()
         .chain(regular.account_nodes.keys())
         .cloned()
-        .collect::<HashSet<_>>()
+        .collect::<BTreeSet<_>>()
     {
         let (task, regular) = (task.account_nodes.remove(&key), regular.account_nodes.remove(&key));
         let database = account_trie_cursor.seek_exact(key.clone())?.map(|x| x.1);
@@ -126,12 +128,13 @@ pub(super) fn compare_trie_updates(
     }
 
     // compare removed nodes
+    let mut account_trie_cursor = trie_cursor_factory.account_trie_cursor()?;
     for key in task
         .removed_nodes
         .iter()
         .chain(regular.removed_nodes.iter())
         .cloned()
-        .collect::<HashSet<_>>()
+        .collect::<BTreeSet<_>>()
     {
         let (task, regular) =
             (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
@@ -152,10 +155,12 @@ pub(super) fn compare_trie_updates(
         let (mut task, mut regular) =
             (task.storage_tries.remove(&key), regular.storage_tries.remove(&key));
         if task != regular {
-            let mut storage_trie_cursor = trie_cursor_factory.storage_trie_cursor(key)?;
             if let Some((task, regular)) = task.as_mut().zip(regular.as_mut()) {
-                let storage_diff =
-                    compare_storage_trie_updates(&mut storage_trie_cursor, task, regular)?;
+                let storage_diff = compare_storage_trie_updates(
+                    || trie_cursor_factory.storage_trie_cursor(key),
+                    task,
+                    regular,
+                )?;
                 if storage_diff.has_differences() {
                     diff.storage_tries.insert(key, StorageTrieDiffEntry::Value(storage_diff));
                 }
@@ -174,12 +179,12 @@ pub(super) fn compare_trie_updates(
     Ok(())
 }
 
-fn compare_storage_trie_updates(
-    trie_cursor: &mut impl TrieCursor,
+fn compare_storage_trie_updates<C: TrieCursor>(
+    trie_cursor: impl Fn() -> Result<C, DatabaseError>,
     task: &mut StorageTrieUpdates,
     regular: &mut StorageTrieUpdates,
 ) -> Result<StorageTrieUpdatesDiff, DatabaseError> {
-    let database_deleted = trie_cursor.next()?.is_none();
+    let database_deleted = trie_cursor()?.next()?.is_none();
     let mut diff = StorageTrieUpdatesDiff {
         is_deleted: (task.is_deleted != regular.is_deleted).then_some(EntryDiff {
             task: task.is_deleted,
@@ -190,6 +195,7 @@ fn compare_storage_trie_updates(
     };
 
     // compare storage nodes
+    let mut storage_trie_cursor = trie_cursor()?;
     for key in task
         .storage_nodes
         .keys()
@@ -198,13 +204,14 @@ fn compare_storage_trie_updates(
         .collect::<HashSet<_>>()
     {
         let (task, regular) = (task.storage_nodes.remove(&key), regular.storage_nodes.remove(&key));
-        let database = trie_cursor.seek_exact(key.clone())?.map(|x| x.1);
+        let database = storage_trie_cursor.seek_exact(key.clone())?.map(|x| x.1);
         if !branch_nodes_equal(task.as_ref(), regular.as_ref(), database.as_ref())? {
             diff.storage_nodes.insert(key, EntryDiff { task, regular, database });
         }
     }
 
     // compare removed nodes
+    let mut storage_trie_cursor = trie_cursor()?;
     for key in task
         .removed_nodes
         .iter()
@@ -214,7 +221,7 @@ fn compare_storage_trie_updates(
     {
         let (task, regular) =
             (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
-        let database = trie_cursor.seek_exact(key.clone())?.map(|x| x.1).is_none();
+        let database = storage_trie_cursor.seek_exact(key.clone())?.map(|x| x.1).is_none();
         if task != regular {
             diff.removed_nodes.insert(key, EntryDiff { task, regular, database });
         }
