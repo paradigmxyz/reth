@@ -150,7 +150,7 @@ pub(super) fn compare_trie_updates(
         .keys()
         .chain(regular.storage_tries.keys())
         .copied()
-        .collect::<HashSet<_>>()
+        .collect::<BTreeSet<_>>()
     {
         let (mut task, mut regular) =
             (task.storage_tries.remove(&key), regular.storage_tries.remove(&key));
@@ -201,7 +201,7 @@ fn compare_storage_trie_updates<C: TrieCursor>(
         .keys()
         .chain(regular.storage_nodes.keys())
         .cloned()
-        .collect::<HashSet<_>>()
+        .collect::<BTreeSet<_>>()
     {
         let (task, regular) = (task.storage_nodes.remove(&key), regular.storage_nodes.remove(&key));
         let database = storage_trie_cursor.seek_exact(key.clone())?.map(|x| x.1);
@@ -217,7 +217,7 @@ fn compare_storage_trie_updates<C: TrieCursor>(
         .iter()
         .chain(regular.removed_nodes.iter())
         .cloned()
-        .collect::<HashSet<_>>()
+        .collect::<BTreeSet<_>>()
     {
         let (task, regular) =
             (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
