@@ -2232,7 +2232,8 @@ where
         self.validate_block(&block)?;
 
         trace!(target: "engine::tree", block=?block.num_hash(), parent=?block.parent_hash(), "Fetching block state provider");
-        let Some((state_provider, mut trie_input)) = self.state_provider(block.parent_hash())?
+        let Some((state_provider, state_provider_trie_input)) =
+            self.state_provider(block.parent_hash())?
         else {
             // we don't have the state required to execute this block, buffering it and find the
             // missing parent block
@@ -2287,10 +2288,10 @@ where
             {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
-                trie_input.extend(
-                    self.compute_trie_input(consistent_view.clone(), block.header().parent_hash())
-                        .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
-                );
+                let mut trie_input = self
+                    .compute_trie_input(consistent_view.clone(), block.header().parent_hash())
+                    .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+                trie_input.extend(state_provider_trie_input);
                 let state_root_config =
                     StateRootConfig::new_from_input(consistent_view.clone(), trie_input);
 
