@@ -8,6 +8,7 @@ use crate::{
 use alloy_consensus::{Eip658Value, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
 use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
@@ -550,6 +551,27 @@ impl ExecutionInfo {
             total_fees: U256::ZERO,
         }
     }
+
+    /// Returns true if the transaction would exceed the block limits.
+    pub fn is_tx_over_limits(
+        &self,
+        tx: &OpTransactionSigned,
+        block_gas_limit: u64,
+        tx_data_limit: Option<u64>,
+        block_data_limit: Option<u64>,
+    ) -> bool {
+        if tx_data_limit.is_some_and(|da_limit| tx.length() as u64 > da_limit) {
+            return true;
+        }
+
+        if block_data_limit
+            .is_some_and(|da_limit| self.cumulative_da_bytes_used + (tx.length() as u64) > da_limit)
+        {
+            return true;
+        }
+
+        self.cumulative_gas_used + tx.gas_limit() > block_gas_limit
+    }
 }
 
 /// Container type that holds all necessities to build a new payload.
@@ -879,13 +901,7 @@ where
         let mut evm = self.evm_config.evm_with_env(&mut *db, env);
 
         while let Some(tx) = best_txs.next(()) {
-            let tx_exceeds_da_size = tx_da_limit
-                .is_some_and(|da_limit| tx.compressed_size() > da_limit);
-            let tx_exceeds_block_size = info.cumulative_gas_used + tx.gas_limit() > block_gas_limit;
-            let tx_exceeds_block_da_size = block_da_limit
-                .is_some_and(|da_limit| info.cumulative_da_bytes_used + tx.compressed_size() > da_limit);
-
-            if tx_exceeds_block_size || tx_exceeds_block_da_size || tx_exceeds_da_size {
+            if info.is_tx_over_limits(tx.tx(), block_gas_limit, tx_da_limit, block_da_limit) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -940,7 +956,7 @@ where
             // add gas used by the transaction to cumulative gas used, before creating the
             // receipt
             info.cumulative_gas_used += gas_used;
-            info.cumulative_da_bytes_used += tx.compressed_size();
+            info.cumulative_da_bytes_used += tx.length() as u64;
 
             let receipt = alloy_consensus::Receipt {
                 status: Eip658Value::Eip658(result.is_success()),

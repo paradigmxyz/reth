@@ -32,7 +32,6 @@ use reth_primitives_traits::{
 };
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
-use revm_optimism::estimate_tx_compressed_size;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -42,9 +41,6 @@ pub struct OpTransactionSigned {
     /// Transaction hash
     #[cfg_attr(feature = "serde", serde(skip))]
     pub hash: OnceLock<TxHash>,
-    /// Memoized estimated compressed size of the transaction.
-    #[cfg_attr(feature = "serde", serde(skip))]
-    compressed_size: OnceLock<u64>,
     /// The transaction signature values
     pub signature: Signature,
     /// Raw transaction info
@@ -68,22 +64,12 @@ impl OpTransactionSigned {
     ///
     /// Note: this only calculates the hash on the first [`OpTransactionSigned::hash`] call.
     pub fn new_unhashed(transaction: OpTypedTransaction, signature: Signature) -> Self {
-        Self { hash: Default::default(), signature, transaction, compressed_size: Default::default() }
+        Self { hash: Default::default(), signature, transaction }
     }
 
     /// Returns whether this transaction is a deposit.
     pub const fn is_deposit(&self) -> bool {
         matches!(self.transaction, OpTypedTransaction::Deposit(_))
-    }
-
-    /// Returns the estimated compressed size of a transaction.
-    pub fn compressed_size(&self) -> u64 {
-        *self.compressed_size.get_or_init(|| {
-            let mut tx_ser: Vec<u8> = Vec::new();
-            self.encode_2718(&mut tx_ser);
-            estimate_tx_compressed_size(&tx_ser)
-                .wrapping_div(1_000_000u64)
-        })
     }
 }
 
@@ -521,7 +507,7 @@ impl reth_codecs::Compact for OpTransactionSigned {
             OpTypedTransaction::from_compact(buf, transaction_type)
         };
 
-        (Self { signature, transaction, hash: Default::default(), compressed_size: Default::default() }, buf)
+        (Self { signature, transaction, hash: Default::default() }, buf)
     }
 }
 
@@ -595,7 +581,7 @@ impl TryFrom<OpTransactionSigned> for OpPooledTransaction {
 
     fn try_from(value: OpTransactionSigned) -> Result<Self, Self::Error> {
         let hash = *value.tx_hash();
-        let OpTransactionSigned { hash: _, signature, transaction, .. } = value;
+        let OpTransactionSigned { hash: _, signature, transaction } = value;
 
         match transaction {
             OpTypedTransaction::Legacy(tx) => {
@@ -683,7 +669,6 @@ pub mod serde_bincode_compat {
     impl<'a> From<OpTransactionSigned<'a>> for super::OpTransactionSigned {
         fn from(value: OpTransactionSigned<'a>) -> Self {
             Self {
-                compressed_size: Default::default(),
                 hash: value.hash.into(),
                 signature: value.signature,
                 transaction: value.transaction.into(),
