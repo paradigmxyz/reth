@@ -60,7 +60,7 @@ impl FullConsensus<OpPrimitives> for OpBeaconConsensus {
         block: &RecoveredBlock<OpBlock>,
         input: PostExecutionInput<'_, OpReceipt>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(&block.header, &self.chain_spec, input.receipts)
+        validate_block_post_execution(block.header(), &self.chain_spec, input.receipts)
     }
 }
 

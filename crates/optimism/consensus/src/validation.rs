@@ -5,7 +5,7 @@ use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives::{gas_spent_by_transactions, RecoveredBlock, GotExpected};
+use reth_primitives::{gas_spent_by_transactions, GotExpected};
 
 /// Validate a block with regard to execution results:
 ///
