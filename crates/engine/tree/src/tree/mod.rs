@@ -2276,52 +2276,60 @@ where
         let persistence_not_in_progress = !self.persistence_state.in_progress();
 
         let state_root_result = std::thread::scope(|scope| {
-            let (state_root_handle, state_hook) = if persistence_not_in_progress &&
-                self.config.use_state_root_task()
-            {
-                let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+            let (state_root_handle, in_memory_trie_cursor, state_hook) =
+                if persistence_not_in_progress && self.config.use_state_root_task() {
+                    let consistent_view =
+                        ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
-                let state_root_config = StateRootConfig::new_from_input(
-                    consistent_view.clone(),
-                    self.compute_trie_input(consistent_view.clone(), block.header().parent_hash())
+                    let state_root_config = StateRootConfig::new_from_input(
+                        consistent_view.clone(),
+                        self.compute_trie_input(
+                            consistent_view.clone(),
+                            block.header().parent_hash(),
+                        )
                         .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
-                );
+                    );
 
-                let provider_ro = consistent_view.provider_ro()?;
-                let nodes_sorted = state_root_config.nodes_sorted.clone();
-                let state_sorted = state_root_config.state_sorted.clone();
-                let prefix_sets = state_root_config.prefix_sets.clone();
+                    let provider_ro = consistent_view.provider_ro()?;
+                    let nodes_sorted = state_root_config.nodes_sorted.clone();
+                    let state_sorted = state_root_config.state_sorted.clone();
+                    let prefix_sets = state_root_config.prefix_sets.clone();
 
-                // context will hold the values that need to be kept alive
-                let context =
-                    StateHookContext { provider_ro, nodes_sorted, state_sorted, prefix_sets };
+                    // context will hold the values that need to be kept alive
+                    let context =
+                        StateHookContext { provider_ro, nodes_sorted, state_sorted, prefix_sets };
 
-                // it is ok to leak here because we are in a scoped thread, the
-                // memory will be freed when the thread completes
-                let context = Box::leak(Box::new(context));
+                    // it is ok to leak here because we are in a scoped thread, the
+                    // memory will be freed when the thread completes
+                    let context = Box::leak(Box::new(context));
 
-                let blinded_provider_factory = ProofBlindedProviderFactory::new(
-                    InMemoryTrieCursorFactory::new(
+                    let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
                         DatabaseTrieCursorFactory::new(context.provider_ro.tx_ref()),
                         &context.nodes_sorted,
-                    ),
-                    HashedPostStateCursorFactory::new(
-                        DatabaseHashedCursorFactory::new(context.provider_ro.tx_ref()),
-                        &context.state_sorted,
-                    ),
-                    context.prefix_sets.clone(),
-                );
+                    );
+                    let blinded_provider_factory = ProofBlindedProviderFactory::new(
+                        in_memory_trie_cursor.clone(),
+                        HashedPostStateCursorFactory::new(
+                            DatabaseHashedCursorFactory::new(context.provider_ro.tx_ref()),
+                            &context.state_sorted,
+                        ),
+                        context.prefix_sets.clone(),
+                    );
 
-                let state_root_task = StateRootTask::new(
-                    state_root_config,
-                    blinded_provider_factory,
-                    self.state_root_task_pool.clone(),
-                );
-                let state_hook = state_root_task.state_hook();
-                (Some(state_root_task.spawn(scope)), Box::new(state_hook) as Box<dyn OnStateHook>)
-            } else {
-                (None, Box::new(|_state: &EvmState| {}) as Box<dyn OnStateHook>)
-            };
+                    let state_root_task = StateRootTask::new(
+                        state_root_config,
+                        blinded_provider_factory,
+                        self.state_root_task_pool.clone(),
+                    );
+                    let state_hook = state_root_task.state_hook();
+                    (
+                        Some(state_root_task.spawn(scope)),
+                        Some(in_memory_trie_cursor),
+                        Box::new(state_hook) as Box<dyn OnStateHook>,
+                    )
+                } else {
+                    (None, None, Box::new(|_state: &EvmState| {}) as Box<dyn OnStateHook>)
+                };
 
             let execution_start = Instant::now();
             let output = self.metrics.executor.execute_metered(executor, &block, state_hook)?;
@@ -2383,9 +2391,8 @@ where
                                     state_provider.state_root_with_updates(hashed_state.clone())?;
 
                                 if regular_root == block.header().state_root() {
-                                    let provider = self.provider.database_provider_ro()?;
                                     compare_trie_updates(
-                                        provider.tx_ref(),
+                                        in_memory_trie_cursor.expect("in memory trie cursor must exist if use_state_root_task is true"),
                                         task_trie_updates.clone(),
                                         regular_updates,
                                     )
