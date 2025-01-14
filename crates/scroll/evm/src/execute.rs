@@ -336,13 +336,13 @@ mod tests {
 
     fn block(number: u64, transactions: Vec<TransactionSigned>) -> BlockWithSenders {
         let senders = transactions.iter().map(|t| t.recover_signer().unwrap()).collect();
-        BlockWithSenders {
-            block: Block {
+        BlockWithSenders::new_unchecked(
+            Block {
                 header: Header { number, gas_limit: BLOCK_GAS_LIMIT, ..Default::default() },
                 body: BlockBody { transactions, ..Default::default() },
             },
             senders,
-        }
+        )
     }
 
     fn transaction(typ: TxType, gas_limit: u64) -> TransactionSigned {
@@ -424,7 +424,7 @@ mod tests {
             Default::default(),
             l1_gas_oracle_storage,
         );
-        for add in &block.senders {
+        for add in block.senders() {
             strategy
                 .state
                 .insert_account(*add, AccountInfo { balance: U256::MAX, ..Default::default() });

@@ -16,6 +16,7 @@
 //! Configure only an http server with a selection of [`RethRpcModule`]s
 //!
 //! ```
+//! use reth_consensus::{ConsensusError, FullConsensus};
 //! use reth_engine_primitives::PayloadValidator;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
@@ -67,7 +68,7 @@
 //!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
 //!     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
-//!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
+//!     Consensus: FullConsensus<Error = ConsensusError> + Clone + 'static,
 //!     Validator: PayloadValidator<Block = reth_primitives::Block>,
 //! {
 //!     // configure the rpc module per transport
@@ -99,6 +100,7 @@
 //!
 //!
 //! ```
+//! use reth_consensus::{ConsensusError, FullConsensus};
 //! use reth_engine_primitives::{EngineTypes, PayloadValidator};
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_network_api::{NetworkInfo, Peers};
@@ -159,7 +161,7 @@
 //!     EngineT: EngineTypes,
 //!     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
-//!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
+//!     Consensus: FullConsensus<Error = ConsensusError> + Clone + 'static,
 //!     Validator: PayloadValidator<Block = reth_primitives::Block>,
 //! {
 //!     // configure the rpc module per transport
@@ -226,7 +228,7 @@ use jsonrpsee::{
     Methods, RpcModule,
 };
 use reth_chainspec::EthereumHardforks;
-use reth_consensus::FullConsensus;
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{EngineTypes, PayloadValidator};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
@@ -298,7 +300,7 @@ pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, B
     evm_config: EvmConfig,
     eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
     block_executor: BlockExecutor,
-    consensus: Arc<dyn FullConsensus<BlockExecutor::Primitives>>,
+    consensus: Arc<dyn FullConsensus<BlockExecutor::Primitives, Error = ConsensusError>>,
     payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
 ) -> Result<RpcServerHandle, RpcError>
 where
@@ -684,7 +686,7 @@ where
         Transaction = <BlockExecutor::Primitives as NodePrimitives>::SignedTx,
     >,
     BlockExecutor: BlockExecutorProvider,
-    Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
+    Consensus: FullConsensus<BlockExecutor::Primitives, Error = ConsensusError> + Clone + 'static,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
     /// be used to start the transport server(s).
@@ -1347,7 +1349,8 @@ where
     /// Instantiates `ValidationApi`
     pub fn validation_api(&self) -> ValidationApi<Provider, BlockExecutor>
     where
-        Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
+        Consensus:
+            FullConsensus<BlockExecutor::Primitives, Error = ConsensusError> + Clone + 'static,
         Provider: BlockReader<Block = <BlockExecutor::Primitives as NodePrimitives>::Block>,
     {
         ValidationApi::new(
@@ -1379,7 +1382,7 @@ where
         >,
     >,
     BlockExecutor: BlockExecutorProvider,
-    Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
+    Consensus: FullConsensus<BlockExecutor::Primitives, Error = ConsensusError> + Clone + 'static,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace
@@ -2107,6 +2110,34 @@ pub struct TransportRpcModules<Context = ()> {
 // === impl TransportRpcModules ===
 
 impl TransportRpcModules {
+    /// Sets a custom [`TransportRpcModuleConfig`] for the configured modules.
+    /// This will overwrite current configuration, if any.
+    pub fn with_config(mut self, config: TransportRpcModuleConfig) -> Self {
+        self.config = config;
+        self
+    }
+
+    /// Sets the [`RpcModule`] for the http transport.
+    /// This will overwrite current module, if any.
+    pub fn with_http(mut self, http: RpcModule<()>) -> Self {
+        self.http = Some(http);
+        self
+    }
+
+    /// Sets the [`RpcModule`] for the ws transport.
+    /// This will overwrite current module, if any.
+    pub fn with_ws(mut self, ws: RpcModule<()>) -> Self {
+        self.ws = Some(ws);
+        self
+    }
+
+    /// Sets the [`RpcModule`] for the http transport.
+    /// This will overwrite current module, if any.
+    pub fn with_ipc(mut self, ipc: RpcModule<()>) -> Self {
+        self.ipc = Some(ipc);
+        self
+    }
+
     /// Returns the [`TransportRpcModuleConfig`] used to configure this instance.
     pub const fn module_config(&self) -> &TransportRpcModuleConfig {
         &self.config

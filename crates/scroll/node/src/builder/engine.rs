@@ -30,7 +30,6 @@ where
         Engine = EthEngineTypes,
     >,
     Node: FullNodeComponents<Types = Types>,
-    ScrollEngineValidator: EngineValidator<Types::Engine>,
 {
     type Validator = ScrollEngineValidator;
 

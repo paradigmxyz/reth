@@ -304,7 +304,7 @@ where
                     }
                     Either::Right(transaction_tx) => {
                         let _ = transaction_tx.send(res.clone().map(|maybe_block| {
-                            maybe_block.map(|block| block.block.body.transactions().to_vec())
+                            maybe_block.map(|block| block.block.body().transactions().to_vec())
                         }));
                     }
                 }
@@ -350,7 +350,7 @@ where
                     }
                     Either::Right(transaction_tx) => {
                         let _ = transaction_tx.send(res.clone().map(|maybe_block| {
-                            maybe_block.map(|block| block.block.body.transactions().to_vec())
+                            maybe_block.map(|block| block.block.body().transactions().to_vec())
                         }));
                     }
                 }

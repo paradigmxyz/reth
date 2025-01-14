@@ -23,7 +23,7 @@ pub use pool::*;
 use reth_network_p2p::BlockClient;
 
 use crate::{ConfigureEvm, FullNodeTypes};
-use reth_consensus::FullConsensus;
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network::{NetworkHandle, NetworkPrimitives};
 use reth_network_api::FullNetwork;
@@ -47,7 +47,10 @@ pub trait NodeComponents<T: FullNodeTypes>: Clone + Unpin + Send + Sync + 'stati
     type Executor: BlockExecutorProvider<Primitives = <T::Types as NodeTypes>::Primitives>;
 
     /// The consensus type of the node.
-    type Consensus: FullConsensus<<T::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static;
+    type Consensus: FullConsensus<<T::Types as NodeTypes>::Primitives, Error = ConsensusError>
+        + Clone
+        + Unpin
+        + 'static;
 
     /// Network API.
     type Network: FullNetwork<
@@ -106,7 +109,10 @@ where
         + 'static,
     EVM: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>,
     Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
-    Cons: FullConsensus<<Node::Types as NodeTypes>::Primitives> + Clone + Unpin + 'static,
+    Cons: FullConsensus<<Node::Types as NodeTypes>::Primitives, Error = ConsensusError>
+        + Clone
+        + Unpin
+        + 'static,
 {
     type Pool = Pool;
     type Evm = EVM;

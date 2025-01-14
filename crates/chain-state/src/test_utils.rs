@@ -94,7 +94,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     ) -> SealedBlockWithSenders {
         let mut rng = thread_rng();
 
-        let mock_tx = |nonce: u64| -> RecoveredTx {
+        let mock_tx = |nonce: u64| -> RecoveredTx<_> {
             let tx = Transaction::Eip1559(TxEip1559 {
                 chain_id: self.chain_spec.chain.id(),
                 nonce,
@@ -112,7 +112,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let num_txs = rng.gen_range(0..5);
         let signer_balance_decrease = Self::single_tx_cost() * U256::from(num_txs);
-        let transactions: Vec<RecoveredTx> = (0..num_txs)
+        let transactions: Vec<RecoveredTx<_>> = (0..num_txs)
             .map(|_| {
                 let tx = mock_tx(self.signer_build_account_info.nonce);
                 self.signer_build_account_info.nonce += 1;
@@ -145,7 +145,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
             transactions_root: calculate_transaction_root(
-                &transactions.clone().into_iter().map(|tx| tx.into_signed()).collect::<Vec<_>>(),
+                &transactions.clone().into_iter().map(|tx| tx.into_tx()).collect::<Vec<_>>(),
             ),
             receipts_root: calculate_receipt_root(&receipts),
             beneficiary: Address::random(),
@@ -168,14 +168,14 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             ..Default::default()
         };
 
-        let block = SealedBlock {
-            header: SealedHeader::seal(header),
-            body: BlockBody {
-                transactions: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
+        let block = SealedBlock::new(
+            SealedHeader::seal(header),
+            BlockBody {
+                transactions: transactions.into_iter().map(|tx| tx.into_tx()).collect(),
                 ommers: Vec::new(),
                 withdrawals: Some(vec![].into()),
             },
-        };
+        );
 
         SealedBlockWithSenders::new(block, vec![self.signer; num_txs as usize]).unwrap()
     }
@@ -207,9 +207,10 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     ) -> ExecutedBlock {
         let block_with_senders = self.generate_random_block(block_number, parent_hash);
 
+        let (block, senders) = block_with_senders.split();
         ExecutedBlock::new(
-            Arc::new(block_with_senders.block.clone()),
-            Arc::new(block_with_senders.senders),
+            Arc::new(block),
+            Arc::new(senders),
             Arc::new(ExecutionOutcome::new(
                 BundleState::default(),
                 receipts,
@@ -259,7 +260,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     /// updated.
     pub fn get_execution_outcome(&mut self, block: SealedBlockWithSenders) -> ExecutionOutcome {
         let receipts = block
-            .body
+            .body()
             .transactions
             .iter()
             .enumerate()
@@ -273,7 +274,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let mut bundle_state_builder = BundleState::builder(block.number..=block.number);
 
-        for tx in &block.body.transactions {
+        for tx in &block.body().transactions {
             self.signer_execute_account_info.balance -= Self::single_tx_cost();
             bundle_state_builder = bundle_state_builder.state_present_account_info(
                 self.signer,

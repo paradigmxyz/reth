@@ -30,18 +30,17 @@ impl<H> HeaderValidator<H> for NoopConsensus {
 }
 
 impl<H, B> Consensus<H, B> for NoopConsensus {
+    type Error = ConsensusError;
+
     fn validate_body_against_header(
         &self,
         _body: &B,
         _header: &SealedHeader<H>,
-    ) -> Result<(), ConsensusError> {
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 
-    fn validate_block_pre_execution(
-        &self,
-        _block: &SealedBlock<H, B>,
-    ) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(&self, _block: &SealedBlock<H, B>) -> Result<(), Self::Error> {
         Ok(())
     }
 }
@@ -51,7 +50,7 @@ impl<N: NodePrimitives> FullConsensus<N> for NoopConsensus {
         &self,
         _block: &BlockWithSenders<N::Block>,
         _input: PostExecutionInput<'_, N::Receipt>,
-    ) -> Result<(), ConsensusError> {
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 }

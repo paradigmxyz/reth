@@ -26,8 +26,6 @@ pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, Display, From, Into};
 pub use dev::OP_DEV;
-#[cfg(not(feature = "std"))]
-pub(crate) use once_cell::sync::Lazy as LazyLock;
 pub use op::OP_MAINNET;
 use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
 pub use op_sepolia::OP_SEPOLIA;
@@ -38,8 +36,7 @@ use reth_chainspec::{
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
-#[cfg(feature = "std")]
-pub(crate) use std::sync::LazyLock;
+use reth_primitives_traits::sync::LazyLock;
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -193,6 +190,11 @@ pub struct OpChainSpec {
 }
 
 impl OpChainSpec {
+    /// Converts the given [`Genesis`] into a [`OpChainSpec`].
+    pub fn from_genesis(genesis: Genesis) -> Self {
+        genesis.into()
+    }
+
     /// Extracts the Holocene 1599 parameters from the encoded extra data from the parent header.
     ///
     /// Caution: Caller must ensure that holocene is active in the parent header.
@@ -316,6 +318,10 @@ impl Hardforks for OpChainSpec {
 }
 
 impl EthereumHardforks for OpChainSpec {
+    fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
+        self.fork(fork)
+    }
+
     fn get_final_paris_total_difficulty(&self) -> Option<U256> {
         self.inner.get_final_paris_total_difficulty()
     }
@@ -325,7 +331,11 @@ impl EthereumHardforks for OpChainSpec {
     }
 }
 
-impl OpHardforks for OpChainSpec {}
+impl OpHardforks for OpChainSpec {
+    fn op_fork_activation(&self, fork: OpHardfork) -> ForkCondition {
+        self.fork(fork)
+    }
+}
 
 impl From<Genesis> for OpChainSpec {
     fn from(genesis: Genesis) -> Self {
@@ -1106,5 +1116,64 @@ mod tests {
 
         let base_fee = op_chain_spec.next_block_base_fee(&parent, 1735315546).unwrap();
         assert_eq!(base_fee, U256::from(507));
+    }
+
+    #[test]
+    fn json_genesis() {
+        let geth_genesis = r#"
+{
+    "config": {
+        "chainId": 1301,
+        "homesteadBlock": 0,
+        "eip150Block": 0,
+        "eip155Block": 0,
+        "eip158Block": 0,
+        "byzantiumBlock": 0,
+        "constantinopleBlock": 0,
+        "petersburgBlock": 0,
+        "istanbulBlock": 0,
+        "muirGlacierBlock": 0,
+        "berlinBlock": 0,
+        "londonBlock": 0,
+        "arrowGlacierBlock": 0,
+        "grayGlacierBlock": 0,
+        "mergeNetsplitBlock": 0,
+        "shanghaiTime": 0,
+        "cancunTime": 0,
+        "bedrockBlock": 0,
+        "regolithTime": 0,
+        "canyonTime": 0,
+        "ecotoneTime": 0,
+        "fjordTime": 0,
+        "graniteTime": 0,
+        "holoceneTime": 1732633200,
+        "terminalTotalDifficulty": 0,
+        "terminalTotalDifficultyPassed": true,
+        "optimism": {
+            "eip1559Elasticity": 6,
+            "eip1559Denominator": 50,
+            "eip1559DenominatorCanyon": 250
+        }
+    },
+    "nonce": "0x0",
+    "timestamp": "0x66edad4c",
+    "extraData": "0x424544524f434b",
+    "gasLimit": "0x1c9c380",
+    "difficulty": "0x0",
+    "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "coinbase": "0x4200000000000000000000000000000000000011",
+    "alloc": {},
+    "number": "0x0",
+    "gasUsed": "0x0",
+    "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "baseFeePerGas": "0x3b9aca00",
+    "excessBlobGas": "0x0",
+    "blobGasUsed": "0x0"
+}
+        "#;
+
+        let genesis: Genesis = serde_json::from_str(geth_genesis).unwrap();
+        let chainspec = OpChainSpec::from_genesis(genesis);
+        assert!(chainspec.is_holocene_active_at_timestamp(1732633200));
     }
 }

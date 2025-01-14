@@ -4,7 +4,7 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::BlockNumber;
 use futures::{stream::FuturesUnordered, Stream};
 use futures_util::StreamExt;
-use reth_consensus::Consensus;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_network_p2p::{
     bodies::{client::BodiesClient, response::BlockResponse},
     error::DownloadResult,
@@ -59,7 +59,7 @@ where
     pub(crate) fn push_new_request(
         &mut self,
         client: Arc<B>,
-        consensus: Arc<dyn Consensus<H, B::Body>>,
+        consensus: Arc<dyn Consensus<H, B::Body, Error = ConsensusError>>,
         request: Vec<SealedHeader<H>>,
     ) {
         // Set last max requested block number

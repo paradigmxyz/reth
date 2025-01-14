@@ -24,7 +24,6 @@ poseidon-bn254 = { workspace = true, features = ["bn254"] }
 tracing.workspace = true
 
 [dev-dependencies]
-hex-literal = "0.4"
 proptest-arbitrary-interop.workspace = true
 
 [features]

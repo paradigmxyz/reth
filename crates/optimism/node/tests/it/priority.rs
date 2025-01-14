@@ -29,7 +29,7 @@ use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::{PayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed};
 use reth_primitives::RecoveredTx;
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::{pool::BestPayloadTransactions, PoolTransaction};
 use std::sync::Arc;
@@ -67,7 +67,7 @@ impl OpPayloadTransactions for CustomTxPriority {
             ..Default::default()
         };
         let signature = sender.sign_transaction_sync(&mut end_of_block_tx).unwrap();
-        let end_of_block_tx = RecoveredTx::from_signed_transaction(
+        let end_of_block_tx = RecoveredTx::new_unchecked(
             OpTransactionSigned::new_unhashed(
                 OpTypedTransaction::Eip1559(end_of_block_tx),
                 signature,
@@ -148,7 +148,7 @@ async fn test_custom_block_priority_config() {
     let tasks = TaskManager::current();
     let node_handle = NodeBuilder::new(config.clone())
         .with_database(db)
-        .with_types_and_provider::<OpNode, BlockchainProvider2<_>>()
+        .with_types_and_provider::<OpNode, BlockchainProvider<_>>()
         .with_components(build_components(config.chain.chain_id()))
         .with_add_ons(OpAddOns::default())
         .launch_with_fn(|builder| {
@@ -187,10 +187,10 @@ async fn test_custom_block_priority_config() {
     assert_eq!(block_payloads.len(), 1);
     let (block_payload, _) = block_payloads.first().unwrap();
     let block_payload = block_payload.block().clone();
-    assert_eq!(block_payload.body.transactions.len(), 2); // L1 block info tx + end-of-block custom tx
+    assert_eq!(block_payload.body().transactions.len(), 2); // L1 block info tx + end-of-block custom tx
 
     // Check that last transaction in the block looks like a transfer to a random address.
-    let end_of_block_tx = block_payload.body.transactions.last().unwrap();
+    let end_of_block_tx = block_payload.body().transactions.last().unwrap();
     let OpTypedTransaction::Eip1559(end_of_block_tx) = &end_of_block_tx.transaction else {
         panic!("expected EIP-1559 transaction");
     };

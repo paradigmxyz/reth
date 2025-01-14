@@ -20,7 +20,7 @@ use reth_chainspec::{
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
-use reth_scroll_forks::ScrollHardforks;
+use reth_scroll_forks::{ScrollHardfork, ScrollHardforks};
 
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;
@@ -273,6 +273,10 @@ impl Hardforks for ScrollChainSpec {
 }
 
 impl EthereumHardforks for ScrollChainSpec {
+    fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
+        self.fork(fork)
+    }
+
     fn get_final_paris_total_difficulty(&self) -> Option<U256> {
         self.inner.get_final_paris_total_difficulty()
     }
@@ -282,7 +286,11 @@ impl EthereumHardforks for ScrollChainSpec {
     }
 }
 
-impl ScrollHardforks for ScrollChainSpec {}
+impl ScrollHardforks for ScrollChainSpec {
+    fn scroll_fork_activation(&self, fork: ScrollHardfork) -> ForkCondition {
+        self.fork(fork)
+    }
+}
 
 impl From<Genesis> for ScrollChainSpec {
     fn from(genesis: Genesis) -> Self {

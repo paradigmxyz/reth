@@ -682,14 +682,6 @@ Pruning:
           Configure receipts log filter. Format: <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
 
 Engine:
-      --engine.experimental
-          Enable the experimental engine features on reth binary
-
-          DEPRECATED: experimental engine is default now, use --engine.legacy to enable the legacy functionality
-
-      --engine.legacy
-          Enable the legacy engine on reth binary
-
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for engine experimental
 
@@ -699,6 +691,12 @@ Engine:
           Configure the target number of blocks to keep in memory
 
           [default: 2]
+
+      --engine.state-root-task
+          Enable state root task
+
+      --engine.state-root-task-compare-updates
+          Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation
 
 Logging:
       --log.stdout.format <FORMAT>

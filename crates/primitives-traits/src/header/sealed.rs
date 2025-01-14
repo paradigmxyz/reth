@@ -119,39 +119,6 @@ impl Decodable for SealedHeader {
     }
 }
 
-#[cfg(any(test, feature = "test-utils"))]
-impl SealedHeader {
-    /// Updates the block header.
-    pub fn set_header(&mut self, header: Header) {
-        self.header = header
-    }
-
-    /// Updates the block hash.
-    pub fn set_hash(&mut self, hash: BlockHash) {
-        self.hash = hash
-    }
-
-    /// Updates the parent block hash.
-    pub fn set_parent_hash(&mut self, hash: BlockHash) {
-        self.header.parent_hash = hash
-    }
-
-    /// Updates the block number.
-    pub fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
-        self.header.number = number;
-    }
-
-    /// Updates the block state root.
-    pub fn set_state_root(&mut self, state_root: alloy_primitives::B256) {
-        self.header.state_root = state_root;
-    }
-
-    /// Updates the block difficulty.
-    pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
-        self.header.difficulty = difficulty;
-    }
-}
-
 impl<H> From<SealedHeader<H>> for Sealed<H> {
     fn from(value: SealedHeader<H>) -> Self {
         Self::new_unchecked(value.header, value.hash)
@@ -167,6 +134,44 @@ where
         let header = H::arbitrary(u)?;
 
         Ok(Self::seal(header))
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl<H: crate::test_utils::TestHeader> SealedHeader<H> {
+    /// Updates the block header.
+    pub fn set_header(&mut self, header: H) {
+        self.header = header
+    }
+
+    /// Updates the block hash.
+    pub fn set_hash(&mut self, hash: BlockHash) {
+        self.hash = hash
+    }
+
+    /// Returns a mutable reference to the header.
+    pub fn header_mut(&mut self) -> &mut H {
+        &mut self.header
+    }
+
+    /// Updates the parent block hash.
+    pub fn set_parent_hash(&mut self, hash: BlockHash) {
+        self.header.set_parent_hash(hash);
+    }
+
+    /// Updates the block number.
+    pub fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
+        self.header.set_block_number(number);
+    }
+
+    /// Updates the block state root.
+    pub fn set_state_root(&mut self, state_root: alloy_primitives::B256) {
+        self.header.set_state_root(state_root);
+    }
+
+    /// Updates the block difficulty.
+    pub fn set_difficulty(&mut self, difficulty: alloy_primitives::U256) {
+        self.header.set_difficulty(difficulty);
     }
 }
 

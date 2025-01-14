@@ -1,5 +1,14 @@
 //! Engine tree configuration.
 
+use alloy_eips::merge::EPOCH_SLOTS;
+
+/// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
+/// for more information.
+///
+/// This is the default threshold, the distance to the head that the tree will be used for sync.
+/// If the distance exceeds this threshold, the pipeline will be used for sync.
+pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
+
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 
@@ -32,6 +41,11 @@ pub struct TreeConfig {
     /// This is used as a cutoff to prevent long-running sequential block execution when we receive
     /// a batch of downloaded blocks.
     max_execute_block_batch_size: usize,
+    /// Whether to use the new state root task calculation method instead of parallel calculation
+    use_state_root_task: bool,
+    /// Whether to always compare trie updates from the state root task to the trie updates from
+    /// the regular state root calculation.
+    always_compare_trie_updates: bool,
 }
 
 impl Default for TreeConfig {
@@ -42,6 +56,8 @@ impl Default for TreeConfig {
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
+            use_state_root_task: false,
+            always_compare_trie_updates: false,
         }
     }
 }
@@ -54,6 +70,8 @@ impl TreeConfig {
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
         max_execute_block_batch_size: usize,
+        use_state_root_task: bool,
+        always_compare_trie_updates: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -61,6 +79,8 @@ impl TreeConfig {
             block_buffer_limit,
             max_invalid_header_cache_length,
             max_execute_block_batch_size,
+            use_state_root_task,
+            always_compare_trie_updates,
         }
     }
 
@@ -87,6 +107,17 @@ impl TreeConfig {
     /// Return the maximum execute block batch size.
     pub const fn max_execute_block_batch_size(&self) -> usize {
         self.max_execute_block_batch_size
+    }
+
+    /// Returns whether to use the state root task calculation method.
+    pub const fn use_state_root_task(&self) -> bool {
+        self.use_state_root_task
+    }
+
+    /// Returns whether to always compare trie updates from the state root task to the trie updates
+    /// from the regular state root calculation.
+    pub const fn always_compare_trie_updates(&self) -> bool {
+        self.always_compare_trie_updates
     }
 
     /// Setter for persistence threshold.
@@ -125,6 +156,22 @@ impl TreeConfig {
         max_execute_block_batch_size: usize,
     ) -> Self {
         self.max_execute_block_batch_size = max_execute_block_batch_size;
+        self
+    }
+
+    /// Setter for whether to use the new state root task calculation method.
+    pub const fn with_state_root_task(mut self, use_state_root_task: bool) -> Self {
+        self.use_state_root_task = use_state_root_task;
+        self
+    }
+
+    /// Setter for whether to always compare trie updates from the state root task to the trie
+    /// updates from the regular state root calculation.
+    pub const fn with_always_compare_trie_updates(
+        mut self,
+        always_compare_trie_updates: bool,
+    ) -> Self {
+        self.always_compare_trie_updates = always_compare_trie_updates;
         self
     }
 }

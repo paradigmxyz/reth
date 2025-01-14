@@ -12,7 +12,7 @@ use crate::{
 };
 use alloy_consensus::Header;
 use futures::{Future, FutureExt, Stream, StreamExt};
-use reth_consensus::{test_utils::TestConsensus, Consensus};
+use reth_consensus::{test_utils::TestConsensus, Consensus, ConsensusError};
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives::SealedHeader;
@@ -147,7 +147,11 @@ impl Stream for TestDownload {
 
             let empty: SealedHeader = SealedHeader::default();
             if let Err(error) =
-                <dyn Consensus<_>>::validate_header_against_parent(&this.consensus, &empty, &empty)
+                <dyn Consensus<_, Error = ConsensusError>>::validate_header_against_parent(
+                    &this.consensus,
+                    &empty,
+                    &empty,
+                )
             {
                 this.done = true;
                 return Poll::Ready(Some(Err(DownloadError::HeaderValidation {
@@ -165,7 +169,6 @@ impl Stream for TestDownload {
                     headers.sort_unstable_by_key(|h| h.number);
                     headers.into_iter().for_each(|h| this.buffer.push(h));
                     this.done = true;
-                    continue
                 }
                 Err(err) => {
                     this.done = true;

@@ -24,7 +24,16 @@ alloy-eips.workspace = true
 
 [dev-dependencies]
 alloy-consensus.workspace = true
-reth-storage-api.workspace = true
 rand.workspace = true
-mockall = "0.13"
 
+[features]
+default = ["std"]
+std = [
+	"alloy-consensus/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"reth-chainspec/std",
+	"reth-consensus/std",
+	"reth-primitives/std",
+	"reth-primitives-traits/std"
+]
