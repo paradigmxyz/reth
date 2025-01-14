@@ -207,9 +207,10 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     ) -> ExecutedBlock {
         let block_with_senders = self.generate_random_block(block_number, parent_hash);
 
+        let (block, senders) = block_with_senders.split();
         ExecutedBlock::new(
-            Arc::new(block_with_senders.block.clone()),
-            Arc::new(block_with_senders.senders),
+            Arc::new(block),
+            Arc::new(senders),
             Arc::new(ExecutionOutcome::new(
                 BundleState::default(),
                 receipts,

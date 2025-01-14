@@ -12,7 +12,6 @@ use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_consensus::ConsensusError;
 use reth_ethereum_consensus::validate_block_post_execution;
 use reth_evm::{
-    env::EvmEnv,
     execute::{
         balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
         BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
@@ -26,7 +25,7 @@ use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
 use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},
-    EnvWithHandlerCfg, ResultAndState,
+    ResultAndState,
 };
 
 /// Factory for [`EthExecutionStrategy`].
@@ -113,23 +112,6 @@ where
     }
 }
 
-impl<DB, EvmConfig> EthExecutionStrategy<DB, EvmConfig>
-where
-    DB: Database<Error: Into<ProviderError> + Display>,
-    EvmConfig: ConfigureEvm,
-{
-    /// Configures a new evm configuration and block environment for the given block.
-    ///
-    /// # Caution
-    ///
-    /// This does not initialize the tx environment.
-    fn evm_env_for_block(&self, header: &EvmConfig::Header) -> EnvWithHandlerCfg {
-        let EvmEnv { cfg_env_with_handler_cfg, block_env } =
-            self.evm_config.cfg_and_block_env(header);
-        EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, Default::default())
-    }
-}
-
 impl<DB, EvmConfig> BlockExecutionStrategy for EthExecutionStrategy<DB, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
@@ -153,8 +135,7 @@ where
             (*self.chain_spec).is_spurious_dragon_active_at_block(block.header.number);
         self.state.set_state_clear_flag(state_clear_flag);
 
-        let env = self.evm_env_for_block(&block.header);
-        let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
+        let mut evm = self.evm_config.evm_for_block(&mut self.state, &block.header);
 
         self.system_caller.apply_pre_execution_changes(&block.header, &mut evm)?;
 
@@ -165,8 +146,7 @@ where
         &mut self,
         block: &BlockWithSenders,
     ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
-        let env = self.evm_env_for_block(&block.header);
-        let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
+        let mut evm = self.evm_config.evm_for_block(&mut self.state, &block.header);
 
         let mut cumulative_gas_used = 0;
         let mut receipts = Vec::with_capacity(block.body.transactions.len());
@@ -227,8 +207,7 @@ where
         block: &BlockWithSenders,
         receipts: &[Receipt],
     ) -> Result<Requests, Self::Error> {
-        let env = self.evm_env_for_block(&block.header);
-        let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
+        let mut evm = self.evm_config.evm_for_block(&mut self.state, &block.header);
 
         let requests = if self.chain_spec.is_prague_active_at_timestamp(block.timestamp) {
             // Collect all EIP-6110 deposits

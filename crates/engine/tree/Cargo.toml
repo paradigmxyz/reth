@@ -15,6 +15,7 @@ workspace = true
 reth-chain-state.workspace = true
 reth-chainspec = { workspace = true, optional = true }
 reth-consensus.workspace = true
+reth-db.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
 reth-evm.workspace = true
@@ -22,8 +23,8 @@ reth-network-p2p.workspace = true
 reth-payload-builder-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
-reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
+reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-revm.workspace = true
@@ -71,7 +72,6 @@ reth-tracing = { workspace = true, optional = true }
 # reth
 reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-chainspec.workspace = true
-reth-db = { workspace = true, features = ["test-utils"] }
 reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
