@@ -73,7 +73,7 @@ impl StorageTrieDiffEntry {
                 }
 
                 for (path, EntryDiff { task, regular, database }) in &storage_diff.removed_nodes {
-                    debug!(target: "engine::tree", ?address, ?path, ?task, ?regular, ?database, "Difference in removed account trie nodes");
+                    debug!(target: "engine::tree", ?address, ?path, ?task, ?regular, ?database, "Difference in removed storage trie nodes");
                 }
             }
         }
