@@ -12,6 +12,8 @@ description = "Common types in reth."
 workspace = true
 
 [dependencies]
+
+rlp = "0.5.0"
 # reth
 reth-codecs = { workspace = true, optional = true }
 

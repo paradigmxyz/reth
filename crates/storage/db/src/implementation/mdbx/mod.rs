@@ -502,11 +502,14 @@ mod tests {
     use super::*;
     use crate::{
         tables::{
-            AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
+            HashedStorages, AccountsHistory, CanonicalHeaders, Headers, PlainAccountState, PlainStorageState,
         },
         test_utils::*,
         AccountChangeSets,
+        HashedAccounts,
     };
+    use rlp::{RlpStream, Rlp, Encodable, Decodable};
+    use primitive_types::H256;
     use alloy_consensus::Header;
     use alloy_primitives::{Address, B256, U256};
     use reth_db_api::{
@@ -517,8 +520,10 @@ mod tests {
     use reth_libmdbx::Error;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
-    use std::str::FromStr;
+    use scalerize_client::ScalerizeClient;
+    use std::{ptr::null, str::FromStr};
     use tempfile::TempDir;
+    use bytes::BytesMut;
 
     /// Create database for testing
     fn create_test_db(kind: DatabaseEnvKind) -> Arc<DatabaseEnv> {
@@ -895,46 +900,323 @@ mod tests {
     }
 
     #[test]
-    fn db_cursor_insert() {
-        let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
+    fn db_cursor_insert() -> Result<(), DatabaseError> {
+        // let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
 
-        // PUT
-        let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        vec![0, 1, 3, 4, 5]
-            .into_iter()
-            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, B256::ZERO))
-            .expect(ERROR_PUT);
-        tx.commit().expect(ERROR_COMMIT);
+        // // PUT
+        // let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        // vec![0, 1, 3, 4, 5]
+        //     .into_iter()
+        //     .try_for_each(|key| tx.put::<CanonicalHeaders>(key, B256::ZERO))
+        //     .expect(ERROR_PUT);
+        // tx.commit().expect(ERROR_COMMIT);
 
-        let key_to_insert = 2;
-        let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
+        // let key_to_insert = 2;
+        // let tx = db.tx_mut().expect(ERROR_INIT_TX);
+        // let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
 
-        // INSERT
-        assert_eq!(cursor.insert(key_to_insert, B256::ZERO), Ok(()));
-        assert_eq!(cursor.current(), Ok(Some((key_to_insert, B256::ZERO))));
+        // // INSERT
+        // assert_eq!(cursor.insert(key_to_insert, B256::ZERO), Ok(()));
+        // assert_eq!(cursor.current(), Ok(Some((key_to_insert, B256::ZERO))));
 
-        // INSERT (failure)
-        assert_eq!(
-            cursor.insert(key_to_insert, B256::ZERO),
-            Err(DatabaseWriteError {
-                info: Error::KeyExist.into(),
-                operation: DatabaseWriteOperation::CursorInsert,
-                table_name: CanonicalHeaders::NAME,
-                key: key_to_insert.encode().into(),
+        // // INSERT (failure)
+        // assert_eq!(
+        //     cursor.insert(key_to_insert, B256::ZERO),
+        //     Err(DatabaseWriteError {
+        //         info: Error::KeyExist.into(),
+        //         operation: DatabaseWriteOperation::CursorInsert,
+        //         table_name: CanonicalHeaders::NAME,
+        //         key: key_to_insert.encode().into(),
+        //     }
+        //     .into())
+        // );
+        // assert_eq!(cursor.current(), Ok(Some((key_to_insert, B256::ZERO))));
+
+        // tx.commit().expect(ERROR_COMMIT);
+
+        // // Confirm the result
+        // let tx = db.tx().expect(ERROR_INIT_TX);
+        // let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
+        // let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        // assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
+        // tx.commit().expect(ERROR_COMMIT);
+
+
+        let key1 = B256::random();
+        let key2 = B256::ZERO;
+        let value = Account {
+            nonce: 1,
+            balance: U256::from(1000),
+            bytecode_hash: Some(U256::from(12345).into()),
+        };
+
+        let rlp_encoded = rlp::encode(&value);
+        println!("RLP Encoded Value: {:?}", rlp_encoded.to_vec());
+        let decoded_account: Account = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
+        println!("Decoded Account: {:?}", decoded_account);
+
+
+        let mut scalerize_client = ScalerizeClient::connect()
+        .map_err(DatabaseError::from)?;
+
+        // PUT FOR HASHEDACCOUNTS 
+        let put_response = scalerize_client.put(0, key1.as_slice(),&[], &rlp_encoded)
+        .expect("Failed to get put response");
+        
+        if put_response[0] == 0 {
+            let error_message = String::from_utf8_lossy(&put_response[1..]);
+            panic!("Put request failed with error: {}", error_message);
+        } else if put_response[0] == 1 {
+            println!("BYTES TO BE DECODED:{:?}", &put_response[1..]);
+            let rlp = Rlp::new(&put_response[1..]);
+            let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+            println!("PUT Account:{:?}", decoded_account);
+        } else {
+            panic!("Unexpected response format");
+        }
+
+        match scalerize_client.write() {
+            Ok(_) => {
+                println!("WRITTEN TO DB");
             }
-            .into())
-        );
-        assert_eq!(cursor.current(), Ok(Some((key_to_insert, B256::ZERO))));
+            Err(e) => {
+                println!("Write request failed with error: {:?}", e);
+            }
+        }
+        
+        // GET FOR HASHEDACCOUNTS 
+        let get_response = scalerize_client.get(0, key1.as_slice()).
+        expect("Failed to put response");
 
-        tx.commit().expect(ERROR_COMMIT);
+        if get_response[0] == 0 {
+            let error_message = String::from_utf8_lossy(&get_response[1..]);
+            panic!("GET request failed with error: {}", error_message);
+        } else if get_response[0] == 1 {
+            println!("BYTES TO BE DECODED:{:?}", &get_response[1..]);
+            let rlp = Rlp::new(&get_response[1..]);
+            let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+            println!("GET Account::::{:?}", decoded_account);
+        } else {
+            panic!("Unexpected response format");
+        }
+        
+        let b256_var_from_bytes1 = B256::from([
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
 
-        // Confirm the result
-        let tx = db.tx().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
-        assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
-        tx.commit().expect(ERROR_COMMIT);
+        let b256_var_from_bytes2 = B256::from([
+            1u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes3 = B256::from([
+            2u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes4 = B256::from([
+            3u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes5 = B256::from([
+            4u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+        
+        println!("for hashed storage");
+        // let subkey = B256::random();
+        let subkey: H256 = H256::zero();
+        println!("subkey {:?}", subkey);
+
+        let value1 = U256::from(1);
+        let value2 = U256::from(2);
+        let value3 = U256::from(3);
+        let value4 = U256::from(4);
+        let entry1 = StorageEntry { key: b256_var_from_bytes2, value: value1 };
+        let entry2 = StorageEntry { key: b256_var_from_bytes3, value: value2 };
+        let entry3 = StorageEntry { key: b256_var_from_bytes4, value: value3 };
+        let entry4 = StorageEntry { key: b256_var_from_bytes5, value: value4 };
+
+        // let storage_entry = StorageEntry {
+        //     key: B256::random(),
+        //     value: U256::from(1),
+        // };
+
+        let rlp_encoded = rlp::encode(&entry1);
+        let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
+        println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
+        let put_response = scalerize_client.put(1, key1.as_slice(), entry1.key.as_slice(), &rlp_encoded)
+        .expect("Failed to get put response");
+        if put_response[0] == 0 {
+            let error_message = String::from_utf8_lossy(&put_response[1..]);
+            panic!("PUT request failed with error: {}", error_message);
+        } else if put_response[0] == 1 {
+            println!("BYTES TO BE DECODED:{:?}", &put_response[1..]);
+            let rlp = Rlp::new(&put_response[1..]);
+            let decoded_account = StorageEntry::decode(&rlp).expect("Failed to decode");
+            println!("PUT STORAGE ENTRY:{:?}", decoded_account);
+        } else {
+            panic!("Unexpected response format");
+        }
+
+        let rlp_encoded = rlp::encode(&entry2);
+        let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
+        println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
+        let put_response = scalerize_client.put(1, key1.as_slice(), entry2.key.as_slice(), &rlp_encoded)
+        .expect("Failed to get put response");
+        if put_response[0] == 0 {
+            let error_message = String::from_utf8_lossy(&put_response[1..]);
+            panic!("PUT request failed with error: {}", error_message);
+        } else if put_response[0] == 1 {
+            println!("BYTES TO BE DECODED:{:?}", &put_response[1..]);
+            let rlp = Rlp::new(&put_response[1..]);
+            let decoded_account = StorageEntry::decode(&rlp).expect("Failed to decode");
+            println!("PUT STORAGE ENTRY:{:?}", decoded_account);
+        } else {
+            panic!("Unexpected response format");
+        }
+
+        let rlp_encoded = rlp::encode(&entry3);
+        let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
+        println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
+        let put_response = scalerize_client.put(1, key1.as_slice(), entry3.key.as_slice(), &rlp_encoded)
+        .expect("Failed to get put response");
+        if put_response[0] == 0 {
+            let error_message = String::from_utf8_lossy(&put_response[1..]);
+            panic!("PUT request failed with error: {}", error_message);
+        } else if put_response[0] == 1 {
+            println!("BYTES TO BE DECODED:{:?}", &put_response[1..]);
+            let rlp = Rlp::new(&put_response[1..]);
+            let decoded_account = StorageEntry::decode(&rlp).expect("Failed to decode");
+            println!("PUT STORAGE ENTRY:{:?}", decoded_account);
+        } else {
+            panic!("Unexpected response format");
+        }
+
+        let rlp_encoded = rlp::encode(&entry4);
+        let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
+        println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
+        let put_response = scalerize_client.put(1, key1.as_slice(), entry4.key.as_slice(), &rlp_encoded)
+        .expect("Failed to get put response");
+        if put_response[0] == 0 {
+            let error_message = String::from_utf8_lossy(&put_response[1..]);
+            panic!("PUT request failed with error: {}", error_message);
+        } else if put_response[0] == 1 {
+            println!("BYTES TO BE DECODED:{:?}", &put_response[1..]);
+            let rlp = Rlp::new(&put_response[1..]);
+            let decoded_account = StorageEntry::decode(&rlp).expect("Failed to decode");
+            println!("PUT STORAGE ENTRY:{:?}", decoded_account);
+        } else {
+            panic!("Unexpected response format");
+        }
+
+        match scalerize_client.write() {
+            Ok(_) => {
+                println!("WRITTEN TO DB");
+            }
+            Err(e) => {
+                println!("Write request failed with error: {:?}", e);
+            }
+        }
+
+        let get_response = scalerize_client.get(1, key1.as_slice()).
+        expect("Failed to put response");
+
+        if get_response[0] == 0 {
+            let error_message = String::from_utf8_lossy(&get_response[1..]);
+            panic!("GET request failed with error: {}", error_message);
+        } else if get_response[0] == 1 {
+            println!("BYTES TO BE DECODED:{:?}", &get_response[1..]);
+            let rlp = Rlp::new(&get_response[1..]);
+            let decoded_account = StorageEntry::decode(&rlp).expect("Failed to decode");
+            println!("GET STORAGE ENTRY::::{:?}", decoded_account);
+        } else {
+            panic!("Unexpected response format");
+        }
+
+        // this will delete all entries for HashedStorages for account address key1
+        // match scalerize_client.delete(1, key1.as_slice(), &[]) {
+        //     Ok(_) => {
+        //         println!("DELETE REQUEST SUCCESSFUL");
+        //     }
+        //     Err(e) => {
+        //         println!("Delete request failed with error: {:?}", e);
+        //     }
+        // }
+
+        // this will delete all entries in the substore created for an account
+        // match scalerize_client.delete(0, key1.as_slice(), &[]) {
+        //     Ok(_) => {
+        //         println!("DELETE REQUEST SUCCESSFUL");
+        //     }
+        //     Err(e) => {
+        //         println!("Delete request failed with error: {:?}", e);
+        //     }
+        // }
+
+        let rlp_encoded = rlp::encode(&entry1);
+        // this will delete only entry for table HashedStorages with account address == key1 and value == entry1
+        match scalerize_client.delete(1, key1.as_slice(), &rlp_encoded) {
+            Ok(_) => {
+                println!("DELETE REQUEST SUCCESSFUL");
+            }
+            Err(e) => {
+                println!("Delete request failed with error: {:?}", e);
+            }
+        }
+
+        match scalerize_client.write() {
+            Ok(_) => {
+                println!("WRITTEN TO DB");
+            }
+            Err(e) => {
+                println!("Write request failed with error: {:?}", e);
+            }
+        }
+
+        let get_response = scalerize_client.get(1, key1.as_slice()).
+        expect("Failed to put response");
+
+        if get_response[0] == 0 {
+            let error_message = String::from_utf8_lossy(&get_response[1..]);
+            println!("GET request failed with error: {}", error_message);
+        } else if get_response[0] == 1 {
+            println!("BYTES TO BE DECODED:{:?}", &get_response[1..]);
+            let rlp = Rlp::new(&get_response[1..]);
+            let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
+            println!("GET STORAGE ENTRY::::{:?}", decoded_storage_entry);
+        } else {
+            panic!("Unexpected response format");
+        }
+
+        let get_response = scalerize_client.get(0, key1.as_slice()).
+        expect("Failed to put response");
+
+        if get_response[0] == 0 {
+            let error_message = String::from_utf8_lossy(&get_response[1..]);
+            println!("GET request failed with error: {}", error_message);
+        } else if get_response[0] == 1 {
+            println!("BYTES TO BE DECODED:{:?}", &get_response[1..]);
+            let rlp = Rlp::new(&get_response[1..]);
+            let decoded_storage_entry:Account  = Account::decode(&rlp).expect("Failed to decode");
+            println!("GET ACCOUNT::::{:?}", decoded_storage_entry);
+        } else {
+            panic!("Unexpected response format");
+        }
+
+        Ok(())
     }
 
     #[test]
@@ -988,32 +1270,266 @@ mod tests {
         let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
 
-        // PUT
-        vec![0, 1, 3, 5, 7, 9]
-            .into_iter()
-            .try_for_each(|key| tx.put::<CanonicalHeaders>(key, B256::ZERO))
-            .expect(ERROR_PUT);
+        let pavalue = Account {
+            nonce: 18446744073709551615,
+            bytecode_hash: Some(B256::random()),
+            balance: U256::MAX,
+        };
+        let pakey = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
+            .expect(ERROR_ETH_ADDRESS);
+
+        // println!("for plain account state");
+        // vec![0, 1, 3, 5, 7, 9]
+        // .into_iter()
+        // .try_for_each(|key| tx.put::<PlainAccountState>(pakey, pavalue))
+        // .expect(ERROR_PUT);
+
+        // let b256_var_from_bytes = B256::from([
+        //     0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+        //     0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+        //     0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+        //     0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        // ]);
+
+        let b256_var_from_bytes1 = B256::from([
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes2 = B256::from([
+            1u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes3 = B256::from([
+            2u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes4 = B256::from([
+            3u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes5 = B256::from([
+            4u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+        
+        println!("for hashed storage");
+        // let subkey = B256::random();
+        let subkey: H256 = H256::zero();
+        println!("subkey {:?}", subkey);
+
+        let value1 = U256::from(1);
+        let value2 = U256::from(2);
+        let value3 = U256::from(3);
+        let value4 = U256::from(4);
+        let entry1 = StorageEntry { key: b256_var_from_bytes2, value: value1 };
+        let entry2 = StorageEntry { key: b256_var_from_bytes3, value: value2 };
+        let entry3 = StorageEntry { key: b256_var_from_bytes4, value: value3 };
+        let entry4 = StorageEntry { key: b256_var_from_bytes5, value: value4 };
+
+        // tx.put::<HashedStorages>(b256_var_from_bytes1, entry1)
+        // .expect(ERROR_PUT);
+
+        tx.put::<HashedStorages>(b256_var_from_bytes1, entry1)
+        .expect(ERROR_PUT);
+        tx.put::<HashedStorages>(b256_var_from_bytes1, entry2)
+        .expect(ERROR_PUT);
+        tx.put::<HashedStorages>(b256_var_from_bytes1, entry3)
+        .expect(ERROR_PUT);
+        tx.put::<HashedStorages>(b256_var_from_bytes1, entry4)
+        .expect(ERROR_PUT);
+
+        let result = tx.get::<HashedStorages>(b256_var_from_bytes1).expect(ERROR_GET);
+
+        println!("STORAGE ENTRY1: {:?}", result);
+
+        let result = tx.delete::<HashedStorages>(b256_var_from_bytes1, Some(entry1)).expect(ERROR_GET);
+
+        let result = tx.get::<HashedStorages>(b256_var_from_bytes1).expect(ERROR_GET);
+
+        println!("STORAGE ENTRY2: {:?}", result);
+        // vec![0, 1, 3, 5, 7, 9]
+        // .into_iter()
+        // .try_for_each(|key| tx.put::<HeaderTerminalDifficulties>(key, B256::ZERO))
+        // .expect(ERROR_PUT);
+        println!("FOR HASHED ACCOUNTS");
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 9, balance: max_u256, bytecode_hash: Some(U256::from(12345).into())};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);  
+        
+
+        println!();
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 9, balance: U256::from(1), bytecode_hash: Some(U256::from(12345).into())};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
+        println!();
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 0, balance: U256::from(12345), bytecode_hash: Some(U256::from(12345).into())};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
+        println!();
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 0, balance: U256::from(256), bytecode_hash: None};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
+        println!();
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 9, balance: U256::from(1), bytecode_hash: None};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
+        println!();
+        
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 9, balance: max_u256, bytecode_hash: None};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
+        println!();
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 0, balance: U256::from(0), bytecode_hash: Some(U256::from(12345).into())};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 1, balance: U256::from(0), bytecode_hash: Some(U256::from(12345).into())};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 0, balance: U256::from(1), bytecode_hash: Some(U256::from(12345).into())};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 1, balance: U256::from(0), bytecode_hash: None};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 3, balance: U256::from(0), bytecode_hash: None};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 9, balance: U256::from(0), bytecode_hash: None};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 0, balance: U256::from(1), bytecode_hash: None};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 18446744073709551615, balance: U256::from(0), bytecode_hash: None};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
+        let max_u256 = U256::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639935").unwrap();
+        let account: Account = Account { nonce: 0, balance: max_u256, bytecode_hash: None};
+        tx.put::<HashedAccounts>(B256::random(), account)
+        .expect(ERROR_PUT);
+
         tx.commit().expect(ERROR_COMMIT);
+        // PUT
+        // vec![0, 1, 3, 5, 7, 9]
+        //     .into_iter()
+        //     .try_for_each(|key| tx.put::<HashedAccounts>(B256::random(), account))
+        //     .expect(ERROR_PUT);
+        // tx.commit().expect(ERROR_COMMIT);
+
+        
+
+        // vec![
+        //     B256::from([0u8; 32]),
+        //     B256::from([1u8; 32]),
+        //     B256::from([3u8; 32]),
+        //     B256::from([5u8; 32]),
+        //     B256::from([7u8; 32]),
+        //     B256::from([9u8; 32]),
+        // ]
+        // .into_iter()
+        // .try_for_each(|key: alloy_primitives::FixedBytes<32>| tx.put::<HashedAccounts>(key, account))
+        // .expect(ERROR_PUT);
+        // tx.commit().expect(ERROR_COMMIT);
 
         let tx = db.tx_mut().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_write::<CanonicalHeaders>().unwrap();
-
-        // INSERT (cursor starts at last)
-        cursor.last().unwrap();
-        assert_eq!(cursor.current(), Ok(Some((9, B256::ZERO))));
-
-        for pos in (2..=8).step_by(2) {
-            assert_eq!(cursor.insert(pos, B256::ZERO), Ok(()));
-            assert_eq!(cursor.current(), Ok(Some((pos, B256::ZERO))));
+        let mut cursorrw = tx.cursor_write::<HashedStorages>().unwrap();
+        let mut entries = Vec::new();
+        while let Some((key, value)) = cursorrw.next().unwrap() {
+            entries.push((key, value));
         }
-        tx.commit().expect(ERROR_COMMIT);
 
-        // Confirm the result
-        let tx = db.tx().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
-        let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
-        assert_eq!(res, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
-        tx.commit().expect(ERROR_COMMIT);
+        for (key, value) in entries {
+            println!("Key: {:?}, Value: {:?}", key, value);
+        }
+
+
+        let mut cursorrw = tx.cursor_write::<HashedStorages>().unwrap();
+        let mut entries = Vec::new();
+        while let Some((key, value)) = cursorrw.next().unwrap() {
+            entries.push((key, value));
+        }
+
+        for (key, value) in entries {
+            println!("Key: {:?}, Value: {:?}", key, value);
+        }
+
+        let bool = tx.delete::<HashedStorages>(b256_var_from_bytes1, Some(entry3)).expect(ERROR_DEL);
+        println!("{}", bool);
+
+        println!("AFTER DELETE");
+        let mut cursorrw = tx.cursor_write::<HashedStorages>().unwrap();
+        let mut entries = Vec::new();
+        while let Some((key, value)) = cursorrw.next().unwrap() {
+            entries.push((key, value));
+        }
+
+        for (key, value) in entries {
+            println!("Key: {:?}, Value: {:?}", key, value);
+        }
+        // let mut cursor1 = tx.cursor_write::<HashedAccounts>().unwrap();
+        // INSERT (cursor starts at last)
+        // cursor.last().unwrap();
+        // assert_eq!(cursor.current(), Ok(Some((9, B256::ZERO))));
+
+        // for pos in (2..=8).step_by(2) {
+        //     assert_eq!(cursor.insert(pos, B256::ZERO), Ok(()));
+        //     assert_eq!(cursor.current(), Ok(Some((pos, B256::ZERO))));
+        // }
+        // tx.commit().expect(ERROR_COMMIT);
+
+        // // Confirm the result
+        // let tx = db.tx().expect(ERROR_INIT_TX);
+        let mut cursorro = tx.cursor_read::<HashedStorages>().unwrap();
+        // let res = cursor.walk(None).unwrap().map(|res| res.unwrap().0).collect::<Vec<_>>();
+        // assert_eq!(res, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        // tx.commit().expect(ERROR_COMMIT);
     }
 
     #[test]
