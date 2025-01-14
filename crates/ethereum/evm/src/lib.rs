@@ -182,11 +182,7 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
-impl ConfigureEvm for EthEvmConfig {
-    type DefaultExternalContext<'a> = ();
-
-    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
-}
+impl ConfigureEvm for EthEvmConfig {}
 
 #[cfg(test)]
 mod tests {
