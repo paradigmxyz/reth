@@ -54,12 +54,11 @@ impl<Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>> Segment<Prov
     }
 
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
-        let (block_range_start, block_range_end) = match input.get_next_block_range() {
-            Some(range) => (*range.start(), *range.end()),
-            None => {
-                trace!(target: "pruner", "No headers to prune");
-                return Ok(SegmentOutput::done())
-            }
+        let Some((block_range_start, block_range_end)) =
+            input.get_next_block_range().map(|r| r.into_inner())
+        else {
+            trace!(target: "pruner", "No headers to prune");
+            return Ok(SegmentOutput::done())
         };
 
         let last_pruned_block =
@@ -160,6 +159,12 @@ where
     C2: DbCursorRW<tables::BlockWithdrawals> + DbCursorRO<tables::BlockWithdrawals>,
 {
     type Item = Result<BlockMetaTablesIterItem, PrunerError>;
+
+    /// It iterates over `self.indices_walker` block range and deletes every corresponding entry
+    /// from `BlockBodyIndices`, `Withdrawals` and `Ommers` tables.
+    ///
+    /// It returns `None` when we have iterated over all blocks of the range OR hit the limit from
+    /// `self.limiter`.
     fn next(&mut self) -> Option<Self::Item> {
         if self.limiter.is_limit_reached() {
             return None
@@ -183,7 +188,7 @@ where
 
         // Prune Ommers table. Can't use prune_table_with_range_step, since there are blocks without
         // a respective entry.
-        if let Some(block) = &pruned_block_indices.clone() {
+        if let Some(block) = &pruned_block_indices {
             match self.ommers_cursor.seek_exact(*block) {
                 Ok(v) if v.is_some() => {
                     if let Err(err) = self.ommers_cursor.delete_current() {
@@ -199,7 +204,7 @@ where
 
         // Prune Withdrawals table. Can't use prune_table_with_range_step, since there are blocks
         // without a respective entry.
-        if let Some(block) = &pruned_block_indices.clone() {
+        if let Some(block) = &pruned_block_indices {
             match self.withdrawals_cursor.seek_exact(*block) {
                 Ok(v) if v.is_some() => {
                     if let Err(err) = self.withdrawals_cursor.delete_current() {
