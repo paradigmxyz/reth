@@ -33,6 +33,8 @@ mod execute;
 pub use execute::*;
 pub mod l1;
 pub use l1::*;
+mod receipts;
+pub use receipts::*;
 
 mod error;
 pub use error::OpBlockExecutionError;
