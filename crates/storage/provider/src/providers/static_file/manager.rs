@@ -48,7 +48,6 @@ use std::{
     path::{Path, PathBuf},
     sync::{mpsc, Arc},
 };
-use strum::IntoEnumIterator;
 use tracing::{info, trace, warn};
 
 /// Alias type for a map that can be queried for block ranges from a transaction
@@ -682,6 +681,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         for segment in StaticFileSegment::iter() {
+            // Not integrated yet
+            if segment.is_block_meta() {
+                continue
+            }
+
             if has_receipt_pruning && segment.is_receipts() {
                 // Pruned nodes (including full node) do not store receipts as static files.
                 continue
@@ -776,6 +780,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     highest_tx,
                     highest_block,
                 )?,
+                StaticFileSegment::BlockMeta => self
+                    .ensure_invariants::<_, tables::BlockBodyIndices>(
+                        provider,
+                        segment,
+                        highest_block,
+                        highest_block,
+                    )?,
             } {
                 update_unwind_target(unwind);
             }
@@ -825,41 +836,46 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     where
         Provider: DBProvider + BlockReader + StageCheckpointReader,
     {
-        let highest_static_file_entry = highest_static_file_entry.unwrap_or_default();
-        let highest_static_file_block = highest_static_file_block.unwrap_or_default();
         let mut db_cursor = provider.tx_ref().cursor_read::<T>()?;
 
         if let Some((db_first_entry, _)) = db_cursor.first()? {
-            // If there is a gap between the entry found in static file and
-            // database, then we have most likely lost static file data and need to unwind so we can
-            // load it again
-            if !(db_first_entry <= highest_static_file_entry ||
-                highest_static_file_entry + 1 == db_first_entry)
+            if let (Some(highest_entry), Some(highest_block)) =
+                (highest_static_file_entry, highest_static_file_block)
             {
-                info!(
-                    target: "reth::providers::static_file",
-                    ?db_first_entry,
-                    ?highest_static_file_entry,
-                    unwind_target = highest_static_file_block,
-                    ?segment,
-                    "Setting unwind target."
-                );
-                return Ok(Some(highest_static_file_block))
+                // If there is a gap between the entry found in static file and
+                // database, then we have most likely lost static file data and need to unwind so we
+                // can load it again
+                if !(db_first_entry <= highest_entry || highest_entry + 1 == db_first_entry) {
+                    info!(
+                        target: "reth::providers::static_file",
+                        ?db_first_entry,
+                        ?highest_entry,
+                        unwind_target = highest_block,
+                        ?segment,
+                        "Setting unwind target."
+                    );
+                    return Ok(Some(highest_block))
+                }
             }
 
             if let Some((db_last_entry, _)) = db_cursor.last()? {
-                if db_last_entry > highest_static_file_entry {
+                if highest_static_file_entry
+                    .is_none_or(|highest_entry| db_last_entry > highest_entry)
+                {
                     return Ok(None)
                 }
             }
         }
+
+        let highest_static_file_entry = highest_static_file_entry.unwrap_or_default();
+        let highest_static_file_block = highest_static_file_block.unwrap_or_default();
 
         // If static file entry is ahead of the database entries, then ensure the checkpoint block
         // number matches.
         let checkpoint_block_number = provider
             .get_stage_checkpoint(match segment {
                 StaticFileSegment::Headers => StageId::Headers,
-                StaticFileSegment::Transactions => StageId::Bodies,
+                StaticFileSegment::Transactions | StaticFileSegment::BlockMeta => StageId::Bodies,
                 StaticFileSegment::Receipts => StageId::Execution,
             })?
             .unwrap_or_default()
@@ -890,8 +906,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             );
             let mut writer = self.latest_writer(segment)?;
             if segment.is_headers() {
+                // TODO(joshie): is_block_meta
                 writer.prune_headers(highest_static_file_block - checkpoint_block_number)?;
             } else if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
+                // todo joshie: is querying block_body_indices a potential issue once bbi is moved
+                // to sf as well
                 let number = highest_static_file_entry - block.last_tx_num();
                 if segment.is_receipts() {
                     writer.prune_receipts(number, checkpoint_block_number)?;
@@ -928,6 +947,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             headers: self.get_highest_static_file_block(StaticFileSegment::Headers),
             receipts: self.get_highest_static_file_block(StaticFileSegment::Receipts),
             transactions: self.get_highest_static_file_block(StaticFileSegment::Transactions),
+            block_meta: self.get_highest_static_file_block(StaticFileSegment::BlockMeta),
         }
     }
 
@@ -970,11 +990,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         F: FnMut(&mut StaticFileCursor<'_>, u64) -> ProviderResult<Option<T>>,
         P: FnMut(&T) -> bool,
     {
-        let get_provider = |start: u64| match segment {
-            StaticFileSegment::Headers => {
+        let get_provider = |start: u64| {
+            if segment.is_block_based() {
                 self.get_segment_provider_from_block(segment, start, None)
-            }
-            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
+            } else {
                 self.get_segment_provider_from_transaction(segment, start, None)
             }
         };
@@ -1046,11 +1065,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         F: Fn(&mut StaticFileCursor<'_>, u64) -> ProviderResult<Option<T>> + 'a,
         T: std::fmt::Debug,
     {
-        let get_provider = move |start: u64| match segment {
-            StaticFileSegment::Headers => {
+        let get_provider = move |start: u64| {
+            if segment.is_block_based() {
                 self.get_segment_provider_from_block(segment, start, None)
-            }
-            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
+            } else {
                 self.get_segment_provider_from_transaction(segment, start, None)
             }
         };
@@ -1098,11 +1116,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         FD: Fn() -> ProviderResult<Option<T>>,
     {
         // If there is, check the maximum block or transaction number of the segment.
-        let static_file_upper_bound = match segment {
-            StaticFileSegment::Headers => self.get_highest_static_file_block(segment),
-            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
-                self.get_highest_static_file_tx(segment)
-            }
+        let static_file_upper_bound = if segment.is_block_based() {
+            self.get_highest_static_file_block(segment)
+        } else {
+            self.get_highest_static_file_tx(segment)
         };
 
         if static_file_upper_bound
@@ -1140,11 +1157,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut data = Vec::new();
 
         // If there is, check the maximum block or transaction number of the segment.
-        if let Some(static_file_upper_bound) = match segment {
-            StaticFileSegment::Headers => self.get_highest_static_file_block(segment),
-            StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
-                self.get_highest_static_file_tx(segment)
-            }
+        if let Some(static_file_upper_bound) = if segment.is_block_based() {
+            self.get_highest_static_file_block(segment)
+        } else {
+            self.get_highest_static_file_tx(segment)
         } {
             if block_or_tx_range.start <= static_file_upper_bound {
                 let end = block_or_tx_range.end.min(static_file_upper_bound + 1);
@@ -1665,25 +1681,56 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
 impl<N: NodePrimitives> WithdrawalsProvider for StaticFileProvider<N> {
     fn withdrawals_by_block(
         &self,
-        _id: BlockHashOrNumber,
-        _timestamp: u64,
+        id: BlockHashOrNumber,
+        timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
-        // Required data not present in static_files
+        if let Some(num) = id.as_number() {
+            return self
+                .get_segment_provider_from_block(StaticFileSegment::BlockMeta, num, None)
+                .and_then(|provider| provider.withdrawals_by_block(id, timestamp))
+                .or_else(|err| {
+                    if let ProviderError::MissingStaticFileBlock(_, _) = err {
+                        Ok(None)
+                    } else {
+                        Err(err)
+                    }
+                })
+        }
+        // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
     }
 }
 
 impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileProvider<N> {
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        // Required data not present in static_files
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+        if let Some(num) = id.as_number() {
+            return self
+                .get_segment_provider_from_block(StaticFileSegment::BlockMeta, num, None)
+                .and_then(|provider| provider.ommers(id))
+                .or_else(|err| {
+                    if let ProviderError::MissingStaticFileBlock(_, _) = err {
+                        Ok(None)
+                    } else {
+                        Err(err)
+                    }
+                })
+        }
+        // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
     }
 }
 
-impl<N: Send + Sync> BlockBodyIndicesProvider for StaticFileProvider<N> {
-    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        // Required data not present in static_files
-        Err(ProviderError::UnsupportedProvider)
+impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileProvider<N> {
+    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        self.get_segment_provider_from_block(StaticFileSegment::BlockMeta, num, None)
+            .and_then(|provider| provider.block_body_indices(num))
+            .or_else(|err| {
+                if let ProviderError::MissingStaticFileBlock(_, _) = err {
+                    Ok(None)
+                } else {
+                    Err(err)
+                }
+            })
     }
 }
 
