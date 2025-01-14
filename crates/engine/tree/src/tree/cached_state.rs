@@ -1,8 +1,6 @@
 //! Implements a state provider that has a shared cache in front of it.
-use std::time::Instant;
-
 use alloy_primitives::{map::B256HashMap, Address, StorageKey, StorageValue, B256};
-use metrics::{Gauge, Histogram};
+use metrics::Gauge;
 use moka::{sync::CacheBuilder, PredicateError};
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
@@ -125,53 +123,17 @@ pub(crate) struct CachedStateMetrics {
     /// Code cache misses
     code_cache_misses: Gauge,
 
-    /// Code access latency
-    code_access_latency: Histogram,
-
-    /// Code access latency for hits
-    code_access_hit_latency: Histogram,
-
-    /// Code access latency for misses
-    code_access_miss_latency: Histogram,
-
-    /// Code cache size
-    code_cache_size: Gauge,
-
     /// Storage cache hits
     storage_cache_hits: Gauge,
 
     /// Storage cache misses
     storage_cache_misses: Gauge,
 
-    /// Storage access latency
-    storage_access_latency: Histogram,
-
-    /// Storage access latency for hits
-    storage_access_hit_latency: Histogram,
-
-    /// Storage access latency for misses
-    storage_access_miss_latency: Histogram,
-
-    /// Storage cache size
-    storage_cache_size: Gauge,
-
     /// Account cache hits
     account_cache_hits: Gauge,
 
     /// Account cache misses
     account_cache_misses: Gauge,
-
-    /// Account access latency
-    account_access_latency: Histogram,
-
-    /// Account access latency for hits
-    account_access_hit_latency: Histogram,
-
-    /// Account access latency for misses
-    account_access_miss_latency: Histogram,
-
-    /// Account cache size
-    account_cache_size: Gauge,
 }
 
 impl CachedStateMetrics {
@@ -200,17 +162,8 @@ impl CachedStateMetrics {
 
 impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        let start = Instant::now();
         if let Some(res) = self.caches.account_cache.get(address) {
-            let hit_latency = start.elapsed();
             self.metrics.account_cache_hits.increment(1);
-
-            // record hit metrics
-            self.metrics.account_access_latency.record(hit_latency);
-            self.metrics.account_access_hit_latency.record(hit_latency);
-
-            // update size metrics
-            self.metrics.account_cache_size.set(self.caches.account_cache.weighted_size() as f64);
             return Ok(res)
         }
 
@@ -218,14 +171,6 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
 
         let res = self.state_provider.basic_account(address)?;
         self.caches.account_cache.insert(*address, res);
-
-        // record miss metrics
-        let miss_latency = start.elapsed();
-        self.metrics.account_access_latency.record(miss_latency);
-        self.metrics.account_access_miss_latency.record(miss_latency);
-
-        // update size metrics
-        self.metrics.account_cache_size.set(self.caches.account_cache.weighted_size() as f64);
         Ok(res)
     }
 }
@@ -236,17 +181,8 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        let start = Instant::now();
         if let Some(res) = self.caches.storage_cache.get(&(account, storage_key)) {
-            let hit_latency = start.elapsed();
             self.metrics.storage_cache_hits.increment(1);
-
-            // record hit metrics
-            self.metrics.storage_access_latency.record(hit_latency);
-            self.metrics.storage_access_hit_latency.record(hit_latency);
-
-            // update size metrics
-            self.metrics.storage_cache_size.set(self.caches.storage_cache.weighted_size() as f64);
             return Ok(res)
         }
 
@@ -254,29 +190,12 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
 
         let final_res = self.state_provider.storage(account, storage_key)?;
         self.caches.storage_cache.insert((account, storage_key), final_res);
-
-        // record miss metrics
-        let miss_latency = start.elapsed();
-        self.metrics.storage_access_latency.record(miss_latency);
-        self.metrics.storage_access_miss_latency.record(miss_latency);
-
-        // update size metrics
-        self.metrics.storage_cache_size.set(self.caches.storage_cache.weighted_size() as f64);
         Ok(final_res)
     }
 
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        let start = Instant::now();
         if let Some(res) = self.caches.code_cache.get(code_hash) {
-            let hit_latency = start.elapsed();
             self.metrics.code_cache_hits.increment(1);
-
-            // record hit metrics
-            self.metrics.code_access_latency.record(hit_latency);
-            self.metrics.code_access_hit_latency.record(hit_latency);
-
-            // update size metrics
-            self.metrics.code_cache_size.set(self.caches.code_cache.weighted_size() as f64);
             return Ok(res)
         }
 
@@ -284,14 +203,6 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
 
         let final_res = self.state_provider.bytecode_by_hash(code_hash)?;
         self.caches.code_cache.insert(*code_hash, final_res.clone());
-
-        // record miss metrics
-        let miss_latency = start.elapsed();
-        self.metrics.code_access_latency.record(miss_latency);
-        self.metrics.code_access_miss_latency.record(miss_latency);
-
-        // update size metrics
-        self.metrics.code_cache_size.set(self.caches.code_cache.weighted_size() as f64);
         Ok(final_res)
     }
 }
