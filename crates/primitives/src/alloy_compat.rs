@@ -87,7 +87,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
                         hash,
                     )
                 } else {
-                    return Err(ConversionError::Custom("unknown transaction type".to_string()));
+                    return Err(ConversionError::Custom("unknown transaction type".to_string()))
                 }
             }
             _ => return Err(ConversionError::Custom("unknown transaction type".to_string())),

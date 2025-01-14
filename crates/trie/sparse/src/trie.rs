@@ -308,7 +308,7 @@ impl<P> RevealedSparseTrie<P> {
     ) -> SparseTrieResult<()> {
         // If the node is already revealed and it's not a hash node, do nothing.
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
-            return Ok(());
+            return Ok(())
         }
 
         if let Some(hash_mask) = hash_mask {
@@ -455,7 +455,7 @@ impl<P> RevealedSparseTrie<P> {
                     entry.insert(SparseNode::Hash(hash));
                 }
             }
-            return Ok(());
+            return Ok(())
         }
 
         self.reveal_node(path, TrieNode::decode(&mut &child[..])?, None, None)
@@ -488,7 +488,7 @@ impl<P> RevealedSparseTrie<P> {
                         node,
                         unset_branch_nibble: None,
                     });
-                    break;
+                    break
                 }
                 SparseNode::Extension { key, .. } => {
                     #[cfg(debug_assertions)]
@@ -599,14 +599,14 @@ impl<P> RevealedSparseTrie<P> {
                 SparseNode::Empty | SparseNode::Hash(_) => {}
                 SparseNode::Leaf { hash, .. } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
-                        continue;
+                        continue
                     }
 
                     targets.push(path);
                 }
                 SparseNode::Extension { key, hash } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
-                        continue;
+                        continue
                     }
 
                     if level >= depth {
@@ -618,7 +618,7 @@ impl<P> RevealedSparseTrie<P> {
                 }
                 SparseNode::Branch { state_mask, hash, .. } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
-                        continue;
+                        continue
                     }
 
                     if level >= depth {
@@ -693,7 +693,7 @@ impl<P> RevealedSparseTrie<P> {
                     } else {
                         // need to get rlp node for child first
                         buffers.path_stack.extend([(path, is_in_prefix_set), (child_path, None)]);
-                        continue;
+                        continue
                     }
                 }
                 SparseNode::Branch { state_mask, hash, store_in_db_trie } => {
@@ -705,7 +705,7 @@ impl<P> RevealedSparseTrie<P> {
                             RlpNode::word_rlp(&hash),
                             SparseNodeType::Branch { store_in_db_trie },
                         ));
-                        continue;
+                        continue
                     }
                     let retain_updates = self.updates.is_some() && prefix_set_contains(&path);
 
@@ -792,7 +792,7 @@ impl<P> RevealedSparseTrie<P> {
                             buffers
                                 .path_stack
                                 .extend(buffers.branch_child_buf.drain(..).map(|p| (p, None)));
-                            continue 'main;
+                            continue 'main
                         }
                     }
 
@@ -846,7 +846,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
         let existing = self.values.insert(path.clone(), value);
         if existing.is_some() {
             // trie structure unchanged, return immediately
-            return Ok(());
+            return Ok(())
         }
 
         let mut current = Nibbles::default();
@@ -854,7 +854,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
             match node {
                 SparseNode::Empty => {
                     *node = SparseNode::new_leaf(path);
-                    break;
+                    break
                 }
                 &mut SparseNode::Hash(hash) => {
                     return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
@@ -957,11 +957,11 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
         if self.values.remove(path).is_none() {
             if let Some(&SparseNode::Hash(hash)) = self.nodes.get(path) {
                 // Leaf is present in the trie, but it's blinded.
-                return Err(SparseTrieErrorKind::BlindedNode { path: path.clone(), hash }.into());
+                return Err(SparseTrieErrorKind::BlindedNode { path: path.clone(), hash }.into())
             }
 
             // Leaf is not present in the trie.
-            return Ok(());
+            return Ok(())
         }
         self.prefix_set.insert(path.clone());
 
@@ -986,7 +986,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
             debug_assert!(self.nodes.is_empty());
             self.nodes.insert(Nibbles::default(), SparseNode::Empty);
 
-            return Ok(());
+            return Ok(())
         }
 
         // Walk the stack of removed nodes from the back and re-insert them back into the trie,

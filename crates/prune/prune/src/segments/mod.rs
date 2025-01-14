@@ -95,7 +95,7 @@ impl PruneInput {
                     // Prevents a scenario where the pruner correctly starts at a finalized block,
                     // but the first transaction (tx_num = 0) only appears on an non-finalized one.
                     // Should only happen on a test/hive scenario.
-                    return Ok(None);
+                    return Ok(None)
                 }
                 last_tx
             }
@@ -104,7 +104,7 @@ impl PruneInput {
 
         let range = from_tx_number..=to_tx_number;
         if range.is_empty() {
-            return Ok(None);
+            return Ok(None)
         }
 
         Ok(Some(range))
@@ -122,7 +122,7 @@ impl PruneInput {
         let from_block = self.get_start_next_block_range();
         let range = from_block..=self.to_block;
         if range.is_empty() {
-            return None;
+            return None
         }
 
         Some(range)

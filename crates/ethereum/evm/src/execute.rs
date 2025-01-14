@@ -159,7 +159,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
 
             self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);

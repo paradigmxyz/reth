@@ -36,16 +36,8 @@ impl TrieUpdatesDiff {
                 debug!(target: "engine::tree", ?path, ?task, ?regular, ?database, "Difference in account trie updates");
             }
 
-            for (
-                path,
-                EntryDiff {
-                    task: task_removed,
-                    regular: regular_removed,
-                    database: database_not_exists,
-                },
-            ) in &self.removed_nodes
-            {
-                debug!(target: "engine::tree", ?path, ?task_removed, ?regular_removed, ?database_not_exists, "Difference in removed account trie nodes");
+            for (path, EntryDiff { task, regular, database }) in &self.removed_nodes {
+                debug!(target: "engine::tree", ?path, ?task, ?regular, ?database, "Difference in removed account trie nodes");
             }
 
             for (address, storage_diff) in self.storage_tries {
@@ -80,16 +72,8 @@ impl StorageTrieDiffEntry {
                     debug!(target: "engine::tree", ?address, ?path, ?task, ?regular, ?database, "Difference in storage trie updates");
                 }
 
-                for (
-                    path,
-                    EntryDiff {
-                        task: task_removed,
-                        regular: regular_removed,
-                        database: database_not_exists,
-                    },
-                ) in &storage_diff.removed_nodes
-                {
-                    debug!(target: "engine::tree", ?address, ?path, ?task_removed, ?regular_removed, ?database_not_exists, "Difference in removed storage trie nodes");
+                for (path, EntryDiff { task, regular, database }) in &storage_diff.removed_nodes {
+                    debug!(target: "engine::tree", ?address, ?path, ?task, ?regular, ?database, "Difference in removed storage trie nodes");
                 }
             }
         }

@@ -211,7 +211,7 @@ where
                     transaction_gas_limit: transaction.gas_limit(),
                     block_available_gas,
                 }
-                .into());
+                .into())
             }
 
             // Cache the depositor account prior to the state transition for the deposit nonce.

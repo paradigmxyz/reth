@@ -204,7 +204,7 @@ impl FromStr for RpcModuleSelection {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
-            return Ok(Self::Selection(Default::default()));
+            return Ok(Self::Selection(Default::default()))
         }
         let mut modules = s.split(',').map(str::trim).peekable();
         let first = modules.peek().copied().ok_or(ParseError::VariantNotFound)?;

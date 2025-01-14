@@ -95,7 +95,7 @@ impl ExecInput {
 
         if all_tx_cnt == 0 {
             // if there is no more transaction return back.
-            return Ok((first_tx_num..first_tx_num, start_block..=target_block, true));
+            return Ok((first_tx_num..first_tx_num, start_block..=target_block, true))
         }
 
         // get block of this tx

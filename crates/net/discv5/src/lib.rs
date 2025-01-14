@@ -99,7 +99,7 @@ impl Discv5 {
                 err="key not utf-8",
                 "failed to update local enr"
             );
-            return;
+            return
         };
         if let Err(err) = self.discv5.enr_insert(key_str, &rlp) {
             error!(target: "net::discv5",
@@ -304,7 +304,7 @@ impl Discv5 {
 
                 self.metrics.discovered_peers.increment_established_sessions_unreachable_enr(1);
 
-                return None;
+                return None
             }
         };
         if let FilterOutcome::Ignore { reason } = self.filter_discovered_peer(enr) {
@@ -316,7 +316,7 @@ impl Discv5 {
 
             self.metrics.discovered_peers.increment_established_sessions_filtered(1);
 
-            return None;
+            return None
         }
 
         // todo: extend for all network stacks in reth-network rlpx logic
@@ -343,14 +343,14 @@ impl Discv5 {
         let id = enr_to_discv4_id(enr).ok_or(Error::IncompatibleKeyType)?;
 
         if enr.tcp4().is_none() && enr.tcp6().is_none() {
-            return Err(Error::UnreachableRlpx);
+            return Err(Error::UnreachableRlpx)
         }
         let Some(tcp_port) = (match self.rlpx_ip_mode {
             IpMode::Ip4 => enr.tcp4(),
             IpMode::Ip6 => enr.tcp6(),
             _ => unimplemented!("dual-stack support not implemented for rlpx"),
         }) else {
-            return Err(Error::IpVersionMismatchRlpx(self.rlpx_ip_mode));
+            return Err(Error::IpVersionMismatchRlpx(self.rlpx_ip_mode))
         };
 
         Ok(NodeRecord { address: socket.ip(), tcp_port, udp_port: socket.port(), id })
@@ -501,7 +501,7 @@ pub async fn bootstrap(
         match node {
             BootNode::Enr(node) => {
                 if let Err(err) = discv5.add_enr(node) {
-                    return Err(Error::AddNodeFailed(err));
+                    return Err(Error::AddNodeFailed(err))
                 }
             }
             BootNode::Enode(enode) => {

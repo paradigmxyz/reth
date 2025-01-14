@@ -104,7 +104,7 @@ where
                 // next.
                 self.push_front(job);
 
-                return Poll::Ready(Some(job_result));
+                return Poll::Ready(Some(job_result))
             };
         }
 

@@ -34,7 +34,7 @@ impl<Provider> SegmentSet<Provider> {
     /// Adds new [Segment] to collection if it's [Some].
     pub fn segment_opt<S: Segment<Provider> + 'static>(self, segment: Option<S>) -> Self {
         if let Some(segment) = segment {
-            return self.segment(segment);
+            return self.segment(segment)
         }
         self
     }

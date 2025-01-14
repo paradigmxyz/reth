@@ -268,11 +268,11 @@ where
     loop {
         if let Some(indices) = provider.block_body_indices(last_block)? {
             if indices.last_tx_num() <= last_tx_num {
-                break;
+                break
             }
         }
         if last_block == 0 {
-            break;
+            break
         }
         last_block -= 1;
     }

@@ -35,7 +35,7 @@ impl Stream for CustomRlpxConnection {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         if let Some(initial_ping) = this.initial_ping.take() {
-            return Poll::Ready(Some(initial_ping.encoded()));
+            return Poll::Ready(Some(initial_ping.encoded()))
         }
 
         loop {
@@ -45,13 +45,13 @@ impl Stream for CustomRlpxConnection {
                         this.pending_pong = Some(response);
                         Poll::Ready(Some(CustomRlpxProtoMessage::ping_message(msg).encoded()))
                     }
-                };
+                }
             }
 
             let Some(msg) = ready!(this.conn.poll_next_unpin(cx)) else { return Poll::Ready(None) };
 
             let Some(msg) = CustomRlpxProtoMessage::decode_message(&mut &msg[..]) else {
-                return Poll::Ready(None);
+                return Poll::Ready(None)
             };
 
             match msg.message {
@@ -66,11 +66,11 @@ impl Stream for CustomRlpxConnection {
                     if let Some(sender) = this.pending_pong.take() {
                         sender.send(msg).ok();
                     }
-                    continue;
+                    continue
                 }
             }
 
-            return Poll::Pending;
+            return Poll::Pending
         }
     }
 }

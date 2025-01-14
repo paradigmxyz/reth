@@ -87,7 +87,7 @@ impl Receipt {
                 len += deposit_receipt_version.length();
             }
 
-            return len;
+            return len
         }
 
         len
@@ -123,7 +123,7 @@ impl Receipt {
         let b = &mut &**buf;
         let rlp_head = alloy_rlp::Header::decode(b)?;
         if !rlp_head.list {
-            return Err(alloy_rlp::Error::UnexpectedString);
+            return Err(alloy_rlp::Error::UnexpectedString)
         }
         let started_len = b.len();
 
@@ -167,7 +167,7 @@ impl Receipt {
             return Err(alloy_rlp::Error::ListLengthMismatch {
                 expected: rlp_head.payload_length,
                 got: consumed,
-            });
+            })
         }
         *buf = *b;
         Ok(this)

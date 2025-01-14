@@ -252,12 +252,12 @@ where
                 &pool_tx,
                 InvalidPoolTransactionError::ExceedsGasLimit(pool_tx.gas_limit(), block_gas_limit),
             );
-            continue;
+            continue
         }
 
         // check if the job was cancelled, if so we can exit early
         if cancel.is_cancelled() {
-            return Ok(BuildOutcome::Cancelled);
+            return Ok(BuildOutcome::Cancelled)
         }
 
         // convert tx to a signed transaction
@@ -280,7 +280,7 @@ where
                         MAX_DATA_GAS_PER_BLOCK,
                     ),
                 );
-                continue;
+                continue
             }
         }
 
@@ -307,11 +307,11 @@ where
                             );
                         }
 
-                        continue;
+                        continue
                     }
                     err => {
                         // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err));
+                        return Err(PayloadBuilderError::EvmExecutionError(err))
                     }
                 }
             }
@@ -363,7 +363,7 @@ where
         drop(evm);
 
         // can skip building the block
-        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads });
+        return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
     // calculate the requests and the requests root

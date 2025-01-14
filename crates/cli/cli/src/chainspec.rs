@@ -72,7 +72,7 @@ pub fn parse_genesis(s: &str) -> eyre::Result<alloy_genesis::Genesis> {
             if s.contains('{') {
                 s.to_string()
             } else {
-                return Err(io_err.into()); // assume invalid path
+                return Err(io_err.into()) // assume invalid path
             }
         }
     };

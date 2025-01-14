@@ -83,12 +83,12 @@ impl Consensus<Header, OpBlockBody> for OpBeaconConsensus {
         if block.ommers_hash != ommers_hash {
             return Err(ConsensusError::BodyOmmersHashDiff(
                 GotExpected { got: ommers_hash, expected: block.ommers_hash }.into(),
-            ));
+            ))
         }
 
         // Check transaction root
         if let Err(error) = block.ensure_transaction_root_valid() {
-            return Err(ConsensusError::BodyTransactionRootDiff(error.into()));
+            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
         }
 
         // EIP-4895: Beacon chain push withdrawals as operations
@@ -136,7 +136,7 @@ impl HeaderValidator for OpBeaconConsensus {
                 return Err(ConsensusError::BaseFeeDiff(GotExpected {
                     expected: expected_base_fee,
                     got: header_base_fee,
-                }));
+                }))
             }
         } else {
             validate_against_parent_eip1559_base_fee(
@@ -166,11 +166,11 @@ impl HeaderValidator for OpBeaconConsensus {
         );
 
         if header.nonce != B64::ZERO {
-            return Err(ConsensusError::TheMergeNonceIsNotZero);
+            return Err(ConsensusError::TheMergeNonceIsNotZero)
         }
 
         if header.ommers_hash != EMPTY_OMMER_ROOT_HASH {
-            return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty);
+            return Err(ConsensusError::TheMergeOmmerRootIsNotEmpty)
         }
 
         // Post-merge, the consensus layer is expected to perform checks such that the block

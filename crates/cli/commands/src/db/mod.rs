@@ -118,7 +118,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
                     if !input.trim().eq_ignore_ascii_case("y") {
                         println!("Database drop aborted!");
-                        return Ok(());
+                        return Ok(())
                     }
                 }
 

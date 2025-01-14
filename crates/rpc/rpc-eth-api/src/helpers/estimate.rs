@@ -99,7 +99,7 @@ pub trait EstimateCall: Call {
                         env.tx.gas_limit = MIN_TRANSACTION_GAS;
                         if let Ok((res, _)) = self.transact(&mut db, env) {
                             if res.result.is_success() {
-                                return Ok(U256::from(MIN_TRANSACTION_GAS));
+                                return Ok(U256::from(MIN_TRANSACTION_GAS))
                             }
                         }
                     }
@@ -145,7 +145,7 @@ pub trait EstimateCall: Call {
             ExecutionResult::Halt { reason, gas_used } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
-                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into_eth_err());
+                return Err(RpcInvalidTransactionError::halt(reason, gas_used).into_eth_err())
             }
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
@@ -155,7 +155,7 @@ pub trait EstimateCall: Call {
                 } else {
                     // the transaction did revert
                     Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err())
-                };
+                }
             }
         };
 
@@ -213,7 +213,7 @@ pub trait EstimateCall: Call {
             if (highest_gas_limit - lowest_gas_limit) as f64 / (highest_gas_limit as f64) <
                 ESTIMATE_GAS_ERROR_RATIO
             {
-                break;
+                break
             };
 
             env.tx.gas_limit = mid_gas_limit;
@@ -353,7 +353,7 @@ pub fn update_estimated_gas_range(
                     // These cases should be unreachable because we know the transaction
                     // succeeds, but if they occur, treat them as an
                     // error.
-                    return Err(RpcInvalidTransactionError::EvmHalt(err).into_eth_err());
+                    return Err(RpcInvalidTransactionError::EvmHalt(err).into_eth_err())
                 }
             }
         }

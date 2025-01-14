@@ -59,7 +59,7 @@ impl BlockCache {
                 debug_assert_eq!(popped_block, block);
                 file_ids.insert(file_id);
             } else {
-                break;
+                break
             }
         }
 

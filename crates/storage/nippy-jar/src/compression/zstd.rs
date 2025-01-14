@@ -64,7 +64,7 @@ impl Zstd {
     pub fn decompressors(&self) -> Result<Vec<Decompressor<'_>>, NippyJarError> {
         if let Some(dictionaries) = &self.dictionaries {
             debug_assert!(dictionaries.len() == self.columns);
-            return dictionaries.decompressors();
+            return dictionaries.decompressors()
         }
 
         Ok(vec![])
@@ -76,12 +76,12 @@ impl Zstd {
             ZstdState::PendingDictionary => Err(NippyJarError::CompressorNotReady),
             ZstdState::Ready => {
                 if !self.use_dict {
-                    return Ok(None);
+                    return Ok(None)
                 }
 
                 if let Some(dictionaries) = &self.dictionaries {
                     debug!(target: "nippy-jar", count=?dictionaries.len(), "Generating ZSTD compressor dictionaries.");
-                    return Ok(Some(dictionaries.compressors()?));
+                    return Ok(Some(dictionaries.compressors()?))
                 }
                 Ok(None)
             }
@@ -106,7 +106,7 @@ impl Zstd {
                 buffer.reserve(column_value.len() * multiplier);
                 multiplier += 1;
                 if multiplier == 5 {
-                    return Err(NippyJarError::Disconnect(err));
+                    return Err(NippyJarError::Disconnect(err))
                 }
             }
 
@@ -196,7 +196,7 @@ impl Compression for Zstd {
         columns: Vec<impl IntoIterator<Item = Vec<u8>>>,
     ) -> Result<(), NippyJarError> {
         if !self.use_dict {
-            return Ok(());
+            return Ok(())
         }
 
         // There's a per 2GB hard limit on each column data set for training
@@ -210,7 +210,7 @@ impl Compression for Zstd {
         // ```
 
         if columns.len() != self.columns {
-            return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()));
+            return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
         }
 
         let mut dictionaries = Vec::with_capacity(columns.len());
@@ -369,7 +369,7 @@ impl Serialize for ZstdDictionary<'_> {
 impl PartialEq for ZstdDictionary<'_> {
     fn eq(&self, other: &Self) -> bool {
         if let (Self::Raw(a), Self::Raw(b)) = (self, &other) {
-            return a == b;
+            return a == b
         }
         unimplemented!("`DecoderDictionary` can't be compared. So comparison should be done after decompressing a value.");
     }

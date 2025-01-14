@@ -71,7 +71,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
             if payload.block_state_calls.len() > self.max_simulate_blocks() as usize {
-                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into());
+                return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into())
             }
 
             let SimulatePayload {
@@ -82,7 +82,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             } = payload;
 
             if block_state_calls.is_empty() {
-                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into());
+                return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
             }
 
             // Build cfg and block env, we'll reuse those.
@@ -145,7 +145,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     if (total_gas_limit - gas_used) < block_env.gas_limit.to() {
                         return Err(
                             EthApiError::Other(Box::new(EthSimulateError::GasLimitReached)).into()
-                        );
+                        )
                     }
 
                     let default_gas_limit = {
@@ -157,7 +157,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             return Err(EthApiError::Other(Box::new(
                                 EthSimulateError::BlockGasLimitExceeded,
                             ))
-                            .into());
+                            .into())
                         }
 
                         if txs_without_gas_limit > 0 {
@@ -275,7 +275,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             if transactions.is_empty() {
                 return Err(
                     EthApiError::InvalidParams(String::from("transactions are empty.")).into()
-                );
+                )
             }
 
             let StateContext { transaction_index, block_number } =
@@ -459,11 +459,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
                     Some(RpcInvalidTransactionError::halt(reason, env.tx.gas_limit).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error });
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Revert { output, gas_used } => {
                 let error = Some(RevertError::new(output).to_string());
-                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error });
+                return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Success { .. } => {}
         };
@@ -718,7 +718,7 @@ pub trait Call:
         for (sender, tx) in transactions {
             if *tx.tx_hash() == target_tx_hash {
                 // reached the target transaction
-                break;
+                break
             }
 
             self.evm_config().fill_tx_env(evm.tx_mut(), tx, *sender);
@@ -739,7 +739,7 @@ pub trait Call:
     ) -> Result<TxEnv, Self::Error> {
         // Ensure that if versioned hashes are set, they're not empty
         if request.blob_versioned_hashes.as_ref().is_some_and(|hashes| hashes.is_empty()) {
-            return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err());
+            return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err())
         }
 
         let TransactionRequest {
@@ -850,7 +850,7 @@ pub trait Call:
             // configured gas exceeds limit
             return Err(
                 EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-            );
+            )
         }
 
         // apply configured gas cap

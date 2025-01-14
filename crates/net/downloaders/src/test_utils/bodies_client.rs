@@ -95,7 +95,7 @@ impl BodiesClient for TestBodiesClient {
 
         Box::pin(async move {
             if should_respond_empty {
-                return Ok((PeerId::default(), vec![]).into());
+                return Ok((PeerId::default(), vec![]).into())
             }
 
             if should_delay {

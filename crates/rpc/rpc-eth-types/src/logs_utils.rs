@@ -152,7 +152,7 @@ pub fn log_matches_filter(
             !params.filter_address(&log.address) ||
             !params.filter_topics(log.topics()))
     {
-        return false;
+        return false
     }
     true
 }

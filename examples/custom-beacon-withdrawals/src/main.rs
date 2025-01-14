@@ -202,7 +202,7 @@ where
             evm.context.evm.env = previous_env;
             return Err(BlockExecutionError::Internal(InternalBlockExecutionError::Other(
                 format!("withdrawal contract system call revert: {}", e).into(),
-            )));
+            )))
         }
     };
 

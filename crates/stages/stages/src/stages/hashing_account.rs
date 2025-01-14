@@ -143,7 +143,7 @@ where
     /// Execute the stage.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         if input.target_reached() {
-            return Ok(ExecOutput::done(input.checkpoint()));
+            return Ok(ExecOutput::done(input.checkpoint()))
         }
 
         let (from_block, to_block) = input.next_block_range().into_inner();
@@ -468,7 +468,7 @@ mod tests {
                     let start_block = input.next_block();
                     let end_block = output.checkpoint.block_number;
                     if start_block > end_block {
-                        return Ok(());
+                        return Ok(())
                     }
                 }
                 self.check_hashed_accounts()

@@ -90,7 +90,7 @@ impl Future for MetricsListener {
         loop {
             let Some(event) = ready!(this.events_rx.poll_recv(cx)) else {
                 // Channel has closed
-                return Poll::Ready(());
+                return Poll::Ready(())
             };
 
             this.handle_event(event);

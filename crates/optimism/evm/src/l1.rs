@@ -51,7 +51,7 @@ pub fn extract_l1_info_from_tx<T: Transaction>(
     if l1_info_tx_data.len() < 4 {
         return Err(OpBlockExecutionError::L1BlockInfoError {
             message: "invalid l1 block info transaction calldata in the L2 block".to_string(),
-        });
+        })
     }
 
     parse_l1_info(l1_info_tx_data)
@@ -92,7 +92,7 @@ pub fn parse_l1_info_tx_bedrock(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
     if data.len() != 256 {
         return Err(OpBlockExecutionError::L1BlockInfoError {
             message: "unexpected l1 block info tx calldata length found".to_string(),
-        });
+        })
     }
 
     let l1_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or_else(|| {
@@ -137,7 +137,7 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
     if data.len() != 160 {
         return Err(OpBlockExecutionError::L1BlockInfoError {
             message: "unexpected l1 block info tx calldata length found".to_string(),
-        });
+        })
     }
 
     // https://github.com/ethereum-optimism/op-geth/blob/60038121c7571a59875ff9ed7679c48c9f73405d/core/types/rollup_cost.go#L317-L328
@@ -226,7 +226,7 @@ impl RethL1BlockInfo for L1BlockInfo {
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError> {
         if is_deposit {
-            return Ok(U256::ZERO);
+            return Ok(U256::ZERO)
         }
 
         let spec_id = if chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, timestamp) {
@@ -241,7 +241,7 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Err(OpBlockExecutionError::L1BlockInfoError {
                 message: "Optimism hardforks are not active".to_string(),
             }
-            .into());
+            .into())
         };
         Ok(self.calculate_tx_l1_cost(input, spec_id))
     }
@@ -262,7 +262,7 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Err(OpBlockExecutionError::L1BlockInfoError {
                 message: "Optimism hardforks are not active".to_string(),
             }
-            .into());
+            .into())
         };
         Ok(self.data_gas(input, spec_id))
     }
@@ -301,7 +301,7 @@ where
 
         // Commit the create2 deployer account to the database.
         db.commit(HashMap::from_iter([(CREATE_2_DEPLOYER_ADDR, revm_acc)]));
-        return Ok(());
+        return Ok(())
     }
 
     Ok(())
