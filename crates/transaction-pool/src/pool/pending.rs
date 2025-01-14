@@ -428,7 +428,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
                 if !remove_locals && tx.transaction.is_local() {
                     let sender_id = tx.transaction.sender_id();
-                    if local_senders.insert(&sender_id) {
+                    if local_senders.insert(sender_id) {
                         non_local_senders -= 1;
                     }
                     continue
