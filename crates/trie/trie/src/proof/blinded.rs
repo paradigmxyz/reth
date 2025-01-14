@@ -8,6 +8,7 @@ use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
 use reth_trie_common::{prefix_set::TriePrefixSetsMut, Nibbles};
 use reth_trie_sparse::blinded::{pad_path_to_key, BlindedProvider, BlindedProviderFactory};
 use std::sync::Arc;
+use tracing::trace;
 
 /// Factory for instantiating providers capable of retrieving blinded trie nodes via proofs.
 #[derive(Debug)]
@@ -91,8 +92,10 @@ where
                 .with_prefix_sets_mut(self.prefix_sets.as_ref().clone())
                 .multiproof(targets)
                 .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
+        let node = proof.account_subtree.into_inner().remove(path);
 
-        Ok(proof.account_subtree.into_inner().remove(path))
+        trace!(target: "trie::proof::blinded", ?path, ?node, "Blinded node for account trie");
+        Ok(node)
     }
 }
 
@@ -138,7 +141,9 @@ where
         .with_prefix_set_mut(storage_prefix_set)
         .storage_multiproof(targets)
         .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
+        let node = proof.subtree.into_inner().remove(path);
 
-        Ok(proof.subtree.into_inner().remove(path))
+        trace!(target: "trie::proof::blinded", account = ?self.account, ?path, ?node, "Blinded node for storage trie");
+        Ok(node)
     }
 }

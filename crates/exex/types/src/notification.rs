@@ -75,7 +75,6 @@ impl<P: NodePrimitives> From<CanonStateNotification<P>> for ExExNotification<P> 
 pub(super) mod serde_bincode_compat {
     use reth_execution_types::serde_bincode_compat::Chain;
     use reth_primitives::{EthPrimitives, NodePrimitives};
-    use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
     use std::sync::Arc;

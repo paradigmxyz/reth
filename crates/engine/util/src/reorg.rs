@@ -14,8 +14,8 @@ use reth_engine_primitives::{
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
-    env::EvmEnv, state_change::post_block_withdrawals_balance_increments,
-    system_calls::SystemCaller, ConfigureEvm,
+    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
+    ConfigureEvm,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
@@ -29,7 +29,7 @@ use reth_revm::{
     DatabaseCommit,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
-use revm_primitives::{EVMError, EnvWithHandlerCfg};
+use revm_primitives::EVMError;
 use std::{
     collections::VecDeque,
     future::Future,
@@ -297,15 +297,8 @@ where
         .with_bundle_update()
         .build();
 
-    // Configure environments
-    let EvmEnv { cfg_env_with_handler_cfg, block_env } =
-        evm_config.cfg_and_block_env(&reorg_target.header);
-    let env = EnvWithHandlerCfg::new_with_cfg_env(
-        cfg_env_with_handler_cfg,
-        block_env,
-        Default::default(),
-    );
-    let mut evm = evm_config.evm_with_env(&mut state, env);
+    // Configure EVM
+    let mut evm = evm_config.evm_for_block(&mut state, &reorg_target.header);
 
     // apply eip-4788 pre block contract call
     let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
