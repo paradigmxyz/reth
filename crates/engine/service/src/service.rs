@@ -52,6 +52,9 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 /// The type that drives the chain forward and communicates progress.
 #[pin_project]
 #[allow(missing_debug_implementations)]
+// TODO(mattsse): remove hidde once fixed : <https://github.com/rust-lang/rust/issues/135363>
+//  otherwise rustdoc fails to resolve the alias
+#[doc(hidden)]
 pub struct EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
