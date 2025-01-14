@@ -63,10 +63,6 @@ pub enum P2PStreamError {
     #[error("mismatched protocol version in Hello message: {0}")]
     MismatchedProtocolVersion(GotExpected<ProtocolVersion>),
 
-    /// Ping started before the handshake completed.
-    #[error("started ping task before the handshake completed")]
-    PingBeforeHandshake,
-
     /// Too many messages buffered before sending.
     #[error("too many messages buffered before sending")]
     SendBufferFull,

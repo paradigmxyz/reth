@@ -80,7 +80,7 @@ where
     // `from_block_with_transactions`, however we need to compute the length before
     let block_length = block.block.length();
     let transactions = block.block.body().transactions().to_vec();
-    let transactions_with_senders = transactions.into_iter().zip(block.senders);
+    let transactions_with_senders = transactions.into_iter().zip(block.senders_iter().copied());
     let transactions = transactions_with_senders
         .enumerate()
         .map(|(idx, (tx, sender))| {

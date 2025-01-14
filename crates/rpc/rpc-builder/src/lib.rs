@@ -2110,6 +2110,34 @@ pub struct TransportRpcModules<Context = ()> {
 // === impl TransportRpcModules ===
 
 impl TransportRpcModules {
+    /// Sets a custom [`TransportRpcModuleConfig`] for the configured modules.
+    /// This will overwrite current configuration, if any.
+    pub fn with_config(mut self, config: TransportRpcModuleConfig) -> Self {
+        self.config = config;
+        self
+    }
+
+    /// Sets the [`RpcModule`] for the http transport.
+    /// This will overwrite current module, if any.
+    pub fn with_http(mut self, http: RpcModule<()>) -> Self {
+        self.http = Some(http);
+        self
+    }
+
+    /// Sets the [`RpcModule`] for the ws transport.
+    /// This will overwrite current module, if any.
+    pub fn with_ws(mut self, ws: RpcModule<()>) -> Self {
+        self.ws = Some(ws);
+        self
+    }
+
+    /// Sets the [`RpcModule`] for the http transport.
+    /// This will overwrite current module, if any.
+    pub fn with_ipc(mut self, ipc: RpcModule<()>) -> Self {
+        self.ipc = Some(ipc);
+        self
+    }
+
     /// Returns the [`TransportRpcModuleConfig`] used to configure this instance.
     pub const fn module_config(&self) -> &TransportRpcModuleConfig {
         &self.config

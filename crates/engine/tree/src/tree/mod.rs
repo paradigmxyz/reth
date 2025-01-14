@@ -539,7 +539,7 @@ where
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
     /// state root task thread pool
-    state_root_task_pool: rayon::ThreadPool,
+    state_root_task_pool: Arc<rayon::ThreadPool>,
 }
 
 impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug> std::fmt::Debug
@@ -606,11 +606,13 @@ where
         let num_threads =
             std::thread::available_parallelism().map_or(1, |num| (num.get() / 2).max(1));
 
-        let state_root_task_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .thread_name(|i| format!("srt-worker-{}", i))
-            .build()
-            .expect("Failed to create proof worker thread pool");
+        let state_root_task_pool = Arc::new(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .thread_name(|i| format!("srt-worker-{}", i))
+                .build()
+                .expect("Failed to create proof worker thread pool"),
+        );
 
         Self {
             provider,
@@ -1597,10 +1599,11 @@ where
             return Ok(None)
         };
 
-        let SealedBlockWithSenders { block, senders } = self
+        let (block, senders) = self
             .provider
             .sealed_block_with_senders(hash.into(), TransactionVariant::WithHash)?
-            .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?;
+            .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?
+            .split();
         let execution_output = self
             .provider
             .get_state(block.number())?
@@ -2312,7 +2315,7 @@ where
                 let state_root_task = StateRootTask::new(
                     state_root_config,
                     blinded_provider_factory,
-                    &self.state_root_task_pool,
+                    self.state_root_task_pool.clone(),
                 );
                 let state_hook = state_root_task.state_hook();
                 (Some(state_root_task.spawn(scope)), Box::new(state_hook) as Box<dyn OnStateHook>)
@@ -2369,13 +2372,24 @@ where
                                 "Task state root finished"
                             );
 
-                            if task_state_root != block.header().state_root() {
-                                debug!(target: "engine::tree", "Task state root does not match block state root");
+                            if task_state_root != block.header().state_root() ||
+                                self.config.always_compare_trie_updates()
+                            {
+                                if task_state_root != block.header().state_root() {
+                                    debug!(target: "engine::tree", "Task state root does not match block state root");
+                                }
+
                                 let (regular_root, regular_updates) =
                                     state_provider.state_root_with_updates(hashed_state.clone())?;
 
                                 if regular_root == block.header().state_root() {
-                                    compare_trie_updates(&task_trie_updates, &regular_updates);
+                                    let provider = self.provider.database_provider_ro()?;
+                                    compare_trie_updates(
+                                        provider.tx_ref(),
+                                        task_trie_updates.clone(),
+                                        regular_updates,
+                                    )
+                                    .map_err(ProviderError::from)?;
                                 } else {
                                     debug!(target: "engine::tree", "Regular state root does not match block state root");
                                 }
@@ -2452,7 +2466,7 @@ where
 
         let executed: ExecutedBlock<N> = ExecutedBlock {
             block: sealed_block.clone(),
-            senders: Arc::new(block.senders),
+            senders: Arc::new(block.senders().to_vec()),
             execution_output: Arc::new(ExecutionOutcome::from((output, block_number))),
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
@@ -3002,9 +3016,11 @@ mod tests {
             self.persist_blocks(
                 blocks
                     .into_iter()
-                    .map(|b| SealedBlockWithSenders {
-                        block: (*b.block).clone(),
-                        senders: b.senders.to_vec(),
+                    .map(|b| {
+                        SealedBlockWithSenders::new_unchecked(
+                            (*b.block).clone(),
+                            b.senders().clone(),
+                        )
                     })
                     .collect(),
             );
@@ -3710,7 +3726,7 @@ mod tests {
         for block in &chain_a {
             test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
                 block: Arc::new(block.block.clone()),
-                senders: Arc::new(block.senders.clone()),
+                senders: Arc::new(block.senders().to_vec()),
                 execution_output: Arc::new(ExecutionOutcome::default()),
                 hashed_state: Arc::new(HashedPostState::default()),
                 trie: Arc::new(TrieUpdates::default()),
@@ -3721,7 +3737,7 @@ mod tests {
         for block in &chain_b {
             test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
                 block: Arc::new(block.block.clone()),
-                senders: Arc::new(block.senders.clone()),
+                senders: Arc::new(block.senders().to_vec()),
                 execution_output: Arc::new(ExecutionOutcome::default()),
                 hashed_state: Arc::new(HashedPostState::default()),
                 trie: Arc::new(TrieUpdates::default()),

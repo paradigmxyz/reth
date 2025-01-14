@@ -1791,7 +1791,7 @@ mod tests {
             consistent_provider.account_block_changeset(last_database_block).unwrap(),
             database_changesets
                 .into_iter()
-                .last()
+                .next_back()
                 .unwrap()
                 .into_iter()
                 .sorted_by_key(|(address, _, _)| *address)
