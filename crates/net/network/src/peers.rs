@@ -1660,6 +1660,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_reject_incoming_at_pending_capacity_trusted_peers() {
+        let trusted_id = PeerId::random();
+        let trusted_peer = TrustedPeer::new(
+            Host::Ipv4(Ipv4Addr::new(127, 0, 1, 2)),
+            10,
+            trusted_id
+        );
+        let mut peers = PeersManager::new( PeersConfig {
+            trusted_nodes: vec![trusted_peer],
+            ..Default::default()
+        });
+
+        for count in 1..=peers.connection_info.config.max_inbound {
+            let socket_addr =
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, count as u8)), 8008);
+            assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_ok());
+            assert_eq!(peers.connection_info.num_pending_in, count);
+        }
+        assert!(peers.connection_info.has_in_capacity());
+        assert!(!peers.connection_info.has_in_pending_capacity());
+
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 100)), 8008);
+        assert!(peers.on_incoming_pending_session(socket_addr.ip()).is_err());
+    }
+
+    #[tokio::test]
     async fn test_closed_incoming() {
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
         let mut peers = PeersManager::default();
