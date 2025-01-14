@@ -152,7 +152,7 @@ where
     ) -> Result<OpTransactionSigned, Self::Error> {
         let request: OpTransactionRequest = request.into();
         let Ok(tx) = request.build_typed_tx() else {
-            return Err(OpEthApiError::Eth(EthApiError::TransactionConversionError))
+            return Err(OpEthApiError::Eth(EthApiError::TransactionConversionError));
         };
 
         // Create an empty signature for the transaction.
@@ -175,7 +175,7 @@ where
                 deposit.input = deposit.input.slice(..4);
                 let mut deposit = deposit.seal_unchecked(hash);
                 std::mem::swap(tx, &mut deposit);
-                return
+                return;
             }
             _ => return,
         };

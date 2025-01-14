@@ -72,13 +72,13 @@ where
             return Err(EthApiError::InvalidParams(
                 EthBundleError::EmptyBundleTransactions.to_string(),
             )
-            .into())
+            .into());
         }
         if block_number == 0 {
             return Err(EthApiError::InvalidParams(
                 EthBundleError::BundleMissingBlockNumber.to_string(),
             )
-            .into())
+            .into());
         }
 
         let transactions = txs
@@ -96,7 +96,7 @@ where
             return Err(EthApiError::InvalidParams(
                 EthBundleError::Eip4844BlobGasExceeded.to_string(),
             )
-            .into())
+            .into());
         }
 
         let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
@@ -126,7 +126,7 @@ where
             if gas_limit > block_env.gas_limit {
                 return Err(
                     EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-                )
+                );
             }
             block_env.gas_limit = gas_limit;
         }

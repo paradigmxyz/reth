@@ -57,13 +57,13 @@ impl Future for MiningMode {
             Self::Instant(rx) => {
                 // drain all transactions notifications
                 if let Poll::Ready(Some(_)) = rx.poll_next_unpin(cx) {
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 }
                 Poll::Pending
             }
             Self::Interval(interval) => {
                 if interval.poll_tick(cx).is_ready() {
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 }
                 Poll::Pending
             }

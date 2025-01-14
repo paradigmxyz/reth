@@ -135,7 +135,7 @@ impl StatefulPrecompileMut for WrappedPrecompile {
 
         // get the result if it exists
         if let Some(result) = cache.get(&key) {
-            return result.clone()
+            return result.clone();
         }
 
         // call the precompile if cache miss

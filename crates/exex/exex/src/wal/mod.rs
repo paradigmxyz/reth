@@ -167,7 +167,7 @@ where
         // Remove notifications from the storage.
         if file_ids.is_empty() {
             debug!(target: "exex::wal", "No notifications were finalized from the storage");
-            return Ok(())
+            return Ok(());
         }
 
         let (removed_notifications, removed_size) = self.storage.remove_notifications(file_ids)?;
@@ -197,7 +197,7 @@ where
         &self,
     ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification<N>>> + '_>> {
         let Some(range) = self.storage.files_range()? else {
-            return Ok(Box::new(std::iter::empty()))
+            return Ok(Box::new(std::iter::empty()));
         };
 
         Ok(Box::new(self.storage.iter_notifications(range).map(|entry| Ok(entry?.2))))
@@ -221,7 +221,7 @@ where
     ) -> eyre::Result<Option<ExExNotification<N>>> {
         let Some(file_id) = self.wal.block_cache().get_file_id_by_committed_block_hash(block_hash)
         else {
-            return Ok(None)
+            return Ok(None);
         };
 
         self.wal

@@ -143,7 +143,7 @@ where
                     error!(target: "engine::local", "received download request in local engine");
                     Poll::Ready(Some(ChainEvent::FatalError))
                 }
-            }
+            };
         }
 
         // forward incoming requests to the handler

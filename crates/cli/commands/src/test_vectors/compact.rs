@@ -213,7 +213,7 @@ where
                         tries += 1;
                         bytes.extend(std::iter::repeat(0u8).take(256));
                     } else {
-                        return Err(err)?
+                        return Err(err)?;
                     }
                 }
             }

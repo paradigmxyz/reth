@@ -325,7 +325,7 @@ impl AuthServerHandle {
                     .build(ipc_endpoint)
                     .await
                     .expect("Failed to create ipc client"),
-            )
+            );
         }
         None
     }

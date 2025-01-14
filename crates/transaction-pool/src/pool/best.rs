@@ -197,7 +197,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                     "[{:?}] skipping invalid transaction",
                     best.transaction.hash()
                 );
-                continue
+                continue;
             }
 
             // Insert transactions that just got unlocked.
@@ -215,7 +215,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                     ),
                 )
             } else {
-                return Some(best.transaction)
+                return Some(best.transaction);
             }
         }
     }
@@ -255,9 +255,9 @@ where
         loop {
             let tx = self.best.next()?;
             if self.invalid.contains(&tx.sender()) {
-                continue
+                continue;
             }
-            return Some(tx.to_consensus())
+            return Some(tx.to_consensus());
         }
     }
 
@@ -294,7 +294,7 @@ where
         loop {
             let best = self.best.next()?;
             if (self.predicate)(&best) {
-                return Some(best)
+                return Some(best);
             }
             self.best.mark_invalid(
                 &best,
@@ -379,7 +379,7 @@ where
                         self.max_prioritized_gas
                 {
                     self.prioritized_gas += item.transaction.gas_limit();
-                    return Some(item)
+                    return Some(item);
                 }
                 self.buffer.push_back(item);
             }

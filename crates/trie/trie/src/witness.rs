@@ -89,7 +89,7 @@ where
         state: HashedPostState,
     ) -> Result<B256HashMap<Bytes>, TrieWitnessError> {
         if state.is_empty() {
-            return Ok(self.witness)
+            return Ok(self.witness);
         }
 
         let proof_targets = self.get_proof_targets(&state)?;

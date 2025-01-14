@@ -111,7 +111,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
                 if value.count == 0 {
                     entry.remove()
                 } else {
-                    return
+                    return;
                 }
             }
             Entry::Vacant(_) => {
@@ -190,7 +190,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         if !self.exceeds(&limit) {
             // if we are below the limits, we don't need to drop anything
-            return Vec::new()
+            return Vec::new();
         }
 
         let mut removed = Vec::new();
@@ -208,7 +208,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
                 }
 
                 if !self.exceeds(&limit) {
-                    break
+                    break;
                 }
             }
         }
@@ -296,7 +296,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
                     // still parked -> skip descendant transactions
                     'this: while let Some((peek, _)) = iter.peek() {
                         if peek.sender != id.sender {
-                            break 'this
+                            break 'this;
                         }
                         iter.next();
                     }

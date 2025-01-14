@@ -13,7 +13,7 @@ use std::future::Future;
 /// See [`alloy_eips::eip2718::Decodable2718::decode_2718`]
 pub fn recover_raw_transaction<T: SignedTransaction>(mut data: &[u8]) -> EthResult<RecoveredTx<T>> {
     if data.is_empty() {
-        return Err(EthApiError::EmptyRawTransactionData)
+        return Err(EthApiError::EmptyRawTransactionData);
     }
 
     let transaction =

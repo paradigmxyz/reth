@@ -195,7 +195,7 @@ where
             if check {
                 if let Some(latest_block) = self.inner.provider.block_by_number(number)? {
                     assert_eq!(latest_block.header().hash_slow(), expected_block_hash);
-                    break
+                    break;
                 }
                 assert!(
                     !wait_finish_checkpoint,
@@ -212,7 +212,7 @@ where
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             if let Some(checkpoint) = self.inner.provider.get_stage_checkpoint(StageId::Headers)? {
                 if checkpoint.block_number == number {
-                    break
+                    break;
                 }
             }
         }
@@ -245,7 +245,7 @@ where
                     // make sure the block hash we submitted via FCU engine api is the new latest
                     // block using an RPC call
                     assert_eq!(latest_block.header().hash_slow(), block_hash);
-                    break
+                    break;
                 }
             }
         }

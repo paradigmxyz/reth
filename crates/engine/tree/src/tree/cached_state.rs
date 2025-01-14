@@ -95,7 +95,7 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if let Some(res) = self.caches.account_cache.get(address) {
             self.metrics.account_cache_hits.increment(1);
-            return Ok(res)
+            return Ok(res);
         }
 
         self.metrics.account_cache_misses.increment(1);
@@ -114,7 +114,7 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
     ) -> ProviderResult<Option<StorageValue>> {
         if let Some(res) = self.caches.storage_cache.get(&(account, storage_key)) {
             self.metrics.storage_cache_hits.increment(1);
-            return Ok(res)
+            return Ok(res);
         }
 
         self.metrics.storage_cache_misses.increment(1);
@@ -127,7 +127,7 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if let Some(res) = self.caches.code_cache.get(code_hash) {
             self.metrics.code_cache_hits.increment(1);
-            return Ok(res)
+            return Ok(res);
         }
 
         self.metrics.code_cache_misses.increment(1);

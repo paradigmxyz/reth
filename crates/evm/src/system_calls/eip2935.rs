@@ -37,13 +37,13 @@ where
     EvmConfig: ConfigureEvm,
 {
     if !chain_spec.is_prague_active_at_timestamp(block_timestamp) {
-        return Ok(None)
+        return Ok(None);
     }
 
     // if the block number is zero (genesis block) then no system transaction may occur as per
     // EIP-2935
     if block_number == 0 {
-        return Ok(None)
+        return Ok(None);
     }
 
     // get previous env
@@ -61,7 +61,9 @@ where
         Ok(res) => res,
         Err(e) => {
             evm.context.evm.env = previous_env;
-            return Err(BlockValidationError::BlockHashContractCall { message: e.to_string() }.into())
+            return Err(
+                BlockValidationError::BlockHashContractCall { message: e.to_string() }.into()
+            );
         }
     };
 

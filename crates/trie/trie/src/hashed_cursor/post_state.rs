@@ -82,7 +82,7 @@ where
         // It's an exact match, return the account from post state without looking up in the
         // database.
         if post_state_entry.is_some_and(|entry| entry.0 == key) {
-            return Ok(post_state_entry)
+            return Ok(post_state_entry);
         }
 
         // It's not an exact match, reposition to the first greater or equal account that wasn't
@@ -217,7 +217,7 @@ where
         // If database storage was wiped or it's an exact match,
         // return the storage slot from post state without looking up in the database.
         if self.storage_wiped || post_state_entry.is_some_and(|entry| entry.0 == subkey) {
-            return Ok(post_state_entry)
+            return Ok(post_state_entry);
         }
 
         // It's not an exact match and storage was not wiped,
@@ -239,7 +239,7 @@ where
 
         // Return post state entry immediately if database was wiped.
         if self.storage_wiped {
-            return Ok(post_state_entry)
+            return Ok(post_state_entry);
         }
 
         // If post state was given precedence, move the cursor forward.

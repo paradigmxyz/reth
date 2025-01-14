@@ -284,7 +284,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     return Err(NippyJarError::InvalidPruning(
                         num_offsets,
                         remaining_to_prune as u64,
-                    ))
+                    ));
                 }
 
                 let new_num_offsets = num_offsets.saturating_sub(remaining_to_prune as u64);
@@ -310,7 +310,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
                     self.data_file.get_mut().set_len(last_offset)?;
                 }
             } else {
-                return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64))
+                return Err(NippyJarError::InvalidPruning(0, remaining_to_prune as u64));
             }
         }
 
@@ -406,7 +406,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
         for offset in self.offsets.drain(..) {
             if let Some(last_offset_ondisk) = last_offset_ondisk.take() {
                 if last_offset_ondisk == offset {
-                    continue
+                    continue;
                 }
             }
             self.offsets_file.write_all(&offset.to_le_bytes())?;

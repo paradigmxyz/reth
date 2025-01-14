@@ -86,7 +86,7 @@ impl SignedTransaction for OpTransactionSigned {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+            return Some(from);
         }
 
         let Self { transaction, signature, .. } = self;
@@ -98,7 +98,7 @@ impl SignedTransaction for OpTransactionSigned {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = &self.transaction {
-            return Some(*from)
+            return Some(*from);
         }
 
         let Self { transaction, signature, .. } = self;
@@ -208,7 +208,7 @@ impl reth_primitives_traits::FillTxEnv for OpTransactionSigned {
                     is_system_transaction: Some(tx.is_system_transaction),
                     enveloped_tx: Some(envelope.into()),
                 };
-                return
+                return;
             }
         }
 

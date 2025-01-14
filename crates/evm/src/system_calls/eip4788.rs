@@ -34,7 +34,7 @@ where
     Spec: EthereumHardforks,
 {
     if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
-        return Ok(None)
+        return Ok(None);
     }
 
     let parent_beacon_block_root =
@@ -47,9 +47,9 @@ where
             return Err(BlockValidationError::CancunGenesisParentBeaconBlockRootNotZero {
                 parent_beacon_block_root,
             }
-            .into())
+            .into());
         }
-        return Ok(None)
+        return Ok(None);
     }
 
     // get previous env
@@ -71,7 +71,7 @@ where
                 parent_beacon_block_root: Box::new(parent_beacon_block_root),
                 message: e.to_string(),
             }
-            .into())
+            .into());
         }
     };
 

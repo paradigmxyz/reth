@@ -138,13 +138,13 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
                         if forward_error_result.is_err() {
                             // channel closed, this means [TaskDownloader] was dropped,
                             // so we can also exit
-                            return Poll::Ready(())
+                            return Poll::Ready(());
                         }
                     }
                 } else {
                     // channel closed, this means [TaskDownloader] was dropped, so we can also
                     // exit
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 }
             }
 
@@ -154,7 +154,7 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
                         if this.bodies_tx.send_item(bodies).is_err() {
                             // channel closed, this means [TaskDownloader] was dropped, so we can
                             // also exit
-                            return Poll::Ready(())
+                            return Poll::Ready(());
                         }
                     }
                     None => return Poll::Pending,
@@ -162,7 +162,7 @@ impl<T: BodyDownloader> Future for SpawnedDownloader<T> {
                 Err(_) => {
                     // channel closed, this means [TaskDownloader] was dropped, so we can also
                     // exit
-                    return Poll::Ready(())
+                    return Poll::Ready(());
                 }
             }
         }

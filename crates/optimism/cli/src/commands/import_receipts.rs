@@ -165,7 +165,7 @@ where
     {
         if highest_block_receipts == highest_block_transactions {
             warn!(target: "reth::cli",  highest_block_receipts, highest_block_transactions, "Ignoring all other blocks in the file since we have reached the desired height");
-            break
+            break;
         }
 
         // create a new file client from chunk read from file

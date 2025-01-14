@@ -58,13 +58,13 @@ impl EthereumHardfork {
     /// Retrieves the activation block for the specified hardfork on the given chain.
     pub fn activation_block(&self, chain: Chain) -> Option<u64> {
         if chain == Chain::mainnet() {
-            return self.mainnet_activation_block()
+            return self.mainnet_activation_block();
         }
         if chain == Chain::sepolia() {
-            return self.sepolia_activation_block()
+            return self.sepolia_activation_block();
         }
         if chain == Chain::holesky() {
-            return self.holesky_activation_block()
+            return self.holesky_activation_block();
         }
 
         None
@@ -194,13 +194,13 @@ impl EthereumHardfork {
     /// Retrieves the activation timestamp for the specified hardfork on the given chain.
     pub fn activation_timestamp(&self, chain: Chain) -> Option<u64> {
         if chain == Chain::mainnet() {
-            return self.mainnet_activation_timestamp()
+            return self.mainnet_activation_timestamp();
         }
         if chain == Chain::sepolia() {
-            return self.sepolia_activation_timestamp()
+            return self.sepolia_activation_timestamp();
         }
         if chain == Chain::holesky() {
-            return self.holesky_activation_timestamp()
+            return self.holesky_activation_timestamp();
         }
 
         None
