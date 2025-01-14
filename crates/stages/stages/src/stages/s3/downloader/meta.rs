@@ -15,7 +15,9 @@ pub struct Metadata {
     pub downloaded: usize,
     /// Download chunk size. Default 150MB.
     pub chunk_size: usize,
-    /// Each chunk remaining download range.
+    /// Remaining download ranges for each chunk.
+    /// - `Some((start, end))`: Start and end indices to be downloaded.
+    /// - `None`: Chunk fully downloaded.
     chunks: Vec<Option<(usize, usize)>>,
     /// Path with the stored metadata.
     #[serde(skip)]

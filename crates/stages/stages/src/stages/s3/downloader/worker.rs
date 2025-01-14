@@ -1,19 +1,18 @@
-use reqwest::{blocking::Client, header::RANGE};
-use std::{
+use super::error::DownloaderError;
+use reqwest::{header::RANGE, Client};
+use std::path::{Path, PathBuf};
+use tokio::{
     fs::OpenOptions,
-    io::{BufWriter, Read, Seek, SeekFrom},
-    path::PathBuf,
-    sync::mpsc::{channel, Sender},
+    io::{AsyncSeekExt, AsyncWriteExt, BufWriter},
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
 };
 use tracing::debug;
-
-use super::error::DownloaderError;
 
 /// Responses sent by a worker.
 #[derive(Debug)]
 pub(crate) enum WorkerResponse {
     /// Worker has been spawned and awaiting work.
-    Ready { worker_id: u64, tx: Sender<WorkerRequest> },
+    Ready { worker_id: u64, tx: UnboundedSender<WorkerRequest> },
     /// Worker has downloaded
     DownloadedChunk { worker_id: u64, chunk_index: usize, written_bytes: usize },
     /// Worker has encountered an error.
@@ -29,31 +28,73 @@ pub(crate) enum WorkerRequest {
     Finish,
 }
 
+/// Spawns the requested number of workers and returns a `UnboundedReceiver` that all of them will
+/// respond to.
+pub(crate) fn spawn_workers(
+    url: &str,
+    number: u64,
+    data_file: &Path,
+) -> UnboundedReceiver<WorkerResponse> {
+    // Create channels for communication between workers and orchestrator
+    let (orchestrator_tx, orchestrator_rx) = unbounded_channel();
+
+    // Initiate workers
+    for worker_id in 0..number {
+        let orchestrator_tx = orchestrator_tx.clone();
+        let data_file = data_file.to_path_buf();
+        let url = url.to_string();
+        debug!(target: "sync::stages::s3::downloader", ?worker_id, "Spawning.");
+
+        tokio::spawn(async move {
+            if let Err(error) = worker_fetch(worker_id, &orchestrator_tx, data_file, url).await {
+                let _ = orchestrator_tx.send(WorkerResponse::Err { worker_id, error });
+            }
+        });
+    }
+
+    orchestrator_rx
+}
+
 /// Downloads requested chunk ranges to the data file.
-pub(crate) fn worker_fetch(
+async fn worker_fetch(
     worker_id: u64,
-    orchestrator_tx: &Sender<WorkerResponse>,
+    orchestrator_tx: &UnboundedSender<WorkerResponse>,
     data_file: PathBuf,
     url: String,
 ) -> Result<(), DownloaderError> {
     let client = Client::new();
-    let mut data_file = BufWriter::new(OpenOptions::new().write(true).open(data_file)?);
+    let mut data_file = BufWriter::new(OpenOptions::new().write(true).open(data_file).await?);
 
     // Signals readiness to download
-    let (tx, rx) = channel::<WorkerRequest>();
-    let _ = orchestrator_tx.send(WorkerResponse::Ready { worker_id, tx });
+    let (tx, mut rx) = unbounded_channel::<WorkerRequest>();
+    orchestrator_tx.send(WorkerResponse::Ready { worker_id, tx }).unwrap_or_else(|_| {
+        debug!("Failed to notify orchestrator of readiness");
+    });
 
-    while let Ok(req) = rx.recv() {
-        debug!(target: "sync::stages::s3::downloader", worker_id, ?req, "received from orchestrator");
+    while let Some(req) = rx.recv().await {
+        debug!(
+            target: "sync::stages::s3::downloader",
+            worker_id,
+            ?req,
+            "received from orchestrator"
+        );
 
         match req {
             WorkerRequest::Download { chunk_index, start, end } => {
-                data_file.seek(SeekFrom::Start(start as u64))?;
+                data_file.seek(tokio::io::SeekFrom::Start(start as u64)).await?;
 
-                let mut response =
-                    client.get(&url).header(RANGE, format!("bytes={}-{}", start, end)).send()?;
+                let mut response = client
+                    .get(&url)
+                    .header(RANGE, format!("bytes={}-{}", start, end))
+                    .send()
+                    .await?;
 
-                let written_bytes = std::io::copy(response.by_ref(), &mut data_file)? as usize;
+                let mut written_bytes = 0;
+                while let Some(chunk) = response.chunk().await? {
+                    written_bytes += chunk.len();
+                    data_file.write_all(&chunk).await?;
+                }
+                data_file.flush().await?;
 
                 let _ = orchestrator_tx.send(WorkerResponse::DownloadedChunk {
                     worker_id,

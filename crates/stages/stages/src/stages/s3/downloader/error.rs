@@ -1,6 +1,7 @@
 use alloy_primitives::B256;
 use reth_fs_util::FsPathError;
 
+/// Possible downloader error variants.
 #[derive(Debug, thiserror::Error)]
 pub enum DownloaderError {
     /// Requires a valid `total_size` {0}

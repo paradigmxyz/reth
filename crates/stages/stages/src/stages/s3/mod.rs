@@ -1,5 +1,6 @@
 mod downloader;
 pub use downloader::{fetch, Metadata};
+use downloader::{DownloaderError, S3DownloaderResponse};
 
 mod filelist;
 use filelist::DOWNLOAD_FILE_LIST;
@@ -13,14 +14,31 @@ use reth_provider::{
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
+use std::{
+    ops::RangeInclusive,
+    path::PathBuf,
+    task::{ready, Context, Poll},
+};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 /// S3 `StageId`
 const S3_STAGE_ID: StageId = StageId::Other("S3");
 
-/// The s3 stage.
-#[derive(Default, Debug, Clone)]
+/// The S3 stage.
+#[derive(Default, Debug)]
 #[non_exhaustive]
-pub struct S3Stage;
+pub struct S3Stage {
+    /// Static file directory.
+    static_file_directory: PathBuf,
+    /// Remote server URL.
+    url: String,
+    /// Maximum number of connections per download.
+    max_concurrent_requests: u64,
+    /// Channel to receive the downloaded ranges from the fetch task.
+    fetch_rx: Option<UnboundedReceiver<Result<S3DownloaderResponse, DownloaderError>>>,
+    /// Downloaded ranges by the fetch task.
+    downloaded_ranges: Vec<RangeInclusive<u64>>,
+}
 
 impl<Provider> Stage<Provider> for S3Stage
 where
@@ -33,6 +51,39 @@ where
         S3_STAGE_ID
     }
 
+    fn poll_execute_ready(
+        &mut self,
+        cx: &mut Context<'_>,
+        input: ExecInput,
+    ) -> Poll<Result<(), StageError>> {
+        // We are currently fetching and may have downloaded ranges that we can process.
+        if let Some(rx) = &mut self.fetch_rx {
+            // Whether we have downloaded all the required files.
+            let mut is_done = false;
+
+            let response = match ready!(rx.poll_recv(cx)) {
+                Some(Ok(response)) => {
+                    is_done = response.is_done;
+                    self.downloaded_ranges.push(response.range);
+                    Ok(())
+                }
+                Some(Err(_)) => todo!(), // TODO: DownloaderError -> StageError
+                None => Err(StageError::ChannelClosed),
+            };
+
+            if is_done {
+                self.fetch_rx = None;
+            }
+
+            return Poll::Ready(response)
+        }
+
+        // Spawns the downloader task
+        self.spawn_fetch(input);
+
+        Poll::Pending
+    }
+
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError>
     where
         Provider: DBProvider<Tx: DbTxMut>
@@ -40,55 +91,39 @@ where
             + StageCheckpointReader
             + StageCheckpointWriter,
     {
-        let cfg = "localhost:8000";
-        let checkpoint = provider.get_stage_checkpoint(S3_STAGE_ID)?.unwrap_or_default();
+        let (_, to_block) = input.next_block_range().into_inner();
         let static_file_provider = provider.static_file_provider();
         let mut tx_block_cursor = provider.tx_ref().cursor_write::<tables::TransactionBlocks>()?;
 
-        for block_range_files in &DOWNLOAD_FILE_LIST {
-            let (_, block_range) =
-                StaticFileSegment::parse_filename(block_range_files[0].0).expect("qed");
+        // Re-initializes the provider to detect the new additions
+        static_file_provider.initialize_index()?;
 
-            if block_range.end() <= checkpoint.block_number {
-                continue
-            }
+        let highest_block = self
+            .downloaded_ranges
+            .last()
+            .map(|r| *r.end())
+            .unwrap_or_else(|| input.checkpoint().block_number);
 
-            for (filename, file_hash) in block_range_files {
-                if static_file_provider.directory().join(filename).exists() {
-                    // TODO: check hash if the file already exists?
-                    continue
-                }
-
-                fetch(
-                    filename,
-                    static_file_provider.directory(),
-                    &format!("{cfg}/{filename}"),
-                    std::thread::available_parallelism()?.get() as u64,
-                    Some(*file_hash),
-                )
-                .unwrap(); // TODO add DownloadError to StageError
-            }
-
-            // Re-initializes the provider to detect the new additions
-            static_file_provider.initialize_index()?;
-
+        for block_range in self.downloaded_ranges.drain(..) {
             // Populate TransactionBlock table
-            for block_number in block_range.start()..=block_range.end() {
-                // TODO: should be error if none
+            for block_number in block_range {
+                // TODO: should be error if none since we always expect them to exist here
                 if let Some(indice) = static_file_provider.block_body_indices(block_number)? {
                     if indice.tx_count() > 0 {
                         tx_block_cursor.append(indice.last_tx_num(), &block_number)?;
                     }
                 }
             }
-
-            let checkpoint =
-                StageCheckpoint { block_number: block_range.end(), stage_checkpoint: None };
-            provider.save_stage_checkpoint(StageId::Bodies, checkpoint)?;
-            provider.save_stage_checkpoint(S3_STAGE_ID, checkpoint)?;
         }
 
-        Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
+        let checkpoint = StageCheckpoint { block_number: highest_block, stage_checkpoint: None };
+        provider.save_stage_checkpoint(StageId::Bodies, checkpoint)?;
+        provider.save_stage_checkpoint(S3_STAGE_ID, checkpoint)?;
+
+        // TODO: verify input.target according to s3 stage specifications
+        let done = highest_block == to_block;
+
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done })
     }
 
     fn unwind(
@@ -98,6 +133,78 @@ where
     ) -> Result<UnwindOutput, StageError> {
         // TODO
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+    }
+}
+
+impl S3Stage {
+    /// Spawns a task that will fetch all the missing static files from the remote server.
+    ///
+    /// Every time a block range is ready with all the necessary files, it sends a
+    /// [`S3DownloaderResponse`] to `self.fetch_rx`. If it's the last requested block range, the
+    /// response will have `is_done` set to true.
+    fn spawn_fetch(&mut self, input: ExecInput) {
+        let checkpoint = input.checkpoint();
+        // TODO: input target can only be certain numbers. eg. 499_999 , 999_999 etc.
+
+        // Create a list of all the missing files per block range that need to be downloaded.
+        let mut requests = vec![];
+        for block_range_files in &DOWNLOAD_FILE_LIST {
+            let (_, block_range) =
+                StaticFileSegment::parse_filename(block_range_files[0].0).expect("qed");
+
+            if block_range.end() <= checkpoint.block_number {
+                continue
+            }
+
+            let mut block_range_requests = vec![];
+            for (filename, file_hash) in block_range_files {
+                // If the file already exists, then we are resuming a previously interrupted stage
+                // run.
+                if self.static_file_directory.join(filename).exists() {
+                    // TODO: check hash if the file already exists
+                    continue
+                }
+
+                block_range_requests.push((filename, file_hash));
+            }
+
+            requests.push((block_range, block_range_requests));
+        }
+
+        let static_file_directory = self.static_file_directory.clone();
+        let url = self.url.clone();
+        let max_concurrent_requests = self.max_concurrent_requests;
+
+        let (fetch_tx, fetch_rx) = unbounded_channel();
+        tokio::spawn(async move {
+            let mut requests_iter = requests.into_iter().peekable();
+
+            while let Some((block_range, file_requests)) = requests_iter.next() {
+                for (filename, file_hash) in file_requests {
+                    if let Err(err) = fetch(
+                        filename,
+                        &static_file_directory,
+                        &format!("{}/{filename}", url),
+                        max_concurrent_requests,
+                        Some(*file_hash),
+                    )
+                    .await
+                    {
+                        let _ = fetch_tx.send(Err(err));
+                        return
+                    }
+                }
+
+                let response = S3DownloaderResponse {
+                    range: block_range.into(),
+                    is_done: requests_iter.peek().is_none(),
+                };
+
+                let _ = fetch_tx.send(Ok(response));
+            }
+        });
+
+        self.fetch_rx = Some(fetch_rx);
     }
 }
 
@@ -129,7 +236,7 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            S3Stage
+            S3Stage::default()
         }
     }
 

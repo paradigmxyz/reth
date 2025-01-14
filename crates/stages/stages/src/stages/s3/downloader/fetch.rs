@@ -1,18 +1,19 @@
+use crate::stages::s3::downloader::worker::spawn_workers;
+
 use super::{
     error::DownloaderError,
     meta::Metadata,
-    worker::{worker_fetch, WorkerRequest, WorkerResponse},
+    worker::{WorkerRequest, WorkerResponse},
 };
 use alloy_primitives::B256;
-use reqwest::{blocking::Client, header::CONTENT_LENGTH};
+use reqwest::{header::CONTENT_LENGTH, Client};
 use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
     io::BufReader,
     path::Path,
-    sync::mpsc::channel,
 };
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 /// Downloads file from url to data file path.
 ///
@@ -32,7 +33,7 @@ use tracing::{debug, error};
 ///     * If `file_hash` is `Some`, verifies its blake3 hash.
 ///     * Deletes the metadata file
 ///     * Moves downloaded file to target directory.
-pub fn fetch(
+pub async fn fetch(
     filename: &str,
     target_dir: &Path,
     url: &str,
@@ -44,7 +45,7 @@ pub fn fetch(
     reth_fs_util::create_dir_all(&download_dir)?;
 
     let data_file = download_dir.join(filename);
-    let mut metadata = metadata(&data_file, url)?;
+    let mut metadata = metadata(&data_file, url).await?;
     if metadata.is_done() {
         return Ok(())
     }
@@ -59,45 +60,32 @@ pub fn fetch(
             .open(&data_file)?;
 
         if file.metadata()?.len() as usize != metadata.total_size {
-            debug!(target: "sync::stages::s3::downloader", ?data_file, length = metadata.total_size, "Preallocating space.");
+            info!(target: "sync::stages::s3::downloader", ?filename, length = metadata.total_size, "Preallocating space.");
             file.set_len(metadata.total_size as u64)?;
         }
     }
 
     while !metadata.is_done() {
+        info!(target: "sync::stages::s3::downloader", ?filename, "Downloading.");
+
         // Find the missing file chunks and the minimum number of workers required
         let missing_chunks = metadata.needed_ranges();
         concurrent = concurrent
             .min(std::thread::available_parallelism()?.get() as u64)
             .min(missing_chunks.len() as u64);
 
-        // Create channels for communication between workers and orchestrator
-        let (orchestrator_tx, orchestrator_rx) = channel();
-
-        // Initiate workers
-        for worker_id in 0..concurrent {
-            let orchestrator_tx = orchestrator_tx.clone();
-            let data_file = data_file.clone();
-            let url = url.to_string();
-            std::thread::spawn(move || {
-                if let Err(error) = worker_fetch(worker_id, &orchestrator_tx, data_file, url) {
-                    let _ = orchestrator_tx.send(WorkerResponse::Err { worker_id, error });
-                }
-            });
-        }
-
-        // Drop the sender to allow the loop processing to exit once all workers are done
-        drop(orchestrator_tx);
+        let mut orchestrator_rx = spawn_workers(url, concurrent, &data_file);
 
         let mut workers = HashMap::new();
         let mut missing_chunks = missing_chunks.into_iter();
 
         // Distribute chunk ranges to workers when they free up
-        while let Ok(worker_msg) = orchestrator_rx.recv() {
+        while let Some(worker_msg) = orchestrator_rx.recv().await {
             debug!(target: "sync::stages::s3::downloader", ?worker_msg, "received message from worker");
 
             let available_worker = match worker_msg {
                 WorkerResponse::Ready { worker_id, tx } => {
+                    debug!(target: "sync::stages::s3::downloader", ?worker_id, "Worker ready.");
                     workers.insert(worker_id, tx);
                     worker_id
                 }
@@ -114,6 +102,7 @@ pub fn fetch(
             let worker = workers.get(&available_worker).expect("should exist");
             match missing_chunks.next() {
                 Some((chunk_index, (start, end))) => {
+                    debug!(target: "sync::stages::s3::downloader", ?available_worker, start, end, "Worker download request.");
                     let _ = worker.send(WorkerRequest::Download { chunk_index, start, end });
                 }
                 None => {
@@ -124,6 +113,7 @@ pub fn fetch(
     }
 
     if let Some(file_hash) = file_hash {
+        info!(target: "sync::stages::s3::downloader", ?filename, "Checking file integrity.");
         check_file_hash(&data_file, &file_hash)?;
     }
 
@@ -136,14 +126,14 @@ pub fn fetch(
 
 /// Creates a metadata file used to keep track of the downloaded chunks. Useful on resuming after a
 /// shutdown.
-fn metadata(data_file: &Path, url: &str) -> Result<Metadata, DownloaderError> {
+async fn metadata(data_file: &Path, url: &str) -> Result<Metadata, DownloaderError> {
     if Metadata::file_path(data_file).exists() {
         debug!(target: "sync::stages::s3::downloader", ?data_file, "Loading metadata ");
         return Metadata::load(data_file)
     }
 
     let client = Client::new();
-    let resp = client.head(url).send()?;
+    let resp = client.head(url).send().await?;
     let total_length: usize = resp
         .headers()
         .get(CONTENT_LENGTH)
@@ -175,8 +165,8 @@ mod tests {
     use super::*;
     use alloy_primitives::b256;
 
-    #[test]
-    fn test_download() {
+    #[tokio::test]
+    async fn test_download() {
         reth_tracing::init_test_tracing();
 
         let b3sum = b256!("81a7318f69fc1d6bb0a58a24af302f3b978bc75a435e4ae5d075f999cd060cfd");
@@ -185,6 +175,6 @@ mod tests {
         let file = tempfile::NamedTempFile::new().unwrap();
         let filename = file.path().file_name().unwrap().to_str().unwrap();
         let target_dir = file.path().parent().unwrap();
-        fetch(filename, target_dir, url, 4, Some(b3sum)).unwrap();
+        fetch(filename, target_dir, url, 4, Some(b3sum)).await.unwrap();
     }
 }
