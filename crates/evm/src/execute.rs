@@ -214,6 +214,14 @@ pub trait BlockExecutionStrategy {
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<ExecuteOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
+    /// Executes a single transaction in the block.
+    fn execute_single_transaction(
+        &mut self,
+        header: &<Self::Primitives as NodePrimitives>::BlockHeader,
+        transaction: &<Self::Primitives as NodePrimitives>::SignedTx,
+        sender: Address,
+    ) -> Result<(<Self::Primitives as NodePrimitives>::Receipt, u64), Self::Error>;
+
     /// Applies any necessary changes after executing the block's transactions.
     fn apply_post_execution_changes(
         &mut self,
@@ -611,6 +619,7 @@ mod tests {
         _evm_config: EvmConfig,
         state: State<DB>,
         execute_transactions_result: ExecuteOutput<Receipt>,
+        execute_single_transaction_result: (Receipt, u64),
         apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
@@ -618,6 +627,7 @@ mod tests {
     #[derive(Clone)]
     struct TestExecutorStrategyFactory {
         execute_transactions_result: ExecuteOutput<Receipt>,
+        execute_single_transaction_result: (Receipt, u64),
         apply_post_execution_changes_result: Requests,
         finish_result: BundleState,
     }
@@ -641,6 +651,7 @@ mod tests {
                 _chain_spec: MAINNET.clone(),
                 _evm_config: TestEvmConfig {},
                 execute_transactions_result: self.execute_transactions_result.clone(),
+                execute_single_transaction_result: self.execute_single_transaction_result.clone(),
                 apply_post_execution_changes_result: self
                     .apply_post_execution_changes_result
                     .clone(),
@@ -670,6 +681,15 @@ mod tests {
             _block: &RecoveredBlock<reth_primitives::Block>,
         ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
             Ok(self.execute_transactions_result.clone())
+        }
+
+        fn execute_single_transaction(
+            &mut self,
+            _header: &<Self::Primitives as NodePrimitives>::BlockHeader,
+            _transaction: &<Self::Primitives as NodePrimitives>::SignedTx,
+            _sender: Address,
+        ) -> Result<(<Self::Primitives as NodePrimitives>::Receipt, u64), Self::Error> {
+            Ok(self.execute_single_transaction_result.clone())
         }
 
         fn apply_post_execution_changes(
@@ -723,11 +743,13 @@ mod tests {
             receipts: expected_receipts.clone(),
             gas_used: expected_gas_used,
         };
+        let expected_execute_single_transaction_result = (Receipt::default(), 10);
         let expected_apply_post_execution_changes_result = Requests::new(vec![bytes!("deadbeef")]);
         let expected_finish_result = BundleState::default();
 
         let strategy_factory = TestExecutorStrategyFactory {
             execute_transactions_result: expected_execute_transactions_result,
+            execute_single_transaction_result: expected_execute_single_transaction_result,
             apply_post_execution_changes_result: expected_apply_post_execution_changes_result
                 .clone(),
             finish_result: expected_finish_result.clone(),
@@ -752,6 +774,7 @@ mod tests {
                 receipts: vec![Receipt::default()],
                 gas_used: 10,
             },
+            execute_single_transaction_result: (Receipt::default(), 10),
             apply_post_execution_changes_result: Requests::new(vec![bytes!("deadbeef")]),
             finish_result: BundleState::default(),
         };

@@ -7,6 +7,7 @@ use crate::{
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::{eip6110, eip7685::Requests};
+use alloy_primitives::Address;
 use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_consensus::ConsensusError;
@@ -21,7 +22,7 @@ use reth_evm::{
     system_calls::{OnStateHook, SystemCaller},
     ConfigureEvm, TxEnvOverrides,
 };
-use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
+use reth_primitives::{EthPrimitives, NodePrimitives, Receipt, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_revm::db::State;
 use revm_primitives::{
@@ -144,6 +145,62 @@ where
         self.system_caller.apply_pre_execution_changes(block.header(), &mut evm)?;
 
         Ok(())
+    }
+
+    fn execute_single_transaction(
+        &mut self,
+        header: &<Self::Primitives as NodePrimitives>::BlockHeader,
+        transaction: &<Self::Primitives as NodePrimitives>::SignedTx,
+        sender: Address,
+    ) -> Result<(Receipt, u64), Self::Error> {
+        let mut evm = self.evm_config.evm_for_block(&mut self.state, header);
+
+        // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
+        // must be no greater than the block’s gasLimit.
+        if transaction.gas_limit() > header.gas_limit {
+            return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
+                transaction_gas_limit: transaction.gas_limit(),
+                block_available_gas: header.gas_limit,
+            }
+            .into())
+        }
+
+        self.evm_config.fill_tx_env(evm.tx_mut(), transaction, sender);
+
+        if let Some(tx_env_overrides) = &mut self.tx_env_overrides {
+            tx_env_overrides.apply(evm.tx_mut());
+        }
+
+        // Execute transaction.
+        let result_and_state = evm.transact().map_err(move |err| {
+            let new_err = err.map_db_err(|e| e.into());
+            // Ensure hash is calculated for error log, if not already done
+            BlockValidationError::EVM {
+                hash: transaction.recalculate_hash(),
+                error: Box::new(new_err),
+            }
+        })?;
+        self.system_caller.on_state(&result_and_state.state);
+        let ResultAndState { result, state } = result_and_state;
+        evm.db_mut().commit(state);
+
+        // record gas used
+        let gas_used = result.gas_used();
+
+        // Push transaction changeset and calculate header bloom filter for receipt.
+        #[allow(clippy::needless_update)] // side-effect of optimism fields
+        let receipt = Receipt {
+            tx_type: transaction.tx_type(),
+            // Success flag was added in `EIP-658: Embedding transaction status code in
+            // receipts`.
+            success: result.is_success(),
+            cumulative_gas_used: gas_used,
+            // convert to reth log
+            logs: result.into_logs(),
+            ..Default::default()
+        };
+
+        Ok((receipt, gas_used))
     }
 
     fn execute_transactions(

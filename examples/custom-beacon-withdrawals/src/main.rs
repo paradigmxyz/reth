@@ -27,7 +27,7 @@ use reth_evm::execute::{
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
+use reth_primitives::{EthPrimitives, NodePrimitives, Receipt, RecoveredBlock};
 use std::{fmt::Display, sync::Arc};
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
@@ -136,6 +136,15 @@ where
         self.state.set_state_clear_flag(state_clear_flag);
 
         Ok(())
+    }
+
+    fn execute_single_transaction(
+        &mut self,
+        _header: &<Self::Primitives as NodePrimitives>::BlockHeader,
+        _transaction: &<Self::Primitives as NodePrimitives>::SignedTx,
+        _sender: Address,
+    ) -> Result<(<Self::Primitives as NodePrimitives>::Receipt, u64), Self::Error> {
+        Ok(Default::default())
     }
 
     fn execute_transactions(
