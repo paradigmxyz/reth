@@ -1,32 +1,32 @@
 use crate::proof::calculate_receipt_root_optimism;
 use alloc::vec::Vec;
-use alloy_consensus::TxReceipt;
+use alloy_consensus::{BlockHeader, TxReceipt};
 use alloy_primitives::{Bloom, B256};
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_optimism_primitives::{OpBlock, OpReceipt};
-use reth_primitives::{gas_spent_by_transactions, BlockWithSenders, GotExpected};
+use reth_optimism_primitives::DepositReceipt;
+use reth_primitives::{gas_spent_by_transactions, GotExpected};
 
 /// Validate a block with regard to execution results:
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
-pub fn validate_block_post_execution(
-    block: &BlockWithSenders<OpBlock>,
+pub fn validate_block_post_execution<R: DepositReceipt>(
+    header: impl BlockHeader,
     chain_spec: &ChainSpec,
-    receipts: &[OpReceipt],
+    receipts: &[R],
 ) -> Result<(), ConsensusError> {
     // Before Byzantium, receipts contained state root that would mean that expensive
     // operation as hashing that is required for state root got calculated in every
     // transaction This was replaced with is_success flag.
     // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-    if chain_spec.is_byzantium_active_at_block(block.header.number) {
+    if chain_spec.is_byzantium_active_at_block(header.number()) {
         if let Err(error) = verify_receipts(
-            block.header.receipts_root,
-            block.header.logs_bloom,
+            header.receipts_root(),
+            header.logs_bloom(),
             receipts,
             chain_spec,
-            block.header.timestamp,
+            header.timestamp(),
         ) {
             tracing::debug!(%error, ?receipts, "receipts verification failed");
             return Err(error)
@@ -36,9 +36,9 @@ pub fn validate_block_post_execution(
     // Check if gas used matches the value set in header.
     let cumulative_gas_used =
         receipts.last().map(|receipt| receipt.cumulative_gas_used()).unwrap_or(0);
-    if block.header.gas_used != cumulative_gas_used {
+    if header.gas_used() != cumulative_gas_used {
         return Err(ConsensusError::BlockGasUsed {
-            gas: GotExpected { got: cumulative_gas_used, expected: block.header.gas_used },
+            gas: GotExpected { got: cumulative_gas_used, expected: header.gas_used() },
             gas_spent_by_tx: gas_spent_by_transactions(receipts),
         })
     }
@@ -47,10 +47,10 @@ pub fn validate_block_post_execution(
 }
 
 /// Verify the calculated receipts root against the expected receipts root.
-fn verify_receipts(
+fn verify_receipts<R: DepositReceipt>(
     expected_receipts_root: B256,
     expected_logs_bloom: Bloom,
-    receipts: &[OpReceipt],
+    receipts: &[R],
     chain_spec: &ChainSpec,
     timestamp: u64,
 ) -> Result<(), ConsensusError> {
