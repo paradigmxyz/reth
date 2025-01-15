@@ -1113,6 +1113,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         }
 
                         if let Some(updates) = self.updates.as_mut() {
+                            trace!(target: "trie::sparse", ?removed_path, ?new_node, "Adding removed node to updates");
                             updates.removed_nodes.insert(removed_path.clone());
                         }
 
