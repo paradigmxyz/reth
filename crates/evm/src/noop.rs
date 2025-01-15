@@ -4,7 +4,7 @@ use alloy_primitives::BlockNumber;
 use core::fmt::Display;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives::{BlockWithSenders, NodePrimitives};
+use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm::State;
@@ -45,7 +45,7 @@ impl<P: NodePrimitives> BlockExecutorProvider for NoopBlockExecutorProvider<P> {
 }
 
 impl<DB, P: NodePrimitives> Executor<DB> for NoopBlockExecutorProvider<P> {
-    type Input<'a> = &'a BlockWithSenders<P::Block>;
+    type Input<'a> = &'a RecoveredBlock<P::Block>;
     type Output = BlockExecutionOutput<P::Receipt>;
     type Error = BlockExecutionError;
 
@@ -77,7 +77,7 @@ impl<DB, P: NodePrimitives> Executor<DB> for NoopBlockExecutorProvider<P> {
 }
 
 impl<DB, P: NodePrimitives> BatchExecutor<DB> for NoopBlockExecutorProvider<P> {
-    type Input<'a> = &'a BlockWithSenders<P::Block>;
+    type Input<'a> = &'a RecoveredBlock<P::Block>;
     type Output = ExecutionOutcome<P::Receipt>;
     type Error = BlockExecutionError;
 

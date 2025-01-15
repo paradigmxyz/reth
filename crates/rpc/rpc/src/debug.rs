@@ -20,7 +20,7 @@ use reth_evm::{
     execute::{BlockExecutorProvider, Executor},
     ConfigureEvmEnv,
 };
-use reth_primitives::{BlockExt, NodePrimitives, ReceiptWithBloom, SealedBlockWithSenders};
+use reth_primitives::{NodePrimitives, ReceiptWithBloom, RecoveredBlock};
 use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
 use reth_provider::{
     BlockIdReader, BlockReaderIdExt, ChainSpecProvider, HeaderProvider, ProviderBlock,
@@ -94,7 +94,7 @@ where
     /// Trace the entire block asynchronously
     async fn trace_block(
         &self,
-        block: Arc<SealedBlockWithSenders<ProviderBlock<Eth::Provider>>>,
+        block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         cfg: CfgEnvWithHandlerCfg,
         block_env: BlockEnv,
         opts: GethDebugTracingOptions,
@@ -192,7 +192,7 @@ where
             };
 
         self.trace_block(
-            Arc::new(block.with_senders_unchecked(senders).seal_slow()),
+            Arc::new(block.with_senders_unchecked(senders)),
             cfg_env_with_handler_cfg,
             block_env,
             opts,
@@ -639,7 +639,7 @@ where
                 let mut witness_record = ExecutionWitnessRecord::default();
 
                 let _ = block_executor
-                    .execute_with_state_closure(&(*block).clone().unseal(), |statedb: &State<_>| {
+                    .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
                         witness_record.record_executed_state(statedb);
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;

@@ -41,18 +41,18 @@ reth-optimism-chainspec.workspace = true
 [features]
 default = ["std"]
 std = [
-	"reth-chainspec/std",
-	"reth-consensus/std",
-	"reth-consensus-common/std",
-	"reth-primitives/std",
-	"reth-optimism-forks/std",
-	"reth-optimism-chainspec/std",
-	"reth-optimism-primitives/std",
-	"alloy-eips/std",
-	"alloy-primitives/std",
-	"alloy-consensus/std",
-	"alloy-trie/std",
-	"op-alloy-consensus/std",
-	"reth-primitives-traits/std"
+    "reth-chainspec/std",
+    "reth-consensus/std",
+    "reth-consensus-common/std",
+    "reth-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-optimism-forks/std",
+    "reth-optimism-chainspec/std",
+    "reth-optimism-primitives/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-consensus/std",
+    "alloy-trie/std",
+    "op-alloy-consensus/std",
 ]
 optimism = ["reth-primitives/optimism", "reth-optimism-primitives/optimism"]

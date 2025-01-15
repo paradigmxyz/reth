@@ -5,7 +5,7 @@ use crate::{
     OpReceiptBuilder, ReceiptBuilderCtx,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
-use alloy_consensus::{Eip658Value, Receipt, Transaction as _};
+use alloy_consensus::{BlockHeader, Eip658Value, Receipt, Transaction as _};
 use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
 use op_alloy_consensus::{DepositTransaction, OpDepositReceipt};
@@ -25,8 +25,8 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardfork;
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt};
-use reth_primitives::{BlockWithSenders, NodePrimitives};
-use reth_primitives_traits::{Block, BlockBody, SignedTransaction};
+use reth_primitives::{NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_revm::{Database, State};
 use revm_primitives::{db::DatabaseCommit, ResultAndState};
 use tracing::trace;
@@ -161,11 +161,11 @@ where
 
     fn apply_pre_execution_changes(
         &mut self,
-        block: &BlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
     ) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
-            (*self.chain_spec).is_spurious_dragon_active_at_block(block.header().number);
+            (*self.chain_spec).is_spurious_dragon_active_at_block(block.number());
         self.state.set_state_clear_flag(state_clear_flag);
 
         let mut evm = self.evm_config.evm_for_block(&mut self.state, block.header());
@@ -189,21 +189,19 @@ where
 
     fn execute_transactions(
         &mut self,
-        block: &BlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
     ) -> Result<ExecuteOutput<N::Receipt>, Self::Error> {
         let mut evm = self.evm_config.evm_for_block(&mut self.state, block.header());
 
-        let is_regolith = self
-            .chain_spec
-            .fork(OpHardfork::Regolith)
-            .active_at_timestamp(block.header().timestamp);
+        let is_regolith =
+            self.chain_spec.fork(OpHardfork::Regolith).active_at_timestamp(block.timestamp());
 
         let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body().transactions().len());
+        let mut receipts = Vec::with_capacity(block.body().transaction_count());
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit, Tg, and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
-            let block_available_gas = block.header().gas_limit - cumulative_gas_used;
+            let block_available_gas = block.gas_limit() - cumulative_gas_used;
             if transaction.gas_limit() > block_available_gas &&
                 (is_regolith || !transaction.is_deposit())
             {
@@ -298,11 +296,10 @@ where
 
     fn apply_post_execution_changes(
         &mut self,
-        block: &BlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         _receipts: &[N::Receipt],
     ) -> Result<Requests, Self::Error> {
-        let balance_increments =
-            post_block_balance_increments(&self.chain_spec.clone(), &block.block);
+        let balance_increments = post_block_balance_increments(&self.chain_spec.clone(), block);
         // increment balances
         self.state
             .increment_balances(balance_increments.clone())
@@ -328,7 +325,7 @@ where
 
     fn validate_block_post_execution(
         &self,
-        block: &BlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         receipts: &[N::Receipt],
         _requests: &Requests,
     ) -> Result<(), ConsensusError> {
@@ -455,7 +452,7 @@ mod tests {
 
         // Attempt to execute a block with one deposit and one non-deposit transaction
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
                     body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
@@ -531,7 +528,7 @@ mod tests {
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
-            .execute_and_verify_one(&BlockWithSenders::new_unchecked(
+            .execute_and_verify_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
                     body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },

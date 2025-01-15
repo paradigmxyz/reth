@@ -64,7 +64,7 @@ impl AccountHashingStage {
     ) -> Result<Vec<(alloy_primitives::Address, reth_primitives::Account)>, StageError>
     where
         N::Primitives: reth_primitives_traits::FullNodePrimitives<
-            BlockBody = reth_primitives::BlockBody,
+            Block = reth_primitives::Block,
             BlockHeader = reth_primitives::Header,
         >,
     {
@@ -85,7 +85,7 @@ impl AccountHashingStage {
         );
 
         for block in blocks {
-            provider.insert_historical_block(block.try_seal_with_senders().unwrap()).unwrap();
+            provider.insert_historical_block(block.try_recover().unwrap()).unwrap();
         }
         provider
             .static_file_provider()

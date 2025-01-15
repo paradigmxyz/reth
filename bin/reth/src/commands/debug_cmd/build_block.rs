@@ -1,5 +1,5 @@
 //! Command for debugging block building.
-use alloy_consensus::TxEip4844;
+use alloy_consensus::{BlockHeader, TxEip4844};
 use alloy_eips::{
     eip2718::Encodable2718,
     eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
@@ -24,10 +24,8 @@ use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
-use reth_primitives::{
-    BlockExt, EthPrimitives, SealedBlockFor, SealedBlockWithSenders, SealedHeader, Transaction,
-    TransactionSigned,
-};
+use reth_primitives::{EthPrimitives, SealedBlock, SealedHeader, Transaction, TransactionSigned};
+use reth_primitives_traits::Block as _;
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
@@ -86,7 +84,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     fn lookup_best_block<N: ProviderNodeTypes<ChainSpec = C::ChainSpec>>(
         &self,
         factory: ProviderFactory<N>,
-    ) -> RethResult<Arc<SealedBlockFor<BlockTy<N>>>> {
+    ) -> RethResult<Arc<SealedBlock<BlockTy<N>>>> {
         let provider = factory.provider()?;
 
         let best_number =
@@ -241,17 +239,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 consensus.validate_header(block.sealed_header())?;
                 consensus.validate_block_pre_execution(block)?;
 
-                let senders = block.senders().expect("sender recovery failed");
-                let block_with_senders =
-                    SealedBlockWithSenders::<BlockTy<N>>::new(block.clone(), senders).unwrap();
+                let block_with_senders = block.clone().try_recover().unwrap();
 
                 let state_provider = blockchain_db.latest()?;
                 let db = StateProviderDatabase::new(&state_provider);
                 let executor =
                     EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
 
-                let block_execution_output =
-                    executor.execute(&block_with_senders.clone().unseal())?;
+                let block_execution_output = executor.execute(&block_with_senders)?;
                 let execution_outcome =
                     ExecutionOutcome::from((block_execution_output, block.number));
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");
@@ -262,7 +257,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     hashed_post_state.clone(),
                 )?;
 
-                if state_root != block_with_senders.state_root {
+                if state_root != block_with_senders.state_root() {
                     eyre::bail!(
                         "state root mismatch. expected: {}. got: {}",
                         block_with_senders.state_root,

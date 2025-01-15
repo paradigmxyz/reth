@@ -1,6 +1,6 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
-use alloy_consensus::{Header, Transaction as _, TxLegacy};
+use alloy_consensus::{Block, Header, Transaction as _, TxLegacy};
 use alloy_eips::{
     eip1898::BlockWithParent,
     eip4895::{Withdrawal, Withdrawals},
@@ -16,7 +16,7 @@ use reth_primitives::{
     TransactionSigned,
 };
 
-use reth_primitives_traits::crypto::secp256k1::sign_message;
+use reth_primitives_traits::{crypto::secp256k1::sign_message, Block as _};
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
@@ -125,7 +125,7 @@ pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> 
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
-    SealedHeader::seal(header)
+    SealedHeader::seal_slow(header)
 }
 
 /// Generates a random legacy [Transaction].
@@ -234,10 +234,11 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
         ..Default::default()
     };
 
-    SealedBlock::new(
-        SealedHeader::seal(header),
-        BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
-    )
+    Block {
+        header,
+        body: BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
+    }
+    .seal_slow()
 }
 
 /// Generate a range of random blocks.

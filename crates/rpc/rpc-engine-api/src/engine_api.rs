@@ -1150,12 +1150,14 @@ mod tests {
                 start..=start + count - 1,
                 BlockRangeParams { tx_count: 0..2, ..Default::default() },
             );
-            handle.provider.extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.unseal())));
+            handle
+                .provider
+                .extend_blocks(blocks.iter().cloned().map(|b| (b.hash(), b.into_block())));
 
             let expected = blocks
                 .iter()
                 .cloned()
-                .map(|b| Some(ExecutionPayloadBodyV1::from_block(b.unseal::<Block>())))
+                .map(|b| Some(ExecutionPayloadBodyV1::from_block(b.into_block())))
                 .collect::<Vec<_>>();
 
             let res = api.get_payload_bodies_by_range_v1(start, count).await.unwrap();
@@ -1184,7 +1186,7 @@ mod tests {
                         !first_missing_range.contains(&b.number) &&
                             !second_missing_range.contains(&b.number)
                     })
-                    .map(|b| (b.hash(), b.clone().unseal())),
+                    .map(|b| (b.hash(), b.clone().into_block())),
             );
 
             let expected = blocks
@@ -1197,7 +1199,7 @@ mod tests {
                     if first_missing_range.contains(&b.number) {
                         None
                     } else {
-                        Some(ExecutionPayloadBodyV1::from_block(b.unseal::<Block>()))
+                        Some(ExecutionPayloadBodyV1::from_block(b.into_block()))
                     }
                 })
                 .collect::<Vec<_>>();
@@ -1216,7 +1218,7 @@ mod tests {
                     {
                         None
                     } else {
-                        Some(ExecutionPayloadBodyV1::from_block(b.unseal::<Block>()))
+                        Some(ExecutionPayloadBodyV1::from_block(b.into_block()))
                     }
                 })
                 .collect::<Vec<_>>();
@@ -1290,7 +1292,7 @@ mod tests {
             // Add block and to provider local store and test for mismatch
             handle.provider.add_block(
                 execution_terminal_block.hash(),
-                execution_terminal_block.clone().unseal(),
+                execution_terminal_block.clone().into_block(),
             );
 
             let res = api.exchange_transition_configuration(transition_config);
@@ -1320,7 +1322,7 @@ mod tests {
                 terminal_block_number,
             };
 
-            handle.provider.add_block(terminal_block.hash(), terminal_block.unseal());
+            handle.provider.add_block(terminal_block.hash(), terminal_block.into_block());
 
             let config = api.exchange_transition_configuration(transition_config).unwrap();
             assert_eq!(config, transition_config);
