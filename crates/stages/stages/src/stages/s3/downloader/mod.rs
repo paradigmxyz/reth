@@ -21,7 +21,18 @@ pub(crate) enum S3DownloaderResponse {
 
 impl S3DownloaderResponse {
     /// Whether the downloaded block range is the last requested one.
-    pub(crate) fn is_done(&self) -> bool {
+    pub(crate) const fn is_done(&self) -> bool {
         matches!(self, Self::Done)
     }
+}
+
+/// Chunk nth remaining range to be downloaded.
+#[derive(Debug)]
+pub struct RemainingChunkRange {
+    /// The nth chunk
+    pub index: usize,
+    /// Start of range
+    pub start: usize,
+    /// End of range
+    pub end: usize,
 }

@@ -1,4 +1,4 @@
-use crate::stages::s3::downloader::worker::spawn_workers;
+use crate::stages::s3::downloader::{worker::spawn_workers, RemainingChunkRange};
 
 use super::{
     error::DownloaderError,
@@ -101,9 +101,9 @@ pub async fn fetch(
 
             let worker = workers.get(&available_worker).expect("should exist");
             match missing_chunks.next() {
-                Some((chunk_index, (start, end))) => {
+                Some(RemainingChunkRange { index, start, end }) => {
                     debug!(target: "sync::stages::s3::downloader", ?available_worker, start, end, "Worker download request.");
-                    let _ = worker.send(WorkerRequest::Download { chunk_index, start, end });
+                    let _ = worker.send(WorkerRequest::Download { chunk_index: index, start, end });
                 }
                 None => {
                     let _ = worker.send(WorkerRequest::Finish);
