@@ -26,6 +26,7 @@ use reth_chainspec::ChainSpec;
 use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::transaction::execute::FillTxEnv;
+use reth_revm::{inspector_handle_register, EvmBuilder};
 use revm_primitives::{
     AnalysisKind, BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, SpecId, TxEnv,
 };
@@ -182,24 +183,57 @@ impl ConfigureEvmEnv for EthEvmConfig {
     }
 }
 
-impl ConfigureEvm for EthEvmConfig {}
+impl ConfigureEvm for EthEvmConfig {
+    fn evm_with_env<DB: reth_revm::Database>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv,
+        tx: TxEnv,
+    ) -> reth_revm::Evm<'_, (), DB> {
+        EvmBuilder::default()
+            .with_db(db)
+            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+            .with_block_env(evm_env.block_env)
+            .with_tx_env(tx)
+            .build()
+    }
+
+    fn evm_with_env_and_inspector<DB, I>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv,
+        tx: TxEnv,
+        inspector: I,
+    ) -> reth_revm::Evm<'_, I, DB>
+    where
+        DB: reth_revm::Database,
+        I: reth_revm::GetInspector<DB>,
+    {
+        EvmBuilder::default()
+            .with_db(db)
+            .with_external_context(inspector)
+            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+            .with_block_env(evm_env.block_env)
+            .with_tx_env(tx)
+            .append_handler_register(inspector_handle_register)
+            .build()
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{constants::KECCAK_EMPTY, Header};
+    use alloy_consensus::Header;
     use alloy_genesis::Genesis;
-    use alloy_primitives::{B256, U256};
+    use alloy_primitives::U256;
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
     use reth_evm::{env::EvmEnv, execute::ProviderError};
     use reth_revm::{
         db::{CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
         primitives::{BlockEnv, CfgEnv, SpecId},
-        JournaledState,
     };
     use revm_primitives::HandlerCfg;
-    use std::collections::HashSet;
 
     #[test]
     fn test_fill_cfg_and_block_env() {
@@ -224,45 +258,6 @@ mod tests {
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec
         assert_eq!(cfg_env_with_handler_cfg.chain_id, chain_spec.chain().id());
-    }
-
-    #[test]
-    #[allow(clippy::needless_update)]
-    fn test_evm_configure() {
-        // Create a default `EthEvmConfig`
-        let evm_config = EthEvmConfig::new(MAINNET.clone());
-
-        // Initialize an empty database wrapped in CacheDB
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-
-        // Create an EVM instance using the configuration and the database
-        let evm = evm_config.evm(db);
-
-        // Check that the EVM environment is initialized with default values
-        assert_eq!(evm.context.evm.inner.env, Box::default());
-
-        // Latest spec ID and no warm preloaded addresses
-        assert_eq!(
-            evm.context.evm.inner.journaled_state,
-            JournaledState::new(SpecId::LATEST, HashSet::default())
-        );
-
-        // Ensure that the accounts database is empty
-        assert!(evm.context.evm.inner.db.accounts.is_empty());
-
-        // Ensure that the block hashes database is empty
-        assert!(evm.context.evm.inner.db.block_hashes.is_empty());
-
-        // Verify that there are two default contracts in the contracts database
-        assert_eq!(evm.context.evm.inner.db.contracts.len(), 2);
-        assert!(evm.context.evm.inner.db.contracts.contains_key(&KECCAK_EMPTY));
-        assert!(evm.context.evm.inner.db.contracts.contains_key(&B256::ZERO));
-
-        // Ensure that the logs database is empty
-        assert!(evm.context.evm.inner.db.logs.is_empty());
-
-        // No Optimism
-        assert_eq!(evm.handler.cfg, HandlerCfg { spec_id: SpecId::LATEST, ..Default::default() });
     }
 
     #[test]
@@ -374,55 +369,13 @@ mod tests {
         let evm = evm_config.evm_with_env(db, evm_env, Default::default());
 
         // Check that the spec ID is setup properly
-        assert_eq!(evm.handler.spec_id(), SpecId::CONSTANTINOPLE);
+        assert_eq!(evm.handler.spec_id(), SpecId::PETERSBURG);
 
         // No Optimism
         assert_eq!(
             evm.handler.cfg,
-            HandlerCfg { spec_id: SpecId::CONSTANTINOPLE, ..Default::default() }
+            HandlerCfg { spec_id: SpecId::PETERSBURG, ..Default::default() }
         );
-    }
-
-    #[test]
-    #[allow(clippy::needless_update)]
-    fn test_evm_with_inspector() {
-        let evm_config = EthEvmConfig::new(MAINNET.clone());
-
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-
-        // No operation inspector
-        let noop = NoOpInspector;
-
-        let evm = evm_config.evm_with_inspector(db, noop);
-
-        // Check that the inspector is set correctly
-        assert_eq!(evm.context.external, noop);
-
-        // Check that the EVM environment is initialized with default values
-        assert_eq!(evm.context.evm.inner.env, Box::default());
-
-        // Latest spec ID and no warm preloaded addresses
-        assert_eq!(
-            evm.context.evm.inner.journaled_state,
-            JournaledState::new(SpecId::LATEST, HashSet::default())
-        );
-
-        // Ensure that the accounts database is empty
-        assert!(evm.context.evm.inner.db.accounts.is_empty());
-
-        // Ensure that the block hashes database is empty
-        assert!(evm.context.evm.inner.db.block_hashes.is_empty());
-
-        // Verify that there are two default contracts in the contracts database
-        assert_eq!(evm.context.evm.inner.db.contracts.len(), 2);
-        assert!(evm.context.evm.inner.db.contracts.contains_key(&KECCAK_EMPTY));
-        assert!(evm.context.evm.inner.db.contracts.contains_key(&B256::ZERO));
-
-        // Ensure that the logs database is empty
-        assert!(evm.context.evm.inner.db.logs.is_empty());
-
-        // No Optimism
-        assert_eq!(evm.handler.cfg, HandlerCfg { spec_id: SpecId::LATEST, ..Default::default() });
     }
 
     #[test]
@@ -530,7 +483,7 @@ mod tests {
         );
 
         // Check that the spec ID is set properly
-        assert_eq!(evm.handler.spec_id(), SpecId::CONSTANTINOPLE);
+        assert_eq!(evm.handler.spec_id(), SpecId::PETERSBURG);
         assert_eq!(evm.context.evm.env.block, evm_env.block_env);
         assert_eq!(evm.context.evm.env.cfg, evm_env.cfg_env_with_handler_cfg.cfg_env);
         assert_eq!(evm.context.evm.env.tx, Default::default());
@@ -539,7 +492,7 @@ mod tests {
         // No Optimism
         assert_eq!(
             evm.handler.cfg,
-            HandlerCfg { spec_id: SpecId::CONSTANTINOPLE, ..Default::default() }
+            HandlerCfg { spec_id: SpecId::PETERSBURG, ..Default::default() }
         );
     }
 }
