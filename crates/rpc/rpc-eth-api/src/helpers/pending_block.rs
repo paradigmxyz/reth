@@ -62,7 +62,7 @@ pub trait LoadPendingBlock:
         &self,
     ) -> &Mutex<Option<PendingBlock<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>>>;
 
-    /// Configures the [`EvmConfig`] for the pending block
+    /// Configures the [`EvmEnv`] for the pending block
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     #[expect(clippy::type_complexity)]
