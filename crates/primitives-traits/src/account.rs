@@ -90,7 +90,7 @@ impl Bytecode {
         Self(RevmBytecode::new_raw(bytes))
     }
 
-    /// Creates a new raw [`revm_primitives::primitives::Bytecode`].
+    /// Creates a new raw [`revm_primitives::Bytecode`].
     ///
     /// Returns an error on incorrect Bytecode format.
     #[inline]
@@ -217,8 +217,6 @@ impl From<Account> for AccountInfo {
             code: None,
             #[cfg(feature = "scroll")]
             code_size: 0,
-            #[cfg(feature = "scroll")]
-            poseidon_code_hash: Default::default(),
         }
     }
 }

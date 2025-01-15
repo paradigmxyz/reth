@@ -30,7 +30,7 @@ alloy-eips = { workspace = true, features = ["serde"] }
 alloy-trie = { workspace = true, features = ["serde"] }
 
 # scroll
-revm-primitives = { package = "reth-scroll-revm", path = "../scroll/revm", features = ["serde"] }
+revm-primitives = { workspace = true, features = ["serde"] }
 reth-scroll-primitives = { workspace = true, optional = true, features = ["serde"] }
 
 # optimism
@@ -69,7 +69,7 @@ reth-codecs = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
 reth-testing-utils.workspace = true
 reth-trie-common = { workspace = true, features = ["arbitrary"] }
-revm-primitives = { package = "reth-scroll-revm", path = "../scroll/revm", features = ["arbitrary"] }
+revm-primitives = { workspace = true, features = ["arbitrary"] }
 
 alloy-eips = { workspace = true, features = ["arbitrary"] }
 alloy-genesis.workspace = true
@@ -177,7 +177,6 @@ test-utils = [
 	"reth-codecs?/test-utils",
 	"reth-trie-common/test-utils",
 	"arbitrary",
-	"revm-primitives/test-utils"
 ]
 serde-bincode-compat = [
 	"serde_with",

@@ -1,7 +1,7 @@
 use crate::{BlockWithSenders, SealedBlock};
 use alloc::vec::Vec;
 use reth_primitives_traits::{Block, BlockBody, SealedHeader, SignedTransaction};
-use revm_primitives::primitives::{Address, B256};
+use revm_primitives::{Address, B256};
 
 /// Extension trait for [`reth_primitives_traits::Block`] implementations
 /// allowing for conversions into common block parts containers such as [`SealedBlock`],

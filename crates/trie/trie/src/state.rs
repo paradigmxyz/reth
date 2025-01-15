@@ -463,8 +463,6 @@ mod tests {
             code: Some(Bytecode::LegacyRaw(Bytes::from(vec![1, 2]))),
             #[cfg(feature = "scroll")]
             code_size: 2,
-            #[cfg(feature = "scroll")]
-            poseidon_code_hash: B256::random(),
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -551,8 +549,6 @@ mod tests {
             code: None,
             #[cfg(feature = "scroll")]
             code_size: 10,
-            #[cfg(feature = "scroll")]
-            poseidon_code_hash: B256::random(),
         };
 
         // Create hashed accounts with addresses.

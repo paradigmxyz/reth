@@ -24,7 +24,7 @@ alloy-rlp.workspace = true
 alloy-trie.workspace = true
 
 # revm-primitives scroll re-export
-revm-primitives = { package = "reth-scroll-revm", path = "../scroll/revm", default-features = false }
+revm-primitives = { workspace = true, default-features = false }
 
 # op
 op-alloy-consensus = { workspace = true, optional = true }
@@ -101,7 +101,6 @@ secp256k1 = ["dep:secp256k1"]
 test-utils = [
 	"arbitrary",
 	"reth-codecs?/test-utils",
-	"revm-primitives/test-utils"
 ]
 arbitrary = [
 	"std",

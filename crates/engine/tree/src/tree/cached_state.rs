@@ -9,7 +9,7 @@ use reth_provider::{
     AccountReader, BlockHashReader, HashedPostStateProvider, HashedStorageProvider,
     KeyHasherProvider, StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
 };
-use reth_revm::BundleAccount;
+use reth_revm::db::BundleAccount;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,

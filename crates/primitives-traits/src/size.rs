@@ -4,7 +4,7 @@ use alloy_consensus::{
 };
 use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
-use revm_primitives::primitives::Log;
+use revm_primitives::Log;
 
 /// Trait for calculating a heuristic for the in-memory size of a struct.
 #[auto_impl::auto_impl(&, Arc, Box)]

@@ -1,13 +1,13 @@
 use reth_chainspec::{ChainSpecProvider, Head};
 use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
 use reth_primitives::{transaction::FillTxEnv, TransactionSigned};
-use reth_revm::{inspector_handle_register, Database, Evm, GetInspector, TxEnv};
+use reth_revm::{inspector_handle_register, Database, Evm, GetInspector};
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_forks::ScrollHardfork;
 use revm::{
     precompile::{Address, Bytes},
     primitives::{
-        AnalysisKind, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, HandlerCfg, SpecId, U256,
+        AnalysisKind, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, HandlerCfg, SpecId, TxEnv, U256,
     },
     EvmBuilder,
 };

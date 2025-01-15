@@ -315,9 +315,11 @@ mod tests {
         L1_GAS_PRICE_ORACLE_ADDRESS, OVER_HEAD_SLOT, SCALAR_SLOT,
     };
     use revm::{
-        db::states::{bundle_state::BundleRetention, StorageSlot},
-        primitives::{Address, B256, U256},
-        AccountInfo, Bytecode, EmptyDBTyped, TxKind,
+        db::{
+            states::{bundle_state::BundleRetention, StorageSlot},
+            EmptyDBTyped,
+        },
+        primitives::{AccountInfo, Address, Bytecode, TxKind, B256, U256},
     };
 
     const BLOCK_GAS_LIMIT: u64 = 10_000_000;
