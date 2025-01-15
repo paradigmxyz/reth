@@ -12,9 +12,16 @@ pub use meta::Metadata;
 
 /// Response sent by the fetch task to `S3Stage` once it has downloaded all files of a block
 /// range.
-pub(crate) struct S3DownloaderResponse {
-    /// Downloaded range.
-    pub range: std::ops::RangeInclusive<u64>,
-    /// Whether the fetch task has downloaded the last requested block range.
-    pub is_done: bool,
+pub(crate) enum S3DownloaderResponse {
+    /// A new block range was downloaded.
+    AddedNewRange,
+    /// The last requested block range was downloaded.
+    Done,
+}
+
+impl S3DownloaderResponse {
+    /// Whether the downloaded block range is the last requested one.
+    pub(crate) fn is_done(&self) -> bool {
+        matches!(self, Self::Done)
+    }
 }
