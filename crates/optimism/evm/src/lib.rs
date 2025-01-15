@@ -438,7 +438,13 @@ mod tests {
         let evm_config = test_evm_config();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
-        let evm_env = EvmEnv::default();
+        let evm_env = EvmEnv {
+            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg {
+                cfg_env: Default::default(),
+                handler_cfg: HandlerCfg { is_optimism: true, ..Default::default() },
+            },
+            ..Default::default()
+        };
 
         let evm = evm_config.evm_with_env_and_inspector(
             db,
