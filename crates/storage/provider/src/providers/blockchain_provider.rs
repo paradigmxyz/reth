@@ -1204,7 +1204,7 @@ mod tests {
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(
                 block.clone(),
-                Default::default(),
+                block.senders().unwrap(),
             )),
             execution_output: Default::default(),
             hashed_state: Default::default(),
