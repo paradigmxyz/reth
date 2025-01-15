@@ -41,6 +41,7 @@ use reth_rpc_eth_types::{
 };
 use revm::{Database, DatabaseCommit, GetInspector};
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
+use revm_primitives::Env;
 use tracing::trace;
 
 /// Result type for `eth_simulateV1` RPC method.
@@ -86,8 +87,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             }
 
             // Build cfg and block env, we'll reuse those.
-            let (evm_env, block) = self.evm_env_at(block.unwrap_or_default()).await?;
-            let EvmEnv { mut cfg_env_with_handler_cfg, mut block_env } = evm_env;
+            let (mut evm_env, block) = self.evm_env_at(block.unwrap_or_default()).await?;
 
             // Gas cap for entire operation
             let total_gas_limit = self.call_gas_limit();
@@ -97,9 +97,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let mut parent_hash = base_block.hash();
 
             // Only enforce base fee if validation is enabled
-            cfg_env_with_handler_cfg.disable_base_fee = !validation;
+            evm_env.cfg_env_with_handler_cfg.disable_base_fee = !validation;
             // Always disable EIP-3607
-            cfg_env_with_handler_cfg.disable_eip3607 = true;
+            evm_env.cfg_env_with_handler_cfg.disable_eip3607 = true;
 
             let this = self.clone();
             self.spawn_with_state_at_block(block, move |state| {
@@ -110,13 +110,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let mut block_state_calls = block_state_calls.into_iter().peekable();
                 while let Some(block) = block_state_calls.next() {
                     // Increase number and timestamp for every new block
-                    block_env.number += U256::from(1);
-                    block_env.timestamp += U256::from(1);
+                    evm_env.block_env.number += U256::from(1);
+                    evm_env.block_env.timestamp += U256::from(1);
 
                     if validation {
                         let chain_spec = RpcNodeCore::provider(&this).chain_spec();
-                        let base_fee_params =
-                            chain_spec.base_fee_params_at_timestamp(block_env.timestamp.to());
+                        let base_fee_params = chain_spec
+                            .base_fee_params_at_timestamp(evm_env.block_env.timestamp.to());
                         let base_fee = if let Some(latest) = blocks.last() {
                             let header = &latest.inner.header;
                             calc_next_block_base_fee(
@@ -128,21 +128,21 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         } else {
                             base_block.next_block_base_fee(base_fee_params).unwrap_or_default()
                         };
-                        block_env.basefee = U256::from(base_fee);
+                        evm_env.block_env.basefee = U256::from(base_fee);
                     } else {
-                        block_env.basefee = U256::ZERO;
+                        evm_env.block_env.basefee = U256::ZERO;
                     }
 
                     let SimBlock { block_overrides, state_overrides, calls } = block;
 
                     if let Some(block_overrides) = block_overrides {
-                        apply_block_overrides(block_overrides, &mut db, &mut block_env);
+                        apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
                     }
                     if let Some(state_overrides) = state_overrides {
                         apply_state_overrides(state_overrides, &mut db)?;
                     }
 
-                    if (total_gas_limit - gas_used) < block_env.gas_limit.to() {
+                    if (total_gas_limit - gas_used) < evm_env.block_env.gas_limit.to() {
                         return Err(
                             EthApiError::Other(Box::new(EthSimulateError::GasLimitReached)).into()
                         )
@@ -153,7 +153,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         let txs_without_gas_limit =
                             calls.iter().filter(|tx| tx.gas.is_none()).count();
 
-                        if total_specified_gas > block_env.gas_limit.to() {
+                        if total_specified_gas > evm_env.block_env.gas_limit.to() {
                             return Err(EthApiError::Other(Box::new(
                                 EthSimulateError::BlockGasLimitExceeded,
                             ))
@@ -161,7 +161,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         }
 
                         if txs_without_gas_limit > 0 {
-                            (block_env.gas_limit.to::<u64>() - total_specified_gas) /
+                            (evm_env.block_env.gas_limit.to::<u64>() - total_specified_gas) /
                                 txs_without_gas_limit as u64
                         } else {
                             0
@@ -182,27 +182,23 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             call,
                             validation,
                             default_gas_limit,
-                            cfg_env_with_handler_cfg.chain_id,
+                            evm_env.cfg_env_with_handler_cfg.chain_id,
                             &mut db,
                             this.tx_resp_builder(),
                         )?;
 
                         let tx_env = this.evm_config().tx_env(&tx, sender);
-                        let env = EnvWithHandlerCfg::new_with_cfg_env(
-                            cfg_env_with_handler_cfg.clone(),
-                            block_env.clone(),
-                            tx_env,
-                        );
 
-                        let (res, env) = {
+                        let (res, (_, tx_env)) = {
                             if trace_transfers {
                                 this.transact_with_inspector(
                                     &mut db,
-                                    env,
+                                    evm_env.clone(),
+                                    tx_env,
                                     TransferInspector::new(false).with_logs(true),
                                 )?
                             } else {
-                                this.transact(&mut db, env)?
+                                this.transact(&mut db, evm_env.clone(), tx_env.clone())?
                             }
                         };
 
@@ -213,12 +209,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         }
 
                         transactions.push(tx);
-                        senders.push(env.tx.caller);
+                        senders.push(tx_env.caller);
                         results.push(res.result);
                     }
 
                     let (block, _) = this.assemble_block_and_receipts(
-                        &block_env,
+                        &evm_env.block_env,
                         parent_hash,
                         // state root calculation is skipped for performance reasons
                         B256::ZERO,
@@ -300,7 +296,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 self.evm_env_at(target_block),
                 self.block_with_senders(target_block)
             )?;
-            let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
             let block = block.ok_or(EthApiError::HeaderNotFound(target_block))?;
 
@@ -330,12 +325,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     // to be replayed
                     let transactions = block.transactions_with_sender().take(num_txs);
                     for (signer, tx) in transactions {
-                        let env = EnvWithHandlerCfg::new_with_cfg_env(
-                            cfg_env_with_handler_cfg.clone(),
-                            block_env.clone(),
-                            RpcNodeCore::evm_config(&this).tx_env(tx, *signer),
-                        );
-                        let (res, _) = this.transact(&mut db, env)?;
+                        let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx, *signer);
+                        let (res, _) = this.transact(&mut db, evm_env.clone(), tx_env)?;
                         db.commit(res.state);
                     }
                 }
@@ -348,14 +339,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let state_overrides = state_override.take();
                     let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                    let env = this.prepare_call_env(
-                        cfg_env_with_handler_cfg.clone(),
-                        block_env.clone(),
-                        tx,
-                        &mut db,
-                        overrides,
-                    )?;
-                    let (res, _) = this.transact(&mut db, env)?;
+                    let (evm_env, tx) =
+                        this.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
+                    let (res, _) = this.transact(&mut db, evm_env, tx)?;
 
                     match ensure_success(res.result) {
                         Ok(output) => {
@@ -395,12 +381,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         async move {
             let block_id = block_number.unwrap_or_default();
             let (evm_env, at) = self.evm_env_at(block_id).await?;
-            let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
-            self.spawn_blocking_io(move |this| {
-                this.create_access_list_with(cfg_env_with_handler_cfg, block_env, at, request)
-            })
-            .await
+            self.spawn_blocking_io(move |this| this.create_access_list_with(evm_env, at, request))
+                .await
         }
     }
 
@@ -408,8 +391,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// [`BlockId`].
     fn create_access_list_with(
         &self,
-        cfg: CfgEnvWithHandlerCfg,
-        block: BlockEnv,
+        mut evm_env: EvmEnv,
         at: BlockId,
         mut request: TransactionRequest,
     ) -> Result<AccessListResult, Self::Error>
@@ -418,23 +400,23 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     {
         let state = self.state_at_block_id(at)?;
 
-        let mut env = self.build_call_evm_env(cfg, block, request.clone())?;
+        let mut tx_env = self.create_txn_env(&evm_env.block_env, request.clone())?;
 
         // we want to disable this in eth_createAccessList, since this is common practice used by
         // other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
-        env.cfg.disable_block_gas_limit = true;
+        evm_env.cfg_env_with_handler_cfg.disable_block_gas_limit = true;
 
         // The basefee should be ignored for eth_createAccessList
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
-        env.cfg.disable_base_fee = true;
+        evm_env.cfg_env_with_handler_cfg.disable_base_fee = true;
 
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-        if request.gas.is_none() && env.tx.gas_price > U256::ZERO {
-            let cap = caller_gas_allowance(&mut db, &env.tx)?;
+        if request.gas.is_none() && tx_env.gas_price > U256::ZERO {
+            let cap = caller_gas_allowance(&mut db, &tx_env)?;
             // no gas limit was provided in the request, so we need to cap the request's gas limit
-            env.tx.gas_limit = cap.min(env.block.gas_limit).saturating_to();
+            tx_env.gas_limit = cap.min(evm_env.block_env.gas_limit).saturating_to();
         }
 
         let from = request.from.unwrap_or_default();
@@ -449,16 +431,17 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         // can consume the list since we're not using the request anymore
         let initial = request.access_list.take().unwrap_or_default();
 
-        let precompiles = get_precompiles(env.handler_cfg.spec_id);
+        let precompiles = get_precompiles(evm_env.cfg_env_with_handler_cfg.handler_cfg.spec_id);
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
 
-        let (result, mut env) = self.inspect(&mut db, env, &mut inspector)?;
+        let (result, (evm_env, mut tx_env)) =
+            self.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
         let access_list = inspector.into_access_list();
-        env.tx.access_list = access_list.to_vec();
+        tx_env.access_list = access_list.to_vec();
         match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
-                    Some(RpcInvalidTransactionError::halt(reason, env.tx.gas_limit).to_string());
+                    Some(RpcInvalidTransactionError::halt(reason, tx_env.gas_limit).to_string());
                 return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Revert { output, gas_used } => {
@@ -469,11 +452,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         };
 
         // transact again to get the exact gas used
-        let (result, env) = self.transact(&mut db, env)?;
+        let (result, (_, tx_env)) = self.transact(&mut db, evm_env, tx_env)?;
         let res = match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
-                    Some(RpcInvalidTransactionError::halt(reason, env.tx.gas_limit).to_string());
+                    Some(RpcInvalidTransactionError::halt(reason, tx_env.gas_limit).to_string());
                 AccessListResult { access_list, gas_used: U256::from(gas_used), error }
             }
             ExecutionResult::Revert { output, gas_used } => {
@@ -515,16 +498,25 @@ pub trait Call:
     fn transact<DB>(
         &self,
         db: DB,
-        env: EnvWithHandlerCfg,
-    ) -> Result<(ResultAndState, EnvWithHandlerCfg), Self::Error>
+        evm_env: EvmEnv,
+        tx_env: TxEnv,
+    ) -> Result<(ResultAndState, (EvmEnv, TxEnv)), Self::Error>
     where
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = self.evm_config().evm_with_env(db, env);
+        let mut evm = self.evm_config().evm_with_env(db, evm_env, tx_env);
         let res = evm.transact().map_err(Self::Error::from_evm_err)?;
         let (_, env) = evm.into_db_and_env_with_handler_cfg();
-        Ok((res, env))
+
+        let EnvWithHandlerCfg { env, handler_cfg } = env;
+        let Env { cfg, block, tx } = *env;
+        let evm_env = EvmEnv {
+            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg { cfg_env: cfg, handler_cfg },
+            block_env: block,
+        };
+
+        Ok((res, (evm_env, tx)))
     }
 
     /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
@@ -532,17 +524,26 @@ pub trait Call:
     fn transact_with_inspector<DB>(
         &self,
         db: DB,
-        env: EnvWithHandlerCfg,
+        evm_env: EvmEnv,
+        tx_env: TxEnv,
         inspector: impl GetInspector<DB>,
-    ) -> Result<(ResultAndState, EnvWithHandlerCfg), Self::Error>
+    ) -> Result<(ResultAndState, (EvmEnv, TxEnv)), Self::Error>
     where
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, env, inspector);
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, tx_env, inspector);
         let res = evm.transact().map_err(Self::Error::from_evm_err)?;
         let (_, env) = evm.into_db_and_env_with_handler_cfg();
-        Ok((res, env))
+
+        let EnvWithHandlerCfg { env, handler_cfg } = env;
+        let Env { cfg, block, tx } = *env;
+        let evm_env = EvmEnv {
+            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg { cfg_env: cfg, handler_cfg },
+            block_env: block,
+        };
+
+        Ok((res, (evm_env, tx)))
     }
 
     /// Executes the call request at the given [`BlockId`].
@@ -551,12 +552,14 @@ pub trait Call:
         request: TransactionRequest,
         at: BlockId,
         overrides: EvmOverrides,
-    ) -> impl Future<Output = Result<(ResultAndState, EnvWithHandlerCfg), Self::Error>> + Send
+    ) -> impl Future<Output = Result<(ResultAndState, (EvmEnv, TxEnv)), Self::Error>> + Send
     where
         Self: LoadPendingBlock,
     {
         let this = self.clone();
-        self.spawn_with_call_at(request, at, overrides, move |db, env| this.transact(db, env))
+        self.spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
+            this.transact(db, evm_env, tx_env)
+        })
     }
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`] on a new task
@@ -599,29 +602,23 @@ pub trait Call:
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
         Self: LoadPendingBlock,
-        F: FnOnce(StateCacheDbRefMutWrapper<'_, '_>, EnvWithHandlerCfg) -> Result<R, Self::Error>
+        F: FnOnce(StateCacheDbRefMutWrapper<'_, '_>, EvmEnv, TxEnv) -> Result<R, Self::Error>
             + Send
             + 'static,
         R: Send + 'static,
     {
         async move {
             let (evm_env, at) = self.evm_env_at(at).await?;
-            let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
             let this = self.clone();
             self.spawn_blocking_io(move |_| {
                 let state = this.state_at_block_id(at)?;
                 let mut db =
                     CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
 
-                let env = this.prepare_call_env(
-                    cfg_env_with_handler_cfg,
-                    block_env,
-                    request,
-                    &mut db,
-                    overrides,
-                )?;
+                let (evm_env, tx_env) =
+                    this.prepare_call_env(evm_env, request, &mut db, overrides)?;
 
-                f(StateCacheDbRefMutWrapper(&mut db), env)
+                f(StateCacheDbRefMutWrapper(&mut db), evm_env, tx_env)
             })
             .await
         }
@@ -656,7 +653,6 @@ pub trait Call:
             let (tx, tx_info) = transaction.split();
 
             let (evm_env, _) = self.evm_env_at(block.hash().into()).await?;
-            let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
@@ -668,21 +664,11 @@ pub trait Call:
                 let block_txs = block.transactions_with_sender();
 
                 // replay all transactions prior to the targeted transaction
-                this.replay_transactions_until(
-                    &mut db,
-                    cfg_env_with_handler_cfg.clone(),
-                    block_env.clone(),
-                    block_txs,
-                    *tx.tx_hash(),
-                )?;
+                this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
 
-                let env = EnvWithHandlerCfg::new_with_cfg_env(
-                    cfg_env_with_handler_cfg,
-                    block_env,
-                    RpcNodeCore::evm_config(&this).tx_env(tx.tx(), tx.signer()),
-                );
+                let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx.tx(), tx.signer());
 
-                let (res, _) = this.transact(&mut db, env)?;
+                let (res, _) = this.transact(&mut db, evm_env, tx_env)?;
                 f(tx_info, res, db)
             })
             .await
@@ -700,8 +686,7 @@ pub trait Call:
     fn replay_transactions_until<'a, DB, I>(
         &self,
         db: &mut DB,
-        cfg: CfgEnvWithHandlerCfg,
-        block_env: BlockEnv,
+        evm_env: EvmEnv,
         transactions: I,
         target_tx_hash: B256,
     ) -> Result<usize, Self::Error>
@@ -711,9 +696,7 @@ pub trait Call:
         I: IntoIterator<Item = (&'a Address, &'a <Self::Evm as ConfigureEvmEnv>::Transaction)>,
         <Self::Evm as ConfigureEvmEnv>::Transaction: SignedTransaction,
     {
-        let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default());
-
-        let mut evm = self.evm_config().evm_with_env(db, env);
+        let mut evm = self.evm_config().evm_with_env(db, evm_env, Default::default());
         let mut index = 0;
         for (sender, tx) in transactions {
             if *tx.tx_hash() == target_tx_hash {
@@ -807,20 +790,6 @@ pub trait Call:
         Ok(env)
     }
 
-    /// Creates a new [`EnvWithHandlerCfg`] to be used for executing the [`TransactionRequest`] in
-    /// `eth_call`.
-    ///
-    /// Note: this does _not_ access the Database to check the sender.
-    fn build_call_evm_env(
-        &self,
-        cfg: CfgEnvWithHandlerCfg,
-        block: BlockEnv,
-        request: TransactionRequest,
-    ) -> Result<EnvWithHandlerCfg, Self::Error> {
-        let tx = self.create_txn_env(&block, request)?;
-        Ok(EnvWithHandlerCfg::new_with_cfg_env(cfg, block, tx))
-    }
-
     /// Prepares the [`EnvWithHandlerCfg`] for execution of calls.
     ///
     /// Does not commit any changes to the underlying database.
@@ -836,12 +805,11 @@ pub trait Call:
     /// In addition, this changes the block's gas limit to the configured [`Self::call_gas_limit`].
     fn prepare_call_env<DB>(
         &self,
-        mut cfg: CfgEnvWithHandlerCfg,
-        mut block: BlockEnv,
+        mut evm_env: EvmEnv,
         mut request: TransactionRequest,
         db: &mut CacheDB<DB>,
         overrides: EvmOverrides,
-    ) -> Result<EnvWithHandlerCfg, Self::Error>
+    ) -> Result<(EvmEnv, TxEnv), Self::Error>
     where
         DB: DatabaseRef,
         EthApiError: From<<DB as DatabaseRef>::Error>,
@@ -854,41 +822,41 @@ pub trait Call:
         }
 
         // apply configured gas cap
-        block.gas_limit = U256::from(self.call_gas_limit());
+        evm_env.block_env.gas_limit = U256::from(self.call_gas_limit());
 
         // Disabled because eth_call is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>
-        cfg.disable_eip3607 = true;
+        evm_env.cfg_env_with_handler_cfg.disable_eip3607 = true;
 
         // The basefee should be ignored for eth_call
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
-        cfg.disable_base_fee = true;
+        evm_env.cfg_env_with_handler_cfg.disable_base_fee = true;
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.nonce = None;
 
         if let Some(block_overrides) = overrides.block {
-            apply_block_overrides(*block_overrides, db, &mut block);
+            apply_block_overrides(*block_overrides, db, &mut evm_env.block_env);
         }
         if let Some(state_overrides) = overrides.state {
             apply_state_overrides(state_overrides, db)?;
         }
 
         let request_gas = request.gas;
-        let mut env = self.build_call_evm_env(cfg, block, request)?;
+        let mut tx_env = self.create_txn_env(&evm_env.block_env, request)?;
 
         if request_gas.is_none() {
             // No gas limit was provided in the request, so we need to cap the transaction gas limit
-            if env.tx.gas_price > U256::ZERO {
+            if tx_env.gas_price > U256::ZERO {
                 // If gas price is specified, cap transaction gas limit with caller allowance
-                trace!(target: "rpc::eth::call", ?env, "Applying gas limit cap with caller allowance");
-                let cap = caller_gas_allowance(db, &env.tx)?;
+                trace!(target: "rpc::eth::call", ?tx_env, "Applying gas limit cap with caller allowance");
+                let cap = caller_gas_allowance(db, &tx_env)?;
                 // ensure we cap gas_limit to the block's
-                env.tx.gas_limit = cap.min(env.block.gas_limit).saturating_to();
+                tx_env.gas_limit = cap.min(evm_env.block_env.gas_limit).saturating_to();
             }
         }
 
-        Ok(env)
+        Ok((evm_env, tx_env))
     }
 }
