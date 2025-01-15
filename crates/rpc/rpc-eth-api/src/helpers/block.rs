@@ -1,33 +1,30 @@
 //! Database access for `eth_` block RPC methods. Loads block and receipt data w.r.t. network.
 
-use std::sync::Arc;
-
+use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
+use crate::{
+    node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
+    RpcReceipt,
+};
 use alloy_eips::BlockId;
 use alloy_primitives::Sealable;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives::{SealedBlockFor, SealedBlockWithSenders};
+use reth_primitives::{RecoveredBlock, SealedBlock};
 use reth_provider::{
     BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt,
 };
 use reth_rpc_types_compat::block::from_block;
 use revm_primitives::U256;
-
-use crate::{
-    node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
-    RpcReceipt,
-};
-
-use super::{LoadPendingBlock, LoadReceipt, SpawnBlocking};
+use std::sync::Arc;
 
 /// Result type of the fetched block receipts.
 pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 /// Result type of the fetched block and its receipts.
 pub type BlockAndReceiptsResult<Eth> = Result<
     Option<(
-        SealedBlockFor<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
+        SealedBlock<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
         Arc<Vec<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>>,
     )>,
     <Eth as EthApiTypes>::Error,
@@ -62,14 +59,8 @@ pub trait EthBlocks: LoadBlock {
     {
         async move {
             let Some(block) = self.block_with_senders(block_id).await? else { return Ok(None) };
-            let block_hash = block.hash();
 
-            let block = from_block(
-                (*block).clone().unseal(),
-                full.into(),
-                Some(block_hash),
-                self.tx_resp_builder(),
-            )?;
+            let block = from_block((*block).clone(), full.into(), self.tx_resp_builder())?;
             Ok(Some(block))
         }
     }
@@ -105,7 +96,7 @@ pub trait EthBlocks: LoadBlock {
                 .get_sealed_block_with_senders(block_hash)
                 .await
                 .map_err(Self::Error::from_eth_err)?
-                .map(|b| b.body().transactions().len()))
+                .map(|b| b.body().transaction_count()))
         }
     }
 
@@ -143,7 +134,7 @@ pub trait EthBlocks: LoadBlock {
 
                 // If no pending block from provider, build the pending block locally.
                 if let Some((block, receipts)) = self.local_pending_block().await? {
-                    return Ok(Some((block.block, Arc::new(receipts))));
+                    return Ok(Some((block.into_sealed_block(), Arc::new(receipts))));
                 }
             }
 
@@ -155,7 +146,7 @@ pub trait EthBlocks: LoadBlock {
                     .get_block_and_receipts(block_hash)
                     .await
                     .map_err(Self::Error::from_eth_err)
-                    .map(|b| b.map(|(b, r)| (b.block.clone(), r)))
+                    .map(|b| b.map(|(b, r)| (b.clone_sealed_block(), r)))
             }
 
             Ok(None)
@@ -219,7 +210,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
         block_id: BlockId,
     ) -> impl Future<
         Output = Result<
-            Option<Arc<SealedBlockWithSenders<<Self::Provider as BlockReader>::Block>>>,
+            Option<Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>>,
             Self::Error,
         >,
     > + Send {

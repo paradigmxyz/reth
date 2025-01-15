@@ -19,9 +19,9 @@ use reth_evm::{
 };
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, BlockExt, Receipt,
-    Receipts,
+    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, Receipt, Receipts,
 };
+use reth_primitives_traits::block::Block as _;
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,

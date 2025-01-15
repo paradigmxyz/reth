@@ -211,6 +211,21 @@ impl InMemorySize for OpReceipt {
 
 impl reth_primitives_traits::Receipt for OpReceipt {}
 
+/// Trait for deposit receipt.
+pub trait DepositReceipt: reth_primitives_traits::Receipt {
+    /// Returns deposit receipt if it is a deposit transaction.
+    fn as_deposit_receipt_mut(&mut self) -> Option<&mut OpDepositReceipt>;
+}
+
+impl DepositReceipt for OpReceipt {
+    fn as_deposit_receipt_mut(&mut self) -> Option<&mut OpDepositReceipt> {
+        match self {
+            Self::Deposit(receipt) => Some(receipt),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(feature = "reth-codec")]
 mod compact {
     use super::*;

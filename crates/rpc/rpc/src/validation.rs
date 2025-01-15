@@ -17,8 +17,8 @@ use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
-use reth_primitives::{GotExpected, NodePrimitives, SealedBlockWithSenders, SealedHeader};
-use reth_primitives_traits::{constants::GAS_LIMIT_BOUND_DIVISOR, Block as _, BlockBody};
+use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock};
 use reth_provider::{BlockExecutionOutput, BlockReaderIdExt, StateProviderFactory};
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
@@ -98,7 +98,7 @@ where
     /// Validates the given block and a [`BidTrace`] against it.
     pub async fn validate_message_against_block(
         &self,
-        block: SealedBlockWithSenders<<E::Primitives as NodePrimitives>::Block>,
+        block: RecoveredBlock<<E::Primitives as NodePrimitives>::Block>,
         message: BidTrace,
         registered_gas_limit: u64,
     ) -> Result<(), ValidationApiError> {
@@ -106,7 +106,7 @@ where
 
         self.consensus.validate_header_with_total_difficulty(block.sealed_header(), U256::MAX)?;
         self.consensus.validate_header(block.sealed_header())?;
-        self.consensus.validate_block_pre_execution(&block)?;
+        self.consensus.validate_block_pre_execution(block.sealed_block())?;
 
         if !self.disallow.is_empty() {
             if self.disallow.contains(&block.beneficiary()) {
@@ -115,7 +115,7 @@ where
             if self.disallow.contains(&message.proposer_fee_recipient) {
                 return Err(ValidationApiError::Blacklist(message.proposer_fee_recipient))
             }
-            for (sender, tx) in block.senders_iter().zip(block.transactions()) {
+            for (sender, tx) in block.senders_iter().zip(block.body().transactions()) {
                 if self.disallow.contains(sender) {
                     return Err(ValidationApiError::Blacklist(*sender))
                 }
@@ -147,7 +147,6 @@ where
         let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
         let executor = self.executor_provider.executor(cached_db);
 
-        let block = block.unseal();
         let mut accessed_blacklisted = None;
         let output = executor.execute_with_state_closure(&block, |state| {
             if !self.disallow.is_empty() {
@@ -251,7 +250,7 @@ where
     /// to checking the latest block transaction.
     fn ensure_payment(
         &self,
-        block: &<E::Primitives as NodePrimitives>::Block,
+        block: &SealedBlock<<E::Primitives as NodePrimitives>::Block>,
         output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
@@ -349,7 +348,7 @@ where
                     versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
                 }),
             )?
-            .try_seal_with_senders()
+            .try_recover()
             .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
 
         self.validate_message_against_block(
@@ -382,7 +381,7 @@ where
                     },
                 ),
             )?
-            .try_seal_with_senders()
+            .try_recover()
             .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
 
         self.validate_message_against_block(

@@ -1,7 +1,8 @@
 use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput};
 use alloy_primitives::U256;
 use core::sync::atomic::{AtomicBool, Ordering};
-use reth_primitives::{BlockWithSenders, NodePrimitives, SealedBlock, SealedHeader};
+use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::Block;
 
 /// Consensus engine implementation for testing
 #[derive(Debug)]
@@ -49,7 +50,7 @@ impl TestConsensus {
 impl<N: NodePrimitives> FullConsensus<N> for TestConsensus {
     fn validate_block_post_execution(
         &self,
-        _block: &BlockWithSenders<N::Block>,
+        _block: &RecoveredBlock<N::Block>,
         _input: PostExecutionInput<'_, N::Receipt>,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
@@ -60,13 +61,13 @@ impl<N: NodePrimitives> FullConsensus<N> for TestConsensus {
     }
 }
 
-impl<H, B> Consensus<H, B> for TestConsensus {
+impl<B: Block> Consensus<B> for TestConsensus {
     type Error = ConsensusError;
 
     fn validate_body_against_header(
         &self,
-        _body: &B,
-        _header: &SealedHeader<H>,
+        _body: &B::Body,
+        _header: &SealedHeader<B::Header>,
     ) -> Result<(), Self::Error> {
         if self.fail_body_against_header() {
             Err(ConsensusError::BaseFeeMissing)
@@ -75,7 +76,7 @@ impl<H, B> Consensus<H, B> for TestConsensus {
         }
     }
 
-    fn validate_block_pre_execution(&self, _block: &SealedBlock<H, B>) -> Result<(), Self::Error> {
+    fn validate_block_pre_execution(&self, _block: &SealedBlock<B>) -> Result<(), Self::Error> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)
         } else {

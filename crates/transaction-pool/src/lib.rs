@@ -177,7 +177,7 @@ use aquamarine as _;
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::RecoveredTx;
-use reth_primitives_traits::{BlockBody, BlockHeader};
+use reth_primitives_traits::Block;
 use reth_storage_api::StateProviderFactory;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::mpsc::Receiver;
@@ -614,10 +614,9 @@ where
         self.pool.set_block_info(info)
     }
 
-    fn on_canonical_state_change<H, B>(&self, update: CanonicalStateUpdate<'_, H, B>)
+    fn on_canonical_state_change<B>(&self, update: CanonicalStateUpdate<'_, B>)
     where
-        H: BlockHeader,
-        B: BlockBody,
+        B: Block,
     {
         self.pool.on_canonical_state_change(update);
     }

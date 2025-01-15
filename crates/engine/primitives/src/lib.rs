@@ -33,7 +33,7 @@ pub use reth_payload_primitives::{
     PayloadTypes,
 };
 use reth_payload_primitives::{InvalidPayloadAttributesError, PayloadAttributes};
-use reth_primitives::{NodePrimitives, SealedBlockFor};
+use reth_primitives::{NodePrimitives, SealedBlock};
 use reth_primitives_traits::Block;
 use serde::{de::DeserializeOwned, ser::Serialize};
 
@@ -86,7 +86,7 @@ pub trait EngineTypes:
 
     /// Converts a [`BuiltPayload`] into an [`ExecutionPayload`] and [`ExecutionPayloadSidecar`].
     fn block_to_payload(
-        block: SealedBlockFor<
+        block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> (ExecutionPayload, ExecutionPayloadSidecar);
@@ -109,7 +109,7 @@ pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
         &self,
         payload: ExecutionPayload,
         sidecar: ExecutionPayloadSidecar,
-    ) -> Result<SealedBlockFor<Self::Block>, PayloadError>;
+    ) -> Result<SealedBlock<Self::Block>, PayloadError>;
 }
 
 /// Type that validates the payloads processed by the engine.

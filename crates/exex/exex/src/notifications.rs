@@ -435,16 +435,16 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::Wal;
-
     use super::*;
+    use crate::Wal;
     use alloy_consensus::Header;
     use alloy_eips::BlockNumHash;
     use eyre::OptionExt;
     use futures::StreamExt;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::{Block, BlockExt};
+    use reth_primitives::Block;
+    use reth_primitives_traits::Block as _;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,
         Chain, DatabaseProviderFactory, StorageLocation,
@@ -473,10 +473,8 @@ mod tests {
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         );
         let provider_rw = provider_factory.provider_rw()?;
-        provider_rw.insert_block(
-            node_head_block.clone().seal_with_senders().ok_or_eyre("failed to recover senders")?,
-            StorageLocation::Database,
-        )?;
+        provider_rw
+            .insert_block(node_head_block.clone().try_recover()?, StorageLocation::Database)?;
         provider_rw.commit()?;
 
         let node_head = Head {
@@ -494,8 +492,7 @@ mod tests {
                     node_head.number + 1,
                     BlockParams { parent: Some(node_head.hash), ..Default::default() },
                 )
-                .seal_with_senders()
-                .ok_or_eyre("failed to recover senders")?],
+                .try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -565,8 +562,7 @@ mod tests {
                     ..Default::default()
                 }
                 .seal_slow()
-                .seal_with_senders()
-                .ok_or_eyre("failed to recover senders")?],
+                .try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -611,8 +607,7 @@ mod tests {
             genesis_block.number + 1,
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         )
-        .seal_with_senders::<reth_primitives::Block>()
-        .ok_or_eyre("failed to recover senders")?;
+        .try_recover()?;
         let node_head = Head {
             number: node_head_block.number,
             hash: node_head_block.hash(),
@@ -638,10 +633,7 @@ mod tests {
         let exex_head = ExExHead { block: exex_head_block.num_hash() };
         let exex_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![exex_head_block
-                    .clone()
-                    .seal_with_senders()
-                    .ok_or_eyre("failed to recover senders")?],
+                vec![exex_head_block.clone().try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -655,8 +647,7 @@ mod tests {
                     node_head.number + 1,
                     BlockParams { parent: Some(node_head.hash), ..Default::default() },
                 )
-                .seal_with_senders()
-                .ok_or_eyre("failed to recover senders")?],
+                .try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -713,10 +704,7 @@ mod tests {
         );
         let exex_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![exex_head_block
-                    .clone()
-                    .seal_with_senders()
-                    .ok_or_eyre("failed to recover senders")?],
+                vec![exex_head_block.clone().try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -736,8 +724,7 @@ mod tests {
                     genesis_block.number + 1,
                     BlockParams { parent: Some(genesis_hash), ..Default::default() },
                 )
-                .seal_with_senders()
-                .ok_or_eyre("failed to recover senders")?],
+                .try_recover()?],
                 Default::default(),
                 None,
             )),

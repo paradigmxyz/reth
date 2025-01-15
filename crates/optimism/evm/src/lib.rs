@@ -33,6 +33,8 @@ mod execute;
 pub use execute::*;
 pub mod l1;
 pub use l1::*;
+mod receipts;
+pub use receipts::*;
 
 mod error;
 pub use error::OpBlockExecutionError;
@@ -166,9 +168,7 @@ impl ConfigureEvmEnv for OpEvmConfig {
 }
 
 impl ConfigureEvm for OpEvmConfig {
-    type DefaultExternalContext<'a> = ();
-
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, (), DB> {
         EvmBuilder::default().with_db(db).optimism().build()
     }
 
@@ -184,8 +184,6 @@ impl ConfigureEvm for OpEvmConfig {
             .append_handler_register(inspector_handle_register)
             .build()
     }
-
-    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
 }
 
 #[cfg(test)]
@@ -206,7 +204,7 @@ mod tests {
     };
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
-    use reth_primitives::{Account, Log, Receipts, SealedBlockWithSenders};
+    use reth_primitives::{Account, Log, Receipts, RecoveredBlock};
     use reth_revm::{
         db::{BundleState, CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
@@ -532,8 +530,8 @@ mod tests {
 
     #[test]
     fn receipts_by_block_hash() {
-        // Create a default SealedBlockWithSenders object
-        let block: SealedBlockWithSenders<OpBlock> = Default::default();
+        // Create a default recovered block
+        let block: RecoveredBlock<OpBlock> = Default::default();
 
         // Define block hashes for block1 and block2
         let block1_hash = B256::new([0x01; 32]);
@@ -544,11 +542,11 @@ mod tests {
         let mut block2 = block;
 
         // Set the hashes of block1 and block2
-        block1.block.set_block_number(10);
-        block1.block.set_hash(block1_hash);
+        block1.set_block_number(10);
+        block1.set_hash(block1_hash);
 
-        block2.block.set_block_number(11);
-        block2.block.set_hash(block2_hash);
+        block2.set_block_number(11);
+        block2.set_hash(block2_hash);
 
         // Create a random receipt object, receipt1
         let receipt1 = OpReceipt::Legacy(Receipt {

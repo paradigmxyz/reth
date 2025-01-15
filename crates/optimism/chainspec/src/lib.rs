@@ -19,7 +19,7 @@ mod op_sepolia;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;
@@ -200,12 +200,12 @@ impl OpChainSpec {
     /// Caution: Caller must ensure that holocene is active in the parent header.
     ///
     /// See also [Base fee computation](https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation)
-    pub fn decode_holocene_base_fee(
+    pub fn decode_holocene_base_fee<H: BlockHeader>(
         &self,
-        parent: &Header,
+        parent: &H,
         timestamp: u64,
     ) -> Result<u64, EIP1559ParamError> {
-        let (elasticity, denominator) = decode_holocene_extra_data(&parent.extra_data)?;
+        let (elasticity, denominator) = decode_holocene_extra_data(parent.extra_data())?;
         let base_fee = if elasticity == 0 && denominator == 0 {
             parent
                 .next_block_base_fee(self.base_fee_params_at_timestamp(timestamp))
@@ -220,15 +220,15 @@ impl OpChainSpec {
     /// Read from parent to determine the base fee for the next block
     ///
     /// See also [Base fee computation](https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation)
-    pub fn next_block_base_fee(
+    pub fn next_block_base_fee<H: BlockHeader>(
         &self,
-        parent: &Header,
+        parent: &H,
         timestamp: u64,
     ) -> Result<U256, EIP1559ParamError> {
         // > if Holocene is active in parent_header.timestamp, then the parameters from
         // > parent_header.extraData are used.
         let is_holocene_activated =
-            self.inner.is_fork_active_at_timestamp(OpHardfork::Holocene, parent.timestamp);
+            self.inner.is_fork_active_at_timestamp(OpHardfork::Holocene, parent.timestamp());
 
         // If we are in the Holocene, we need to use the base fee params
         // from the parent block's extra data.

@@ -1,11 +1,9 @@
 use super::missing_static_data_error;
 use futures_util::TryStreamExt;
-use reth_codecs::Compact;
 use reth_db::{tables, transaction::DbTx};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTxMut};
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::StaticFileSegment;
-use reth_primitives_traits::{Block, BlockBody, BlockHeader};
 use reth_provider::{
     providers::StaticFileWriter, BlockReader, BlockWriter, DBProvider, ProviderError,
     StaticFileProviderFactory, StatsReader, StorageLocation,
@@ -56,7 +54,7 @@ pub struct BodyStage<D: BodyDownloader> {
     /// The body downloader.
     downloader: D,
     /// Block response buffer.
-    buffer: Option<Vec<BlockResponse<D::Header, D::Body>>>,
+    buffer: Option<Vec<BlockResponse<D::Block>>>,
 }
 
 impl<D: BodyDownloader> BodyStage<D> {
@@ -150,8 +148,8 @@ where
         + StaticFileProviderFactory
         + StatsReader
         + BlockReader
-        + BlockWriter<Block: Block<Header = D::Header, Body = D::Body>>,
-    D: BodyDownloader<Header: BlockHeader, Body: BlockBody<Transaction: Compact>>,
+        + BlockWriter<Block = D::Block>,
+    D: BodyDownloader,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -762,8 +760,7 @@ mod tests {
         }
 
         impl BodyDownloader for TestBodyDownloader {
-            type Header = Header;
-            type Body = BlockBody;
+            type Block = reth_primitives::Block;
 
             fn set_download_range(
                 &mut self,
@@ -785,7 +782,7 @@ mod tests {
         }
 
         impl Stream for TestBodyDownloader {
-            type Item = BodyDownloaderResult<Header, BlockBody>;
+            type Item = BodyDownloaderResult<reth_primitives::Block>;
             fn poll_next(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
                 let this = self.get_mut();
 
@@ -801,7 +798,9 @@ mod tests {
                     } else {
                         let body =
                             this.responses.remove(&header.hash()).expect("requested unknown body");
-                        response.push(BlockResponse::Full(SealedBlock::new(header, body)));
+                        response.push(BlockResponse::Full(SealedBlock::from_sealed_parts(
+                            header, body,
+                        )));
                     }
 
                     if response.len() as u64 >= this.batch_size {

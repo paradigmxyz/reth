@@ -15,7 +15,7 @@ use reth_network_p2p::{
     error::{DownloadError, DownloadResult},
 };
 use reth_primitives::SealedHeader;
-use reth_primitives_traits::size::InMemorySize;
+use reth_primitives_traits::{size::InMemorySize, Block};
 use reth_storage_api::HeaderProvider;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use std::{
@@ -35,11 +35,15 @@ use tracing::info;
 /// All blocks in a batch are fetched at the same time.
 #[must_use = "Stream does nothing unless polled"]
 #[derive(Debug)]
-pub struct BodiesDownloader<B: BodiesClient, Provider: HeaderProvider> {
+pub struct BodiesDownloader<
+    B: Block,
+    C: BodiesClient<Body = B::Body>,
+    Provider: HeaderProvider<Header = B::Header>,
+> {
     /// The bodies client
-    client: Arc<B>,
+    client: Arc<C>,
     /// The consensus client
-    consensus: Arc<dyn Consensus<Provider::Header, B::Body, Error = ConsensusError>>,
+    consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
     /// The database handle
     provider: Provider,
     /// The maximum number of non-empty blocks per one request
@@ -57,19 +61,20 @@ pub struct BodiesDownloader<B: BodiesClient, Provider: HeaderProvider> {
     /// The latest block number returned.
     latest_queued_block_number: Option<BlockNumber>,
     /// Requests in progress
-    in_progress_queue: BodiesRequestQueue<Provider::Header, B>,
+    in_progress_queue: BodiesRequestQueue<B, C>,
     /// Buffered responses
-    buffered_responses: BinaryHeap<OrderedBodiesResponse<Provider::Header, B::Body>>,
+    buffered_responses: BinaryHeap<OrderedBodiesResponse<B>>,
     /// Queued body responses that can be returned for insertion into the database.
-    queued_bodies: Vec<BlockResponse<Provider::Header, B::Body>>,
+    queued_bodies: Vec<BlockResponse<B>>,
     /// The bodies downloader metrics.
     metrics: BodyDownloaderMetrics,
 }
 
-impl<B, Provider> BodiesDownloader<B, Provider>
+impl<B, C, Provider> BodiesDownloader<B, C, Provider>
 where
-    B: BodiesClient<Body: InMemorySize> + 'static,
-    Provider: HeaderProvider<Header: BlockHeader> + Unpin + 'static,
+    B: Block,
+    C: BodiesClient<Body = B::Body> + 'static,
+    Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
 {
     /// Returns the next contiguous request.
     fn next_headers_request(&self) -> DownloadResult<Option<Vec<SealedHeader<Provider::Header>>>> {
@@ -97,7 +102,7 @@ where
         &self,
         range: RangeInclusive<BlockNumber>,
         max_non_empty: u64,
-    ) -> DownloadResult<Option<Vec<SealedHeader<Provider::Header>>>> {
+    ) -> DownloadResult<Option<Vec<SealedHeader<B::Header>>>> {
         if range.is_empty() || max_non_empty == 0 {
             return Ok(None)
         }
@@ -193,16 +198,14 @@ where
     }
 
     /// Queues bodies and sets the latest queued block number
-    fn queue_bodies(&mut self, bodies: Vec<BlockResponse<Provider::Header, B::Body>>) {
+    fn queue_bodies(&mut self, bodies: Vec<BlockResponse<B>>) {
         self.latest_queued_block_number = Some(bodies.last().expect("is not empty").block_number());
         self.queued_bodies.extend(bodies);
         self.metrics.queued_blocks.set(self.queued_bodies.len() as f64);
     }
 
     /// Removes the next response from the buffer.
-    fn pop_buffered_response(
-        &mut self,
-    ) -> Option<OrderedBodiesResponse<Provider::Header, B::Body>> {
+    fn pop_buffered_response(&mut self) -> Option<OrderedBodiesResponse<B>> {
         let resp = self.buffered_responses.pop()?;
         self.metrics.buffered_responses.decrement(1.);
         self.buffered_blocks_size_bytes -= resp.size();
@@ -212,10 +215,10 @@ where
     }
 
     /// Adds a new response to the internal buffer
-    fn buffer_bodies_response(&mut self, response: Vec<BlockResponse<Provider::Header, B::Body>>) {
+    fn buffer_bodies_response(&mut self, response: Vec<BlockResponse<B>>) {
         // take into account capacity
         let size = response.iter().map(BlockResponse::size).sum::<usize>() +
-            response.capacity() * mem::size_of::<BlockResponse<Provider::Header, B::Body>>();
+            response.capacity() * mem::size_of::<BlockResponse<B>>();
 
         let response = OrderedBodiesResponse { resp: response, size };
         let response_len = response.len();
@@ -229,7 +232,7 @@ where
     }
 
     /// Returns a response if it's first block number matches the next expected.
-    fn try_next_buffered(&mut self) -> Option<Vec<BlockResponse<Provider::Header, B::Body>>> {
+    fn try_next_buffered(&mut self) -> Option<Vec<BlockResponse<B>>> {
         if let Some(next) = self.buffered_responses.peek() {
             let expected = self.next_expected_block_number();
             let next_block_range = next.block_range();
@@ -255,7 +258,7 @@ where
 
     /// Returns the next batch of block bodies that can be returned if we have enough buffered
     /// bodies
-    fn try_split_next_batch(&mut self) -> Option<Vec<BlockResponse<Provider::Header, B::Body>>> {
+    fn try_split_next_batch(&mut self) -> Option<Vec<BlockResponse<B>>> {
         if self.queued_bodies.len() >= self.stream_batch_size {
             let next_batch = self.queued_bodies.drain(..self.stream_batch_size).collect::<Vec<_>>();
             self.queued_bodies.shrink_to_fit();
@@ -280,24 +283,19 @@ where
     }
 }
 
-impl<B, Provider> BodiesDownloader<B, Provider>
+impl<B, C, Provider> BodiesDownloader<B, C, Provider>
 where
-    B: BodiesClient + 'static,
-    Provider: HeaderProvider + Unpin + 'static,
-    Self: BodyDownloader + 'static,
+    B: Block + 'static,
+    C: BodiesClient<Body = B::Body> + 'static,
+    Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
 {
     /// Spawns the downloader task via [`tokio::task::spawn`]
-    pub fn into_task(
-        self,
-    ) -> TaskDownloader<<Self as BodyDownloader>::Header, <Self as BodyDownloader>::Body> {
+    pub fn into_task(self) -> TaskDownloader<B> {
         self.into_task_with(&TokioTaskExecutor::default())
     }
 
     /// Convert the downloader into a [`TaskDownloader`] by spawning it via the given spawner.
-    pub fn into_task_with<S>(
-        self,
-        spawner: &S,
-    ) -> TaskDownloader<<Self as BodyDownloader>::Header, <Self as BodyDownloader>::Body>
+    pub fn into_task_with<S>(self, spawner: &S) -> TaskDownloader<B>
     where
         S: TaskSpawner,
     {
@@ -305,13 +303,13 @@ where
     }
 }
 
-impl<B, Provider> BodyDownloader for BodiesDownloader<B, Provider>
+impl<B, C, Provider> BodyDownloader for BodiesDownloader<B, C, Provider>
 where
-    B: BodiesClient<Body: Debug + InMemorySize> + 'static,
-    Provider: HeaderProvider + Unpin + 'static,
+    B: Block + 'static,
+    C: BodiesClient<Body = B::Body> + 'static,
+    Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
 {
-    type Header = Provider::Header;
-    type Body = B::Body;
+    type Block = B;
 
     /// Set a new download range (exclusive).
     ///
@@ -356,12 +354,13 @@ where
     }
 }
 
-impl<B, Provider> Stream for BodiesDownloader<B, Provider>
+impl<B, C, Provider> Stream for BodiesDownloader<B, C, Provider>
 where
-    B: BodiesClient<Body: InMemorySize> + 'static,
-    Provider: HeaderProvider + Unpin + 'static,
+    B: Block + 'static,
+    C: BodiesClient<Body = B::Body> + 'static,
+    Provider: HeaderProvider<Header = B::Header> + Unpin + 'static,
 {
-    type Item = BodyDownloaderResult<Provider::Header, B::Body>;
+    type Item = BodyDownloaderResult<B>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -443,13 +442,13 @@ where
 }
 
 #[derive(Debug)]
-struct OrderedBodiesResponse<H, B> {
-    resp: Vec<BlockResponse<H, B>>,
+struct OrderedBodiesResponse<B: Block> {
+    resp: Vec<BlockResponse<B>>,
     /// The total size of the response in bytes
     size: usize,
 }
 
-impl<H, B> OrderedBodiesResponse<H, B> {
+impl<B: Block> OrderedBodiesResponse<B> {
     #[inline]
     fn len(&self) -> usize {
         self.resp.len()
@@ -464,10 +463,7 @@ impl<H, B> OrderedBodiesResponse<H, B> {
     }
 }
 
-impl<H, B> OrderedBodiesResponse<H, B>
-where
-    H: BlockHeader,
-{
+impl<B: Block> OrderedBodiesResponse<B> {
     /// Returns the block number of the first element
     ///
     /// # Panics
@@ -485,21 +481,21 @@ where
     }
 }
 
-impl<H: BlockHeader, B> PartialEq for OrderedBodiesResponse<H, B> {
+impl<B: Block> PartialEq for OrderedBodiesResponse<B> {
     fn eq(&self, other: &Self) -> bool {
         self.first_block_number() == other.first_block_number()
     }
 }
 
-impl<H: BlockHeader, B> Eq for OrderedBodiesResponse<H, B> {}
+impl<B: Block> Eq for OrderedBodiesResponse<B> {}
 
-impl<H: BlockHeader, B> PartialOrd for OrderedBodiesResponse<H, B> {
+impl<B: Block> PartialOrd for OrderedBodiesResponse<B> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<H: BlockHeader, B> Ord for OrderedBodiesResponse<H, B> {
+impl<B: Block> Ord for OrderedBodiesResponse<B> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.first_block_number().cmp(&other.first_block_number()).reverse()
     }
@@ -576,15 +572,16 @@ impl BodiesDownloaderBuilder {
     }
 
     /// Consume self and return the concurrent downloader.
-    pub fn build<B, Provider>(
+    pub fn build<B, C, Provider>(
         self,
-        client: B,
-        consensus: Arc<dyn Consensus<Provider::Header, B::Body, Error = ConsensusError>>,
+        client: C,
+        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
         provider: Provider,
-    ) -> BodiesDownloader<B, Provider>
+    ) -> BodiesDownloader<B, C, Provider>
     where
-        B: BodiesClient + 'static,
-        Provider: HeaderProvider,
+        B: Block,
+        C: BodiesClient<Body = B::Body> + 'static,
+        Provider: HeaderProvider<Header = B::Header>,
     {
         let Self {
             request_limit,
@@ -646,15 +643,16 @@ mod tests {
         );
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
-        let mut downloader = BodiesDownloaderBuilder::default().build(
-            client.clone(),
-            Arc::new(TestConsensus::default()),
-            ProviderFactory::<MockNodeTypesWithDB>::new(
-                db,
-                MAINNET.clone(),
-                StaticFileProvider::read_write(static_dir_path).unwrap(),
-            ),
-        );
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .build::<reth_primitives::Block, _, _>(
+                client.clone(),
+                Arc::new(TestConsensus::default()),
+                ProviderFactory::<MockNodeTypesWithDB>::new(
+                    db,
+                    MAINNET.clone(),
+                    StaticFileProvider::read_write(static_dir_path).unwrap(),
+                ),
+            );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(
@@ -689,16 +687,17 @@ mod tests {
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
-        let mut downloader =
-            BodiesDownloaderBuilder::default().with_request_limit(request_limit).build(
-                client.clone(),
-                Arc::new(TestConsensus::default()),
-                ProviderFactory::<MockNodeTypesWithDB>::new(
-                    db,
-                    MAINNET.clone(),
-                    StaticFileProvider::read_write(static_dir_path).unwrap(),
-                ),
-            );
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .with_request_limit(request_limit)
+            .build::<reth_primitives::Block, _, _>(
+            client.clone(),
+            Arc::new(TestConsensus::default()),
+            ProviderFactory::<MockNodeTypesWithDB>::new(
+                db,
+                MAINNET.clone(),
+                StaticFileProvider::read_write(static_dir_path).unwrap(),
+            ),
+        );
         downloader.set_download_range(0..=199).expect("failed to set download range");
 
         let _ = downloader.collect::<Vec<_>>().await;
@@ -724,7 +723,7 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default()
             .with_stream_batch_size(stream_batch_size)
             .with_request_limit(request_limit)
-            .build(
+            .build::<reth_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
                 ProviderFactory::<MockNodeTypesWithDB>::new(
@@ -760,7 +759,9 @@ mod tests {
         let client = Arc::new(TestBodiesClient::default().with_bodies(bodies.clone()));
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
 
-        let mut downloader = BodiesDownloaderBuilder::default().with_stream_batch_size(100).build(
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .with_stream_batch_size(100)
+            .build::<reth_primitives::Block, _, _>(
             client.clone(),
             Arc::new(TestConsensus::default()),
             ProviderFactory::<MockNodeTypesWithDB>::new(
@@ -806,7 +807,7 @@ mod tests {
             .with_stream_batch_size(10)
             .with_request_limit(1)
             .with_max_buffered_blocks_size_bytes(1)
-            .build(
+            .build::<reth_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
                 ProviderFactory::<MockNodeTypesWithDB>::new(
@@ -843,7 +844,7 @@ mod tests {
         let mut downloader = BodiesDownloaderBuilder::default()
             .with_request_limit(3)
             .with_stream_batch_size(100)
-            .build(
+            .build::<reth_primitives::Block, _, _>(
                 client.clone(),
                 Arc::new(TestConsensus::default()),
                 ProviderFactory::<MockNodeTypesWithDB>::new(
