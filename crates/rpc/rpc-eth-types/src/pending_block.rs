@@ -12,7 +12,7 @@ use reth_evm::EvmEnv;
 use reth_primitives::{Receipt, RecoveredBlock};
 use reth_primitives_traits::Block;
 
-/// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block.
+/// Configured [`EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
 pub struct PendingBlockEnv<B: Block = reth_primitives::Block, R = Receipt> {
     /// Configured [`EvmEnv`] for the pending block.
