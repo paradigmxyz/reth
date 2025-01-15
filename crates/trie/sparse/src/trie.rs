@@ -1132,7 +1132,14 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                 node: new_node.clone(),
                 unset_branch_nibble: None,
             };
-            trace!(target: "trie::sparse", ?removed_path, ?new_node, "Re-inserting the node");
+            trace!(
+                target: "trie::sparse",
+                ?removed_path,
+                ?new_node,
+                hash_mask = ?self.branch_node_hash_masks.get(&removed_path),
+                tree_mask = ?self.branch_node_tree_masks.get(&removed_path),
+                "Re-inserting the node"
+            );
             self.nodes.insert(removed_path, new_node);
         }
 
