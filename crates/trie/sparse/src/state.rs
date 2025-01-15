@@ -246,7 +246,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 };
 
                 trace!(target: "trie::sparse", ?path, ?node, ?hash_mask, ?tree_mask, "Revealing account node");
-                trie.reveal_node(path, node, hash_mask, tree_mask)?;
+                trie.reveal_node(path, node, tree_mask, hash_mask)?;
             }
         }
 
@@ -277,7 +277,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                     };
 
                     trace!(target: "trie::sparse", ?account, ?path, ?node, ?hash_mask, ?tree_mask, "Revealing storage node");
-                    trie.reveal_node(path, node, hash_mask, tree_mask)?;
+                    trie.reveal_node(path, node, tree_mask, hash_mask)?;
                 }
             }
         }
