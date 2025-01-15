@@ -369,12 +369,12 @@ mod tests {
         let evm = evm_config.evm_with_env(db, evm_env, Default::default());
 
         // Check that the spec ID is setup properly
-        assert_eq!(evm.handler.spec_id(), SpecId::CONSTANTINOPLE);
+        assert_eq!(evm.handler.spec_id(), SpecId::PETERSBURG);
 
         // No Optimism
         assert_eq!(
             evm.handler.cfg,
-            HandlerCfg { spec_id: SpecId::CONSTANTINOPLE, ..Default::default() }
+            HandlerCfg { spec_id: SpecId::PETERSBURG, ..Default::default() }
         );
     }
 
@@ -483,7 +483,7 @@ mod tests {
         );
 
         // Check that the spec ID is set properly
-        assert_eq!(evm.handler.spec_id(), SpecId::CONSTANTINOPLE);
+        assert_eq!(evm.handler.spec_id(), SpecId::PETERSBURG);
         assert_eq!(evm.context.evm.env.block, evm_env.block_env);
         assert_eq!(evm.context.evm.env.cfg, evm_env.cfg_env_with_handler_cfg.cfg_env);
         assert_eq!(evm.context.evm.env.tx, Default::default());
@@ -492,7 +492,7 @@ mod tests {
         // No Optimism
         assert_eq!(
             evm.handler.cfg,
-            HandlerCfg { spec_id: SpecId::CONSTANTINOPLE, ..Default::default() }
+            HandlerCfg { spec_id: SpecId::PETERSBURG, ..Default::default() }
         );
     }
 }
