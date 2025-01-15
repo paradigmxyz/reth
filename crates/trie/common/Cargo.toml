@@ -87,7 +87,7 @@ serde = [
     "alloy-trie/serde",
     "alloy-rpc-types-eth?/serde",
     "reth-primitives-traits/serde",
-    "reth-codecs?/serde",
+    "reth-codecs?/serde"
 ]
 reth-codec = [
     "dep:reth-codecs",
@@ -117,7 +117,7 @@ arbitrary = [
 	"alloy-primitives/arbitrary",
 	"nybbles/arbitrary",
 	"reth-codecs/arbitrary",
-	"alloy-rpc-types-eth?/arbitrary",
+	"alloy-rpc-types-eth?/arbitrary"
 ]
 
 [[bench]]

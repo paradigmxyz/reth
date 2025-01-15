@@ -371,10 +371,9 @@ mod tests {
     use revm::{
         db::{
             states::{plain_account::PlainStorage, CacheAccount, StorageSlot},
-            BundleAccount, StorageWithOriginalValues,
+            BundleAccount, PlainAccount, StorageWithOriginalValues,
         },
         primitives::{AccountInfo, Bytecode},
-        PlainAccount,
     };
 
     #[test]
@@ -505,7 +504,7 @@ mod tests {
         let address = Address::random();
 
         // Create mock account info.
-        let account_info = revm::AccountInfo {
+        let account_info = AccountInfo {
             balance: U256::from(500),
             nonce: 5,
             code_hash: B256::random(),

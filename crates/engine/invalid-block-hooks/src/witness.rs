@@ -136,8 +136,9 @@ where
         let mut hashed_state = db.database.hashed_post_state(&bundle_state);
         for (address, account) in db.cache.accounts {
             let hashed_address = provider.hash_key(address.as_ref());
-            let hashed_account = account.account.as_ref().map(|a| a.info.clone().into());
-            hashed_state.accounts.insert(hashed_address, hashed_account);
+            hashed_state
+                .accounts
+                .insert(hashed_address, account.account.as_ref().map(|a| a.info.clone().into()));
 
             let storage = hashed_state
                 .storages

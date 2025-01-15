@@ -633,8 +633,8 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
-                let block_executor =
-                    this.inner.block_executor.executor(StateProviderDatabase::new(&state_provider));
+                let db = StateProviderDatabase::new(&state_provider);
+                let block_executor = this.inner.block_executor.executor(db);
 
                 let mut witness_record = ExecutionWitnessRecord::default();
 
