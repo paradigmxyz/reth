@@ -429,7 +429,7 @@ where
             .map_err(PayloadBuilderError::other)?;
 
         excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_header.timestamp) {
-            let blob_params = if chain_spec.is_prague_active_at_timestamp(parent_header.timestamp) {
+            let blob_params = if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
                 BlobParams::prague()
             } else {
                 // cancun
