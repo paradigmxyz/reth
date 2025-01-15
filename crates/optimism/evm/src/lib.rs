@@ -175,6 +175,7 @@ impl ConfigureEvm for OpEvmConfig {
         tx: TxEnv,
     ) -> Evm<'_, (), DB> {
         evm_env.cfg_env_with_handler_cfg.handler_cfg.is_optimism = true;
+
         EvmBuilder::default()
             .with_db(db)
             .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
@@ -195,6 +196,7 @@ impl ConfigureEvm for OpEvmConfig {
         I: GetInspector<DB>,
     {
         evm_env.cfg_env_with_handler_cfg.handler_cfg.is_optimism = true;
+
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
