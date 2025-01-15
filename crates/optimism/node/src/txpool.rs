@@ -37,12 +37,22 @@ pub type OpTransactionPool<Client, S> = Pool<
 
 /// Pool transaction for OP.
 #[derive(Debug, Clone, derive_more::Deref)]
-pub struct OpPooledTransaction(EthPooledTransaction<OpTransactionSigned>);
+pub struct OpPooledTransaction {
+    inner: EthPooledTransaction<OpTransactionSigned>,
+    da_cost: U256,
+}
 
 impl OpPooledTransaction {
     /// Create new instance of [Self].
     pub fn new(transaction: RecoveredTx<OpTransactionSigned>, encoded_length: usize) -> Self {
-        Self(EthPooledTransaction::new(transaction, encoded_length))
+        Self { inner: EthPooledTransaction::new(transaction, encoded_length), da_cost: U256::ZERO }
+    }
+
+    /// Estimate DA costs
+    pub fn estimate_da_cost(&self) -> U256 {
+        let tx = self.transaction().clone_into_consensus();
+        let cost = reth_revm::estimate_tx(&tx, None, None).await.unwrap();
+        U256::from(cost)
     }
 }
 
@@ -296,7 +306,7 @@ where
     /// See also [`TransactionValidator::validate_transaction`]
     ///
     /// This behaves the same as [`EthTransactionValidator::validate_one`], but in addition, ensures
-    /// that the account has enough balance to cover the L1 gas cost.
+    /// that the account has enough balance to cover the L1 gas cost and DA cost.
     pub fn validate_one(
         &self,
         origin: TransactionOrigin,
@@ -316,7 +326,7 @@ where
             return outcome
         }
 
-        // ensure that the account has enough balance to cover the L1 gas cost
+        // ensure that the account has enough balance to cover the L1 gas cost and DA cost
         if let TransactionValidationOutcome::Valid {
             balance,
             state_nonce,
@@ -341,14 +351,17 @@ where
                     return TransactionValidationOutcome::Error(*valid_tx.hash(), Box::new(err))
                 }
             };
-            let cost = valid_tx.transaction().cost().saturating_add(cost_addition);
+
+            let da_cost = valid_tx.estimate_da_cost();
+            let total_cost =
+                valid_tx.transaction().cost().saturating_add(cost_addition).saturating_add(da_cost);
 
             // Checks for max cost
-            if cost > balance {
+            if total_cost > balance {
                 return TransactionValidationOutcome::Invalid(
                     valid_tx.into_transaction(),
                     InvalidTransactionError::InsufficientFunds(
-                        GotExpected { got: balance, expected: cost }.into(),
+                        GotExpected { got: balance, expected: total_cost }.into(),
                     )
                     .into(),
                 )
