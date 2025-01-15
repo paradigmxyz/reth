@@ -168,7 +168,13 @@ impl ConfigureEvmEnv for OpEvmConfig {
 }
 
 impl ConfigureEvm for OpEvmConfig {
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv, tx: TxEnv) -> Evm<'_, (), DB> {
+    fn evm_with_env<DB: Database>(
+        &self,
+        db: DB,
+        mut evm_env: EvmEnv,
+        tx: TxEnv,
+    ) -> Evm<'_, (), DB> {
+        evm_env.cfg_env_with_handler_cfg.handler_cfg.is_optimism = true;
         EvmBuilder::default()
             .with_db(db)
             .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
@@ -180,7 +186,7 @@ impl ConfigureEvm for OpEvmConfig {
     fn evm_with_env_and_inspector<DB, I>(
         &self,
         db: DB,
-        evm_env: EvmEnv,
+        mut evm_env: EvmEnv,
         tx: TxEnv,
         inspector: I,
     ) -> Evm<'_, I, DB>
@@ -188,6 +194,7 @@ impl ConfigureEvm for OpEvmConfig {
         DB: Database,
         I: GetInspector<DB>,
     {
+        evm_env.cfg_env_with_handler_cfg.handler_cfg.is_optimism = true;
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
