@@ -193,7 +193,6 @@ where
     let base_fee = initialized_block_env.basefee.to::<u64>();
 
     let mut executed_txs = Vec::new();
-    let mut executed_senders = Vec::new();
 
     let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
@@ -352,8 +351,7 @@ where
             .expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
-        // append sender and transaction to the respective lists
-        executed_senders.push(tx.signer());
+        // append transaction to the respective lists
         executed_txs.push(tx.into_tx());
     }
 
