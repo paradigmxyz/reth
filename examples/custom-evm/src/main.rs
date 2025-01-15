@@ -55,8 +55,8 @@ impl MyEvmConfig {
 impl MyEvmConfig {
     /// Sets the precompiles to the EVM handler
     ///
-    /// This will be invoked when the EVM is created via [ConfigureEvm::evm] or
-    /// [ConfigureEvm::evm_with_inspector]
+    /// This will be invoked when the EVM is created via [ConfigureEvm::evm_with_env] or
+    /// [ConfigureEvm::evm_with_env_and_inspector]
     ///
     /// This will use the default mainnet precompiles and add additional precompiles.
     pub fn set_precompiles<EXT, DB>(handler: &mut EvmHandler<EXT, DB>)
