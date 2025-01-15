@@ -17,8 +17,7 @@ use alloy_primitives::{
 };
 use core::fmt::Display;
 use reth_consensus::ConsensusError;
-use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt};
-use reth_primitives_traits::Block;
+use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{
@@ -151,7 +150,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// the returned state.
     type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
         DB,
-        Input<'a> = &'a BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        Input<'a> = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         Output = BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>,
         Error = BlockExecutionError,
     >;
@@ -159,7 +158,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// An executor that can execute a batch of blocks given a database.
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
         DB,
-        Input<'a> = &'a BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        Input<'a> = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         Output = ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>,
         Error = BlockExecutionError,
     >;
@@ -206,19 +205,19 @@ pub trait BlockExecutionStrategy {
     /// Applies any necessary changes before executing the block's transactions.
     fn apply_pre_execution_changes(
         &mut self,
-        block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<(), Self::Error>;
 
     /// Executes all transactions in the block.
     fn execute_transactions(
         &mut self,
-        block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<ExecuteOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
     /// Applies any necessary changes after executing the block's transactions.
     fn apply_post_execution_changes(
         &mut self,
-        block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         receipts: &[<Self::Primitives as NodePrimitives>::Receipt],
     ) -> Result<Requests, Self::Error>;
 
@@ -240,7 +239,7 @@ pub trait BlockExecutionStrategy {
     /// Validate a block with regard to execution results.
     fn validate_block_post_execution(
         &self,
-        _block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         _receipts: &[<Self::Primitives as NodePrimitives>::Receipt],
         _requests: &Requests,
     ) -> Result<(), ConsensusError> {
@@ -338,7 +337,7 @@ where
     S: BlockExecutionStrategy<DB = DB>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
-    type Input<'a> = &'a BlockWithSenders<<S::Primitives as NodePrimitives>::Block>;
+    type Input<'a> = &'a RecoveredBlock<<S::Primitives as NodePrimitives>::Block>;
     type Output = BlockExecutionOutput<<S::Primitives as NodePrimitives>::Receipt>;
     type Error = S::Error;
 
@@ -425,7 +424,7 @@ where
     S: BlockExecutionStrategy<DB = DB, Error = BlockExecutionError>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
-    type Input<'a> = &'a BlockWithSenders<<S::Primitives as NodePrimitives>::Block>;
+    type Input<'a> = &'a RecoveredBlock<<S::Primitives as NodePrimitives>::Block>;
     type Output = ExecutionOutcome<<S::Primitives as NodePrimitives>::Receipt>;
     type Error = BlockExecutionError;
 
@@ -548,7 +547,7 @@ mod tests {
     struct TestExecutor<DB>(PhantomData<DB>);
 
     impl<DB> Executor<DB> for TestExecutor<DB> {
-        type Input<'a> = &'a BlockWithSenders;
+        type Input<'a> = &'a RecoveredBlock<reth_primitives::Block>;
         type Output = BlockExecutionOutput<Receipt>;
         type Error = BlockExecutionError;
 
@@ -580,7 +579,7 @@ mod tests {
     }
 
     impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
-        type Input<'a> = &'a BlockWithSenders;
+        type Input<'a> = &'a RecoveredBlock<reth_primitives::Block>;
         type Output = ExecutionOutcome;
         type Error = BlockExecutionError;
 
@@ -661,21 +660,21 @@ mod tests {
 
         fn apply_pre_execution_changes(
             &mut self,
-            _block: &BlockWithSenders,
+            _block: &RecoveredBlock<reth_primitives::Block>,
         ) -> Result<(), Self::Error> {
             Ok(())
         }
 
         fn execute_transactions(
             &mut self,
-            _block: &BlockWithSenders,
+            _block: &RecoveredBlock<reth_primitives::Block>,
         ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
             Ok(self.execute_transactions_result.clone())
         }
 
         fn apply_post_execution_changes(
             &mut self,
-            _block: &BlockWithSenders,
+            _block: &RecoveredBlock<reth_primitives::Block>,
             _receipts: &[Receipt],
         ) -> Result<Requests, Self::Error> {
             Ok(self.apply_post_execution_changes_result.clone())
@@ -697,7 +696,7 @@ mod tests {
 
         fn validate_block_post_execution(
             &self,
-            _block: &BlockWithSenders,
+            _block: &RecoveredBlock<reth_primitives::Block>,
             _receipts: &[Receipt],
             _requests: &Requests,
         ) -> Result<(), ConsensusError> {

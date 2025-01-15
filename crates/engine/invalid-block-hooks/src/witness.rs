@@ -8,8 +8,8 @@ use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
     state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm,
 };
-use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase, db::states::bundle_state::BundleRetention, DatabaseCommit,
@@ -58,7 +58,7 @@ where
     fn on_invalid_block<N>(
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
-        block: &SealedBlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()>
@@ -87,7 +87,7 @@ where
 
         // Re-execute all of the transactions in the block to load all touched accounts into
         // the cache DB.
-        for tx in block.transactions() {
+        for tx in block.body().transactions() {
             self.evm_config.fill_tx_env(
                 evm.tx_mut(),
                 tx,
@@ -101,10 +101,8 @@ where
 
         // use U256::MAX here for difficulty, because fetching it is annoying
         // NOTE: This is not mut because we are not doing the DAO irregular state change here
-        let balance_increments = post_block_balance_increments(
-            self.provider.chain_spec().as_ref(),
-            &block.clone().unseal().block,
-        );
+        let balance_increments =
+            post_block_balance_increments(self.provider.chain_spec().as_ref(), block);
 
         // increment balances
         db.increment_balances(balance_increments)?;
@@ -302,7 +300,7 @@ where
     fn on_invalid_block(
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
-        block: &SealedBlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {

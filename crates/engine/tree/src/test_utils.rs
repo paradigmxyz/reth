@@ -76,7 +76,7 @@ pub fn insert_headers_into_client(
         header.parent_hash = hash;
         header.number += 1;
         header.timestamp += 1;
-        sealed_header = SealedHeader::seal(header);
+        sealed_header = SealedHeader::seal_slow(header);
         client.insert(sealed_header.clone(), body.clone());
     }
 }

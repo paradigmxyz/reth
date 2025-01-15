@@ -43,27 +43,20 @@ pub mod test_utils;
 
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
-    /// Associated type for the default external context that should be configured for the EVM.
-    type DefaultExternalContext<'a>;
-
     /// Returns new EVM with the given database
     ///
     /// This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It is up to
     /// the caller to call an appropriate method to fill the transaction and block environment
     /// before executing any transactions using the provided EVM.
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
-        RethEvmBuilder::new(db, self.default_external_context()).build()
+    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, (), DB> {
+        RethEvmBuilder::new(db).build()
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env<DB: Database>(
-        &self,
-        db: DB,
-        env: EnvWithHandlerCfg,
-    ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+    fn evm_with_env<DB: Database>(&self, db: DB, env: EnvWithHandlerCfg) -> Evm<'_, (), DB> {
         let mut evm = self.evm(db);
         evm.modify_spec_id(env.spec_id());
         evm.context.evm.env = env.env;
@@ -77,11 +70,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// # Caution
     ///
     /// This does not initialize the tx environment.
-    fn evm_for_block<DB: Database>(
-        &self,
-        db: DB,
-        header: &Self::Header,
-    ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Evm<'_, (), DB> {
         let EvmEnv {
             cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg { cfg_env, handler_cfg },
             block_env,
@@ -127,11 +116,8 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         DB: Database,
         I: GetInspector<DB>,
     {
-        RethEvmBuilder::new(db, self.default_external_context()).build_with_inspector(inspector)
+        RethEvmBuilder::new(db).build_with_inspector(inspector)
     }
-
-    /// Provides the default external context.
-    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a>;
 }
 
 impl<'b, T> ConfigureEvm for &'b T
@@ -139,29 +125,15 @@ where
     T: ConfigureEvm,
     &'b T: ConfigureEvmEnv<Header = T::Header>,
 {
-    type DefaultExternalContext<'a> = T::DefaultExternalContext<'a>;
-
-    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {
-        (*self).default_external_context()
-    }
-
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, (), DB> {
         (*self).evm(db)
     }
 
-    fn evm_for_block<DB: Database>(
-        &self,
-        db: DB,
-        header: &Self::Header,
-    ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Evm<'_, (), DB> {
         (*self).evm_for_block(db, header)
     }
 
-    fn evm_with_env<DB: Database>(
-        &self,
-        db: DB,
-        env: EnvWithHandlerCfg,
-    ) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+    fn evm_with_env<DB: Database>(&self, db: DB, env: EnvWithHandlerCfg) -> Evm<'_, (), DB> {
         (*self).evm_with_env(db, env)
     }
 

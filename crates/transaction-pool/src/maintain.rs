@@ -108,7 +108,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     let MaintainPoolConfig { max_update_depth, max_reload_accounts, .. } = config;
     // ensure the pool points to latest state
     if let Ok(Some(latest)) = client.header_by_number_or_tag(BlockNumberOrTag::Latest) {
-        let latest = SealedHeader::seal(latest);
+        let latest = SealedHeader::seal_slow(latest);
         let chain_spec = client.chain_spec();
         let info = BlockInfo {
             block_gas_limit: latest.gas_limit(),
@@ -272,11 +272,13 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                 // fees for the next block: `new_tip+1`
                 let pending_block_base_fee = new_tip
+                    .header()
                     .next_block_base_fee(
                         chain_spec.base_fee_params_at_timestamp(new_tip.timestamp() + 12),
                     )
                     .unwrap_or_default();
-                let pending_block_blob_fee = new_tip.next_block_blob_fee(BlobParams::cancun());
+                let pending_block_blob_fee =
+                    new_tip.header().next_block_blob_fee(BlobParams::cancun());
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
@@ -346,7 +348,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                 // update the pool first
                 let update = CanonicalStateUpdate {
-                    new_tip: &new_tip.block,
+                    new_tip: new_tip.sealed_block(),
                     pending_block_base_fee,
                     pending_block_blob_fee,
                     changed_accounts,
@@ -375,11 +377,12 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                 // fees for the next block: `tip+1`
                 let pending_block_base_fee = tip
+                    .header()
                     .next_block_base_fee(
                         chain_spec.base_fee_params_at_timestamp(tip.timestamp() + 12),
                     )
                     .unwrap_or_default();
-                let pending_block_blob_fee = tip.next_block_blob_fee(BlobParams::cancun());
+                let pending_block_blob_fee = tip.header().next_block_blob_fee(BlobParams::cancun());
 
                 let first_block = blocks.first();
                 trace!(
@@ -397,7 +400,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     maintained_state = MaintainedPoolState::Drifted;
                     debug!(target: "txpool", ?depth, "skipping deep canonical update");
                     let info = BlockInfo {
-                        block_gas_limit: tip.gas_limit(),
+                        block_gas_limit: tip.header().gas_limit(),
                         last_seen_block_hash: tip.hash(),
                         last_seen_block_number: tip.number(),
                         pending_basefee: pending_block_base_fee,
@@ -430,7 +433,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
 
                 // Canonical update
                 let update = CanonicalStateUpdate {
-                    new_tip: &tip.block,
+                    new_tip: tip.sealed_block(),
                     pending_block_base_fee,
                     pending_block_blob_fee,
                     changed_accounts,

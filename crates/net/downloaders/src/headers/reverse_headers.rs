@@ -4,7 +4,7 @@ use super::task::TaskDownloader;
 use crate::metrics::HeaderDownloaderMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{BlockNumber, Sealable, B256};
 use futures::{stream::Stream, FutureExt};
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use rayon::prelude::*;
@@ -40,14 +40,14 @@ const REQUESTS_PER_PEER_MULTIPLIER: usize = 5;
 
 /// Wrapper for internal downloader errors.
 #[derive(Error, Debug)]
-enum ReverseHeadersDownloaderError<H> {
+enum ReverseHeadersDownloaderError<H: Sealable> {
     #[error(transparent)]
     Downloader(#[from] HeadersDownloaderError<H>),
     #[error(transparent)]
     Response(#[from] Box<HeadersResponseError>),
 }
 
-impl<H> From<HeadersResponseError> for ReverseHeadersDownloaderError<H> {
+impl<H: Sealable> From<HeadersResponseError> for ReverseHeadersDownloaderError<H> {
     fn from(value: HeadersResponseError) -> Self {
         Self::Response(Box::new(value))
     }
@@ -251,7 +251,8 @@ where
     ) -> Result<(), ReverseHeadersDownloaderError<H::Header>> {
         let mut validated = Vec::with_capacity(headers.len());
 
-        let sealed_headers = headers.into_par_iter().map(SealedHeader::seal).collect::<Vec<_>>();
+        let sealed_headers =
+            headers.into_par_iter().map(SealedHeader::seal_slow).collect::<Vec<_>>();
         for parent in sealed_headers {
             // Validate that the header is the parent header of the last validated header.
             if let Some(validated_header) =
@@ -378,7 +379,7 @@ where
                 }
 
                 let header = headers.swap_remove(0);
-                let target = SealedHeader::seal(header);
+                let target = SealedHeader::seal_slow(header);
 
                 match sync_target {
                     SyncTargetBlock::Hash(hash) | SyncTargetBlock::HashAndNumber { hash, .. } => {

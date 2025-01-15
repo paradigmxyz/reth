@@ -10,7 +10,7 @@ use reth_evm::execute::{
     BatchExecutor, BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider, Executor,
 };
 use reth_node_api::{Block as _, BlockBody as _, NodePrimitives};
-use reth_primitives::{BlockExt, BlockWithSenders, Receipt};
+use reth_primitives::{Receipt, RecoveredBlock};
 use reth_primitives_traits::{format_gas_throughput, SignedTransaction};
 use reth_provider::{
     BlockReader, Chain, HeaderProvider, ProviderError, StateProviderFactory, TransactionVariant,
@@ -107,10 +107,9 @@ where
             let execute_start = Instant::now();
 
             // Unseal the block for execution
-            let (block, senders) = block.split();
-            let (header, body) = block.split();
-            let (unsealed_header, hash) = header.split();
-            let block = P::Block::new(unsealed_header, body).with_senders_unchecked(senders);
+            let (block, senders) = block.split_sealed();
+            let (header, body) = block.split_sealed_header_body();
+            let block = P::Block::new_sealed(header, body).with_senders(senders);
 
             executor.execute_and_verify_one(&block)?;
             execution_duration += execute_start.elapsed();
@@ -118,7 +117,7 @@ where
             // TODO(alexey): report gas metrics using `block.header.gas_used`
 
             // Seal the block back and save it
-            blocks.push(block.seal_unchecked(hash));
+            blocks.push(block);
 
             // Check if we should commit now
             let bundle_size_hint = executor.size_hint().unwrap_or_default() as u64;
@@ -151,7 +150,7 @@ where
 /// Single block Backfill job started for a specific range.
 ///
 /// It implements [`Iterator`] which executes a block each time the
-/// iterator is advanced and yields ([`BlockWithSenders`], [`BlockExecutionOutput`])
+/// iterator is advanced and yields ([`RecoveredBlock`], [`BlockExecutionOutput`])
 #[derive(Debug, Clone)]
 pub struct SingleBlockBackfillJob<E, P> {
     pub(crate) executor: E,
@@ -166,7 +165,7 @@ where
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     type Item = BackfillJobResult<(
-        BlockWithSenders<P::Block>,
+        RecoveredBlock<P::Block>,
         BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
     )>;
 
@@ -183,7 +182,11 @@ where
     /// Converts the single block backfill job into a stream.
     pub fn into_stream(
         self,
-    ) -> StreamBackfillJob<E, P, (BlockWithSenders, BlockExecutionOutput<Receipt>)> {
+    ) -> StreamBackfillJob<
+        E,
+        P,
+        (RecoveredBlock<reth_primitives::Block>, BlockExecutionOutput<Receipt>),
+    > {
         self.into()
     }
 
@@ -192,7 +195,7 @@ where
         &self,
         block_number: u64,
     ) -> BackfillJobResult<(
-        BlockWithSenders<P::Block>,
+        RecoveredBlock<P::Block>,
         BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
     )> {
         // Fetch the block with senders for execution.
@@ -206,7 +209,7 @@ where
             self.provider.history_by_block_number(block_number.saturating_sub(1))?,
         ));
 
-        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.block.body().transactions().len(), "Executing block");
+        trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.body().transaction_count(), "Executing block");
 
         let block_execution_output = executor.execute(&block_with_senders)?;
 
@@ -310,8 +313,7 @@ mod tests {
             let (block, mut execution_output) = res?;
             execution_output.state.reverts.sort();
 
-            let sealed_block_with_senders = blocks_and_execution_outcomes[i].0.clone();
-            let expected_block = sealed_block_with_senders.unseal();
+            let expected_block = blocks_and_execution_outcomes[i].0.clone();
             let expected_output = &blocks_and_execution_outcomes[i].1;
 
             assert_eq!(block, expected_block);

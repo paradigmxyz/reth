@@ -9,7 +9,7 @@ use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
 };
-use reth_primitives::{SealedBlockFor, SealedBlockWithSenders};
+use reth_primitives::{RecoveredBlock, SealedBlock};
 use reth_primitives_traits::Block;
 use std::{
     cmp::{Ordering, Reverse},
@@ -45,7 +45,7 @@ pub enum DownloadAction {
 #[derive(Debug)]
 pub enum DownloadOutcome<B: Block> {
     /// Downloaded blocks.
-    Blocks(Vec<SealedBlockWithSenders<B>>),
+    Blocks(Vec<RecoveredBlock<B>>),
     /// New download started.
     NewDownloadStarted {
         /// How many blocks are pending in this download.
@@ -69,7 +69,7 @@ where
     inflight_block_range_requests: Vec<FetchFullBlockRangeFuture<Client>>,
     /// Buffered blocks from downloads - this is a min-heap of blocks, using the block number for
     /// ordering. This means the blocks will be popped from the heap with ascending block numbers.
-    set_buffered_blocks: BinaryHeap<Reverse<OrderedSealedBlockWithSenders<B>>>,
+    set_buffered_blocks: BinaryHeap<Reverse<OrderedRecoveredBlock<B>>>,
     /// Engine download metrics.
     metrics: BlockDownloaderMetrics,
     /// Pending events to be emitted.
@@ -78,14 +78,11 @@ where
 
 impl<Client, B> BasicBlockDownloader<Client, B>
 where
-    Client: BlockClient<Header = B::Header, Body = B::Body> + 'static,
+    Client: BlockClient<Block = B> + 'static,
     B: Block,
 {
     /// Create a new instance
-    pub fn new(
-        client: Client,
-        consensus: Arc<dyn Consensus<Client::Header, Client::Body, Error = ConsensusError>>,
-    ) -> Self {
+    pub fn new(client: Client, consensus: Arc<dyn Consensus<B, Error = ConsensusError>>) -> Self {
         Self {
             full_block_client: FullBlockClient::new(client, consensus),
             inflight_full_block_requests: Vec::new(),
@@ -192,7 +189,7 @@ where
 
 impl<Client, B> BlockDownloader for BasicBlockDownloader<Client, B>
 where
-    Client: BlockClient<Header = B::Header, Body = B::Body>,
+    Client: BlockClient<Block = B>,
     B: Block,
 {
     type Block = B;
@@ -233,9 +230,7 @@ where
                         .into_iter()
                         .map(|b| {
                             let senders = b.senders().unwrap_or_default();
-                            OrderedSealedBlockWithSenders(SealedBlockWithSenders::new_unchecked(
-                                b, senders,
-                            ))
+                            OrderedRecoveredBlock(RecoveredBlock::new_sealed(b, senders))
                         })
                         .map(Reverse),
                 );
@@ -252,7 +247,7 @@ where
         }
 
         // drain all unique element of the block buffer if there are any
-        let mut downloaded_blocks: Vec<SealedBlockWithSenders<B>> =
+        let mut downloaded_blocks: Vec<RecoveredBlock<B>> =
             Vec::with_capacity(self.set_buffered_blocks.len());
         while let Some(block) = self.set_buffered_blocks.pop() {
             // peek ahead and pop duplicates
@@ -269,32 +264,32 @@ where
     }
 }
 
-/// A wrapper type around [`SealedBlockWithSenders`] that implements the [Ord]
+/// A wrapper type around [`RecoveredBlock`] that implements the [Ord]
 /// trait by block number.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct OrderedSealedBlockWithSenders<B: Block>(SealedBlockWithSenders<B>);
+struct OrderedRecoveredBlock<B: Block>(RecoveredBlock<B>);
 
-impl<B: Block> PartialOrd for OrderedSealedBlockWithSenders<B> {
+impl<B: Block> PartialOrd for OrderedRecoveredBlock<B> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<B: Block> Ord for OrderedSealedBlockWithSenders<B> {
+impl<B: Block> Ord for OrderedRecoveredBlock<B> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.0.number().cmp(&other.0.number())
     }
 }
 
-impl<B: Block> From<SealedBlockFor<B>> for OrderedSealedBlockWithSenders<B> {
-    fn from(block: SealedBlockFor<B>) -> Self {
+impl<B: Block> From<SealedBlock<B>> for OrderedRecoveredBlock<B> {
+    fn from(block: SealedBlock<B>) -> Self {
         let senders = block.senders().unwrap_or_default();
-        Self(SealedBlockWithSenders::new_unchecked(block, senders))
+        Self(RecoveredBlock::new_sealed(block, senders))
     }
 }
 
-impl<B: Block> From<OrderedSealedBlockWithSenders<B>> for SealedBlockWithSenders<B> {
-    fn from(value: OrderedSealedBlockWithSenders<B>) -> Self {
+impl<B: Block> From<OrderedRecoveredBlock<B>> for RecoveredBlock<B> {
+    fn from(value: OrderedRecoveredBlock<B>) -> Self {
         value.0
     }
 }
@@ -348,7 +343,7 @@ mod tests {
                 gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
                 ..Default::default()
             };
-            let header = SealedHeader::seal(header);
+            let header = SealedHeader::seal_slow(header);
 
             insert_headers_into_client(&client, header, 0..total_blocks);
             let consensus = Arc::new(EthBeaconConsensus::new(chain_spec));

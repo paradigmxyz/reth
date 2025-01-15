@@ -400,10 +400,9 @@ where
         self.validate_all(transactions)
     }
 
-    fn on_new_head_block<H, B>(&self, new_tip_block: &SealedBlock<H, B>)
+    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
     where
-        H: reth_primitives_traits::BlockHeader,
-        B: BlockBody,
+        B: Block,
     {
         self.inner.on_new_head_block(new_tip_block);
         self.update_l1_block_info(

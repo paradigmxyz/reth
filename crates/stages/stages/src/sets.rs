@@ -47,6 +47,7 @@ use reth_config::config::StageConfig;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
+use reth_primitives_traits::Block;
 use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::PruneModes;
 use reth_stages_api::Stage;
@@ -102,7 +103,7 @@ where
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn Consensus<H::Header, B::Body, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
         header_downloader: H,
         body_downloader: B,
         executor_factory: E,
@@ -185,7 +186,7 @@ where
     /// The tip for the headers stage.
     tip: watch::Receiver<B256>,
     /// The consensus engine used to validate incoming data.
-    consensus: Arc<dyn Consensus<H::Header, B::Body, Error = ConsensusError>>,
+    consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
     /// The block header downloader
     header_downloader: H,
     /// The block body downloader
@@ -203,7 +204,7 @@ where
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn Consensus<H::Header, B::Body, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
         header_downloader: H,
         body_downloader: B,
         stages_config: StageConfig,
@@ -215,7 +216,7 @@ where
 impl<P, H, B> OnlineStages<P, H, B>
 where
     P: HeaderSyncGapProvider + 'static,
-    H: HeaderDownloader + 'static,
+    H: HeaderDownloader<Header = <B::Block as Block>::Header> + 'static,
     B: BodyDownloader + 'static,
 {
     /// Create a new builder using the given headers stage.
@@ -236,7 +237,7 @@ where
         provider: P,
         tip: watch::Receiver<B256>,
         header_downloader: H,
-        consensus: Arc<dyn Consensus<H::Header, B::Body, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
         stages_config: StageConfig,
     ) -> StageSetBuilder<Provider>
     where
@@ -258,7 +259,7 @@ where
 impl<Provider, P, H, B> StageSet<Provider> for OnlineStages<P, H, B>
 where
     P: HeaderSyncGapProvider + 'static,
-    H: HeaderDownloader + 'static,
+    H: HeaderDownloader<Header = <B::Block as Block>::Header> + 'static,
     B: BodyDownloader + 'static,
     HeaderStage<P, H>: Stage<Provider>,
     BodyStage<B>: Stage<Provider>,

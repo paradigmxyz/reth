@@ -11,7 +11,7 @@ use revm_primitives::EnvWithHandlerCfg;
 /// This is useful for creating an EVM with a custom database and environment without having to
 /// necessarily rely on Revm inspector.
 #[derive(Debug)]
-pub struct RethEvmBuilder<DB: Database, EXT = ()> {
+pub struct RethEvmBuilder<DB, EXT = ()> {
     /// The database to use for the EVM.
     db: DB,
     /// The environment to use for the EVM.
@@ -20,15 +20,17 @@ pub struct RethEvmBuilder<DB: Database, EXT = ()> {
     external_context: EXT,
 }
 
+impl<DB> RethEvmBuilder<DB> {
+    /// Create a new EVM builder with the given database.
+    pub const fn new(db: DB) -> Self {
+        Self { db, env: None, external_context: () }
+    }
+}
+
 impl<DB, EXT> RethEvmBuilder<DB, EXT>
 where
     DB: Database,
 {
-    /// Create a new EVM builder with the given database.
-    pub const fn new(db: DB, external_context: EXT) -> Self {
-        Self { db, env: None, external_context }
-    }
-
     /// Set the environment for the EVM.
     pub fn with_env(mut self, env: Box<EnvWithHandlerCfg>) -> Self {
         self.env = Some(env);
@@ -79,22 +81,16 @@ pub trait ConfigureEvmBuilder {
 
 /// Trait for configuring the EVM for executing full blocks.
 pub trait EvmFactory {
-    /// Associated type for the default external context that should be configured for the EVM.
-    type DefaultExternalContext<'a>;
-
-    /// Provides the default external context.
-    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a>;
-
     /// Returns new EVM with the given database
     ///
     /// This does not automatically configure the EVM with [`crate::ConfigureEvmEnv`] methods. It is
     /// up to the caller to call an appropriate method to fill the transaction and block
     /// environment before executing any transactions using the provided EVM.
-    fn evm<DB: Database>(self, db: DB) -> Evm<'static, Self::DefaultExternalContext<'static>, DB>
+    fn evm<DB: Database>(self, db: DB) -> Evm<'static, (), DB>
     where
         Self: Sized,
     {
-        RethEvmBuilder::new(db, self.default_external_context()).build()
+        RethEvmBuilder::new(db).build()
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
@@ -105,8 +101,8 @@ pub trait EvmFactory {
         &self,
         db: DB,
         env: EnvWithHandlerCfg,
-    ) -> Evm<'a, Self::DefaultExternalContext<'a>, DB> {
-        RethEvmBuilder::new(db, self.default_external_context()).with_env(env.into()).build()
+    ) -> Evm<'a, (), DB> {
+        RethEvmBuilder::new(db).with_env(env.into()).build()
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
@@ -125,9 +121,7 @@ pub trait EvmFactory {
         DB: Database,
         I: GetInspector<DB>,
     {
-        RethEvmBuilder::new(db, self.default_external_context())
-            .with_env(env.into())
-            .build_with_inspector(inspector)
+        RethEvmBuilder::new(db).with_env(env.into()).build_with_inspector(inspector)
     }
 
     /// Returns a new EVM with the given inspector.
@@ -140,14 +134,8 @@ pub trait EvmFactory {
         DB: Database,
         I: GetInspector<DB>,
     {
-        RethEvmBuilder::new(db, self.default_external_context()).build_with_inspector(inspector)
+        RethEvmBuilder::new(db).build_with_inspector(inspector)
     }
 }
 
-impl<DB: Database, EXT: Clone> EvmFactory for RethEvmBuilder<DB, EXT> {
-    type DefaultExternalContext<'a> = EXT;
-
-    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {
-        self.external_context.clone()
-    }
-}
+impl<DB: Database, EXT: Clone> EvmFactory for RethEvmBuilder<DB, EXT> {}

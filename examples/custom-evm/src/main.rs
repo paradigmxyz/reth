@@ -117,9 +117,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
 }
 
 impl ConfigureEvm for MyEvmConfig {
-    type DefaultExternalContext<'a> = ();
-
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, (), DB> {
         EvmBuilder::default()
             .with_db(db)
             // add additional precompiles
@@ -140,8 +138,6 @@ impl ConfigureEvm for MyEvmConfig {
             .append_handler_register(inspector_handle_register)
             .build()
     }
-
-    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
 }
 
 /// Builds a regular ethereum block executor that uses the custom EVM.

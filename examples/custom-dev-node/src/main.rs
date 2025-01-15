@@ -50,7 +50,7 @@ async fn main() -> eyre::Result<()> {
 
     let head = notifications.next().await.unwrap();
 
-    let tx = &head.tip().transactions()[0];
+    let tx = &head.tip().body().transactions().next().unwrap();
     assert_eq!(tx.hash(), hash);
     println!("mined transaction: {hash}");
     Ok(())
