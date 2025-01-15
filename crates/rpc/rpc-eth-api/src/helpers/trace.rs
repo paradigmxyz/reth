@@ -457,21 +457,11 @@ pub trait Trace:
             SystemCaller::new(self.evm_config().clone(), self.provider().chain_spec());
         // apply relevant system calls
         system_caller
-            .pre_block_beacon_root_contract_call(
-                db,
-                evm_env.cfg_env_with_handler_cfg(),
-                evm_env.block_env(),
-                block.parent_beacon_block_root(),
-            )
+            .pre_block_beacon_root_contract_call(db, evm_env, block.parent_beacon_block_root())
             .map_err(|_| EthApiError::EvmCustom("failed to apply 4788 system call".to_string()))?;
 
         system_caller
-            .pre_block_blockhashes_contract_call(
-                db,
-                evm_env.cfg_env_with_handler_cfg(),
-                evm_env.block_env(),
-                block.parent_hash(),
-            )
+            .pre_block_blockhashes_contract_call(db, evm_env, block.parent_hash())
             .map_err(|_| {
                 EthApiError::EvmCustom("failed to apply blockhashes system call".to_string())
             })?;

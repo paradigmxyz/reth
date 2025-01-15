@@ -202,12 +202,7 @@ where
 
     // apply eip-4788 pre block contract call
     system_caller
-        .pre_block_beacon_root_contract_call(
-            &mut db,
-            evm_env.cfg_env_with_handler_cfg(),
-            evm_env.block_env(),
-            attributes.parent_beacon_block_root,
-        )
+        .pre_block_beacon_root_contract_call(&mut db, &evm_env, attributes.parent_beacon_block_root)
         .map_err(|err| {
             warn!(target: "payload_builder",
                 parent_hash=%parent_header.hash(),
@@ -220,8 +215,7 @@ where
     // apply eip-2935 blockhashes update
     system_caller.pre_block_blockhashes_contract_call(
         &mut db,
-        evm_env.cfg_env_with_handler_cfg(),
-        evm_env.block_env(),
+        &evm_env,
         parent_header.hash(),
     )
     .map_err(|err| {
