@@ -630,7 +630,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             (*block_hash).into(),
             |db_provider| db_provider.header(block_hash),
-            |block_state| Ok(Some(block_state.block_ref().recovered_block().header().clone())),
+            |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_header())),
         )
     }
 
@@ -638,7 +638,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             num.into(),
             |db_provider| db_provider.header_by_number(num),
-            |block_state| Ok(Some(block_state.block_ref().recovered_block().header().clone())),
+            |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_header())),
         )
     }
 

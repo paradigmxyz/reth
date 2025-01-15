@@ -162,7 +162,7 @@ where
         // Insert the blocks
         for ExecutedBlock { recovered_block, execution_output, hashed_state, trie } in blocks {
             self.database()
-                .insert_block(recovered_block.as_ref().clone(), StorageLocation::Both)?;
+                .insert_block(Arc::unwrap_or_clone(recovered_block), StorageLocation::Both)?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
