@@ -438,8 +438,13 @@ where
 
         // create the executed block data
         let executed: ExecutedBlock<OpPrimitives> = ExecutedBlock {
-            block: sealed_block.clone(),
-            senders: Arc::new(info.executed_senders),
+            block: Arc::new(
+                <reth_primitives_traits::SealedBlock<
+                    alloy_consensus::Block<reth_optimism_primitives::OpTransactionSigned>,
+                > as Clone>::clone(&sealed_block)
+                .try_recover()
+                .expect("failed to recover block"),
+            ),
             execution_output: Arc::new(execution_outcome),
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
