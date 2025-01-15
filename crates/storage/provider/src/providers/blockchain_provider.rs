@@ -925,8 +925,7 @@ mod tests {
                         ExecutionOutcome { receipts: block_receipts.into(), ..Default::default() };
 
                     ExecutedBlock::new(
-                        Arc::new(block.clone()),
-                        Arc::new(senders),
+                        Arc::new(block.clone().try_recover().expect("failed to recover block")),
                         execution_outcome.into(),
                         Default::default(),
                         Default::default(),
@@ -1055,8 +1054,9 @@ mod tests {
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock::new(
-                Arc::new(first_in_mem_block.clone()),
-                Arc::new(in_memory_block_senders),
+                Arc::new(
+                    first_in_mem_block.clone().try_recover().expect("failed to recover block"),
+                ),
                 Default::default(),
                 Default::default(),
                 Default::default(),
@@ -1089,8 +1089,9 @@ mod tests {
 
         // Insert the last block into the pending state
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            block: Arc::new(last_in_mem_block.clone()),
-            senders: Default::default(),
+            block: Arc::new(
+                last_in_mem_block.clone().try_recover().expect("failed to recover block"),
+            ),
             execution_output: Default::default(),
             hashed_state: Default::default(),
             trie: Default::default(),
@@ -1145,8 +1146,9 @@ mod tests {
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock::new(
-                Arc::new(first_in_mem_block.clone()),
-                Arc::new(in_memory_block_senders),
+                Arc::new(
+                    first_in_mem_block.clone().try_recover().expect("failed to recover block"),
+                ),
                 Default::default(),
                 Default::default(),
                 Default::default(),
@@ -1197,8 +1199,7 @@ mod tests {
 
         // Set the block as pending
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            block: Arc::new(block.clone()),
-            senders: Default::default(),
+            block: Arc::new(block.clone().try_recover().expect("failed to recover block")),
             execution_output: Default::default(),
             hashed_state: Default::default(),
             trie: Default::default(),
@@ -1278,8 +1279,9 @@ mod tests {
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock::new(
-                Arc::new(first_in_mem_block.clone()),
-                Arc::new(in_memory_block_senders),
+                Arc::new(
+                    first_in_mem_block.clone().try_recover().expect("failed to recover block"),
+                ),
                 Default::default(),
                 Default::default(),
                 Default::default(),
@@ -1841,8 +1843,7 @@ mod tests {
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
                     ExecutedBlock::new(
-                        Arc::new(block.clone()),
-                        Arc::new(senders),
+                        Arc::new(block.clone().try_recover().expect("failed to recover block")),
                         Arc::new(ExecutionOutcome {
                             bundle: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
@@ -1977,8 +1978,7 @@ mod tests {
         // adding a pending block to state can test pending() and  pending_state_by_hash() function
         let pending_block = database_blocks[database_blocks.len() - 1].clone();
         only_database_provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            block: Arc::new(pending_block.clone()),
-            senders: Default::default(),
+            block: Arc::new(pending_block.clone().try_recover().expect("failed to recover block")),
             execution_output: Default::default(),
             hashed_state: Default::default(),
             trie: Default::default(),
@@ -2098,8 +2098,7 @@ mod tests {
         // Set the pending block in memory
         let pending_block = in_memory_blocks.last().unwrap();
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            block: Arc::new(pending_block.clone()),
-            senders: Default::default(),
+            block: Arc::new(pending_block.clone().try_recover().expect("failed to recover block")),
             execution_output: Default::default(),
             hashed_state: Default::default(),
             trie: Default::default(),

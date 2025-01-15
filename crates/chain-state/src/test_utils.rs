@@ -208,16 +208,15 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     ) -> ExecutedBlock {
         let block_with_senders = self.generate_random_block(block_number, parent_hash);
 
-        let (block, senders) = block_with_senders.split_sealed();
         ExecutedBlock::new(
-            Arc::new(block),
-            Arc::new(senders),
-            Arc::new(ExecutionOutcome::new(
+            Arc::new(block_with_senders),
+            ExecutionOutcome::new(
                 BundleState::default(),
                 receipts,
                 block_number,
                 vec![Requests::default()],
-            )),
+            )
+            .into(),
             Arc::new(HashedPostState::default()),
             Arc::new(TrieUpdates::default()),
         )

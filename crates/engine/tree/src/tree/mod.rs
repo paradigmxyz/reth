@@ -147,7 +147,7 @@ impl<N: NodePrimitives> TreeState<N> {
 
     /// Returns the block by hash.
     fn block_by_hash(&self, hash: B256) -> Option<Arc<SealedBlock<N::Block>>> {
-        self.blocks_by_hash.get(&hash).map(|b| b.block.clone())
+        self.blocks_by_hash.get(&hash).map(|b| Arc::new(b.block().clone()))
     }
 
     /// Returns all available blocks for the given hash that lead back to the canonical chain, from
@@ -1270,7 +1270,7 @@ where
 
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             BeaconConsensusEngineEvent::CanonicalBlockAdded(
-                                sealed_block,
+                                sealed_block.clone_sealed_block().into(),
                                 now.elapsed(),
                             ),
                         ));
@@ -1598,7 +1598,7 @@ where
             return Ok(None)
         };
 
-        let (block, senders) = self
+        let (block, _) = self
             .provider
             .sealed_block_with_senders(hash.into(), TransactionVariant::WithHash)?
             .ok_or_else(|| ProviderError::HeaderNotFound(hash.into()))?
@@ -1610,8 +1610,7 @@ where
         let hashed_state = self.provider.hashed_post_state(execution_output.state());
 
         Ok(Some(ExecutedBlock {
-            block: Arc::new(block),
-            senders: Arc::new(senders),
+            block: Arc::new(block.try_recover().expect("Failed to recover block")),
             trie: updates.clone(),
             execution_output: Arc::new(execution_output),
             hashed_state: Arc::new(hashed_state),
@@ -2464,8 +2463,7 @@ where
         debug!(target: "engine::tree", ?root_elapsed, block=?sealed_block.num_hash(), "Calculated state root");
 
         let executed: ExecutedBlock<N> = ExecutedBlock {
-            block: sealed_block.clone(),
-            senders: Arc::new(block.senders().to_vec()),
+            block: Arc::new(block.clone()),
             execution_output: Arc::new(ExecutionOutcome::from((output, block_number))),
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
@@ -3016,7 +3014,7 @@ mod tests {
             self.persist_blocks(
                 blocks
                     .into_iter()
-                    .map(|b| RecoveredBlock::new_sealed(b.block().clone(), b.senders().clone()))
+                    .map(|b| RecoveredBlock::new_sealed(b.block().clone(), b.senders().to_vec()))
                     .collect(),
             );
 
@@ -3722,8 +3720,7 @@ mod tests {
 
         for block in &chain_a {
             test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
-                block: Arc::new(block.clone_sealed_block()),
-                senders: Arc::new(block.senders().to_vec()),
+                block: Arc::new(block.clone()),
                 execution_output: Arc::new(ExecutionOutcome::default()),
                 hashed_state: Arc::new(HashedPostState::default()),
                 trie: Arc::new(TrieUpdates::default()),
@@ -3733,8 +3730,7 @@ mod tests {
 
         for block in &chain_b {
             test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
-                block: Arc::new(block.clone_sealed_block()),
-                senders: Arc::new(block.senders().to_vec()),
+                block: Arc::new(block.clone()),
                 execution_output: Arc::new(ExecutionOutcome::default()),
                 hashed_state: Arc::new(HashedPostState::default()),
                 trie: Arc::new(TrieUpdates::default()),

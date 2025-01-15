@@ -638,7 +638,7 @@ impl<N: NodePrimitives> BlockState<N> {
     /// Returns a clone of the block with recovered senders for the state.
     pub fn clone_recovered_block(&self) -> RecoveredBlock<N::Block> {
         let block = self.block.block().clone();
-        let senders = self.block.senders().clone();
+        let senders = self.block.senders().to_vec();
         RecoveredBlock::new_sealed(block, senders)
     }
 
@@ -793,10 +793,8 @@ impl<N: NodePrimitives> BlockState<N> {
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
-    /// Sealed block the rest of fields refer to.
-    pub block: Arc<SealedBlock<N::Block>>,
-    /// Block's senders.
-    pub senders: Arc<Vec<Address>>,
+    /// Block with senders recovered
+    pub block: Arc<RecoveredBlock<N::Block>>,
     /// Block's execution outcome.
     pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
     /// Block's hashed state.
@@ -808,13 +806,12 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
 impl<N: NodePrimitives> ExecutedBlock<N> {
     /// [`ExecutedBlock`] constructor.
     pub const fn new(
-        block: Arc<SealedBlock<N::Block>>,
-        senders: Arc<Vec<Address>>,
+        block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<ExecutionOutcome<N::Receipt>>,
         hashed_state: Arc<HashedPostState>,
         trie: Arc<TrieUpdates>,
     ) -> Self {
-        Self { block, senders, execution_output, hashed_state, trie }
+        Self { block, execution_output, hashed_state, trie }
     }
 
     /// Returns a reference to the executed block.
@@ -823,15 +820,15 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     }
 
     /// Returns a reference to the block's senders
-    pub fn senders(&self) -> &Vec<Address> {
-        &self.senders
+    pub fn senders(&self) -> &[Address] {
+        self.block.senders()
     }
 
     /// Returns a [`RecoveredBlock`]
     ///
     /// Note: this clones the block and senders.
     pub fn clone_recovered_block(&self) -> RecoveredBlock<N::Block> {
-        RecoveredBlock::new_sealed((*self.block).clone(), (*self.senders).clone())
+        (*self.block).clone()
     }
 
     /// Returns a reference to the block's execution outcome

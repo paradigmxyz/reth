@@ -160,10 +160,8 @@ where
         //  * trie updates (cannot naively extend, need helper)
         //  * indices (already done basically)
         // Insert the blocks
-        for ExecutedBlock { block, senders, execution_output, hashed_state, trie } in blocks {
-            let sealed_block = Arc::unwrap_or_clone(block)
-                .try_with_senders_unchecked(Arc::unwrap_or_clone(senders))
-                .unwrap();
+        for ExecutedBlock { block, execution_output, hashed_state, trie } in blocks {
+            let sealed_block = Arc::unwrap_or_clone(block);
             self.database().insert_block(sealed_block, StorageLocation::Both)?;
 
             // Write state and changesets to the database.

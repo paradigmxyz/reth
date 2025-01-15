@@ -1003,7 +1003,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_tx_range(
             range,
             |db_provider, db_range| db_provider.senders_by_tx_range(db_range),
-            |index_range, block_state| Ok(block_state.block_ref().senders[index_range].to_vec()),
+            |index_range, block_state| Ok(block_state.block_ref().senders()[index_range].to_vec()),
         )
     }
 
@@ -1011,7 +1011,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
             |provider| provider.transaction_sender(id),
-            |tx_index, _, block_state| Ok(block_state.block_ref().senders.get(tx_index).copied()),
+            |tx_index, _, block_state| Ok(block_state.block_ref().senders().get(tx_index).copied()),
         )
     }
 }
@@ -1546,12 +1546,11 @@ mod tests {
         );
 
         // Insert first block into the in-memory state
-        let in_memory_block_senders =
-            first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock::new(
-                Arc::new(first_in_mem_block.clone()),
-                Arc::new(in_memory_block_senders),
+                Arc::new(
+                    first_in_mem_block.clone().try_recover().expect("failed to recover block"),
+                ),
                 Default::default(),
                 Default::default(),
                 Default::default(),
@@ -1590,8 +1589,9 @@ mod tests {
 
         // Insert the last block into the pending state
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            block: Arc::new(last_in_mem_block.clone()),
-            senders: Default::default(),
+            block: Arc::new(
+                last_in_mem_block.clone().try_recover().expect("failed to recover block"),
+            ),
             execution_output: Default::default(),
             hashed_state: Default::default(),
             trie: Default::default(),
@@ -1650,12 +1650,11 @@ mod tests {
         );
 
         // Insert first block into the in-memory state
-        let in_memory_block_senders =
-            first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock::new(
-                Arc::new(first_in_mem_block.clone()),
-                Arc::new(in_memory_block_senders),
+                Arc::new(
+                    first_in_mem_block.clone().try_recover().expect("failed to recover block"),
+                ),
                 Default::default(),
                 Default::default(),
                 Default::default(),
@@ -1756,10 +1755,8 @@ mod tests {
             new: vec![in_memory_blocks
                 .first()
                 .map(|block| {
-                    let senders = block.senders().expect("failed to recover senders");
                     ExecutedBlock::new(
-                        Arc::new(block.clone()),
-                        Arc::new(senders),
+                        Arc::new(block.clone().try_recover().expect("failed to recover block")),
                         Arc::new(ExecutionOutcome {
                             bundle: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
