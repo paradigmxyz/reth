@@ -321,8 +321,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?
             .state_root();
 
+        #[cfg(feature = "skip-state-root-validation")]
+        {
+            let _ = parent_state_root;
+            debug!(target: "provider::db::unwind", ?new_state_root, block_number = parent_number);
+        }
+
         // state root should be always correct as we are reverting state.
         // but for sake of double verification we will check it again.
+        #[cfg(not(feature = "skip-state-root-validation"))]
         if new_state_root != parent_state_root {
             let parent_hash = self
                 .block_hash(parent_number)?

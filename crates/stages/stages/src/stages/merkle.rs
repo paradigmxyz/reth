@@ -1,21 +1,26 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockNumber, B256};
 use reth_codecs::Compact;
-use reth_consensus::ConsensusError;
 use reth_db::tables;
 use reth_db_api::transaction::{DbTx, DbTxMut};
-use reth_primitives::{GotExpected, SealedHeader};
 use reth_provider::{
     DBProvider, HeaderProvider, LatestStateProviderRef, ProviderError, StageCheckpointReader,
     StageCheckpointWriter, StateCommitmentProvider, StateRootProviderExt, StatsReader, TrieWriter,
 };
 use reth_stages_api::{
-    BlockErrorKind, EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage,
-    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
+    EntitiesCheckpoint, ExecInput, ExecOutput, MerkleCheckpoint, Stage, StageCheckpoint,
+    StageError, StageId, UnwindInput, UnwindOutput,
 };
 use reth_trie::{IntermediateStateRootState, StateRootProgress, StoredSubNode};
 use std::fmt::Debug;
 use tracing::*;
+
+#[cfg(not(feature = "skip-state-root-validation"))]
+use {
+    alloy_primitives::{BlockNumber, B256},
+    reth_consensus::ConsensusError,
+    reth_primitives::{GotExpected, SealedHeader},
+    reth_stages_api::BlockErrorKind,
+};
 
 // TODO: automate the process outlined below so the user can just send in a debugging package
 /// The error message that we include in invalid state root errors to tell users what information
@@ -276,9 +281,7 @@ where
         self.save_execution_checkpoint(provider, None)?;
 
         #[cfg(feature = "skip-state-root-validation")]
-        {
-            debug!(target: "sync::stages::merkle::exec", ?trie_root, block_number = target_block.number());
-        }
+        debug!(target: "sync::stages::merkle::exec", ?trie_root, block_number = target_block.number());
         #[cfg(not(feature = "skip-state-root-validation"))]
         validate_state_root(trie_root, SealedHeader::seal(target_block), to_block)?;
 
@@ -334,6 +337,9 @@ where
                 .header_by_number(input.unwind_to)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
 
+            #[cfg(feature = "skip-state-root-validation")]
+            debug!(target: "sync::stages::merkle::unwind", ?block_root, block_number = target.number());
+            #[cfg(not(feature = "skip-state-root-validation"))]
             validate_state_root(block_root, SealedHeader::seal(target), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
@@ -348,6 +354,7 @@ where
 
 /// Check that the computed state root matches the root in the expected header.
 #[inline]
+#[cfg(not(feature = "skip-state-root-validation"))]
 fn validate_state_root<H: BlockHeader + Debug>(
     got: B256,
     expected: SealedHeader<H>,
@@ -373,10 +380,10 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{keccak256, U256};
+    use alloy_primitives::{keccak256, B256, U256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
-    use reth_primitives::{SealedBlock, StaticFileSegment, StorageEntry};
+    use reth_primitives::{SealedBlock, SealedHeader, StaticFileSegment, StorageEntry};
     use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{

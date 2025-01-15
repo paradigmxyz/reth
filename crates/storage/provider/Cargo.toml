@@ -145,3 +145,4 @@ scroll = [
     "reth-execution-types/scroll",
     "reth-evm/scroll",
 ]
+skip-state-root-validation = []

@@ -31,7 +31,8 @@ scroll = [
 ]
 skip-state-root-validation = [
 	"reth-node-builder/skip-state-root-validation",
-	"reth-scroll-node/skip-state-root-validation"
+	"reth-scroll-node/skip-state-root-validation",
+	"reth-provider/skip-state-root-validation"
 ]
 optimism = [
 	"reth-provider/optimism",
