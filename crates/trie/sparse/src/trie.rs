@@ -820,6 +820,8 @@ impl<P> RevealedSparseTrie<P> {
                                 hash.filter(|_| path.is_empty()),
                             );
                             updates.updated_nodes.insert(path.clone(), branch_node);
+                        } else {
+                            updates.removed_nodes.insert(path.clone());
                         }
 
                         store_in_db_trie
