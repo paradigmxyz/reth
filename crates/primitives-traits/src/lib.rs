@@ -17,6 +17,32 @@
 //! - `secp256k1`: Adds secp256k1 support for transaction signing/recovery. (By default the no-std
 //!   friendly `k256` is used)
 //! - `rayon`: Uses `rayon` for parallel transaction sender recovery in [`BlockBody`] by default.
+//!
+//! ## Overview
+//!
+//! This crate defines various traits and types that form the foundation of the reth stack.
+//! The top-level trait is [`Block`] which represents a block in the blockchain. A [`Block`] is
+//! composed of a [`Header`] and a [`BlockBody`]. A [`BlockBody`] contains the transactions in the
+//! block any additional data that is part of the block. A [`Header`] contains the metadata of the
+//! block.
+//!
+//! ### Sealing (Hashing)
+//!
+//! The block hash is derived from the [`Header`] and is used to uniquely identify the block. This
+//! operation is referred to as sealing in the context of this crate. Sealing is an expensive
+//! operation. This crate provides various wrapper types that cache the hash of the block to avoid
+//! recomputing it: [`SealedHeader`] and [`SealedBlock`]. All sealed types can be downgraded to
+//! their unsealed counterparts.
+//!
+//! ### Recovery
+//!
+//! The raw consensus transactions that make up a block don't include the sender's address. This
+//! information is recovered from the transaction signature. This operation is referred to as
+//! recovery in the context of this crate and is an expensive operation. The [`RecoveredBlock`]
+//! represents a [`SealedBlock`] with the sender addresses recovered. A [`SealedBlock`] can be
+//! upgraded to a [`RecoveredBlock`] by recovering the sender addresses:
+//! [`SealedBlock::try_recover`]. A [`RecoveredBlock`] can be downgraded to a [`SealedBlock`] by
+//! removing the sender addresses: [`RecoveredBlock::into_sealed_block`].
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -52,7 +78,7 @@ pub mod block;
 pub use block::{
     body::{BlockBody, FullBlockBody},
     header::{BlockHeader, FullBlockHeader},
-    Block, FullBlock,
+    Block, FullBlock, RecoveredBlock, SealedBlock,
 };
 
 mod encoded;
@@ -138,6 +164,6 @@ impl<T> MaybeSerdeBincodeCompat for T {}
 #[cfg(any(test, feature = "arbitrary", feature = "test-utils"))]
 pub mod test_utils {
     pub use crate::header::test_utils::{generate_valid_header, valid_header_strategy};
-    #[cfg(feature = "test-utils")]
+    #[cfg(any(test, feature = "test-utils"))]
     pub use crate::{block::TestBlock, header::test_utils::TestHeader};
 }

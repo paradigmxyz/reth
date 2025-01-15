@@ -8,10 +8,12 @@ use alloy_rpc_types_engine::{
 };
 use jsonrpsee::core::client::{ClientT, SubscriptionClientT};
 use reth_ethereum_engine_primitives::EthEngineTypes;
-use reth_primitives::{Block, BlockExt, TransactionSigned};
+use reth_primitives::{Block, TransactionSigned};
+use reth_primitives_traits::block::Block as _;
 use reth_rpc_api::clients::EngineApiClient;
 use reth_rpc_layer::JwtSecret;
 use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
+
 #[allow(unused_must_use)]
 async fn test_basic_engine_calls<C>(client: &C)
 where
@@ -23,7 +25,7 @@ where
         client,
         ExecutionPayloadInputV2 {
             execution_payload: ExecutionPayloadV1::from_block_slow::<TransactionSigned>(
-                &block.unseal(),
+                &block.into_block(),
             ),
             withdrawals: None,
         },

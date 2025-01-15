@@ -1,7 +1,6 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
-use std::{fmt::Display, sync::Arc};
-
+use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
 use crate::{FromEvmError, RpcNodeCore};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
@@ -9,7 +8,7 @@ use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::SealedBlockWithSenders;
+use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
 use reth_revm::database::StateProviderDatabase;
@@ -22,8 +21,7 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use revm_primitives::{
     BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState,
 };
-
-use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
+use std::{fmt::Display, sync::Arc};
 
 /// Executes CPU heavy tasks.
 pub trait Trace:
@@ -246,7 +244,7 @@ pub trait Trace:
     fn trace_block_until<F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<SealedBlockWithSenders<ProviderBlock<Self::Provider>>>>,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
         highest_index: Option<u64>,
         config: TracingInspectorConfig,
         f: F,
@@ -286,7 +284,7 @@ pub trait Trace:
     fn trace_block_until_with_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<SealedBlockWithSenders<ProviderBlock<Self::Provider>>>>,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
         highest_index: Option<u64>,
         mut inspector_setup: Setup,
         f: F,
@@ -350,7 +348,7 @@ pub trait Trace:
                 // prepare transactions, we do everything upfront to reduce time spent with open
                 // state
                 let max_transactions =
-                    highest_index.map_or(block.body().transactions().len(), |highest| {
+                    highest_index.map_or(block.body().transaction_count(), |highest| {
                         // we need + 1 because the index is 0-based
                         highest as usize + 1
                     });
@@ -413,7 +411,7 @@ pub trait Trace:
     fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<SealedBlockWithSenders<ProviderBlock<Self::Provider>>>>,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
         config: TracingInspectorConfig,
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
@@ -452,7 +450,7 @@ pub trait Trace:
     fn trace_block_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<SealedBlockWithSenders<ProviderBlock<Self::Provider>>>>,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
         insp_setup: Setup,
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
@@ -483,7 +481,7 @@ pub trait Trace:
     /// already applied.
     fn apply_pre_execution_changes<DB: Send + Database<Error: Display> + DatabaseCommit>(
         &self,
-        block: &SealedBlockWithSenders<ProviderBlock<Self::Provider>>,
+        block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
         db: &mut DB,
         cfg: &CfgEnvWithHandlerCfg,
         block_env: &BlockEnv,

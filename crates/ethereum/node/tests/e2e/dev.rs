@@ -3,7 +3,7 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures::StreamExt;
 use reth_chainspec::ChainSpec;
-use reth_node_api::{FullNodeComponents, FullNodePrimitives, NodeTypes};
+use reth_node_api::{BlockBody, FullNodeComponents, FullNodePrimitives, NodeTypes};
 use reth_node_builder::{
     rpc::RethRpcAddOns, EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig, NodeHandle,
 };
@@ -65,7 +65,7 @@ where
 
     let head = notifications.next().await.unwrap();
 
-    let tx = &head.tip().transactions()[0];
+    let tx = &head.tip().body().transactions()[0];
     assert_eq!(tx.trie_hash(), hash);
     println!("mined transaction: {hash}");
 }

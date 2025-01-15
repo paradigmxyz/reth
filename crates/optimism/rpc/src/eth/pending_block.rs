@@ -14,7 +14,7 @@ use reth_evm::ConfigureEvm;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
-use reth_primitives::{logs_bloom, BlockBody, SealedBlockWithSenders};
+use reth_primitives::{logs_bloom, BlockBody, RecoveredBlock};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderHeader,
     ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
@@ -64,7 +64,7 @@ where
         &self,
     ) -> Result<
         Option<(
-            SealedBlockWithSenders<ProviderBlock<Self::Provider>>,
+            RecoveredBlock<ProviderBlock<Self::Provider>>,
             Vec<ProviderReceipt<Self::Provider>>,
         )>,
         Self::Error,
@@ -80,8 +80,7 @@ where
             .provider()
             .block_with_senders(block_id, Default::default())
             .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?
-            .seal_unchecked(latest.hash());
+            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
         let receipts = self
             .provider()

@@ -90,6 +90,7 @@ mdbx = [
 ]
 test-utils = [
     "dep:tempfile",
+    "mdbx",
     "arbitrary",
     "parking_lot",
     "reth-primitives/test-utils",

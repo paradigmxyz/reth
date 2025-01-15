@@ -26,7 +26,7 @@ pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 pub use constants::{
     DEFAULT_MAX_TX_INPUT_BYTES, MAX_CODE_BYTE_SIZE, MAX_INIT_CODE_BYTE_SIZE, TX_SLOT_BYTE_SIZE,
 };
-use reth_primitives_traits::{BlockBody, BlockHeader};
+use reth_primitives_traits::Block;
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
@@ -207,10 +207,9 @@ pub trait TransactionValidator: Send + Sync {
     /// Invoked when the head block changes.
     ///
     /// This can be used to update fork specific values (timestamp).
-    fn on_new_head_block<H, B>(&self, _new_tip_block: &SealedBlock<H, B>)
+    fn on_new_head_block<B>(&self, _new_tip_block: &SealedBlock<B>)
     where
-        H: BlockHeader,
-        B: BlockBody,
+        B: Block,
     {
     }
 }
@@ -243,10 +242,9 @@ where
         }
     }
 
-    fn on_new_head_block<H, Body>(&self, new_tip_block: &SealedBlock<H, Body>)
+    fn on_new_head_block<Bl>(&self, new_tip_block: &SealedBlock<Bl>)
     where
-        H: BlockHeader,
-        Body: BlockBody,
+        Bl: Block,
     {
         match self {
             Self::Left(v) => v.on_new_head_block(new_tip_block),
