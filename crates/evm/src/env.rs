@@ -14,6 +14,7 @@ impl Default for EvmEnv {
         Self {
             cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg {
                 cfg_env: Default::default(),
+                // Will set `is_optimism` if `revm/optimism-default-handler` is enabled.
                 handler_cfg: Default::default(),
             },
             block_env: BlockEnv::default(),

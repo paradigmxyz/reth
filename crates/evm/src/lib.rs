@@ -52,7 +52,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
-    /// including the spec id.
+    /// including the spec id and transaction environment.
     ///
     /// This will preserve any handler modifications
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv, tx: TxEnv) -> Evm<'_, (), DB> {
