@@ -253,7 +253,7 @@ impl<T: EngineTypes, N: NodePrimitives> Display for EngineApiRequest<T, N> {
         match self {
             Self::Beacon(msg) => msg.fmt(f),
             Self::InsertExecutedBlock(block) => {
-                write!(f, "InsertExecutedBlock({:?})", block.block().num_hash())
+                write!(f, "InsertExecutedBlock({:?})", block.recovered_block().num_hash())
             }
         }
     }

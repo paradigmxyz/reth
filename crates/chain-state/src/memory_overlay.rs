@@ -65,8 +65,8 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
 impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N> {
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
         for block in &self.in_memory {
-            if block.block.number() == number {
-                return Ok(Some(block.block.hash()));
+            if block.recovered_block().number() == number {
+                return Ok(Some(block.recovered_block().hash()));
             }
         }
 
@@ -82,9 +82,9 @@ impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N>
         let mut earliest_block_number = None;
         let mut in_memory_hashes = Vec::new();
         for block in &self.in_memory {
-            if range.contains(&block.block.number()) {
-                in_memory_hashes.insert(0, block.block.hash());
-                earliest_block_number = Some(block.block.number());
+            if range.contains(&block.recovered_block().number()) {
+                in_memory_hashes.insert(0, block.recovered_block().hash());
+                earliest_block_number = Some(block.recovered_block().number());
             }
         }
 

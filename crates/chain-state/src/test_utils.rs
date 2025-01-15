@@ -210,8 +210,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let (block, senders) = block_with_senders.split_sealed();
         ExecutedBlock::new(
-            Arc::new(block),
-            Arc::new(senders),
+            Arc::new(RecoveredBlock::new_sealed(block, senders)),
             Arc::new(ExecutionOutcome::new(
                 BundleState::default(),
                 receipts,
@@ -251,7 +250,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         range.map(move |number| {
             let current_parent_hash = parent_hash;
             let block = self.get_executed_block_with_number(number, current_parent_hash);
-            parent_hash = block.block.hash();
+            parent_hash = block.recovered_block().hash();
             block
         })
     }
