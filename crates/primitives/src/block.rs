@@ -1,4 +1,4 @@
-use crate::TransactionSigned;
+use reth_ethereum_primitives::TransactionSigned;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use reth_primitives_traits::test_utils::{generate_valid_header, valid_header_strategy};
 

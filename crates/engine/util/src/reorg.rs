@@ -1,6 +1,6 @@
 //! Stream wrapper that simulates reorgs.
 
-use alloy_consensus::{Header, Transaction};
+use alloy_consensus::{Header, Transaction, Typed2718};
 use alloy_eips::eip7840::BlobParams;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus,
@@ -21,7 +21,7 @@ use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
     proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, Receipt, Receipts,
 };
-use reth_primitives_traits::block::Block as _;
+use reth_primitives_traits::{block::Block as _, SignedTransaction};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -329,21 +329,21 @@ where
         let exec_result = match evm.transact() {
             Ok(result) => result,
             error @ Err(EVMError::Transaction(_) | EVMError::Header(_)) => {
-                trace!(target: "engine::stream::reorg", hash = %tx.hash(), ?error, "Error executing transaction from next block");
+                trace!(target: "engine::stream::reorg", hash = %tx.tx_hash(), ?error, "Error executing transaction from next block");
                 continue
             }
             // Treat error as fatal
             Err(error) => {
                 return Err(RethError::Execution(BlockExecutionError::Validation(
-                    BlockValidationError::EVM { hash: tx.hash(), error: Box::new(error) },
+                    BlockValidationError::EVM { hash: *tx.tx_hash(), error: Box::new(error) },
                 )))
             }
         };
         evm.db_mut().commit(exec_result.state);
 
-        if let Some(blob_tx) = tx.transaction.as_eip4844() {
-            sum_blob_gas_used += blob_tx.blob_gas();
-            versioned_hashes.extend(blob_tx.blob_versioned_hashes.clone());
+        if tx.is_eip4844() {
+            sum_blob_gas_used += tx.blob_gas_used().unwrap_or_default();
+            versioned_hashes.extend(tx.blob_versioned_hashes().unwrap_or_default());
         }
 
         cumulative_gas_used += exec_result.result.gas_used();

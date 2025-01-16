@@ -1,6 +1,7 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
 use crate::Receipt;
+use alloy_consensus::TxReceipt;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 pub use alloy_trie::root::ordered_trie_root_with_encoder;

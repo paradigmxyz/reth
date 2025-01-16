@@ -25,8 +25,7 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{
-    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, RecoveredBlock,
-    SealedHeader, TxType,
+    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, SealedHeader,
 };
 use reth_primitives_traits::block::Block as _;
 use reth_provider::{
@@ -864,7 +863,7 @@ where
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
-            if tx.is_eip4844() || tx.tx_type() == TxType::Deposit as u8 {
+            if tx.is_eip4844() || tx.tx_type() == OpTxType::Deposit {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue
             }
