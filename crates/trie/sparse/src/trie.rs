@@ -1150,6 +1150,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
 
                         if delete_child {
                             self.nodes.remove(&child_path);
+                            removed_nodes.retain(|node| node.path != child_path);
                         }
 
                         if let Some(updates) = self.updates.as_mut() {
