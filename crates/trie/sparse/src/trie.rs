@@ -1010,6 +1010,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                 return Err(SparseTrieErrorKind::BlindedNode { path: path.clone(), hash }.into())
             }
 
+            trace!(target: "trie::sparse", ?path, "Leaf node is not present in the trie");
             // Leaf is not present in the trie.
             return Ok(())
         }
