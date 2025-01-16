@@ -359,6 +359,14 @@ impl TransactionSigned {
             _ => return Err(self),
         })
     }
+
+    /// Returns the [`TxEip4844`] if the transaction is an [`Eip4844`] transaction.
+    pub const fn as_eip4844(&self) -> Option<&TxEip4844> {
+        match &self.transaction {
+            Transaction::Eip4844(tx) => Some(tx),
+            _ => None,
+        }
+    }
 }
 
 impl Typed2718 for TransactionSigned {

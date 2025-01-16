@@ -1,6 +1,6 @@
 //! `Eth` bundle implementation and helpers.
 
-use alloy_consensus::{BlockHeader, Transaction as _};
+use alloy_consensus::{BlockHeader, EnvKzgSettings, Transaction as _};
 use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
 use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
@@ -23,7 +23,7 @@ use revm::{
     db::{CacheDB, DatabaseCommit, DatabaseRef},
     primitives::ResultAndState,
 };
-use revm_primitives::{EnvKzgSettings, SpecId};
+use revm_primitives::SpecId;
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.

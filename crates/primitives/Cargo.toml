@@ -39,7 +39,6 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 # eth
 reth-chainspec = { workspace = true, features = ["arbitrary"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
-reth-testing-utils.workspace = true
 reth-trie-common = { workspace = true, features = ["arbitrary"] }
 
 alloy-rlp.workspace = true
@@ -49,12 +48,9 @@ alloy-genesis.workspace = true
 arbitrary = { workspace = true, features = ["derive"] }
 
 assert_matches.workspace = true
-bincode.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
-test-fuzz.workspace = true
-rstest.workspace = true
 reth-codecs.workspace = true
 
 criterion.workspace = true

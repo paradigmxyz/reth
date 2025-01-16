@@ -1,6 +1,6 @@
 //! Stream wrapper that simulates reorgs.
 
-use alloy_consensus::{Header, Transaction, Typed2718};
+use alloy_consensus::{Header, Transaction};
 use alloy_eips::eip7840::BlobParams;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus,
@@ -341,9 +341,9 @@ where
         };
         evm.db_mut().commit(exec_result.state);
 
-        if tx.is_eip4844() {
-            sum_blob_gas_used += tx.blob_gas_used().unwrap_or_default();
-            versioned_hashes.extend(tx.blob_versioned_hashes().unwrap_or_default());
+        if let Some(blob_tx) = tx.as_eip4844() {
+            sum_blob_gas_used += blob_tx.blob_gas();
+            versioned_hashes.extend(blob_tx.blob_versioned_hashes.clone());
         }
 
         cumulative_gas_used += exec_result.result.gas_used();

@@ -250,8 +250,8 @@ where
 
         // There's only limited amount of blob space available per block, so we need to check if
         // the EIP-4844 can still fit in the block
-        if tx.is_eip4844() {
-            let tx_blob_gas = tx.blob_gas_used().unwrap_or_default();
+        if let Some(blob_tx) = tx.as_eip4844() {
+            let tx_blob_gas = blob_tx.blob_gas();
             if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
                 // we can't fit this _blob_ transaction into the block, so we mark it as
                 // invalid, which removes its dependent transactions from
@@ -306,8 +306,8 @@ where
         evm.db_mut().commit(state);
 
         // add to the total blob gas used if the transaction successfully executed
-        if tx.is_eip4844() {
-            let tx_blob_gas = tx.blob_gas_used().unwrap_or_default();
+        if let Some(blob_tx) = tx.as_eip4844() {
+            let tx_blob_gas = blob_tx.blob_gas();
             sum_blob_gas_used += tx_blob_gas;
 
             // if we've reached the max data gas per block, we can skip blob txs entirely

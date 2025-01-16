@@ -8563,7 +8563,6 @@ dependencies = [
  "alloy-trie",
  "arbitrary",
  "assert_matches",
- "bincode",
  "c-kzg",
  "codspeed-criterion-compat",
  "derive_more",
@@ -8577,12 +8576,9 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "reth-static-file-types",
- "reth-testing-utils",
  "reth-trie-common",
- "rstest",
  "serde",
  "serde_json",
- "test-fuzz",
 ]
 
 [[package]]
