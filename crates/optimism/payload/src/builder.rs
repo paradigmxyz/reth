@@ -27,7 +27,7 @@ use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{
     proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, SealedHeader,
 };
-use reth_primitives_traits::block::Block as _;
+use reth_primitives_traits::{block::Block as _, RecoveredBlock};
 use reth_provider::{
     HashedPostStateProvider, ProviderError, StateProofProvider, StateProviderFactory,
     StateRootProvider,
