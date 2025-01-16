@@ -137,6 +137,9 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// Receipt type.
     type Primitives: NodePrimitives;
 
+    /// The error type returned by the executor.
+    type Error;
+
     /// An executor that can execute a single block given a database.
     ///
     /// # Verification
@@ -152,7 +155,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
         DB,
         Input<'a> = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         Output = BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>,
-        Error = BlockExecutionError,
+        Error = Self::Error,
     >;
 
     /// An executor that can execute a batch of blocks given a database.
@@ -160,7 +163,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
         DB,
         Input<'a> = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         Output = ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>,
-        Error = BlockExecutionError,
+        Error = Self::Error,
     >;
 
     /// Creates a new executor for single block execution.
@@ -197,7 +200,7 @@ pub trait BlockExecutionStrategy {
     type Primitives: NodePrimitives;
 
     /// The error type returned by this strategy's methods.
-    type Error: From<ProviderError> + core::error::Error;
+    type Error;
 
     /// Initialize the strategy with the given transaction environment overrides.
     fn init(&mut self, _tx_env_overrides: Box<dyn TxEnvOverrides>) {}
@@ -250,7 +253,7 @@ pub trait BlockExecutionStrategy {
 /// A strategy factory that can create block execution strategies.
 pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
     /// The error type returned by this strategy's methods.
-    type Error: From<ProviderError> + core::error::Error;
+    type Error;
 
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;
@@ -292,8 +295,10 @@ impl<F> BasicBlockExecutorProvider<F> {
 
 impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
 where
-    F: BlockExecutionStrategyFactory<Error = BlockExecutionError>,
+    F: BlockExecutionStrategyFactory,
 {
+    type Error = F::Error;
+
     type Primitives = F::Primitives;
 
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
@@ -424,12 +429,12 @@ where
 
 impl<S, DB> BatchExecutor<DB> for BasicBatchExecutor<S>
 where
-    S: BlockExecutionStrategy<DB = DB, Error = BlockExecutionError>,
+    S: BlockExecutionStrategy<DB = DB>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
     type Input<'a> = &'a RecoveredBlock<<S::Primitives as NodePrimitives>::Block>;
     type Output = ExecutionOutcome<<S::Primitives as NodePrimitives>::Receipt>;
-    type Error = BlockExecutionError;
+    type Error = S::Error;
 
     fn execute_and_verify_one(&mut self, block: Self::Input<'_>) -> Result<(), Self::Error> {
         if self.batch_record.first_block().is_none() {
@@ -528,6 +533,7 @@ mod tests {
     struct TestExecutorProvider;
 
     impl BlockExecutorProvider for TestExecutorProvider {
+        type Error = BlockExecutionError;
         type Primitives = EthPrimitives;
         type Executor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
         type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;

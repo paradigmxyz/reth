@@ -111,7 +111,7 @@ where
             let (header, body) = block.split_sealed_header_body();
             let block = P::Block::new_sealed(header, body).with_senders(senders);
 
-            executor.execute_and_verify_one(&block)?;
+            executor.execute_and_verify_one(&block).unwrap();
             execution_duration += execute_start.elapsed();
 
             // TODO(alexey): report gas metrics using `block.header.gas_used`
