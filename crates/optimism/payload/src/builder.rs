@@ -713,8 +713,7 @@ where
         SystemCaller::new(self.evm_config.clone(), self.chain_spec.clone())
             .pre_block_beacon_root_contract_call(
                 db,
-                &self.evm_env.cfg_env_with_handler_cfg,
-                &self.evm_env.block_env,
+                &self.evm_env,
                 self.attributes().payload_attributes.parent_beacon_block_root,
             )
             .map_err(|err| {
