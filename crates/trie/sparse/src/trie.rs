@@ -289,7 +289,7 @@ impl<P> RevealedSparseTrie<P> {
     }
 
     /// Returns reference to all trie nodes.
-    pub fn nodes_ref(&self) -> &HashMap<Nibbles, SparseNode> {
+    pub const fn nodes_ref(&self) -> &HashMap<Nibbles, SparseNode> {
         &self.nodes
     }
 
@@ -1123,8 +1123,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
 
                         new_node
                     }
-                    // If more than one child is left set in the branch, we just re-insert it
-                    // as-is.
+                    // If more than one child is left set in the branch, we just re-insert it as-is.
                     else {
                         SparseNode::new_branch(state_mask)
                     }

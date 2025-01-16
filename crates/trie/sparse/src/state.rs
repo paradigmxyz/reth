@@ -106,7 +106,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 
     /// Returns reference to state trie if it was revealed.
-    pub fn state_trie_ref(&self) -> Option<&RevealedSparseTrie<F::AccountNodeProvider>> {
+    pub const fn state_trie_ref(&self) -> Option<&RevealedSparseTrie<F::AccountNodeProvider>> {
         self.state.as_revealed_ref()
     }
 
