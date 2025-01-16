@@ -774,15 +774,6 @@ impl<P> RevealedSparseTrie<P> {
                                     hash_mask.set_bit(last_child_nibble);
                                     hashes.push(hash);
                                 }
-
-                                trace!(
-                                    target: "trie::sparse",
-                                    ?path,
-                                    ?child_path,
-                                    tree_mask_bit_set = should_set_tree_mask_bit,
-                                    hash_mask_bit_set = hash.is_some(),
-                                    "Updating branch node child masks"
-                                );
                             }
 
                             // Insert children in the resulting buffer in a normal order,
@@ -800,6 +791,14 @@ impl<P> RevealedSparseTrie<P> {
                             continue 'main
                         }
                     }
+
+                    trace!(
+                        target: "trie::sparse",
+                        ?path,
+                        ?tree_mask,
+                        ?hash_mask,
+                        "Branch node masks"
+                    );
 
                     self.rlp_buf.clear();
                     let branch_node_ref =
