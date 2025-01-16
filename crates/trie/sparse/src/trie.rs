@@ -1113,6 +1113,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         }
 
                         if let Some(updates) = self.updates.as_mut() {
+                            updates.updated_nodes.remove(&removed_path);
                             updates.removed_nodes.insert(removed_path.clone());
                         }
 
