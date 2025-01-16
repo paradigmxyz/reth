@@ -392,7 +392,7 @@ impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileJarProvider<'_, N
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
         let mut cursor = self.cursor()?;
-        let mut indices = Vec::with_capacity((range.end() - range.start()) as usize);
+        let mut indices = Vec::with_capacity((range.end() - range.start() + 1) as usize);
 
         for num in range {
             if let Some(block) = cursor.get_one::<BodyIndicesMask>(num.into())? {
@@ -400,6 +400,5 @@ impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileJarProvider<'_, N
             }
         }
         Ok(indices)
-
     }
 }

@@ -112,8 +112,7 @@ impl<D: BodyDownloader> BodyStage<D> {
                 // fix the inconsistency right away.
                 if let Some(unwind_to) = unwind_block {
                     let next_tx_num_after_unwind = provider
-                        .tx_ref()
-                        .get::<tables::BlockBodyIndices>(unwind_to)?
+                        .block_body_indices(unwind_to)?
                         .map(|b| b.next_tx_num())
                         .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?;
 
