@@ -22,18 +22,6 @@ pub enum OpBlockExecutionError {
     #[error("failed to load account {_0}")]
     AccountLoadFailed(alloy_primitives::Address),
     /// Thrown when a L1 block execution failed.
-    #[error("execution error on L1: {_0}")]
-    Eth(BlockExecutionError),
-}
-
-impl From<OpBlockExecutionError> for BlockExecutionError {
-    fn from(err: OpBlockExecutionError) -> Self {
-        Self::other(err)
-    }
-}
-
-impl From<ProviderError> for OpBlockExecutionError {
-    fn from(error: ProviderError) -> Self {
-        Self::Eth(BlockExecutionError::from(error))
-    }
+    #[error(transparent)]
+    Eth(#[from] BlockExecutionError),
 }
