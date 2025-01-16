@@ -288,6 +288,11 @@ impl<P> RevealedSparseTrie<P> {
         self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
     }
 
+    /// Returns reference to all trie nodes.
+    pub fn nodes_ref(&self) -> &HashMap<Nibbles, SparseNode> {
+        &self.nodes
+    }
+
     /// Returns a reference to the leaf value if present.
     pub fn get_leaf_value(&self, path: &Nibbles) -> Option<&Vec<u8>> {
         self.values.get(path)
