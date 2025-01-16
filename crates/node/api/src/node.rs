@@ -7,8 +7,7 @@ use reth_db_api::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
     Database,
 };
-use reth_engine_primitives::BeaconConsensusEngineHandle;
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::execute::{BlockExecutionError, BlockExecutorProvider};
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{HeaderTy, NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine, TxTy};
@@ -55,7 +54,10 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Evm: ConfigureEvm<Header = HeaderTy<Self::Types>, Transaction = TxTy<Self::Types>>;
 
     /// The type that knows how to execute blocks.
-    type Executor: BlockExecutorProvider<Primitives = <Self::Types as NodeTypes>::Primitives>;
+    type Executor: BlockExecutorProvider<
+        Primitives = <Self::Types as NodeTypes>::Primitives,
+        Error = BlockExecutionError,
+    >;
 
     /// The consensus type of the node.
     type Consensus: FullConsensus<<Self::Types as NodeTypes>::Primitives, Error = ConsensusError>

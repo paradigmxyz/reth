@@ -2,7 +2,7 @@ use crate::{BackfillJobFactory, ExExNotification, StreamBackfillJob, WalHandle};
 use alloy_consensus::BlockHeader;
 use futures::{Stream, StreamExt};
 use reth_chainspec::Head;
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::execute::{BlockExecutionError, BlockExecutorProvider};
 use reth_exex_types::ExExHead;
 use reth_node_api::NodePrimitives;
 use reth_primitives::EthPrimitives;
@@ -105,8 +105,10 @@ where
 impl<P, E> ExExNotificationsStream<E::Primitives> for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
+    E: BlockExecutorProvider<
+            Primitives: NodePrimitives<Block = P::Block>,
+            Error = BlockExecutionError,
+        > + Clone
         + Unpin
         + 'static,
 {
@@ -157,8 +159,10 @@ where
 impl<P, E> Stream for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
+    E: BlockExecutorProvider<
+            Primitives: NodePrimitives<Block = P::Block>,
+            Error = BlockExecutionError,
+        > + Clone
         + Unpin
         + 'static,
 {
@@ -301,8 +305,10 @@ where
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
+    E: BlockExecutorProvider<
+            Primitives: NodePrimitives<Block = P::Block>,
+            Error = BlockExecutionError,
+        > + Clone
         + Unpin
         + 'static,
 {
@@ -381,8 +387,10 @@ where
 impl<P, E> Stream for ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
+    E: BlockExecutorProvider<
+            Primitives: NodePrimitives<Block = P::Block>,
+            Error = BlockExecutionError,
+        > + Clone
         + Unpin
         + 'static,
 {
