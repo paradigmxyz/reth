@@ -37,10 +37,11 @@ arbitrary.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 rand.workspace = true
-reth-codecs.workspace = true
+reth-codecs = { workspace = true, features = ["test-utils"] }
 reth-zstd-compressors.workspace = true
-secp256k1.workspace = true
+secp256k1 = { workspace = true, features = ["rand"] }
 test-fuzz.workspace = true
+alloy-consensus = { workspace = true, features = ["serde", "arbitrary"] }
 
 [features]
 default = ["std"]
