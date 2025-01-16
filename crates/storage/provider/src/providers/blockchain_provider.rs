@@ -557,6 +557,13 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         } else if let Ok(Some(pending)) = self.pending_state_by_hash(hash) {
             // .. or this could be the pending state
             Ok(pending)
+        } else if let Some(pending_state) = self.canonical_in_memory_state.pending_state() {
+            // Check if the pending state matches the requested hash
+            if pending_state.hash() == hash {
+                Ok(Box::new(self.block_state_provider(&pending_state)?))
+            } else {
+                Err(ProviderError::StateForHashNotFound(hash))
+            }
         } else {
             // if we couldn't find it anywhere, then we should return an error
             Err(ProviderError::StateForHashNotFound(hash))
