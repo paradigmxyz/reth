@@ -23,10 +23,7 @@ use reth_provider::{
 };
 use reth_revm::{
     database::StateProviderDatabase,
-    primitives::{
-        BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, ExecutionResult, InvalidTransaction,
-        ResultAndState,
-    },
+    primitives::{BlockEnv, EVMError, ExecutionResult, InvalidTransaction, ResultAndState},
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{
@@ -65,7 +62,7 @@ pub trait LoadPendingBlock:
         &self,
     ) -> &Mutex<Option<PendingBlock<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>>>;
 
-    /// Configures the [`CfgEnvWithHandlerCfg`] and [`BlockEnv`] for the pending block
+    /// Configures the [`EvmEnv`] for the pending block
     ///
     /// If no pending block is available, this will derive it from the `latest` block
     #[expect(clippy::type_complexity)]
@@ -86,12 +83,10 @@ pub trait LoadPendingBlock:
                 // Note: for the PENDING block we assume it is past the known merge block and
                 // thus this will not fail when looking up the total
                 // difficulty value for the blockenv.
-                let EvmEnv { cfg_env_with_handler_cfg, block_env } =
-                    self.evm_config().cfg_and_block_env(block.header());
+                let evm_env = self.evm_config().cfg_and_block_env(block.header());
 
                 return Ok(PendingBlockEnv::new(
-                    cfg_env_with_handler_cfg,
-                    block_env,
+                    evm_env,
                     PendingBlockEnvOrigin::ActualPending(block, receipts),
                 ));
             }
@@ -105,7 +100,7 @@ pub trait LoadPendingBlock:
             .map_err(Self::Error::from_eth_err)?
             .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
 
-        let EvmEnv { cfg_env_with_handler_cfg, block_env } = self
+        let evm_env = self
             .evm_config()
             .next_cfg_and_block_env(
                 &latest,
@@ -119,11 +114,7 @@ pub trait LoadPendingBlock:
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
 
-        Ok(PendingBlockEnv::new(
-            cfg_env_with_handler_cfg,
-            block_env,
-            PendingBlockEnvOrigin::DerivedFromLatest(latest.hash()),
-        ))
+        Ok(PendingBlockEnv::new(evm_env, PendingBlockEnvOrigin::DerivedFromLatest(latest.hash())))
     }
 
     /// Returns the locally built pending block
@@ -159,7 +150,7 @@ pub trait LoadPendingBlock:
             // check if the block is still good
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
-                if pending.block_env.number.to::<u64>() == pending_block.block.number() &&
+                if pending.evm_env.block_env.number.to::<u64>() == pending_block.block.number() &&
                     parent_hash == pending_block.block.parent_hash() &&
                     now <= pending_block.expires_at
                 {
@@ -171,7 +162,7 @@ pub trait LoadPendingBlock:
             let (sealed_block, receipts) = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
-                    this.build_block(pending.cfg, pending.block_env, parent_hash)
+                    this.build_block(pending.evm_env, parent_hash)
                 })
                 .await
             {
@@ -243,8 +234,7 @@ pub trait LoadPendingBlock:
     #[expect(clippy::type_complexity)]
     fn build_block(
         &self,
-        cfg: CfgEnvWithHandlerCfg,
-        block_env: BlockEnv,
+        evm_env: EvmEnv,
         parent_hash: B256,
     ) -> Result<
         (RecoveredBlock<ProviderBlock<Self::Provider>>, Vec<ProviderReceipt<Self::Provider>>),
@@ -262,15 +252,15 @@ pub trait LoadPendingBlock:
 
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
-        let block_gas_limit: u64 = block_env.gas_limit.to::<u64>();
-        let base_fee = block_env.basefee.to::<u64>();
+        let block_gas_limit: u64 = evm_env.block_env.gas_limit.to::<u64>();
+        let base_fee = evm_env.block_env.basefee.to::<u64>();
 
         let mut executed_txs = Vec::new();
         let mut senders = Vec::new();
         let mut best_txs =
             self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
                 base_fee,
-                block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
+                evm_env.block_env.get_blob_gasprice().map(|gasprice| gasprice as u64),
             ));
 
         let chain_spec = self.provider().chain_spec();
@@ -278,7 +268,7 @@ pub trait LoadPendingBlock:
         let mut system_caller = SystemCaller::new(self.evm_config().clone(), chain_spec.clone());
 
         system_caller
-            .pre_block_blockhashes_contract_call(&mut db, &cfg, &block_env, parent_hash)
+            .pre_block_blockhashes_contract_call(&mut db, &evm_env, parent_hash)
             .map_err(|err| EthApiError::Internal(err.into()))?;
 
         let mut results = Vec::new();
@@ -334,14 +324,8 @@ pub trait LoadPendingBlock:
                 }
             }
 
-            // Configure the environment for the block.
-            let env = Env::boxed(
-                cfg.cfg_env.clone(),
-                block_env.clone(),
-                Self::evm_config(self).tx_env(tx.tx(), tx.signer()),
-            );
-
-            let mut evm = revm::Evm::builder().with_env(env).with_db(&mut db).build();
+            let tx_env = self.evm_config().tx_env(tx.tx(), tx.signer());
+            let mut evm = self.evm_config().evm_with_env(&mut db, evm_env.clone(), tx_env);
 
             let ResultAndState { result, state } = match evm.transact() {
                 Ok(res) => res,
@@ -399,7 +383,7 @@ pub trait LoadPendingBlock:
         // executes the withdrawals and commits them to the Database and BundleState.
         let balance_increments = post_block_withdrawals_balance_increments(
             chain_spec.as_ref(),
-            block_env.timestamp.try_into().unwrap_or(u64::MAX),
+            evm_env.block_env.timestamp.try_into().unwrap_or(u64::MAX),
             &[],
         );
 
@@ -416,7 +400,7 @@ pub trait LoadPendingBlock:
         let state_root = db.database.state_root(hashed_state).map_err(Self::Error::from_eth_err)?;
 
         let (block, receipts) = self.assemble_block_and_receipts(
-            &block_env,
+            &evm_env.block_env,
             parent_hash,
             state_root,
             executed_txs,
