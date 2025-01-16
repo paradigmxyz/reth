@@ -472,6 +472,13 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider<N> {
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         self.consistent_provider()?.block_body_indices(number)
     }
+
+    fn block_body_indices_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        self.consistent_provider()?.block_body_indices_range(range)
+    }
 }
 
 impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {

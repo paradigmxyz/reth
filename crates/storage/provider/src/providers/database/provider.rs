@@ -1620,6 +1620,18 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockBodyIndicesProvider
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
     }
+
+    fn block_body_indices_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        Ok(self
+            .tx_ref()
+            .cursor_read::<tables::BlockBodyIndices>()?
+            .walk_range(range)?
+            .map(|r| r.map(|(_, b)| b))
+            .collect::<Result<_, _>>()?)
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> StageCheckpointReader for DatabaseProvider<TX, N> {
