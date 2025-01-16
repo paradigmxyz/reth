@@ -92,6 +92,7 @@ where
         let mut proof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.as_ref().clone())
+                .with_branch_node_masks(true)
                 .multiproof(targets)
                 .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
         let node = proof.account_subtree.into_inner().remove(path);
@@ -143,6 +144,7 @@ where
             self.account,
         )
         .with_prefix_set_mut(storage_prefix_set)
+        .with_branch_node_masks(true)
         .storage_multiproof(targets)
         .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
         let node = proof.subtree.into_inner().remove(path);
