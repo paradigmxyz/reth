@@ -1094,7 +1094,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         let mut child_path = removed_path.clone();
                         child_path.push_unchecked(child_nibble);
 
-                        trace!(target: "trie::sparse", ?removed_path, ?child_path, ?child, "Branch node has only one child");
+                        trace!(target: "trie::sparse", ?removed_path, ?child_path, "Branch node has only one child");
 
                         if self.nodes.get(&child_path).unwrap().is_hash() {
                             trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
