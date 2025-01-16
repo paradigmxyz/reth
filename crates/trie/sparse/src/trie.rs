@@ -949,7 +949,14 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                                     self.provider.blinded_node(&current)?
                                 {
                                     let decoded = TrieNode::decode(&mut &node[..])?;
-                                    trace!(target: "trie::sparse", ?current, ?decoded, "Revealing extension node child");
+                                    trace!(
+                                        target: "trie::sparse",
+                                        ?current,
+                                        ?decoded,
+                                        ?tree_mask,
+                                        ?hash_mask,
+                                        "Revealing extension node child",
+                                    );
                                     self.reveal_node(
                                         current.clone(),
                                         decoded,
@@ -1105,7 +1112,14 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                                 self.provider.blinded_node(&child_path)?
                             {
                                 let decoded = TrieNode::decode(&mut &node[..])?;
-                                trace!(target: "trie::sparse", ?child_path, ?decoded, "Revealing remaining blinded branch child");
+                                trace!(
+                                    target: "trie::sparse",
+                                    ?child_path,
+                                    ?decoded,
+                                    ?tree_mask,
+                                    ?hash_mask,
+                                    "Revealing remaining blinded branch child"
+                                );
                                 self.reveal_node(
                                     child_path.clone(),
                                     decoded,
