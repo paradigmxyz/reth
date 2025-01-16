@@ -92,7 +92,6 @@ impl ScalerizeClient {
         println!("KEY FOR GET: {:?}", key);
         let mut request = vec![OP_GET];
         request.extend_from_slice(&table_code.to_be_bytes());
-        
         request.extend_from_slice(key);
         
         println!("GET REQUEST: {:?}", request);
@@ -101,28 +100,26 @@ impl ScalerizeClient {
 
         let response = self.read_full_response()?;
         println!("RESPONSE FOR GET: {:?}", response);
-        Ok(response)
-        // let status = response[0];
-        // let data = response[1..].to_vec();
+        // Ok(response)
+        let status = response[0];
+        let data = response[1..].to_vec();
 
-        // match status {
-        //     STATUS_SUCCESS => Ok(data),
-        //     STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(&data).into_owned())),
-        //     _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}, response: {:?}", status, data)))
-        // }
+        match status {
+            STATUS_SUCCESS => Ok(data),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(&data).into_owned())),
+            _ => Err(ClientError::OperationFailed(format!("Error: {:?}", data)))
+        }
     }
 
-    pub fn put(&mut self, table_code: u8, key: &[u8], subkey: &[u8], value: &[u8]) -> Result<Vec<u8>, ClientError> {
+    // no need to send rlp encoded for dupsorted even when using this method
+    // just send the value at that subkey
+    pub fn put(&mut self, table_code: u8, key: &[u8], subkey: Option<&[u8]>, value: &[u8]) -> Result<Vec<u8>, ClientError> {
         let mut request = vec![OP_PUT, table_code];
-        let value_len = value.len();
-        if value_len > 65535 {
-            return Err(ClientError::InvalidRequest("Value length exceeds 65535 bytes".to_string()));
-        }
-    
-        request.extend_from_slice(&(value_len as u16).to_be_bytes());
+        
         request.extend_from_slice(key);
-        request.extend_from_slice(subkey);
-        request.extend_from_slice(value);
+        if let Some(subkey) = subkey {
+            request.extend_from_slice(subkey);
+        }           request.extend_from_slice(value);
         
         println!("PUT REQUEST: {:?}", request);
         self.stream.write_all(&request)?;
@@ -131,19 +128,43 @@ impl ScalerizeClient {
         let response = self.read_full_response()?;
         println!("RESPONSE FOR PUT: {:?}", response);
 
-        Ok(response)
+        let status = response[0];
+        let data = response[1..].to_vec();
+
+        match status {
+            STATUS_SUCCESS => Ok(data),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(&data).into_owned())),
+            _ => Err(ClientError::OperationFailed(format!("Error: {:?}", data)))
+        }
     }
 
-    pub fn delete(&mut self, table_code: u8, key: &[u8], value: &[u8]) -> Result<(), ClientError> {
-        let mut request = vec![OP_DELETE, table_code];
-        let value_len = value.len();
-        if value_len > 65535 {
-            return Err(ClientError::InvalidRequest("Value length exceeds 65535 bytes".to_string()));
-        }
-        request.extend_from_slice(&(value_len as u16).to_be_bytes());
-        request.extend_from_slice(key);
-        request.extend_from_slice(value);
+    // pub fn delete(&mut self, table_code: u8, key: &[u8], value: &[u8]) -> Result<Vec<u8>, ClientError> {
+    //     let mut request = vec![OP_DELETE, table_code];
+    //     request.extend_from_slice(key);
+    //     request.extend_from_slice(value);
         
+    //     println!("DELETE REQUEST: {:?}", request);
+    //     self.stream.write_all(&request)?;
+    //     self.stream.flush()?;
+
+    //     let response = self.read_full_response()?;
+    //     println!("RESPONSE FOR DELETE: {:?}", response);
+    //     let status = response[0];
+    //     let data = response[1..].to_vec();
+
+    //     match status {
+    //         STATUS_SUCCESS => Ok(data),
+    //         STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(&data).into_owned())),
+    //         _ => Err(ClientError::OperationFailed(format!("Error: {:?}", data)))
+    //     }
+    // }
+
+    pub fn delete(&mut self, table_code: u8, key: &[u8], subkey: Option<&[u8]>) -> Result<Vec<u8>, ClientError> {
+        let mut request = vec![OP_DELETE, table_code];
+        request.extend_from_slice(key);
+        if let Some(subkey) = subkey {
+            request.extend_from_slice(subkey);
+        }        
         println!("DELETE REQUEST: {:?}", request);
         self.stream.write_all(&request)?;
         self.stream.flush()?;
@@ -151,16 +172,16 @@ impl ScalerizeClient {
         let response = self.read_full_response()?;
         println!("RESPONSE FOR DELETE: {:?}", response);
         let status = response[0];
-        let data = &response[1..];
+        let data = response[1..].to_vec();
 
         match status {
-            STATUS_SUCCESS => Ok(()),
-            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
-            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}, response: {:?}", status, data)))
+            STATUS_SUCCESS => Ok(data),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(&data).into_owned())),
+            _ => Err(ClientError::OperationFailed(format!("Error: {:?}", data)))
         }
     }
 
-    pub fn write(&mut self) -> Result<(), ClientError> {
+    pub fn write(&mut self) -> Result<Vec<u8>, ClientError> {
         let store_number: u8 = 0;
         let mut request = vec![OP_WRITE];
         request.extend_from_slice(&store_number.to_be_bytes());
@@ -172,12 +193,12 @@ impl ScalerizeClient {
         let response = self.read_full_response()?;
         println!("RESPONSE FOR WRITE: {:?}", response);
         let status = response[0];
-        let data = &response[1..];
+        let data = response[1..].to_vec();
 
         match status {
-            STATUS_SUCCESS => Ok(()),
-            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
-            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}, response: {:?}", status, data)))
+            STATUS_SUCCESS => Ok(data),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(&data).into_owned())),
+            _ => Err(ClientError::OperationFailed(format!("Error: {:?}", data)))
         }
     }
 

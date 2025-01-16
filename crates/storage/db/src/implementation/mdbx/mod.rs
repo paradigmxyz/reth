@@ -524,6 +524,8 @@ mod tests {
     use std::{ptr::null, str::FromStr};
     use tempfile::TempDir;
     use bytes::BytesMut;
+    use std::thread;
+    use std::time::Duration;
 
     /// Create database for testing
     fn create_test_db(kind: DatabaseEnvKind) -> Arc<DatabaseEnv> {
@@ -941,39 +943,58 @@ mod tests {
         // assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
         // tx.commit().expect(ERROR_COMMIT);
 
-
         let key1 = B256::random();
-        let key2 = B256::ZERO;
-        let value = Account {
+        let key2 = B256::random();
+        let value1 = Account {
             nonce: 1,
             balance: U256::from(1000),
             bytecode_hash: Some(U256::from(12345).into()),
         };
 
-        let rlp_encoded = rlp::encode(&value);
-        println!("RLP Encoded Value: {:?}", rlp_encoded.to_vec());
-        let decoded_account: Account = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
-        println!("Decoded Account: {:?}", decoded_account);
+        let value2 = Account {
+            nonce: 2,
+            balance: U256::from(2000),
+            bytecode_hash: Some(U256::from(12345).into()),
+        };
 
+        let rlp_encoded1 = rlp::encode(&value1);
+        println!("RLP Encoded Value 1: {:?}", rlp_encoded1.to_vec());
+        let decoded_account: Account = rlp::decode(&rlp_encoded1).expect("Failed to decode RLP");
+        println!("Decoded Account 1: {:?}", decoded_account);
+
+        let rlp_encoded2 = rlp::encode(&value2);
+        println!("RLP Encoded Value 2: {:?}", rlp_encoded2.to_vec());
+        let decoded_account: Account = rlp::decode(&rlp_encoded2).expect("Failed to decode RLP");
+        println!("Decoded Account 2: {:?}", decoded_account);
 
         let mut scalerize_client = ScalerizeClient::connect()
         .map_err(DatabaseError::from)?;
 
         // PUT FOR HASHEDACCOUNTS 
-        let put_response = scalerize_client.put(0, key1.as_slice(),&[], &rlp_encoded)
+        let put_response = scalerize_client.put(0, key1.as_slice(),None, &rlp_encoded1)
+        .expect("PUT REQUEST FAILED");
+        
+        println!("BYTES TO BE DECODED:{:?}", &put_response);
+        let rlp = Rlp::new(&put_response);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        println!("PUT Account:{:?}", decoded_account);
+
+        match scalerize_client.write() {
+            Ok(_) => {
+                println!("WRITTEN TO DB");
+            }
+            Err(e) => {
+                println!("Write request failed with error: {:?}", e);
+            }
+        }
+
+        let put_response = scalerize_client.put(0, key2.as_slice(),None, &rlp_encoded2)
         .expect("Failed to get put response");
         
-        if put_response[0] == 0 {
-            let error_message = String::from_utf8_lossy(&put_response[1..]);
-            panic!("Put request failed with error: {}", error_message);
-        } else if put_response[0] == 1 {
-            println!("BYTES TO BE DECODED:{:?}", &put_response[1..]);
-            let rlp = Rlp::new(&put_response[1..]);
-            let decoded_account = Account::decode(&rlp).expect("Failed to decode");
-            println!("PUT Account:{:?}", decoded_account);
-        } else {
-            panic!("Unexpected response format");
-        }
+        println!("BYTES TO BE DECODED:{:?}", &put_response);
+        let rlp = Rlp::new(&put_response);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        println!("PUT Account:{:?}", decoded_account);
 
         match scalerize_client.write() {
             Ok(_) => {
@@ -984,22 +1005,32 @@ mod tests {
             }
         }
         
+        // Try put request for table which does not exists
+        // let put_response = scalerize_client.put(2, key2.as_slice(),&[], &rlp_encoded)
+        // .expect("Failed to get put response");
+        
+        // println!("BYTES TO BE DECODED:{:?}", &put_response);
+        // let rlp = Rlp::new(&put_response);
+        // let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        // println!("PUT Account:{:?}", decoded_account);
+
         // GET FOR HASHEDACCOUNTS 
         let get_response = scalerize_client.get(0, key1.as_slice()).
         expect("Failed to put response");
 
-        if get_response[0] == 0 {
-            let error_message = String::from_utf8_lossy(&get_response[1..]);
-            panic!("GET request failed with error: {}", error_message);
-        } else if get_response[0] == 1 {
-            println!("BYTES TO BE DECODED:{:?}", &get_response[1..]);
-            let rlp = Rlp::new(&get_response[1..]);
-            let decoded_account = Account::decode(&rlp).expect("Failed to decode");
-            println!("GET Account::::{:?}", decoded_account);
-        } else {
-            panic!("Unexpected response format");
-        }
-        
+        println!("BYTES TO BE DECODED:{:?}", &get_response);
+        let rlp = Rlp::new(&get_response);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        println!("GET Account 1:{:?}", decoded_account);
+
+        let get_response = scalerize_client.get(0, key2.as_slice()).
+        expect("Failed to put response");
+
+        println!("BYTES TO BE DECODED:{:?}", &get_response);
+        let rlp = Rlp::new(&get_response);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        println!("GET Account 2:{:?}", decoded_account);
+
         let b256_var_from_bytes1 = B256::from([
             0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
             0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
@@ -1035,10 +1066,10 @@ mod tests {
             0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
         ]);
         
-        println!("for hashed storage");
-        // let subkey = B256::random();
-        let subkey: H256 = H256::zero();
-        println!("subkey {:?}", subkey);
+        // println!("for hashed storage");
+        let subkey = B256::random();
+        // let subkey: H256 = H256::zero();
+        // println!("subkey {:?}", subkey);
 
         let value1 = U256::from(1);
         let value2 = U256::from(2);
@@ -1049,78 +1080,59 @@ mod tests {
         let entry3 = StorageEntry { key: b256_var_from_bytes4, value: value3 };
         let entry4 = StorageEntry { key: b256_var_from_bytes5, value: value4 };
 
-        // let storage_entry = StorageEntry {
-        //     key: B256::random(),
-        //     value: U256::from(1),
-        // };
+        // // let storage_entry = StorageEntry {
+        // //     key: B256::random(),
+        // //     value: U256::from(1),
+        // // };
 
         let rlp_encoded = rlp::encode(&entry1);
         let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
         println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
-        let put_response = scalerize_client.put(1, key1.as_slice(), entry1.key.as_slice(), &rlp_encoded)
+        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry1.key.as_slice()), &rlp_encoded)
         .expect("Failed to get put response");
-        if put_response[0] == 0 {
-            let error_message = String::from_utf8_lossy(&put_response[1..]);
-            panic!("PUT request failed with error: {}", error_message);
-        } else if put_response[0] == 1 {
-            println!("BYTES TO BE DECODED:{:?}", &put_response[1..]);
-            let rlp = Rlp::new(&put_response[1..]);
-            let decoded_account = StorageEntry::decode(&rlp).expect("Failed to decode");
-            println!("PUT STORAGE ENTRY:{:?}", decoded_account);
-        } else {
-            panic!("Unexpected response format");
-        }
+        
+        println!("BYTES TO BE DECODED:{:?}", &put_response);
+        let rlp = Rlp::new(&put_response);
+        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
+        println!("PUT Storage Entry:{:?}", decoded_storage_entry);
+
+
 
         let rlp_encoded = rlp::encode(&entry2);
         let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
         println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
-        let put_response = scalerize_client.put(1, key1.as_slice(), entry2.key.as_slice(), &rlp_encoded)
+        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry2.key.as_slice()), &rlp_encoded)
         .expect("Failed to get put response");
-        if put_response[0] == 0 {
-            let error_message = String::from_utf8_lossy(&put_response[1..]);
-            panic!("PUT request failed with error: {}", error_message);
-        } else if put_response[0] == 1 {
-            println!("BYTES TO BE DECODED:{:?}", &put_response[1..]);
-            let rlp = Rlp::new(&put_response[1..]);
-            let decoded_account = StorageEntry::decode(&rlp).expect("Failed to decode");
-            println!("PUT STORAGE ENTRY:{:?}", decoded_account);
-        } else {
-            panic!("Unexpected response format");
-        }
+        
+        println!("BYTES TO BE DECODED:{:?}", &put_response);
+        let rlp = Rlp::new(&put_response);
+        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
+        println!("PUT Storage Entry:{:?}", decoded_storage_entry);
+
+
 
         let rlp_encoded = rlp::encode(&entry3);
         let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
         println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
-        let put_response = scalerize_client.put(1, key1.as_slice(), entry3.key.as_slice(), &rlp_encoded)
+        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry3.key.as_slice()), &rlp_encoded)
         .expect("Failed to get put response");
-        if put_response[0] == 0 {
-            let error_message = String::from_utf8_lossy(&put_response[1..]);
-            panic!("PUT request failed with error: {}", error_message);
-        } else if put_response[0] == 1 {
-            println!("BYTES TO BE DECODED:{:?}", &put_response[1..]);
-            let rlp = Rlp::new(&put_response[1..]);
-            let decoded_account = StorageEntry::decode(&rlp).expect("Failed to decode");
-            println!("PUT STORAGE ENTRY:{:?}", decoded_account);
-        } else {
-            panic!("Unexpected response format");
-        }
+        
+        println!("BYTES TO BE DECODED:{:?}", &put_response);
+        let rlp = Rlp::new(&put_response);
+        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
+        println!("PUT Storage Entry:{:?}", decoded_storage_entry);
+
 
         let rlp_encoded = rlp::encode(&entry4);
         let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
         println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
-        let put_response = scalerize_client.put(1, key1.as_slice(), entry4.key.as_slice(), &rlp_encoded)
+        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry4.key.as_slice()), &rlp_encoded)
         .expect("Failed to get put response");
-        if put_response[0] == 0 {
-            let error_message = String::from_utf8_lossy(&put_response[1..]);
-            panic!("PUT request failed with error: {}", error_message);
-        } else if put_response[0] == 1 {
-            println!("BYTES TO BE DECODED:{:?}", &put_response[1..]);
-            let rlp = Rlp::new(&put_response[1..]);
-            let decoded_account = StorageEntry::decode(&rlp).expect("Failed to decode");
-            println!("PUT STORAGE ENTRY:{:?}", decoded_account);
-        } else {
-            panic!("Unexpected response format");
-        }
+        
+        println!("BYTES TO BE DECODED:{:?}", &put_response);
+        let rlp = Rlp::new(&put_response);
+        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
+        println!("PUT Storage Entry:{:?}", decoded_storage_entry);
 
         match scalerize_client.write() {
             Ok(_) => {
@@ -1132,43 +1144,17 @@ mod tests {
         }
 
         let get_response = scalerize_client.get(1, key1.as_slice()).
-        expect("Failed to put response");
+        expect("Failed to get response");
 
-        if get_response[0] == 0 {
-            let error_message = String::from_utf8_lossy(&get_response[1..]);
-            panic!("GET request failed with error: {}", error_message);
-        } else if get_response[0] == 1 {
-            println!("BYTES TO BE DECODED:{:?}", &get_response[1..]);
-            let rlp = Rlp::new(&get_response[1..]);
-            let decoded_account = StorageEntry::decode(&rlp).expect("Failed to decode");
-            println!("GET STORAGE ENTRY::::{:?}", decoded_account);
-        } else {
-            panic!("Unexpected response format");
-        }
+        println!("BYTES TO BE DECODED:{:?}", &get_response);
+        let rlp = Rlp::new(&get_response);
+        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
+        println!("GET Storage Entry:{:?}", decoded_storage_entry);
 
-        // this will delete all entries for HashedStorages for account address key1
-        // match scalerize_client.delete(1, key1.as_slice(), &[]) {
-        //     Ok(_) => {
-        //         println!("DELETE REQUEST SUCCESSFUL");
-        //     }
-        //     Err(e) => {
-        //         println!("Delete request failed with error: {:?}", e);
-        //     }
-        // }
+        
 
-        // this will delete all entries in the substore created for an account
-        // match scalerize_client.delete(0, key1.as_slice(), &[]) {
-        //     Ok(_) => {
-        //         println!("DELETE REQUEST SUCCESSFUL");
-        //     }
-        //     Err(e) => {
-        //         println!("Delete request failed with error: {:?}", e);
-        //     }
-        // }
-
-        let rlp_encoded = rlp::encode(&entry1);
-        // this will delete only entry for table HashedStorages with account address == key1 and value == entry1
-        match scalerize_client.delete(1, key1.as_slice(), &rlp_encoded) {
+        // this will delete only entry for table HashedStorages with account address == key1 and subkey == entry1
+        match scalerize_client.delete(1, key1.as_slice(), Some(entry1.key.as_slice())) {
             Ok(_) => {
                 println!("DELETE REQUEST SUCCESSFUL");
             }
@@ -1186,35 +1172,42 @@ mod tests {
             }
         }
 
+
         let get_response = scalerize_client.get(1, key1.as_slice()).
-        expect("Failed to put response");
+        expect("Failed to get response");
 
-        if get_response[0] == 0 {
-            let error_message = String::from_utf8_lossy(&get_response[1..]);
-            println!("GET request failed with error: {}", error_message);
-        } else if get_response[0] == 1 {
-            println!("BYTES TO BE DECODED:{:?}", &get_response[1..]);
-            let rlp = Rlp::new(&get_response[1..]);
-            let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
-            println!("GET STORAGE ENTRY::::{:?}", decoded_storage_entry);
-        } else {
-            panic!("Unexpected response format");
+        println!("BYTES TO BE DECODED:{:?}", &get_response);
+        let rlp = Rlp::new(&get_response);
+        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
+        println!("GET Storage Entry:{:?}", decoded_storage_entry);
+
+        // this will delete all the entries for key
+        match scalerize_client.delete(1, key1.as_slice(), None) {
+            Ok(_) => {
+                println!("DELETE REQUEST SUCCESSFUL");
+            }
+            Err(e) => {
+                println!("Delete request failed with error: {:?}", e);
+            }
         }
 
-        let get_response = scalerize_client.get(0, key1.as_slice()).
-        expect("Failed to put response");
-
-        if get_response[0] == 0 {
-            let error_message = String::from_utf8_lossy(&get_response[1..]);
-            println!("GET request failed with error: {}", error_message);
-        } else if get_response[0] == 1 {
-            println!("BYTES TO BE DECODED:{:?}", &get_response[1..]);
-            let rlp = Rlp::new(&get_response[1..]);
-            let decoded_storage_entry:Account  = Account::decode(&rlp).expect("Failed to decode");
-            println!("GET ACCOUNT::::{:?}", decoded_storage_entry);
-        } else {
-            panic!("Unexpected response format");
+        match scalerize_client.write() {
+            Ok(_) => {
+                println!("WRITTEN TO DB");
+            }
+            Err(e) => {
+                println!("Write request failed with error: {:?}", e);
+            }
         }
+
+        // this should fail since we deleted all entries for that key 
+        let get_response = scalerize_client.get(1, key1.as_slice()).
+        expect("Failed to get response");
+
+        println!("BYTES TO BE DECODED:{:?}", &get_response);
+        let rlp = Rlp::new(&get_response);
+        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
+        println!("GET Storage Entry:{:?}", decoded_storage_entry);
 
         Ok(())
     }
