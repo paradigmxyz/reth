@@ -15,7 +15,7 @@ use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResu
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
     state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
-    ConfigureEvm,
+    ConfigureEvm, Evm,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
@@ -325,8 +325,8 @@ where
         let tx_recovered = tx.clone().try_into_ecrecovered().map_err(|_| {
             BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError)
         })?;
-        evm_config.fill_tx_env(evm.tx_mut(), &tx_recovered, tx_recovered.signer());
-        let exec_result = match evm.transact() {
+        let tx_env = evm_config.tx_env(&tx_recovered, tx_recovered.signer());
+        let exec_result = match evm.transact(tx_env) {
             Ok(result) => result,
             error @ Err(EVMError::Transaction(_) | EVMError::Header(_)) => {
                 trace!(target: "engine::stream::reorg", hash = %tx.tx_hash(), ?error, "Error executing transaction from next block");

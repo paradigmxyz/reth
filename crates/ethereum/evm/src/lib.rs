@@ -17,18 +17,18 @@
 
 extern crate alloc;
 
-use core::convert::Infallible;
-
 use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
+use core::convert::Infallible;
 use reth_chainspec::ChainSpec;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm, NextBlockEnvAttributes};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::transaction::execute::FillTxEnv;
-use reth_revm::{inspector_handle_register, EvmBuilder};
+use reth_revm::{inspector_handle_register, Database, EvmBuilder};
 use revm_primitives::{
-    AnalysisKind, BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, SpecId, TxEnv,
+    AnalysisKind, BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, EVMError, Env,
+    SpecId, TxEnv,
 };
 
 mod config;
@@ -184,12 +184,12 @@ impl ConfigureEvmEnv for EthEvmConfig {
 }
 
 impl ConfigureEvm for EthEvmConfig {
-    fn evm_with_env<DB: reth_revm::Database>(
+    fn evm_with_env<'a, DB: Database + 'a>(
         &self,
         db: DB,
         evm_env: EvmEnv,
         tx: TxEnv,
-    ) -> reth_revm::Evm<'_, (), DB> {
+    ) -> impl Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>> + 'a {
         EvmBuilder::default()
             .with_db(db)
             .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
@@ -198,16 +198,16 @@ impl ConfigureEvm for EthEvmConfig {
             .build()
     }
 
-    fn evm_with_env_and_inspector<DB, I>(
+    fn evm_with_env_and_inspector<'a, DB, I>(
         &self,
         db: DB,
         evm_env: EvmEnv,
         tx: TxEnv,
         inspector: I,
-    ) -> reth_revm::Evm<'_, I, DB>
+    ) -> impl Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>> + 'a
     where
-        DB: reth_revm::Database,
-        I: reth_revm::GetInspector<DB>,
+        DB: Database + 'a,
+        I: reth_revm::GetInspector<DB> + 'a,
     {
         EvmBuilder::default()
             .with_db(db)

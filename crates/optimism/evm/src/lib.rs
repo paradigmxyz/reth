@@ -17,14 +17,14 @@ use alloy_consensus::Header;
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, U256};
 use op_alloy_consensus::EIP1559ParamError;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::FillTxEnv;
 use reth_revm::{
     inspector_handle_register,
     primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Database, Evm, EvmBuilder, GetInspector,
+    Database, EvmBuilder, GetInspector,
 };
 
 mod config;
@@ -39,7 +39,7 @@ pub use receipts::*;
 mod error;
 pub use error::OpBlockExecutionError;
 use revm_primitives::{
-    BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, Env, HandlerCfg, OptimismFields, SpecId, TxKind,
+    BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, EVMError, Env, HandlerCfg, OptimismFields, SpecId, TxKind
 };
 
 /// Optimism-related EVM configuration.
@@ -168,12 +168,12 @@ impl ConfigureEvmEnv for OpEvmConfig {
 }
 
 impl ConfigureEvm for OpEvmConfig {
-    fn evm_with_env<DB: Database>(
+    fn evm_with_env<'a, DB: Database + 'a>(
         &self,
         db: DB,
         mut evm_env: EvmEnv,
         tx: TxEnv,
-    ) -> Evm<'_, (), DB> {
+    ) -> impl Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>> + 'a {
         evm_env.cfg_env_with_handler_cfg.handler_cfg.is_optimism = true;
 
         EvmBuilder::default()
@@ -184,16 +184,16 @@ impl ConfigureEvm for OpEvmConfig {
             .build()
     }
 
-    fn evm_with_env_and_inspector<DB, I>(
+    fn evm_with_env_and_inspector<'a, DB, I>(
         &self,
         db: DB,
         mut evm_env: EvmEnv,
         tx: TxEnv,
         inspector: I,
-    ) -> Evm<'_, I, DB>
+    ) -> impl Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>> + 'a
     where
-        DB: Database,
-        I: GetInspector<DB>,
+        DB: Database + 'a,
+        I: GetInspector<DB> + 'a,
     {
         evm_env.cfg_env_with_handler_cfg.handler_cfg.is_optimism = true;
 

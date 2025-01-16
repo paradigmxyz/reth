@@ -20,8 +20,10 @@ extern crate alloc;
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
-use revm::{Database, Evm, GetInspector};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, SpecId, TxEnv};
+use revm::{Database, DatabaseCommit, GetInspector};
+use revm_primitives::{
+    BlockEnv, CfgEnvWithHandlerCfg, EVMError, Env, ResultAndState, SpecId, TxEnv, TxKind,
+};
 
 pub mod either;
 /// EVM environment configuration.
@@ -38,13 +40,141 @@ pub mod system_calls;
 /// test helpers for mocking executor
 pub mod test_utils;
 
+/// An abstraction over EVM.
+pub trait Evm {
+    /// Database type held by the EVM.
+    type DB;
+    /// Transaction environment
+    type Tx;
+    /// Error type.
+    type Error;
+
+    /// Reference to [`BlockEnv`].
+    fn block(&self) -> &BlockEnv;
+
+    /// Consumes the type and returns the underlying [`EvmEnv`].
+    fn into_env(self) -> EvmEnv;
+
+    /// Executes the given transaction.
+    fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error>;
+
+    /// Executes a system call.
+    fn transact_system_call(
+        &mut self,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) -> Result<ResultAndState, Self::Error>;
+
+    /// Returns a mutable reference to the underlying database.
+    fn db_mut(&mut self) -> &mut Self::DB;
+
+    /// Executes a transaction and commits the state changes to the underlying database.
+    fn transact_commit(&mut self, tx_env: Self::Tx) -> Result<ResultAndState, Self::Error>
+    where
+        Self::DB: DatabaseCommit,
+    {
+        let result = self.transact(tx_env)?;
+        self.db_mut().commit(result.state.clone());
+
+        Ok(result)
+    }
+}
+
+impl<EXT, DB> Evm for revm::Evm<'_, EXT, DB>
+where
+    DB: Database,
+{
+    type DB = DB;
+    type Tx = TxEnv;
+    type Error = EVMError<DB::Error>;
+
+    fn block(&self) -> &BlockEnv {
+        self.block()
+    }
+
+    fn into_env(self) -> EvmEnv {
+        let Env { cfg, block, tx: _ } = *self.context.evm.inner.env;
+        EvmEnv {
+            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg {
+                cfg_env: cfg,
+                handler_cfg: self.handler.cfg,
+            },
+            block_env: block,
+        }
+    }
+
+    fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error> {
+        *self.tx_mut() = tx;
+        self.transact()
+    }
+
+    fn transact_system_call(
+        &mut self,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) -> Result<ResultAndState, Self::Error> {
+        #[allow(clippy::needless_update)] // side-effect of optimism fields
+        let tx_env = TxEnv {
+            caller,
+            transact_to: TxKind::Call(contract),
+            // Explicitly set nonce to None so revm does not do any nonce checks
+            nonce: None,
+            gas_limit: 30_000_000,
+            value: U256::ZERO,
+            data,
+            // Setting the gas price to zero enforces that no value is transferred as part of the
+            // call, and that the call will not count against the block's gas limit
+            gas_price: U256::ZERO,
+            // The chain ID check is not relevant here and is disabled if set to None
+            chain_id: None,
+            // Setting the gas priority fee to None ensures the effective gas price is derived from
+            // the `gas_price` field, which we need to be zero
+            gas_priority_fee: None,
+            access_list: Vec::new(),
+            // blob fields can be None for this tx
+            blob_hashes: Vec::new(),
+            max_fee_per_blob_gas: None,
+            // TODO remove this once this crate is no longer built with optimism
+            ..Default::default()
+        };
+
+        *self.tx_mut() = tx_env;
+
+        let prev_block_env = self.block().clone();
+
+        // ensure the block gas limit is >= the tx
+        self.block_mut().gas_limit = U256::from(self.tx().gas_limit);
+
+        // disable the base fee check for this call by setting the base fee to zero
+        self.block_mut().basefee = U256::ZERO;
+
+        let res = self.transact();
+
+        // re-set the block env
+        *self.block_mut() = prev_block_env;
+
+        res
+    }
+
+    fn db_mut(&mut self) -> &mut Self::DB {
+        &mut self.context.evm.db
+    }
+}
+
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id and transaction environment.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv, tx: TxEnv) -> Evm<'_, (), DB>;
+    fn evm_with_env<'a, DB: Database + 'a>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv,
+        tx: TxEnv,
+    ) -> impl Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>> + 'a;
 
     /// Returns a new EVM with the given database configured with `cfg` and `block_env`
     /// configuration derived from the given header. Relies on
@@ -53,7 +183,11 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// # Caution
     ///
     /// This does not initialize the tx environment.
-    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Evm<'_, (), DB> {
+    fn evm_for_block<'a, DB: Database + 'a>(
+        &self,
+        db: DB,
+        header: &Self::Header,
+    ) -> impl Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>> + 'a {
         let evm_env = self.cfg_and_block_env(header);
         self.evm_with_env(db, evm_env, Default::default())
     }
@@ -64,16 +198,16 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// This will use the given external inspector as the EVM external context.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env_and_inspector<DB, I>(
+    fn evm_with_env_and_inspector<'a, DB, I>(
         &self,
         db: DB,
         evm_env: EvmEnv,
         tx: TxEnv,
         inspector: I,
-    ) -> Evm<'_, I, DB>
+    ) -> impl Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>> + 'a
     where
-        DB: Database,
-        I: GetInspector<DB>;
+        DB: Database + 'a,
+        I: GetInspector<DB> + 'a;
 }
 
 impl<'b, T> ConfigureEvm for &'b T
@@ -81,24 +215,33 @@ where
     T: ConfigureEvm,
     &'b T: ConfigureEvmEnv<Header = T::Header>,
 {
-    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Evm<'_, (), DB> {
+    fn evm_for_block<'a, DB: Database + 'a>(
+        &self,
+        db: DB,
+        header: &Self::Header,
+    ) -> impl Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>> + 'a {
         (*self).evm_for_block(db, header)
     }
 
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv, tx: TxEnv) -> Evm<'_, (), DB> {
+    fn evm_with_env<'a, DB: Database + 'a>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv,
+        tx: TxEnv,
+    ) -> impl Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>> + 'a {
         (*self).evm_with_env(db, evm_env, tx)
     }
 
-    fn evm_with_env_and_inspector<DB, I>(
+    fn evm_with_env_and_inspector<'a, DB, I>(
         &self,
         db: DB,
         evm_env: EvmEnv,
         tx_env: TxEnv,
         inspector: I,
-    ) -> Evm<'_, I, DB>
+    ) -> impl Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>> + 'a
     where
-        DB: Database,
-        I: GetInspector<DB>,
+        DB: Database + 'a,
+        I: GetInspector<DB> + 'a,
     {
         (*self).evm_with_env_and_inspector(db, evm_env, tx_env, inspector)
     }

@@ -93,16 +93,6 @@ impl ConfigureEvmEnv for MyEvmConfig {
         self.inner.fill_tx_env(tx_env, transaction, sender);
     }
 
-    fn fill_tx_env_system_contract_call(
-        &self,
-        env: &mut Env,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    ) {
-        self.inner.fill_tx_env_system_contract_call(env, caller, contract, data);
-    }
-
     fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
         self.inner.fill_cfg_env(cfg_env, header);
     }
