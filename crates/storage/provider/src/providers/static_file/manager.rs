@@ -17,8 +17,8 @@ use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{
-        iter_static_files, BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask,
-        StaticFileCursor, TDWithHashMask, TransactionMask,
+        iter_static_files, BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask,
+        ReceiptMask, StaticFileCursor, TDWithHashMask, TransactionMask,
     },
     table::{Decompress, Value},
     tables,
@@ -1728,10 +1728,14 @@ impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileProvider<N> {
 
     fn block_body_indices_range(
         &self,
-        _range: RangeInclusive<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
-        // Required data not present in static_files
-        Err(ProviderError::UnsupportedProvider)
+        self.fetch_range_with_predicate(
+            StaticFileSegment::BlockMeta,
+            *range.start()..*range.end() + 1,
+            |cursor, number| cursor.get_one::<BodyIndicesMask>(number.into()),
+            |_| true,
+        )
     }
 }
 
