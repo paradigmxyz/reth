@@ -308,6 +308,12 @@ mod compact {
             (receipt.into(), buf)
         }
     }
+
+    #[cfg(test)]
+    #[test]
+    fn test_ensure_backwards_compatibility() {
+        assert_eq!(CompactOpReceipt::bitflag_encoded_bytes(), 2);
+    }
 }
 
 #[cfg(test)]
