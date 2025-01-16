@@ -381,6 +381,7 @@ impl<P> RevealedSparseTrie<P> {
                             // Memoize the hash of a previously blinded node in a new extension
                             // node.
                             hash: Some(*hash),
+                            store_in_db_trie: None,
                         });
                         self.reveal_node_or_hash(child_path, &ext.child)?;
                     }
@@ -602,14 +603,14 @@ impl<P> RevealedSparseTrie<P> {
         while let Some((mut path, level)) = paths.pop() {
             match self.nodes.get(&path).unwrap() {
                 SparseNode::Empty | SparseNode::Hash(_) => {}
-                SparseNode::Leaf { hash, .. } => {
+                SparseNode::Leaf { key: _, hash } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
 
                     targets.push(path);
                 }
-                SparseNode::Extension { key, hash } => {
+                SparseNode::Extension { key, hash, store_in_db_trie: _ } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
@@ -621,7 +622,7 @@ impl<P> RevealedSparseTrie<P> {
                         paths.push((path, level + 1));
                     }
                 }
-                SparseNode::Branch { state_mask, hash, .. } => {
+                SparseNode::Branch { state_mask, hash, store_in_db_trie: _ } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
@@ -673,26 +674,37 @@ impl<P> RevealedSparseTrie<P> {
                         (rlp_node, SparseNodeType::Leaf)
                     }
                 }
-                SparseNode::Extension { key, hash } => {
+                SparseNode::Extension { key, hash, store_in_db_trie } => {
                     let mut child_path = path.clone();
                     child_path.extend_from_slice_unchecked(key);
-                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
-                        (
-                            RlpNode::word_rlp(&hash),
-                            SparseNodeType::Extension { store_in_db_trie: true },
-                        )
+                    if let Some((hash, store_in_db_trie)) =
+                        hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
+                    {
+                        (RlpNode::word_rlp(&hash), SparseNodeType::Extension { store_in_db_trie })
                     } else if buffers.rlp_node_stack.last().is_some_and(|e| e.0 == child_path) {
                         let (_, child, child_node_type) = buffers.rlp_node_stack.pop().unwrap();
                         self.rlp_buf.clear();
                         let rlp_node = ExtensionNodeRef::new(key, &child).rlp(&mut self.rlp_buf);
                         *hash = rlp_node.as_hash();
 
+                        let store_in_db_trie_value = child_node_type.store_in_db_trie();
+
+                        trace!(
+                            target: "trie::sparse",
+                            ?path,
+                            ?child_path,
+                            ?child_node_type,
+                            "Extension node"
+                        );
+
+                        *store_in_db_trie = Some(store_in_db_trie_value);
+
                         (
                             rlp_node,
                             SparseNodeType::Extension {
                                 // Inherit the `store_in_db_trie` flag from the child node, which is
                                 // always the branch node
-                                store_in_db_trie: child_node_type.store_in_db_trie(),
+                                store_in_db_trie: store_in_db_trie_value,
                             },
                         )
                     } else {
@@ -1228,7 +1240,14 @@ pub enum SparseNode {
         key: Nibbles,
         /// Pre-computed hash of the sparse node.
         /// Can be reused unless this trie path has been updated.
+        ///
+        /// If [`None`], then the value is not known and should be calculated from scratch.
         hash: Option<B256>,
+        /// Pre-computed flag indicating whether the trie node should be stored in the database.
+        /// Can be reused unless this trie path has been updated.
+        ///
+        /// If [`None`], then the value is not known and should be calculated from scratch.
+        store_in_db_trie: Option<bool>,
     },
     /// Sparse branch node with state mask.
     Branch {
@@ -1236,9 +1255,13 @@ pub enum SparseNode {
         state_mask: TrieMask,
         /// Pre-computed hash of the sparse node.
         /// Can be reused unless this trie path has been updated.
+        ///
+        /// If [`None`], then the value is not known and should be calculated from scratch.
         hash: Option<B256>,
         /// Pre-computed flag indicating whether the trie node should be stored in the database.
         /// Can be reused unless this trie path has been updated.
+        ///
+        /// If [`None`], then the value is not known and should be calculated from scratch.
         store_in_db_trie: Option<bool>,
     },
 }
@@ -1270,7 +1293,7 @@ impl SparseNode {
 
     /// Create new [`SparseNode::Extension`] from the key slice.
     pub const fn new_ext(key: Nibbles) -> Self {
-        Self::Extension { key, hash: None }
+        Self::Extension { key, hash: None, store_in_db_trie: None }
     }
 
     /// Create new [`SparseNode::Leaf`] from leaf key and value.
@@ -2308,7 +2331,7 @@ mod tests {
         // Check that the root extension node exists
         assert_matches!(
             sparse.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Extension { key, hash: None }) if *key == Nibbles::from_nibbles([0x00])
+            Some(SparseNode::Extension { key, hash: None, store_in_db_trie: None }) if *key == Nibbles::from_nibbles([0x00])
         );
 
         // Insert the leaf with a different prefix
