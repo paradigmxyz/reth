@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
 use reth_consensus_common::calc::{base_block_reward_pre_merge, block_reward, ommer_reward};
-use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
+use reth_evm::ConfigureEvmEnv;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_provider::{BlockNumReader, BlockReader, ChainSpecProvider};
 use reth_revm::database::StateProviderDatabase;
@@ -25,10 +25,7 @@ use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{
-    db::{CacheDB, DatabaseCommit},
-    primitives::EnvWithHandlerCfg,
-};
+use revm::db::{CacheDB, DatabaseCommit};
 use revm_inspectors::{
     opcode::OpcodeGasInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
@@ -90,12 +87,12 @@ where
         let mut inspector = TracingInspector::new(config);
         let this = self.clone();
         self.eth_api()
-            .spawn_with_call_at(trace_request.call, at, overrides, move |db, env| {
+            .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
                 // wrapper is hack to get around 'higher-ranked lifetime error', see
                 // <https://github.com/rust-lang/rust/issues/100013>
                 let db = db.0;
 
-                let (res, _) = this.eth_api().inspect(&mut *db, env, &mut inspector)?;
+                let (res, _) = this.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_request.trace_types, &db)
@@ -116,18 +113,12 @@ where
             .map_transaction(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
-        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
-
-        let env = EnvWithHandlerCfg::new_with_cfg_env(
-            cfg_env_with_handler_cfg,
-            block_env,
-            self.eth_api().evm_config().tx_env(tx.tx(), tx.signer()),
-        );
+        let tx_env = self.eth_api().evm_config().tx_env(tx.tx(), tx.signer());
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
 
         self.eth_api()
-            .spawn_trace_at_with_state(env, config, at, move |inspector, res, db| {
+            .spawn_trace_at_with_state(evm_env, tx_env, config, at, move |inspector, res, db| {
                 inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &db)
@@ -147,7 +138,6 @@ where
     ) -> Result<Vec<TraceResults>, Eth::Error> {
         let at = block_id.unwrap_or(BlockId::pending());
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
-        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
         let this = self.clone();
         // execute all transactions on top of each other and record the traces
@@ -159,16 +149,16 @@ where
                 let mut calls = calls.into_iter().peekable();
 
                 while let Some((call, trace_types)) = calls.next() {
-                    let env = this.eth_api().prepare_call_env(
-                        cfg_env_with_handler_cfg.clone(),
-                        block_env.clone(),
+                    let (evm_env, tx_env) = this.eth_api().prepare_call_env(
+                        evm_env.clone(),
                         call,
                         &mut db,
                         Default::default(),
                     )?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
-                    let (res, _) = this.eth_api().inspect(&mut db, env, &mut inspector)?;
+                    let (res, _) =
+                        this.eth_api().inspect(&mut db, evm_env, tx_env, &mut inspector)?;
 
                     let trace_res = inspector
                         .into_parity_builder()

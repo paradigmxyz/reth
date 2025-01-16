@@ -17,20 +17,17 @@
 
 extern crate alloc;
 
-use crate::builder::RethEvmBuilder;
-use alloc::boxed::Box;
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{Database, Evm, GetInspector};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, SpecId, TxEnv};
+use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, SpecId, TxEnv};
 
-pub mod builder;
 pub mod either;
 /// EVM environment configuration.
 pub mod env;
 pub mod execute;
-use env::EvmEnv;
+pub use env::EvmEnv;
 
 #[cfg(feature = "std")]
 pub mod metrics;
@@ -43,25 +40,11 @@ pub mod test_utils;
 
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
-    /// Returns new EVM with the given database
-    ///
-    /// This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It is up to
-    /// the caller to call an appropriate method to fill the transaction and block environment
-    /// before executing any transactions using the provided EVM.
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, (), DB> {
-        RethEvmBuilder::new(db).build()
-    }
-
     /// Returns a new EVM with the given database configured with the given environment settings,
-    /// including the spec id.
+    /// including the spec id and transaction environment.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env<DB: Database>(&self, db: DB, env: EnvWithHandlerCfg) -> Evm<'_, (), DB> {
-        let mut evm = self.evm(db);
-        evm.modify_spec_id(env.spec_id());
-        evm.context.evm.env = env.env;
-        evm
-    }
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv, tx: TxEnv) -> Evm<'_, (), DB>;
 
     /// Returns a new EVM with the given database configured with `cfg` and `block_env`
     /// configuration derived from the given header. Relies on
@@ -71,17 +54,8 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     ///
     /// This does not initialize the tx environment.
     fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Evm<'_, (), DB> {
-        let EvmEnv {
-            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg { cfg_env, handler_cfg },
-            block_env,
-        } = self.cfg_and_block_env(header);
-        self.evm_with_env(
-            db,
-            EnvWithHandlerCfg {
-                env: Box::new(Env { cfg: cfg_env, block: block_env, tx: Default::default() }),
-                handler_cfg,
-            },
-        )
+        let evm_env = self.cfg_and_block_env(header);
+        self.evm_with_env(db, evm_env, Default::default())
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
@@ -93,31 +67,13 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     fn evm_with_env_and_inspector<DB, I>(
         &self,
         db: DB,
-        env: EnvWithHandlerCfg,
+        evm_env: EvmEnv,
+        tx: TxEnv,
         inspector: I,
     ) -> Evm<'_, I, DB>
     where
         DB: Database,
-        I: GetInspector<DB>,
-    {
-        let mut evm = self.evm_with_inspector(db, inspector);
-        evm.modify_spec_id(env.spec_id());
-        evm.context.evm.env = env.env;
-        evm
-    }
-
-    /// Returns a new EVM with the given inspector.
-    ///
-    /// Caution: This does not automatically configure the EVM with [`ConfigureEvmEnv`] methods. It
-    /// is up to the caller to call an appropriate method to fill the transaction and block
-    /// environment before executing any transactions using the provided EVM.
-    fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
-    where
-        DB: Database,
-        I: GetInspector<DB>,
-    {
-        RethEvmBuilder::new(db).build_with_inspector(inspector)
-    }
+        I: GetInspector<DB>;
 }
 
 impl<'b, T> ConfigureEvm for &'b T
@@ -125,37 +81,26 @@ where
     T: ConfigureEvm,
     &'b T: ConfigureEvmEnv<Header = T::Header>,
 {
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, (), DB> {
-        (*self).evm(db)
-    }
-
     fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Evm<'_, (), DB> {
         (*self).evm_for_block(db, header)
     }
 
-    fn evm_with_env<DB: Database>(&self, db: DB, env: EnvWithHandlerCfg) -> Evm<'_, (), DB> {
-        (*self).evm_with_env(db, env)
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv, tx: TxEnv) -> Evm<'_, (), DB> {
+        (*self).evm_with_env(db, evm_env, tx)
     }
 
     fn evm_with_env_and_inspector<DB, I>(
         &self,
         db: DB,
-        env: EnvWithHandlerCfg,
+        evm_env: EvmEnv,
+        tx_env: TxEnv,
         inspector: I,
     ) -> Evm<'_, I, DB>
     where
         DB: Database,
         I: GetInspector<DB>,
     {
-        (*self).evm_with_env_and_inspector(db, env, inspector)
-    }
-
-    fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
-    where
-        DB: Database,
-        I: GetInspector<DB>,
-    {
-        (*self).evm_with_inspector(db, inspector)
+        (*self).evm_with_env_and_inspector(db, evm_env, tx_env, inspector)
     }
 }
 

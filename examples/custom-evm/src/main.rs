@@ -55,8 +55,8 @@ impl MyEvmConfig {
 impl MyEvmConfig {
     /// Sets the precompiles to the EVM handler
     ///
-    /// This will be invoked when the EVM is created via [ConfigureEvm::evm] or
-    /// [ConfigureEvm::evm_with_inspector]
+    /// This will be invoked when the EVM is created via [ConfigureEvm::evm_with_env] or
+    /// [ConfigureEvm::evm_with_env_and_inspector]
     ///
     /// This will use the default mainnet precompiles and add additional precompiles.
     pub fn set_precompiles<EXT, DB>(handler: &mut EvmHandler<EXT, DB>)
@@ -117,15 +117,24 @@ impl ConfigureEvmEnv for MyEvmConfig {
 }
 
 impl ConfigureEvm for MyEvmConfig {
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, (), DB> {
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv, tx: TxEnv) -> Evm<'_, (), DB> {
         EvmBuilder::default()
             .with_db(db)
+            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+            .with_block_env(evm_env.block_env)
+            .with_tx_env(tx)
             // add additional precompiles
             .append_handler_register(MyEvmConfig::set_precompiles)
             .build()
     }
 
-    fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
+    fn evm_with_env_and_inspector<DB, I>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv,
+        tx: TxEnv,
+        inspector: I,
+    ) -> Evm<'_, I, DB>
     where
         DB: Database,
         I: GetInspector<DB>,
@@ -133,6 +142,9 @@ impl ConfigureEvm for MyEvmConfig {
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
+            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+            .with_block_env(evm_env.block_env)
+            .with_tx_env(tx)
             // add additional precompiles
             .append_handler_register(MyEvmConfig::set_precompiles)
             .append_handler_register(inspector_handle_register)
