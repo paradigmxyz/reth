@@ -315,7 +315,7 @@ mod compact {
         use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
 
         assert_eq!(CompactOpReceipt::bitflag_encoded_bytes(), 2);
-        validate_bitflag_backwards_compat!(CompactOpReceipt, UnusedBits::NotZero);
+        validate_bitflag_backwards_compat!(CompactOpReceipt<'_>, UnusedBits::NotZero);
     }
 }
 
