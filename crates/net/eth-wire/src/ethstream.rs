@@ -159,11 +159,11 @@ where
 
                 // TD at mainnet block #7753254 is 76 bits. If it becomes 100 million times
                 // larger, it will still fit within 100 bits
-                if status.total_difficulty.bit_len() > 100 {
+                if status.total_difficulty.bit_len() > 160 {
                     self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
                     return Err(EthHandshakeError::TotalDifficultyBitLenTooLarge {
                         got: status.total_difficulty.bit_len(),
-                        maximum: 100,
+                        maximum: 160,
                     }
                     .into())
                 }
