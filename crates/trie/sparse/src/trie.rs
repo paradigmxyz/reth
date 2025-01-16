@@ -1228,9 +1228,13 @@ pub enum SparseNode {
         key: Nibbles,
         /// Pre-computed hash of the sparse node.
         /// Can be reused unless this trie path has been updated.
+        ///
+        /// If [`None`], then the value is not known and should be calculated from scratch.
         hash: Option<B256>,
         /// Pre-computed flag indicating whether the trie node should be stored in the database.
         /// Can be reused unless this trie path has been updated.
+        ///
+        /// If [`None`], then the value is not known and should be calculated from scratch.
         store_in_db_trie: Option<bool>,
     },
     /// Sparse branch node with state mask.
@@ -1239,9 +1243,13 @@ pub enum SparseNode {
         state_mask: TrieMask,
         /// Pre-computed hash of the sparse node.
         /// Can be reused unless this trie path has been updated.
+        ///
+        /// If [`None`], then the value is not known and should be calculated from scratch.
         hash: Option<B256>,
         /// Pre-computed flag indicating whether the trie node should be stored in the database.
         /// Can be reused unless this trie path has been updated.
+        ///
+        /// If [`None`], then the value is not known and should be calculated from scratch.
         store_in_db_trie: Option<bool>,
     },
 }
