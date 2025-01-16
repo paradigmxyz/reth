@@ -106,6 +106,11 @@ impl<S> CachedStateProvider<S> {
             }
         }
 
+        // run pending tasks on all caches
+        caches.storage_cache.run_pending_tasks();
+        caches.account_cache.run_pending_tasks();
+        caches.code_cache.run_pending_tasks();
+
         // create a saved cache with the executed block hash, same metrics, and updated caches
         let saved_cache = SavedCache { hash: executed_block_hash, caches, metrics };
 
