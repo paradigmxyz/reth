@@ -16,7 +16,7 @@ mod tests {
         CompactClientVersion, CompactU256, CompactU64, StoredBlockBodyIndices,
         StoredBlockWithdrawals,
     };
-    use reth_primitives::{Account, Receipt};
+    use reth_primitives::Account;
     use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
     use reth_stages_types::{
         AccountHashingCheckpoint, CheckpointBlockRange, EntitiesCheckpoint, ExecutionCheckpoint,
