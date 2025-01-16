@@ -25,7 +25,8 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{
-    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, SealedHeader, TxType,
+    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, RecoveredBlock,
+    SealedHeader, TxType,
 };
 use reth_primitives_traits::block::Block as _;
 use reth_provider::{
@@ -431,8 +432,10 @@ where
 
         // create the executed block data
         let executed: ExecutedBlock<OpPrimitives> = ExecutedBlock {
-            block: sealed_block.clone(),
-            senders: Arc::new(info.executed_senders),
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                sealed_block.as_ref().clone(),
+                info.executed_senders,
+            )),
             execution_output: Arc::new(execution_outcome),
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
