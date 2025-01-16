@@ -835,6 +835,7 @@ impl<P> RevealedSparseTrie<P> {
                         {
                             // If new tree and hash masks are empty, but previously they weren't, we
                             // need to remove the node.
+                            updates.updated_nodes.remove(&path);
                             updates.removed_nodes.insert(path.clone());
                         }
 
