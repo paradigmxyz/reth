@@ -80,7 +80,8 @@ std = [
 	"reth-trie-common/std",
 	"serde_json/std",
 	"reth-chainspec/std",
-	"reth-ethereum-primitives/std"
+	"reth-ethereum-primitives/std",
+	"alloy-rlp/std"
 ]
 reth-codec = [
 	 "std",
@@ -99,7 +100,8 @@ arbitrary = [
 	"alloy-primitives/arbitrary",
 	"alloy-trie/arbitrary",
 	"reth-trie-common/arbitrary",
-	"reth-ethereum-primitives/arbitrary"
+	"reth-ethereum-primitives/arbitrary",
+	"reth-codecs/arbitrary"
 ]
 secp256k1 = [
 	"reth-primitives-traits/secp256k1",
@@ -109,7 +111,6 @@ c-kzg = [
 	"alloy-consensus/kzg",
 	"alloy-eips/kzg",
 ]
-optimism = []
 alloy-compat = [
     "reth-ethereum-primitives/alloy-compat"
 ]
@@ -118,6 +119,7 @@ test-utils = [
 	"reth-chainspec/test-utils",
 	"reth-trie-common/test-utils",
 	"arbitrary",
+	"reth-codecs/test-utils"
 ]
 serde-bincode-compat = [
 	"alloy-eips/serde-bincode-compat",

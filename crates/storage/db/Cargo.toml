@@ -112,7 +112,7 @@ arbitrary = [
     "reth-stages-types/arbitrary",
     "alloy-consensus/arbitrary",
 ]
-optimism = ["reth-primitives/optimism", "reth-db-api/optimism"]
+optimism = ["reth-db-api/optimism"]
 op = ["reth-db-api/op"]
 disable-lock = []
 
