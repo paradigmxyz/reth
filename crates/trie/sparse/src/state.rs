@@ -105,6 +105,19 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         self.storages.get(account)?.as_revealed_ref()?.get_leaf_value(&Nibbles::unpack(slot))
     }
 
+    /// Returns reference to state trie if it was revealed.
+    pub const fn state_trie_ref(&self) -> Option<&RevealedSparseTrie<F::AccountNodeProvider>> {
+        self.state.as_revealed_ref()
+    }
+
+    /// Returns reference to storage trie if it was revealed.
+    pub fn storage_trie_ref(
+        &self,
+        address: &B256,
+    ) -> Option<&RevealedSparseTrie<F::StorageNodeProvider>> {
+        self.storages.get(address).and_then(|e| e.as_revealed_ref())
+    }
+
     /// Returns mutable reference to storage sparse trie if it was revealed.
     pub fn storage_trie_mut(
         &mut self,
