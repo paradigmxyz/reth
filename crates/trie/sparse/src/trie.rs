@@ -833,9 +833,21 @@ impl<P> RevealedSparseTrie<P> {
                                 .is_some_and(|mask| !mask.is_empty())
                         {
                             // If new tree and hash masks are empty, but previously they weren't, we
-                            // need to remove the node.
+                            // need to remove the node update and add the node itself to the list of
+                            // removed nodes.
                             updates.updated_nodes.remove(&path);
                             updates.removed_nodes.insert(path.clone());
+                        } else if self
+                            .branch_node_hash_masks
+                            .get(&path)
+                            .is_none_or(|mask| mask.is_empty()) &&
+                            self.branch_node_hash_masks
+                                .get(&path)
+                                .is_none_or(|mask| mask.is_empty())
+                        {
+                            // If new tree and hash masks are empty, and they were previously empty
+                            // as well, we need to remove the node update.
+                            updates.updated_nodes.remove(&path);
                         }
 
                         store_in_db_trie
