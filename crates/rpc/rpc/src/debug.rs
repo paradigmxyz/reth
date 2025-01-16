@@ -15,7 +15,6 @@ use alloy_rpc_types_trace::geth::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
-use reth_errors::BlockExecutionError;
 use reth_evm::{
     env::EvmEnv,
     execute::{BlockExecutorProvider, Executor},
@@ -85,10 +84,8 @@ impl<Eth: RpcNodeCore, BlockExecutor> DebugApi<Eth, BlockExecutor> {
 impl<Eth, BlockExecutor> DebugApi<Eth, BlockExecutor>
 where
     Eth: EthApiTypes + TraceExt + 'static,
-    BlockExecutor: BlockExecutorProvider<
-        Primitives: NodePrimitives<Block = ProviderBlock<Eth::Provider>>,
-        Error = BlockExecutionError,
-    >,
+    BlockExecutor:
+        BlockExecutorProvider<Primitives: NodePrimitives<Block = ProviderBlock<Eth::Provider>>>,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {

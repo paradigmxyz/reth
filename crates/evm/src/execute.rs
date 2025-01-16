@@ -200,7 +200,7 @@ pub trait BlockExecutionStrategy {
     type Primitives: NodePrimitives;
 
     /// The error type returned by this strategy's methods.
-    type Error: From<BlockExecutionError> + Into<BlockExecutionError>;
+    type Error;
 
     /// Initialize the strategy with the given transaction environment overrides.
     fn init(&mut self, _tx_env_overrides: Box<dyn TxEnvOverrides>) {}
@@ -445,9 +445,7 @@ where
         let ExecuteOutput { receipts, .. } = self.strategy.execute_transactions(block)?;
         let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
 
-        self.strategy
-            .validate_block_post_execution(block, &receipts, &requests)
-            .map_err(BlockExecutionError::Consensus)?;
+        self.strategy.validate_block_post_execution(block, &receipts, &requests)?;
 
         // prepare the state according to the prune mode
         let retention = self.batch_record.bundle_retention(block.header().number());

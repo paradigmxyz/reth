@@ -12,7 +12,6 @@ use reth_blockchain_tree_api::{
     InsertPayloadOk,
 };
 use reth_evm::execute::BlockExecutorProvider;
-use reth_execution_errors::BlockExecutionError;
 use reth_node_types::NodeTypesWithDB;
 use reth_primitives::{Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader};
 use reth_provider::{
@@ -40,7 +39,7 @@ impl<N: NodeTypesWithDB, E> ShareableBlockchainTree<N, E> {
 impl<N, E> BlockchainTreeEngine for ShareableBlockchainTree<N, E>
 where
     N: TreeNodeTypes,
-    E: BlockExecutorProvider<Primitives = N::Primitives, Error = BlockExecutionError>,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     fn buffer_block(&self, block: SealedBlockWithSenders) -> Result<(), InsertBlockError> {
         let mut tree = self.tree.write();
@@ -111,7 +110,7 @@ where
 impl<N, E> BlockchainTreeViewer for ShareableBlockchainTree<N, E>
 where
     N: TreeNodeTypes,
-    E: BlockExecutorProvider<Primitives = N::Primitives, Error = BlockExecutionError>,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     fn header_by_hash(&self, hash: BlockHash) -> Option<SealedHeader> {
         trace!(target: "blockchain_tree", ?hash, "Returning header by hash");
@@ -174,7 +173,7 @@ where
 impl<N, E> BlockchainTreePendingStateProvider for ShareableBlockchainTree<N, E>
 where
     N: TreeNodeTypes,
-    E: BlockExecutorProvider<Primitives = N::Primitives, Error = BlockExecutionError>,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     fn find_pending_state_provider(
         &self,
