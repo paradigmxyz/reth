@@ -8,17 +8,15 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::B256;
 use derive_more::Constructor;
+use reth_evm::EvmEnv;
 use reth_primitives::{Receipt, RecoveredBlock};
 use reth_primitives_traits::Block;
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg};
 
-/// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block.
+/// Configured [`EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
 pub struct PendingBlockEnv<B: Block = reth_primitives::Block, R = Receipt> {
-    /// Configured [`CfgEnvWithHandlerCfg`] for the pending block.
-    pub cfg: CfgEnvWithHandlerCfg,
-    /// Configured [`BlockEnv`] for the pending block.
-    pub block_env: BlockEnv,
+    /// Configured [`EvmEnv`] for the pending block.
+    pub evm_env: EvmEnv,
     /// Origin block for the config
     pub origin: PendingBlockEnvOrigin<B, R>,
 }

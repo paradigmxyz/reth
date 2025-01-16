@@ -6,7 +6,7 @@ use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;
@@ -21,9 +21,9 @@ use reth_transaction_pool::{
 };
 use revm::{
     db::{CacheDB, DatabaseCommit, DatabaseRef},
-    primitives::{ResultAndState, TxEnv},
+    primitives::ResultAndState,
 };
-use revm_primitives::{EnvKzgSettings, EnvWithHandlerCfg, SpecId};
+use revm_primitives::{EnvKzgSettings, SpecId};
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.
@@ -101,40 +101,40 @@ where
 
         let block_id: alloy_rpc_types_eth::BlockId = state_block_number.into();
         // Note: the block number is considered the `parent` block: <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2104>
-        let (evm_env, at) = self.eth_api().evm_env_at(block_id).await?;
-        let EvmEnv { cfg_env_with_handler_cfg, mut block_env } = evm_env;
+        let (mut evm_env, at) = self.eth_api().evm_env_at(block_id).await?;
 
         if let Some(coinbase) = coinbase {
-            block_env.coinbase = coinbase;
+            evm_env.block_env.coinbase = coinbase;
         }
 
         // need to adjust the timestamp for the next block
         if let Some(timestamp) = timestamp {
-            block_env.timestamp = U256::from(timestamp);
+            evm_env.block_env.timestamp = U256::from(timestamp);
         } else {
-            block_env.timestamp += U256::from(12);
+            evm_env.block_env.timestamp += U256::from(12);
         }
 
         if let Some(difficulty) = difficulty {
-            block_env.difficulty = U256::from(difficulty);
+            evm_env.block_env.difficulty = U256::from(difficulty);
         }
 
         // default to call gas limit unless user requests a smaller limit
-        block_env.gas_limit = U256::from(self.inner.eth_api.call_gas_limit());
+        evm_env.block_env.gas_limit = U256::from(self.inner.eth_api.call_gas_limit());
         if let Some(gas_limit) = gas_limit {
             let gas_limit = U256::from(gas_limit);
-            if gas_limit > block_env.gas_limit {
+            if gas_limit > evm_env.block_env.gas_limit {
                 return Err(
                     EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
                 )
             }
-            block_env.gas_limit = gas_limit;
+            evm_env.block_env.gas_limit = gas_limit;
         }
 
         if let Some(base_fee) = base_fee {
-            block_env.basefee = U256::from(base_fee);
-        } else if cfg_env_with_handler_cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON) {
-            let parent_block = block_env.number.saturating_to::<u64>();
+            evm_env.block_env.basefee = U256::from(base_fee);
+        } else if evm_env.cfg_env_with_handler_cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON)
+        {
+            let parent_block = evm_env.block_env.number.saturating_to::<u64>();
             // here we need to fetch the _next_ block's basefee based on the parent block <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2130>
             let parent = RpcNodeCore::provider(self.eth_api())
                 .header_by_number(parent_block)
@@ -145,25 +145,20 @@ where
                     .chain_spec()
                     .base_fee_params_at_block(parent_block),
             ) {
-                block_env.basefee = U256::from(base_fee);
+                evm_env.block_env.basefee = U256::from(base_fee);
             }
         }
 
-        let state_block_number = block_env.number;
+        let state_block_number = evm_env.block_env.number;
         // use the block number of the request
-        block_env.number = U256::from(block_number);
+        evm_env.block_env.number = U256::from(block_number);
 
         let eth_api = self.eth_api().clone();
 
         self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
-                let coinbase = block_env.coinbase;
-                let basefee = Some(block_env.basefee.to::<u64>());
-                let env = EnvWithHandlerCfg::new_with_cfg_env(
-                    cfg_env_with_handler_cfg,
-                    block_env,
-                    TxEnv::default(),
-                );
+                let coinbase = evm_env.block_env.coinbase;
+                let basefee = Some(evm_env.block_env.basefee.to::<u64>());
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let initial_coinbase = db
@@ -177,7 +172,7 @@ where
                 let mut total_gas_fess = U256::ZERO;
                 let mut hasher = Keccak256::new();
 
-                let mut evm = eth_api.evm_config().evm_with_env(db, env);
+                let mut evm = eth_api.evm_config().evm_with_env(db, evm_env, Default::default());
 
                 let mut results = Vec::with_capacity(transactions.len());
                 let mut transactions = transactions.into_iter().peekable();
