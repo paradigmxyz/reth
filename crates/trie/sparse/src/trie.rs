@@ -766,9 +766,10 @@ impl<P> RevealedSparseTrie<P> {
                                     store_in_db_trie
                                 } else {
                                     // A blinded node has the tree mask bit set
-                                    self.branch_node_tree_masks
-                                        .get(&path)
-                                        .is_some_and(|mask| mask.is_bit_set(last_child_nibble))
+                                    child_node_type.is_hash() &&
+                                        self.branch_node_tree_masks.get(&path).is_some_and(
+                                            |mask| mask.is_bit_set(last_child_nibble),
+                                        )
                                 };
                                 if should_set_tree_mask_bit {
                                     tree_mask.set_bit(last_child_nibble);
