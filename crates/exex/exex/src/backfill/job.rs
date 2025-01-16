@@ -39,7 +39,10 @@ pub struct BackfillJob<E, P> {
 
 impl<E, P> Iterator for BackfillJob<E, P>
 where
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>,
+    E: BlockExecutorProvider<
+        Primitives: NodePrimitives<Block = P::Block>,
+        Error = BlockExecutionError,
+    >,
     P: HeaderProvider + BlockReader<Transaction: SignedTransaction> + StateProviderFactory,
 {
     type Item = BackfillJobResult<Chain<E::Primitives>>;
@@ -55,7 +58,10 @@ where
 
 impl<E, P> BackfillJob<E, P>
 where
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>,
+    E: BlockExecutorProvider<
+        Primitives: NodePrimitives<Block = P::Block>,
+        Error = BlockExecutionError,
+    >,
     P: BlockReader<Transaction: SignedTransaction> + HeaderProvider + StateProviderFactory,
 {
     /// Converts the backfill job into a single block backfill job.
@@ -112,7 +118,7 @@ where
             let (unsealed_header, hash) = header.split();
             let block = P::Block::new(unsealed_header, body).with_senders_unchecked(senders);
 
-            executor.execute_and_verify_one(&block).unwrap();
+            executor.execute_and_verify_one(&block)?;
             execution_duration += execute_start.elapsed();
 
             // TODO(alexey): report gas metrics using `block.header.gas_used`
@@ -162,7 +168,10 @@ pub struct SingleBlockBackfillJob<E, P> {
 
 impl<E, P> Iterator for SingleBlockBackfillJob<E, P>
 where
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>,
+    E: BlockExecutorProvider<
+        Primitives: NodePrimitives<Block = P::Block>,
+        Error = BlockExecutionError,
+    >,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     type Item = BackfillJobResult<(
@@ -177,7 +186,10 @@ where
 
 impl<E, P> SingleBlockBackfillJob<E, P>
 where
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>,
+    E: BlockExecutorProvider<
+        Primitives: NodePrimitives<Block = P::Block>,
+        Error = BlockExecutionError,
+    >,
     P: HeaderProvider + BlockReader + StateProviderFactory,
 {
     /// Converts the single block backfill job into a stream.
