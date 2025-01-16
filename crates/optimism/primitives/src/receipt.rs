@@ -313,6 +313,7 @@ mod compact {
     #[test]
     fn test_ensure_backwards_compatibility() {
         assert_eq!(CompactOpReceipt::bitflag_encoded_bytes(), 2);
+        reth_codecs::validate_bitflag_backwards_compat!(Receipt, UnusedBits::NotZero);
     }
 }
 

@@ -61,7 +61,6 @@ mod tests {
         validate_bitflag_backwards_compat!(PruneCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(PruneMode, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(PruneSegment, UnusedBits::Zero);
-        validate_bitflag_backwards_compat!(Receipt, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(StageCheckpoint, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(StageUnitCheckpoint, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StoredBlockBodyIndices, UnusedBits::Zero);
