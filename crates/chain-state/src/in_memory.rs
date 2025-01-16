@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber, BlockNumHash};
-use alloy_primitives::{map::HashMap, Address, TxHash, B256};
+use alloy_primitives::{map::HashMap, TxHash, B256};
 use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
 use reth_execution_types::{Chain, ExecutionOutcome};
@@ -181,7 +181,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     ) -> Self {
         let in_memory_state = InMemoryState::new(blocks, numbers, pending);
         let header = in_memory_state.head_state().map_or_else(SealedHeader::default, |state| {
-            state.block_ref().block().clone_sealed_header()
+            state.block_ref().recovered_block().clone_sealed_header()
         });
         let chain_info_tracker = ChainInfoTracker::new(header, finalized, safe);
         let (canon_state_notification_sender, _) =
@@ -228,7 +228,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns the header corresponding to the given hash.
     pub fn header_by_hash(&self, hash: B256) -> Option<SealedHeader<N::BlockHeader>> {
-        self.state_by_hash(hash).map(|block| block.block_ref().block.clone_sealed_header())
+        self.state_by_hash(hash)
+            .map(|block| block.block_ref().recovered_block().clone_sealed_header())
     }
 
     /// Clears all entries in the in memory state.
@@ -241,7 +242,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Note: This assumes that the parent block of the pending block is canonical.
     pub fn set_pending_block(&self, pending: ExecutedBlock<N>) {
         // fetch the state of the pending block's parent block
-        let parent = self.state_by_hash(pending.block().parent_hash());
+        let parent = self.state_by_hash(pending.recovered_block().parent_hash());
         let pending = BlockState::with_parent(pending, parent);
         self.inner.in_memory_state.pending.send_modify(|p| {
             p.replace(pending);
@@ -264,15 +265,15 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
             // we first remove the blocks from the reorged chain
             for block in reorged {
-                let hash = block.block().hash();
-                let number = block.block().number();
+                let hash = block.recovered_block().hash();
+                let number = block.recovered_block().number();
                 blocks.remove(&hash);
                 numbers.remove(&number);
             }
 
             // insert the new blocks
             for block in new_blocks {
-                let parent = blocks.get(&block.block().parent_hash()).cloned();
+                let parent = blocks.get(&block.recovered_block().parent_hash()).cloned();
                 let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
@@ -332,16 +333,16 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             // height)
             let mut old_blocks = blocks
                 .drain()
-                .filter(|(_, b)| b.block_ref().block().number() > persisted_height)
+                .filter(|(_, b)| b.block_ref().recovered_block().number() > persisted_height)
                 .map(|(_, b)| b.block.clone())
                 .collect::<Vec<_>>();
 
             // sort the blocks by number so we can insert them back in natural order (low -> high)
-            old_blocks.sort_unstable_by_key(|block| block.block().number());
+            old_blocks.sort_unstable_by_key(|block| block.recovered_block().number());
 
             // re-insert the blocks in natural order and connect them to their parent blocks
             for block in old_blocks {
-                let parent = blocks.get(&block.block().parent_hash()).cloned();
+                let parent = blocks.get(&block.recovered_block().parent_hash()).cloned();
                 let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
@@ -354,7 +355,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             // also shift the pending state if it exists
             self.inner.in_memory_state.pending.send_modify(|p| {
                 if let Some(p) = p.as_mut() {
-                    p.parent = blocks.get(&p.block_ref().block.parent_hash()).cloned();
+                    p.parent = blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
                 }
             });
         }
@@ -461,7 +462,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns the `SealedHeader` corresponding to the pending state.
     pub fn pending_sealed_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
-        self.pending_state().map(|h| h.block_ref().block().clone_sealed_header())
+        self.pending_state().map(|h| h.block_ref().recovered_block().clone_sealed_header())
     }
 
     /// Returns the `Header` corresponding to the pending state.
@@ -471,7 +472,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
     /// Returns the `SealedBlock` corresponding to the pending state.
     pub fn pending_block(&self) -> Option<SealedBlock<N::Block>> {
-        self.pending_state().map(|block_state| block_state.block_ref().block().clone())
+        self.pending_state()
+            .map(|block_state| block_state.block_ref().recovered_block().sealed_block().clone())
     }
 
     /// Returns the `RecoveredBlock` corresponding to the pending state.
@@ -479,15 +481,17 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     where
         N::SignedTx: SignedTransaction,
     {
-        self.pending_state()
-            .and_then(|block_state| block_state.block_ref().block().clone().try_recover().ok())
+        self.pending_state().map(|block_state| block_state.block_ref().recovered_block().clone())
     }
 
     /// Returns a tuple with the `SealedBlock` corresponding to the pending
     /// state and a vector of its `Receipt`s.
     pub fn pending_block_and_receipts(&self) -> Option<PendingBlockAndReceipts<N>> {
         self.pending_state().map(|block_state| {
-            (block_state.block_ref().block().clone(), block_state.executed_block_receipts())
+            (
+                block_state.block_ref().recovered_block().sealed_block().clone(),
+                block_state.executed_block_receipts(),
+            )
         })
     }
 
@@ -547,7 +551,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         for block_state in self.canonical_chain() {
             if let Some(tx) = block_state
                 .block_ref()
-                .block()
+                .recovered_block()
                 .body()
                 .transactions()
                 .iter()
@@ -571,7 +575,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         for block_state in self.canonical_chain() {
             if let Some((index, tx)) = block_state
                 .block_ref()
-                .block()
+                .recovered_block()
                 .body()
                 .transactions()
                 .iter()
@@ -582,10 +586,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                     tx_hash,
                     index: index as u64,
                     block_hash: block_state.hash(),
-                    block_number: block_state.block_ref().block.number(),
-                    base_fee: block_state.block_ref().block.base_fee_per_gas(),
-                    timestamp: block_state.block_ref().block.timestamp(),
-                    excess_blob_gas: block_state.block_ref().block.excess_blob_gas(),
+                    block_number: block_state.block_ref().recovered_block().number(),
+                    base_fee: block_state.block_ref().recovered_block().base_fee_per_gas(),
+                    timestamp: block_state.block_ref().recovered_block().timestamp(),
+                    excess_blob_gas: block_state.block_ref().recovered_block().excess_blob_gas(),
                 };
                 return Some((tx.clone(), meta))
             }
@@ -621,7 +625,7 @@ impl<N: NodePrimitives> BlockState<N> {
         if let Some(parent) = &self.parent {
             parent.anchor()
         } else {
-            self.block.block().parent_num_hash()
+            self.block.recovered_block().parent_num_hash()
         }
     }
 
@@ -635,27 +639,20 @@ impl<N: NodePrimitives> BlockState<N> {
         &self.block
     }
 
-    /// Returns a clone of the block with recovered senders for the state.
-    pub fn clone_recovered_block(&self) -> RecoveredBlock<N::Block> {
-        let block = self.block.block().clone();
-        let senders = self.block.senders().clone();
-        RecoveredBlock::new_sealed(block, senders)
-    }
-
     /// Returns the hash of executed block that determines the state.
     pub fn hash(&self) -> B256 {
-        self.block.block().hash()
+        self.block.recovered_block().hash()
     }
 
     /// Returns the block number of executed block that determines the state.
     pub fn number(&self) -> u64 {
-        self.block.block().number()
+        self.block.recovered_block().number()
     }
 
     /// Returns the state root after applying the executed block that determines
     /// the state.
     pub fn state_root(&self) -> B256 {
-        self.block.block().state_root()
+        self.block.recovered_block().state_root()
     }
 
     /// Returns the `Receipts` of executed block that determines the state.
@@ -748,7 +745,7 @@ impl<N: NodePrimitives> BlockState<N> {
         self.chain().find_map(|block_state| {
             block_state
                 .block_ref()
-                .block()
+                .recovered_block()
                 .body()
                 .transactions()
                 .iter()
@@ -768,7 +765,7 @@ impl<N: NodePrimitives> BlockState<N> {
         self.chain().find_map(|block_state| {
             block_state
                 .block_ref()
-                .block()
+                .recovered_block()
                 .body()
                 .transactions()
                 .iter()
@@ -779,10 +776,13 @@ impl<N: NodePrimitives> BlockState<N> {
                         tx_hash,
                         index: index as u64,
                         block_hash: block_state.hash(),
-                        block_number: block_state.block_ref().block.number(),
-                        base_fee: block_state.block_ref().block.base_fee_per_gas(),
-                        timestamp: block_state.block_ref().block.timestamp(),
-                        excess_blob_gas: block_state.block_ref().block.excess_blob_gas(),
+                        block_number: block_state.block_ref().recovered_block().number(),
+                        base_fee: block_state.block_ref().recovered_block().base_fee_per_gas(),
+                        timestamp: block_state.block_ref().recovered_block().timestamp(),
+                        excess_blob_gas: block_state
+                            .block_ref()
+                            .recovered_block()
+                            .excess_blob_gas(),
                     };
                     (tx.clone(), meta)
                 })
@@ -793,10 +793,8 @@ impl<N: NodePrimitives> BlockState<N> {
 /// Represents an executed block stored in-memory.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
-    /// Sealed block the rest of fields refer to.
-    pub block: Arc<SealedBlock<N::Block>>,
-    /// Block's senders.
-    pub senders: Arc<Vec<Address>>,
+    /// Recovered Block
+    pub recovered_block: Arc<RecoveredBlock<N::Block>>,
     /// Block's execution outcome.
     pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
     /// Block's hashed state.
@@ -808,30 +806,17 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
 impl<N: NodePrimitives> ExecutedBlock<N> {
     /// [`ExecutedBlock`] constructor.
     pub const fn new(
-        block: Arc<SealedBlock<N::Block>>,
-        senders: Arc<Vec<Address>>,
+        recovered_block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<ExecutionOutcome<N::Receipt>>,
         hashed_state: Arc<HashedPostState>,
         trie: Arc<TrieUpdates>,
     ) -> Self {
-        Self { block, senders, execution_output, hashed_state, trie }
+        Self { recovered_block, execution_output, hashed_state, trie }
     }
 
-    /// Returns a reference to the executed block.
-    pub fn block(&self) -> &SealedBlock<N::Block> {
-        &self.block
-    }
-
-    /// Returns a reference to the block's senders
-    pub fn senders(&self) -> &Vec<Address> {
-        &self.senders
-    }
-
-    /// Returns a [`RecoveredBlock`]
-    ///
-    /// Note: this clones the block and senders.
-    pub fn clone_recovered_block(&self) -> RecoveredBlock<N::Block> {
-        RecoveredBlock::new_sealed((*self.block).clone(), (*self.senders).clone())
+    /// Returns a reference to [`RecoveredBlock`]
+    pub fn recovered_block(&self) -> &RecoveredBlock<N::Block> {
+        &self.recovered_block
     }
 
     /// Returns a reference to the block's execution outcome
@@ -890,7 +875,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
             Self::Commit { new } => {
                 let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
                     chain.append_block(
-                        exec.clone_recovered_block(),
+                        exec.recovered_block().clone(),
                         exec.execution_outcome().clone(),
                     );
                     chain
@@ -900,14 +885,14 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
             Self::Reorg { new, old } => {
                 let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
                     chain.append_block(
-                        exec.clone_recovered_block(),
+                        exec.recovered_block().clone(),
                         exec.execution_outcome().clone(),
                     );
                     chain
                 }));
                 let old = Arc::new(old.iter().fold(Chain::default(), |mut chain, exec| {
                     chain.append_block(
-                        exec.clone_recovered_block(),
+                        exec.recovered_block().clone(),
                         exec.execution_outcome().clone(),
                     );
                     chain
@@ -924,7 +909,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     pub fn tip(&self) -> &SealedBlock<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => {
-                new.last().expect("non empty blocks").block()
+                new.last().expect("non empty blocks").recovered_block()
             }
         }
     }
@@ -935,7 +920,9 @@ mod tests {
     use super::*;
     use crate::test_utils::TestBlockBuilder;
     use alloy_eips::eip7685::Requests;
-    use alloy_primitives::{map::B256HashMap, BlockNumber, Bytes, StorageKey, StorageValue};
+    use alloy_primitives::{
+        map::B256HashMap, Address, BlockNumber, Bytes, StorageKey, StorageValue,
+    };
     use rand::Rng;
     use reth_errors::ProviderResult;
     use reth_primitives::{Account, Bytecode, EthPrimitives, Receipt};
@@ -1168,8 +1155,8 @@ mod tests {
         let result = in_memory_state.pending_state();
         assert!(result.is_some());
         let actual_pending_state = result.unwrap();
-        assert_eq!(actual_pending_state.block.block().hash(), pending_hash);
-        assert_eq!(actual_pending_state.block.block().number, pending_number);
+        assert_eq!(actual_pending_state.block.recovered_block().hash(), pending_hash);
+        assert_eq!(actual_pending_state.block.recovered_block().number, pending_number);
     }
 
     #[test]
@@ -1210,7 +1197,7 @@ mod tests {
 
         let state = BlockState::new(block.clone());
 
-        assert_eq!(state.hash(), block.block.hash());
+        assert_eq!(state.hash(), block.recovered_block().hash());
     }
 
     #[test]
@@ -1232,7 +1219,7 @@ mod tests {
 
         let state = BlockState::new(block.clone());
 
-        assert_eq!(state.state_root(), block.block().state_root);
+        assert_eq!(state.state_root(), block.recovered_block().state_root);
     }
 
     #[test]
@@ -1255,18 +1242,24 @@ mod tests {
         let block2 = test_block_builder.get_executed_block_with_number(0, B256::random());
         let chain = NewCanonicalChain::Commit { new: vec![block1.clone()] };
         state.update_chain(chain);
-        assert_eq!(state.head_state().unwrap().block_ref().block().hash(), block1.block().hash());
         assert_eq!(
-            state.state_by_number(0).unwrap().block_ref().block().hash(),
-            block1.block().hash()
+            state.head_state().unwrap().block_ref().recovered_block().hash(),
+            block1.recovered_block().hash()
+        );
+        assert_eq!(
+            state.state_by_number(0).unwrap().block_ref().recovered_block().hash(),
+            block1.recovered_block().hash()
         );
 
         let chain = NewCanonicalChain::Reorg { new: vec![block2.clone()], old: vec![block1] };
         state.update_chain(chain);
-        assert_eq!(state.head_state().unwrap().block_ref().block().hash(), block2.block().hash());
         assert_eq!(
-            state.state_by_number(0).unwrap().block_ref().block().hash(),
-            block2.block().hash()
+            state.head_state().unwrap().block_ref().recovered_block().hash(),
+            block2.recovered_block().hash()
+        );
+        assert_eq!(
+            state.state_by_number(0).unwrap().block_ref().recovered_block().hash(),
+            block2.recovered_block().hash()
         );
 
         assert_eq!(state.inner.in_memory_state.block_count(), 1);
@@ -1281,7 +1274,8 @@ mod tests {
         let block1 = test_block_builder.get_executed_block_with_number(0, B256::random());
 
         // Second block with parent hash of the first block
-        let block2 = test_block_builder.get_executed_block_with_number(1, block1.block().hash());
+        let block2 =
+            test_block_builder.get_executed_block_with_number(1, block1.recovered_block().hash());
 
         // Commit the two blocks
         let chain = NewCanonicalChain::Commit { new: vec![block1.clone(), block2.clone()] };
@@ -1300,69 +1294,75 @@ mod tests {
         );
 
         // Check the pending block
-        assert_eq!(state.pending_block().unwrap(), block2.block().clone());
+        assert_eq!(state.pending_block().unwrap(), block2.recovered_block().sealed_block().clone());
 
         // Check the pending block number and hash
         assert_eq!(
             state.pending_block_num_hash().unwrap(),
-            BlockNumHash { number: 1, hash: block2.block().hash() }
+            BlockNumHash { number: 1, hash: block2.recovered_block().hash() }
         );
 
         // Check the pending header
-        assert_eq!(state.pending_header().unwrap(), block2.block().header().clone());
+        assert_eq!(state.pending_header().unwrap(), block2.recovered_block().header().clone());
 
         // Check the pending sealed header
-        assert_eq!(state.pending_sealed_header().unwrap(), block2.block().clone_sealed_header());
-
-        // Check the pending block with senders
         assert_eq!(
-            state.pending_recovered_block().unwrap(),
-            block2.block().clone().try_recover().unwrap()
+            state.pending_sealed_header().unwrap(),
+            block2.recovered_block().clone_sealed_header()
         );
 
+        // Check the pending block with senders
+        assert_eq!(state.pending_recovered_block().unwrap(), block2.recovered_block().clone());
+
         // Check the pending block and receipts
-        assert_eq!(state.pending_block_and_receipts().unwrap(), (block2.block().clone(), vec![]));
+        assert_eq!(
+            state.pending_block_and_receipts().unwrap(),
+            (block2.recovered_block().sealed_block().clone(), vec![])
+        );
     }
 
     #[test]
     fn test_canonical_in_memory_state_state_provider() {
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let block1 = test_block_builder.get_executed_block_with_number(1, B256::random());
-        let block2 = test_block_builder.get_executed_block_with_number(2, block1.block().hash());
-        let block3 = test_block_builder.get_executed_block_with_number(3, block2.block().hash());
+        let block2 =
+            test_block_builder.get_executed_block_with_number(2, block1.recovered_block().hash());
+        let block3 =
+            test_block_builder.get_executed_block_with_number(3, block2.recovered_block().hash());
 
         let state1 = Arc::new(BlockState::new(block1.clone()));
         let state2 = Arc::new(BlockState::with_parent(block2.clone(), Some(state1.clone())));
         let state3 = Arc::new(BlockState::with_parent(block3.clone(), Some(state2.clone())));
 
         let mut blocks = HashMap::default();
-        blocks.insert(block1.block().hash(), state1);
-        blocks.insert(block2.block().hash(), state2);
-        blocks.insert(block3.block().hash(), state3);
+        blocks.insert(block1.recovered_block().hash(), state1);
+        blocks.insert(block2.recovered_block().hash(), state2);
+        blocks.insert(block3.recovered_block().hash(), state3);
 
         let mut numbers = BTreeMap::new();
-        numbers.insert(1, block1.block().hash());
-        numbers.insert(2, block2.block().hash());
-        numbers.insert(3, block3.block().hash());
+        numbers.insert(1, block1.recovered_block().hash());
+        numbers.insert(2, block2.recovered_block().hash());
+        numbers.insert(3, block3.recovered_block().hash());
 
         let canonical_state = CanonicalInMemoryState::new(blocks, numbers, None, None, None);
 
         let historical: StateProviderBox = Box::new(MockStateProvider);
 
-        let overlay_provider = canonical_state.state_provider(block3.block().hash(), historical);
+        let overlay_provider =
+            canonical_state.state_provider(block3.recovered_block().hash(), historical);
 
         assert_eq!(overlay_provider.in_memory.len(), 3);
-        assert_eq!(overlay_provider.in_memory[0].block().number, 3);
-        assert_eq!(overlay_provider.in_memory[1].block().number, 2);
-        assert_eq!(overlay_provider.in_memory[2].block().number, 1);
+        assert_eq!(overlay_provider.in_memory[0].recovered_block().number, 3);
+        assert_eq!(overlay_provider.in_memory[1].recovered_block().number, 2);
+        assert_eq!(overlay_provider.in_memory[2].recovered_block().number, 1);
 
         assert_eq!(
-            overlay_provider.in_memory[0].block().parent_hash,
-            overlay_provider.in_memory[1].block().hash()
+            overlay_provider.in_memory[0].recovered_block().parent_hash,
+            overlay_provider.in_memory[1].recovered_block().hash()
         );
         assert_eq!(
-            overlay_provider.in_memory[1].block().parent_hash,
-            overlay_provider.in_memory[2].block().hash()
+            overlay_provider.in_memory[1].recovered_block().parent_hash,
+            overlay_provider.in_memory[2].recovered_block().hash()
         );
 
         let unknown_hash = B256::random();
@@ -1381,7 +1381,7 @@ mod tests {
     #[test]
     fn test_canonical_in_memory_state_canonical_chain_single_block() {
         let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::random());
-        let hash = block.block().hash();
+        let hash = block.recovered_block().hash();
         let mut blocks = HashMap::default();
         blocks.insert(hash, Arc::new(BlockState::new(block)));
         let mut numbers = BTreeMap::new();
@@ -1403,7 +1403,7 @@ mod tests {
 
         for i in 1..=3 {
             let block = block_builder.get_executed_block_with_number(i, parent_hash);
-            let hash = block.block().hash();
+            let hash = block.recovered_block().hash();
             state.update_blocks(Some(block), None);
             parent_hash = hash;
         }
@@ -1425,7 +1425,7 @@ mod tests {
 
         for i in 1..=2 {
             let block = block_builder.get_executed_block_with_number(i, parent_hash);
-            let hash = block.block().hash();
+            let hash = block.recovered_block().hash();
             state.update_blocks(Some(block), None);
             parent_hash = hash;
         }
@@ -1446,14 +1446,14 @@ mod tests {
 
         let parents = chain[3].parent_state_chain();
         assert_eq!(parents.len(), 3);
-        assert_eq!(parents[0].block().block.number, 3);
-        assert_eq!(parents[1].block().block.number, 2);
-        assert_eq!(parents[2].block().block.number, 1);
+        assert_eq!(parents[0].block().recovered_block().number, 3);
+        assert_eq!(parents[1].block().recovered_block().number, 2);
+        assert_eq!(parents[2].block().recovered_block().number, 1);
 
         let parents = chain[2].parent_state_chain();
         assert_eq!(parents.len(), 2);
-        assert_eq!(parents[0].block().block.number, 2);
-        assert_eq!(parents[1].block().block.number, 1);
+        assert_eq!(parents[0].block().recovered_block().number, 2);
+        assert_eq!(parents[1].block().recovered_block().number, 1);
 
         let parents = chain[0].parent_state_chain();
         assert_eq!(parents.len(), 0);
@@ -1465,15 +1465,15 @@ mod tests {
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let single_block =
             create_mock_state(&mut test_block_builder, single_block_number, B256::random());
-        let single_block_hash = single_block.block().block.hash();
+        let single_block_hash = single_block.block().recovered_block().hash();
 
         let parents = single_block.parent_state_chain();
         assert_eq!(parents.len(), 0);
 
         let block_state_chain = single_block.chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 1);
-        assert_eq!(block_state_chain[0].block().block.number, single_block_number);
-        assert_eq!(block_state_chain[0].block().block.hash(), single_block_hash);
+        assert_eq!(block_state_chain[0].block().recovered_block().number, single_block_number);
+        assert_eq!(block_state_chain[0].block().recovered_block().hash(), single_block_hash);
     }
 
     #[test]
@@ -1483,18 +1483,18 @@ mod tests {
 
         let block_state_chain = chain[2].chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 3);
-        assert_eq!(block_state_chain[0].block().block.number, 3);
-        assert_eq!(block_state_chain[1].block().block.number, 2);
-        assert_eq!(block_state_chain[2].block().block.number, 1);
+        assert_eq!(block_state_chain[0].block().recovered_block().number, 3);
+        assert_eq!(block_state_chain[1].block().recovered_block().number, 2);
+        assert_eq!(block_state_chain[2].block().recovered_block().number, 1);
 
         let block_state_chain = chain[1].chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 2);
-        assert_eq!(block_state_chain[0].block().block.number, 2);
-        assert_eq!(block_state_chain[1].block().block.number, 1);
+        assert_eq!(block_state_chain[0].block().recovered_block().number, 2);
+        assert_eq!(block_state_chain[1].block().recovered_block().number, 1);
 
         let block_state_chain = chain[0].chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 1);
-        assert_eq!(block_state_chain[0].block().block.number, 1);
+        assert_eq!(block_state_chain[0].block().recovered_block().number, 1);
     }
 
     #[test]
@@ -1502,10 +1502,14 @@ mod tests {
         // Generate 4 blocks
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let block0 = test_block_builder.get_executed_block_with_number(0, B256::random());
-        let block1 = test_block_builder.get_executed_block_with_number(1, block0.block.hash());
-        let block1a = test_block_builder.get_executed_block_with_number(1, block0.block.hash());
-        let block2 = test_block_builder.get_executed_block_with_number(2, block1.block.hash());
-        let block2a = test_block_builder.get_executed_block_with_number(2, block1.block.hash());
+        let block1 =
+            test_block_builder.get_executed_block_with_number(1, block0.recovered_block.hash());
+        let block1a =
+            test_block_builder.get_executed_block_with_number(1, block0.recovered_block.hash());
+        let block2 =
+            test_block_builder.get_executed_block_with_number(2, block1.recovered_block.hash());
+        let block2a =
+            test_block_builder.get_executed_block_with_number(2, block1.recovered_block.hash());
 
         let sample_execution_outcome = ExecutionOutcome {
             receipts: Receipts::from_iter([vec![], vec![]]),
@@ -1520,7 +1524,7 @@ mod tests {
             chain_commit.to_chain_notification(),
             CanonStateNotification::Commit {
                 new: Arc::new(Chain::new(
-                    vec![block0.clone_recovered_block(), block1.clone_recovered_block()],
+                    vec![block0.recovered_block().clone(), block1.recovered_block().clone()],
                     sample_execution_outcome.clone(),
                     None
                 ))
@@ -1537,12 +1541,12 @@ mod tests {
             chain_reorg.to_chain_notification(),
             CanonStateNotification::Reorg {
                 old: Arc::new(Chain::new(
-                    vec![block1.clone_recovered_block(), block2.clone_recovered_block()],
+                    vec![block1.recovered_block().clone(), block2.recovered_block().clone()],
                     sample_execution_outcome.clone(),
                     None
                 )),
                 new: Arc::new(Chain::new(
-                    vec![block1a.clone_recovered_block(), block2a.clone_recovered_block()],
+                    vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()],
                     sample_execution_outcome,
                     None
                 ))

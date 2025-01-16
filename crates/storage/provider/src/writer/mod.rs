@@ -143,9 +143,9 @@ where
         }
 
         // NOTE: checked non-empty above
-        let first_block = blocks.first().unwrap().block();
+        let first_block = blocks.first().unwrap().recovered_block();
 
-        let last_block = blocks.last().unwrap().block();
+        let last_block = blocks.last().unwrap().recovered_block();
         let first_number = first_block.number();
         let last_block_number = last_block.number();
 
@@ -160,11 +160,9 @@ where
         //  * trie updates (cannot naively extend, need helper)
         //  * indices (already done basically)
         // Insert the blocks
-        for ExecutedBlock { block, senders, execution_output, hashed_state, trie } in blocks {
-            let sealed_block = Arc::unwrap_or_clone(block)
-                .try_with_senders_unchecked(Arc::unwrap_or_clone(senders))
-                .unwrap();
-            self.database().insert_block(sealed_block, StorageLocation::Both)?;
+        for ExecutedBlock { recovered_block, execution_output, hashed_state, trie } in blocks {
+            self.database()
+                .insert_block(Arc::unwrap_or_clone(recovered_block), StorageLocation::Both)?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.

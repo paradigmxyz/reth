@@ -30,7 +30,8 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
     proofs::{self},
-    Block, BlockBody, EthereumHardforks, InvalidTransactionError, Receipt, TransactionSigned,
+    Block, BlockBody, EthereumHardforks, InvalidTransactionError, Receipt, RecoveredBlock,
+    TransactionSigned,
 };
 use reth_primitives_traits::Block as _;
 use reth_revm::database::StateProviderDatabase;
@@ -478,8 +479,10 @@ where
 
     // create the executed block data
     let executed = ExecutedBlock {
-        block: sealed_block.clone(),
-        senders: Arc::new(executed_senders),
+        recovered_block: Arc::new(RecoveredBlock::new_sealed(
+            sealed_block.as_ref().clone(),
+            executed_senders,
+        )),
         execution_output: Arc::new(execution_outcome),
         hashed_state: Arc::new(hashed_state),
         trie: Arc::new(trie_output),

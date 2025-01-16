@@ -442,7 +442,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         let (start, end) = self.convert_range_bounds(range, || {
             in_mem_chain
                 .iter()
-                .map(|b| b.block_ref().block().body().transactions().len() as u64)
+                .map(|b| b.block_ref().recovered_block().body().transactions().len() as u64)
                 .sum::<u64>() +
                 last_block_body_index.last_tx_num()
         });
@@ -474,7 +474,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
 
         // Iterate from the lowest block to the highest in-memory chain
         for block_state in in_mem_chain.iter().rev() {
-            let block_tx_count = block_state.block_ref().block().body().transactions().len();
+            let block_tx_count =
+                block_state.block_ref().recovered_block().body().transactions().len();
             let remaining = (tx_range.end() - tx_range.start() + 1) as usize;
 
             // If the transaction range start is equal or higher than the next block first
@@ -546,7 +547,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         // Iterate from the lowest block to the highest
         for block_state in in_mem_chain.iter().rev() {
             let executed_block = block_state.block_ref();
-            let block = executed_block.block();
+            let block = executed_block.recovered_block();
 
             for tx_index in 0..block.body().transactions().len() {
                 match id {
@@ -629,7 +630,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             (*block_hash).into(),
             |db_provider| db_provider.header(block_hash),
-            |block_state| Ok(Some(block_state.block_ref().block().header().clone())),
+            |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_header())),
         )
     }
 
@@ -637,7 +638,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             num.into(),
             |db_provider| db_provider.header_by_number(num),
-            |block_state| Ok(Some(block_state.block_ref().block().header().clone())),
+            |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_header())),
         )
     }
 
@@ -679,7 +680,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.headers_range(range),
-            |block_state, _| Some(block_state.block_ref().block().header().clone()),
+            |block_state, _| Some(block_state.block_ref().recovered_block().header().clone()),
             |_| true,
         )
     }
@@ -691,7 +692,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             number.into(),
             |db_provider| db_provider.sealed_header(number),
-            |block_state| Ok(Some(block_state.block_ref().block().clone_sealed_header())),
+            |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_sealed_header())),
         )
     }
 
@@ -702,7 +703,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.sealed_headers_range(range),
-            |block_state, _| Some(block_state.block_ref().block().clone_sealed_header()),
+            |block_state, _| Some(block_state.block_ref().recovered_block().clone_sealed_header()),
             |_| true,
         )
     }
@@ -716,7 +717,7 @@ impl<N: ProviderNodeTypes> HeaderProvider for ConsistentProvider<N> {
             range,
             |db_provider, range, predicate| db_provider.sealed_headers_while(range, predicate),
             |block_state, predicate| {
-                let header = block_state.block_ref().block().sealed_header();
+                let header = block_state.block_ref().recovered_block().sealed_header();
                 predicate(header).then(|| header.clone())
             },
             predicate,
@@ -802,7 +803,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
                 self.get_in_memory_or_storage_by_block(
                     hash.into(),
                     |db_provider| db_provider.find_block_by_hash(hash, source),
-                    |block_state| Ok(Some(block_state.block_ref().block().clone_block())),
+                    |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
                 )
             }
             BlockSource::Pending => {
@@ -815,7 +816,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.block(id),
-            |block_state| Ok(Some(block_state.block_ref().block().clone_block())),
+            |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
         )
     }
 
@@ -847,7 +848,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.block_with_senders(id, transaction_kind),
-            |block_state| Ok(Some(block_state.clone_recovered_block())),
+            |block_state| Ok(Some(block_state.block().recovered_block().clone())),
         )
     }
 
@@ -859,7 +860,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.sealed_block_with_senders(id, transaction_kind),
-            |block_state| Ok(Some(block_state.clone_recovered_block())),
+            |block_state| Ok(Some(block_state.block().recovered_block().clone())),
         )
     }
 
@@ -867,7 +868,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.block_range(range),
-            |block_state, _| Some(block_state.block_ref().block().clone_block()),
+            |block_state, _| Some(block_state.block_ref().recovered_block().clone_block()),
             |_| true,
         )
     }
@@ -879,7 +880,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.block_with_senders_range(range),
-            |block_state, _| Some(block_state.clone_recovered_block()),
+            |block_state, _| Some(block_state.block().recovered_block().clone()),
             |_| true,
         )
     }
@@ -891,7 +892,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.sealed_block_with_senders_range(range),
-            |block_state, _| Some(block_state.clone_recovered_block()),
+            |block_state, _| Some(block_state.block().recovered_block().clone()),
             |_| true,
         )
     }
@@ -913,7 +914,13 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
             id.into(),
             |provider| provider.transaction_by_id(id),
             |tx_index, _, block_state| {
-                Ok(block_state.block_ref().block().body().transactions().get(tx_index).cloned())
+                Ok(block_state
+                    .block_ref()
+                    .recovered_block()
+                    .body()
+                    .transactions()
+                    .get(tx_index)
+                    .cloned())
             },
         )
     }
@@ -926,7 +933,13 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
             id.into(),
             |provider| provider.transaction_by_id_unhashed(id),
             |tx_index, _, block_state| {
-                Ok(block_state.block_ref().block().body().transactions().get(tx_index).cloned())
+                Ok(block_state
+                    .block_ref()
+                    .recovered_block()
+                    .body()
+                    .transactions()
+                    .get(tx_index)
+                    .cloned())
             },
         )
     }
@@ -956,7 +969,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
             |provider| provider.transaction_block(id),
-            |_, _, block_state| Ok(Some(block_state.block_ref().block().number())),
+            |_, _, block_state| Ok(Some(block_state.block_ref().recovered_block().number())),
         )
     }
 
@@ -967,7 +980,9 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |provider| provider.transactions_by_block(id),
-            |block_state| Ok(Some(block_state.block_ref().block().body().transactions().to_vec())),
+            |block_state| {
+                Ok(Some(block_state.block_ref().recovered_block().body().transactions().to_vec()))
+            },
         )
     }
 
@@ -978,7 +993,9 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block_range_while(
             range,
             |db_provider, range, _| db_provider.transactions_by_block_range(range),
-            |block_state, _| Some(block_state.block_ref().block().body().transactions().to_vec()),
+            |block_state, _| {
+                Some(block_state.block_ref().recovered_block().body().transactions().to_vec())
+            },
             |_| true,
         )
     }
@@ -991,7 +1008,8 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
             range,
             |db_provider, db_range| db_provider.transactions_by_tx_range(db_range),
             |index_range, block_state| {
-                Ok(block_state.block_ref().block().body().transactions()[index_range].to_vec())
+                Ok(block_state.block_ref().recovered_block().body().transactions()[index_range]
+                    .to_vec())
             },
         )
     }
@@ -1003,7 +1021,9 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_tx_range(
             range,
             |db_provider, db_range| db_provider.senders_by_tx_range(db_range),
-            |index_range, block_state| Ok(block_state.block_ref().senders[index_range].to_vec()),
+            |index_range, block_state| {
+                Ok(block_state.block_ref().recovered_block.senders()[index_range].to_vec())
+            },
         )
     }
 
@@ -1011,7 +1031,9 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_tx(
             id.into(),
             |provider| provider.transaction_sender(id),
-            |tx_index, _, block_state| Ok(block_state.block_ref().senders.get(tx_index).copied()),
+            |tx_index, _, block_state| {
+                Ok(block_state.block_ref().recovered_block.senders().get(tx_index).copied())
+            },
         )
     }
 }
@@ -1032,7 +1054,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
         for block_state in self.head_block.iter().flat_map(|b| b.chain()) {
             let executed_block = block_state.block_ref();
-            let block = executed_block.block();
+            let block = executed_block.recovered_block();
             let receipts = block_state.executed_block_receipts();
 
             // assuming 1:1 correspondence between transactions and receipts
@@ -1124,7 +1146,9 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ConsistentProvider<N> {
         self.get_in_memory_or_storage_by_block(
             id,
             |db_provider| db_provider.withdrawals_by_block(id, timestamp),
-            |block_state| Ok(block_state.block_ref().block().body().withdrawals().cloned()),
+            |block_state| {
+                Ok(block_state.block_ref().recovered_block().body().withdrawals().cloned())
+            },
         )
     }
 }
@@ -1139,7 +1163,7 @@ impl<N: ProviderNodeTypes> OmmersProvider for ConsistentProvider<N> {
                     return Ok(Some(Vec::new()))
                 }
 
-                Ok(block_state.block_ref().block().body().ommers().map(|o| o.to_vec()))
+                Ok(block_state.block_ref().recovered_block().body().ommers().map(|o| o.to_vec()))
             },
         )
     }
@@ -1167,8 +1191,9 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ConsistentProvider<N> {
 
                 // Iterate from the lowest block in memory until our target block
                 for state in block_state.chain().collect::<Vec<_>>().into_iter().rev() {
-                    let block_tx_count = state.block_ref().block.body().transactions().len() as u64;
-                    if state.block_ref().block().number() == number {
+                    let block_tx_count =
+                        state.block_ref().recovered_block().body().transactions().len() as u64;
+                    if state.block_ref().recovered_block().number() == number {
                         stored_indices.tx_count = block_tx_count;
                     } else {
                         stored_indices.first_tx_num += block_tx_count;
@@ -1450,7 +1475,7 @@ mod tests {
     use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
     use reth_db::models::AccountBeforeTx;
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::SealedBlock;
+    use reth_primitives::{RecoveredBlock, SealedBlock};
     use reth_storage_api::{BlockReader, BlockSource, ChangeSetReader};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
@@ -1550,8 +1575,10 @@ mod tests {
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock::new(
-                Arc::new(first_in_mem_block.clone()),
-                Arc::new(in_memory_block_senders),
+                Arc::new(RecoveredBlock::new_sealed(
+                    first_in_mem_block.clone(),
+                    in_memory_block_senders,
+                )),
                 Default::default(),
                 Default::default(),
                 Default::default(),
@@ -1590,8 +1617,10 @@ mod tests {
 
         // Insert the last block into the pending state
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            block: Arc::new(last_in_mem_block.clone()),
-            senders: Default::default(),
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                last_in_mem_block.clone(),
+                Default::default(),
+            )),
             execution_output: Default::default(),
             hashed_state: Default::default(),
             trie: Default::default(),
@@ -1654,8 +1683,10 @@ mod tests {
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock::new(
-                Arc::new(first_in_mem_block.clone()),
-                Arc::new(in_memory_block_senders),
+                Arc::new(RecoveredBlock::new_sealed(
+                    first_in_mem_block.clone(),
+                    in_memory_block_senders,
+                )),
                 Default::default(),
                 Default::default(),
                 Default::default(),
@@ -1758,8 +1789,7 @@ mod tests {
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
                     ExecutedBlock::new(
-                        Arc::new(block.clone()),
-                        Arc::new(senders),
+                        Arc::new(RecoveredBlock::new_sealed(block.clone(), senders)),
                         Arc::new(ExecutionOutcome {
                             bundle: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
