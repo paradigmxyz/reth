@@ -687,12 +687,22 @@ impl<P> RevealedSparseTrie<P> {
                         let rlp_node = ExtensionNodeRef::new(key, &child).rlp(&mut self.rlp_buf);
                         *hash = rlp_node.as_hash();
 
+                        let store_in_db_trie = child_node_type.store_in_db_trie();
+
+                        trace!(
+                            target: "trie::sparse",
+                            ?path,
+                            ?child_path,
+                            ?child_node_type,
+                            "Extension node"
+                        );
+
                         (
                             rlp_node,
                             SparseNodeType::Extension {
                                 // Inherit the `store_in_db_trie` flag from the child node, which is
                                 // always the branch node
-                                store_in_db_trie: child_node_type.store_in_db_trie(),
+                                store_in_db_trie,
                             },
                         )
                     } else {
