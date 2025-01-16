@@ -145,7 +145,6 @@ mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
     use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
-    use reth_execution_errors::BlockExecutionError;
     use revm::db::BundleState;
     use revm_primitives::{
         Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot, B256, U256,
@@ -163,7 +162,7 @@ mod tests {
         where
             Self: 'a;
         type Output = BlockExecutionOutput<()>;
-        type Error = BlockExecutionError;
+        type Error = std::convert::Infallible;
 
         fn execute(self, _input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
             Ok(BlockExecutionOutput {

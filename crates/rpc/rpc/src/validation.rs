@@ -93,7 +93,7 @@ where
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + 'static,
-    E: BlockExecutorProvider<Error = BlockExecutionError>,
+    E: BlockExecutorProvider,
 {
     /// Validates the given block and a [`BidTrace`] against it.
     pub async fn validate_message_against_block(
