@@ -2,7 +2,7 @@
 
 use alloy_primitives::{Bytes, B256};
 use reth_execution_errors::SparseTrieError;
-use reth_trie_common::{Nibbles, TrieMask};
+use reth_trie_common::Nibbles;
 
 /// Factory for instantiating blinded node providers.
 pub trait BlindedProviderFactory {
@@ -18,21 +18,10 @@ pub trait BlindedProviderFactory {
     fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider;
 }
 
-/// Revealed blinded trie node.
-#[derive(Debug)]
-pub struct RevealedNode {
-    /// Raw trie node.
-    pub node: Bytes,
-    /// Branch node tree mask, if any.
-    pub tree_mask: Option<TrieMask>,
-    /// Branch node hash mask, if any.
-    pub hash_mask: Option<TrieMask>,
-}
-
 /// Trie node provider for retrieving blinded nodes.
 pub trait BlindedProvider {
     /// Retrieve blinded node by path.
-    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError>;
+    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<Bytes>, SparseTrieError>;
 }
 
 /// Default blinded node provider factory that creates [`DefaultBlindedProvider`].
@@ -57,7 +46,7 @@ impl BlindedProviderFactory for DefaultBlindedProviderFactory {
 pub struct DefaultBlindedProvider;
 
 impl BlindedProvider for DefaultBlindedProvider {
-    fn blinded_node(&mut self, _path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+    fn blinded_node(&mut self, _path: &Nibbles) -> Result<Option<Bytes>, SparseTrieError> {
         Ok(None)
     }
 }

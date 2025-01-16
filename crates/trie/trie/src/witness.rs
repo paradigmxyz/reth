@@ -17,7 +17,7 @@ use reth_execution_errors::{
 };
 use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
-    blinded::{BlindedProvider, BlindedProviderFactory, RevealedNode},
+    blinded::{BlindedProvider, BlindedProviderFactory},
     SparseStateTrie,
 };
 use std::sync::{mpsc, Arc};
@@ -244,11 +244,11 @@ impl<P> WitnessBlindedProvider<P> {
 }
 
 impl<P: BlindedProvider> BlindedProvider for WitnessBlindedProvider<P> {
-    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+    fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<Bytes>, SparseTrieError> {
         let maybe_node = self.provider.blinded_node(path)?;
         if let Some(node) = &maybe_node {
             self.tx
-                .send(node.node.clone())
+                .send(node.clone())
                 .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
         }
         Ok(maybe_node)
