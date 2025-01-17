@@ -19,9 +19,8 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm, TxEnvOverrides,
+    ConfigureEvm, Evm, TxEnvOverrides,
 };
-use reth_evm::Evm;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardfork;

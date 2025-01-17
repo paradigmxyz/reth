@@ -16,7 +16,7 @@ use reth::{
         primitives::{
             CfgEnvWithHandlerCfg, Env, PrecompileResult, SpecId, StatefulPrecompileMut, TxEnv,
         },
-        ContextPrecompile, ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
+        ContextPrecompile, ContextPrecompiles, Database, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
 };
@@ -25,8 +25,8 @@ use reth_evm::env::EvmEnv;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
-    node::EthereumAddOns, BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory,
-    EthereumNode,
+    evm::EthEvm, node::EthereumAddOns, BasicBlockExecutorProvider, EthEvmConfig,
+    EthExecutionStrategyFactory, EthereumNode,
 };
 use reth_primitives::{EthPrimitives, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
@@ -169,7 +169,14 @@ impl ConfigureEvmEnv for MyEvmConfig {
 }
 
 impl ConfigureEvm for MyEvmConfig {
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv, tx: TxEnv) -> Evm<'_, (), DB> {
+    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
+
+    fn evm_with_env<DB: Database>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv,
+        tx: TxEnv,
+    ) -> Self::Evm<'_, DB, ()> {
         let new_cache = self.precompile_cache.clone();
         EvmBuilder::default()
             .with_db(db)
@@ -181,6 +188,7 @@ impl ConfigureEvm for MyEvmConfig {
                 MyEvmConfig::set_precompiles(handler, new_cache.clone())
             }))
             .build()
+            .into()
     }
 
     fn evm_with_env_and_inspector<DB, I>(
@@ -189,7 +197,7 @@ impl ConfigureEvm for MyEvmConfig {
         evm_env: EvmEnv,
         tx: TxEnv,
         inspector: I,
-    ) -> Evm<'_, I, DB>
+    ) -> Self::Evm<'_, DB, I>
     where
         DB: Database,
         I: GetInspector<DB>,
@@ -207,6 +215,7 @@ impl ConfigureEvm for MyEvmConfig {
             }))
             .append_handler_register(inspector_handle_register)
             .build()
+            .into()
     }
 }
 

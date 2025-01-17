@@ -7514,6 +7514,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-sol-types",
+ "derive_more",
  "reth-chainspec",
  "reth-consensus",
  "reth-ethereum-consensus",
