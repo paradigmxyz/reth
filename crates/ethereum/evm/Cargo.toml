@@ -58,5 +58,6 @@ std = [
 	"reth-ethereum-forks/std",
 	"serde_json/std",
 	"reth-primitives-traits/std",
-	"reth-chainspec/std"
+	"reth-chainspec/std",
+	"derive_more/std"
 ]
