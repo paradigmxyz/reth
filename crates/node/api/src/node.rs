@@ -7,6 +7,7 @@ use reth_db_api::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
     Database,
 };
+use reth_engine_primitives::BeaconConsensusEngineHandle;
 use reth_evm::execute::{BlockExecutionError, BlockExecutorProvider};
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
