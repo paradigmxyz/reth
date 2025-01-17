@@ -142,7 +142,7 @@ where
                 .into_iter()
                 .cloned() // TODO(alexey): Avoid cloning here
                 .zip(target_slots.into_iter().sorted_unstable())
-                .chunks(50)
+                .chunks(200)
             {
                 let (prefix_set, target_slots): (PrefixSetMut, B256HashSet) = chunk.unzip();
 
