@@ -37,7 +37,7 @@ use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_tasks::pool::BlockingTaskGuard;
 use revm::{
     db::{CacheDB, State},
-    primitives::{db::DatabaseCommit, Env},
+    primitives::db::DatabaseCommit,
 };
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
@@ -450,7 +450,7 @@ where
                                 tx_env.clone(),
                                 &mut inspector,
                             )?;
-                            let env = Env::boxed(
+                            let env = revm_primitives::Env::boxed(
                                 evm_env.cfg_env_with_handler_cfg.cfg_env,
                                 evm_env.block_env,
                                 tx_env,
@@ -785,7 +785,7 @@ where
                         self.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
 
                     let state = res.state.clone();
-                    let env = Env::boxed(
+                    let env = revm_primitives::Env::boxed(
                         evm_env.cfg_env_with_handler_cfg.cfg_env,
                         evm_env.block_env,
                         tx_env,

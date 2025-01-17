@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
-use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{
     eip4844::MAX_DATA_GAS_PER_BLOCK, eip6110, eip7685::Requests, eip7840::BlobParams,
     merge::BEACON_NONCE,
@@ -33,7 +33,7 @@ use reth_primitives::{
     Block, BlockBody, EthereumHardforks, InvalidTransactionError, Receipt, RecoveredBlock,
     TransactionSigned,
 };
-use reth_primitives_traits::Block as _;
+use reth_primitives_traits::{Block as _, SignedTransaction};
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
@@ -250,7 +250,7 @@ where
 
         // There's only limited amount of blob space available per block, so we need to check if
         // the EIP-4844 can still fit in the block
-        if let Some(blob_tx) = tx.transaction.as_eip4844() {
+        if let Some(blob_tx) = tx.as_eip4844() {
             let tx_blob_gas = blob_tx.blob_gas();
             if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
                 // we can't fit this _blob_ transaction into the block, so we mark it as
@@ -306,7 +306,7 @@ where
         evm.db_mut().commit(state);
 
         // add to the total blob gas used if the transaction successfully executed
-        if let Some(blob_tx) = tx.transaction.as_eip4844() {
+        if let Some(blob_tx) = tx.as_eip4844() {
             let tx_blob_gas = blob_tx.blob_gas();
             sum_blob_gas_used += tx_blob_gas;
 
@@ -332,9 +332,8 @@ where
         }));
 
         // update add to total fees
-        let miner_fee = tx
-            .effective_tip_per_gas(Some(base_fee))
-            .expect("fee is always valid; execution succeeded");
+        let miner_fee =
+            tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
         // append sender and transaction to the respective lists
@@ -419,7 +418,7 @@ where
         // grab the blob sidecars from the executed txs
         blob_sidecars = pool
             .get_all_blobs_exact(
-                executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| tx.hash()).collect(),
+                executed_txs.iter().filter(|tx| tx.is_eip4844()).map(|tx| *tx.tx_hash()).collect(),
             )
             .map_err(PayloadBuilderError::other)?;
 

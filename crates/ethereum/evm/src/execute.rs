@@ -22,7 +22,7 @@ use reth_evm::{
     ConfigureEvm, TxEnvOverrides,
 };
 use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
-use reth_primitives_traits::BlockBody;
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_revm::db::State;
 use revm_primitives::{
     db::{Database, DatabaseCommit},

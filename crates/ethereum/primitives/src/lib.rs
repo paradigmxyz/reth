@@ -16,3 +16,6 @@ pub use receipt::*;
 
 mod transaction;
 pub use transaction::*;
+
+#[cfg(feature = "alloy-compat")]
+mod alloy_compat;

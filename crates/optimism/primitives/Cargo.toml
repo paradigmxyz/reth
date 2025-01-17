@@ -49,6 +49,7 @@ rstest.workspace = true
 arbitrary.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 proptest.workspace = true
+rand.workspace = true
 
 [features]
 default = ["std"]

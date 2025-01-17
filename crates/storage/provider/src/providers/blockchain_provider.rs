@@ -2402,7 +2402,7 @@ mod tests {
         let mut in_memory_blocks: std::collections::VecDeque<_> = in_memory_blocks.into();
 
         $(
-            let tx_hash = |block: &SealedBlock| block.body().transactions[0].hash();
+            let tx_hash = |block: &SealedBlock| *block.body().transactions[0].tx_hash();
             let tx_num = |block: &SealedBlock| {
                 database_blocks
                     .iter()
@@ -2726,7 +2726,7 @@ mod tests {
             // above, we do not see it.
             assert!(matches!(
                 old_transaction_hash_fn(
-                    to_be_persisted_tx.hash(),
+                    *to_be_persisted_tx.tx_hash(),
                     provider.canonical_in_memory_state(),
                     provider.database.clone()
                 ),
@@ -2743,7 +2743,7 @@ mod tests {
 
             assert!(matches!(
                 correct_transaction_hash_fn(
-                    to_be_persisted_tx.hash(),
+                    *to_be_persisted_tx.tx_hash(),
                     provider.canonical_in_memory_state(),
                     provider.database
                 ),

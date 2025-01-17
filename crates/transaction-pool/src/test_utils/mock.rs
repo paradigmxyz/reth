@@ -32,7 +32,7 @@ use reth_primitives::{
     transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
     PooledTransaction, RecoveredTx, Transaction, TransactionSigned, TxType,
 };
-use reth_primitives_traits::InMemorySize;
+use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
 
 /// A transaction pool implementation using [`MockOrdering`] for transaction ordering.
@@ -909,7 +909,7 @@ impl TryFrom<RecoveredTx<TransactionSigned>> for MockTransaction {
     fn try_from(tx: RecoveredTx<TransactionSigned>) -> Result<Self, Self::Error> {
         let sender = tx.signer();
         let transaction = tx.into_tx();
-        let hash = transaction.hash();
+        let hash = *transaction.tx_hash();
         let size = transaction.size();
 
         #[allow(unreachable_patterns)]

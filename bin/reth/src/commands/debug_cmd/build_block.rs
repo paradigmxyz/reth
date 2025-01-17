@@ -24,8 +24,11 @@ use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
-use reth_primitives::{EthPrimitives, SealedBlock, SealedHeader, Transaction, TransactionSigned};
-use reth_primitives_traits::Block as _;
+use reth_primitives::{
+    transaction::SignedTransactionIntoRecoveredExt, EthPrimitives, SealedBlock, SealedHeader,
+    Transaction, TransactionSigned,
+};
+use reth_primitives_traits::{Block as _, SignedTransaction};
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
@@ -163,7 +166,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         for tx_bytes in &self.transactions {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
             let transaction = TransactionSigned::decode(&mut &Bytes::from_str(tx_bytes)?[..])?
-                .into_ecrecovered()
+                .try_ecrecovered()
                 .ok_or_else(|| eyre::eyre!("failed to recover tx"))?;
 
             let encoded_length = match &transaction.transaction {
@@ -183,7 +186,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     let encoded_length = pooled.encode_2718_len();
 
                     // insert the blob into the store
-                    blob_store.insert(transaction.hash(), sidecar)?;
+                    blob_store.insert(*transaction.tx_hash(), sidecar)?;
 
                     encoded_length
                 }
