@@ -44,10 +44,7 @@ impl BlockProvider for RpcBlockProvider {
     }
 
     async fn get_block(&self, block_number: u64) -> eyre::Result<Block> {
-        let ws_provider = ProviderBuilder::new()
-            .on_builtin(&self.ws_rpc_url)
-            .await
-            .expect("failed to create WS provider");
+        let ws_provider = ProviderBuilder::new().on_builtin(&self.ws_rpc_url).await?;
         let block: Block = ws_provider
             .get_block_by_number(BlockNumberOrTag::Number(block_number), true.into())
             .await?
