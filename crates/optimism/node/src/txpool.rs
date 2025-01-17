@@ -25,7 +25,7 @@ use reth_transaction_pool::{
 use revm::primitives::{AccessList, KzgSettings};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc,
+    Arc, LazyLock,
 };
 
 /// Type alias for default optimism transaction pool
@@ -36,23 +36,34 @@ pub type OpTransactionPool<Client, S> = Pool<
 >;
 
 /// Pool transaction for OP.
-#[derive(Debug, Clone, derive_more::Deref)]
+#[derive(Debug, derive_more::Deref)]
 pub struct OpPooledTransaction {
+    #[deref]
     inner: EthPooledTransaction<OpTransactionSigned>,
-    da_cost: U256,
+    estimated_tx_compressed_size: LazyLock<u64>,
 }
 
 impl OpPooledTransaction {
     /// Create new instance of [Self].
     pub fn new(transaction: RecoveredTx<OpTransactionSigned>, encoded_length: usize) -> Self {
-        Self { inner: EthPooledTransaction::new(transaction, encoded_length), da_cost: U256::ZERO }
+        Self {
+            inner: EthPooledTransaction::new(transaction, encoded_length),
+            estimated_tx_compressed_size: LazyLock::new(|| Default::default()),
+        }
     }
 
-    /// Estimate DA costs
-    pub fn estimate_da_cost(&self) -> U256 {
-        let tx = self.transaction().clone_into_consensus();
-        let cost = reth_revm::estimate_tx(&tx, None, None).await.unwrap();
-        U256::from(cost)
+    /// Returns the estimated compressed size of a transaction.
+    pub fn compressed_size(&self) -> u64 {
+        *self.estimated_tx_compressed_size
+    }
+}
+
+impl Clone for OpPooledTransaction {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            estimated_tx_compressed_size: LazyLock::new(|| Default::default()),
+        }
     }
 }
 
@@ -60,7 +71,10 @@ impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for OpPooledTran
     fn from(tx: RecoveredTx<op_alloy_consensus::OpPooledTransaction>) -> Self {
         let encoded_len = tx.encode_2718_len();
         let tx = tx.map_transaction(|tx| tx.into());
-        Self(EthPooledTransaction::new(tx, encoded_len))
+        Self {
+            inner: EthPooledTransaction::new(tx, encoded_len),
+            estimated_tx_compressed_size: LazyLock::new(|| Default::default()),
+        }
     }
 }
 
@@ -77,7 +91,7 @@ impl TryFrom<RecoveredTx<OpTransactionSigned>> for OpPooledTransaction {
 
 impl From<OpPooledTransaction> for RecoveredTx<OpTransactionSigned> {
     fn from(value: OpPooledTransaction) -> Self {
-        value.0.transaction
+        value.inner.transaction
     }
 }
 
@@ -87,7 +101,7 @@ impl PoolTransaction for OpPooledTransaction {
     type Pooled = op_alloy_consensus::OpPooledTransaction;
 
     fn clone_into_consensus(&self) -> RecoveredTx<Self::Consensus> {
-        self.transaction().clone()
+        self.inner.transaction().clone()
     }
 
     fn try_consensus_into_pooled(
@@ -98,79 +112,79 @@ impl PoolTransaction for OpPooledTransaction {
     }
 
     fn hash(&self) -> &TxHash {
-        self.transaction.tx_hash()
+        self.inner.transaction.tx_hash()
     }
 
     fn sender(&self) -> Address {
-        self.transaction.signer()
+        self.inner.transaction.signer()
     }
 
     fn sender_ref(&self) -> &Address {
-        self.transaction.signer_ref()
+        self.inner.transaction.signer_ref()
     }
 
     fn nonce(&self) -> u64 {
-        self.transaction.nonce()
+        self.inner.transaction.nonce()
     }
 
     fn cost(&self) -> &U256 {
-        &self.cost
+        &self.inner.cost
     }
 
     fn gas_limit(&self) -> u64 {
-        self.transaction.gas_limit()
+        self.inner.transaction.gas_limit()
     }
 
     fn max_fee_per_gas(&self) -> u128 {
-        self.transaction.transaction.max_fee_per_gas()
+        self.inner.transaction.transaction.max_fee_per_gas()
     }
 
     fn access_list(&self) -> Option<&AccessList> {
-        self.transaction.access_list()
+        self.inner.transaction.access_list()
     }
 
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        self.transaction.transaction.max_priority_fee_per_gas()
+        self.inner.transaction.transaction.max_priority_fee_per_gas()
     }
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        self.transaction.max_fee_per_blob_gas()
+        self.inner.transaction.max_fee_per_blob_gas()
     }
 
     fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.transaction.effective_tip_per_gas(base_fee)
+        self.inner.transaction.effective_tip_per_gas(base_fee)
     }
 
     fn priority_fee_or_price(&self) -> u128 {
-        self.transaction.priority_fee_or_price()
+        self.inner.transaction.priority_fee_or_price()
     }
 
     fn kind(&self) -> TxKind {
-        self.transaction.kind()
+        self.inner.transaction.kind()
     }
 
     fn is_create(&self) -> bool {
-        self.transaction.is_create()
+        self.inner.transaction.is_create()
     }
 
     fn input(&self) -> &[u8] {
-        self.transaction.input()
+        self.inner.transaction.input()
     }
 
     fn size(&self) -> usize {
-        self.transaction.transaction.input().len()
+        self.inner.transaction.transaction.input().len()
     }
 
     fn tx_type(&self) -> u8 {
-        self.transaction.ty()
+        self.inner.transaction.ty()
     }
 
     fn encoded_length(&self) -> usize {
-        self.encoded_length
+        self.inner.encoded_length
     }
 
     fn chain_id(&self) -> Option<u64> {
-        self.transaction.chain_id()
+        self.inner.transaction.chain_id()
     }
 }
 
@@ -206,7 +220,7 @@ impl EthPoolTransaction for OpPooledTransaction {
     }
 
     fn authorization_count(&self) -> usize {
-        match &self.transaction.transaction {
+        match &self.inner.transaction.transaction {
             OpTypedTransaction::Eip7702(tx) => tx.authorization_list.len(),
             _ => 0,
         }
@@ -306,7 +320,7 @@ where
     /// See also [`TransactionValidator::validate_transaction`]
     ///
     /// This behaves the same as [`EthTransactionValidator::validate_one`], but in addition, ensures
-    /// that the account has enough balance to cover the L1 gas cost and DA cost.
+    /// that the account has enough balance to cover the L1 gas cost.
     pub fn validate_one(
         &self,
         origin: TransactionOrigin,
@@ -326,7 +340,7 @@ where
             return outcome
         }
 
-        // ensure that the account has enough balance to cover the L1 gas cost and DA cost
+        // ensure that the account has enough balance to cover the L1 gas cost
         if let TransactionValidationOutcome::Valid {
             balance,
             state_nonce,
@@ -351,17 +365,14 @@ where
                     return TransactionValidationOutcome::Error(*valid_tx.hash(), Box::new(err))
                 }
             };
-
-            let da_cost = valid_tx.estimate_da_cost();
-            let total_cost =
-                valid_tx.transaction().cost().saturating_add(cost_addition).saturating_add(da_cost);
+            let cost = valid_tx.transaction().cost().saturating_add(cost_addition);
 
             // Checks for max cost
-            if total_cost > balance {
+            if cost > balance {
                 return TransactionValidationOutcome::Invalid(
                     valid_tx.into_transaction(),
                     InvalidTransactionError::InsufficientFunds(
-                        GotExpected { got: balance, expected: total_cost }.into(),
+                        GotExpected { got: balance, expected: cost }.into(),
                     )
                     .into(),
                 )
