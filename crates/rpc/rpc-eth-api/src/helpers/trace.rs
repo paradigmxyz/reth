@@ -31,7 +31,7 @@ pub trait Trace:
     >,
 >
 {
-    /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
+    /// Executes the [`EvmEnv`] against the given [Database] without committing state
     /// changes.
     fn inspect<DB, I>(
         &self,
@@ -60,7 +60,7 @@ pub trait Trace:
     /// config.
     ///
     /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
-    /// the configured [`EnvWithHandlerCfg`] was inspected.
+    /// the configured [`EvmEnv`] was inspected.
     ///
     /// Caution: this is blocking
     fn trace_at<F, R>(
@@ -89,7 +89,7 @@ pub trait Trace:
     /// config.
     ///
     /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
-    /// the configured [`EnvWithHandlerCfg`] was inspected.
+    /// the configured [`EvmEnv`] was inspected.
     fn spawn_trace_at_with_state<F, R>(
         &self,
         evm_env: EvmEnv,

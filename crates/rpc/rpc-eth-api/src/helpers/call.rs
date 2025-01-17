@@ -490,7 +490,7 @@ pub trait Call:
         f(StateProviderTraitObjWrapper(&state))
     }
 
-    /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
+    /// Executes the [`TxEnv`] against the given [Database] without committing state
     /// changes.
     fn transact<DB>(
         &self,
@@ -509,7 +509,7 @@ pub trait Call:
         Ok((res, (evm_env, tx_env)))
     }
 
-    /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
+    /// Executes the [`EvmEnv`] against the given [Database] without committing state
     /// changes.
     fn transact_with_inspector<DB>(
         &self,
@@ -569,7 +569,7 @@ pub trait Call:
     /// Prepares the state and env for the given [`TransactionRequest`] at the given [`BlockId`] and
     /// executes the closure on a new task returning the result of the closure.
     ///
-    /// This returns the configured [`EnvWithHandlerCfg`] for the given [`TransactionRequest`] at
+    /// This returns the configured [`EvmEnv`] for the given [`TransactionRequest`] at
     /// the given [`BlockId`] and with configured call settings: `prepare_call_env`.
     ///
     /// This is primarily used by `eth_call`.
@@ -778,7 +778,7 @@ pub trait Call:
         Ok(env)
     }
 
-    /// Prepares the [`EnvWithHandlerCfg`] for execution of calls.
+    /// Prepares the [`EvmEnv`] for execution of calls.
     ///
     /// Does not commit any changes to the underlying database.
     ///
