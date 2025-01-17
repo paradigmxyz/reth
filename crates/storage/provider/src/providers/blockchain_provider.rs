@@ -472,6 +472,13 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider<N> {
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         self.consistent_provider()?.block_body_indices(number)
     }
+
+    fn block_body_indices_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        self.consistent_provider()?.block_body_indices_range(range)
+    }
 }
 
 impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {
@@ -882,10 +889,9 @@ mod tests {
         let static_file_provider = factory.static_file_provider();
 
         // Write transactions to static files with the right `tx_num``
-        let mut bodies_cursor = provider_rw.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
-        let mut tx_num = bodies_cursor
-            .seek_exact(database_blocks.first().as_ref().unwrap().number.saturating_sub(1))?
-            .map(|(_, indices)| indices.next_tx_num())
+        let mut tx_num = provider_rw
+            .block_body_indices(database_blocks.first().as_ref().unwrap().number.saturating_sub(1))?
+            .map(|indices| indices.next_tx_num())
             .unwrap_or_default();
 
         // Insert blocks into the database

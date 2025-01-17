@@ -777,6 +777,12 @@ impl BlockBodyIndicesProvider for MockEthProvider {
     fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(None)
     }
+    fn block_body_indices_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        Ok(vec![])
+    }
 }
 
 impl ChangeSetReader for MockEthProvider {
