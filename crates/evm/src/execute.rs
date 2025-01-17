@@ -688,19 +688,8 @@ mod tests {
             &mut self.state
         }
 
-        fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
-
         fn finish(&mut self) -> BundleState {
             self.finish_result.clone()
-        }
-
-        fn validate_block_post_execution(
-            &self,
-            _block: &RecoveredBlock<reth_primitives::Block>,
-            _receipts: &[Receipt],
-            _requests: &Requests,
-        ) -> Result<(), ConsensusError> {
-            Ok(())
         }
     }
 
