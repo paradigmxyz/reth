@@ -1204,6 +1204,13 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ConsistentProvider<N> {
             },
         )
     }
+
+    fn block_body_indices_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        range.map_while(|b| self.block_body_indices(b).transpose()).collect()
+    }
 }
 
 impl<N: ProviderNodeTypes> StageCheckpointReader for ConsistentProvider<N> {

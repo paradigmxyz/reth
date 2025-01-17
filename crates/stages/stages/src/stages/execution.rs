@@ -5,7 +5,6 @@ use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_db::{static_file::HeaderMask, tables};
-use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
 use reth_evm::{
     execute::{BatchExecutor, BlockExecutorProvider},
     metrics::ExecutorMetrics,
@@ -203,12 +202,8 @@ where
         }
 
         // Get next expected receipt number
-        let tx = provider.tx_ref();
-        let next_receipt_num = tx
-            .cursor_read::<tables::BlockBodyIndices>()?
-            .seek_exact(checkpoint)?
-            .map(|(_, value)| value.next_tx_num())
-            .unwrap_or(0);
+        let next_receipt_num =
+            provider.block_body_indices(checkpoint)?.map(|b| b.next_tx_num()).unwrap_or(0);
 
         let static_file_provider = provider.static_file_provider();
 
@@ -237,8 +232,7 @@ where
                 // fix the inconsistency right away.
                 if let Some(unwind_to) = unwind_to {
                     let next_receipt_num_after_unwind = provider
-                        .tx_ref()
-                        .get::<tables::BlockBodyIndices>(unwind_to)?
+                        .block_body_indices(unwind_to)?
                         .map(|b| b.next_tx_num())
                         .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?;
 
@@ -645,6 +639,7 @@ mod tests {
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
+    use reth_db::transaction::DbTx;
     use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
     use reth_evm::execute::BasicBlockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
