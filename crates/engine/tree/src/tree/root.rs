@@ -105,13 +105,13 @@ pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
-    ProofCalculated(Box<ProofCalculated>),
+    ProofCalculated(ProofCalculated),
     /// Error during proof calculation
     ProofCalculationError(ProviderError),
     /// State root calculation completed
     RootCalculated {
         /// The updated sparse trie
-        trie: Box<SparseStateTrie<BPF>>,
+        trie: SparseStateTrie<BPF>,
         /// Time taken to calculate the root
         elapsed: Duration,
     },
@@ -273,7 +273,7 @@ pub struct StateRootTask<Factory, BPF: BlindedProviderFactory> {
     proof_sequencer: ProofSequencer,
     /// The sparse trie used for the state root calculation. If [`None`], then update is in
     /// progress.
-    sparse_trie: Option<Box<SparseStateTrie<BPF>>>,
+    sparse_trie: Option<SparseStateTrie<BPF>>,
     /// Reference to the shared thread pool for parallel proof generation
     thread_pool: Arc<rayon::ThreadPool>,
 }
@@ -304,7 +304,7 @@ where
             tx,
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
-            sparse_trie: Some(Box::new(SparseStateTrie::new(blinded_provider).with_updates(true))),
+            sparse_trie: Some(SparseStateTrie::new(blinded_provider).with_updates(true)),
             thread_pool,
         }
     }
@@ -421,12 +421,12 @@ where
             match result {
                 Ok(proof) => {
                     let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
-                        Box::new(ProofCalculated {
+                        ProofCalculated {
                             state_update: hashed_state_update,
                             targets: proof_targets,
                             proof,
                             sequence_number: proof_sequence_number,
-                        }),
+                        },
                     ));
                 }
                 Err(error) => {
@@ -487,7 +487,7 @@ where
 
         let tx = self.tx.clone();
         scope.spawn(move |_| {
-            let result = update_sparse_trie(trie, multiproof, targets, state);
+            let result = update_sparse_trie(Box::new(trie), multiproof, targets, state);
             match result {
                 Ok((trie, elapsed)) => {
                     trace!(
@@ -495,7 +495,7 @@ where
                         ?elapsed,
                         "Root calculation completed, sending result"
                     );
-                    let _ = tx.send(StateRootMessage::RootCalculated { trie, elapsed });
+                    let _ = tx.send(StateRootMessage::RootCalculated { trie: *trie, elapsed });
                 }
                 Err(e) => {
                     let _ = tx.send(StateRootMessage::RootCalculationError(e));
