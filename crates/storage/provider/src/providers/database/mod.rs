@@ -708,7 +708,7 @@ mod tests {
                 if sender == block.body().transactions[0].recover_signer().unwrap()
             );
             assert_matches!(
-                provider.transaction_id(block.body().transactions[0].hash()),
+                provider.transaction_id(*block.body().transactions[0].tx_hash()),
                 Ok(Some(0))
             );
         }
@@ -726,7 +726,10 @@ mod tests {
                 Ok(_)
             );
             assert_matches!(provider.transaction_sender(0), Ok(None));
-            assert_matches!(provider.transaction_id(block.body().transactions[0].hash()), Ok(None));
+            assert_matches!(
+                provider.transaction_id(*block.body().transactions[0].tx_hash()),
+                Ok(None)
+            );
         }
     }
 

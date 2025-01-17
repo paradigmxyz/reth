@@ -12,10 +12,9 @@ mod tests {
     use super::*;
     use alloy_consensus::{transaction::RlpEcdsaTx, Transaction as _, TxLegacy};
     use alloy_eips::eip2718::Decodable2718;
-    use alloy_primitives::{address, hex};
+    use alloy_primitives::{address, hex, Bytes};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
-    use bytes::Bytes;
 
     #[test]
     fn invalid_legacy_pooled_decoding_input_too_short() {

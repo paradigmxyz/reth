@@ -387,7 +387,7 @@ mod tests {
         for block in &blocks[..=max_processed_block] {
             for transaction in &block.body().transactions {
                 if block.number > max_pruned_block {
-                    tx_hash_numbers.push((transaction.hash(), tx_hash_number));
+                    tx_hash_numbers.push((*transaction.tx_hash(), tx_hash_number));
                 }
                 tx_hash_number += 1;
             }
@@ -552,7 +552,10 @@ mod tests {
                         for tx_id in body.tx_num_range() {
                             let transaction =
                                 provider.transaction_by_id(tx_id)?.expect("no transaction entry");
-                            assert_eq!(Some(tx_id), provider.transaction_id(transaction.hash())?);
+                            assert_eq!(
+                                Some(tx_id),
+                                provider.transaction_id(*transaction.tx_hash())?
+                            );
                         }
                     }
                 }

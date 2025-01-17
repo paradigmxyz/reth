@@ -52,7 +52,6 @@ tracing.workspace = true
 
 [features]
 optimism = [
-    "reth-primitives/optimism",
     "reth-provider/optimism",
     "revm-primitives/optimism",
 ]

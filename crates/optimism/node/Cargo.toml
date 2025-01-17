@@ -89,7 +89,6 @@ futures.workspace = true
 [features]
 default = ["reth-codec"]
 optimism = [
-	"reth-primitives/optimism",
 	"reth-provider/optimism",
 	"reth-optimism-evm/optimism",
 	"reth-optimism-payload-builder/optimism",

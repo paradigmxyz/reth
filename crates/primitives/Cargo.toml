@@ -13,48 +13,24 @@ workspace = true
 
 [dependencies]
 # reth
+reth-ethereum-primitives.workspace = true
 reth-primitives-traits = { workspace = true, features = ["serde"] }
 reth-ethereum-forks.workspace = true
 reth-static-file-types.workspace = true
-revm-primitives = { workspace = true, features = ["serde"] }
-reth-codecs = { workspace = true, optional = true }
-reth-zstd-compressors = { workspace = true, optional = true }
 
 # ethereum
 alloy-consensus.workspace = true
-alloy-network = { workspace = true, optional = true }
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
-alloy-rlp = { workspace = true, features = ["arrayvec"] }
-alloy-rpc-types = { workspace = true, optional = true }
-alloy-serde = { workspace = true, optional = true }
 alloy-eips = { workspace = true, features = ["serde"] }
 alloy-trie = { workspace = true, features = ["serde"] }
-
-# optimism
-op-alloy-rpc-types = { workspace = true, optional = true }
-op-alloy-consensus = { workspace = true, features = [
-	"arbitrary",
-	"serde",
-], optional = true }
 
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
 
-# crypto
-secp256k1 = { workspace = true, features = [
-	"global-context",
-	"recovery",
-	"rand",
-], optional = true }
-
 # misc
-bytes.workspace = true
 derive_more.workspace = true
-modular-bitfield = { workspace = true, optional = true }
 once_cell.workspace = true
-rand = { workspace = true, optional = true }
 serde.workspace = true
-serde_with = { workspace = true, optional = true }
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -62,30 +38,20 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 [dev-dependencies]
 # eth
 reth-chainspec = { workspace = true, features = ["arbitrary"] }
-reth-codecs = { workspace = true, features = ["test-utils"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
-reth-testing-utils.workspace = true
 reth-trie-common = { workspace = true, features = ["arbitrary"] }
-revm-primitives = { workspace = true, features = ["arbitrary"] }
 
+alloy-rlp.workspace = true
 alloy-eips = { workspace = true, features = ["arbitrary"] }
 alloy-genesis.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
-secp256k1 = { workspace = true, features = [
-	"global-context",
-	"recovery",
-	"rand",
-] }
 
 assert_matches.workspace = true
-bincode.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
-rand.workspace = true
 serde_json.workspace = true
-test-fuzz.workspace = true
-rstest.workspace = true
+reth-codecs.workspace = true
 
 criterion.workspace = true
 pprof = { workspace = true, features = [
@@ -102,50 +68,36 @@ std = [
 	"alloy-eips/std",
 	"alloy-genesis/std",
 	"alloy-primitives/std",
-	"alloy-serde?/std",
 	"once_cell/std",
-	"revm-primitives/std",
 	"serde/std",
 	"alloy-trie/std",
-	"serde_with?/std",
-	"alloy-rlp/std",
 	"reth-ethereum-forks/std",
-	"bytes/std",
 	"derive_more/std",
-	"reth-zstd-compressors?/std",
-	"secp256k1?/std",
 	"reth-trie-common/std",
-	"op-alloy-consensus?/std",
-	"op-alloy-rpc-types?/std",
 	"serde_json/std",
-	"reth-chainspec/std"
+	"reth-chainspec/std",
+	"reth-ethereum-primitives/std",
+	"alloy-rlp/std"
 ]
 reth-codec = [
-	"dep:reth-codecs",
-	"dep:reth-zstd-compressors",
-	"dep:modular-bitfield", "std",
+	 "std",
 	"reth-primitives-traits/reth-codec",
+    "reth-ethereum-primitives/reth-codec"
 ]
-asm-keccak = ["alloy-primitives/asm-keccak", "revm-primitives/asm-keccak"]
+asm-keccak = ["alloy-primitives/asm-keccak"]
 arbitrary = [
 	"dep:arbitrary",
 	"alloy-eips/arbitrary",
-	"rand",
 	"reth-codec",
 	"reth-ethereum-forks/arbitrary",
 	"reth-primitives-traits/arbitrary",
-	"revm-primitives/arbitrary",
 	"reth-chainspec/arbitrary",
 	"alloy-consensus/arbitrary",
 	"alloy-primitives/arbitrary",
-	"alloy-rpc-types?/arbitrary",
-	"alloy-serde?/arbitrary",
-	"op-alloy-consensus?/arbitrary",
-	"op-alloy-rpc-types?/arbitrary",
-	"reth-codecs?/arbitrary",
 	"alloy-trie/arbitrary",
 	"reth-trie-common/arbitrary",
-	"dep:secp256k1"
+	"reth-ethereum-primitives/arbitrary",
+	"reth-codecs/arbitrary"
 ]
 secp256k1 = [
 	"reth-primitives-traits/secp256k1",
@@ -154,33 +106,23 @@ c-kzg = [
 	"dep:c-kzg",
 	"alloy-consensus/kzg",
 	"alloy-eips/kzg",
-	"revm-primitives/c-kzg",
-]
-optimism = [
-	"dep:op-alloy-consensus",
-	"reth-codecs?/op",
-	"revm-primitives/optimism",
 ]
 alloy-compat = [
-	"dep:alloy-rpc-types",
-	"dep:alloy-serde",
-	"dep:op-alloy-rpc-types",
-    "dep:alloy-network",
+    "reth-ethereum-primitives/alloy-compat"
 ]
 test-utils = [
 	"reth-primitives-traits/test-utils",
 	"reth-chainspec/test-utils",
-	"reth-codecs?/test-utils",
 	"reth-trie-common/test-utils",
 	"arbitrary",
+	"reth-codecs/test-utils"
 ]
 serde-bincode-compat = [
-	"serde_with",
 	"alloy-eips/serde-bincode-compat",
 	"alloy-consensus/serde-bincode-compat",
-	"op-alloy-consensus?/serde-bincode-compat",
 	"reth-primitives-traits/serde-bincode-compat",
 	"reth-trie-common/serde-bincode-compat",
+	"reth-ethereum-primitives/serde-bincode-compat"
 ]
 
 [[bench]]

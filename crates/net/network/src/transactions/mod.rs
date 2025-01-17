@@ -2181,7 +2181,7 @@ mod tests {
         });
         assert!(transactions
             .transactions_by_peers
-            .get(&signed_tx.hash())
+            .get(signed_tx.tx_hash())
             .unwrap()
             .contains(handle1.peer_id()));
 

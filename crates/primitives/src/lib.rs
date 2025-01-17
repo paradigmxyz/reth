@@ -21,8 +21,6 @@
 
 extern crate alloc;
 
-#[cfg(feature = "alloy-compat")]
-mod alloy_compat;
 mod block;
 pub mod proofs;
 mod receipt;
@@ -69,7 +67,6 @@ pub use c_kzg as kzg;
 /// Read more: <https://github.com/bincode-org/bincode/issues/326>
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
-    pub use super::transaction::{serde_bincode_compat as transaction, serde_bincode_compat::*};
     pub use reth_primitives_traits::serde_bincode_compat::*;
 }
 
