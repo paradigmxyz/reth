@@ -1,17 +1,20 @@
+extern crate alloc;
+use alloc::sync::Arc;
+
 /// The implementation of forward-only in memory cursor over the entries.
 /// The cursor operates under the assumption that the supplied collection is pre-sorted.
 #[derive(Debug)]
-pub struct ForwardInMemoryCursor<'a, K, V> {
+pub struct ForwardInMemoryCursor<K, V> {
     /// The reference to the pre-sorted collection of entries.
-    entries: &'a Vec<(K, V)>,
+    entries: Arc<Vec<(K, V)>>,
     /// The index where cursor is currently positioned.
     index: usize,
 }
 
-impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
+impl<K, V> ForwardInMemoryCursor<K, V> {
     /// Create new forward cursor positioned at the beginning of the collection.
     /// The cursor expects all of the entries have been sorted in advance.
-    pub const fn new(entries: &'a Vec<(K, V)>) -> Self {
+    pub const fn new(entries: Arc<Vec<(K, V)>>) -> Self {
         Self { entries, index: 0 }
     }
 
@@ -21,7 +24,7 @@ impl<'a, K, V> ForwardInMemoryCursor<'a, K, V> {
     }
 }
 
-impl<K, V> ForwardInMemoryCursor<'_, K, V>
+impl<K, V> ForwardInMemoryCursor<K, V>
 where
     K: PartialOrd + Clone,
     V: Clone,

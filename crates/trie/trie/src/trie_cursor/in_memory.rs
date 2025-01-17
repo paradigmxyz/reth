@@ -7,29 +7,32 @@ use alloy_primitives::{map::HashSet, B256};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
 
+extern crate alloc;
+use alloc::sync::Arc;
+
 /// The trie cursor factory for the trie updates.
 #[derive(Debug, Clone)]
-pub struct InMemoryTrieCursorFactory<'a, CF> {
+pub struct InMemoryTrieCursorFactory<CF> {
     /// Underlying trie cursor factory.
     cursor_factory: CF,
     /// Reference to sorted trie updates.
-    trie_updates: &'a TrieUpdatesSorted,
+    trie_updates: Arc<TrieUpdatesSorted>,
 }
 
-impl<'a, CF> InMemoryTrieCursorFactory<'a, CF> {
+impl<CF> InMemoryTrieCursorFactory<CF> {
     /// Create a new trie cursor factory.
-    pub const fn new(cursor_factory: CF, trie_updates: &'a TrieUpdatesSorted) -> Self {
+    pub const fn new(cursor_factory: CF, trie_updates: Arc<TrieUpdatesSorted>) -> Self {
         Self { cursor_factory, trie_updates }
     }
 }
 
-impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<'a, CF> {
-    type AccountTrieCursor = InMemoryAccountTrieCursor<'a, CF::AccountTrieCursor>;
-    type StorageTrieCursor = InMemoryStorageTrieCursor<'a, CF::StorageTrieCursor>;
+impl<CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<CF> {
+    type AccountTrieCursor = InMemoryAccountTrieCursor<CF::AccountTrieCursor>;
+    type StorageTrieCursor = InMemoryStorageTrieCursor<CF::StorageTrieCursor>;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
         let cursor = self.cursor_factory.account_trie_cursor()?;
-        Ok(InMemoryAccountTrieCursor::new(cursor, self.trie_updates))
+        Ok(InMemoryAccountTrieCursor::new(cursor, self.trie_updates.clone()))
     }
 
     fn storage_trie_cursor(
@@ -40,7 +43,10 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<
         Ok(InMemoryStorageTrieCursor::new(
             hashed_address,
             cursor,
-            self.trie_updates.storage_tries.get(&hashed_address),
+            self.trie_updates
+                .storage_tries
+                .get(&hashed_address)
+                .map(|updates| Arc::new(updates.clone())),
         ))
     }
 }
@@ -48,26 +54,27 @@ impl<'a, CF: TrieCursorFactory> TrieCursorFactory for InMemoryTrieCursorFactory<
 /// The cursor to iterate over account trie updates and corresponding database entries.
 /// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
-pub struct InMemoryAccountTrieCursor<'a, C> {
+pub struct InMemoryAccountTrieCursor<C> {
     /// The underlying cursor.
     cursor: C,
     /// Forward-only in-memory cursor over storage trie nodes.
-    in_memory_cursor: ForwardInMemoryCursor<'a, Nibbles, BranchNodeCompact>,
+    in_memory_cursor: ForwardInMemoryCursor<Nibbles, BranchNodeCompact>,
     /// Collection of removed trie nodes.
-    removed_nodes: &'a HashSet<Nibbles>,
+    removed_nodes: HashSet<Nibbles>,
     /// Last key returned by the cursor.
     last_key: Option<Nibbles>,
 }
 
-impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
+impl<C: TrieCursor> InMemoryAccountTrieCursor<C> {
     /// Create new account trie cursor from underlying cursor and reference to
     /// [`TrieUpdatesSorted`].
-    pub const fn new(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
-        let in_memory_cursor = ForwardInMemoryCursor::new(&trie_updates.account_nodes);
+    pub fn new(cursor: C, trie_updates: Arc<TrieUpdatesSorted>) -> Self {
+        let in_memory_cursor =
+            ForwardInMemoryCursor::new(Arc::new(trie_updates.account_nodes.clone()));
         Self {
             cursor,
             in_memory_cursor,
-            removed_nodes: &trie_updates.removed_nodes,
+            removed_nodes: trie_updates.removed_nodes.clone(),
             last_key: None,
         }
     }
@@ -114,7 +121,7 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
     }
 }
 
-impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
+impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<C> {
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -158,31 +165,32 @@ impl<C: TrieCursor> TrieCursor for InMemoryAccountTrieCursor<'_, C> {
 /// It will always give precedence to the data from the trie updates.
 #[derive(Debug)]
 #[allow(dead_code)]
-pub struct InMemoryStorageTrieCursor<'a, C> {
+pub struct InMemoryStorageTrieCursor<C> {
     /// The hashed address of the account that trie belongs to.
     hashed_address: B256,
     /// The underlying cursor.
     cursor: C,
     /// Forward-only in-memory cursor over storage trie nodes.
-    in_memory_cursor: Option<ForwardInMemoryCursor<'a, Nibbles, BranchNodeCompact>>,
+    in_memory_cursor: Option<ForwardInMemoryCursor<Nibbles, BranchNodeCompact>>,
     /// Reference to the set of removed storage node keys.
-    removed_nodes: Option<&'a HashSet<Nibbles>>,
+    removed_nodes: Option<HashSet<Nibbles>>,
     /// The flag indicating whether the storage trie was cleared.
     storage_trie_cleared: bool,
     /// Last key returned by the cursor.
     last_key: Option<Nibbles>,
 }
 
-impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
+impl<C> InMemoryStorageTrieCursor<C> {
     /// Create new storage trie cursor from underlying cursor and reference to
     /// [`StorageTrieUpdatesSorted`].
     pub fn new(
         hashed_address: B256,
         cursor: C,
-        updates: Option<&'a StorageTrieUpdatesSorted>,
+        updates: Option<Arc<StorageTrieUpdatesSorted>>,
     ) -> Self {
-        let in_memory_cursor = updates.map(|u| ForwardInMemoryCursor::new(&u.storage_nodes));
-        let removed_nodes = updates.map(|u| &u.removed_nodes);
+        let in_memory_cursor =
+            updates.clone().map(|u| ForwardInMemoryCursor::new(Arc::new(u.storage_nodes.clone())));
+        let removed_nodes = updates.clone().map(|u| u.removed_nodes.clone());
         let storage_trie_cleared = updates.is_some_and(|u| u.is_deleted);
         Self {
             hashed_address,
@@ -195,7 +203,7 @@ impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
     }
 }
 
-impl<C: TrieCursor> InMemoryStorageTrieCursor<'_, C> {
+impl<C: TrieCursor> InMemoryStorageTrieCursor<C> {
     fn seek_inner(
         &mut self,
         key: Nibbles,
@@ -243,7 +251,7 @@ impl<C: TrieCursor> InMemoryStorageTrieCursor<'_, C> {
     }
 }
 
-impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<'_, C> {
+impl<C: TrieCursor> TrieCursor for InMemoryStorageTrieCursor<C> {
     fn seek_exact(
         &mut self,
         key: Nibbles,

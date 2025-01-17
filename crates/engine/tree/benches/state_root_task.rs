@@ -23,7 +23,7 @@ use revm_primitives::{
     Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot, HashMap,
     B256, KECCAK_EMPTY, U256,
 };
-use std::{hint::black_box, sync::Arc};
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 struct BenchParams {
@@ -210,7 +210,7 @@ fn bench_state_root(c: &mut Criterion) {
                             ConsistentDbView::new(factory, None),
                             trie_input,
                         );
-                        let provider = config.consistent_view.provider_ro().unwrap();
+                        let provider = Arc::new(config.consistent_view.provider_ro().unwrap());
                         let nodes_sorted = config.nodes_sorted.clone();
                         let state_sorted = config.state_sorted.clone();
                         let prefix_sets = config.prefix_sets.clone();
@@ -246,32 +246,30 @@ fn bench_state_root(c: &mut Criterion) {
                     )| {
                         let blinded_provider_factory = ProofBlindedProviderFactory::new(
                             InMemoryTrieCursorFactory::new(
-                                DatabaseTrieCursorFactory::new(provider.tx_ref()),
-                                &nodes_sorted,
+                                DatabaseTrieCursorFactory::from_provider(provider.clone()),
+                                nodes_sorted,
                             ),
                             HashedPostStateCursorFactory::new(
-                                DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                                &state_sorted,
+                                DatabaseHashedCursorFactory::from_provider(provider),
+                                state_sorted,
                             ),
                             prefix_sets,
                         );
 
-                        black_box(std::thread::scope(|scope| {
-                            let task = StateRootTask::new(
-                                config,
-                                blinded_provider_factory,
-                                state_root_task_pool,
-                            );
-                            let mut hook = task.state_hook();
-                            let handle = task.spawn(scope);
+                        let task = StateRootTask::new(
+                            config,
+                            blinded_provider_factory,
+                            state_root_task_pool,
+                        );
+                        let mut hook = task.state_hook();
+                        let handle = task.spawn();
 
-                            for update in state_updates {
-                                hook.on_state(&update)
-                            }
-                            drop(hook);
+                        for update in state_updates {
+                            hook.on_state(&update)
+                        }
+                        drop(hook);
 
-                            handle.wait_for_result().expect("task failed")
-                        }));
+                        handle.wait_for_result().expect("task failed")
                     },
                 )
             },

@@ -63,7 +63,7 @@ use reth_trie::{
     updates::{StorageTrieUpdates, TrieUpdates},
     HashedPostStateSorted, Nibbles, StateRoot, StoredNibbles,
 };
-use reth_trie_db::{DatabaseStateRoot, DatabaseStorageTrieCursor};
+use reth_trie_db::{DatabaseRef, DatabaseStateRoot, DatabaseStorageTrieCursor};
 use revm::db::states::{
     PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset,
 };
@@ -3148,5 +3148,13 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
     fn prune_modes_ref(&self) -> &PruneModes {
         self.prune_modes_ref()
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> DatabaseRef for DatabaseProvider<TX, N> {
+    type Tx = TX;
+
+    fn tx_reference(&self) -> &Self::Tx {
+        &self.tx
     }
 }

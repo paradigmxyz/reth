@@ -7,6 +7,9 @@ use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
 };
 
+extern crate alloc;
+use alloc::sync::Arc;
+
 #[cfg(feature = "metrics")]
 use reth_trie::metrics::{TrieRootMetrics, TrieType};
 
@@ -34,7 +37,7 @@ pub trait DatabaseHashedStorage<TX>: Sized {
 }
 
 impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
-    for StorageRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
+    for StorageRoot<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn from_tx(tx: &'a TX, address: Address) -> Self {
         Self::new(
@@ -68,7 +71,10 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
             HashedPostState::from_hashed_storage(keccak256(address), hashed_storage).into_sorted();
         StorageRoot::new(
             DatabaseTrieCursorFactory::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(tx),
+                Arc::new(state_sorted),
+            ),
             address,
             prefix_set,
             #[cfg(feature = "metrics")]

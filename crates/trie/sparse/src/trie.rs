@@ -1470,7 +1470,7 @@ mod tests {
             walker,
             HashedPostStateAccountCursor::new(
                 NoopHashedAccountCursor::default(),
-                hashed_post_state.accounts(),
+                hashed_post_state.accounts().clone(),
             ),
         );
 
