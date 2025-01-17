@@ -645,12 +645,26 @@ impl<P> RevealedSparseTrie<P> {
         targets
     }
 
-    fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
+    /// Look up or calculate the RLP of the node at the given path.
+    ///
+    /// # Panics
+    ///
+    /// If the node at provided path does not exist.
+    pub fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
         let mut buffers = RlpNodeBuffers::new_with_path(path);
         self.rlp_node(prefix_set, &mut buffers)
     }
 
-    fn rlp_node(&mut self, prefix_set: &mut PrefixSet, buffers: &mut RlpNodeBuffers) -> RlpNode {
+    /// Look up or calculate the RLP of the node at the given path specified in [`RlpNodeBuffers`].
+    ///
+    /// # Panics
+    ///
+    /// If the node at provided path does not exist.
+    pub fn rlp_node(
+        &mut self,
+        prefix_set: &mut PrefixSet,
+        buffers: &mut RlpNodeBuffers,
+    ) -> RlpNode {
         'main: while let Some((path, mut is_in_prefix_set)) = buffers.path_stack.pop() {
             // Check if the path is in the prefix set.
             // First, check the cached value. If it's `None`, then check the prefix set, and update
@@ -680,7 +694,10 @@ impl<P> RevealedSparseTrie<P> {
                     if let Some((hash, store_in_db_trie)) =
                         hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
                     {
-                        (RlpNode::word_rlp(&hash), SparseNodeType::Extension { store_in_db_trie })
+                        (
+                            RlpNode::word_rlp(&hash),
+                            SparseNodeType::Extension { store_in_db_trie: Some(store_in_db_trie) },
+                        )
                     } else if buffers.rlp_node_stack.last().is_some_and(|e| e.0 == child_path) {
                         let (_, child, child_node_type) = buffers.rlp_node_stack.pop().unwrap();
                         self.rlp_buf.clear();
@@ -697,7 +714,7 @@ impl<P> RevealedSparseTrie<P> {
                             "Extension node"
                         );
 
-                        *store_in_db_trie = Some(store_in_db_trie_value);
+                        *store_in_db_trie = store_in_db_trie_value;
 
                         (
                             rlp_node,
@@ -720,7 +737,7 @@ impl<P> RevealedSparseTrie<P> {
                         buffers.rlp_node_stack.push((
                             path,
                             RlpNode::word_rlp(&hash),
-                            SparseNodeType::Branch { store_in_db_trie },
+                            SparseNodeType::Branch { store_in_db_trie: Some(store_in_db_trie) },
                         ));
                         continue
                     }
@@ -755,17 +772,19 @@ impl<P> RevealedSparseTrie<P> {
                                 let last_child_nibble = child_path.last().unwrap();
 
                                 // Determine whether we need to set trie mask bit.
-                                let should_set_tree_mask_bit =
-                                    // A blinded node has the tree mask bit set
-                                    (
-                                        child_node_type.is_hash() &&
-                                        self.branch_node_tree_masks
-                                            .get(&path)
-                                            .is_some_and(|mask| mask.is_bit_set(last_child_nibble))
-                                    ) ||
+                                let should_set_tree_mask_bit = if let Some(store_in_db_trie) =
+                                    child_node_type.store_in_db_trie()
+                                {
                                     // A branch or an extension node explicitly set the
                                     // `store_in_db_trie` flag
-                                    child_node_type.store_in_db_trie();
+                                    store_in_db_trie
+                                } else {
+                                    // A blinded node has the tree mask bit set
+                                    child_node_type.is_hash() &&
+                                        self.branch_node_tree_masks.get(&path).is_some_and(
+                                            |mask| mask.is_bit_set(last_child_nibble),
+                                        )
+                                };
                                 if should_set_tree_mask_bit {
                                     tree_mask.set_bit(last_child_nibble);
                                 }
@@ -868,7 +887,10 @@ impl<P> RevealedSparseTrie<P> {
                     };
                     *store_in_db_trie = Some(store_in_db_trie_value);
 
-                    (rlp_node, SparseNodeType::Branch { store_in_db_trie: store_in_db_trie_value })
+                    (
+                        rlp_node,
+                        SparseNodeType::Branch { store_in_db_trie: Some(store_in_db_trie_value) },
+                    )
                 }
             };
             buffers.rlp_node_stack.push((path, rlp_node, node_type));
@@ -1213,12 +1235,12 @@ enum SparseNodeType {
     /// Sparse extension node.
     Extension {
         /// A flag indicating whether the extension node should be stored in the database.
-        store_in_db_trie: bool,
+        store_in_db_trie: Option<bool>,
     },
     /// Sparse branch node.
     Branch {
         /// A flag indicating whether the branch node should be stored in the database.
-        store_in_db_trie: bool,
+        store_in_db_trie: Option<bool>,
     },
 }
 
@@ -1231,12 +1253,12 @@ impl SparseNodeType {
         matches!(self, Self::Branch { .. })
     }
 
-    const fn store_in_db_trie(&self) -> bool {
+    const fn store_in_db_trie(&self) -> Option<bool> {
         match *self {
             Self::Extension { store_in_db_trie } | Self::Branch { store_in_db_trie } => {
                 store_in_db_trie
             }
-            _ => false,
+            _ => None,
         }
     }
 }
@@ -1338,7 +1360,7 @@ struct RemovedSparseNode {
 
 /// Collection of reusable buffers for [`RevealedSparseTrie::rlp_node`].
 #[derive(Debug, Default)]
-struct RlpNodeBuffers {
+pub struct RlpNodeBuffers {
     /// Stack of paths we need rlp nodes for and whether the path is in the prefix set.
     path_stack: Vec<(Nibbles, Option<bool>)>,
     /// Stack of rlp nodes
