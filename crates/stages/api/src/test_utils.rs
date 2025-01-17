@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 use crate::{ExecInput, ExecOutput, Stage, StageError, StageId, UnwindInput, UnwindOutput};
+use reth_errors::GenericBlockExecutionError;
 use std::{
     collections::VecDeque,
     sync::{
@@ -13,15 +14,18 @@ use std::{
 ///
 /// This can be used to mock expected outputs of [`Stage::execute`] and [`Stage::unwind`]
 #[derive(Debug)]
-pub struct TestStage {
+pub struct TestStage<E: GenericBlockExecutionError> {
     id: StageId,
-    exec_outputs: VecDeque<Result<ExecOutput, StageError>>,
-    unwind_outputs: VecDeque<Result<UnwindOutput, StageError>>,
+    exec_outputs: VecDeque<Result<ExecOutput, StageError<E>>>,
+    unwind_outputs: VecDeque<Result<UnwindOutput, StageError<E>>>,
     post_execute_commit_counter: Arc<AtomicUsize>,
     post_unwind_commit_counter: Arc<AtomicUsize>,
 }
 
-impl TestStage {
+impl<E> TestStage<E>
+where
+    E: GenericBlockExecutionError,
+{
     pub fn new(id: StageId) -> Self {
         Self {
             id,

@@ -16,7 +16,9 @@ mod error;
 pub use error::{RethError, RethResult};
 
 pub use reth_consensus::ConsensusError;
-pub use reth_execution_errors::{BlockExecutionError, BlockValidationError};
+pub use reth_execution_errors::{
+    BlockExecutionError, BlockValidationError, GenericBlockExecutionError,
+};
 pub use reth_storage_errors::{
     db::DatabaseError,
     provider::{ProviderError, ProviderResult},

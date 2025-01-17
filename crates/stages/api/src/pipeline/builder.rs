@@ -1,14 +1,18 @@
 use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageId, StageSet};
 use alloy_primitives::{BlockNumber, B256};
+use reth_errors::GenericBlockExecutionError;
 use reth_provider::{providers::ProviderNodeTypes, DatabaseProviderFactory, ProviderFactory};
 use reth_static_file::StaticFileProducer;
 use tokio::sync::watch;
 
 /// Builds a [`Pipeline`].
 #[must_use = "call `build` to construct the pipeline"]
-pub struct PipelineBuilder<Provider> {
+pub struct PipelineBuilder<Provider, E>
+where
+    E: GenericBlockExecutionError,
+{
     /// All configured stages in the order they will be executed.
-    stages: Vec<BoxedStage<Provider>>,
+    stages: Vec<BoxedStage<Provider, E>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
     /// A receiver for the current chain tip to sync to.

@@ -1,5 +1,6 @@
 use crate::{error::StageError, StageCheckpoint, StageId};
 use alloy_primitives::{BlockNumber, TxNumber};
+use reth_errors::GenericBlockExecutionError;
 use reth_provider::{BlockReader, ProviderError};
 use std::{
     cmp::{max, min},
@@ -190,7 +191,10 @@ pub struct UnwindOutput {
 ///
 /// Stages receive [`DBProvider`](reth_provider::DBProvider).
 #[auto_impl::auto_impl(Box)]
-pub trait Stage<Provider>: Send + Sync {
+pub trait Stage<Provider, E>: Send + Sync
+where
+    E: GenericBlockExecutionError,
+{
     /// Get the ID of the stage.
     ///
     /// Stage IDs must be unique.
@@ -224,21 +228,25 @@ pub trait Stage<Provider>: Send + Sync {
         &mut self,
         _cx: &mut Context<'_>,
         _input: ExecInput,
-    ) -> Poll<Result<(), StageError>> {
+    ) -> Poll<Result<(), StageError<Self::Error>>> {
         Poll::Ready(Ok(()))
     }
 
     /// Execute the stage.
     /// It is expected that the stage will write all necessary data to the database
     /// upon invoking this method.
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError>;
+    fn execute(
+        &mut self,
+        provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError<Self::Error>>;
 
     /// Post execution commit hook.
     ///
     /// This is called after the stage has been executed and the data has been committed by the
     /// provider. The stage may want to pass some data from [`Self::execute`] via the internal
     /// field.
-    fn post_execute_commit(&mut self) -> Result<(), StageError> {
+    fn post_execute_commit(&mut self) -> Result<(), StageError<Self::Error>> {
         Ok(())
     }
 
@@ -247,14 +255,14 @@ pub trait Stage<Provider>: Send + Sync {
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError>;
+    ) -> Result<UnwindOutput, StageError<Self::Error>>;
 
     /// Post unwind commit hook.
     ///
     /// This is called after the stage has been unwound and the data has been committed by the
     /// provider. The stage may want to pass some data from [`Self::unwind`] via the internal
     /// field.
-    fn post_unwind_commit(&mut self) -> Result<(), StageError> {
+    fn post_unwind_commit(&mut self) -> Result<(), StageError<Self::Error>> {
         Ok(())
     }
 }

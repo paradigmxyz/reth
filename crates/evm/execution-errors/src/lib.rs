@@ -17,6 +17,7 @@ use alloc::{
 };
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
+use core::fmt::Display;
 use reth_consensus::ConsensusError;
 use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
@@ -134,6 +135,21 @@ pub enum BlockExecutionError {
     Internal(#[from] InternalBlockExecutionError),
 }
 
+/// Generic block execution error.
+pub trait GenericBlockExecutionError:
+    Display + From<ConsensusError> + From<BlockExecutionError>
+{
+    /// Returns `true` if the error is a state root error.
+    fn is_state_root_error(&self) -> bool;
+}
+
+impl GenericBlockExecutionError for BlockExecutionError {
+    /// Returns `true` if the error is a state root error.
+    fn is_state_root_error(&self) -> bool {
+        matches!(self, Self::Validation(BlockValidationError::StateRoot(_)))
+    }
+}
+
 impl BlockExecutionError {
     /// Create a new [`BlockExecutionError::Internal`] variant, containing a
     /// [`InternalBlockExecutionError::Other`] error.
@@ -156,11 +172,6 @@ impl BlockExecutionError {
             Self::Validation(err) => Some(err),
             _ => None,
         }
-    }
-
-    /// Returns `true` if the error is a state root error.
-    pub const fn is_state_root_error(&self) -> bool {
-        matches!(self, Self::Validation(BlockValidationError::StateRoot(_)))
     }
 }
 

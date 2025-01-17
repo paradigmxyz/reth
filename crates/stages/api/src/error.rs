@@ -1,7 +1,7 @@
 use crate::PipelineEvent;
 use alloy_eips::eip1898::BlockWithParent;
 use reth_consensus::ConsensusError;
-use reth_errors::{BlockExecutionError, DatabaseError, RethError};
+use reth_errors::{DatabaseError, GenericBlockExecutionError, RethError};
 use reth_network_p2p::error::DownloadError;
 use reth_provider::ProviderError;
 use reth_prune::{PruneSegment, PruneSegmentError, PrunerError};
@@ -11,18 +11,21 @@ use tokio::sync::broadcast::error::SendError;
 
 /// Represents the specific error type within a block error.
 #[derive(Error, Debug)]
-pub enum BlockErrorKind {
+pub enum BlockErrorKind<E: GenericBlockExecutionError> {
     /// The block encountered a validation error.
     #[error("validation error: {0}")]
     Validation(#[from] ConsensusError),
     /// The block encountered an execution error.
     #[error("execution error: {0}")]
-    Execution(#[from] BlockExecutionError),
+    Execution(E),
 }
 
-impl BlockErrorKind {
+impl<E> BlockErrorKind<E>
+where
+    E: GenericBlockExecutionError,
+{
     /// Returns `true` if the error is a state root error.
-    pub const fn is_state_root_error(&self) -> bool {
+    pub fn is_state_root_error(&self) -> bool {
         match self {
             Self::Validation(err) => err.is_state_root_error(),
             Self::Execution(err) => err.is_state_root_error(),
@@ -32,7 +35,7 @@ impl BlockErrorKind {
 
 /// A stage execution error.
 #[derive(Error, Debug)]
-pub enum StageError {
+pub enum StageError<E: GenericBlockExecutionError> {
     /// The stage encountered an error related to a block.
     #[error("stage encountered an error in block #{number}: {error}", number = block.block.number)]
     Block {
@@ -40,7 +43,7 @@ pub enum StageError {
         block: Box<BlockWithParent>,
         /// The specific error type, either consensus or execution error.
         #[source]
-        error: BlockErrorKind,
+        error: BlockErrorKind<E>,
     },
     /// The stage encountered a downloader error where the responses cannot be attached to the
     /// current head.
@@ -121,7 +124,10 @@ pub enum StageError {
     Fatal(Box<dyn core::error::Error + Send + Sync>),
 }
 
-impl StageError {
+impl<E> StageError<E>
+where
+    E: GenericBlockExecutionError,
+{
     /// If the error is fatal the pipeline will stop.
     pub const fn is_fatal(&self) -> bool {
         matches!(
@@ -139,7 +145,10 @@ impl StageError {
     }
 }
 
-impl From<std::io::Error> for StageError {
+impl<E> From<std::io::Error> for StageError<E>
+where
+    E: GenericBlockExecutionError,
+{
     fn from(source: std::io::Error) -> Self {
         Self::Fatal(Box::new(source))
     }
@@ -147,10 +156,10 @@ impl From<std::io::Error> for StageError {
 
 /// A pipeline execution error.
 #[derive(Error, Debug)]
-pub enum PipelineError {
+pub enum PipelineError<E: GenericBlockExecutionError> {
     /// The pipeline encountered an irrecoverable error in one of the stages.
     #[error(transparent)]
-    Stage(#[from] StageError),
+    Stage(#[from] StageError<E>),
     /// The pipeline encountered a database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),

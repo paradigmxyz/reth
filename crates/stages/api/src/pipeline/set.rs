@@ -1,3 +1,5 @@
+use reth_errors::GenericBlockExecutionError;
+
 use crate::{Stage, StageId};
 use std::{
     collections::HashMap,
@@ -10,7 +12,10 @@ use std::{
 /// individual stage sets to determine what kind of configuration they expose.
 ///
 /// Individual stages in the set can be added, removed and overridden using [`StageSetBuilder`].
-pub trait StageSet<Provider>: Sized {
+pub trait StageSet<Provider, E>: Sized
+where
+    E: GenericBlockExecutionError,
+{
     /// Configures the stages in the set.
     fn builder(self) -> StageSetBuilder<Provider>;
 
@@ -19,17 +24,23 @@ pub trait StageSet<Provider>: Sized {
     /// # Panics
     ///
     /// Panics if the [`Stage`] is not in this set.
-    fn set<S: Stage<Provider> + 'static>(self, stage: S) -> StageSetBuilder<Provider> {
+    fn set<S: Stage<Provider, E> + 'static>(self, stage: S) -> StageSetBuilder<Provider> {
         self.builder().set(stage)
     }
 }
 
-struct StageEntry<Provider> {
-    stage: Box<dyn Stage<Provider>>,
+struct StageEntry<Provider, E>
+where
+    E: GenericBlockExecutionError,
+{
+    stage: Box<dyn Stage<Provider, E>>,
     enabled: bool,
 }
 
-impl<Provider> Debug for StageEntry<Provider> {
+impl<Provider, E> Debug for StageEntry<Provider, E>
+where
+    E: GenericBlockExecutionError,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StageEntry")
             .field("stage", &self.stage.id())

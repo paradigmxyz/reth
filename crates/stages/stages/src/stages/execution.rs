@@ -360,7 +360,7 @@ where
                             header.parent_hash(),
                             NumHash::new(header.number(), header.hash_slow()),
                         )),
-                        error: BlockErrorKind::Execution(error),
+                        error: BlockErrorKind::<E::Error>::Execution(error),
                     }
                 })
             })?;

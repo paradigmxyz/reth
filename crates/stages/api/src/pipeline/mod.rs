@@ -28,11 +28,11 @@ use crate::{
 };
 pub use builder::*;
 use progress::*;
-use reth_errors::RethResult;
+use reth_errors::{GenericBlockExecutionError, RethResult};
 pub use set::*;
 
 /// A container for a queued stage.
-pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
+pub(crate) type BoxedStage<DB, Error> = Box<dyn Stage<DB, Error>>;
 
 /// The future that returns the owned pipeline and the result of the pipeline run. See
 /// [`Pipeline::run_as_fut`].
@@ -494,12 +494,12 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     }
 }
 
-fn on_stage_error<N: ProviderNodeTypes>(
+fn on_stage_error<N: ProviderNodeTypes, E: GenericBlockExecutionError>(
     factory: &ProviderFactory<N>,
     stage_id: StageId,
     prev_checkpoint: Option<StageCheckpoint>,
-    err: StageError,
-) -> Result<Option<ControlFlow>, PipelineError> {
+    err: StageError<E>,
+) -> Result<Option<ControlFlow>, PipelineError<E>> {
     if let StageError::DetachedHead { local_head, header, error } = err {
         warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, %error, "Stage encountered detached head");
 
