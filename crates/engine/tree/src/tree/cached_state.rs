@@ -1,4 +1,6 @@
 //! Implements a state provider that has a shared cache in front of it.
+use std::time::Instant;
+
 use alloy_primitives::{map::B256HashMap, Address, StorageKey, StorageValue, B256};
 use metrics::Gauge;
 use moka::{sync::CacheBuilder, PredicateError};
@@ -61,6 +63,7 @@ impl<S> CachedStateProvider<S> {
         state_updates: &BundleState,
     ) -> Result<SavedCache, PredicateError> {
         let Self { caches, metrics, state_provider: _ } = self;
+        let start = Instant::now();
 
         for (addr, account) in &state_updates.state {
             // If the account was not modified, as in not changed and not destroyed, then we have
@@ -111,6 +114,13 @@ impl<S> CachedStateProvider<S> {
         caches.account_cache.run_pending_tasks();
         caches.code_cache.run_pending_tasks();
 
+        // set metrics
+        metrics.storage_cache_size.set(caches.storage_cache.entry_count() as f64);
+        metrics.account_cache_size.set(caches.account_cache.entry_count() as f64);
+        metrics.code_cache_size.set(caches.code_cache.entry_count() as f64);
+
+        tracing::debug!(target: "engine::caching", update_latency=?start.elapsed(), "Updated state caches");
+
         // create a saved cache with the executed block hash, same metrics, and updated caches
         let saved_cache = SavedCache { hash: executed_block_hash, caches, metrics };
 
@@ -128,17 +138,35 @@ pub(crate) struct CachedStateMetrics {
     /// Code cache misses
     code_cache_misses: Gauge,
 
+    /// Storage cache size
+    ///
+    /// NOTE: this uses the moka caches' `entry_count`, NOT the `weighted_size` method to calculate
+    /// size.
+    code_cache_size: Gauge,
+
     /// Storage cache hits
     storage_cache_hits: Gauge,
 
     /// Storage cache misses
     storage_cache_misses: Gauge,
 
+    /// Storage cache size
+    ///
+    /// NOTE: this uses the moka caches' `entry_count`, NOT the `weighted_size` method to calculate
+    /// size.
+    storage_cache_size: Gauge,
+
     /// Account cache hits
     account_cache_hits: Gauge,
 
     /// Account cache misses
     account_cache_misses: Gauge,
+
+    /// Account cache size
+    ///
+    /// NOTE: this uses the moka caches' `entry_count`, NOT the `weighted_size` method to calculate
+    /// size.
+    account_cache_size: Gauge,
 }
 
 impl CachedStateMetrics {
