@@ -3,33 +3,31 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 #[cfg(feature = "optimism")]
 use reth::revm::primitives::OptimismFields;
 use reth::{
-    api::{ConfigureEvm, ConfigureEvmEnv, NodeTypesWithEngine},
+    api::{ConfigureEvm, NodeTypesWithEngine},
     builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
     cli::Cli,
     providers::ProviderError,
     revm::{
         interpreter::Host,
-        primitives::{address, Address, Bytes, Env, EnvWithHandlerCfg, TransactTo, TxEnv, U256},
+        primitives::{address, Address, Bytes, Env, TransactTo, TxEnv, U256},
         Database, DatabaseCommit, Evm, State,
     },
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_evm::{
-    env::EvmEnv,
-    execute::{
-        BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
-        InternalBlockExecutionError,
-    },
+use reth_evm::execute::{
+    BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
+    InternalBlockExecutionError,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
+use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
 use std::{fmt::Display, sync::Arc};
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
@@ -121,22 +119,6 @@ where
     state: State<DB>,
 }
 
-impl<DB> CustomExecutorStrategy<DB>
-where
-    DB: Database<Error: Into<ProviderError> + Display>,
-{
-    /// Configures a new evm configuration and block environment for the given block.
-    ///
-    /// # Caution
-    ///
-    /// This does not initialize the tx environment.
-    fn evm_env_for_block(&self, header: &alloy_consensus::Header) -> EnvWithHandlerCfg {
-        let evm_env = self.evm_config.cfg_and_block_env(header);
-        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
-        EnvWithHandlerCfg::new_with_cfg_env(cfg_env_with_handler_cfg, block_env, Default::default())
-    }
-}
-
 impl<DB> BlockExecutionStrategy for CustomExecutorStrategy<DB>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
@@ -145,10 +127,13 @@ where
     type Primitives = EthPrimitives;
     type Error = BlockExecutionError;
 
-    fn apply_pre_execution_changes(&mut self, block: &BlockWithSenders) -> Result<(), Self::Error> {
+    fn apply_pre_execution_changes(
+        &mut self,
+        block: &RecoveredBlock<reth_primitives::Block>,
+    ) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
-            (*self.chain_spec).is_spurious_dragon_active_at_block(block.header.number);
+            (*self.chain_spec).is_spurious_dragon_active_at_block(block.number());
         self.state.set_state_clear_flag(state_clear_flag);
 
         Ok(())
@@ -156,20 +141,19 @@ where
 
     fn execute_transactions(
         &mut self,
-        _block: &BlockWithSenders,
+        _block: &RecoveredBlock<reth_primitives::Block>,
     ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
         Ok(ExecuteOutput { receipts: vec![], gas_used: 0 })
     }
 
     fn apply_post_execution_changes(
         &mut self,
-        block: &BlockWithSenders,
+        block: &RecoveredBlock<reth_primitives::Block>,
         _receipts: &[Receipt],
     ) -> Result<Requests, Self::Error> {
-        let env = self.evm_env_for_block(&block.header);
-        let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
+        let mut evm = self.evm_config.evm_for_block(&mut self.state, block.header());
 
-        if let Some(withdrawals) = block.body.withdrawals.as_ref() {
+        if let Some(withdrawals) = block.body().withdrawals.as_ref() {
             apply_withdrawals_contract_call(withdrawals, &mut evm)?;
         }
 

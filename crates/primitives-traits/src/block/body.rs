@@ -1,10 +1,11 @@
 //! Block body abstraction.
 
 use crate::{
-    BlockHeader, FullSignedTx, InMemorySize, MaybeSerde, MaybeSerdeBincodeCompat, SignedTransaction,
+    transaction::signed::RecoveryError, BlockHeader, FullSignedTx, InMemorySize, MaybeSerde,
+    MaybeSerdeBincodeCompat, SignedTransaction,
 };
 use alloc::{fmt, vec::Vec};
-use alloy_consensus::{Header, Transaction};
+use alloy_consensus::{Header, Transaction, Typed2718};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, B256};
 
@@ -13,10 +14,10 @@ pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincod
 
 impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
 
-#[cfg(feature = "rayon")]
-use rayon::prelude::*;
-
 /// Abstraction for block's body.
+///
+/// This type is a container for everything that is included in a block except the header.
+/// For ethereum this includes transactions, ommers, and withdrawals.
 pub trait BlockBody:
     Send
     + Sync
@@ -50,8 +51,14 @@ pub trait BlockBody:
     fn transaction_count(&self) -> usize {
         self.transactions().len()
     }
+
     /// Consume the block body and return a [`Vec`] of transactions.
     fn into_transactions(self) -> Vec<Self::Transaction>;
+
+    /// Returns `true` if the block body contains a transaction of the given type.
+    fn contains_transaction_type(&self, tx_type: u8) -> bool {
+        self.transactions().iter().any(|tx| tx.is_type(tx_type))
+    }
 
     /// Calculate the transaction root for the block body.
     fn calculate_tx_root(&self) -> B256 {
@@ -115,14 +122,17 @@ pub trait BlockBody:
     where
         Self::Transaction: SignedTransaction,
     {
-        #[cfg(feature = "rayon")]
-        {
-            self.transactions().into_par_iter().map(|tx| tx.recover_signer()).collect()
-        }
-        #[cfg(not(feature = "rayon"))]
-        {
-            self.transactions().iter().map(|tx| tx.recover_signer()).collect()
-        }
+        crate::transaction::recover::recover_signers(self.transactions())
+    }
+
+    /// Recover signer addresses for all transactions in the block body.
+    ///
+    /// Returns an error if some transaction's signature is invalid.
+    fn try_recover_signers(&self) -> Result<Vec<Address>, RecoveryError>
+    where
+        Self::Transaction: SignedTransaction,
+    {
+        self.recover_signers().ok_or(RecoveryError)
     }
 
     /// Recover signer addresses for all transactions in the block body _without ensuring that the
@@ -133,14 +143,18 @@ pub trait BlockBody:
     where
         Self::Transaction: SignedTransaction,
     {
-        #[cfg(feature = "rayon")]
-        {
-            self.transactions().into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
-        }
-        #[cfg(not(feature = "rayon"))]
-        {
-            self.transactions().iter().map(|tx| tx.recover_signer_unchecked()).collect()
-        }
+        crate::transaction::recover::recover_signers_unchecked(self.transactions())
+    }
+
+    /// Recover signer addresses for all transactions in the block body _without ensuring that the
+    /// signature has a low `s` value_.
+    ///
+    /// Returns an error if some transaction's signature is invalid.
+    fn try_recover_signers_unchecked(&self) -> Result<Vec<Address>, RecoveryError>
+    where
+        Self::Transaction: SignedTransaction,
+    {
+        self.recover_signers_unchecked().ok_or(RecoveryError)
     }
 }
 

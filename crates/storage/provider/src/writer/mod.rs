@@ -143,9 +143,9 @@ where
         }
 
         // NOTE: checked non-empty above
-        let first_block = blocks.first().unwrap().block();
+        let first_block = blocks.first().unwrap().recovered_block();
 
-        let last_block = blocks.last().unwrap().block();
+        let last_block = blocks.last().unwrap().recovered_block();
         let first_number = first_block.number();
         let last_block_number = last_block.number();
 
@@ -160,16 +160,14 @@ where
         //  * trie updates (cannot naively extend, need helper)
         //  * indices (already done basically)
         // Insert the blocks
-        for ExecutedBlock { block, senders, execution_output, hashed_state, trie } in blocks {
-            let sealed_block = Arc::unwrap_or_clone(block)
-                .try_with_senders_unchecked(Arc::unwrap_or_clone(senders))
-                .unwrap();
-            self.database().insert_block(sealed_block, StorageLocation::Both)?;
+        for ExecutedBlock { recovered_block, execution_output, hashed_state, trie } in blocks {
+            self.database()
+                .insert_block(Arc::unwrap_or_clone(recovered_block), StorageLocation::Both)?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
             self.database().write_state(
-                Arc::unwrap_or_clone(execution_output),
+                &execution_output,
                 OriginalValuesKnown::No,
                 StorageLocation::StaticFiles,
             )?;
@@ -273,10 +271,13 @@ mod tests {
             for address in addresses {
                 let hashed_address = keccak256(address);
                 accounts_cursor
-                    .insert(hashed_address, Account { nonce: 1, ..Default::default() })
+                    .insert(hashed_address, &Account { nonce: 1, ..Default::default() })
                     .unwrap();
                 storage_cursor
-                    .insert(hashed_address, StorageEntry { key: hashed_slot, value: U256::from(1) })
+                    .insert(
+                        hashed_address,
+                        &StorageEntry { key: hashed_slot, value: U256::from(1) },
+                    )
                     .unwrap();
             }
             provider_rw.commit().unwrap();
@@ -496,7 +497,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
         provider
-            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         // Check plain storage state
@@ -596,7 +597,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 2, Vec::new());
         provider
-            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         assert_eq!(
@@ -663,7 +664,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
         provider
-            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -811,7 +812,7 @@ mod tests {
         let outcome: ExecutionOutcome =
             ExecutionOutcome::new(bundle, Receipts::default(), 1, Vec::new());
         provider
-            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider
@@ -976,7 +977,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(init_state.take_bundle(), Receipts::default(), 0, Vec::new());
         provider
-            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut state = State::builder().with_bundle_update().build();
@@ -1023,7 +1024,7 @@ mod tests {
         let outcome =
             ExecutionOutcome::new(state.take_bundle(), Receipts::default(), 1, Vec::new());
         provider
-            .write_state(outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
+            .write_state(&outcome, OriginalValuesKnown::Yes, StorageLocation::Database)
             .expect("Could not write bundle state to DB");
 
         let mut storage_changeset_cursor = provider

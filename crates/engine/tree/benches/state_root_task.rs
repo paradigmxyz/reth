@@ -23,7 +23,7 @@ use revm_primitives::{
     Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot, HashMap,
     B256, KECCAK_EMPTY, U256,
 };
-use std::hint::black_box;
+use std::{hint::black_box, sync::Arc};
 
 #[derive(Debug, Clone)]
 struct BenchParams {
@@ -217,11 +217,13 @@ fn bench_state_root(c: &mut Criterion) {
                         let num_threads = std::thread::available_parallelism()
                             .map_or(1, |num| (num.get() / 2).max(1));
 
-                        let state_root_task_pool = rayon::ThreadPoolBuilder::new()
-                            .num_threads(num_threads)
-                            .thread_name(|i| format!("proof-worker-{}", i))
-                            .build()
-                            .expect("Failed to create proof worker thread pool");
+                        let state_root_task_pool = Arc::new(
+                            rayon::ThreadPoolBuilder::new()
+                                .num_threads(num_threads)
+                                .thread_name(|i| format!("proof-worker-{}", i))
+                                .build()
+                                .expect("Failed to create proof worker thread pool"),
+                        );
 
                         (
                             config,
@@ -258,7 +260,7 @@ fn bench_state_root(c: &mut Criterion) {
                             let task = StateRootTask::new(
                                 config,
                                 blinded_provider_factory,
-                                &state_root_task_pool,
+                                state_root_task_pool,
                             );
                             let mut hook = task.state_hook();
                             let handle = task.spawn(scope);

@@ -9,8 +9,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod payload;
-use std::sync::Arc;
-
 use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError};
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
@@ -24,8 +22,9 @@ use reth_payload_primitives::{
     PayloadOrAttributes, PayloadTypes,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Block, NodePrimitives, SealedBlock, SealedBlockFor};
+use reth_primitives::{Block, NodePrimitives, SealedBlock};
 use reth_rpc_types_compat::engine::payload::block_to_payload;
+use std::sync::Arc;
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -55,7 +54,7 @@ where
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
 
     fn block_to_payload(
-        block: SealedBlockFor<
+        block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> (ExecutionPayload, ExecutionPayloadSidecar) {

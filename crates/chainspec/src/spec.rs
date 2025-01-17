@@ -1,6 +1,6 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 
-use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec, LazyLock, OnceLock};
+use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec};
 use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
@@ -28,7 +28,10 @@ use reth_network_peers::{
     base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
     sepolia_nodes, NodeRecord,
 };
-use reth_primitives_traits::SealedHeader;
+use reth_primitives_traits::{
+    sync::{LazyLock, OnceLock},
+    SealedHeader,
+};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
@@ -608,7 +611,7 @@ impl ChainSpec {
                             return Some(block_num);
                         }
                     }
-                    ForkCondition::Block(_) | ForkCondition::Never => continue,
+                    ForkCondition::Block(_) | ForkCondition::Never => {}
                 }
             }
         }
@@ -762,6 +765,10 @@ impl Hardforks for ChainSpec {
 }
 
 impl EthereumHardforks for ChainSpec {
+    fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
+        self.fork(fork)
+    }
+
     fn get_final_paris_total_difficulty(&self) -> Option<U256> {
         self.get_final_paris_total_difficulty()
     }

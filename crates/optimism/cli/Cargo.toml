@@ -83,7 +83,6 @@ optimism = [
 	"alloy-consensus",
 	"dep:derive_more",
 	"dep:serde",
-	"reth-primitives/optimism",
 	"reth-optimism-evm/optimism",
 	"reth-provider/optimism",
 	"reth-node-core/optimism",

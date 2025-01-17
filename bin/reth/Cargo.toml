@@ -31,12 +31,10 @@ reth-stages.workspace = true
 reth-execution-types.workspace = true
 reth-errors.workspace = true
 reth-transaction-pool.workspace = true
-reth-beacon-consensus.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-commands.workspace = true
 reth-cli-util.workspace = true
 reth-consensus-common.workspace = true
-reth-blockchain-tree.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc.workspace = true
 reth-rpc-types-compat.workspace = true
@@ -64,7 +62,6 @@ reth-node-builder.workspace = true
 reth-node-events.workspace = true
 reth-node-metrics.workspace = true
 reth-consensus.workspace = true
-reth-engine-util.workspace = true
 reth-prune.workspace = true
 
 # crypto
@@ -120,6 +117,12 @@ jemalloc-prof = [
 	"reth-cli-util/jemalloc-prof"
 ]
 tracy-allocator = ["reth-cli-util/tracy-allocator"]
+
+# Because jemalloc is default and preferred over snmalloc when both features are
+# enabled, `--no-default-features` should be used when enabling snmalloc or
+# snmalloc-native.
+snmalloc = ["reth-cli-util/snmalloc"]
+snmalloc-native = ["reth-cli-util/snmalloc-native"]
 
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]

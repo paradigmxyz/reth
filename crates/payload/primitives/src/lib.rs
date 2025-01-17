@@ -8,6 +8,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use alloy_primitives::Bytes;
+use reth_chainspec::EthereumHardforks;
+
 mod error;
 pub use error::{
     EngineObjectValidationError, InvalidPayloadAttributesError, PayloadBuilderError,
@@ -24,7 +27,6 @@ pub use traits::{
 mod payload;
 pub use payload::PayloadOrAttributes;
 
-use reth_chainspec::EthereumHardforks;
 /// The types that are used by the engine API.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static {
     /// The built payload type.
@@ -363,12 +365,85 @@ pub enum PayloadKind {
     WaitForPending,
 }
 
+/// Validates that execution requests are valid according to Engine API specification.
+///
+/// `executionRequests`: `Array of DATA` - List of execution layer triggered requests. Each list
+/// element is a `requests` byte array as defined by [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685).
+/// The first byte of each element is the `request_type` and the remaining bytes are the
+/// `request_data`. Elements of the list **MUST** be ordered by `request_type` in ascending order.
+/// Elements with empty `request_data` **MUST** be excluded from the list. If any element is out of
+/// order or has a length of 1-byte or shorter, client software **MUST** return `-32602: Invalid
+/// params` error.
+pub fn validate_execution_requests(requests: &[Bytes]) -> Result<(), EngineObjectValidationError> {
+    let mut last_request_type = None;
+    for request in requests {
+        if request.len() <= 1 {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "empty execution request".to_string().into(),
+            ))
+        }
+
+        let request_type = request[0];
+        if Some(request_type) < last_request_type {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "execution requests out of order".to_string().into(),
+            ))
+        }
+
+        last_request_type = Some(request_type);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
 
     #[test]
     fn version_ord() {
         assert!(EngineApiMessageVersion::V4 > EngineApiMessageVersion::V3);
+    }
+
+    #[test]
+    fn execution_requests_validation() {
+        assert_matches!(validate_execution_requests(&[]), Ok(()));
+
+        let valid_requests = [
+            Bytes::from_iter([1, 2]),
+            Bytes::from_iter([2, 3]),
+            Bytes::from_iter([3, 4]),
+            Bytes::from_iter([4, 5]),
+        ];
+        assert_matches!(validate_execution_requests(&valid_requests), Ok(()));
+
+        let requests_with_empty = [
+            Bytes::from_iter([1, 2]),
+            Bytes::from_iter([2, 3]),
+            Bytes::new(),
+            Bytes::from_iter([3, 4]),
+        ];
+        assert_matches!(
+            validate_execution_requests(&requests_with_empty),
+            Err(EngineObjectValidationError::InvalidParams(_))
+        );
+
+        let mut requests_valid_reversed = valid_requests;
+        requests_valid_reversed.reverse();
+        assert_matches!(
+            validate_execution_requests(&requests_with_empty),
+            Err(EngineObjectValidationError::InvalidParams(_))
+        );
+
+        let requests_out_of_order = [
+            Bytes::from_iter([1, 2]),
+            Bytes::from_iter([2, 3]),
+            Bytes::from_iter([4, 5]),
+            Bytes::from_iter([3, 4]),
+        ];
+        assert_matches!(
+            validate_execution_requests(&requests_out_of_order),
+            Err(EngineObjectValidationError::InvalidParams(_))
+        );
     }
 }

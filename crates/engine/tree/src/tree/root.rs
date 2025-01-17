@@ -1,6 +1,6 @@
 //! State root task related functionality.
 
-use alloy_primitives::{map::HashSet, Address};
+use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
@@ -17,7 +17,7 @@ use reth_trie::{
 use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
-    errors::{SparseStateTrieError, SparseStateTrieResult, SparseTrieError, SparseTrieErrorKind},
+    errors::{SparseStateTrieError, SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie,
 };
 use revm_primitives::{keccak256, EvmState, B256};
@@ -101,7 +101,7 @@ impl<Factory> StateRootConfig<Factory> {
 #[derive(Debug)]
 pub enum StateRootMessage<BPF: BlindedProviderFactory> {
     /// Prefetch proof targets
-    PrefetchProofs(HashSet<Address>),
+    PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
@@ -260,7 +260,7 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 /// to the tree.
 /// Then it updates relevant leaves according to the result of the transaction.
 #[derive(Debug)]
-pub struct StateRootTask<'env, Factory, BPF: BlindedProviderFactory> {
+pub struct StateRootTask<Factory, BPF: BlindedProviderFactory> {
     /// Task configuration.
     config: StateRootConfig<Factory>,
     /// Receiver for state root related messages.
@@ -275,10 +275,10 @@ pub struct StateRootTask<'env, Factory, BPF: BlindedProviderFactory> {
     /// progress.
     sparse_trie: Option<Box<SparseStateTrie<BPF>>>,
     /// Reference to the shared thread pool for parallel proof generation
-    thread_pool: &'env rayon::ThreadPool,
+    thread_pool: Arc<rayon::ThreadPool>,
 }
 
-impl<'env, Factory, ABP, SBP, BPF> StateRootTask<'env, Factory, BPF>
+impl<'env, Factory, BPF> StateRootTask<Factory, BPF>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader>
         + StateCommitmentProvider
@@ -286,18 +286,15 @@ where
         + Send
         + Sync
         + 'static,
-    ABP: BlindedProvider<Error = SparseTrieError> + Send + Sync + 'env,
-    SBP: BlindedProvider<Error = SparseTrieError> + Send + Sync + 'env,
-    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP>
-        + Send
-        + Sync
-        + 'env,
+    BPF: BlindedProviderFactory + Send + Sync + 'env,
+    BPF::AccountNodeProvider: BlindedProvider + Send + Sync + 'env,
+    BPF::StorageNodeProvider: BlindedProvider + Send + Sync + 'env,
 {
     /// Creates a new state root task with the unified message channel
     pub fn new(
         config: StateRootConfig<Factory>,
         blinded_provider: BPF,
-        thread_pool: &'env rayon::ThreadPool,
+        thread_pool: Arc<rayon::ThreadPool>,
     ) -> Self {
         let (tx, rx) = channel();
 
@@ -343,21 +340,19 @@ where
     fn on_prefetch_proof(
         scope: &rayon::Scope<'env>,
         config: StateRootConfig<Factory>,
-        targets: HashSet<Address>,
+        targets: MultiProofTargets,
         fetched_proof_targets: &mut MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
-        thread_pool: &'env rayon::ThreadPool,
+        thread_pool: Arc<rayon::ThreadPool>,
     ) {
-        let proof_targets =
-            targets.into_iter().map(|address| (keccak256(address), Default::default())).collect();
-        extend_multi_proof_targets_ref(fetched_proof_targets, &proof_targets);
+        extend_multi_proof_targets_ref(fetched_proof_targets, &targets);
 
         Self::spawn_multiproof(
             scope,
             config,
             Default::default(),
-            proof_targets,
+            targets,
             proof_sequence_number,
             state_root_message_sender,
             thread_pool,
@@ -374,7 +369,7 @@ where
         fetched_proof_targets: &mut MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
-        thread_pool: &'env rayon::ThreadPool,
+        thread_pool: Arc<rayon::ThreadPool>,
     ) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
@@ -399,7 +394,7 @@ where
         proof_targets: MultiProofTargets,
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage<BPF>>,
-        thread_pool: &'env rayon::ThreadPool,
+        thread_pool: Arc<rayon::ThreadPool>,
     ) {
         // Dispatch proof gathering for this state update
         scope.spawn(move |_| {
@@ -536,7 +531,7 @@ where
                             &mut self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
-                            self.thread_pool,
+                            self.thread_pool.clone(),
                         );
                     }
                     StateRootMessage::StateUpdate(update) => {
@@ -560,7 +555,7 @@ where
                             &mut self.fetched_proof_targets,
                             self.proof_sequencer.next_sequence(),
                             self.tx.clone(),
-                            self.thread_pool,
+                            self.thread_pool.clone(),
                         );
                     }
                     StateRootMessage::FinishedStateUpdates => {
@@ -738,7 +733,7 @@ fn get_proof_targets(
 /// Calculate multiproof for the targets.
 #[inline]
 fn calculate_multiproof<Factory>(
-    thread_pool: &rayon::ThreadPool,
+    thread_pool: Arc<rayon::ThreadPool>,
     config: StateRootConfig<Factory>,
     proof_targets: MultiProofTargets,
 ) -> ProviderResult<MultiProof>
@@ -753,22 +748,23 @@ where
         config.prefix_sets,
         thread_pool,
     )
-    .with_branch_node_hash_masks(true)
+    .with_branch_node_masks(true)
     .multiproof(proof_targets)?)
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
 /// time it took.
-fn update_sparse_trie<
-    ABP: BlindedProvider<Error = SparseTrieError> + Send + Sync,
-    SBP: BlindedProvider<Error = SparseTrieError> + Send + Sync,
-    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP> + Send + Sync,
->(
+fn update_sparse_trie<BPF>(
     mut trie: Box<SparseStateTrie<BPF>>,
     multiproof: MultiProof,
     targets: MultiProofTargets,
     state: HashedPostState,
-) -> SparseStateTrieResult<(Box<SparseStateTrie<BPF>>, Duration)> {
+) -> SparseStateTrieResult<(Box<SparseStateTrie<BPF>>, Duration)>
+where
+    BPF: BlindedProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
+    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+{
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
 
@@ -995,7 +991,11 @@ mod tests {
             .expect("Failed to create proof worker thread pool");
 
         let (root_from_task, _) = std::thread::scope(|std_scope| {
-            let task = StateRootTask::new(config, blinded_provider_factory, &state_root_task_pool);
+            let task = StateRootTask::new(
+                config,
+                blinded_provider_factory,
+                Arc::new(state_root_task_pool),
+            );
             let mut state_hook = task.state_hook();
             let handle = task.spawn(std_scope);
 

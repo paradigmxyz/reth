@@ -14,7 +14,7 @@ use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, SealedBlockWithSenders};
+use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, RecoveredBlock};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
@@ -253,7 +253,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
 
             // Check if the sender is a contract
-            if self.get_code(sender, None).await?.len() > 0 {
+            if !self.get_code(sender, None).await?.is_empty() {
                 return Ok(None);
             }
 
@@ -320,7 +320,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             if let Some(block) = self.block_with_senders(block_id).await? {
-                if let Some(tx) = block.transactions().get(index) {
+                if let Some(tx) = block.body().transactions().get(index) {
                     return Ok(Some(tx.encoded_2718().into()))
                 }
             }
@@ -546,7 +546,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         Output = Result<
             Option<(
                 TransactionSource<ProviderTx<Self::Provider>>,
-                Arc<SealedBlockWithSenders<ProviderBlock<Self::Provider>>>,
+                Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>,
             )>,
             Self::Error,
         >,

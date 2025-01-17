@@ -22,11 +22,11 @@ use core::{
 use derive_more::{AsRef, Deref};
 #[cfg(not(feature = "std"))]
 use once_cell::sync::OnceCell as OnceLock;
-use op_alloy_consensus::{OpPooledTransaction, OpTypedTransaction, TxDeposit};
+use op_alloy_consensus::{DepositTransaction, OpPooledTransaction, OpTypedTransaction, TxDeposit};
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
 use reth_primitives_traits::{
-    crypto::secp256k1::{recover_signer, recover_signer_unchecked, sign_message},
+    crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     transaction::error::TransactionConversionError,
     InMemorySize, SignedTransaction,
 };
@@ -519,7 +519,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
 
         let secp = secp256k1::Secp256k1::new();
         let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
-        let signature = sign_message(
+        let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
             signature_hash(&transaction),
         )
@@ -598,6 +598,30 @@ impl TryFrom<OpTransactionSigned> for OpPooledTransaction {
             }
             OpTypedTransaction::Deposit(_) => Err(TransactionConversionError::UnsupportedForP2P),
         }
+    }
+}
+
+impl DepositTransaction for OpTransactionSigned {
+    fn source_hash(&self) -> Option<B256> {
+        match &self.transaction {
+            OpTypedTransaction::Deposit(tx) => Some(tx.source_hash),
+            _ => None,
+        }
+    }
+
+    fn mint(&self) -> Option<u128> {
+        match &self.transaction {
+            OpTypedTransaction::Deposit(tx) => tx.mint,
+            _ => None,
+        }
+    }
+
+    fn is_system_transaction(&self) -> bool {
+        self.is_deposit()
+    }
+
+    fn is_deposit(&self) -> bool {
+        self.is_deposit()
     }
 }
 

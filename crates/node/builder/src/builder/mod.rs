@@ -7,17 +7,17 @@ use crate::{
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
-    BlockReaderFor, DefaultNodeLauncher, LaunchNode, Node, NodeHandle,
+    BlockReaderFor, EngineNodeLauncher, LaunchNode, Node,
 };
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
-use reth_blockchain_tree::externals::NodeTypesForTree;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli_util::get_secret_key;
 use reth_db_api::{
     database::Database,
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
 };
+use reth_engine_tree::tree::TreeConfig;
 use reth_exex::ExExContext;
 use reth_network::{
     transactions::TransactionsManagerConfig, NetworkBuilder, NetworkConfig, NetworkConfigBuilder,
@@ -34,7 +34,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider},
+    providers::{BlockchainProvider, NodeTypesForProvider, NodeTypesForTree},
     ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
@@ -341,18 +341,14 @@ where
     ///
     /// This bootstraps the node internals, creates all the components with the given [Node]
     ///
-    /// Returns a [`NodeHandle`] that can be used to interact with the node.
+    /// Returns a [`NodeHandle`](crate::NodeHandle) that can be used to interact with the node.
     pub async fn launch_node<N>(
         self,
         node: N,
     ) -> eyre::Result<
-        NodeHandle<
-            NodeAdapter<
-                RethFullAdapter<DB, N>,
-                <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
-            >,
-            N::AddOns,
-        >,
+        <EngineNodeLauncher as LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+        >>::Node,
     >
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForTree,
@@ -363,6 +359,9 @@ where
             >,
         >,
         N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+        EngineNodeLauncher: LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+        >,
     {
         self.node(node).launch().await
     }
@@ -553,14 +552,28 @@ where
     T: NodeTypesWithEngine + NodeTypesForTree,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     AO: RethRpcAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
+    EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>,
 {
-    /// Launches the node with the [`DefaultNodeLauncher`] that sets up engine API consensus and rpc
+    /// Launches the node with the [`EngineNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(
         self,
-    ) -> eyre::Result<NodeHandle<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>, AO>> {
+    ) -> eyre::Result<
+        <EngineNodeLauncher as LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>,
+        >>::Node,
+    > {
         let Self { builder, task_executor } = self;
 
-        let launcher = DefaultNodeLauncher::new(task_executor, builder.config.datadir());
+        let engine_tree_config = TreeConfig::default()
+            .with_persistence_threshold(builder.config.engine.persistence_threshold)
+            .with_memory_block_buffer_target(builder.config.engine.memory_block_buffer_target)
+            .with_state_root_task(builder.config.engine.state_root_task_enabled)
+            .with_always_compare_trie_updates(
+                builder.config.engine.state_root_task_compare_updates,
+            );
+
+        let launcher =
+            EngineNodeLauncher::new(task_executor, builder.config.datadir(), engine_tree_config);
         builder.launch_with(launcher).await
     }
 }

@@ -1,11 +1,10 @@
 //! Command for debugging execution.
 
-use crate::{args::NetworkArgs, utils::get_single_header};
+use crate::{api::BlockTy, args::NetworkArgs, utils::get_single_header};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use clap::Parser;
 use futures::StreamExt;
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
@@ -18,12 +17,13 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_errors::ConsensusError;
 use reth_exex::ExExManagerHandle;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
 use reth_node_api::NodeTypesWithDBAdapter;
-use reth_node_ethereum::EthExecutorProvider;
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::EthPrimitives;
 use reth_provider::{
@@ -64,7 +64,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         &self,
         config: &Config,
         client: Client,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<BlockTy<N>, Error = ConsensusError>>,
         provider_factory: ProviderFactory<N>,
         task_executor: &TaskExecutor,
         static_file_producer: StaticFileProducer<ProviderFactory<N>>,
@@ -172,7 +172,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let Environment { provider_factory, config, data_dir } =
             self.env.init::<N>(AccessRights::RW)?;
 
-        let consensus: Arc<dyn Consensus> =
+        let consensus: Arc<dyn Consensus<BlockTy<N>, Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
         // Configure and build network

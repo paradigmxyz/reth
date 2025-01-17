@@ -1,7 +1,8 @@
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844,
-    TxEip7702, TxLegacy, TxType, Typed2718,
+    transaction::{PooledTransaction, RlpEcdsaTx},
+    BlobTransactionSidecar, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844,
+    TxEip4844WithSidecar, TxEip7702, TxLegacy, TxType, Typed2718, TypedTransaction,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -18,8 +19,10 @@ use once_cell as _;
 use once_cell::sync::OnceCell as OnceLock;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
-    InMemorySize, SignedTransaction,
+    transaction::error::TransactionConversionError,
+    FillTxEnv, InMemorySize, SignedTransaction,
 };
+use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
@@ -99,6 +102,17 @@ impl Transaction {
             Self::Eip1559(_) => TxType::Eip1559,
             Self::Eip4844(_) => TxType::Eip4844,
             Self::Eip7702(_) => TxType::Eip7702,
+        }
+    }
+
+    /// This sets the transaction's nonce.
+    pub fn set_nonce(&mut self, nonce: u64) {
+        match self {
+            Self::Legacy(tx) => tx.nonce = nonce,
+            Self::Eip2930(tx) => tx.nonce = nonce,
+            Self::Eip1559(tx) => tx.nonce = nonce,
+            Self::Eip4844(tx) => tx.nonce = nonce,
+            Self::Eip7702(tx) => tx.nonce = nonce,
         }
     }
 }
@@ -253,6 +267,18 @@ impl reth_codecs::Compact for Transaction {
     }
 }
 
+impl From<TypedTransaction> for Transaction {
+    fn from(value: TypedTransaction) -> Self {
+        match value {
+            TypedTransaction::Legacy(tx) => Self::Legacy(tx),
+            TypedTransaction::Eip2930(tx) => Self::Eip2930(tx),
+            TypedTransaction::Eip1559(tx) => Self::Eip1559(tx),
+            TypedTransaction::Eip4844(tx) => Self::Eip4844(tx.into()),
+            TypedTransaction::Eip7702(tx) => Self::Eip7702(tx),
+        }
+    }
+}
+
 /// Signed Ethereum transaction.
 #[derive(Debug, Clone, Eq, Serialize, Deserialize, derive_more::AsRef, derive_more::Deref)]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -267,6 +293,12 @@ pub struct TransactionSigned {
     #[deref]
     #[as_ref]
     pub transaction: Transaction,
+}
+
+impl Default for TransactionSigned {
+    fn default() -> Self {
+        Self::new_unhashed(Transaction::Legacy(Default::default()), Signature::test_signature())
+    }
 }
 
 impl TransactionSigned {
@@ -291,11 +323,49 @@ impl PartialEq for TransactionSigned {
 }
 
 impl TransactionSigned {
+    /// Creates a new signed transaction from the given transaction, signature and hash.
+    pub fn new(transaction: Transaction, signature: Signature, hash: B256) -> Self {
+        Self { hash: hash.into(), signature, transaction }
+    }
+
     /// Creates a new signed transaction from the given transaction and signature without the hash.
     ///
     /// Note: this only calculates the hash on the first [`TransactionSigned::hash`] call.
     pub fn new_unhashed(transaction: Transaction, signature: Signature) -> Self {
         Self { hash: Default::default(), signature, transaction }
+    }
+
+    /// Converts from an EIP-4844 transaction to a [`PooledTransaction`] with the given sidecar.
+    ///
+    /// Returns an `Err` containing the original `TransactionSigned` if the transaction is not
+    /// EIP-4844.
+    pub fn try_into_pooled_eip4844(
+        self,
+        sidecar: BlobTransactionSidecar,
+    ) -> Result<PooledTransaction, Self> {
+        let hash = *self.tx_hash();
+        Ok(match self {
+            // If the transaction is an EIP-4844 transaction...
+            Self { transaction: Transaction::Eip4844(tx), signature, .. } => {
+                // Construct a pooled eip488 tx with the provided sidecar.
+                PooledTransaction::Eip4844(Signed::new_unchecked(
+                    TxEip4844WithSidecar { tx, sidecar },
+                    signature,
+                    hash,
+                ))
+            }
+            // If the transaction is not EIP-4844, return an error with the original
+            // transaction.
+            _ => return Err(self),
+        })
+    }
+
+    /// Returns the [`TxEip4844`] if the transaction is an EIP-4844 transaction.
+    pub const fn as_eip4844(&self) -> Option<&TxEip4844> {
+        match &self.transaction {
+            Transaction::Eip4844(tx) => Some(tx),
+            _ => None,
+        }
     }
 }
 
@@ -561,6 +631,85 @@ impl reth_codecs::Compact for TransactionSigned {
     }
 }
 
+impl FillTxEnv for TransactionSigned {
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
+        tx_env.caller = sender;
+        match self.as_ref() {
+            Transaction::Legacy(tx) => {
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = U256::from(tx.gas_price);
+                tx_env.gas_priority_fee = None;
+                tx_env.transact_to = tx.to;
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = tx.chain_id;
+                tx_env.nonce = Some(tx.nonce);
+                tx_env.access_list.clear();
+                tx_env.blob_hashes.clear();
+                tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list = None;
+            }
+            Transaction::Eip2930(tx) => {
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = U256::from(tx.gas_price);
+                tx_env.gas_priority_fee = None;
+                tx_env.transact_to = tx.to;
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = Some(tx.chain_id);
+                tx_env.nonce = Some(tx.nonce);
+                tx_env.access_list.clone_from(&tx.access_list.0);
+                tx_env.blob_hashes.clear();
+                tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list = None;
+            }
+            Transaction::Eip1559(tx) => {
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
+                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
+                tx_env.transact_to = tx.to;
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = Some(tx.chain_id);
+                tx_env.nonce = Some(tx.nonce);
+                tx_env.access_list.clone_from(&tx.access_list.0);
+                tx_env.blob_hashes.clear();
+                tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list = None;
+            }
+            Transaction::Eip4844(tx) => {
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
+                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
+                tx_env.transact_to = TxKind::Call(tx.to);
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = Some(tx.chain_id);
+                tx_env.nonce = Some(tx.nonce);
+                tx_env.access_list.clone_from(&tx.access_list.0);
+                tx_env.blob_hashes.clone_from(&tx.blob_versioned_hashes);
+                tx_env.max_fee_per_blob_gas = Some(U256::from(tx.max_fee_per_blob_gas));
+                tx_env.authorization_list = None;
+            }
+            Transaction::Eip7702(tx) => {
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
+                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
+                tx_env.transact_to = tx.to.into();
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = Some(tx.chain_id);
+                tx_env.nonce = Some(tx.nonce);
+                tx_env.access_list.clone_from(&tx.access_list.0);
+                tx_env.blob_hashes.clear();
+                tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list =
+                    Some(AuthorizationList::Signed(tx.authorization_list.clone()));
+            }
+        }
+    }
+}
+
 impl SignedTransaction for TransactionSigned {
     fn tx_hash(&self) -> &TxHash {
         self.hash.get_or_init(|| self.recalculate_hash())
@@ -579,6 +728,180 @@ impl SignedTransaction for TransactionSigned {
         self.encode_for_signing(buf);
         let signature_hash = keccak256(buf);
         recover_signer_unchecked(&self.signature, signature_hash)
+    }
+}
+
+impl TryFrom<TransactionSigned> for PooledTransaction {
+    type Error = TransactionConversionError;
+
+    fn try_from(tx: TransactionSigned) -> Result<Self, Self::Error> {
+        let hash = *tx.tx_hash();
+        match tx {
+            TransactionSigned { transaction: Transaction::Legacy(tx), signature, .. } => {
+                Ok(Self::Legacy(Signed::new_unchecked(tx, signature, hash)))
+            }
+            TransactionSigned { transaction: Transaction::Eip2930(tx), signature, .. } => {
+                Ok(Self::Eip2930(Signed::new_unchecked(tx, signature, hash)))
+            }
+            TransactionSigned { transaction: Transaction::Eip1559(tx), signature, .. } => {
+                Ok(Self::Eip1559(Signed::new_unchecked(tx, signature, hash)))
+            }
+            TransactionSigned { transaction: Transaction::Eip7702(tx), signature, .. } => {
+                Ok(Self::Eip7702(Signed::new_unchecked(tx, signature, hash)))
+            }
+            // Not supported because missing blob sidecar
+            TransactionSigned { transaction: Transaction::Eip4844(_), .. } => {
+                Err(TransactionConversionError::UnsupportedForP2P)
+            }
+        }
+    }
+}
+
+impl<T> From<Signed<T>> for TransactionSigned
+where
+    T: Into<Transaction>,
+{
+    fn from(value: Signed<T>) -> Self {
+        let (tx, signature, hash) = value.into_parts();
+        Self { transaction: tx.into(), signature, hash: hash.into() }
+    }
+}
+
+impl From<PooledTransaction> for TransactionSigned {
+    fn from(value: PooledTransaction) -> Self {
+        match value {
+            PooledTransaction::Legacy(tx) => tx.into(),
+            PooledTransaction::Eip2930(tx) => tx.into(),
+            PooledTransaction::Eip1559(tx) => tx.into(),
+            PooledTransaction::Eip7702(tx) => tx.into(),
+            PooledTransaction::Eip4844(tx) => {
+                let (tx, signature, hash) = tx.into_parts();
+                Signed::new_unchecked(tx.tx, signature, hash).into()
+            }
+        }
+    }
+}
+
+/// Bincode-compatible transaction type serde implementations.
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    use alloc::borrow::Cow;
+    use alloy_consensus::{
+        transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxEip7702, TxLegacy},
+        TxEip4844,
+    };
+    use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+    use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
+    use serde::{Deserialize, Serialize};
+
+    /// Bincode-compatible [`super::Transaction`] serde implementation.
+    #[derive(Debug, Serialize, Deserialize)]
+    #[allow(missing_docs)]
+    pub enum Transaction<'a> {
+        Legacy(TxLegacy<'a>),
+        Eip2930(TxEip2930<'a>),
+        Eip1559(TxEip1559<'a>),
+        Eip4844(Cow<'a, TxEip4844>),
+        Eip7702(TxEip7702<'a>),
+    }
+
+    impl<'a> From<&'a super::Transaction> for Transaction<'a> {
+        fn from(value: &'a super::Transaction) -> Self {
+            match value {
+                super::Transaction::Legacy(tx) => Self::Legacy(TxLegacy::from(tx)),
+                super::Transaction::Eip2930(tx) => Self::Eip2930(TxEip2930::from(tx)),
+                super::Transaction::Eip1559(tx) => Self::Eip1559(TxEip1559::from(tx)),
+                super::Transaction::Eip4844(tx) => Self::Eip4844(Cow::Borrowed(tx)),
+                super::Transaction::Eip7702(tx) => Self::Eip7702(TxEip7702::from(tx)),
+            }
+        }
+    }
+
+    impl<'a> From<Transaction<'a>> for super::Transaction {
+        fn from(value: Transaction<'a>) -> Self {
+            match value {
+                Transaction::Legacy(tx) => Self::Legacy(tx.into()),
+                Transaction::Eip2930(tx) => Self::Eip2930(tx.into()),
+                Transaction::Eip1559(tx) => Self::Eip1559(tx.into()),
+                Transaction::Eip4844(tx) => Self::Eip4844(tx.into_owned()),
+                Transaction::Eip7702(tx) => Self::Eip7702(tx.into()),
+            }
+        }
+    }
+
+    /// Bincode-compatible [`super::TransactionSigned`] serde implementation.
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct TransactionSigned<'a> {
+        hash: TxHash,
+        signature: Signature,
+        transaction: Transaction<'a>,
+    }
+
+    impl<'a> From<&'a super::TransactionSigned> for TransactionSigned<'a> {
+        fn from(value: &'a super::TransactionSigned) -> Self {
+            Self {
+                hash: *value.tx_hash(),
+                signature: value.signature,
+                transaction: Transaction::from(&value.transaction),
+            }
+        }
+    }
+
+    impl<'a> From<TransactionSigned<'a>> for super::TransactionSigned {
+        fn from(value: TransactionSigned<'a>) -> Self {
+            Self {
+                hash: value.hash.into(),
+                signature: value.signature,
+                transaction: value.transaction.into(),
+            }
+        }
+    }
+    impl SerdeBincodeCompat for super::TransactionSigned {
+        type BincodeRepr<'a> = TransactionSigned<'a>;
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::super::{serde_bincode_compat, Transaction, TransactionSigned};
+        use arbitrary::Arbitrary;
+        use rand::Rng;
+        use reth_testing_utils::generators;
+        use serde::{Deserialize, Serialize};
+
+        #[test]
+        fn test_transaction_bincode_roundtrip() {
+            #[derive(Debug, Serialize, Deserialize)]
+            struct Data<'a> {
+                transaction: serde_bincode_compat::Transaction<'a>,
+            }
+
+            let mut bytes = [0u8; 1024];
+            generators::rng().fill(bytes.as_mut_slice());
+            let tx = Transaction::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
+            let data = Data { transaction: (&tx).into() };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data<'_> = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(tx, decoded.transaction.into());
+        }
+
+        #[test]
+        fn test_transaction_signed_bincode_roundtrip() {
+            #[derive(Debug, Serialize, Deserialize)]
+            struct Data<'a> {
+                transaction: serde_bincode_compat::TransactionSigned<'a>,
+            }
+
+            let mut bytes = [0u8; 1024];
+            generators::rng().fill(bytes.as_mut_slice());
+            let tx =
+                TransactionSigned::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap();
+            let data = Data { transaction: (&tx).into() };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data<'_> = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(tx, decoded.transaction.into());
+        }
     }
 }
 

@@ -1,8 +1,11 @@
 //! Ethereum Node types config.
 
+pub use crate::payload::EthereumPayloadBuilder;
 use crate::{EthEngineTypes, EthEvmConfig};
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::ChainSpec;
+use reth_consensus::{ConsensusError, FullConsensus};
+use reth_ethereum_consensus::EthBeaconConsensus;
+pub use reth_ethereum_engine_primitives::EthereumEngineValidator;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
@@ -28,9 +31,6 @@ use reth_transaction_pool::{
 };
 use reth_trie_db::MerklePatriciaTrie;
 use std::sync::Arc;
-
-pub use crate::payload::EthereumPayloadBuilder;
-pub use reth_ethereum_engine_primitives::EthereumEngineValidator;
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -252,7 +252,7 @@ impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type Consensus = Arc<dyn reth_consensus::FullConsensus>;
+    type Consensus = Arc<dyn FullConsensus<Error = ConsensusError>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
         Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))

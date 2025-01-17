@@ -5,6 +5,7 @@ pub mod signature;
 pub mod signed;
 
 pub mod error;
+pub mod recover;
 
 pub use alloy_consensus::transaction::{TransactionInfo, TransactionMeta};
 

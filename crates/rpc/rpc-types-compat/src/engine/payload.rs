@@ -1,7 +1,6 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
-use alloy_consensus::Header;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, eip7685::RequestsOrHash};
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
@@ -9,12 +8,14 @@ use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
     ExecutionPayloadV2, ExecutionPayloadV3, PraguePayloadFields,
 };
-use reth_primitives::{BlockBody, SealedBlock};
+use reth_primitives::{Block, SealedBlock};
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 
-/// Converts [`SealedBlock`] to [`ExecutionPayload`]
+/// Converts [`SealedBlock`] to [`ExecutionPayload`].
+///
+/// TODO(mattsse): remove after next alloy bump
 pub fn block_to_payload<T: SignedTransaction>(
-    value: SealedBlock<Header, BlockBody<T>>,
+    value: SealedBlock<Block<T>>,
 ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
     let cancun =
         value.parent_beacon_block_root.map(|parent_beacon_block_root| CancunPayloadFields {
@@ -47,8 +48,8 @@ pub fn block_to_payload<T: SignedTransaction>(
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV1`]
-pub fn block_to_payload_v1<T: Encodable2718>(
-    value: SealedBlock<Header, BlockBody<T>>,
+pub fn block_to_payload_v1<T: SignedTransaction>(
+    value: SealedBlock<Block<T>>,
 ) -> ExecutionPayloadV1 {
     let transactions =
         value.body().transactions.iter().map(|tx| tx.encoded_2718().into()).collect::<Vec<_>>();
@@ -71,8 +72,8 @@ pub fn block_to_payload_v1<T: Encodable2718>(
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV2`]
-pub fn block_to_payload_v2<T: Encodable2718>(
-    value: SealedBlock<Header, BlockBody<T>>,
+pub fn block_to_payload_v2<T: SignedTransaction>(
+    value: SealedBlock<Block<T>>,
 ) -> ExecutionPayloadV2 {
     ExecutionPayloadV2 {
         withdrawals: value.body().withdrawals.clone().unwrap_or_default().into_inner(),
@@ -81,8 +82,8 @@ pub fn block_to_payload_v2<T: Encodable2718>(
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV3`], and returns the parent beacon block root.
-pub fn block_to_payload_v3<T: Encodable2718>(
-    value: SealedBlock<Header, BlockBody<T>>,
+pub fn block_to_payload_v3<T: SignedTransaction>(
+    value: SealedBlock<Block<T>>,
 ) -> ExecutionPayloadV3 {
     ExecutionPayloadV3 {
         blob_gas_used: value.blob_gas_used.unwrap_or_default(),
@@ -92,8 +93,8 @@ pub fn block_to_payload_v3<T: Encodable2718>(
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadFieldV2`]
-pub fn convert_block_to_payload_field_v2<T: Encodable2718>(
-    value: SealedBlock<Header, BlockBody<T>>,
+pub fn convert_block_to_payload_field_v2<T: SignedTransaction>(
+    value: SealedBlock<Block<T>>,
 ) -> ExecutionPayloadFieldV2 {
     // if there are withdrawals, return V2
     if value.body().withdrawals.is_some() {
@@ -122,7 +123,8 @@ mod tests {
         CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
         ExecutionPayloadV2, ExecutionPayloadV3,
     };
-    use reth_primitives::{Block, BlockExt, TransactionSigned};
+    use reth_primitives::{Block, TransactionSigned};
+    use reth_primitives_traits::Block as _;
 
     #[test]
     fn roundtrip_payload_to_block() {

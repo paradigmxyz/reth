@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
-    BlockHeader, Transaction as _, Typed2718,
+    BlockHeader, Signed, Transaction as _, Typed2718,
 };
 use alloy_eips::{
     eip2718::Encodable2718,
@@ -23,7 +23,7 @@ use reth_primitives::{
     transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
     PooledTransaction, RecoveredTx, SealedBlock, Transaction, TransactionSigned,
 };
-use reth_primitives_traits::{BlockBody, SignedTransaction};
+use reth_primitives_traits::{Block, SignedTransaction};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -518,10 +518,9 @@ pub trait TransactionPoolExt: TransactionPool {
     /// sidecar must not be removed from the blob store. Only after a blob transaction is
     /// finalized, its sidecar is removed from the blob store. This ensures that in case of a reorg,
     /// the sidecar is still available.
-    fn on_canonical_state_change<H, B>(&self, update: CanonicalStateUpdate<'_, H, B>)
+    fn on_canonical_state_change<B>(&self, update: CanonicalStateUpdate<'_, B>)
     where
-        H: reth_primitives_traits::BlockHeader,
-        B: BlockBody;
+        B: Block;
 
     /// Updates the accounts in the pool
     fn update_accounts(&self, accounts: Vec<ChangedAccount>);
@@ -721,9 +720,9 @@ pub enum PoolUpdateKind {
 ///
 /// This is used to update the pool state accordingly.
 #[derive(Clone, Debug)]
-pub struct CanonicalStateUpdate<'a, H, B> {
+pub struct CanonicalStateUpdate<'a, B: Block> {
     /// Hash of the tip block.
-    pub new_tip: &'a SealedBlock<H, B>,
+    pub new_tip: &'a SealedBlock<B>,
     /// EIP-1559 Base fee of the _next_ (pending) block
     ///
     /// The base fee of a block depends on the utilization of the last block and its base fee.
@@ -740,9 +739,9 @@ pub struct CanonicalStateUpdate<'a, H, B> {
     pub update_kind: PoolUpdateKind,
 }
 
-impl<H, B> CanonicalStateUpdate<'_, H, B>
+impl<B> CanonicalStateUpdate<'_, B>
 where
-    H: BlockHeader,
+    B: Block,
 {
     /// Returns the number of the tip block.
     pub fn number(&self) -> u64 {
@@ -750,7 +749,7 @@ where
     }
 
     /// Returns the hash of the tip block.
-    pub const fn hash(&self) -> B256 {
+    pub fn hash(&self) -> B256 {
         self.new_tip.hash()
     }
 
@@ -771,9 +770,9 @@ where
     }
 }
 
-impl<H, B> fmt::Display for CanonicalStateUpdate<'_, H, B>
+impl<B> fmt::Display for CanonicalStateUpdate<'_, B>
 where
-    H: BlockHeader,
+    B: Block,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CanonicalStateUpdate")
@@ -1250,7 +1249,8 @@ impl From<RecoveredTx<PooledTransaction>> for EthPooledTransaction {
                 // include the blob sidecar
                 let (tx, sig, hash) = tx.into_parts();
                 let (tx, blob) = tx.into_parts();
-                let tx = TransactionSigned::new(tx.into(), sig, hash);
+                let tx = Signed::new_unchecked(tx, sig, hash);
+                let tx = TransactionSigned::from(tx);
                 let tx = RecoveredTx::new_unchecked(tx, signer);
                 let mut pooled = Self::new(tx, encoded_length);
                 pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
@@ -1280,9 +1280,8 @@ impl PoolTransaction for EthPooledTransaction {
         tx: RecoveredTx<Self::Consensus>,
     ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
         let (tx, signer) = tx.into_parts();
-        let pooled = tx
-            .try_into_pooled()
-            .map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)?;
+        let pooled =
+            tx.try_into().map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)?;
         Ok(RecoveredTx::new_unchecked(pooled, signer))
     }
 

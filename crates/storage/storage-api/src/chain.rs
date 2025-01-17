@@ -108,14 +108,14 @@ where
 
             // Write ommers if any
             if !body.ommers.is_empty() {
-                ommers_cursor.append(block_number, StoredBlockOmmers { ommers: body.ommers })?;
+                ommers_cursor.append(block_number, &StoredBlockOmmers { ommers: body.ommers })?;
             }
 
             // Write withdrawals if any
             if let Some(withdrawals) = body.withdrawals {
                 if !withdrawals.is_empty() {
                     withdrawals_cursor
-                        .append(block_number, StoredBlockWithdrawals { withdrawals })?;
+                        .append(block_number, &StoredBlockWithdrawals { withdrawals })?;
                 }
             }
         }

@@ -74,10 +74,10 @@ std = [
 	"thiserror/std",
 	"op-alloy-consensus/std",
 	"reth-chainspec/std",
-	"reth-consensus-common/std"
+	"reth-optimism-consensus/std",
+	"reth-consensus-common/std",
 ]
 optimism = [
-	"reth-primitives/optimism",
 	"reth-execution-types/optimism",
 	"reth-optimism-consensus/optimism",
 	"revm/optimism",

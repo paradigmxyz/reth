@@ -3,11 +3,10 @@ use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_primitives::B256;
 use clap::Parser;
 use futures::{Stream, StreamExt};
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::Config;
-use reth_consensus::Consensus;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_db::tables;
 use reth_db_api::transaction::DbTx;
 use reth_downloaders::{
@@ -15,12 +14,13 @@ use reth_downloaders::{
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_node_api::{BlockTy, BodyTy, HeaderTy};
+use reth_node_api::BlockTy;
 use reth_node_core::version::SHORT_VERSION;
 use reth_node_events::node::NodeEvent;
 use reth_provider::{
@@ -169,7 +169,7 @@ pub fn build_import_pipeline<N, C, E>(
 ) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent<N::Primitives>>)>
 where
     N: ProviderNodeTypes + CliNodeTypes,
-    C: Consensus<HeaderTy<N>, BodyTy<N>> + 'static,
+    C: Consensus<BlockTy<N>, Error = ConsensusError> + 'static,
     E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     if !file_client.has_canonical_blocks() {

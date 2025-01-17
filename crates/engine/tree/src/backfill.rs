@@ -274,7 +274,7 @@ mod tests {
                 gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
                 ..Default::default()
             };
-            let header = SealedHeader::seal(header);
+            let header = SealedHeader::seal_slow(header);
             insert_headers_into_client(&client, header, 0..total_blocks);
 
             let tip = client.highest_block().expect("there should be blocks here").hash();

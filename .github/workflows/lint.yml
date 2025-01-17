@@ -73,7 +73,9 @@ jobs:
           cache-on-failure: true
       - uses: dcarbone/install-jq-action@v3
       - name: Run Wasm checks
-        run: .github/assets/check_wasm.sh
+        run: |
+          sudo apt update && sudo apt install gcc-multilib
+          .github/assets/check_wasm.sh
 
   riscv:
     runs-on: ubuntu-latest

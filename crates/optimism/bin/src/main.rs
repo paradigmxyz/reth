@@ -6,7 +6,7 @@ use clap::Parser;
 use reth_node_builder::{engine_tree_config::TreeConfig, EngineNodeLauncher, Node};
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::{args::RollupArgs, OpNode};
-use reth_provider::providers::BlockchainProvider2;
+use reth_provider::providers::BlockchainProvider;
 
 use tracing as _;
 
@@ -24,12 +24,16 @@ fn main() {
     if let Err(err) =
         Cli::<OpChainSpecParser, RollupArgs>::parse().run(|builder, rollup_args| async move {
             let engine_tree_config = TreeConfig::default()
-                .with_persistence_threshold(rollup_args.persistence_threshold)
-                .with_memory_block_buffer_target(rollup_args.memory_block_buffer_target);
+                .with_persistence_threshold(builder.config().engine.persistence_threshold)
+                .with_memory_block_buffer_target(builder.config().engine.memory_block_buffer_target)
+                .with_state_root_task(builder.config().engine.state_root_task_enabled)
+                .with_always_compare_trie_updates(
+                    builder.config().engine.state_root_task_compare_updates,
+                );
 
             let op_node = OpNode::new(rollup_args.clone());
             let handle = builder
-                .with_types_and_provider::<OpNode, BlockchainProvider2<_>>()
+                .with_types_and_provider::<OpNode, BlockchainProvider<_>>()
                 .with_components(op_node.components())
                 .with_add_ons(op_node.add_ons())
                 .launch_with_fn(|builder| {

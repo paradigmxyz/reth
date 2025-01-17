@@ -6,6 +6,7 @@ use alloy_primitives::PrimitiveSignature as Signature;
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
 use reth_primitives::{RecoveredTx, TransactionSigned};
+use reth_primitives_traits::SignedTransaction;
 use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::TransactionCompat;
@@ -43,7 +44,7 @@ where
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
-        let hash = tx.hash();
+        let hash = *tx.tx_hash();
         let TransactionSigned { transaction, signature, .. } = tx.into_tx();
 
         let inner: TxEnvelope = match transaction {

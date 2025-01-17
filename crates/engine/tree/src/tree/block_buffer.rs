@@ -1,9 +1,9 @@
-use crate::metrics::BlockBufferMetrics;
+use crate::tree::metrics::BlockBufferMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber};
 use reth_network::cache::LruCache;
-use reth_node_types::Block;
-use reth_primitives::SealedBlockWithSenders;
+use reth_primitives::RecoveredBlock;
+use reth_primitives_traits::Block;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Contains the tree of pending blocks that cannot be executed due to missing parent.
@@ -18,9 +18,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 /// Note: Buffer is limited by number of blocks that it can contain and eviction of the block
 /// is done by last recently used block.
 #[derive(Debug)]
-pub struct BlockBuffer<B: Block = reth_primitives::Block> {
+pub(super) struct BlockBuffer<B: Block> {
     /// All blocks in the buffer stored by their block hash.
-    pub(crate) blocks: HashMap<BlockHash, SealedBlockWithSenders<B>>,
+    pub(crate) blocks: HashMap<BlockHash, RecoveredBlock<B>>,
     /// Map of any parent block hash (even the ones not currently in the buffer)
     /// to the buffered children.
     /// Allows connecting buffered blocks by parent.
@@ -39,7 +39,7 @@ pub struct BlockBuffer<B: Block = reth_primitives::Block> {
 
 impl<B: Block> BlockBuffer<B> {
     /// Create new buffer with max limit of blocks
-    pub fn new(limit: u32) -> Self {
+    pub(super) fn new(limit: u32) -> Self {
         Self {
             blocks: Default::default(),
             parent_to_child: Default::default(),
@@ -49,18 +49,13 @@ impl<B: Block> BlockBuffer<B> {
         }
     }
 
-    /// Return reference to buffered blocks
-    pub const fn blocks(&self) -> &HashMap<BlockHash, SealedBlockWithSenders<B>> {
-        &self.blocks
-    }
-
     /// Return reference to the requested block.
-    pub fn block(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders<B>> {
+    pub(super) fn block(&self, hash: &BlockHash) -> Option<&RecoveredBlock<B>> {
         self.blocks.get(hash)
     }
 
     /// Return a reference to the lowest ancestor of the given block in the buffer.
-    pub fn lowest_ancestor(&self, hash: &BlockHash) -> Option<&SealedBlockWithSenders<B>> {
+    pub(super) fn lowest_ancestor(&self, hash: &BlockHash) -> Option<&RecoveredBlock<B>> {
         let mut current_block = self.blocks.get(hash)?;
         while let Some(parent) = self.blocks.get(&current_block.parent_hash()) {
             current_block = parent;
@@ -69,7 +64,7 @@ impl<B: Block> BlockBuffer<B> {
     }
 
     /// Insert a correct block inside the buffer.
-    pub fn insert_block(&mut self, block: SealedBlockWithSenders<B>) {
+    pub(super) fn insert_block(&mut self, block: RecoveredBlock<B>) {
         let hash = block.hash();
 
         self.parent_to_child.entry(block.parent_hash()).or_default().insert(hash);
@@ -92,10 +87,10 @@ impl<B: Block> BlockBuffer<B> {
     ///
     /// Note: that order of returned blocks is important and the blocks with lower block number
     /// in the chain will come first so that they can be executed in the correct order.
-    pub fn remove_block_with_children(
+    pub(super) fn remove_block_with_children(
         &mut self,
         parent_hash: &BlockHash,
-    ) -> Vec<SealedBlockWithSenders<B>> {
+    ) -> Vec<RecoveredBlock<B>> {
         let removed = self
             .remove_block(parent_hash)
             .into_iter()
@@ -106,7 +101,7 @@ impl<B: Block> BlockBuffer<B> {
     }
 
     /// Discard all blocks that precede block number from the buffer.
-    pub fn remove_old_blocks(&mut self, block_number: BlockNumber) {
+    pub(super) fn remove_old_blocks(&mut self, block_number: BlockNumber) {
         let mut block_hashes_to_remove = Vec::new();
 
         // discard all blocks that are before the finalized number.
@@ -154,7 +149,7 @@ impl<B: Block> BlockBuffer<B> {
     /// This method will only remove the block if it's present inside `self.blocks`.
     /// The block might be missing from other collections, the method will only ensure that it has
     /// been removed.
-    fn remove_block(&mut self, hash: &BlockHash) -> Option<SealedBlockWithSenders<B>> {
+    fn remove_block(&mut self, hash: &BlockHash) -> Option<RecoveredBlock<B>> {
         let block = self.blocks.remove(hash)?;
         self.remove_from_earliest_blocks(block.number(), hash);
         self.remove_from_parent(block.parent_hash(), hash);
@@ -163,7 +158,7 @@ impl<B: Block> BlockBuffer<B> {
     }
 
     /// Remove all children and their descendants for the given blocks and return them.
-    fn remove_children(&mut self, parent_hashes: Vec<BlockHash>) -> Vec<SealedBlockWithSenders<B>> {
+    fn remove_children(&mut self, parent_hashes: Vec<BlockHash>) -> Vec<RecoveredBlock<B>> {
         // remove all parent child connection and all the child children blocks that are connected
         // to the discarded parent blocks.
         let mut remove_parent_children = parent_hashes;
@@ -186,22 +181,26 @@ impl<B: Block> BlockBuffer<B> {
 
 #[cfg(test)]
 mod tests {
-    use crate::BlockBuffer;
+    use super::*;
     use alloy_eips::BlockNumHash;
     use alloy_primitives::BlockHash;
-    use reth_primitives::SealedBlockWithSenders;
+    use reth_primitives::RecoveredBlock;
     use reth_testing_utils::generators::{self, random_block, BlockParams, Rng};
     use std::collections::HashMap;
 
     /// Create random block with specified number and parent hash.
-    fn create_block<R: Rng>(rng: &mut R, number: u64, parent: BlockHash) -> SealedBlockWithSenders {
+    fn create_block<R: Rng>(
+        rng: &mut R,
+        number: u64,
+        parent: BlockHash,
+    ) -> RecoveredBlock<reth_primitives::Block> {
         let block =
             random_block(rng, number, BlockParams { parent: Some(parent), ..Default::default() });
-        block.seal_with_senders().unwrap()
+        block.try_recover().unwrap()
     }
 
     /// Assert that all buffer collections have the same data length.
-    fn assert_buffer_lengths(buffer: &BlockBuffer, expected: usize) {
+    fn assert_buffer_lengths<B: Block>(buffer: &BlockBuffer<B>, expected: usize) {
         assert_eq!(buffer.blocks.len(), expected);
         assert_eq!(buffer.lru.len(), expected);
         assert_eq!(
@@ -215,7 +214,10 @@ mod tests {
     }
 
     /// Assert that the block was removed from all buffer collections.
-    fn assert_block_removal(buffer: &BlockBuffer, block: &SealedBlockWithSenders) {
+    fn assert_block_removal<B: Block>(
+        buffer: &BlockBuffer<B>,
+        block: &RecoveredBlock<reth_primitives::Block>,
+    ) {
         assert!(!buffer.blocks.contains_key(&block.hash()));
         assert!(buffer
             .parent_to_child
