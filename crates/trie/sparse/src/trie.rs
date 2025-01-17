@@ -645,12 +645,26 @@ impl<P> RevealedSparseTrie<P> {
         targets
     }
 
-    fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
+    /// Look up or calculate the RLP of the node at the given path.
+    ///
+    /// # Panics
+    ///
+    /// If the node at provided path does not exist.
+    pub fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
         let mut buffers = RlpNodeBuffers::new_with_path(path);
         self.rlp_node(prefix_set, &mut buffers)
     }
 
-    fn rlp_node(&mut self, prefix_set: &mut PrefixSet, buffers: &mut RlpNodeBuffers) -> RlpNode {
+    /// Look up or calculate the RLP of the node at the given path specified in [`RlpNodeBuffers`].
+    ///
+    /// # Panics
+    ///
+    /// If the node at provided path does not exist.
+    pub fn rlp_node(
+        &mut self,
+        prefix_set: &mut PrefixSet,
+        buffers: &mut RlpNodeBuffers,
+    ) -> RlpNode {
         'main: while let Some((path, mut is_in_prefix_set)) = buffers.path_stack.pop() {
             // Check if the path is in the prefix set.
             // First, check the cached value. If it's `None`, then check the prefix set, and update
@@ -1338,7 +1352,7 @@ struct RemovedSparseNode {
 
 /// Collection of reusable buffers for [`RevealedSparseTrie::rlp_node`].
 #[derive(Debug, Default)]
-struct RlpNodeBuffers {
+pub struct RlpNodeBuffers {
     /// Stack of paths we need rlp nodes for and whether the path is in the prefix set.
     path_stack: Vec<(Nibbles, Option<bool>)>,
     /// Stack of rlp nodes
