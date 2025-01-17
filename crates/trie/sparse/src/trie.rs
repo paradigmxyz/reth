@@ -1,4 +1,4 @@
-use crate::blinded::{BlindedProvider, DefaultBlindedProvider};
+use crate::blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode};
 use alloy_primitives::{
     hex, keccak256,
     map::{Entry, HashMap, HashSet},
@@ -945,14 +945,24 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         if self.updates.is_some() {
                             // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
-                                if let Some(node) = self.provider.blinded_node(&current)? {
+                                if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                                    self.provider.blinded_node(&current)?
+                                {
                                     let decoded = TrieNode::decode(&mut &node[..])?;
-                                    trace!(target: "trie::sparse", ?current, ?decoded, "Revealing extension node child");
-                                    // We'll never have to update the revealed child node, only
-                                    // remove or do nothing, so
-                                    // we can safely ignore the hash mask here and
-                                    // pass `None`.
-                                    self.reveal_node(current.clone(), decoded, None, None)?;
+                                    trace!(
+                                        target: "trie::sparse",
+                                        ?current,
+                                        ?decoded,
+                                        ?tree_mask,
+                                        ?hash_mask,
+                                        "Revealing extension node child",
+                                    );
+                                    self.reveal_node(
+                                        current.clone(),
+                                        decoded,
+                                        tree_mask,
+                                        hash_mask,
+                                    )?;
                                 }
                             }
                         }
@@ -1000,6 +1010,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                 return Err(SparseTrieErrorKind::BlindedNode { path: path.clone(), hash }.into())
             }
 
+            trace!(target: "trie::sparse", ?path, "Leaf node is not present in the trie");
             // Leaf is not present in the trie.
             return Ok(())
         }
@@ -1098,13 +1109,24 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
 
                         if self.nodes.get(&child_path).unwrap().is_hash() {
                             trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
-                            if let Some(node) = self.provider.blinded_node(&child_path)? {
+                            if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                                self.provider.blinded_node(&child_path)?
+                            {
                                 let decoded = TrieNode::decode(&mut &node[..])?;
-                                trace!(target: "trie::sparse", ?child_path, ?decoded, "Revealing remaining blinded branch child");
-                                // We'll never have to update the revealed branch node, only remove
-                                // or do nothing, so we can safely ignore the hash mask here and
-                                // pass `None`.
-                                self.reveal_node(child_path.clone(), decoded, None, None)?;
+                                trace!(
+                                    target: "trie::sparse",
+                                    ?child_path,
+                                    ?decoded,
+                                    ?tree_mask,
+                                    ?hash_mask,
+                                    "Revealing remaining blinded branch child"
+                                );
+                                self.reveal_node(
+                                    child_path.clone(),
+                                    decoded,
+                                    tree_mask,
+                                    hash_mask,
+                                )?;
                             }
                         }
 
