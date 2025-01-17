@@ -48,7 +48,7 @@ impl OpPooledTransaction {
     pub fn new(transaction: RecoveredTx<OpTransactionSigned>, encoded_length: usize) -> Self {
         Self {
             inner: EthPooledTransaction::new(transaction, encoded_length),
-            estimated_tx_compressed_size: LazyLock::new(|| Default::default()),
+            estimated_tx_compressed_size: LazyLock::new(Default::default),
         }
     }
 
@@ -62,7 +62,7 @@ impl Clone for OpPooledTransaction {
     fn clone(&self) -> Self {
         Self {
             inner: self.inner.clone(),
-            estimated_tx_compressed_size: LazyLock::new(|| Default::default()),
+            estimated_tx_compressed_size: LazyLock::new(Default::default),
         }
     }
 }
@@ -73,7 +73,7 @@ impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for OpPooledTran
         let tx = tx.map_transaction(|tx| tx.into());
         Self {
             inner: EthPooledTransaction::new(tx, encoded_len),
-            estimated_tx_compressed_size: LazyLock::new(|| Default::default()),
+            estimated_tx_compressed_size: LazyLock::new(Default::default),
         }
     }
 }
