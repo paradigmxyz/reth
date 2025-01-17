@@ -17,7 +17,7 @@
 
 extern crate alloc;
 
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::{Address, U256};
 use core::{convert::Infallible, fmt::Debug};
