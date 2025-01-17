@@ -356,11 +356,25 @@ impl ProviderCacheBuilder {
 
 impl Default for ProviderCacheBuilder {
     fn default() -> Self {
-        // moka caches have been benchmarked up to 800k entries, so we just use 1M, optimizing for
-        // hitrate over memory consumption.
+        // moka caches have been benchmarked up to 800k entries, so we just use 10M on account and
+        // code cache, and 100M for storage cache, optimizing for hitrate over memory consumption.
+        //
+        // Heuristic for storage cache memory consumption:
+        // * the keys are addr (20 bytes) + storage key (32 bytes)
+        // * the values are 32 bytes
+        // So this means roughly 84 bytes per entry.
+        //
+        // 100M * 84 = 8.4 GB
+        //
+        // Code cache can be much much larger - this needs to be space instead of element bound.
+        // Accounts can be element bound but memory calculation TODO
         //
         // See: https://github.com/moka-rs/moka/wiki#admission-and-eviction-policies
-        Self { code_cache_size: 1000000, storage_cache_size: 1000000, account_cache_size: 1000000 }
+        Self {
+            code_cache_size: 1000000,
+            storage_cache_size: 100000000,
+            account_cache_size: 10000000,
+        }
     }
 }
 
