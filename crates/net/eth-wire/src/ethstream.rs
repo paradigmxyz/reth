@@ -158,12 +158,12 @@ where
                 }
 
                 // TD at mainnet block #7753254 is 76 bits. If it becomes 100 million times
-                // larger, it will still fit within 100 bits
-                if status.total_difficulty.bit_len() > 100 {
+                // larger, it will still fit within 160 bits
+                if status.total_difficulty.bit_len() > 160 {
                     self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
                     return Err(EthHandshakeError::TotalDifficultyBitLenTooLarge {
                         got: status.total_difficulty.bit_len(),
-                        maximum: 100,
+                        maximum: 160,
                     }
                     .into())
                 }
@@ -498,7 +498,7 @@ mod tests {
         let status = Status {
             version: EthVersion::Eth67,
             chain: NamedChain::Mainnet.into(),
-            total_difficulty: U256::from(2).pow(U256::from(100)),
+            total_difficulty: U256::from(2).pow(U256::from(164)),
             blockhash: B256::random(),
             genesis,
             // Pass the current fork id.
@@ -522,7 +522,7 @@ mod tests {
             assert!(matches!(
                 handshake_res,
                 Err(EthStreamError::EthHandshakeError(
-                    EthHandshakeError::TotalDifficultyBitLenTooLarge { got: 101, maximum: 100 }
+                    EthHandshakeError::TotalDifficultyBitLenTooLarge { got: 165, maximum: 160 }
                 ))
             ));
         });
@@ -539,7 +539,7 @@ mod tests {
         assert!(matches!(
             handshake_res,
             Err(EthStreamError::EthHandshakeError(
-                EthHandshakeError::TotalDifficultyBitLenTooLarge { got: 101, maximum: 100 }
+                EthHandshakeError::TotalDifficultyBitLenTooLarge { got: 165, maximum: 160 }
             ))
         ));
 

@@ -9,6 +9,19 @@ pub struct EvmEnv {
     pub block_env: BlockEnv,
 }
 
+impl Default for EvmEnv {
+    fn default() -> Self {
+        Self {
+            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg {
+                cfg_env: Default::default(),
+                // Will set `is_optimism` if `revm/optimism-default-handler` is enabled.
+                handler_cfg: Default::default(),
+            },
+            block_env: BlockEnv::default(),
+        }
+    }
+}
+
 impl EvmEnv {
     /// Create a new `EvmEnv` from its components.
     ///

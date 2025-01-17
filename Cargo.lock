@@ -2985,7 +2985,9 @@ dependencies = [
  "clap",
  "futures-util",
  "reth",
+ "reth-evm",
  "reth-node-ethereum",
+ "revm-primitives",
 ]
 
 [[package]]
@@ -9002,6 +9004,7 @@ dependencies = [
  "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
+ "reth-evm",
  "reth-execution-types",
  "reth-metrics",
  "reth-primitives",
