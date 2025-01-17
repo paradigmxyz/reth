@@ -1574,14 +1574,21 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Withdrawals
     ) -> ProviderResult<Option<Withdrawals>> {
         if self.chain_spec.is_shanghai_active_at_timestamp(timestamp) {
             if let Some(number) = self.convert_hash_or_number(id)? {
-                // If we are past shanghai, then all blocks should have a withdrawal list, even if
-                // empty
-                let withdrawals = self
-                    .tx
-                    .get::<tables::BlockWithdrawals>(number)
-                    .map(|w| w.map(|w| w.withdrawals))?
-                    .unwrap_or_default();
-                return Ok(Some(withdrawals))
+                return self.static_file_provider.get_with_static_file_or_database(
+                    StaticFileSegment::BlockMeta,
+                    number,
+                    |static_file| static_file.withdrawals_by_block(number.into(), timestamp),
+                    || {
+                        // If we are past shanghai, then all blocks should have a withdrawal list,
+                        // even if empty
+                        let withdrawals = self
+                            .tx
+                            .get::<tables::BlockWithdrawals>(number)
+                            .map(|w| w.map(|w| w.withdrawals))?
+                            .unwrap_or_default();
+                        Ok(Some(withdrawals))
+                    },
+                )
             }
         }
         Ok(None)
@@ -1601,9 +1608,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> OmmersProvider for DatabasePro
                 return Ok(Some(Vec::new()))
             }
 
-            let ommers =
-                self.tx.get::<tables::BlockOmmers<Self::Header>>(number)?.map(|o| o.ommers);
-            return Ok(ommers)
+            return self.static_file_provider.get_with_static_file_or_database(
+                StaticFileSegment::BlockMeta,
+                number,
+                |static_file| static_file.ommers(id),
+                || Ok(self.tx.get::<tables::BlockOmmers<Self::Header>>(number)?.map(|o| o.ommers)),
+            )
         }
 
         Ok(None)
@@ -1614,19 +1624,27 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockBodyIndicesProvider
     for DatabaseProvider<TX, N>
 {
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::BlockMeta,
+            num,
+            |static_file| static_file.block_body_indices(num),
+            || Ok(self.tx.get::<tables::BlockBodyIndices>(num)?),
+        )
     }
 
     fn block_body_indices_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
-        Ok(self
-            .tx_ref()
-            .cursor_read::<tables::BlockBodyIndices>()?
-            .walk_range(range)?
-            .map(|r| r.map(|(_, b)| b))
-            .collect::<Result<_, _>>()?)
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::BlockMeta,
+            *range.start()..*range.end() + 1,
+            |static_file, range, _| {
+                static_file.block_body_indices_range(range.start..=range.end.saturating_sub(1))
+            },
+            |range, _| self.cursor_read_collect::<tables::BlockBodyIndices>(range),
+            |_| true,
+        )
     }
 }
 
