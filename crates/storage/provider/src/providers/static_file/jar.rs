@@ -25,7 +25,7 @@ use reth_storage_api::{BlockBodyIndicesProvider, OmmersProvider, WithdrawalsProv
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     fmt::Debug,
-    ops::{Deref, RangeBounds},
+    ops::{Deref, RangeBounds, RangeInclusive},
     sync::Arc,
 };
 
@@ -385,5 +385,20 @@ impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileJar
 impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileJarProvider<'_, N> {
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         self.cursor()?.get_one::<BodyIndicesMask>(num.into())
+    }
+
+    fn block_body_indices_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        let mut cursor = self.cursor()?;
+        let mut indices = Vec::with_capacity((range.end() - range.start() + 1) as usize);
+
+        for num in range {
+            if let Some(block) = cursor.get_one::<BodyIndicesMask>(num.into())? {
+                indices.push(block)
+            }
+        }
+        Ok(indices)
     }
 }

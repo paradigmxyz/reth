@@ -564,6 +564,13 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ProviderFactory<N> {
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         self.provider()?.block_body_indices(number)
     }
+
+    fn block_body_indices_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        self.provider()?.block_body_indices_range(range)
+    }
 }
 
 impl<N: ProviderNodeTypes> StageCheckpointReader for ProviderFactory<N> {
