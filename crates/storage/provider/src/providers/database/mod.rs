@@ -562,7 +562,12 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ProviderFactory<N> {
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.provider()?.block_body_indices(number)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::BlockMeta,
+            number,
+            |static_file| static_file.block_body_indices(number),
+            || self.provider()?.block_body_indices(number),
+        )
     }
 
     fn block_body_indices_range(

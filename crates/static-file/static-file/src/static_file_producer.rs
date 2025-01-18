@@ -140,6 +140,9 @@ where
         if let Some(block_range) = targets.receipts.clone() {
             segments.push((Box::new(segments::Receipts), block_range));
         }
+        if let Some(block_range) = targets.block_meta.clone() {
+            segments.push((Box::new(segments::BlockMeta), block_range));
+        }
 
         segments.par_iter().try_for_each(|(segment, block_range)| -> ProviderResult<()> {
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, "StaticFileProducer segment");
@@ -326,7 +329,7 @@ mod tests {
                 headers: Some(1),
                 receipts: Some(1),
                 transactions: Some(1),
-                block_meta: None,
+                block_meta: Some(1),
             })
             .expect("get static file targets");
         assert_eq!(
@@ -335,7 +338,7 @@ mod tests {
                 headers: Some(0..=1),
                 receipts: Some(0..=1),
                 transactions: Some(0..=1),
-                block_meta: None
+                block_meta: Some(0..=1)
             }
         );
         assert_matches!(static_file_producer.run(targets), Ok(_));
@@ -345,7 +348,7 @@ mod tests {
                 headers: Some(1),
                 receipts: Some(1),
                 transactions: Some(1),
-                block_meta: None
+                block_meta: Some(1)
             }
         );
 
@@ -354,7 +357,7 @@ mod tests {
                 headers: Some(3),
                 receipts: Some(3),
                 transactions: Some(3),
-                block_meta: None,
+                block_meta: Some(3),
             })
             .expect("get static file targets");
         assert_eq!(
@@ -363,7 +366,7 @@ mod tests {
                 headers: Some(2..=3),
                 receipts: Some(2..=3),
                 transactions: Some(2..=3),
-                block_meta: None
+                block_meta: Some(2..=3)
             }
         );
         assert_matches!(static_file_producer.run(targets), Ok(_));
@@ -373,7 +376,7 @@ mod tests {
                 headers: Some(3),
                 receipts: Some(3),
                 transactions: Some(3),
-                block_meta: None
+                block_meta: Some(3)
             }
         );
 
@@ -382,7 +385,7 @@ mod tests {
                 headers: Some(4),
                 receipts: Some(4),
                 transactions: Some(4),
-                block_meta: None,
+                block_meta: Some(4),
             })
             .expect("get static file targets");
         assert_eq!(
@@ -391,7 +394,7 @@ mod tests {
                 headers: Some(4..=4),
                 receipts: Some(4..=4),
                 transactions: Some(4..=4),
-                block_meta: None
+                block_meta: Some(4..=4)
             }
         );
         assert_matches!(
@@ -404,7 +407,7 @@ mod tests {
                 headers: Some(3),
                 receipts: Some(3),
                 transactions: Some(3),
-                block_meta: None
+                block_meta: Some(3)
             }
         );
     }
@@ -433,7 +436,7 @@ mod tests {
                         headers: Some(1),
                         receipts: Some(1),
                         transactions: Some(1),
-                        block_meta: None,
+                        block_meta: Some(1),
                     })
                     .expect("get static file targets");
                 assert_matches!(locked_producer.run(targets.clone()), Ok(_));

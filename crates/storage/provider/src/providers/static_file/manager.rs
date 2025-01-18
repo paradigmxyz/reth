@@ -17,8 +17,8 @@ use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db::{
     lockfile::StorageLock,
     static_file::{
-        iter_static_files, BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask,
-        StaticFileCursor, TDWithHashMask, TransactionMask,
+        iter_static_files, BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask,
+        ReceiptMask, StaticFileCursor, TDWithHashMask, TransactionMask,
     },
     table::{Decompress, Value},
     tables,
@@ -680,11 +680,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         };
 
         for segment in StaticFileSegment::iter() {
-            // Not integrated yet
-            if segment.is_block_meta() {
-                continue
-            }
-
             if has_receipt_pruning && segment.is_receipts() {
                 // Pruned nodes (including full node) do not store receipts as static files.
                 continue
@@ -905,8 +900,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             );
             let mut writer = self.latest_writer(segment)?;
             if segment.is_headers() {
-                // TODO(joshie): is_block_meta
                 writer.prune_headers(highest_static_file_block - checkpoint_block_number)?;
+            } else if segment.is_block_meta() {
+                writer.prune_block_meta(highest_static_file_block - checkpoint_block_number)?;
             } else if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
                 // todo joshie: is querying block_body_indices a potential issue once bbi is moved
                 // to sf as well
@@ -1027,7 +1023,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                                 "Could not find block or tx number on a range request"
                             );
 
-                            let err = if segment.is_headers() {
+                            let err = if segment.is_block_based() {
                                 ProviderError::MissingStaticFileBlock(segment, number)
                             } else {
                                 ProviderError::MissingStaticFileTx(segment, number)
@@ -1732,10 +1728,14 @@ impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileProvider<N> {
 
     fn block_body_indices_range(
         &self,
-        _range: RangeInclusive<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
-        // Required data not present in static_files
-        Err(ProviderError::UnsupportedProvider)
+        self.fetch_range_with_predicate(
+            StaticFileSegment::BlockMeta,
+            *range.start()..*range.end() + 1,
+            |cursor, number| cursor.get_one::<BodyIndicesMask>(number.into()),
+            |_| true,
+        )
     }
 }
 
