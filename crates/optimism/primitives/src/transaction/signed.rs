@@ -20,18 +20,15 @@ use core::{
     mem,
 };
 use derive_more::{AsRef, Deref};
-#[cfg(not(feature = "std"))]
-use once_cell::sync::OnceCell as OnceLock;
 use op_alloy_consensus::{DepositTransaction, OpPooledTransaction, OpTypedTransaction, TxDeposit};
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
+    sync::OnceLock,
     transaction::error::TransactionConversionError,
     InMemorySize, SignedTransaction,
 };
-#[cfg(feature = "std")]
-use std::sync::OnceLock;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
