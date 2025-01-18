@@ -22,7 +22,7 @@ use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKin
 use reth_primitives::{NodePrimitives, SealedHeader};
 use reth_primitives_traits::proofs;
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
-use reth_revm::cached::CachedReads;
+use reth_revm::{cached::CachedReads, cancelled::Cancelled};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{Database, State};
@@ -31,7 +31,7 @@ use std::{
     future::Future,
     ops::Deref,
     pin::Pin,
-    sync::{atomic::AtomicBool, Arc},
+    sync::Arc,
     task::{Context, Poll},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -678,27 +678,6 @@ impl<P> Future for PendingPayload<P> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let res = ready!(self.payload.poll_unpin(cx));
         Poll::Ready(res.map_err(Into::into).and_then(|res| res))
-    }
-}
-
-/// A marker that can be used to cancel a job.
-///
-/// If dropped, it will set the `cancelled` flag to true.
-#[derive(Default, Clone, Debug)]
-pub struct Cancelled(Arc<AtomicBool>);
-
-// === impl Cancelled ===
-
-impl Cancelled {
-    /// Returns true if the job was cancelled.
-    pub fn is_cancelled(&self) -> bool {
-        self.0.load(std::sync::atomic::Ordering::Relaxed)
-    }
-}
-
-impl Drop for Cancelled {
-    fn drop(&mut self) {
-        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
