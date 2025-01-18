@@ -16,7 +16,7 @@ use reth::{
         inspector_handle_register,
         precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
         primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
-        ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
+        ContextPrecompiles, Database, EvmBuilder, GetInspector,
     },
     rpc::types::engine::PayloadAttributes,
     tasks::TaskManager,
@@ -24,7 +24,7 @@ use reth::{
 };
 use reth_chainspec::{Chain, ChainSpec};
 use reth_evm::env::EvmEnv;
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::{EthEvm, EthEvmConfig};
 use reth_node_api::{
     ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
     NodeTypesWithEngine, PayloadTypes,
@@ -93,16 +93,6 @@ impl ConfigureEvmEnv for MyEvmConfig {
         self.inner.fill_tx_env(tx_env, transaction, sender);
     }
 
-    fn fill_tx_env_system_contract_call(
-        &self,
-        env: &mut Env,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    ) {
-        self.inner.fill_tx_env_system_contract_call(env, caller, contract, data);
-    }
-
     fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
         self.inner.fill_cfg_env(cfg_env, header);
     }
@@ -117,7 +107,14 @@ impl ConfigureEvmEnv for MyEvmConfig {
 }
 
 impl ConfigureEvm for MyEvmConfig {
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv, tx: TxEnv) -> Evm<'_, (), DB> {
+    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
+
+    fn evm_with_env<DB: Database>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv,
+        tx: TxEnv,
+    ) -> Self::Evm<'_, DB, ()> {
         EvmBuilder::default()
             .with_db(db)
             .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
@@ -126,6 +123,7 @@ impl ConfigureEvm for MyEvmConfig {
             // add additional precompiles
             .append_handler_register(MyEvmConfig::set_precompiles)
             .build()
+            .into()
     }
 
     fn evm_with_env_and_inspector<DB, I>(
@@ -134,7 +132,7 @@ impl ConfigureEvm for MyEvmConfig {
         evm_env: EvmEnv,
         tx: TxEnv,
         inspector: I,
-    ) -> Evm<'_, I, DB>
+    ) -> Self::Evm<'_, DB, I>
     where
         DB: Database,
         I: GetInspector<DB>,
@@ -149,6 +147,7 @@ impl ConfigureEvm for MyEvmConfig {
             .append_handler_register(MyEvmConfig::set_precompiles)
             .append_handler_register(inspector_handle_register)
             .build()
+            .into()
     }
 }
 
