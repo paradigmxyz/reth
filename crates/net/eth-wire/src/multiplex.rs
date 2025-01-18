@@ -122,8 +122,8 @@ impl<St> RlpxProtocolMultiplexer<St> {
             let st = handshake(proxy).await?;
             Ok((st, ()))
         })
-            .await
-            .map(|(st, _)| st)
+        .await
+        .map(|(st, _)| st)
     }
 
     /// Converts this multiplexer into a [`RlpxSatelliteStream`] with the given primary protocol.
@@ -220,7 +220,7 @@ impl<St> RlpxProtocolMultiplexer<St> {
                 UnauthedEthStream::new(proxy).handshake(status, fork_filter).await
             },
         )
-            .await
+        .await
     }
 }
 
@@ -557,7 +557,7 @@ where
                             return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(
                                 offset,
                             )
-                                .into())))
+                            .into())))
                         }
                     }
                     Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
@@ -770,7 +770,7 @@ mod tests {
                     unreachable!()
                 }
             })
-                .unwrap();
+            .unwrap();
 
             loop {
                 let _ = st.next().await;
@@ -809,7 +809,7 @@ mod tests {
                 unreachable!()
             }
         })
-            .unwrap();
+        .unwrap();
 
         loop {
             tokio::select! {
