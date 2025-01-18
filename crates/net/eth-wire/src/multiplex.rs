@@ -581,7 +581,7 @@ where
     St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     Primary: Sink<T> + Unpin,
     P2PStreamError: Into<<Primary as Sink<T>>::Error>,
-    io::Error: Into<<Primary as Sink<T>>::Error>
+    io::Error: Into<<Primary as Sink<T>>::Error>,
 {
     type Error = <Primary as Sink<T>>::Error;
 
@@ -619,7 +619,8 @@ where
             return Err(io::Error::new(
                 io::ErrorKind::WouldBlock,
                 "satellite message buffer not empty",
-            ).into());
+            )
+            .into());
         }
 
         this.primary.st.start_send_unpin(item)
