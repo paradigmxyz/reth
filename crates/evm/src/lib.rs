@@ -39,6 +39,8 @@ pub mod system_calls;
 pub mod test_utils;
 
 /// An abstraction over EVM.
+///
+/// At this point, assumed to be implemented on wrappers around [`revm::Evm`].
 pub trait Evm {
     /// Database type held by the EVM.
     type DB;
