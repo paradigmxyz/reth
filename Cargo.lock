@@ -8562,7 +8562,6 @@ dependencies = [
  "alloy-rlp",
  "alloy-trie",
  "arbitrary",
- "assert_matches",
  "c-kzg",
  "codspeed-criterion-compat",
  "derive_more",

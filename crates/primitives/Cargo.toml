@@ -47,7 +47,6 @@ alloy-genesis.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }
 
-assert_matches.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
