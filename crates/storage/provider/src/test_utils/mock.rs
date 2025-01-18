@@ -44,7 +44,7 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct MockEthProvider<T = TransactionSigned> {
     /// Local block store
-    pub blocks: Arc<Mutex<HashMap<B256, Block>>>,
+    pub blocks: Arc<Mutex<HashMap<B256, Block<T>>>>,
     /// Local header store
     pub headers: Arc<Mutex<HashMap<B256, Header>>>,
     /// Local account store
