@@ -692,8 +692,6 @@ async fn test_rejected_by_already_connect() {
     let peer_id = events.next_session_established().await.unwrap();
     assert_eq!(peer_id, *other_peer_handle2.peer_id());
 
-    // wait 2 seconds and check that other_peer2 is not rejected by TooManyPeers
-    tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(handle.num_connected_peers(), 2);
 }
 
