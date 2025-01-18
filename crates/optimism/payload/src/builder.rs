@@ -741,8 +741,7 @@ where
         DB: Database<Error = ProviderError>,
     {
         let mut info = ExecutionInfo::with_capacity(self.attributes().transactions.len());
-        let mut evm =
-            self.evm_config.evm_with_env(&mut *db, self.evm_env.clone(), Default::default());
+        let mut evm = self.evm_config.evm_with_env(&mut *db, self.evm_env.clone());
 
         for sequencer_tx in &self.attributes().transactions {
             // A sequencer's block should never contain blob transactions.
@@ -851,8 +850,7 @@ where
         let block_gas_limit = self.block_gas_limit();
         let base_fee = self.base_fee();
 
-        let mut evm =
-            self.evm_config.evm_with_env(&mut *db, self.evm_env.clone(), Default::default());
+        let mut evm = self.evm_config.evm_with_env(&mut *db, self.evm_env.clone());
 
         while let Some(tx) = best_txs.next(()) {
             // ensure we still have capacity for this transaction

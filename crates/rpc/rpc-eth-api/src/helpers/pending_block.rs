@@ -325,8 +325,7 @@ pub trait LoadPendingBlock:
             }
 
             let tx_env = self.evm_config().tx_env(tx.tx(), tx.signer());
-            let mut evm =
-                self.evm_config().evm_with_env(&mut db, evm_env.clone(), Default::default());
+            let mut evm = self.evm_config().evm_with_env(&mut db, evm_env.clone());
 
             let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,

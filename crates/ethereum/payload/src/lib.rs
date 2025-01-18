@@ -226,7 +226,7 @@ where
         PayloadBuilderError::Internal(err.into())
     })?;
 
-    let mut evm = evm_config.evm_with_env(&mut db, evm_env, Default::default());
+    let mut evm = evm_config.evm_with_env(&mut db, evm_env);
 
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
