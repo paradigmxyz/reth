@@ -25,7 +25,7 @@ use reth_transaction_pool::{
 use revm::primitives::{AccessList, KzgSettings};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc, LazyLock,
+    Arc, OnceLock,
 };
 
 /// Type alias for default optimism transaction pool
@@ -36,11 +36,16 @@ pub type OpTransactionPool<Client, S> = Pool<
 >;
 
 /// Pool transaction for OP.
-#[derive(Debug, derive_more::Deref)]
+///
+/// This type wraps the actual transaction and caches values that are frequently used by the pool.
+/// For payload building this lazily tracks values that are required during payload building:
+///  - Estimated compressed size of this transaction
+#[derive(Debug, Clone, derive_more::Deref)]
 pub struct OpPooledTransaction {
     #[deref]
     inner: EthPooledTransaction<OpTransactionSigned>,
-    estimated_tx_compressed_size: LazyLock<u64>,
+    /// The estimated size of this transaction, lazily computed.
+    estimated_tx_compressed_size: OnceLock<u32>,
 }
 
 impl OpPooledTransaction {
@@ -48,22 +53,16 @@ impl OpPooledTransaction {
     pub fn new(transaction: RecoveredTx<OpTransactionSigned>, encoded_length: usize) -> Self {
         Self {
             inner: EthPooledTransaction::new(transaction, encoded_length),
-            estimated_tx_compressed_size: LazyLock::new(Default::default),
+            estimated_tx_compressed_size: Default::default(),
         }
     }
 
-    /// Returns the estimated compressed size of a transaction.
-    pub fn compressed_size(&self) -> u64 {
-        *self.estimated_tx_compressed_size
-    }
-}
-
-impl Clone for OpPooledTransaction {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            estimated_tx_compressed_size: LazyLock::new(Default::default),
-        }
+    /// Returns the estimated compressed size of a transaction in bytes scaled by 1e6.
+    // This value is computed based on the following formula:
+    // `max(minTransactionSize, intercept + fastlzCoef*fastlzSize)`
+    pub fn estimated_compressed_size(&self) -> u32 {
+        // TODO(mattsse): use standalone flz compute function
+        *self.estimated_tx_compressed_size.get_or_init(|| self.inner.encoded_length as u32)
     }
 }
 
@@ -73,7 +72,7 @@ impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for OpPooledTran
         let tx = tx.map_transaction(|tx| tx.into());
         Self {
             inner: EthPooledTransaction::new(tx, encoded_len),
-            estimated_tx_compressed_size: LazyLock::new(Default::default),
+            estimated_tx_compressed_size: Default::default(),
         }
     }
 }
