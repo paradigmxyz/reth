@@ -108,7 +108,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         self,
         config: Config,
         provider_factory: ProviderFactory<N>,
-    ) -> Result<Pipeline<N>, eyre::Error> {
+    ) -> Result<Pipeline<N, E>, eyre::Error> {
         let stage_conf = &config.stages;
         let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 

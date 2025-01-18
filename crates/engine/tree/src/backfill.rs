@@ -8,6 +8,7 @@
 //! These modes are mutually exclusive and the node can only be in one mode at a time.
 
 use futures::FutureExt;
+use reth_errors::GenericBlockExecutionError;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
@@ -90,7 +91,7 @@ pub struct PipelineSync<N: ProviderNodeTypes> {
 
 impl<N: ProviderNodeTypes> PipelineSync<N> {
     /// Create a new instance.
-    pub fn new(pipeline: Pipeline<N>, pipeline_task_spawner: Box<dyn TaskSpawner>) -> Self {
+    pub fn new(pipeline: Pipeline<N, E>, pipeline_task_spawner: Box<dyn TaskSpawner>) -> Self {
         Self {
             pipeline_task_spawner,
             pipeline_state: PipelineState::Idle(Some(pipeline)),
@@ -212,11 +213,11 @@ impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
 #[derive(Debug)]
-enum PipelineState<N: ProviderNodeTypes> {
+enum PipelineState<N: ProviderNodeTypes, E: GenericBlockExecutionError> {
     /// Pipeline is idle.
-    Idle(Option<Pipeline<N>>),
+    Idle(Option<Pipeline<N, E>>),
     /// Pipeline is running and waiting for a response
-    Running(oneshot::Receiver<PipelineWithResult<N>>),
+    Running(oneshot::Receiver<PipelineWithResult<N, E>>),
 }
 
 impl<N: ProviderNodeTypes> PipelineState<N> {

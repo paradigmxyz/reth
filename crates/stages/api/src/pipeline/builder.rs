@@ -21,11 +21,14 @@ where
     fail_on_unwind: bool,
 }
 
-impl<Provider> PipelineBuilder<Provider> {
+impl<Provider, E> PipelineBuilder<Provider, E>
+where
+    E: GenericBlockExecutionError,
+{
     /// Add a stage to the pipeline.
     pub fn add_stage<S>(mut self, stage: S) -> Self
     where
-        S: Stage<Provider> + 'static,
+        S: Stage<Provider, E> + 'static,
     {
         self.stages.push(Box::new(stage));
         self
@@ -38,7 +41,7 @@ impl<Provider> PipelineBuilder<Provider> {
     /// To customize the stages in the set (reorder, disable, insert a stage) call
     /// [`builder`][StageSet::builder] on the set which will convert it to a
     /// [`StageSetBuilder`][crate::StageSetBuilder].
-    pub fn add_stages<Set: StageSet<Provider>>(mut self, set: Set) -> Self {
+    pub fn add_stages<Set: StageSet<Provider, E>>(mut self, set: Set) -> Self {
         let states = set.builder().build();
         self.stages.reserve_exact(states.len());
         for stage in states {
@@ -78,7 +81,7 @@ impl<Provider> PipelineBuilder<Provider> {
         self,
         provider_factory: ProviderFactory<N>,
         static_file_producer: StaticFileProducer<ProviderFactory<N>>,
-    ) -> Pipeline<N>
+    ) -> Pipeline<N, E>
     where
         N: ProviderNodeTypes,
         ProviderFactory<N>: DatabaseProviderFactory<ProviderRW = Provider>,
@@ -98,7 +101,10 @@ impl<Provider> PipelineBuilder<Provider> {
     }
 }
 
-impl<Provider> Default for PipelineBuilder<Provider> {
+impl<Provider, E> Default for PipelineBuilder<Provider, E>
+where
+    E: GenericBlockExecutionError,
+{
     fn default() -> Self {
         Self {
             stages: Vec::new(),
@@ -110,7 +116,10 @@ impl<Provider> Default for PipelineBuilder<Provider> {
     }
 }
 
-impl<Provider> std::fmt::Debug for PipelineBuilder<Provider> {
+impl<Provider, E> std::fmt::Debug for PipelineBuilder<Provider, E>
+where
+    E: GenericBlockExecutionError,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PipelineBuilder")
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())

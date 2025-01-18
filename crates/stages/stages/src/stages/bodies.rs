@@ -2,6 +2,7 @@ use super::missing_static_data_error;
 use futures_util::TryStreamExt;
 use reth_db::{tables, transaction::DbTx};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTxMut};
+use reth_execution_errors::GenericBlockExecutionError;
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::StaticFileSegment;
 use reth_provider::{
@@ -50,14 +51,20 @@ use tracing::*;
 /// - The [`BlockBodies`][reth_db::tables::BlockBodyIndices] table
 /// - The [`Transactions`][reth_db::tables::Transactions] table
 #[derive(Debug)]
-pub struct BodyStage<D: BodyDownloader> {
+pub struct BodyStage<D: BodyDownloader, E>
+where
+    E: GenericBlockExecutionError,
+{
     /// The body downloader.
     downloader: D,
     /// Block response buffer.
     buffer: Option<Vec<BlockResponse<D::Block>>>,
 }
 
-impl<D: BodyDownloader> BodyStage<D> {
+impl<D: BodyDownloader, E> BodyStage<D, E>
+where
+    E: GenericBlockExecutionError,
+{
     /// Create new bodies stage from downloader.
     pub const fn new(downloader: D) -> Self {
         Self { downloader, buffer: None }
@@ -68,7 +75,7 @@ impl<D: BodyDownloader> BodyStage<D> {
         &self,
         provider: &Provider,
         unwind_block: Option<u64>,
-    ) -> Result<(), StageError>
+    ) -> Result<(), StageError<E>>
     where
         Provider: DBProvider<Tx: DbTxMut> + BlockReader + StaticFileProviderFactory,
     {
@@ -142,7 +149,7 @@ impl<D: BodyDownloader> BodyStage<D> {
     }
 }
 
-impl<Provider, D> Stage<Provider> for BodyStage<D>
+impl<Provider, D, E> Stage<Provider, E> for BodyStage<D, E>
 where
     Provider: DBProvider<Tx: DbTxMut>
         + StaticFileProviderFactory
@@ -150,6 +157,7 @@ where
         + BlockReader
         + BlockWriter<Block = D::Block>,
     D: BodyDownloader,
+    E: GenericBlockExecutionError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -160,7 +168,7 @@ where
         &mut self,
         cx: &mut Context<'_>,
         input: ExecInput,
-    ) -> Poll<Result<(), StageError>> {
+    ) -> Poll<Result<(), StageError<E>>> {
         if input.target_reached() || self.buffer.is_some() {
             return Poll::Ready(Ok(()))
         }
@@ -186,7 +194,11 @@ where
 
     /// Download block bodies from the last checkpoint for this stage up until the latest synced
     /// header, limited by the stage's batch size.
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError<E>> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -226,7 +238,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    ) -> Result<UnwindOutput, StageError<E>> {
         self.buffer.take();
 
         self.ensure_consistency(provider, Some(input.unwind_to))?;
@@ -489,6 +501,7 @@ mod tests {
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
             transaction::{DbTx, DbTxMut},
         };
+        use reth_execution_errors::GenericBlockExecutionError;
         use reth_network_p2p::{
             bodies::{
                 downloader::{BodyDownloader, BodyDownloaderResult},
@@ -543,7 +556,10 @@ mod tests {
             }
         }
 
-        impl StageTestRunner for BodyTestRunner {
+        impl<E> StageTestRunner<E> for BodyTestRunner
+        where
+            E: GenericBlockExecutionError,
+        {
             type S = BodyStage<TestBodyDownloader>;
 
             fn db(&self) -> &TestStageDB {
@@ -559,7 +575,10 @@ mod tests {
             }
         }
 
-        impl ExecuteStageTestRunner for BodyTestRunner {
+        impl<E> ExecuteStageTestRunner<E> for BodyTestRunner
+        where
+            E: GenericBlockExecutionError,
+        {
             type Seed = Vec<SealedBlock>;
 
             fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
@@ -638,7 +657,10 @@ mod tests {
             }
         }
 
-        impl UnwindStageTestRunner for BodyTestRunner {
+        impl<E> UnwindStageTestRunner<E> for BodyTestRunner
+        where
+            E: GenericBlockExecutionError,
+        {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
                 self.db.ensure_no_entry_above::<tables::BlockBodyIndices, _>(
                     input.unwind_to,

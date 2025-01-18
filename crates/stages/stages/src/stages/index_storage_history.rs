@@ -7,6 +7,7 @@ use reth_db_api::{
     table::Decode,
     transaction::DbTxMut,
 };
+use reth_execution_errors::BlockExecutionError;
 use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
@@ -44,7 +45,7 @@ impl Default for IndexStorageHistoryStage {
     }
 }
 
-impl<Provider> Stage<Provider> for IndexStorageHistoryStage
+impl<Provider> Stage<Provider, BlockExecutionError> for IndexStorageHistoryStage
 where
     Provider:
         DBProvider<Tx: DbTxMut> + PruneCheckpointWriter + HistoryWriter + PruneCheckpointReader,
@@ -164,6 +165,7 @@ mod tests {
         },
         transaction::DbTx,
     };
+    use reth_execution_errors::GenericBlockExecutionError;
     use reth_primitives::StorageEntry;
     use reth_provider::{providers::StaticFileWriter, DatabaseProviderFactory};
     use reth_testing_utils::generators::{
@@ -532,7 +534,10 @@ mod tests {
         }
     }
 
-    impl StageTestRunner for IndexStorageHistoryTestRunner {
+    impl<E> StageTestRunner<E> for IndexStorageHistoryTestRunner
+    where
+        E: GenericBlockExecutionError,
+    {
         type S = IndexStorageHistoryStage;
 
         fn db(&self) -> &TestStageDB {

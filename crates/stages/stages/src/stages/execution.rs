@@ -165,7 +165,7 @@ where
         provider: impl StatsReader,
         start_block: u64,
         max_block: u64,
-    ) -> Result<PruneModes, StageError> {
+    ) -> Result<PruneModes, StageError<E::Error>> {
         let mut prune_modes = self.prune_modes.clone();
 
         // If we're not executing MerkleStage from scratch (by threshold or first-sync), then erase
@@ -192,7 +192,7 @@ where
         provider: &Provider,
         checkpoint: u64,
         unwind_to: Option<u64>,
-    ) -> Result<(), StageError>
+    ) -> Result<(), StageError<E::Error>>
     where
         Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
     {
@@ -262,7 +262,7 @@ where
     }
 }
 
-impl<E, Provider> Stage<Provider> for ExecutionStage<E>
+impl<E, Provider> Stage<Provider, E::Error> for ExecutionStage<E::Error>
 where
     E: BlockExecutorProvider,
     Provider: DBProvider
@@ -457,7 +457,7 @@ where
         })
     }
 
-    fn post_execute_commit(&mut self) -> Result<(), StageError> {
+    fn post_execute_commit(&mut self) -> Result<(), StageError<E::Error>> {
         let Some(chain) = self.post_execute_commit_input.take() else { return Ok(()) };
 
         // NOTE: We can ignore the error here, since an error means that the channel is closed,
@@ -475,7 +475,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    ) -> Result<UnwindOutput, StageError<E::Error>> {
         let (range, unwind_to, _) =
             input.unwind_block_range_with_threshold(self.thresholds.max_blocks.unwrap_or(u64::MAX));
         if range.is_empty() {
@@ -531,7 +531,7 @@ where
         Ok(UnwindOutput { checkpoint })
     }
 
-    fn post_unwind_commit(&mut self) -> Result<(), StageError> {
+    fn post_unwind_commit(&mut self) -> Result<(), StageError<E::Error>> {
         let Some(chain) = self.post_unwind_commit_input.take() else { return Ok(()) };
 
         // NOTE: We can ignore the error here, since an error means that the channel is closed,

@@ -3,6 +3,7 @@ use alloy_primitives::Address;
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db::tables;
 use reth_db_api::{models::ShardedKey, table::Decode, transaction::DbTxMut};
+use reth_execution_errors::GenericBlockExecutionError;
 use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
@@ -42,10 +43,11 @@ impl Default for IndexAccountHistoryStage {
     }
 }
 
-impl<Provider> Stage<Provider> for IndexAccountHistoryStage
+impl<Provider, E> Stage<Provider, E> for IndexAccountHistoryStage
 where
     Provider:
         DBProvider<Tx: DbTxMut> + HistoryWriter + PruneCheckpointReader + PruneCheckpointWriter,
+    E: GenericBlockExecutionError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -510,7 +512,7 @@ mod tests {
         }
     }
 
-    impl StageTestRunner for IndexAccountHistoryTestRunner {
+    impl<E> StageTestRunner<E> for IndexAccountHistoryTestRunner<E> {
         type S = IndexAccountHistoryStage;
 
         fn db(&self) -> &TestStageDB {

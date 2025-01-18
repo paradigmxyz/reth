@@ -7,6 +7,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
+use reth_execution_errors::GenericBlockExecutionError;
 use reth_primitives::{GotExpected, NodePrimitives, StaticFileSegment};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
@@ -31,7 +32,8 @@ const BATCH_SIZE: usize = 100_000;
 const WORKER_CHUNK_SIZE: usize = 100;
 
 /// Type alias for a sender that transmits the result of sender recovery.
-type RecoveryResultSender = mpsc::Sender<Result<(u64, Address), Box<SenderRecoveryStageError>>>;
+type RecoveryResultSender<E: GenericBlockExecutionError> =
+    mpsc::Sender<Result<(u64, Address), Box<SenderRecoveryStageError<E>>>>;
 
 /// The sender recovery stage iterates over existing transactions,
 /// recovers the transaction signer and stores them
@@ -56,13 +58,14 @@ impl Default for SenderRecoveryStage {
     }
 }
 
-impl<Provider> Stage<Provider> for SenderRecoveryStage
+impl<Provider, E> Stage<Provider, E> for SenderRecoveryStage
 where
     Provider: DBProvider<Tx: DbTxMut>
         + BlockReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + StatsReader
         + PruneCheckpointReader,
+    E: GenericBlockExecutionError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -73,7 +76,11 @@ where
     /// [`BlockBodyIndices`][reth_db::tables::BlockBodyIndices],
     /// collect transactions within that range, recover signer for each transaction and store
     /// entries in the [`TransactionSenders`][reth_db::tables::TransactionSenders] table.
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError<E>> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -122,7 +129,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    ) -> Result<UnwindOutput, StageError<E>> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Lookup latest tx id that we should unwind to
@@ -139,15 +146,16 @@ where
     }
 }
 
-fn recover_range<Provider, CURSOR>(
+fn recover_range<Provider, CURSOR, E>(
     tx_range: Range<u64>,
     provider: &Provider,
-    tx_batch_sender: mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>,
+    tx_batch_sender: mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender<E>)>>,
     senders_cursor: &mut CURSOR,
 ) -> Result<(), StageError>
 where
     Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
+    E: GenericBlockExecutionError,
 {
     debug!(target: "sync::stages::sender_recovery", ?tx_range, "Sending batch for processing");
 
@@ -230,13 +238,14 @@ where
 /// Spawns a thread to handle the recovery of transaction senders for
 /// specified chunks of a given batch. It processes incoming ranges, fetching and recovering
 /// transactions in parallel using global rayon pool
-fn setup_range_recovery<Provider>(
+fn setup_range_recovery<Provider, E>(
     provider: &Provider,
-) -> mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>
+) -> mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender<E>)>>
 where
     Provider: DBProvider
         + HeaderProvider
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>,
+    E: GenericBlockExecutionError,
 {
     let (tx_sender, tx_receiver) = mpsc::channel::<Vec<(Range<u64>, RecoveryResultSender)>>();
     let static_file_provider = provider.static_file_provider();
@@ -342,7 +351,10 @@ where
 
 #[derive(Error, Debug)]
 #[error(transparent)]
-enum SenderRecoveryStageError {
+enum SenderRecoveryStageError<E>
+where
+    E: GenericBlockExecutionError,
+{
     /// A transaction failed sender recovery
     #[error(transparent)]
     FailedRecovery(#[from] FailedSenderRecoveryError),
@@ -353,7 +365,7 @@ enum SenderRecoveryStageError {
 
     /// A different type of stage error occurred
     #[error(transparent)]
-    StageError(#[from] StageError),
+    StageError(#[from] StageError<E>),
 }
 
 #[derive(Error, Debug)]
@@ -620,7 +632,10 @@ mod tests {
         }
     }
 
-    impl StageTestRunner for SenderRecoveryTestRunner {
+    impl<E> StageTestRunner<E> for SenderRecoveryTestRunner
+    where
+        E: GenericBlockExecutionError,
+    {
         type S = SenderRecoveryStage;
 
         fn db(&self) -> &TestStageDB {
@@ -689,7 +704,10 @@ mod tests {
         }
     }
 
-    impl UnwindStageTestRunner for SenderRecoveryTestRunner {
+    impl<E> UnwindStageTestRunner<E> for SenderRecoveryTestRunner
+    where
+        E: GenericBlockExecutionError,
+    {
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             self.ensure_no_senders_by_block(input.unwind_to)
         }

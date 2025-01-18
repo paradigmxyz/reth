@@ -137,7 +137,7 @@ pub enum BlockExecutionError {
 
 /// Generic block execution error.
 pub trait GenericBlockExecutionError:
-    Display + From<ConsensusError> + From<BlockExecutionError>
+    Display + Sync + Send + std::fmt::Debug + 'static + From<ConsensusError> + From<BlockExecutionError>
 {
     /// Returns `true` if the error is a state root error.
     fn is_state_root_error(&self) -> bool;

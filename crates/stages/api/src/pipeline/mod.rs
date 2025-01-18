@@ -36,10 +36,10 @@ pub(crate) type BoxedStage<DB, Error> = Box<dyn Stage<DB, Error>>;
 
 /// The future that returns the owned pipeline and the result of the pipeline run. See
 /// [`Pipeline::run_as_fut`].
-pub type PipelineFut<N> = Pin<Box<dyn Future<Output = PipelineWithResult<N>> + Send>>;
+pub type PipelineFut<N, E> = Pin<Box<dyn Future<Output = PipelineWithResult<N, E>> + Send>>;
 
 /// The pipeline type itself with the result of [`Pipeline::run_as_fut`]
-pub type PipelineWithResult<N> = (Pipeline<N>, Result<ControlFlow, PipelineError>);
+pub type PipelineWithResult<N, E> = (Pipeline<N, E>, Result<ControlFlow, PipelineError<E>>);
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// A staged sync pipeline.
@@ -63,11 +63,11 @@ pub type PipelineWithResult<N> = (Pipeline<N>, Result<ControlFlow, PipelineError
 /// # Defaults
 ///
 /// The [`DefaultStages`](crate::sets::DefaultStages) are used to fully sync reth.
-pub struct Pipeline<N: ProviderNodeTypes> {
+pub struct Pipeline<N: ProviderNodeTypes, E: GenericBlockExecutionError> {
     /// Provider factory.
     provider_factory: ProviderFactory<N>,
     /// All configured stages in the order they will be executed.
-    stages: Vec<BoxedStage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>>,
+    stages: Vec<BoxedStage<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW, E>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
@@ -83,10 +83,13 @@ pub struct Pipeline<N: ProviderNodeTypes> {
     fail_on_unwind: bool,
 }
 
-impl<N: ProviderNodeTypes> Pipeline<N> {
+impl<N: ProviderNodeTypes, E> Pipeline<N, E>
+where
+    E: GenericBlockExecutionError,
+{
     /// Construct a pipeline using a [`PipelineBuilder`].
-    pub fn builder() -> PipelineBuilder<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW>
-    {
+    pub fn builder(
+    ) -> PipelineBuilder<<ProviderFactory<N> as DatabaseProviderFactory>::ProviderRW, E> {
         PipelineBuilder::default()
     }
 
@@ -110,9 +113,12 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> Pipeline<N> {
+impl<N: ProviderNodeTypes, E> Pipeline<N, E>
+where
+    E: GenericBlockExecutionError,
+{
     /// Registers progress metrics for each registered stage
-    pub fn register_metrics(&mut self) -> Result<(), PipelineError> {
+    pub fn register_metrics(&mut self) -> Result<(), PipelineError<E>> {
         let Some(metrics_tx) = &mut self.metrics_tx else { return Ok(()) };
         let provider = self.provider_factory.provider()?;
 
@@ -130,7 +136,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     /// Consume the pipeline and run it until it reaches the provided tip, if set. Return the
     /// pipeline and its result as a future.
     #[track_caller]
-    pub fn run_as_fut(mut self, target: Option<PipelineTarget>) -> PipelineFut<N> {
+    pub fn run_as_fut(mut self, target: Option<PipelineTarget>) -> PipelineFut<N, E> {
         // TODO: fix this in a follow up PR. ideally, consensus engine would be responsible for
         // updating metrics.
         let _ = self.register_metrics(); // ignore error
@@ -161,7 +167,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
     /// Run the pipeline in an infinite loop. Will terminate early if the user has specified
     /// a `max_block` in the pipeline.
-    pub async fn run(&mut self) -> Result<(), PipelineError> {
+    pub async fn run(&mut self) -> Result<(), PipelineError<E>> {
         let _ = self.register_metrics(); // ignore error
 
         loop {
@@ -202,7 +208,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     /// This will be [`ControlFlow::Continue`] or [`ControlFlow::NoProgress`] of the _last_ stage in
     /// the pipeline (for example the `Finish` stage). Or [`ControlFlow::Unwind`] of the stage
     /// that caused the unwind.
-    pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError> {
+    pub async fn run_loop(&mut self) -> Result<ControlFlow, PipelineError<E>> {
         self.move_to_static_files()?;
 
         let mut previous_stage = None;
@@ -279,7 +285,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         &mut self,
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
-    ) -> Result<(), PipelineError> {
+    ) -> Result<(), PipelineError<E>> {
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
@@ -380,7 +386,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         &mut self,
         previous_stage: Option<BlockNumber>,
         stage_index: usize,
-    ) -> Result<ControlFlow, PipelineError> {
+    ) -> Result<ControlFlow, PipelineError<E>> {
         let total_stages = self.stages.len();
 
         let stage = &mut self.stages[stage_index];
@@ -581,7 +587,10 @@ fn on_stage_error<N: ProviderNodeTypes, E: GenericBlockExecutionError>(
     }
 }
 
-impl<N: ProviderNodeTypes> std::fmt::Debug for Pipeline<N> {
+impl<N: ProviderNodeTypes, E> std::fmt::Debug for Pipeline<N, E>
+where
+    E: GenericBlockExecutionError,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pipeline")
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
@@ -600,7 +609,7 @@ mod tests {
     use crate::{test_utils::TestStage, UnwindOutput};
     use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
-    use reth_errors::ProviderError;
+    use reth_errors::{BlockExecutionError, ProviderError};
     use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
     use reth_prune::PruneModes;
     use reth_testing_utils::generators::{self, random_block_with_parent};
@@ -648,7 +657,7 @@ mod tests {
         let (stage_b, post_execute_commit_counter_b) = stage_b.with_post_execute_commit_counter();
         let (stage_b, post_unwind_commit_counter_b) = stage_b.with_post_unwind_commit_counter();
 
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB, BlockExecutionError>::builder()
             .add_stage(stage_a)
             .add_stage(stage_b)
             .with_max_block(10)
@@ -734,7 +743,7 @@ mod tests {
         let (stage_c, post_execute_commit_counter_c) = stage_c.with_post_execute_commit_counter();
         let (stage_c, post_unwind_commit_counter_c) = stage_c.with_post_unwind_commit_counter();
 
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB, BlockExecutionError>::builder()
             .add_stage(stage_a)
             .add_stage(stage_b)
             .add_stage(stage_c)
@@ -865,7 +874,7 @@ mod tests {
     async fn unwind_pipeline_with_intermediate_progress() {
         let provider_factory = create_test_provider_factory();
 
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB, BlockExecutionError>::builder()
             .add_stage(
                 TestStage::new(StageId::Other("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(100), done: true }))
@@ -965,7 +974,7 @@ mod tests {
     async fn run_pipeline_with_unwind() {
         let provider_factory = create_test_provider_factory();
 
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB, BlockExecutionError>::builder()
             .add_stage(
                 TestStage::new(StageId::Other("A"))
                     .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true }))
@@ -1086,7 +1095,7 @@ mod tests {
     async fn pipeline_error_handling() {
         // Non-fatal
         let provider_factory = create_test_provider_factory();
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB, BlockExecutionError>::builder()
             .add_stage(
                 TestStage::new(StageId::Other("NonFatal"))
                     .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
@@ -1102,7 +1111,7 @@ mod tests {
 
         // Fatal
         let provider_factory = create_test_provider_factory();
-        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB, BlockExecutionError>::builder()
             .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
                 StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
             )))

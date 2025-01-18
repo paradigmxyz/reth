@@ -1,4 +1,5 @@
 use reth_db::{table::Value, transaction::DbTxMut};
+use reth_execution_errors::GenericBlockExecutionError;
 use reth_primitives::NodePrimitives;
 use reth_provider::{
     BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
@@ -36,19 +37,24 @@ impl PruneStage {
     }
 }
 
-impl<Provider> Stage<Provider> for PruneStage
+impl<Provider, E> Stage<Provider, E> for PruneStage
 where
     Provider: DBProvider<Tx: DbTxMut>
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
+    E: GenericBlockExecutionError,
 {
     fn id(&self) -> StageId {
         StageId::Prune
     }
 
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError<E>> {
         let mut pruner = PrunerBuilder::default()
             .segments(self.prune_modes.clone())
             .delete_limit(self.commit_threshold)
@@ -96,7 +102,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    ) -> Result<UnwindOutput, StageError<E>> {
         // We cannot recover the data that was pruned in `execute`, so we just update the
         // checkpoints.
         let prune_checkpoints = provider.get_prune_checkpoints()?;
@@ -125,19 +131,24 @@ impl PruneSenderRecoveryStage {
     }
 }
 
-impl<Provider> Stage<Provider> for PruneSenderRecoveryStage
+impl<Provider, E> Stage<Provider, E> for PruneSenderRecoveryStage
 where
     Provider: DBProvider<Tx: DbTxMut>
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
+    E: GenericBlockExecutionError,
 {
     fn id(&self) -> StageId {
         StageId::PruneSenderRecovery
     }
 
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError<E>> {
         let mut result = self.0.execute(provider, input)?;
 
         // Adjust the checkpoint to the highest pruned block number of the Sender Recovery segment
@@ -258,7 +269,10 @@ mod tests {
         }
     }
 
-    impl UnwindStageTestRunner for PruneTestRunner {
+    impl<E> UnwindStageTestRunner<E> for PruneTestRunner
+    where
+        E: GenericBlockExecutionError,
+    {
         fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
             Ok(())
         }

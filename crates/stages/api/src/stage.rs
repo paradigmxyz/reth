@@ -71,13 +71,14 @@ impl ExecInput {
     /// Return the next block range determined the number of transactions within it.
     /// This function walks the block indices until either the end of the range is reached or
     /// the number of transactions exceeds the threshold.
-    pub fn next_block_range_with_transaction_threshold<Provider>(
+    pub fn next_block_range_with_transaction_threshold<Provider, E>(
         &self,
         provider: &Provider,
         tx_threshold: u64,
-    ) -> Result<(Range<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError>
+    ) -> Result<(Range<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError<E>>
     where
         Provider: BlockReader,
+        E: GenericBlockExecutionError,
     {
         let start_block = self.next_block();
         let target_block = self.target();
@@ -228,7 +229,7 @@ where
         &mut self,
         _cx: &mut Context<'_>,
         _input: ExecInput,
-    ) -> Poll<Result<(), StageError<Self::Error>>> {
+    ) -> Poll<Result<(), StageError<E>>> {
         Poll::Ready(Ok(()))
     }
 
@@ -239,14 +240,14 @@ where
         &mut self,
         provider: &Provider,
         input: ExecInput,
-    ) -> Result<ExecOutput, StageError<Self::Error>>;
+    ) -> Result<ExecOutput, StageError<E>>;
 
     /// Post execution commit hook.
     ///
     /// This is called after the stage has been executed and the data has been committed by the
     /// provider. The stage may want to pass some data from [`Self::execute`] via the internal
     /// field.
-    fn post_execute_commit(&mut self) -> Result<(), StageError<Self::Error>> {
+    fn post_execute_commit(&mut self) -> Result<(), StageError<E>> {
         Ok(())
     }
 
@@ -255,28 +256,34 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError<Self::Error>>;
+    ) -> Result<UnwindOutput, StageError<E>>;
 
     /// Post unwind commit hook.
     ///
     /// This is called after the stage has been unwound and the data has been committed by the
     /// provider. The stage may want to pass some data from [`Self::unwind`] via the internal
     /// field.
-    fn post_unwind_commit(&mut self) -> Result<(), StageError<Self::Error>> {
+    fn post_unwind_commit(&mut self) -> Result<(), StageError<E>> {
         Ok(())
     }
 }
 
 /// [Stage] trait extension.
-pub trait StageExt<Provider>: Stage<Provider> {
+pub trait StageExt<Provider, E>: Stage<Provider, E>
+where
+    E: GenericBlockExecutionError,
+{
     /// Utility extension for the `Stage` trait that invokes `Stage::poll_execute_ready`
     /// with [`poll_fn`] context. For more information see [`Stage::poll_execute_ready`].
     fn execute_ready(
         &mut self,
         input: ExecInput,
-    ) -> impl Future<Output = Result<(), StageError>> + Send {
+    ) -> impl Future<Output = Result<(), StageError<E>>> + Send {
         poll_fn(move |cx| self.poll_execute_ready(cx, input))
     }
 }
 
-impl<Provider, S: Stage<Provider>> StageExt<Provider> for S {}
+impl<Provider, E, S: Stage<Provider, E>> StageExt<Provider, E> for S where
+    E: GenericBlockExecutionError
+{
+}

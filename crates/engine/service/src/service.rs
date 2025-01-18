@@ -79,7 +79,7 @@ where
         chain_spec: Arc<N::ChainSpec>,
         client: Client,
         incoming_requests: EngineMessageStream<N::Engine>,
-        pipeline: Pipeline<N>,
+        pipeline: Pipeline<N, E>,
         pipeline_task_spawner: Box<dyn TaskSpawner>,
         provider: ProviderFactory<N>,
         blockchain_db: BlockchainProvider<N>,

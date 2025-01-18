@@ -4,6 +4,7 @@ use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
 use reth_db::tables;
 use reth_db_api::transaction::{DbTx, DbTxMut};
+use reth_execution_errors::{BlockExecutionError, GenericBlockExecutionError};
 use reth_primitives::{GotExpected, SealedHeader};
 use reth_provider::{
     DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
@@ -131,7 +132,7 @@ impl MerkleStage {
     }
 }
 
-impl<Provider> Stage<Provider> for MerkleStage
+impl<Provider, E> Stage<Provider, E> for MerkleStage
 where
     Provider: DBProvider<Tx: DbTxMut>
         + TrieWriter
@@ -139,6 +140,7 @@ where
         + HeaderProvider
         + StageCheckpointReader
         + StageCheckpointWriter,
+    E: GenericBlockExecutionError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -348,7 +350,7 @@ fn validate_state_root<H: BlockHeader + Sealable + Debug>(
     got: B256,
     expected: SealedHeader<H>,
     target_block: BlockNumber,
-) -> Result<(), StageError> {
+) -> Result<(), StageError<BlockExecutionError>> {
     if got == expected.state_root() {
         Ok(())
     } else {
@@ -476,7 +478,10 @@ mod tests {
         }
     }
 
-    impl StageTestRunner for MerkleTestRunner {
+    impl<E> StageTestRunner<E> for MerkleTestRunner
+    where
+        E: GenericBlockExecutionError,
+    {
         type S = MerkleStage;
 
         fn db(&self) -> &TestStageDB {

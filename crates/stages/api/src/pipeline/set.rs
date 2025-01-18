@@ -17,14 +17,14 @@ where
     E: GenericBlockExecutionError,
 {
     /// Configures the stages in the set.
-    fn builder(self) -> StageSetBuilder<Provider>;
+    fn builder(self) -> StageSetBuilder<Provider, E>;
 
     /// Overrides the given [`Stage`], if it is in this set.
     ///
     /// # Panics
     ///
     /// Panics if the [`Stage`] is not in this set.
-    fn set<S: Stage<Provider, E> + 'static>(self, stage: S) -> StageSetBuilder<Provider> {
+    fn set<S: Stage<Provider, E> + 'static>(self, stage: S) -> StageSetBuilder<Provider, E> {
         self.builder().set(stage)
     }
 }
@@ -55,18 +55,27 @@ where
 /// to the final sync pipeline before/after their dependencies.
 ///
 /// Stages inside the set can be disabled, enabled, overridden and reordered.
-pub struct StageSetBuilder<Provider> {
-    stages: HashMap<StageId, StageEntry<Provider>>,
+pub struct StageSetBuilder<Provider, E>
+where
+    E: GenericBlockExecutionError,
+{
+    stages: HashMap<StageId, StageEntry<Provider, E>>,
     order: Vec<StageId>,
 }
 
-impl<Provider> Default for StageSetBuilder<Provider> {
+impl<Provider, E> Default for StageSetBuilder<Provider, E>
+where
+    E: GenericBlockExecutionError,
+{
     fn default() -> Self {
         Self { stages: HashMap::default(), order: Vec::new() }
     }
 }
 
-impl<Provider> Debug for StageSetBuilder<Provider> {
+impl<Provider, E> Debug for StageSetBuilder<Provider, E>
+where
+    E: GenericBlockExecutionError,
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StageSetBuilder")
             .field("stages", &self.stages)
@@ -75,14 +84,17 @@ impl<Provider> Debug for StageSetBuilder<Provider> {
     }
 }
 
-impl<Provider> StageSetBuilder<Provider> {
+impl<Provider, E> StageSetBuilder<Provider, E>
+where
+    E: GenericBlockExecutionError,
+{
     fn index_of(&self, stage_id: StageId) -> usize {
         let index = self.order.iter().position(|&id| id == stage_id);
 
         index.unwrap_or_else(|| panic!("Stage does not exist in set: {stage_id}"))
     }
 
-    fn upsert_stage_state(&mut self, stage: Box<dyn Stage<Provider>>, added_at_index: usize) {
+    fn upsert_stage_state(&mut self, stage: Box<dyn Stage<Provider, E>>, added_at_index: usize) {
         let stage_id = stage.id();
         if self.stages.insert(stage.id(), StageEntry { stage, enabled: true }).is_some() {
             if let Some(to_remove) = self
@@ -102,7 +114,7 @@ impl<Provider> StageSetBuilder<Provider> {
     /// # Panics
     ///
     /// Panics if the [`Stage`] is not in this set.
-    pub fn set<S: Stage<Provider> + 'static>(mut self, stage: S) -> Self {
+    pub fn set<S: Stage<Provider, E> + 'static>(mut self, stage: S) -> Self {
         let entry = self
             .stages
             .get_mut(&stage.id())
@@ -114,7 +126,7 @@ impl<Provider> StageSetBuilder<Provider> {
     /// Adds the given [`Stage`] at the end of this set.
     ///
     /// If the stage was already in the group, it is removed from its previous place.
-    pub fn add_stage<S: Stage<Provider> + 'static>(mut self, stage: S) -> Self {
+    pub fn add_stage<S: Stage<Provider, E> + 'static>(mut self, stage: S) -> Self {
         let target_index = self.order.len();
         self.order.push(stage.id());
         self.upsert_stage_state(Box::new(stage), target_index);
@@ -124,7 +136,7 @@ impl<Provider> StageSetBuilder<Provider> {
     /// Adds the given [`Stage`] at the end of this set if it's [`Some`].
     ///
     /// If the stage was already in the group, it is removed from its previous place.
-    pub fn add_stage_opt<S: Stage<Provider> + 'static>(self, stage: Option<S>) -> Self {
+    pub fn add_stage_opt<S: Stage<Provider, E> + 'static>(self, stage: Option<S>) -> Self {
         if let Some(stage) = stage {
             self.add_stage(stage)
         } else {
@@ -136,7 +148,7 @@ impl<Provider> StageSetBuilder<Provider> {
     ///
     /// If a stage is in both sets, it is removed from its previous place in this set. Because of
     /// this, it is advisable to merge sets first and re-order stages after if needed.
-    pub fn add_set<Set: StageSet<Provider>>(mut self, set: Set) -> Self {
+    pub fn add_set<Set: StageSet<Provider, E>>(mut self, set: Set) -> Self {
         for stage in set.builder().build() {
             let target_index = self.order.len();
             self.order.push(stage.id());
@@ -152,7 +164,11 @@ impl<Provider> StageSetBuilder<Provider> {
     /// # Panics
     ///
     /// Panics if the dependency stage is not in this set.
-    pub fn add_before<S: Stage<Provider> + 'static>(mut self, stage: S, before: StageId) -> Self {
+    pub fn add_before<S: Stage<Provider, E> + 'static>(
+        mut self,
+        stage: S,
+        before: StageId,
+    ) -> Self {
         let target_index = self.index_of(before);
         self.order.insert(target_index, stage.id());
         self.upsert_stage_state(Box::new(stage), target_index);
@@ -166,7 +182,7 @@ impl<Provider> StageSetBuilder<Provider> {
     /// # Panics
     ///
     /// Panics if the dependency stage is not in this set.
-    pub fn add_after<S: Stage<Provider> + 'static>(mut self, stage: S, after: StageId) -> Self {
+    pub fn add_after<S: Stage<Provider, E> + 'static>(mut self, stage: S, after: StageId) -> Self {
         let target_index = self.index_of(after) + 1;
         self.order.insert(target_index, stage.id());
         self.upsert_stage_state(Box::new(stage), target_index);
@@ -247,7 +263,7 @@ impl<Provider> StageSetBuilder<Provider> {
     }
 
     /// Consumes the builder and returns the contained [`Stage`]s in the order specified.
-    pub fn build(mut self) -> Vec<Box<dyn Stage<Provider>>> {
+    pub fn build(mut self) -> Vec<Box<dyn Stage<Provider, E>>> {
         let mut stages = Vec::new();
         for id in &self.order {
             if let Some(entry) = self.stages.remove(id) {
@@ -260,7 +276,10 @@ impl<Provider> StageSetBuilder<Provider> {
     }
 }
 
-impl<Provider> StageSet<Provider> for StageSetBuilder<Provider> {
+impl<Provider, E> StageSet<Provider, E> for StageSetBuilder<Provider, E>
+where
+    E: GenericBlockExecutionError,
+{
     fn builder(self) -> Self {
         self
     }

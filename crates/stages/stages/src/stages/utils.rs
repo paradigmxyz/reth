@@ -10,6 +10,7 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_etl::Collector;
+use reth_execution_errors::GenericBlockExecutionError;
 use reth_primitives::StaticFileSegment;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, ProviderError,
@@ -39,18 +40,19 @@ const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
 ///
 /// As a result, the `Collector` will contain entries such as `(Address1.3, [1,2,3])` and
 /// `(Address1.300, [100,300])`. The entries may be stored across one or more files.
-pub(crate) fn collect_history_indices<Provider, CS, H, P>(
+pub(crate) fn collect_history_indices<Provider, CS, H, P, E>(
     provider: &Provider,
     range: impl RangeBounds<CS::Key>,
     sharded_key_factory: impl Fn(P, BlockNumber) -> H::Key,
     partial_key_factory: impl Fn((CS::Key, CS::Value)) -> (u64, P),
     etl_config: &EtlConfig,
-) -> Result<Collector<H::Key, H::Value>, StageError>
+) -> Result<Collector<H::Key, H::Value>, StageError<E>>
 where
     Provider: DBProvider,
     CS: Table,
     H: Table<Value = BlockNumberList>,
     P: Copy + Eq + Hash,
+    E: GenericBlockExecutionError,
 {
     let mut changeset_cursor = provider.tx_ref().cursor_read::<CS>()?;
 
@@ -106,14 +108,14 @@ where
 /// `Address.StorageKey`). It flushes indices to disk when reaching a shard's max length
 /// (`NUM_OF_INDICES_IN_SHARD`) or when the partial key changes, ensuring the last previous partial
 /// key shard is stored.
-pub(crate) fn load_history_indices<Provider, H, P>(
+pub(crate) fn load_history_indices<Provider, H, P, E: GenericBlockExecutionError>(
     provider: &Provider,
     mut collector: Collector<H::Key, H::Value>,
     append_only: bool,
     sharded_key_factory: impl Clone + Fn(P, u64) -> <H as Table>::Key,
     decode_key: impl Fn(Vec<u8>) -> Result<<H as Table>::Key, DatabaseError>,
     get_partial: impl Fn(<H as Table>::Key) -> P,
-) -> Result<(), StageError>
+) -> Result<(), StageError<E>>
 where
     Provider: DBProvider<Tx: DbTxMut>,
     H: Table<Value = BlockNumberList>,
@@ -191,14 +193,14 @@ where
 }
 
 /// Shard and insert the indices list according to [`LoadMode`] and its length.
-pub(crate) fn load_indices<H, C, P>(
+pub(crate) fn load_indices<H, C, P, E: GenericBlockExecutionError>(
     cursor: &mut C,
     partial_key: P,
     list: &mut Vec<BlockNumber>,
     sharded_key_factory: &impl Fn(P, BlockNumber) -> <H as Table>::Key,
     append_only: bool,
     mode: LoadMode,
-) -> Result<(), StageError>
+) -> Result<(), StageError<E>>
 where
     C: DbCursorRO<H> + DbCursorRW<H>,
     H: Table<Value = BlockNumberList>,
@@ -251,14 +253,15 @@ impl LoadMode {
 
 /// Called when database is ahead of static files. Attempts to find the first block we are missing
 /// transactions for.
-pub(crate) fn missing_static_data_error<Provider>(
+pub(crate) fn missing_static_data_error<Provider, E>(
     last_tx_num: TxNumber,
     static_file_provider: &StaticFileProvider<Provider::Primitives>,
     provider: &Provider,
     segment: StaticFileSegment,
-) -> Result<StageError, ProviderError>
+) -> Result<StageError<E>, ProviderError>
 where
     Provider: BlockReader + StaticFileProviderFactory,
+    E: GenericBlockExecutionError,
 {
     let mut last_block =
         static_file_provider.get_highest_static_file_block(segment).unwrap_or_default();

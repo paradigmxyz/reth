@@ -46,6 +46,7 @@ use alloy_primitives::B256;
 use reth_config::config::StageConfig;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_evm::execute::BlockExecutorProvider;
+use reth_execution_errors::GenericBlockExecutionError;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
 use reth_primitives_traits::Block;
 use reth_provider::HeaderSyncGapProvider;
@@ -137,13 +138,13 @@ where
 {
     /// Appends the default offline stages and default finish stage to the given builder.
     pub fn add_offline_stages<Provider>(
-        default_offline: StageSetBuilder<Provider>,
+        default_offline: StageSetBuilder<Provider, E::Error>,
         executor_factory: E,
         stages_config: StageConfig,
         prune_modes: PruneModes,
-    ) -> StageSetBuilder<Provider>
+    ) -> StageSetBuilder<Provider, E::Error>
     where
-        OfflineStages<E>: StageSet<Provider>,
+        OfflineStages<E>: StageSet<Provider, E::Error>,
     {
         StageSetBuilder::default()
             .add_set(default_offline)
@@ -161,7 +162,7 @@ where
     OnlineStages<P, H, B>: StageSet<Provider>,
     OfflineStages<E>: StageSet<Provider>,
 {
-    fn builder(self) -> StageSetBuilder<Provider> {
+    fn builder(self) -> StageSetBuilder<Provider, E::Error> {
         Self::add_offline_stages(
             self.online.builder(),
             self.executor_factory,
@@ -213,20 +214,21 @@ where
     }
 }
 
-impl<P, H, B> OnlineStages<P, H, B>
+impl<P, H, B, E> OnlineStages<P, H, B, E>
 where
     P: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader<Header = <B::Block as Block>::Header> + 'static,
     B: BodyDownloader + 'static,
+    E: GenericBlockExecutionError,
 {
     /// Create a new builder using the given headers stage.
     pub fn builder_with_headers<Provider>(
         headers: HeaderStage<P, H>,
         body_downloader: B,
-    ) -> StageSetBuilder<Provider>
+    ) -> StageSetBuilder<Provider, E>
     where
-        HeaderStage<P, H>: Stage<Provider>,
-        BodyStage<B>: Stage<Provider>,
+        HeaderStage<P, H>: Stage<Provider, E>,
+        BodyStage<B>: Stage<Provider, E>,
     {
         StageSetBuilder::default().add_stage(headers).add_stage(BodyStage::new(body_downloader))
     }
@@ -239,10 +241,10 @@ where
         header_downloader: H,
         consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
         stages_config: StageConfig,
-    ) -> StageSetBuilder<Provider>
+    ) -> StageSetBuilder<Provider, E>
     where
-        BodyStage<B>: Stage<Provider>,
-        HeaderStage<P, H>: Stage<Provider>,
+        BodyStage<B, E>: Stage<Provider, E>,
+        HeaderStage<P, H>: Stage<Provider, E>,
     {
         StageSetBuilder::default()
             .add_stage(HeaderStage::new(
@@ -256,15 +258,16 @@ where
     }
 }
 
-impl<Provider, P, H, B> StageSet<Provider> for OnlineStages<P, H, B>
+impl<Provider, P, H, B, E> StageSet<Provider, E> for OnlineStages<P, H, B, E>
 where
     P: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader<Header = <B::Block as Block>::Header> + 'static,
     B: BodyDownloader + 'static,
-    HeaderStage<P, H>: Stage<Provider>,
-    BodyStage<B>: Stage<Provider>,
+    HeaderStage<P, H>: Stage<Provider, E>,
+    BodyStage<B>: Stage<Provider, E>,
+    E: GenericBlockExecutionError,
 {
-    fn builder(self) -> StageSetBuilder<Provider> {
+    fn builder(self) -> StageSetBuilder<Provider, E> {
         StageSetBuilder::default()
             .add_stage(HeaderStage::new(
                 self.provider,
@@ -311,13 +314,13 @@ impl<EF> OfflineStages<EF> {
 impl<E, Provider> StageSet<Provider> for OfflineStages<E>
 where
     E: BlockExecutorProvider,
-    ExecutionStages<E>: StageSet<Provider>,
-    PruneSenderRecoveryStage: Stage<Provider>,
-    HashingStages: StageSet<Provider>,
-    HistoryIndexingStages: StageSet<Provider>,
-    PruneStage: Stage<Provider>,
+    ExecutionStages<E>: StageSet<Provider, E::Error>,
+    PruneSenderRecoveryStage: Stage<Provider, E::Error>,
+    HashingStages: StageSet<Provider, E::Error>,
+    HistoryIndexingStages: StageSet<Provider, E::Error>,
+    PruneStage: Stage<Provider, E::Error>,
 {
-    fn builder(self) -> StageSetBuilder<Provider> {
+    fn builder(self) -> StageSetBuilder<Provider, E::Error> {
         ExecutionStages::new(
             self.executor_factory,
             self.stages_config.clone(),
@@ -368,10 +371,10 @@ impl<E> ExecutionStages<E> {
 impl<E, Provider> StageSet<Provider> for ExecutionStages<E>
 where
     E: BlockExecutorProvider,
-    SenderRecoveryStage: Stage<Provider>,
-    ExecutionStage<E>: Stage<Provider>,
+    SenderRecoveryStage: Stage<Provider, E::Error>,
+    ExecutionStage<E>: Stage<Provider, E::Error>,
 {
-    fn builder(self) -> StageSetBuilder<Provider> {
+    fn builder(self) -> StageSetBuilder<Provider, E::Error> {
         StageSetBuilder::default()
             .add_stage(SenderRecoveryStage::new(self.stages_config.sender_recovery))
             .add_stage(ExecutionStage::from_config(
@@ -391,13 +394,14 @@ pub struct HashingStages {
     stages_config: StageConfig,
 }
 
-impl<Provider> StageSet<Provider> for HashingStages
+impl<Provider, E> StageSet<Provider, E> for HashingStages
 where
-    MerkleStage: Stage<Provider>,
-    AccountHashingStage: Stage<Provider>,
-    StorageHashingStage: Stage<Provider>,
+    MerkleStage: Stage<Provider, E>,
+    AccountHashingStage: Stage<Provider, E>,
+    StorageHashingStage: Stage<Provider, E>,
+    E: GenericBlockExecutionError,
 {
-    fn builder(self) -> StageSetBuilder<Provider> {
+    fn builder(self) -> StageSetBuilder<Provider, E> {
         StageSetBuilder::default()
             .add_stage(MerkleStage::default_unwind())
             .add_stage(AccountHashingStage::new(
@@ -422,13 +426,14 @@ pub struct HistoryIndexingStages {
     prune_modes: PruneModes,
 }
 
-impl<Provider> StageSet<Provider> for HistoryIndexingStages
+impl<Provider, E> StageSet<Provider, E> for HistoryIndexingStages
 where
-    TransactionLookupStage: Stage<Provider>,
-    IndexStorageHistoryStage: Stage<Provider>,
-    IndexAccountHistoryStage: Stage<Provider>,
+    TransactionLookupStage: Stage<Provider, E>,
+    IndexStorageHistoryStage: Stage<Provider, E>,
+    IndexAccountHistoryStage: Stage<Provider, E>,
+    E: GenericBlockExecutionError,
 {
-    fn builder(self) -> StageSetBuilder<Provider> {
+    fn builder(self) -> StageSetBuilder<Provider, E> {
         StageSetBuilder::default()
             .add_stage(TransactionLookupStage::new(
                 self.stages_config.transaction_lookup,

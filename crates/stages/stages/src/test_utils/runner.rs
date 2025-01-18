@@ -1,5 +1,6 @@
 use super::TestStageDB;
 use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
+use reth_execution_errors::GenericBlockExecutionError;
 use reth_provider::{test_utils::MockNodeTypesWithDB, DatabaseProvider, ProviderError};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageError, StageExt, UnwindInput, UnwindOutput,
@@ -18,9 +19,14 @@ pub(crate) enum TestRunnerError {
 }
 
 /// A generic test runner for stages.
-pub(crate) trait StageTestRunner {
-    type S: Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>
-        + 'static;
+pub(crate) trait StageTestRunner<E>
+where
+    E: GenericBlockExecutionError,
+{
+    type S: Stage<
+            DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>,
+            E,
+        > + 'static;
 
     /// Return a reference to the database.
     fn db(&self) -> &TestStageDB;
@@ -29,7 +35,10 @@ pub(crate) trait StageTestRunner {
     fn stage(&self) -> Self::S;
 }
 
-pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
+pub(crate) trait ExecuteStageTestRunner<E>: StageTestRunner<E>
+where
+    E: GenericBlockExecutionError,
+{
     type Seed: Send + Sync;
 
     /// Seed database for stage execution
@@ -43,7 +52,7 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
     ) -> Result<(), TestRunnerError>;
 
     /// Run [`Stage::execute`] and return a receiver for the result.
-    fn execute(&self, input: ExecInput) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
+    fn execute(&self, input: ExecInput) -> oneshot::Receiver<Result<ExecOutput, StageError<E>>> {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.db().factory.clone(), self.stage());
         tokio::spawn(async move {
@@ -64,7 +73,10 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
     }
 }
 
-pub(crate) trait UnwindStageTestRunner: StageTestRunner {
+pub(crate) trait UnwindStageTestRunner<E>: StageTestRunner<E>
+where
+    E: GenericBlockExecutionError,
+{
     /// Validate the unwind
     fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError>;
 
