@@ -42,7 +42,7 @@ use std::{
 
 /// A mock implementation for Provider interfaces.
 #[derive(Debug, Clone)]
-pub struct MockEthProvider {
+pub struct MockEthProvider<T = TransactionSigned> {
     /// Local block store
     pub blocks: Arc<Mutex<HashMap<B256, Block>>>,
     /// Local header store
