@@ -1,11 +1,11 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
 
 use alloc::vec::Vec;
-use alloy_consensus::{RlpDecodableReceipt, RlpEncodableReceipt};
+use alloy_consensus::{ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt};
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::{Receipt, ReceiptWithBloom};
+use reth_ethereum_primitives::Receipt;
 
 /// A request for transaction receipts from the given block hashes.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -48,10 +48,11 @@ impl<T: RlpDecodableReceipt> alloy_rlp::Decodable for Receipts<T> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{message::RequestPair, GetReceipts, Receipts};
+    use alloy_consensus::TxType;
     use alloy_primitives::{hex, Log};
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{Receipt, ReceiptWithBloom, TxType};
 
     #[test]
     fn roundtrip_eip1559() {

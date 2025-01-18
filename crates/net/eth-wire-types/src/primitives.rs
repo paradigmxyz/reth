@@ -3,8 +3,7 @@
 use alloy_consensus::{RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_rlp::{Decodable, Encodable};
 use core::fmt::Debug;
-use reth_primitives::NodePrimitives;
-use reth_primitives_traits::{Block, BlockBody, BlockHeader, SignedTransaction};
+use reth_primitives_traits::{Block, BlockBody, BlockHeader, NodePrimitives, SignedTransaction};
 
 /// Abstraction over primitive types which might appear in network messages. See
 /// [`crate::EthMessage`] for more context.
@@ -66,9 +65,9 @@ pub struct EthNetworkPrimitives;
 
 impl NetworkPrimitives for EthNetworkPrimitives {
     type BlockHeader = alloy_consensus::Header;
-    type BlockBody = reth_primitives::BlockBody;
-    type Block = reth_primitives::Block;
-    type BroadcastedTransaction = reth_primitives::TransactionSigned;
-    type PooledTransaction = reth_primitives::PooledTransaction;
-    type Receipt = reth_primitives::Receipt;
+    type BlockBody = reth_ethereum_primitives::BlockBody;
+    type Block = reth_ethereum_primitives::Block;
+    type BroadcastedTransaction = reth_ethereum_primitives::TransactionSigned;
+    type PooledTransaction = reth_ethereum_primitives::PooledTransaction;
+    type Receipt = reth_ethereum_primitives::Receipt;
 }

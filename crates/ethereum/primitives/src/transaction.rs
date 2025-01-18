@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
+pub use alloy_consensus::{transaction::PooledTransaction, TxType};
 use alloy_consensus::{
-    transaction::{PooledTransaction, RlpEcdsaTx},
-    BlobTransactionSidecar, SignableTransaction, Signed, TxEip1559, TxEip2930, TxEip4844,
-    TxEip4844WithSidecar, TxEip7702, TxLegacy, TxType, Typed2718, TypedTransaction,
+    transaction::RlpEcdsaTx, BlobTransactionSidecar, SignableTransaction, Signed, TxEip1559,
+    TxEip2930, TxEip4844, TxEip4844WithSidecar, TxEip7702, TxLegacy, Typed2718, TypedTransaction,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
