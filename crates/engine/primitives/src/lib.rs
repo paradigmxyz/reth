@@ -8,6 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+use reth_payload_primitives::{BuiltPayload, PayloadAttributes};
 mod error;
 
 use core::fmt;
@@ -28,14 +29,16 @@ pub use event::*;
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 
-pub use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes,
-    PayloadTypes,
+use reth_payload_primitives::{
+    validate_execution_requests, EngineApiMessageVersion,
+    EngineObjectValidationError, InvalidPayloadAttributesError, PayloadOrAttributes, PayloadTypes,
 };
-use reth_payload_primitives::{InvalidPayloadAttributesError, PayloadAttributes};
 use reth_primitives::{NodePrimitives, SealedBlock};
 use reth_primitives_traits::Block;
 use serde::{de::DeserializeOwned, ser::Serialize};
+
+use alloy_eips::eip7685::Requests;
+
 
 /// This type defines the versioned types of the engine API.
 ///
@@ -114,6 +117,19 @@ pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
 
 /// Type that validates the payloads processed by the engine.
 pub trait EngineValidator<Types: EngineTypes>: PayloadValidator {
+    /// Validates the execution requests according to EIP-7685.
+    ///
+    /// This ensures that:
+    /// 1. The requests array is not empty
+    /// 2. Each request's ID is unique
+    /// 3. Each request's ID is non-zero
+    fn validate_execution_requests(
+        &self,
+        requests: &Requests,
+    ) -> Result<(), EngineObjectValidationError> {
+        validate_execution_requests(requests).map_err(|e| EngineObjectValidationError::from(e))
+    }
+
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
     fn validate_version_specific_fields(
