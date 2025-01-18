@@ -19,7 +19,6 @@ use std::{
 use crate::{
     capability::{SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
-    p2pstream::DisconnectP2P,
     CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
 };
 use bytes::{Bytes, BytesMut};
@@ -459,118 +458,105 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
+        // First try to drain any buffered satellite messages
         loop {
-            // first drain the primary stream
-            if let Poll::Ready(Some(msg)) = this.primary.st.try_poll_next_unpin(cx) {
-                return Poll::Ready(Some(msg))
+            match this.inner.conn.poll_ready_unpin(cx) {
+                Poll::Ready(Ok(())) => {
+                    if let Some(msg) = this.inner.out_buffer.pop_front() {
+                        if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+                            return Poll::Ready(Some(Err(err.into())));
+                        }
+                        continue;
+                    }
+                    break;
+                }
+                Poll::Ready(Err(err)) => return Poll::Ready(Some(Err(err.into()))),
+                Poll::Pending => break,
             }
+        }
 
-            let mut conn_ready = true;
+        // Then poll primary stream
+        if let Poll::Ready(Some(msg)) = this.primary.st.try_poll_next_unpin(cx) {
+            return Poll::Ready(Some(msg));
+        }
+
+        // advance primary out
+        loop {
+            match this.primary.from_primary.poll_next_unpin(cx) {
+                Poll::Ready(Some(msg)) => {
+                    this.inner.out_buffer.push_back(msg);
+                }
+                Poll::Ready(None) => {
+                    // primary closed
+                    return Poll::Ready(None)
+                }
+                Poll::Pending => break,
+            }
+        }
+
+        // advance all satellites
+        for idx in (0..this.inner.protocols.len()).rev() {
+            let mut proto = this.inner.protocols.swap_remove(idx);
             loop {
-                match this.inner.conn.poll_ready_unpin(cx) {
-                    Poll::Ready(Ok(())) => {
-                        if let Some(msg) = this.inner.out_buffer.pop_front() {
-                            if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                                return Poll::Ready(Some(Err(err.into())))
-                            }
-                        } else {
-                            break
-                        }
+                match proto.poll_next_unpin(cx) {
+                    Poll::Ready(Some(Err(err))) => {
+                        return Poll::Ready(Some(Err(P2PStreamError::Io(err).into())))
                     }
-                    Poll::Ready(Err(err)) => {
-                        if let Err(disconnect_err) =
-                            this.inner.conn.start_disconnect(DisconnectReason::DisconnectRequested)
-                        {
-                            return Poll::Ready(Some(Err(disconnect_err.into())))
-                        }
-                        return Poll::Ready(Some(Err(err.into())))
+                    Poll::Ready(Some(Ok(msg))) => {
+                        this.inner.out_buffer.push_back(msg);
                     }
+                    Poll::Ready(None) => return Poll::Ready(None),
                     Poll::Pending => {
-                        conn_ready = false;
+                        this.inner.protocols.push(proto);
                         break
                     }
                 }
             }
+        }
 
-            // advance primary out
-            loop {
-                match this.primary.from_primary.poll_next_unpin(cx) {
-                    Poll::Ready(Some(msg)) => {
-                        this.inner.out_buffer.push_back(msg);
-                    }
-                    Poll::Ready(None) => {
-                        // primary closed
-                        return Poll::Ready(None)
-                    }
-                    Poll::Pending => break,
-                }
-            }
-
-            // advance all satellites
-            for idx in (0..this.inner.protocols.len()).rev() {
-                let mut proto = this.inner.protocols.swap_remove(idx);
-                loop {
-                    match proto.poll_next_unpin(cx) {
-                        Poll::Ready(Some(Err(err))) => {
-                            return Poll::Ready(Some(Err(P2PStreamError::Io(err).into())))
-                        }
-                        Poll::Ready(Some(Ok(msg))) => {
-                            this.inner.out_buffer.push_back(msg);
-                        }
-                        Poll::Ready(None) => return Poll::Ready(None),
-                        Poll::Pending => {
-                            this.inner.protocols.push(proto);
-                            break
-                        }
-                    }
-                }
-            }
-
-            let mut delegated = false;
-            loop {
-                // pull messages from connection
-                match this.inner.conn.poll_next_unpin(cx) {
-                    Poll::Ready(Some(Ok(msg))) => {
-                        delegated = true;
-                        let Some(offset) = msg.first().copied() else {
-                            return Poll::Ready(Some(Err(
-                                P2PStreamError::EmptyProtocolMessage.into()
-                            )))
-                        };
-                        // delegate the multiplexed message to the correct protocol
-                        if let Some(cap) =
-                            this.inner.conn.shared_capabilities().find_by_relative_offset(offset)
-                        {
-                            if cap == &this.primary.shared_cap {
-                                // delegate to primary
-                                let _ = this.primary.to_primary.send(msg);
-                            } else {
-                                // delegate to installed satellite if any
-                                for proto in &this.inner.protocols {
-                                    if proto.shared_cap == *cap {
-                                        proto.send_raw(msg);
-                                        break
-                                    }
+        // pull messages from connection
+        loop {
+            match this.inner.conn.poll_next_unpin(cx) {
+                Poll::Ready(Some(Ok(msg))) => {
+                    let Some(offset) = msg.first().copied() else {
+                        return Poll::Ready(Some(Err(P2PStreamError::EmptyProtocolMessage.into())))
+                    };
+                    // delegate the multiplexed message to the correct protocol
+                    if let Some(cap) =
+                        this.inner.conn.shared_capabilities().find_by_relative_offset(offset)
+                    {
+                        if cap == &this.primary.shared_cap {
+                            // delegate to primary
+                            let _ = this.primary.to_primary.send(msg);
+                        } else {
+                            // delegate to installed satellite if any
+                            for proto in &this.inner.protocols {
+                                if proto.shared_cap == *cap {
+                                    proto.send_raw(msg);
+                                    break
                                 }
                             }
-                        } else {
-                            return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(
-                                offset,
-                            )
-                            .into())))
                         }
+                    } else {
+                        return Poll::Ready(Some(Err(P2PStreamError::UnknownReservedMessageId(
+                            offset,
+                        )
+                        .into())))
                     }
-                    Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
-                    Poll::Ready(None) => {
-                        // connection closed
-                        return Poll::Ready(None)
-                    }
-                    Poll::Pending => break,
                 }
-            }
-
-            if !conn_ready || (!delegated && this.inner.out_buffer.is_empty()) {
-                return Poll::Pending
+                Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err.into()))),
+                Poll::Ready(None) => {
+                    // connection closed
+                    return Poll::Ready(None)
+                }
+                Poll::Pending => {
+                    // No more messages to process, return Pending if we have buffered messages
+                    // or haven't processed any messages in this iteration
+                    if !this.inner.out_buffer.is_empty() {
+                        continue;
+                    }
+                    return Poll::Pending;
+                }
             }
         }
     }
@@ -586,13 +572,26 @@ where
 
     fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = self.get_mut();
-        if let Err(err) = ready!(this.inner.conn.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err.into()))
+
+        // First try to drain any buffered satellite messages
+        loop {
+            match this.inner.conn.poll_ready_unpin(cx) {
+                Poll::Ready(Ok(())) => {
+                    if let Some(msg) = this.inner.out_buffer.pop_front() {
+                        if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+                            return Poll::Ready(Err(err.into()));
+                        }
+                        continue;
+                    }
+                    break;
+                }
+                Poll::Ready(Err(err)) => return Poll::Ready(Err(err.into())),
+                Poll::Pending => return Poll::Pending,
+            }
         }
-        if let Err(err) = ready!(this.primary.st.poll_ready_unpin(cx)) {
-            return Poll::Ready(Err(err))
-        }
-        Poll::Ready(Ok(()))
+
+        // Then check if primary sink is ready
+        this.primary.st.poll_ready_unpin(cx).map_err(Into::into)
     }
 
     fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
