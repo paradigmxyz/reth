@@ -19,7 +19,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm, TxEnvOverrides,
+    ConfigureEvm, Evm, TxEnvOverrides,
 };
 use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
@@ -166,14 +166,14 @@ where
                 .into())
             }
 
-            self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
+            let mut tx_env = self.evm_config.tx_env(transaction, *sender);
 
             if let Some(tx_env_overrides) = &mut self.tx_env_overrides {
-                tx_env_overrides.apply(evm.tx_mut());
+                tx_env_overrides.apply(&mut tx_env);
             }
 
             // Execute transaction.
-            let result_and_state = evm.transact().map_err(move |err| {
+            let result_and_state = evm.transact(tx_env).map_err(move |err| {
                 let new_err = err.map_db_err(|e| e.into());
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {

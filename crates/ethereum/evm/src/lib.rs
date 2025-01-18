@@ -17,18 +17,18 @@
 
 extern crate alloc;
 
-use core::convert::Infallible;
-
 use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
-use alloy_primitives::{Address, Bytes, TxKind, U256};
+use alloy_primitives::{Address, U256};
+use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::ChainSpec;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm, NextBlockEnvAttributes};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::transaction::execute::FillTxEnv;
-use reth_revm::{inspector_handle_register, EvmBuilder};
+use reth_revm::{inspector_handle_register, Database, EvmBuilder};
 use revm_primitives::{
-    AnalysisKind, BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, SpecId, TxEnv,
+    AnalysisKind, BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, CfgEnvWithHandlerCfg, EVMError,
+    Env, ResultAndState, SpecId, TxEnv, TxKind,
 };
 
 mod config;
@@ -43,6 +43,90 @@ pub mod dao_fork;
 
 /// [EIP-6110](https://eips.ethereum.org/EIPS/eip-6110) handling.
 pub mod eip6110;
+
+/// Ethereum EVM implementation.
+#[derive(derive_more::Debug, derive_more::Deref, derive_more::DerefMut, derive_more::From)]
+#[debug(bound(DB::Error: Debug))]
+pub struct EthEvm<'a, EXT, DB: Database>(reth_revm::Evm<'a, EXT, DB>);
+
+impl<EXT, DB: Database> Evm for EthEvm<'_, EXT, DB> {
+    type DB = DB;
+    type Tx = TxEnv;
+    type Error = EVMError<DB::Error>;
+
+    fn block(&self) -> &BlockEnv {
+        self.0.block()
+    }
+
+    fn into_env(self) -> EvmEnv {
+        let Env { cfg, block, tx: _ } = *self.0.context.evm.inner.env;
+        EvmEnv {
+            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg {
+                cfg_env: cfg,
+                handler_cfg: self.0.handler.cfg,
+            },
+            block_env: block,
+        }
+    }
+
+    fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error> {
+        *self.tx_mut() = tx;
+        self.0.transact()
+    }
+
+    fn transact_system_call(
+        &mut self,
+        caller: Address,
+        contract: Address,
+        data: Bytes,
+    ) -> Result<ResultAndState, Self::Error> {
+        #[allow(clippy::needless_update)] // side-effect of optimism fields
+        let tx_env = TxEnv {
+            caller,
+            transact_to: TxKind::Call(contract),
+            // Explicitly set nonce to None so revm does not do any nonce checks
+            nonce: None,
+            gas_limit: 30_000_000,
+            value: U256::ZERO,
+            data,
+            // Setting the gas price to zero enforces that no value is transferred as part of the
+            // call, and that the call will not count against the block's gas limit
+            gas_price: U256::ZERO,
+            // The chain ID check is not relevant here and is disabled if set to None
+            chain_id: None,
+            // Setting the gas priority fee to None ensures the effective gas price is derived from
+            // the `gas_price` field, which we need to be zero
+            gas_priority_fee: None,
+            access_list: Vec::new(),
+            // blob fields can be None for this tx
+            blob_hashes: Vec::new(),
+            max_fee_per_blob_gas: None,
+            // TODO remove this once this crate is no longer built with optimism
+            ..Default::default()
+        };
+
+        *self.tx_mut() = tx_env;
+
+        let prev_block_env = self.block().clone();
+
+        // ensure the block gas limit is >= the tx
+        self.block_mut().gas_limit = U256::from(self.tx().gas_limit);
+
+        // disable the base fee check for this call by setting the base fee to zero
+        self.block_mut().basefee = U256::ZERO;
+
+        let res = self.0.transact();
+
+        // re-set the block env
+        *self.block_mut() = prev_block_env;
+
+        res
+    }
+
+    fn db_mut(&mut self) -> &mut Self::DB {
+        &mut self.context.evm.db
+    }
+}
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
@@ -69,46 +153,6 @@ impl ConfigureEvmEnv for EthEvmConfig {
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         transaction.fill_tx_env(tx_env, sender);
-    }
-
-    fn fill_tx_env_system_contract_call(
-        &self,
-        env: &mut Env,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    ) {
-        #[allow(clippy::needless_update)] // side-effect of optimism fields
-        let tx = TxEnv {
-            caller,
-            transact_to: TxKind::Call(contract),
-            // Explicitly set nonce to None so revm does not do any nonce checks
-            nonce: None,
-            gas_limit: 30_000_000,
-            value: U256::ZERO,
-            data,
-            // Setting the gas price to zero enforces that no value is transferred as part of the
-            // call, and that the call will not count against the block's gas limit
-            gas_price: U256::ZERO,
-            // The chain ID check is not relevant here and is disabled if set to None
-            chain_id: None,
-            // Setting the gas priority fee to None ensures the effective gas price is derived from
-            // the `gas_price` field, which we need to be zero
-            gas_priority_fee: None,
-            access_list: Vec::new(),
-            // blob fields can be None for this tx
-            blob_hashes: Vec::new(),
-            max_fee_per_blob_gas: None,
-            // TODO remove this once this crate is no longer built with optimism
-            ..Default::default()
-        };
-        env.tx = tx;
-
-        // ensure the block gas limit is >= the tx
-        env.block.gas_limit = U256::from(env.tx.gas_limit);
-
-        // disable the base fee check for this call by setting the base fee to zero
-        env.block.basefee = U256::ZERO;
     }
 
     fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Header) {
@@ -184,18 +228,22 @@ impl ConfigureEvmEnv for EthEvmConfig {
 }
 
 impl ConfigureEvm for EthEvmConfig {
-    fn evm_with_env<DB: reth_revm::Database>(
+    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
+
+    fn evm_with_env<DB: Database>(
         &self,
         db: DB,
         evm_env: EvmEnv,
         tx: TxEnv,
-    ) -> reth_revm::Evm<'_, (), DB> {
-        EvmBuilder::default()
-            .with_db(db)
-            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
-            .with_block_env(evm_env.block_env)
-            .with_tx_env(tx)
-            .build()
+    ) -> Self::Evm<'_, DB, ()> {
+        EthEvm(
+            EvmBuilder::default()
+                .with_db(db)
+                .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+                .with_block_env(evm_env.block_env)
+                .with_tx_env(tx)
+                .build(),
+        )
     }
 
     fn evm_with_env_and_inspector<DB, I>(
@@ -204,19 +252,21 @@ impl ConfigureEvm for EthEvmConfig {
         evm_env: EvmEnv,
         tx: TxEnv,
         inspector: I,
-    ) -> reth_revm::Evm<'_, I, DB>
+    ) -> Self::Evm<'_, DB, I>
     where
-        DB: reth_revm::Database,
+        DB: Database,
         I: reth_revm::GetInspector<DB>,
     {
-        EvmBuilder::default()
-            .with_db(db)
-            .with_external_context(inspector)
-            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
-            .with_block_env(evm_env.block_env)
-            .with_tx_env(tx)
-            .append_handler_register(inspector_handle_register)
-            .build()
+        EthEvm(
+            EvmBuilder::default()
+                .with_db(db)
+                .with_external_context(inspector)
+                .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+                .with_block_env(evm_env.block_env)
+                .with_tx_env(tx)
+                .append_handler_register(inspector_handle_register)
+                .build(),
+        )
     }
 }
 

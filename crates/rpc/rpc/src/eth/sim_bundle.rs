@@ -10,7 +10,7 @@ use alloy_rpc_types_mev::{
 };
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
 use reth_provider::{ChainSpecProvider, HeaderProvider, ProviderTx};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::MevSimApiServer;
@@ -324,10 +324,10 @@ where
                         )
                         .into());
                     }
-                    eth_api.evm_config().fill_tx_env(evm.tx_mut(), &item.tx, item.signer);
 
-                    let ResultAndState { result, state } =
-                        evm.transact().map_err(EthApiError::from_eth_err)?;
+                    let ResultAndState { result, state } = evm
+                        .transact(eth_api.evm_config().tx_env(&item.tx, item.signer))
+                        .map_err(EthApiError::from_eth_err)?;
 
                     if !result.is_success() && !item.can_revert {
                         return Err(EthApiError::InvalidParams(
@@ -366,7 +366,7 @@ where
                     }
 
                     // Apply state changes
-                    evm.context.evm.db.commit(state);
+                    evm.db_mut().commit(state);
                 }
 
                 // After processing all transactions, process refunds

@@ -13,7 +13,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{
     env::EvmEnv, state_change::post_block_withdrawals_balance_increments,
-    system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes,
+    system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Evm, NextBlockEnvAttributes,
 };
 use reth_primitives::{InvalidTransactionError, RecoveredBlock};
 use reth_primitives_traits::Receipt;
@@ -325,9 +325,10 @@ pub trait LoadPendingBlock:
             }
 
             let tx_env = self.evm_config().tx_env(tx.tx(), tx.signer());
-            let mut evm = self.evm_config().evm_with_env(&mut db, evm_env.clone(), tx_env);
+            let mut evm =
+                self.evm_config().evm_with_env(&mut db, evm_env.clone(), Default::default());
 
-            let ResultAndState { result, state } = match evm.transact() {
+            let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
                     match err {
