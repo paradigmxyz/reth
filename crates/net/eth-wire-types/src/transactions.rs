@@ -1,12 +1,12 @@
 //! Implements the `GetPooledTransactions` and `PooledTransactions` message types.
 
 use alloc::vec::Vec;
+use alloy_consensus::transaction::PooledTransaction;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use derive_more::{Constructor, Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
-use reth_primitives::PooledTransaction;
 
 /// A list of transaction hashes that the peer would like transaction bodies for.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -85,11 +85,11 @@ impl<T> Default for PooledTransactions<T> {
 #[cfg(test)]
 mod tests {
     use crate::{message::RequestPair, GetPooledTransactions, PooledTransactions};
-    use alloy_consensus::{TxEip1559, TxLegacy};
+    use alloy_consensus::{transaction::PooledTransaction, TxEip1559, TxLegacy};
     use alloy_primitives::{hex, PrimitiveSignature as Signature, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_primitives::{PooledTransaction, Transaction, TransactionSigned};
+    use reth_ethereum_primitives::{Transaction, TransactionSigned};
     use std::str::FromStr;
 
     #[test]
