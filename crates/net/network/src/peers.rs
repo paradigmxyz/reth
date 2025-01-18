@@ -356,10 +356,9 @@ impl PeersManager {
             }
         }
 
+        let has_in_capacity = self.connection_info.has_in_capacity();
         // increment new incoming connection
         self.connection_info.inc_in();
-
-        let has_in_capacity = self.connection_info.has_in_capacity();
 
         // disconnect the peer if we don't have capacity for more inbound connections
         if !is_trusted && !has_in_capacity {
