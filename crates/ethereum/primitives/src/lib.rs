@@ -19,3 +19,9 @@ pub use transaction::*;
 
 #[cfg(feature = "alloy-compat")]
 mod alloy_compat;
+
+/// Type alias for the ethereum block
+pub type Block = alloy_consensus::Block<TransactionSigned>;
+
+/// Type alias for the ethereum blockbody
+pub type BlockBody = alloy_consensus::BlockBody<TransactionSigned>;
