@@ -502,7 +502,7 @@ pub trait Call:
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env, Default::default());
+        let mut evm = self.evm_config().evm_with_env(db, evm_env);
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
         let evm_env = evm.into_env();
 
@@ -522,12 +522,7 @@ pub trait Call:
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(
-            db,
-            evm_env,
-            Default::default(),
-            inspector,
-        );
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
         let evm_env = evm.into_env();
 
@@ -684,7 +679,7 @@ pub trait Call:
         I: IntoIterator<Item = (&'a Address, &'a <Self::Evm as ConfigureEvmEnv>::Transaction)>,
         <Self::Evm as ConfigureEvmEnv>::Transaction: SignedTransaction,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env, Default::default());
+        let mut evm = self.evm_config().evm_with_env(db, evm_env);
         let mut index = 0;
         for (sender, tx) in transactions {
             if *tx.tx_hash() == target_tx_hash {

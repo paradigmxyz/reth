@@ -90,12 +90,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// including the spec id and transaction environment.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env<DB: Database>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        tx: TxEnv,
-    ) -> Self::Evm<'_, DB, ()>;
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()>;
 
     /// Returns a new EVM with the given database configured with `cfg` and `block_env`
     /// configuration derived from the given header. Relies on
@@ -106,7 +101,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// This does not initialize the tx environment.
     fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Self::Evm<'_, DB, ()> {
         let evm_env = self.cfg_and_block_env(header);
-        self.evm_with_env(db, evm_env, Default::default())
+        self.evm_with_env(db, evm_env)
     }
 
     /// Returns a new EVM with the given database configured with the given environment settings,
@@ -119,7 +114,6 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         &self,
         db: DB,
         evm_env: EvmEnv,
-        tx: TxEnv,
         inspector: I,
     ) -> Self::Evm<'_, DB, I>
     where
@@ -138,27 +132,21 @@ where
         (*self).evm_for_block(db, header)
     }
 
-    fn evm_with_env<DB: Database>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        tx: TxEnv,
-    ) -> Self::Evm<'_, DB, ()> {
-        (*self).evm_with_env(db, evm_env, tx)
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
+        (*self).evm_with_env(db, evm_env)
     }
 
     fn evm_with_env_and_inspector<DB, I>(
         &self,
         db: DB,
         evm_env: EvmEnv,
-        tx_env: TxEnv,
         inspector: I,
     ) -> Self::Evm<'_, DB, I>
     where
         DB: Database,
         I: GetInspector<DB>,
     {
-        (*self).evm_with_env_and_inspector(db, evm_env, tx_env, inspector)
+        (*self).evm_with_env_and_inspector(db, evm_env, inspector)
     }
 }
 
