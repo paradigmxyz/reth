@@ -1,9 +1,4 @@
 //! Helper function for calculating Merkle proofs and hashes.
-
-use crate::Receipt;
-use alloy_consensus::TxReceipt;
-use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::B256;
 pub use alloy_trie::root::ordered_trie_root_with_encoder;
 
 pub use alloy_consensus::proofs::calculate_receipt_root;
@@ -22,22 +17,16 @@ pub use alloy_consensus::proofs::calculate_withdrawals_root;
 #[doc(inline)]
 pub use alloy_consensus::proofs::calculate_ommers_root;
 
-/// Calculates the receipt root for a header for the reference type of [Receipt].
-///
-/// NOTE: Prefer [`calculate_receipt_root`] if you have log blooms memoized.
-pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
-    ordered_trie_root_with_encoder(receipts, |r, buf| r.with_bloom_ref().encode_2718(buf))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Block, TxType};
     use alloy_consensus::EMPTY_ROOT_HASH;
     use alloy_genesis::GenesisAccount;
-    use alloy_primitives::{b256, bloom, hex_literal::hex, Address, Log, LogData, U256};
+    use alloy_primitives::{b256, bloom, hex_literal::hex, Address, Log, LogData, B256, U256};
     use alloy_rlp::Decodable;
     use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
+    use reth_ethereum_primitives::Receipt;
     use reth_trie_common::root::{state_root_ref_unhashed, state_root_unhashed};
     use std::collections::HashMap;
 
