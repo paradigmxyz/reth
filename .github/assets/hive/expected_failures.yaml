@@ -7,7 +7,6 @@ rpc-compat:
   - debug_getRawTransaction/get-invalid-hash (reth)
 
   - eth_call/call-callenv (reth)
-  - eth_feeHistory/fee-history (reth)
   - eth_getStorageAt/get-storage-invalid-key-too-large (reth)
   - eth_getStorageAt/get-storage-invalid-key (reth)
   - eth_getTransactionReceipt/get-access-list (reth)
