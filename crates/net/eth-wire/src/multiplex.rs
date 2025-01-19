@@ -590,64 +590,37 @@ where
 
         // First try to drain any buffered satellite messages
         loop {
-            match this.inner.conn.poll_ready_unpin(cx) {
-                Poll::Ready(Ok(())) => {
-                    if let Some(msg) = this.inner.out_buffer.pop_front() {
-                        if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                            return Poll::Ready(Err(err.into()))
-                        }
-                        continue;
-                    }
-                    break;
+            ready!(this.inner.conn.poll_ready_unpin(cx)).map_err(Into::into)?;
+            if let Some(msg) = this.inner.out_buffer.pop_front() {
+                if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+                    return Poll::Ready(Err(err.into()))
                 }
-                Poll::Ready(Err(err)) => return Poll::Ready(Err(err.into())),
-                Poll::Pending => return Poll::Pending,
+                continue;
             }
+            break;
         }
 
         // Only check primary sink readiness after buffer is drained
         this.primary.st.poll_ready_unpin(cx)
     }
 
-    /// Attempts to send a message. Returns an error if there are still buffered satellite messages
-    /// that need to be sent first.
     fn start_send(self: Pin<&mut Self>, item: T) -> Result<(), Self::Error> {
-        let this = self.get_mut();
-
-        // Ensure all buffered satellite messages are sent before accepting new messages
-        if !this.inner.out_buffer.is_empty() {
-            return Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "satellite message buffer not empty",
-            )
-            .into());
-        }
-
-        this.primary.st.start_send_unpin(item)
+        self.get_mut().primary.st.start_send_unpin(item)
     }
 
-    /// Attempts to flush all pending messages by:
-    /// 1. Sending any buffered satellite messages
-    /// 2. Flushing the underlying connection
-    /// 3. Flushing the primary stream
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let this = self.get_mut();
 
         // First try to send all buffered satellite messages
         loop {
-            match this.inner.conn.poll_ready_unpin(cx) {
-                Poll::Ready(Ok(())) => {
-                    if let Some(msg) = this.inner.out_buffer.pop_front() {
-                        if let Err(err) = this.inner.conn.start_send_unpin(msg) {
-                            return Poll::Ready(Err(err.into()))
-                        }
-                        continue;
-                    }
-                    break;
+            ready!(this.inner.conn.poll_ready_unpin(cx)).map_err(Into::into)?;
+            if let Some(msg) = this.inner.out_buffer.pop_front() {
+                if let Err(err) = this.inner.conn.start_send_unpin(msg) {
+                    return Poll::Ready(Err(err.into()))
                 }
-                Poll::Ready(Err(err)) => return Poll::Ready(Err(err.into())),
-                Poll::Pending => return Poll::Pending,
+                continue;
             }
+            break;
         }
 
         // Then flush both the connection and primary stream
@@ -655,19 +628,8 @@ where
         this.primary.st.poll_flush_unpin(cx)
     }
 
-    /// Closes the stream by:
-    /// 1. Flushing all pending messages
-    /// 2. Closing the underlying connection
-    /// 3. Closing the primary stream
     fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.get_mut();
-
-        // First flush any remaining messages
-        ready!(Pin::new(&mut *this).poll_flush(cx))?;
-
-        // Then close both the connection and primary stream
-        ready!(this.inner.conn.poll_close_unpin(cx)).map_err(Into::into)?;
-        this.primary.st.poll_close_unpin(cx)
+        self.get_mut().inner.conn.poll_close_unpin(cx).map_err(Into::into)
     }
 }
 
