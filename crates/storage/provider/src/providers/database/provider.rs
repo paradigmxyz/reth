@@ -2254,17 +2254,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         // Track the number of inserted entries.
         let mut num_entries = 0;
 
-        // Merge updated and removed nodes. Updated nodes must take precedence.
-        let mut account_updates = trie_updates
-            .removed_nodes_ref()
-            .iter()
-            .filter_map(|n| {
-                (!trie_updates.account_nodes_ref().contains_key(n)).then_some((n, None))
-            })
-            .collect::<Vec<_>>();
-        account_updates.extend(
-            trie_updates.account_nodes_ref().iter().map(|(nibbles, node)| (nibbles, Some(node))),
-        );
+        let mut account_updates: Vec<_> =
+            trie_updates.changed_nodes_ref().iter().map(|(k, v)| (k, v.clone())).collect();
         // Sort trie node updates.
         account_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
 

@@ -427,10 +427,11 @@ fn account_and_storage_trie() {
 
     // Check account trie
     let account_updates = trie_updates.into_sorted();
-    let account_updates = account_updates.account_nodes_ref();
+    let account_updates = account_updates.changed_nodes_ref();
     assert_eq!(account_updates.len(), 2);
 
     let (nibbles1a, node1a) = account_updates.first().unwrap();
+    let node1a = node1a.clone().unwrap();
     assert_eq!(nibbles1a[..], [0xB]);
     assert_eq!(node1a.state_mask, TrieMask::new(0b1011));
     assert_eq!(node1a.tree_mask, TrieMask::new(0b0001));
@@ -439,6 +440,7 @@ fn account_and_storage_trie() {
     assert_eq!(node1a.hashes.len(), 2);
 
     let (nibbles2a, node2a) = account_updates.last().unwrap();
+    let node2a = node2a.clone().unwrap();
     assert_eq!(nibbles2a[..], [0xB, 0x0]);
     assert_eq!(node2a.state_mask, TrieMask::new(0b10001));
     assert_eq!(node2a.tree_mask, TrieMask::new(0b00000));
@@ -470,10 +472,11 @@ fn account_and_storage_trie() {
     assert_eq!(root, expected_state_root);
 
     let account_updates = trie_updates.into_sorted();
-    let account_updates = account_updates.account_nodes_ref();
+    let account_updates = account_updates.changed_nodes_ref();
     assert_eq!(account_updates.len(), 2);
 
     let (nibbles1b, node1b) = account_updates.first().unwrap();
+    let node1b = node1b.clone().unwrap();
     assert_eq!(nibbles1b[..], [0xB]);
     assert_eq!(node1b.state_mask, TrieMask::new(0b1011));
     assert_eq!(node1b.tree_mask, TrieMask::new(0b0001));
@@ -484,6 +487,7 @@ fn account_and_storage_trie() {
     assert_eq!(node1a.hashes[1], node1b.hashes[2]);
 
     let (nibbles2b, node2b) = account_updates.last().unwrap();
+    let node2b = node2b.clone().unwrap();
     assert_eq!(nibbles2b[..], [0xB, 0x0]);
     assert_eq!(node2a, node2b);
     tx.commit().unwrap();
@@ -517,14 +521,12 @@ fn account_and_storage_trie() {
             .root_with_updates()
             .unwrap();
         assert_eq!(root, computed_expected_root);
-        assert_eq!(
-            trie_updates.account_nodes_ref().len() + trie_updates.removed_nodes_ref().len(),
-            1
-        );
+        assert_eq!(trie_updates.changed_nodes_ref().len(), 1);
 
-        assert_eq!(trie_updates.account_nodes_ref().len(), 1);
+        assert_eq!(trie_updates.changed_nodes_ref().len(), 1);
 
-        let (nibbles1c, node1c) = trie_updates.account_nodes_ref().iter().next().unwrap();
+        let (nibbles1c, node1c) = trie_updates.changed_nodes_ref().iter().next().unwrap();
+        let node1c = node1c.clone().unwrap();
         assert_eq!(nibbles1c[..], [0xB]);
 
         assert_eq!(node1c.state_mask, TrieMask::new(0b1011));
@@ -571,18 +573,16 @@ fn account_and_storage_trie() {
             .root_with_updates()
             .unwrap();
         assert_eq!(root, computed_expected_root);
-        assert_eq!(
-            trie_updates.account_nodes_ref().len() + trie_updates.removed_nodes_ref().len(),
-            1
-        );
+        assert_eq!(trie_updates.changed_nodes_ref().len(), 1);
         assert!(!trie_updates
             .storage_tries_ref()
             .iter()
             .any(|(_, u)| !u.storage_nodes_ref().is_empty() || !u.removed_nodes_ref().is_empty())); // no storage root update
 
-        assert_eq!(trie_updates.account_nodes_ref().len(), 1);
+        assert_eq!(trie_updates.changed_nodes_ref().len(), 1);
 
-        let (nibbles1d, node1d) = trie_updates.account_nodes_ref().iter().next().unwrap();
+        let (nibbles1d, node1d) = trie_updates.changed_nodes_ref().iter().next().unwrap();
+        let node1d = node1d.clone().unwrap();
         assert_eq!(nibbles1d[..], [0xB]);
 
         assert_eq!(node1d.state_mask, TrieMask::new(0b1011));
@@ -606,7 +606,13 @@ fn account_trie_around_extension_node() {
 
     let (got, updates) = StateRoot::from_tx(tx.tx_ref()).root_with_updates().unwrap();
     assert_eq!(expected, got);
-    assert_trie_updates(updates.account_nodes_ref());
+    assert_trie_updates(
+        &updates
+            .changed_nodes_ref()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone().unwrap()))
+            .collect(),
+    );
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use super::{TrieCursor, TrieCursorFactory};
 use crate::{
-    forward_cursor::ForwardInMemoryCursor,
+    forward_cursor::{ForwardInMemoryCursor, OptionForwardInMemoryCursor},
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
 };
 use alloy_primitives::{map::HashSet, B256};
@@ -52,9 +52,7 @@ pub struct InMemoryAccountTrieCursor<'a, C> {
     /// The underlying cursor.
     cursor: C,
     /// Forward-only in-memory cursor over storage trie nodes.
-    in_memory_cursor: ForwardInMemoryCursor<'a, Nibbles, BranchNodeCompact>,
-    /// Collection of removed trie nodes.
-    removed_nodes: &'a HashSet<Nibbles>,
+    in_memory_cursor: OptionForwardInMemoryCursor<'a, Nibbles, BranchNodeCompact>,
     /// Last key returned by the cursor.
     last_key: Option<Nibbles>,
 }
@@ -62,12 +60,10 @@ pub struct InMemoryAccountTrieCursor<'a, C> {
 impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
     /// Create new account trie cursor from underlying cursor and reference to
     /// [`TrieUpdatesSorted`].
-    pub const fn new(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
-        let in_memory_cursor = ForwardInMemoryCursor::new(&trie_updates.account_nodes);
+    pub fn new(cursor: C, trie_updates: &'a TrieUpdatesSorted) -> Self {
         Self {
             cursor,
-            in_memory_cursor,
-            removed_nodes: &trie_updates.removed_nodes,
+            in_memory_cursor: OptionForwardInMemoryCursor::new(&trie_updates.changed_nodes),
             last_key: None,
         }
     }
@@ -84,7 +80,7 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
 
         // Reposition the cursor to the first greater or equal node that wasn't removed.
         let mut db_entry = self.cursor.seek(key.clone())?;
-        while db_entry.as_ref().is_some_and(|entry| self.removed_nodes.contains(&entry.0)) {
+        while db_entry.as_ref().is_some_and(|entry| self.in_memory_cursor.is_removed(&entry.0)) {
             db_entry = self.cursor.next()?;
         }
 
@@ -104,7 +100,7 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
         let mut db_entry = self.cursor.seek(last.clone())?;
         while db_entry
             .as_ref()
-            .is_some_and(|entry| entry.0 < last || self.removed_nodes.contains(&entry.0))
+            .is_some_and(|entry| entry.0 < last || self.in_memory_cursor.is_removed(&entry.0))
         {
             db_entry = self.cursor.next()?;
         }
