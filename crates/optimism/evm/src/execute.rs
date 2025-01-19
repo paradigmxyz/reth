@@ -8,7 +8,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Eip658Value, Receipt, Transaction as _};
 use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
-use op_alloy_consensus::{DepositTransaction, OpDepositReceipt};
+use op_alloy_consensus::OpDepositReceipt;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_evm::{
@@ -24,7 +24,9 @@ use reth_evm::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardfork;
-use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt};
+use reth_optimism_primitives::{
+    transaction::signed::OpTransaction, DepositReceipt, OpPrimitives, OpReceipt,
+};
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_revm::{Database, State};
@@ -69,7 +71,7 @@ where
     N: NodePrimitives<
         BlockHeader = alloy_consensus::Header,
         Receipt = OpReceipt,
-        SignedTx: DepositTransaction,
+        SignedTx: OpTransaction,
     >,
     EvmConfig: Clone
         + Unpin
@@ -146,7 +148,7 @@ where
     DB: Database<Error: Into<ProviderError> + Display>,
     N: NodePrimitives<
         BlockHeader = alloy_consensus::Header,
-        SignedTx: DepositTransaction,
+        SignedTx: OpTransaction,
         Receipt: DepositReceipt,
     >,
     EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
