@@ -22,7 +22,9 @@ use reth_basic_payload_builder::{
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_errors::RethError;
-use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::{
+    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, NextBlockEnvAttributes,
+};
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
@@ -270,9 +272,9 @@ where
         }
 
         // Configure the environment for the tx.
-        *evm.tx_mut() = evm_config.tx_env(tx.tx(), tx.signer());
+        let tx_env = evm_config.tx_env(tx.tx(), tx.signer());
 
-        let ResultAndState { result, state } = match evm.transact() {
+        let ResultAndState { result, state } = match evm.transact(tx_env) {
             Ok(res) => res,
             Err(err) => {
                 match err {

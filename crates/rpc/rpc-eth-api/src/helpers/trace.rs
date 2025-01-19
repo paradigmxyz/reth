@@ -7,7 +7,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
-use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Evm};
 use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
@@ -18,9 +18,7 @@ use reth_rpc_eth_types::{
 };
 use revm::{db::CacheDB, Database, DatabaseCommit, GetInspector, Inspector};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
-use revm_primitives::{
-    CfgEnvWithHandlerCfg, Env, EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState, TxEnv,
-};
+use revm_primitives::{EvmState, ExecutionResult, ResultAndState, TxEnv};
 use std::{fmt::Display, sync::Arc};
 
 /// Executes CPU heavy tasks.
@@ -33,7 +31,7 @@ pub trait Trace:
     >,
 >
 {
-    /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
+    /// Executes the [`EvmEnv`] against the given [Database] without committing state
     /// changes.
     fn inspect<DB, I>(
         &self,
@@ -47,23 +45,22 @@ pub trait Trace:
         EthApiError: From<DB::Error>,
         I: GetInspector<DB>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, tx_env, inspector);
-        let res = evm.transact().map_err(Self::Error::from_evm_err)?;
-        let (_, env) = evm.into_db_and_env_with_handler_cfg();
-        let EnvWithHandlerCfg { env, handler_cfg } = env;
-        let Env { cfg, block, tx } = *env;
-        let evm_env = EvmEnv {
-            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg { cfg_env: cfg, handler_cfg },
-            block_env: block,
-        };
-        Ok((res, (evm_env, tx)))
+        let mut evm = self.evm_config().evm_with_env_and_inspector(
+            db,
+            evm_env,
+            Default::default(),
+            inspector,
+        );
+        let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
+        let evm_env = evm.into_env();
+        Ok((res, (evm_env, tx_env)))
     }
 
     /// Executes the transaction on top of the given [`BlockId`] with a tracer configured by the
     /// config.
     ///
     /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
-    /// the configured [`EnvWithHandlerCfg`] was inspected.
+    /// the configured [`EvmEnv`] was inspected.
     ///
     /// Caution: this is blocking
     fn trace_at<F, R>(
@@ -92,7 +89,7 @@ pub trait Trace:
     /// config.
     ///
     /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
-    /// the configured [`EnvWithHandlerCfg`] was inspected.
+    /// the configured [`EvmEnv`] was inspected.
     fn spawn_trace_at_with_state<F, R>(
         &self,
         evm_env: EvmEnv,

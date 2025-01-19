@@ -25,7 +25,7 @@ use reth_transaction_pool::{
 use revm::primitives::{AccessList, KzgSettings};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc,
+    Arc, OnceLock,
 };
 
 /// Type alias for default optimism transaction pool
@@ -36,13 +36,33 @@ pub type OpTransactionPool<Client, S> = Pool<
 >;
 
 /// Pool transaction for OP.
+///
+/// This type wraps the actual transaction and caches values that are frequently used by the pool.
+/// For payload building this lazily tracks values that are required during payload building:
+///  - Estimated compressed size of this transaction
 #[derive(Debug, Clone, derive_more::Deref)]
-pub struct OpPooledTransaction(EthPooledTransaction<OpTransactionSigned>);
+pub struct OpPooledTransaction {
+    #[deref]
+    inner: EthPooledTransaction<OpTransactionSigned>,
+    /// The estimated size of this transaction, lazily computed.
+    estimated_tx_compressed_size: OnceLock<u32>,
+}
 
 impl OpPooledTransaction {
     /// Create new instance of [Self].
     pub fn new(transaction: RecoveredTx<OpTransactionSigned>, encoded_length: usize) -> Self {
-        Self(EthPooledTransaction::new(transaction, encoded_length))
+        Self {
+            inner: EthPooledTransaction::new(transaction, encoded_length),
+            estimated_tx_compressed_size: Default::default(),
+        }
+    }
+
+    /// Returns the estimated compressed size of a transaction in bytes scaled by 1e6.
+    // This value is computed based on the following formula:
+    // `max(minTransactionSize, intercept + fastlzCoef*fastlzSize)`
+    pub fn estimated_compressed_size(&self) -> u32 {
+        // TODO(mattsse): use standalone flz compute function
+        *self.estimated_tx_compressed_size.get_or_init(|| self.inner.encoded_length as u32)
     }
 }
 
@@ -50,7 +70,10 @@ impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for OpPooledTran
     fn from(tx: RecoveredTx<op_alloy_consensus::OpPooledTransaction>) -> Self {
         let encoded_len = tx.encode_2718_len();
         let tx = tx.map_transaction(|tx| tx.into());
-        Self(EthPooledTransaction::new(tx, encoded_len))
+        Self {
+            inner: EthPooledTransaction::new(tx, encoded_len),
+            estimated_tx_compressed_size: Default::default(),
+        }
     }
 }
 
@@ -67,7 +90,7 @@ impl TryFrom<RecoveredTx<OpTransactionSigned>> for OpPooledTransaction {
 
 impl From<OpPooledTransaction> for RecoveredTx<OpTransactionSigned> {
     fn from(value: OpPooledTransaction) -> Self {
-        value.0.transaction
+        value.inner.transaction
     }
 }
 
@@ -77,7 +100,7 @@ impl PoolTransaction for OpPooledTransaction {
     type Pooled = op_alloy_consensus::OpPooledTransaction;
 
     fn clone_into_consensus(&self) -> RecoveredTx<Self::Consensus> {
-        self.transaction().clone()
+        self.inner.transaction().clone()
     }
 
     fn try_consensus_into_pooled(
@@ -88,79 +111,79 @@ impl PoolTransaction for OpPooledTransaction {
     }
 
     fn hash(&self) -> &TxHash {
-        self.transaction.tx_hash()
+        self.inner.transaction.tx_hash()
     }
 
     fn sender(&self) -> Address {
-        self.transaction.signer()
+        self.inner.transaction.signer()
     }
 
     fn sender_ref(&self) -> &Address {
-        self.transaction.signer_ref()
+        self.inner.transaction.signer_ref()
     }
 
     fn nonce(&self) -> u64 {
-        self.transaction.nonce()
+        self.inner.transaction.nonce()
     }
 
     fn cost(&self) -> &U256 {
-        &self.cost
+        &self.inner.cost
     }
 
     fn gas_limit(&self) -> u64 {
-        self.transaction.gas_limit()
+        self.inner.transaction.gas_limit()
     }
 
     fn max_fee_per_gas(&self) -> u128 {
-        self.transaction.transaction.max_fee_per_gas()
+        self.inner.transaction.transaction.max_fee_per_gas()
     }
 
     fn access_list(&self) -> Option<&AccessList> {
-        self.transaction.access_list()
+        self.inner.transaction.access_list()
     }
 
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        self.transaction.transaction.max_priority_fee_per_gas()
+        self.inner.transaction.transaction.max_priority_fee_per_gas()
     }
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        self.transaction.max_fee_per_blob_gas()
+        self.inner.transaction.max_fee_per_blob_gas()
     }
 
     fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.transaction.effective_tip_per_gas(base_fee)
+        self.inner.transaction.effective_tip_per_gas(base_fee)
     }
 
     fn priority_fee_or_price(&self) -> u128 {
-        self.transaction.priority_fee_or_price()
+        self.inner.transaction.priority_fee_or_price()
     }
 
     fn kind(&self) -> TxKind {
-        self.transaction.kind()
+        self.inner.transaction.kind()
     }
 
     fn is_create(&self) -> bool {
-        self.transaction.is_create()
+        self.inner.transaction.is_create()
     }
 
     fn input(&self) -> &[u8] {
-        self.transaction.input()
+        self.inner.transaction.input()
     }
 
     fn size(&self) -> usize {
-        self.transaction.transaction.input().len()
+        self.inner.transaction.transaction.input().len()
     }
 
     fn tx_type(&self) -> u8 {
-        self.transaction.ty()
+        self.inner.transaction.ty()
     }
 
     fn encoded_length(&self) -> usize {
-        self.encoded_length
+        self.inner.encoded_length
     }
 
     fn chain_id(&self) -> Option<u64> {
-        self.transaction.chain_id()
+        self.inner.transaction.chain_id()
     }
 }
 
@@ -196,7 +219,7 @@ impl EthPoolTransaction for OpPooledTransaction {
     }
 
     fn authorization_count(&self) -> usize {
-        match &self.transaction.transaction {
+        match &self.inner.transaction.transaction {
             OpTypedTransaction::Eip7702(tx) => tx.authorization_list.len(),
             _ => 0,
         }

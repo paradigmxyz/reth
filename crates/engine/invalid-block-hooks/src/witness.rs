@@ -6,14 +6,13 @@ use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
-    state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm,
+    state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm, Evm,
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
-    database::StateProviderDatabase, db::states::bundle_state::BundleRetention, DatabaseCommit,
-    StateBuilder,
+    database::StateProviderDatabase, db::states::bundle_state::BundleRetention, StateBuilder,
 };
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
@@ -88,13 +87,8 @@ where
         // Re-execute all of the transactions in the block to load all touched accounts into
         // the cache DB.
         for tx in block.body().transactions() {
-            self.evm_config.fill_tx_env(
-                evm.tx_mut(),
-                tx,
-                tx.recover_signer().ok_or_eyre("failed to recover sender")?,
-            );
-            let result = evm.transact()?;
-            evm.db_mut().commit(result.state);
+            let signer = tx.recover_signer().ok_or_eyre("failed to recover sender")?;
+            evm.transact_commit(self.evm_config.tx_env(tx, signer))?;
         }
 
         drop(evm);
