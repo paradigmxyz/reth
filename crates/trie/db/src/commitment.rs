@@ -28,12 +28,12 @@ pub struct MerklePatriciaTrie;
 
 impl StateCommitment for MerklePatriciaTrie {
     type StateRoot<'a, TX: DbTx + 'a> =
-        StateRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
+        StateRoot<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>;
     type StorageRoot<'a, TX: DbTx + 'a> =
-        StorageRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
+        StorageRoot<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>;
     type StateProof<'a, TX: DbTx + 'a> =
-        Proof<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
+        Proof<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>;
     type StateWitness<'a, TX: DbTx + 'a> =
-        TrieWitness<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>;
+        TrieWitness<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>;
     type KeyHasher = KeccakKeyHasher;
 }

@@ -1,3 +1,4 @@
+use crate::DatabaseRef;
 use alloy_primitives::B256;
 use reth_db::{
     cursor::{DbCursorRW, DbDupCursorRW},
@@ -14,31 +15,46 @@ use reth_trie::{
     BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
 
+extern crate alloc;
+use alloc::sync::Arc;
+
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
 #[derive(Debug)]
-pub struct DatabaseTrieCursorFactory<'a, TX>(&'a TX);
+pub struct DatabaseTrieCursorFactory<Provider> {
+    provider: Arc<Provider>,
+}
 
-impl<TX> Clone for DatabaseTrieCursorFactory<'_, TX> {
+impl<Provider> Clone for DatabaseTrieCursorFactory<Provider> {
     fn clone(&self) -> Self {
-        Self(self.0)
+        Self { provider: self.provider.clone() }
     }
 }
 
-impl<'a, TX> DatabaseTrieCursorFactory<'a, TX> {
-    /// Create new [`DatabaseTrieCursorFactory`].
-    pub const fn new(tx: &'a TX) -> Self {
-        Self(tx)
+impl<'a, Tx: DbTx> DatabaseTrieCursorFactory<&'a Tx> {
+    /// Create new [`DatabaseTrieCursorFactory`] from a transaction reference.
+    pub fn new(tx: &'a Tx) -> Self {
+        DatabaseTrieCursorFactory { provider: Arc::new(tx) }
+    }
+}
+
+impl<Provider> DatabaseTrieCursorFactory<Provider> {
+    /// Create new [`DatabaseTrieCursorFactory`] from a provider.
+    pub const fn from_provider(provider: Arc<Provider>) -> Self {
+        Self { provider }
     }
 }
 
 /// Implementation of the trie cursor factory for a database transaction.
-impl<TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<'_, TX> {
-    type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
+impl<Provider: DatabaseRef> TrieCursorFactory for DatabaseTrieCursorFactory<Provider> {
+    type AccountTrieCursor =
+        DatabaseAccountTrieCursor<<Provider::Tx as DbTx>::Cursor<tables::AccountsTrie>>;
     type StorageTrieCursor =
-        DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
+        DatabaseStorageTrieCursor<<Provider::Tx as DbTx>::DupCursor<tables::StoragesTrie>>;
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
-        Ok(DatabaseAccountTrieCursor::new(self.0.cursor_read::<tables::AccountsTrie>()?))
+        Ok(DatabaseAccountTrieCursor::new(
+            self.provider.tx_reference().cursor_read::<tables::AccountsTrie>()?,
+        ))
     }
 
     fn storage_trie_cursor(
@@ -46,7 +62,7 @@ impl<TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<'_, TX> {
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor, DatabaseError> {
         Ok(DatabaseStorageTrieCursor::new(
-            self.0.cursor_dup_read::<tables::StoragesTrie>()?,
+            self.provider.tx_reference().cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
         ))
     }

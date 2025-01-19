@@ -1,3 +1,4 @@
+use crate::DatabaseRef;
 use alloy_primitives::{B256, U256};
 use reth_db::tables;
 use reth_db_api::{
@@ -7,30 +8,45 @@ use reth_db_api::{
 use reth_primitives::Account;
 use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 
+extern crate alloc;
+use alloc::sync::Arc;
+
 /// A struct wrapping database transaction that implements [`HashedCursorFactory`].
 #[derive(Debug)]
-pub struct DatabaseHashedCursorFactory<'a, TX>(&'a TX);
+pub struct DatabaseHashedCursorFactory<Provider> {
+    provider: Arc<Provider>,
+}
 
-impl<TX> Clone for DatabaseHashedCursorFactory<'_, TX> {
+impl<Provider> Clone for DatabaseHashedCursorFactory<Provider> {
     fn clone(&self) -> Self {
-        Self(self.0)
+        Self { provider: self.provider.clone() }
     }
 }
 
-impl<'a, TX> DatabaseHashedCursorFactory<'a, TX> {
-    /// Create new database hashed cursor factory.
-    pub const fn new(tx: &'a TX) -> Self {
-        Self(tx)
+impl<'a, Tx: DbTx> DatabaseHashedCursorFactory<&'a Tx> {
+    /// Create new [`DatabaseHashedCursorFactory`] from a transaction reference.
+    pub fn new(tx: &'a Tx) -> Self {
+        DatabaseHashedCursorFactory { provider: Arc::new(tx) }
     }
 }
 
-impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<'_, TX> {
-    type AccountCursor = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts>>;
+impl<Provider> DatabaseHashedCursorFactory<Provider> {
+    /// Create new [`DatabaseHashedCursorFactory`] from a provider.
+    pub const fn from_provider(provider: Arc<Provider>) -> Self {
+        Self { provider }
+    }
+}
+
+impl<Provider: DatabaseRef> HashedCursorFactory for DatabaseHashedCursorFactory<Provider> {
+    type AccountCursor =
+        DatabaseHashedAccountCursor<<Provider::Tx as DbTx>::Cursor<tables::HashedAccounts>>;
     type StorageCursor =
-        DatabaseHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>;
+        DatabaseHashedStorageCursor<<Provider::Tx as DbTx>::DupCursor<tables::HashedStorages>>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, reth_db::DatabaseError> {
-        Ok(DatabaseHashedAccountCursor(self.0.cursor_read::<tables::HashedAccounts>()?))
+        Ok(DatabaseHashedAccountCursor(
+            self.provider.tx_reference().cursor_read::<tables::HashedAccounts>()?,
+        ))
     }
 
     fn hashed_storage_cursor(
@@ -38,7 +54,7 @@ impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<'_, TX> {
         hashed_address: B256,
     ) -> Result<Self::StorageCursor, reth_db::DatabaseError> {
         Ok(DatabaseHashedStorageCursor::new(
-            self.0.cursor_dup_read::<tables::HashedStorages>()?,
+            self.provider.tx_reference().cursor_dup_read::<tables::HashedStorages>()?,
             hashed_address,
         ))
     }
