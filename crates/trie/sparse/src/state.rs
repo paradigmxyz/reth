@@ -470,8 +470,11 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         let updates = trie.take_updates();
                         let updates = StorageTrieUpdates {
                             is_deleted: updates.wiped,
-                            storage_nodes: updates.updated_nodes,
-                            removed_nodes: updates.removed_nodes,
+                            changed_nodes: Iterator::chain(
+                                updates.removed_nodes.into_iter().map(|k| (k, None)),
+                                updates.updated_nodes.into_iter().map(|(k, v)| (k, Some(v))),
+                            )
+                            .collect(),
                         };
                         (*address, updates)
                     })
@@ -753,8 +756,7 @@ mod tests {
                     b256!("1100000000000000000000000000000000000000000000000000000000000000"),
                     StorageTrieUpdates {
                         is_deleted: true,
-                        storage_nodes: HashMap::default(),
-                        removed_nodes: HashSet::default()
+                        changed_nodes: HashMap::default(),
                     }
                 )]),
             }

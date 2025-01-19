@@ -128,14 +128,7 @@ where
         }
 
         // Merge updated and removed nodes. Updated nodes must take precedence.
-        let mut storage_updates = updates
-            .removed_nodes_ref()
-            .iter()
-            .filter_map(|n| (!updates.storage_nodes_ref().contains_key(n)).then_some((n, None)))
-            .collect::<Vec<_>>();
-        storage_updates.extend(
-            updates.storage_nodes_ref().iter().map(|(nibbles, node)| (nibbles, Some(node))),
-        );
+        let mut storage_updates = updates.changed_nodes_ref().iter().collect::<Vec<_>>();
 
         // Sort trie node updates.
         storage_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
