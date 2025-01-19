@@ -4867,48 +4867,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "maili-consensus"
-version = "0.1.6"
-source = "git+https://github.com/op-rs/maili#624e63c2393ed2026bd5220cd8a65ce43ca63b0f"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-serde",
- "serde",
-]
-
-[[package]]
 name = "maili-flz"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11418b80159f49d9a2f13909ca9e0921629647ee68bcf97adcac0dd14d4d32e6"
 
 [[package]]
-name = "maili-flz"
-version = "0.1.6"
-source = "git+https://github.com/op-rs/maili#624e63c2393ed2026bd5220cd8a65ce43ca63b0f"
-
-[[package]]
 name = "maili-genesis"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a5680e0bb4c77bb98e8e9534dffd511ddd0d6ab7632514b54f2a09220d9337e"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "alloy-sol-types",
- "serde",
- "serde_repr",
- "thiserror 2.0.11",
-]
-
-[[package]]
-name = "maili-genesis"
-version = "0.1.6"
-source = "git+https://github.com/op-rs/maili#624e63c2393ed2026bd5220cd8a65ce43ca63b0f"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -4935,35 +4903,9 @@ dependencies = [
  "async-trait",
  "brotli",
  "derive_more",
- "maili-consensus 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "maili-flz 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "maili-genesis 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "miniz_oxide",
- "rand 0.8.5",
- "serde",
- "thiserror 2.0.11",
- "tracing",
- "unsigned-varint",
-]
-
-[[package]]
-name = "maili-protocol"
-version = "0.1.6"
-source = "git+https://github.com/op-rs/maili#624e63c2393ed2026bd5220cd8a65ce43ca63b0f"
-dependencies = [
- "alloc-no-stdlib",
- "alloy-consensus",
- "alloy-eips",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-serde",
- "alloy-sol-types",
- "async-trait",
- "brotli",
- "derive_more",
- "maili-consensus 0.1.6 (git+https://github.com/op-rs/maili)",
- "maili-flz 0.1.6 (git+https://github.com/op-rs/maili)",
- "maili-genesis 0.1.6 (git+https://github.com/op-rs/maili)",
+ "maili-consensus",
+ "maili-flz",
+ "maili-genesis",
  "miniz_oxide",
  "rand 0.8.5",
  "serde",
@@ -4975,14 +4917,15 @@ dependencies = [
 [[package]]
 name = "maili-rpc"
 version = "0.1.6"
-source = "git+https://github.com/op-rs/maili#624e63c2393ed2026bd5220cd8a65ce43ca63b0f"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c23e579fce3c019aa9291f0184d5c10b59718da7b4b5cd23dd6a8c53aaef78f"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "derive_more",
  "getrandom 0.2.15",
  "jsonrpsee",
- "maili-protocol 0.1.6 (git+https://github.com/op-rs/maili)",
+ "maili-protocol",
  "serde",
 ]
 
@@ -5546,7 +5489,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-serde",
- "maili-protocol 0.1.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "maili-protocol",
  "op-alloy-consensus",
  "serde",
  "thiserror 2.0.11",
