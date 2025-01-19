@@ -7,6 +7,9 @@ use reth_trie::{
     witness::TrieWitness, HashedPostState, TrieInput,
 };
 
+extern crate alloc;
+use alloc::sync::Arc;
+
 /// Extends [`TrieWitness`] with operations specific for working with a database transaction.
 pub trait DatabaseTrieWitness<'a, TX> {
     /// Create a new [`TrieWitness`] from database transaction.
@@ -37,11 +40,11 @@ impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
         Self::from_tx(tx)
             .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
                 DatabaseTrieCursorFactory::new(tx),
-                &nodes_sorted,
+                Arc::new(nodes_sorted),
             ))
             .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
                 DatabaseHashedCursorFactory::new(tx),
-                &state_sorted,
+                Arc::new(state_sorted),
             ))
             .with_prefix_sets_mut(input.prefix_sets)
             .compute(target)

@@ -7,27 +7,30 @@ use alloy_primitives::{map::B256HashSet, B256, U256};
 use reth_primitives::Account;
 use reth_storage_errors::db::DatabaseError;
 
+extern crate alloc;
+use alloc::sync::Arc;
+
 /// The hashed cursor factory for the post state.
 #[derive(Clone, Debug)]
-pub struct HashedPostStateCursorFactory<'a, CF> {
+pub struct HashedPostStateCursorFactory<CF> {
     cursor_factory: CF,
-    post_state: &'a HashedPostStateSorted,
+    post_state: Arc<HashedPostStateSorted>,
 }
 
-impl<'a, CF> HashedPostStateCursorFactory<'a, CF> {
+impl<CF> HashedPostStateCursorFactory<CF> {
     /// Create a new factory.
-    pub const fn new(cursor_factory: CF, post_state: &'a HashedPostStateSorted) -> Self {
+    pub const fn new(cursor_factory: CF, post_state: Arc<HashedPostStateSorted>) -> Self {
         Self { cursor_factory, post_state }
     }
 }
 
-impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorFactory<'a, CF> {
-    type AccountCursor = HashedPostStateAccountCursor<'a, CF::AccountCursor>;
-    type StorageCursor = HashedPostStateStorageCursor<'a, CF::StorageCursor>;
+impl<CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorFactory<CF> {
+    type AccountCursor = HashedPostStateAccountCursor<CF::AccountCursor>;
+    type StorageCursor = HashedPostStateStorageCursor<CF::StorageCursor>;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
         let cursor = self.cursor_factory.hashed_account_cursor()?;
-        Ok(HashedPostStateAccountCursor::new(cursor, &self.post_state.accounts))
+        Ok(HashedPostStateAccountCursor::new(cursor, self.post_state.accounts.clone()))
     }
 
     fn hashed_storage_cursor(
@@ -35,33 +38,36 @@ impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorF
         hashed_address: B256,
     ) -> Result<Self::StorageCursor, DatabaseError> {
         let cursor = self.cursor_factory.hashed_storage_cursor(hashed_address)?;
-        Ok(HashedPostStateStorageCursor::new(cursor, self.post_state.storages.get(&hashed_address)))
+        Ok(HashedPostStateStorageCursor::new(
+            cursor,
+            self.post_state.storages.get(&hashed_address).cloned().map(Arc::new),
+        ))
     }
 }
 
 /// The cursor to iterate over post state hashed accounts and corresponding database entries.
 /// It will always give precedence to the data from the hashed post state.
 #[derive(Debug)]
-pub struct HashedPostStateAccountCursor<'a, C> {
+pub struct HashedPostStateAccountCursor<C> {
     /// The database cursor.
     cursor: C,
     /// Forward-only in-memory cursor over accounts.
-    post_state_cursor: ForwardInMemoryCursor<'a, B256, Account>,
+    post_state_cursor: ForwardInMemoryCursor<B256, Account>,
     /// Reference to the collection of account keys that were destroyed.
-    destroyed_accounts: &'a B256HashSet,
+    destroyed_accounts: Arc<B256HashSet>,
     /// The last hashed account that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_account: Option<B256>,
 }
 
-impl<'a, C> HashedPostStateAccountCursor<'a, C>
+impl<C> HashedPostStateAccountCursor<C>
 where
     C: HashedCursor<Value = Account>,
 {
     /// Create new instance of [`HashedPostStateAccountCursor`].
-    pub const fn new(cursor: C, post_state_accounts: &'a HashedAccountsSorted) -> Self {
-        let post_state_cursor = ForwardInMemoryCursor::new(&post_state_accounts.accounts);
-        let destroyed_accounts = &post_state_accounts.destroyed_accounts;
+    pub fn new(cursor: C, post_state_accounts: Arc<HashedAccountsSorted>) -> Self {
+        let post_state_cursor = ForwardInMemoryCursor::new(post_state_accounts.accounts.clone());
+        let destroyed_accounts = post_state_accounts.destroyed_accounts.clone();
         Self { cursor, post_state_cursor, destroyed_accounts, last_account: None }
     }
 
@@ -131,7 +137,7 @@ where
     }
 }
 
-impl<C> HashedCursor for HashedPostStateAccountCursor<'_, C>
+impl<C> HashedCursor for HashedPostStateAccountCursor<C>
 where
     C: HashedCursor<Value = Account>,
 {
@@ -176,13 +182,13 @@ where
 /// The cursor to iterate over post state hashed storages and corresponding database entries.
 /// It will always give precedence to the data from the post state.
 #[derive(Debug)]
-pub struct HashedPostStateStorageCursor<'a, C> {
+pub struct HashedPostStateStorageCursor<C> {
     /// The database cursor.
     cursor: C,
     /// Forward-only in-memory cursor over non zero-valued account storage slots.
-    post_state_cursor: Option<ForwardInMemoryCursor<'a, B256, U256>>,
+    post_state_cursor: Option<ForwardInMemoryCursor<B256, U256>>,
     /// Reference to the collection of storage slot keys that were cleared.
-    cleared_slots: Option<&'a B256HashSet>,
+    cleared_slots: Option<Arc<B256HashSet>>,
     /// Flag indicating whether database storage was wiped.
     storage_wiped: bool,
     /// The last slot that has been returned by the cursor.
@@ -190,15 +196,16 @@ pub struct HashedPostStateStorageCursor<'a, C> {
     last_slot: Option<B256>,
 }
 
-impl<'a, C> HashedPostStateStorageCursor<'a, C>
+impl<C> HashedPostStateStorageCursor<C>
 where
     C: HashedStorageCursor<Value = U256>,
 {
     /// Create new instance of [`HashedPostStateStorageCursor`] for the given hashed address.
-    pub fn new(cursor: C, post_state_storage: Option<&'a HashedStorageSorted>) -> Self {
-        let post_state_cursor =
-            post_state_storage.map(|s| ForwardInMemoryCursor::new(&s.non_zero_valued_slots));
-        let cleared_slots = post_state_storage.map(|s| &s.zero_valued_slots);
+    pub fn new(cursor: C, post_state_storage: Option<Arc<HashedStorageSorted>>) -> Self {
+        let post_state_cursor = post_state_storage
+            .as_ref()
+            .map(|s| ForwardInMemoryCursor::new(s.non_zero_valued_slots.clone()));
+        let cleared_slots = post_state_storage.as_ref().map(|s| s.zero_valued_slots.clone());
         let storage_wiped = post_state_storage.is_some_and(|s| s.wiped);
         Self { cursor, post_state_cursor, cleared_slots, storage_wiped, last_slot: None }
     }
@@ -206,7 +213,7 @@ where
     /// Check if the slot was zeroed out in the post state.
     /// The database is not checked since it already has no zero-valued slots.
     fn is_slot_zero_valued(&self, slot: &B256) -> bool {
-        self.cleared_slots.is_some_and(|s| s.contains(slot))
+        self.cleared_slots.as_ref().is_some_and(|s| s.contains(slot))
     }
 
     /// Find the storage entry in post state or database that's greater or equal to provided subkey.
@@ -275,7 +282,7 @@ where
     }
 }
 
-impl<C> HashedCursor for HashedPostStateStorageCursor<'_, C>
+impl<C> HashedCursor for HashedPostStateStorageCursor<C>
 where
     C: HashedStorageCursor<Value = U256>,
 {
@@ -303,7 +310,7 @@ where
     }
 }
 
-impl<C> HashedStorageCursor for HashedPostStateStorageCursor<'_, C>
+impl<C> HashedStorageCursor for HashedPostStateStorageCursor<C>
 where
     C: HashedStorageCursor<Value = U256>,
 {

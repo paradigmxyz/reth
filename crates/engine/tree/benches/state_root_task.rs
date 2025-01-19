@@ -247,11 +247,11 @@ fn bench_state_root(c: &mut Criterion) {
                         let blinded_provider_factory = ProofBlindedProviderFactory::new(
                             InMemoryTrieCursorFactory::new(
                                 DatabaseTrieCursorFactory::new(provider.tx_ref()),
-                                &nodes_sorted,
+                                nodes_sorted,
                             ),
                             HashedPostStateCursorFactory::new(
                                 DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                                &state_sorted,
+                                state_sorted,
                             ),
                             prefix_sets,
                         );

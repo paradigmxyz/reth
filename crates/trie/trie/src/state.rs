@@ -12,7 +12,7 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives::Account;
 use reth_trie_common::KeyHasher;
 use revm::db::{states::CacheAccount, AccountStatus, BundleAccount};
-use std::borrow::Cow;
+use std::{borrow::Cow, sync::Arc};
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -192,7 +192,7 @@ impl HashedPostState {
             }
         }
         updated_accounts.sort_unstable_by_key(|(address, _)| *address);
-        let accounts = HashedAccountsSorted { accounts: updated_accounts, destroyed_accounts };
+        let accounts = HashedAccountsSorted::new(updated_accounts, destroyed_accounts);
 
         let storages = self
             .storages
@@ -200,7 +200,7 @@ impl HashedPostState {
             .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
             .collect();
 
-        HashedPostStateSorted { accounts, storages }
+        HashedPostStateSorted::new(accounts, storages)
     }
 }
 
@@ -271,7 +271,7 @@ impl HashedStorage {
         }
         non_zero_valued_slots.sort_unstable_by_key(|(key, _)| *key);
 
-        HashedStorageSorted { non_zero_valued_slots, zero_valued_slots, wiped: self.wiped }
+        HashedStorageSorted::new(non_zero_valued_slots, zero_valued_slots, self.wiped)
     }
 }
 
@@ -279,23 +279,20 @@ impl HashedStorage {
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct HashedPostStateSorted {
     /// Updated state of accounts.
-    pub(crate) accounts: HashedAccountsSorted,
+    pub(crate) accounts: Arc<HashedAccountsSorted>,
     /// Map of hashed addresses to hashed storage.
     pub(crate) storages: B256HashMap<HashedStorageSorted>,
 }
 
 impl HashedPostStateSorted {
     /// Create new instance of [`HashedPostStateSorted`]
-    pub const fn new(
-        accounts: HashedAccountsSorted,
-        storages: B256HashMap<HashedStorageSorted>,
-    ) -> Self {
-        Self { accounts, storages }
+    pub fn new(accounts: HashedAccountsSorted, storages: B256HashMap<HashedStorageSorted>) -> Self {
+        Self { accounts: Arc::new(accounts), storages }
     }
 
     /// Returns reference to hashed accounts.
-    pub const fn accounts(&self) -> &HashedAccountsSorted {
-        &self.accounts
+    pub fn accounts(&self) -> Arc<HashedAccountsSorted> {
+        self.accounts.clone()
     }
 
     /// Returns reference to hashed account storages.
@@ -308,12 +305,17 @@ impl HashedPostStateSorted {
 #[derive(Clone, Eq, PartialEq, Default, Debug)]
 pub struct HashedAccountsSorted {
     /// Sorted collection of hashed addresses and their account info.
-    pub(crate) accounts: Vec<(B256, Account)>,
+    pub(crate) accounts: Arc<Vec<(B256, Account)>>,
     /// Set of destroyed account keys.
-    pub(crate) destroyed_accounts: B256HashSet,
+    pub(crate) destroyed_accounts: Arc<B256HashSet>,
 }
 
 impl HashedAccountsSorted {
+    /// Create new instance of [`HashedAccountsSorted`]
+    pub fn new(accounts: Vec<(B256, Account)>, destroyed_accounts: B256HashSet) -> Self {
+        Self { accounts: Arc::new(accounts), destroyed_accounts: Arc::new(destroyed_accounts) }
+    }
+
     /// Returns a sorted iterator over updated accounts.
     pub fn accounts_sorted(&self) -> impl Iterator<Item = (B256, Option<Account>)> {
         self.accounts
@@ -328,14 +330,27 @@ impl HashedAccountsSorted {
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct HashedStorageSorted {
     /// Sorted hashed storage slots with non-zero value.
-    pub(crate) non_zero_valued_slots: Vec<(B256, U256)>,
+    pub(crate) non_zero_valued_slots: Arc<Vec<(B256, U256)>>,
     /// Slots that have been zero valued.
-    pub(crate) zero_valued_slots: B256HashSet,
+    pub(crate) zero_valued_slots: Arc<B256HashSet>,
     /// Flag indicating whether the storage was wiped or not.
     pub(crate) wiped: bool,
 }
 
 impl HashedStorageSorted {
+    /// Create new instance of [`HashedStorageSorted`]
+    pub fn new(
+        non_zero_valued_slots: Vec<(B256, U256)>,
+        zero_valued_slots: B256HashSet,
+        wiped: bool,
+    ) -> Self {
+        Self {
+            non_zero_valued_slots: Arc::new(non_zero_valued_slots),
+            zero_valued_slots: Arc::new(zero_valued_slots),
+            wiped,
+        }
+    }
+
     /// Returns `true` if the account was wiped.
     pub const fn is_wiped(&self) -> bool {
         self.wiped

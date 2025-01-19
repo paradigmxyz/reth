@@ -14,6 +14,7 @@ use reth_trie::{
 };
 use reth_trie_common::{HashBuilder, Nibbles};
 use reth_trie_sparse::SparseTrie;
+use std::sync::Arc;
 
 fn calculate_root_from_leaves(c: &mut Criterion) {
     let mut group = c.benchmark_group("calculate root from leaves");
@@ -133,7 +134,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                     InMemoryStorageTrieCursor::new(
                                         B256::ZERO,
                                         NoopStorageTrieCursor::default(),
-                                        Some(&trie_updates_sorted),
+                                        Some(Arc::new(trie_updates_sorted)),
                                     ),
                                     prefix_set,
                                 );
@@ -141,7 +142,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                                     walker,
                                     HashedPostStateStorageCursor::new(
                                         NoopHashedStorageCursor::default(),
-                                        Some(&storage_sorted),
+                                        Some(Arc::new(storage_sorted)),
                                     ),
                                 );
 

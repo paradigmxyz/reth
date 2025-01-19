@@ -2311,13 +2311,13 @@ where
 
                     let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
                         DatabaseTrieCursorFactory::new(context.provider_ro.tx_ref()),
-                        &context.nodes_sorted,
+                        context.nodes_sorted.clone(),
                     );
                     let blinded_provider_factory = ProofBlindedProviderFactory::new(
                         in_memory_trie_cursor.clone(),
                         HashedPostStateCursorFactory::new(
                             DatabaseHashedCursorFactory::new(context.provider_ro.tx_ref()),
-                            &context.state_sorted,
+                            context.state_sorted.clone(),
                         ),
                         context.prefix_sets.clone(),
                     );

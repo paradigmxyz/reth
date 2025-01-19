@@ -16,13 +16,12 @@ use reth_trie::{
     HashedPostState, HashedStorage, StateRoot, StorageRoot,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 proptest! {
     #![proptest_config(ProptestConfig {
         cases: 128, ..ProptestConfig::default()
     })]
-
     #[test]
     fn fuzz_in_memory_account_nodes(mut init_state: BTreeMap<B256, U256>, state_updates: [BTreeMap<B256, Option<U256>>; 10]) {
         let factory = create_test_provider_factory();
@@ -58,8 +57,8 @@ proptest! {
             // Compute root with in-memory trie nodes overlay
             let (state_root, trie_updates) = StateRoot::from_tx(provider.tx_ref())
                 .with_prefix_sets(hashed_state.construct_prefix_sets().freeze())
-                .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
-                    DatabaseTrieCursorFactory::new(provider.tx_ref()), &trie_nodes.clone().into_sorted())
+                .with_trie_cursor_factory(
+                    InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(provider.tx_ref()), Arc::new(trie_nodes.clone().into_sorted()))
                 )
                 .root_with_updates()
                 .unwrap();
@@ -113,10 +112,9 @@ proptest! {
             let (storage_root, _, trie_updates) =
                 StorageRoot::from_tx_hashed(provider.tx_ref(), hashed_address)
                     .with_prefix_set(hashed_storage.construct_prefix_set().freeze())
-                    .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
-                        DatabaseTrieCursorFactory::new(provider.tx_ref()),
-                        &trie_nodes.into_sorted(),
-                    ))
+                .with_trie_cursor_factory(
+                    InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(provider.tx_ref()), Arc::new(trie_nodes.clone().into_sorted()))
+                    )
                     .root_with_updates()
                     .unwrap();
 

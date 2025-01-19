@@ -19,6 +19,9 @@ use reth_trie::{
 use std::{collections::HashMap, ops::RangeInclusive};
 use tracing::debug;
 
+extern crate alloc;
+use alloc::sync::Arc;
+
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
 pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// Create a new [`StateRoot`] instance.
@@ -173,7 +176,10 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         let state_sorted = post_state.into_sorted();
         StateRoot::new(
             DatabaseTrieCursorFactory::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(tx),
+                Arc::new(state_sorted),
+            ),
         )
         .with_prefix_sets(prefix_sets)
         .root()
@@ -187,7 +193,10 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         let state_sorted = post_state.into_sorted();
         StateRoot::new(
             DatabaseTrieCursorFactory::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(tx),
+                Arc::new(state_sorted),
+            ),
         )
         .with_prefix_sets(prefix_sets)
         .root_with_updates()
@@ -197,8 +206,14 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         let state_sorted = input.state.into_sorted();
         let nodes_sorted = input.nodes.into_sorted();
         StateRoot::new(
-            InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            InMemoryTrieCursorFactory::new(
+                DatabaseTrieCursorFactory::new(tx),
+                Arc::new(nodes_sorted),
+            ),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(tx),
+                Arc::new(state_sorted),
+            ),
         )
         .with_prefix_sets(input.prefix_sets.freeze())
         .root()
@@ -211,8 +226,14 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
         let state_sorted = input.state.into_sorted();
         let nodes_sorted = input.nodes.into_sorted();
         StateRoot::new(
-            InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            InMemoryTrieCursorFactory::new(
+                DatabaseTrieCursorFactory::new(tx),
+                Arc::new(nodes_sorted),
+            ),
+            HashedPostStateCursorFactory::new(
+                DatabaseHashedCursorFactory::new(tx),
+                Arc::new(state_sorted),
+            ),
         )
         .with_prefix_sets(input.prefix_sets.freeze())
         .root_with_updates()

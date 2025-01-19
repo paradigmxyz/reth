@@ -111,15 +111,16 @@ where
                     let provider_ro = view.provider_ro()?;
                     let trie_cursor_factory = InMemoryTrieCursorFactory::new(
                         DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                        &trie_nodes_sorted,
+                        trie_nodes_sorted,
                     );
-                    let hashed_state = HashedPostStateCursorFactory::new(
+                    let hashed_cursor_factory = HashedPostStateCursorFactory::new(
                         DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-                        &hashed_state_sorted,
+                        hashed_state_sorted,
                     );
+
                     Ok(StorageRoot::new_hashed(
                         trie_cursor_factory,
-                        hashed_state,
+                        hashed_cursor_factory,
                         hashed_address,
                         prefix_set,
                         #[cfg(feature = "metrics")]
@@ -138,11 +139,11 @@ where
         let provider_ro = self.view.provider_ro()?;
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
             DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-            &trie_nodes_sorted,
+            trie_nodes_sorted,
         );
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-            &hashed_state_sorted,
+            hashed_state_sorted,
         );
 
         let walker = TrieWalker::new(
