@@ -121,6 +121,19 @@ impl SignedTransaction for OpTransactionSigned {
     }
 }
 
+/// A trait that represents an optimism transaction, mainly used to indicate whether or not the
+/// transaction is a deposit transaction.
+pub trait OpTransaction {
+    /// Whether or not the transaction is a dpeosit transaction.
+    fn is_deposit(&self) -> bool;
+}
+
+impl OpTransaction for OpTransactionSigned {
+    fn is_deposit(&self) -> bool {
+        self.is_deposit()
+    }
+}
+
 #[cfg(feature = "optimism")]
 impl reth_primitives_traits::FillTxEnv for OpTransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut revm_primitives::TxEnv, sender: Address) {
@@ -614,10 +627,6 @@ impl DepositTransaction for OpTransactionSigned {
     }
 
     fn is_system_transaction(&self) -> bool {
-        self.is_deposit()
-    }
-
-    fn is_deposit(&self) -> bool {
         self.is_deposit()
     }
 }

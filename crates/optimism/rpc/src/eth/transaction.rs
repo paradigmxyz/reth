@@ -119,7 +119,7 @@ where
             block_hash, block_number, index: transaction_index, base_fee, ..
         } = tx_info;
 
-        let effective_gas_price = if inner.is_deposit() {
+        let effective_gas_price = if matches!(inner, OpTxEnvelope::Deposit(_)) {
             // For deposits, we must always set the `gasPrice` field to 0 in rpc
             // deposit tx don't have a gas price field, but serde of `Transaction` will take care of
             // it
