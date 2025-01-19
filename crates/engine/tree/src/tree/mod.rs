@@ -647,7 +647,7 @@ where
 
         let prewarming_thread_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads)
-            .thread_name(|i| format!("prewarm-worker-{}", i))
+            .thread_name(|i| format!("prewarm-{}", i))
             .build()
             .expect("Failed to create prewarming worker thread pool");
 
@@ -2366,6 +2366,8 @@ where
             cache_metrics.clone(),
         );
 
+        info!(target: "engine::tree", "Spawning prewarm threads");
+
         // TODO: isolate prewarm logic into method, making moves explicit
         for (tx, sender) in block.body().transactions().iter().zip(block.senders()) {
             let Some(state_provider) = self.state_provider(block.parent_hash())? else {
@@ -2402,8 +2404,8 @@ where
             });
         }
 
+        info!(target: "engine::tree", "Done spawning prewarm threads");
         trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
-
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
 
         let sealed_block = Arc::new(block.clone_sealed_block());
