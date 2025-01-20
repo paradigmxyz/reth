@@ -165,7 +165,7 @@ mod tests {
         },
         transaction::DbTx,
     };
-    use reth_execution_errors::GenericBlockExecutionError;
+    use reth_execution_errors::BlockExecError;
     use reth_primitives::StorageEntry;
     use reth_provider::{providers::StaticFileWriter, DatabaseProviderFactory};
     use reth_testing_utils::generators::{
@@ -536,7 +536,7 @@ mod tests {
 
     impl<E> StageTestRunner<E> for IndexStorageHistoryTestRunner
     where
-        E: GenericBlockExecutionError,
+        E: BlockExecError,
     {
         type S = IndexStorageHistoryStage;
 

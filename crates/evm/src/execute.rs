@@ -1,7 +1,7 @@
 //! Traits for execution.
 
 use alloy_consensus::BlockHeader;
-use reth_execution_errors::GenericBlockExecutionError;
+use reth_execution_errors::BlockExecError;
 // Re-export execution types
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
@@ -81,7 +81,7 @@ pub trait BatchExecutor<DB> {
     /// The output type for the executor.
     type Output;
     /// The error type returned by the executor.
-    type Error: GenericBlockExecutionError;
+    type Error: BlockExecError;
 
     /// Executes the next block in the batch, verifies the output and updates the state internally.
     fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error>;
@@ -139,7 +139,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     type Primitives: NodePrimitives;
 
     /// The error type returned by the executor.
-    type Error: GenericBlockExecutionError;
+    type Error: BlockExecError;
 
     /// An executor that can execute a single block given a database.
     ///
@@ -201,7 +201,7 @@ pub trait BlockExecutionStrategy {
     type Primitives: NodePrimitives;
 
     /// The error type returned by this strategy's methods.
-    type Error: GenericBlockExecutionError;
+    type Error: BlockExecError;
 
     /// Initialize the strategy with the given transaction environment overrides.
     fn init(&mut self, _tx_env_overrides: Box<dyn TxEnvOverrides>) {}
@@ -254,7 +254,7 @@ pub trait BlockExecutionStrategy {
 /// A strategy factory that can create block execution strategies.
 pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
     /// The error type returned by this strategy's methods.
-    type Error: GenericBlockExecutionError;
+    type Error: BlockExecError;
 
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;

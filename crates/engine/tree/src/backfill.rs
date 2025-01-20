@@ -8,7 +8,7 @@
 //! These modes are mutually exclusive and the node can only be in one mode at a time.
 
 use futures::FutureExt;
-use reth_errors::GenericBlockExecutionError;
+use reth_errors::BlockExecError;
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
@@ -213,7 +213,7 @@ impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
 #[derive(Debug)]
-enum PipelineState<N: ProviderNodeTypes, E: GenericBlockExecutionError> {
+enum PipelineState<N: ProviderNodeTypes, E: BlockExecError> {
     /// Pipeline is idle.
     Idle(Option<Pipeline<N, E>>),
     /// Pipeline is running and waiting for a response

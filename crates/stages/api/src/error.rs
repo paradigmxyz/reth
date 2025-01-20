@@ -1,7 +1,7 @@
 use crate::PipelineEvent;
 use alloy_eips::eip1898::BlockWithParent;
 use reth_consensus::ConsensusError;
-use reth_errors::{DatabaseError, GenericBlockExecutionError, RethError};
+use reth_errors::{BlockExecError, DatabaseError, RethError};
 use reth_network_p2p::error::DownloadError;
 use reth_provider::ProviderError;
 use reth_prune::{PruneSegment, PruneSegmentError, PrunerError};
@@ -11,7 +11,7 @@ use tokio::sync::broadcast::error::SendError;
 
 /// Represents the specific error type within a block error.
 #[derive(Error, Debug)]
-pub enum BlockErrorKind<E: GenericBlockExecutionError> {
+pub enum BlockErrorKind<E: BlockExecError> {
     /// The block encountered a validation error.
     #[error("validation error: {0}")]
     Validation(#[from] ConsensusError),
@@ -22,7 +22,7 @@ pub enum BlockErrorKind<E: GenericBlockExecutionError> {
 
 impl<E> BlockErrorKind<E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Returns `true` if the error is a state root error.
     pub fn is_state_root_error(&self) -> bool {
@@ -35,7 +35,7 @@ where
 
 /// A stage execution error.
 #[derive(Error, Debug)]
-pub enum StageError<E: GenericBlockExecutionError> {
+pub enum StageError<E: BlockExecError> {
     /// The stage encountered an error related to a block.
     #[error("stage encountered an error in block #{number}: {error}", number = block.block.number)]
     Block {
@@ -126,7 +126,7 @@ pub enum StageError<E: GenericBlockExecutionError> {
 
 impl<E> StageError<E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// If the error is fatal the pipeline will stop.
     pub const fn is_fatal(&self) -> bool {
@@ -147,7 +147,7 @@ where
 
 impl<E> From<std::io::Error> for StageError<E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn from(source: std::io::Error) -> Self {
         Self::Fatal(Box::new(source))
@@ -156,7 +156,7 @@ where
 
 /// A pipeline execution error.
 #[derive(Error, Debug)]
-pub enum PipelineError<E: GenericBlockExecutionError> {
+pub enum PipelineError<E: BlockExecError> {
     /// The pipeline encountered an irrecoverable error in one of the stages.
     #[error(transparent)]
     Stage(#[from] StageError<E>),

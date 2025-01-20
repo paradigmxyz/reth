@@ -1,4 +1,4 @@
-use reth_execution_errors::GenericBlockExecutionError;
+use reth_execution_errors::BlockExecError;
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
@@ -13,7 +13,7 @@ pub struct FinishStage;
 
 impl<Provider, E> Stage<Provider, E> for FinishStage
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn id(&self) -> StageId {
         StageId::Finish
@@ -59,7 +59,7 @@ mod tests {
 
     impl<E> StageTestRunner<E> for FinishTestRunner
     where
-        E: GenericBlockExecutionError,
+        E: BlockExecError,
     {
         type S = FinishStage;
 

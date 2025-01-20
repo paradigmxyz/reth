@@ -1,13 +1,13 @@
 use super::TEST_STAGE_ID;
 use crate::{StageSet, StageSetBuilder};
-use reth_execution_errors::GenericBlockExecutionError;
+use reth_execution_errors::BlockExecError;
 use reth_stages_api::{test_utils::TestStage, ExecOutput, StageError, UnwindOutput};
 use std::collections::VecDeque;
 
 #[derive(Default, Debug)]
 pub struct TestStages<E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     exec_outputs: VecDeque<Result<ExecOutput, StageError<E>>>,
     unwind_outputs: VecDeque<Result<UnwindOutput, StageError<E>>>,
@@ -15,7 +15,7 @@ where
 
 impl<E> TestStages<E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     pub const fn new(
         exec_outputs: VecDeque<Result<ExecOutput, StageError<E>>>,
@@ -27,7 +27,7 @@ where
 
 impl<Provider, E> StageSet<Provider, E> for TestStages<E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn builder(self) -> StageSetBuilder<Provider, E> {
         StageSetBuilder::default().add_stage(

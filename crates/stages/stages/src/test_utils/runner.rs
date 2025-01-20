@@ -1,6 +1,6 @@
 use super::TestStageDB;
 use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
-use reth_execution_errors::GenericBlockExecutionError;
+use reth_execution_errors::BlockExecError;
 use reth_provider::{test_utils::MockNodeTypesWithDB, DatabaseProvider, ProviderError};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageError, StageExt, UnwindInput, UnwindOutput,
@@ -21,7 +21,7 @@ pub(crate) enum TestRunnerError {
 /// A generic test runner for stages.
 pub(crate) trait StageTestRunner<E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     type S: Stage<
             DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>,
@@ -37,7 +37,7 @@ where
 
 pub(crate) trait ExecuteStageTestRunner<E>: StageTestRunner<E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     type Seed: Send + Sync;
 
@@ -75,7 +75,7 @@ where
 
 pub(crate) trait UnwindStageTestRunner<E>: StageTestRunner<E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Validate the unwind
     fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError>;

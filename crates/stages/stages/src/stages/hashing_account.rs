@@ -7,7 +7,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_execution_errors::GenericBlockExecutionError;
+use reth_execution_errors::BlockExecError;
 use reth_primitives::Account;
 use reth_provider::{AccountExtReader, DBProvider, HashingWriter, StatsReader};
 use reth_stages_api::{
@@ -135,7 +135,7 @@ impl Default for AccountHashingStage {
 impl<Provider, E> Stage<Provider, E> for AccountHashingStage
 where
     Provider: DBProvider<Tx: DbTxMut> + HashingWriter + AccountExtReader + StatsReader,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -433,7 +433,7 @@ mod tests {
 
         impl<E> StageTestRunner<E> for AccountHashingTestRunner
         where
-            E: GenericBlockExecutionError,
+            E: BlockExecError,
         {
             type S = AccountHashingStage;
 

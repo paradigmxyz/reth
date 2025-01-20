@@ -28,7 +28,7 @@ use crate::{
 };
 pub use builder::*;
 use progress::*;
-use reth_errors::{GenericBlockExecutionError, RethResult};
+use reth_errors::{BlockExecError, RethResult};
 pub use set::*;
 
 /// A container for a queued stage.
@@ -63,7 +63,7 @@ pub type PipelineWithResult<N, E> = (Pipeline<N, E>, Result<ControlFlow, Pipelin
 /// # Defaults
 ///
 /// The [`DefaultStages`](crate::sets::DefaultStages) are used to fully sync reth.
-pub struct Pipeline<N: ProviderNodeTypes, E: GenericBlockExecutionError> {
+pub struct Pipeline<N: ProviderNodeTypes, E: BlockExecError> {
     /// Provider factory.
     provider_factory: ProviderFactory<N>,
     /// All configured stages in the order they will be executed.
@@ -85,7 +85,7 @@ pub struct Pipeline<N: ProviderNodeTypes, E: GenericBlockExecutionError> {
 
 impl<N: ProviderNodeTypes, E> Pipeline<N, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Construct a pipeline using a [`PipelineBuilder`].
     pub fn builder(
@@ -115,7 +115,7 @@ where
 
 impl<N: ProviderNodeTypes, E> Pipeline<N, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Registers progress metrics for each registered stage
     pub fn register_metrics(&mut self) -> Result<(), PipelineError<E>> {
@@ -500,7 +500,7 @@ where
     }
 }
 
-fn on_stage_error<N: ProviderNodeTypes, E: GenericBlockExecutionError>(
+fn on_stage_error<N: ProviderNodeTypes, E: BlockExecError>(
     factory: &ProviderFactory<N>,
     stage_id: StageId,
     prev_checkpoint: Option<StageCheckpoint>,
@@ -589,7 +589,7 @@ fn on_stage_error<N: ProviderNodeTypes, E: GenericBlockExecutionError>(
 
 impl<N: ProviderNodeTypes, E> std::fmt::Debug for Pipeline<N, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Pipeline")

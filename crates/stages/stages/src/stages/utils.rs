@@ -10,7 +10,7 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_etl::Collector;
-use reth_execution_errors::GenericBlockExecutionError;
+use reth_execution_errors::BlockExecError;
 use reth_primitives::StaticFileSegment;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, ProviderError,
@@ -52,7 +52,7 @@ where
     CS: Table,
     H: Table<Value = BlockNumberList>,
     P: Copy + Eq + Hash,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     let mut changeset_cursor = provider.tx_ref().cursor_read::<CS>()?;
 
@@ -108,7 +108,7 @@ where
 /// `Address.StorageKey`). It flushes indices to disk when reaching a shard's max length
 /// (`NUM_OF_INDICES_IN_SHARD`) or when the partial key changes, ensuring the last previous partial
 /// key shard is stored.
-pub(crate) fn load_history_indices<Provider, H, P, E: GenericBlockExecutionError>(
+pub(crate) fn load_history_indices<Provider, H, P, E: BlockExecError>(
     provider: &Provider,
     mut collector: Collector<H::Key, H::Value>,
     append_only: bool,
@@ -193,7 +193,7 @@ where
 }
 
 /// Shard and insert the indices list according to [`LoadMode`] and its length.
-pub(crate) fn load_indices<H, C, P, E: GenericBlockExecutionError>(
+pub(crate) fn load_indices<H, C, P, E: BlockExecError>(
     cursor: &mut C,
     partial_key: P,
     list: &mut Vec<BlockNumber>,
@@ -261,7 +261,7 @@ pub(crate) fn missing_static_data_error<Provider, E>(
 ) -> Result<StageError<E>, ProviderError>
 where
     Provider: BlockReader + StaticFileProviderFactory,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     let mut last_block =
         static_file_provider.get_highest_static_file_block(segment).unwrap_or_default();

@@ -11,7 +11,7 @@ use reth_db_api::{
     DbTxUnwindExt,
 };
 use reth_etl::Collector;
-use reth_execution_errors::GenericBlockExecutionError;
+use reth_execution_errors::BlockExecError;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
 use reth_primitives::{NodePrimitives, SealedHeader, StaticFileSegment};
 use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader};
@@ -205,7 +205,7 @@ where
     P: HeaderSyncGapProvider<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
     D: HeaderDownloader<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
     <Provider::Primitives as NodePrimitives>::BlockHeader: FullBlockHeader + Value,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -458,7 +458,7 @@ mod tests {
         impl<D: HeaderDownloader<Header = alloy_consensus::Header> + 'static, E> StageTestRunner<E>
             for HeadersTestRunner<D>
         where
-            E: GenericBlockExecutionError,
+            E: BlockExecError,
         {
             type S = HeaderStage<ProviderFactory<MockNodeTypesWithDB>, D>;
 

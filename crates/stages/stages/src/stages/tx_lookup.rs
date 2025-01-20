@@ -8,7 +8,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_execution_errors::GenericBlockExecutionError;
+use reth_execution_errors::BlockExecError;
 use reth_primitives::NodePrimitives;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
@@ -66,7 +66,7 @@ where
         + StatsReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + TransactionsProviderExt,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -228,7 +228,7 @@ where
 fn stage_checkpoint<Provider, E>(provider: &Provider) -> Result<EntitiesCheckpoint, StageError<E>>
 where
     Provider: PruneCheckpointReader + StaticFileProviderFactory + StatsReader,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::TransactionLookup)?
@@ -483,7 +483,7 @@ mod tests {
 
     impl<E> StageTestRunner<E> for TransactionLookupTestRunner
     where
-        E: GenericBlockExecutionError,
+        E: BlockExecError,
     {
         type S = TransactionLookupStage;
 
@@ -573,7 +573,7 @@ mod tests {
 
     impl<E> UnwindStageTestRunner<E> for TransactionLookupTestRunner
     where
-        E: GenericBlockExecutionError,
+        E: BlockExecError,
     {
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             self.ensure_no_hash_by_block(input.unwind_to)

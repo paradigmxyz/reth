@@ -4,7 +4,7 @@ use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
 use reth_db::tables;
 use reth_db_api::transaction::{DbTx, DbTxMut};
-use reth_execution_errors::{BlockExecutionError, GenericBlockExecutionError};
+use reth_execution_errors::{BlockExecError, BlockExecutionError};
 use reth_primitives::{GotExpected, SealedHeader};
 use reth_provider::{
     DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
@@ -140,7 +140,7 @@ where
         + HeaderProvider
         + StageCheckpointReader
         + StageCheckpointWriter,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -480,7 +480,7 @@ mod tests {
 
     impl<E> StageTestRunner<E> for MerkleTestRunner
     where
-        E: GenericBlockExecutionError,
+        E: BlockExecError,
     {
         type S = MerkleStage;
 

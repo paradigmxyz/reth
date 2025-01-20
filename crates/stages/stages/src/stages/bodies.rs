@@ -2,7 +2,7 @@ use super::missing_static_data_error;
 use futures_util::TryStreamExt;
 use reth_db::{tables, transaction::DbTx};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTxMut};
-use reth_execution_errors::GenericBlockExecutionError;
+use reth_execution_errors::BlockExecError;
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::StaticFileSegment;
 use reth_provider::{
@@ -53,7 +53,7 @@ use tracing::*;
 #[derive(Debug)]
 pub struct BodyStage<D: BodyDownloader, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// The body downloader.
     downloader: D,
@@ -63,7 +63,7 @@ where
 
 impl<D: BodyDownloader, E> BodyStage<D, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Create new bodies stage from downloader.
     pub const fn new(downloader: D) -> Self {
@@ -157,7 +157,7 @@ where
         + BlockReader
         + BlockWriter<Block = D::Block>,
     D: BodyDownloader,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -501,7 +501,7 @@ mod tests {
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
             transaction::{DbTx, DbTxMut},
         };
-        use reth_execution_errors::GenericBlockExecutionError;
+        use reth_execution_errors::BlockExecError;
         use reth_network_p2p::{
             bodies::{
                 downloader::{BodyDownloader, BodyDownloaderResult},
@@ -558,7 +558,7 @@ mod tests {
 
         impl<E> StageTestRunner<E> for BodyTestRunner
         where
-            E: GenericBlockExecutionError,
+            E: BlockExecError,
         {
             type S = BodyStage<TestBodyDownloader>;
 
@@ -577,7 +577,7 @@ mod tests {
 
         impl<E> ExecuteStageTestRunner<E> for BodyTestRunner
         where
-            E: GenericBlockExecutionError,
+            E: BlockExecError,
         {
             type Seed = Vec<SealedBlock>;
 
@@ -659,7 +659,7 @@ mod tests {
 
         impl<E> UnwindStageTestRunner<E> for BodyTestRunner
         where
-            E: GenericBlockExecutionError,
+            E: BlockExecError,
         {
             fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
                 self.db.ensure_no_entry_above::<tables::BlockBodyIndices, _>(

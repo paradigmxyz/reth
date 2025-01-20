@@ -1,5 +1,5 @@
 use reth_db::{table::Value, transaction::DbTxMut};
-use reth_execution_errors::GenericBlockExecutionError;
+use reth_execution_errors::BlockExecError;
 use reth_primitives::NodePrimitives;
 use reth_provider::{
     BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
@@ -44,7 +44,7 @@ where
         + PruneCheckpointWriter
         + BlockReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn id(&self) -> StageId {
         StageId::Prune
@@ -138,7 +138,7 @@ where
         + PruneCheckpointWriter
         + BlockReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn id(&self) -> StageId {
         StageId::PruneSenderRecovery
@@ -271,7 +271,7 @@ mod tests {
 
     impl<E> UnwindStageTestRunner<E> for PruneTestRunner
     where
-        E: GenericBlockExecutionError,
+        E: BlockExecError,
     {
         fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
             Ok(())

@@ -1,6 +1,6 @@
 use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageId, StageSet};
 use alloy_primitives::{BlockNumber, B256};
-use reth_errors::GenericBlockExecutionError;
+use reth_errors::BlockExecError;
 use reth_provider::{providers::ProviderNodeTypes, DatabaseProviderFactory, ProviderFactory};
 use reth_static_file::StaticFileProducer;
 use tokio::sync::watch;
@@ -9,7 +9,7 @@ use tokio::sync::watch;
 #[must_use = "call `build` to construct the pipeline"]
 pub struct PipelineBuilder<Provider, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// All configured stages in the order they will be executed.
     stages: Vec<BoxedStage<Provider, E>>,
@@ -23,7 +23,7 @@ where
 
 impl<Provider, E> PipelineBuilder<Provider, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Add a stage to the pipeline.
     pub fn add_stage<S>(mut self, stage: S) -> Self
@@ -103,7 +103,7 @@ where
 
 impl<Provider, E> Default for PipelineBuilder<Provider, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn default() -> Self {
         Self {
@@ -118,7 +118,7 @@ where
 
 impl<Provider, E> std::fmt::Debug for PipelineBuilder<Provider, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PipelineBuilder")

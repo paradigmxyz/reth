@@ -1,6 +1,6 @@
 use crate::{error::StageError, StageCheckpoint, StageId};
 use alloy_primitives::{BlockNumber, TxNumber};
-use reth_errors::GenericBlockExecutionError;
+use reth_errors::BlockExecError;
 use reth_provider::{BlockReader, ProviderError};
 use std::{
     cmp::{max, min},
@@ -78,7 +78,7 @@ impl ExecInput {
     ) -> Result<(Range<TxNumber>, RangeInclusive<BlockNumber>, bool), StageError<E>>
     where
         Provider: BlockReader,
-        E: GenericBlockExecutionError,
+        E: BlockExecError,
     {
         let start_block = self.next_block();
         let target_block = self.target();
@@ -194,7 +194,7 @@ pub struct UnwindOutput {
 #[auto_impl::auto_impl(Box)]
 pub trait Stage<Provider, E>: Send + Sync
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Get the ID of the stage.
     ///
@@ -271,7 +271,7 @@ where
 /// [Stage] trait extension.
 pub trait StageExt<Provider, E>: Stage<Provider, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Utility extension for the `Stage` trait that invokes `Stage::poll_execute_ready`
     /// with [`poll_fn`] context. For more information see [`Stage::poll_execute_ready`].
@@ -283,7 +283,4 @@ where
     }
 }
 
-impl<Provider, E, S: Stage<Provider, E>> StageExt<Provider, E> for S where
-    E: GenericBlockExecutionError
-{
-}
+impl<Provider, E, S: Stage<Provider, E>> StageExt<Provider, E> for S where E: BlockExecError {}

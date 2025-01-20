@@ -9,7 +9,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_execution_errors::GenericBlockExecutionError;
+use reth_execution_errors::BlockExecError;
 use reth_primitives::StorageEntry;
 use reth_provider::{DBProvider, HashingWriter, StatsReader, StorageReader};
 use reth_stages_api::{
@@ -66,7 +66,7 @@ impl Default for StorageHashingStage {
 impl<Provider, E> Stage<Provider, E> for StorageHashingStage
 where
     Provider: DBProvider<Tx: DbTxMut> + StorageReader + HashingWriter + StatsReader,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -316,7 +316,7 @@ mod tests {
 
     impl<E> StageTestRunner<E> for StorageHashingTestRunner
     where
-        E: GenericBlockExecutionError,
+        E: BlockExecError,
     {
         type S = StorageHashingStage;
 

@@ -1,4 +1,4 @@
-use reth_errors::GenericBlockExecutionError;
+use reth_errors::BlockExecError;
 
 use crate::{Stage, StageId};
 use std::{
@@ -14,7 +14,7 @@ use std::{
 /// Individual stages in the set can be added, removed and overridden using [`StageSetBuilder`].
 pub trait StageSet<Provider, E>: Sized
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Configures the stages in the set.
     fn builder(self) -> StageSetBuilder<Provider, E>;
@@ -31,7 +31,7 @@ where
 
 struct StageEntry<Provider, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     stage: Box<dyn Stage<Provider, E>>,
     enabled: bool,
@@ -39,7 +39,7 @@ where
 
 impl<Provider, E> Debug for StageEntry<Provider, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StageEntry")
@@ -57,7 +57,7 @@ where
 /// Stages inside the set can be disabled, enabled, overridden and reordered.
 pub struct StageSetBuilder<Provider, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     stages: HashMap<StageId, StageEntry<Provider, E>>,
     order: Vec<StageId>,
@@ -65,7 +65,7 @@ where
 
 impl<Provider, E> Default for StageSetBuilder<Provider, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn default() -> Self {
         Self { stages: HashMap::default(), order: Vec::new() }
@@ -74,7 +74,7 @@ where
 
 impl<Provider, E> Debug for StageSetBuilder<Provider, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StageSetBuilder")
@@ -86,7 +86,7 @@ where
 
 impl<Provider, E> StageSetBuilder<Provider, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn index_of(&self, stage_id: StageId) -> usize {
         let index = self.order.iter().position(|&id| id == stage_id);
@@ -278,7 +278,7 @@ where
 
 impl<Provider, E> StageSet<Provider, E> for StageSetBuilder<Provider, E>
 where
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn builder(self) -> Self {
         self

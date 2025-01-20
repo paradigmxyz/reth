@@ -46,7 +46,7 @@ use alloy_primitives::B256;
 use reth_config::config::StageConfig;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_evm::execute::BlockExecutorProvider;
-use reth_execution_errors::GenericBlockExecutionError;
+use reth_execution_errors::BlockExecError;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
 use reth_primitives_traits::Block;
 use reth_provider::HeaderSyncGapProvider;
@@ -219,7 +219,7 @@ where
     P: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader<Header = <B::Block as Block>::Header> + 'static,
     B: BodyDownloader + 'static,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     /// Create a new builder using the given headers stage.
     pub fn builder_with_headers<Provider>(
@@ -265,7 +265,7 @@ where
     B: BodyDownloader + 'static,
     HeaderStage<P, H>: Stage<Provider, E>,
     BodyStage<B>: Stage<Provider, E>,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn builder(self) -> StageSetBuilder<Provider, E> {
         StageSetBuilder::default()
@@ -399,7 +399,7 @@ where
     MerkleStage: Stage<Provider, E>,
     AccountHashingStage: Stage<Provider, E>,
     StorageHashingStage: Stage<Provider, E>,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn builder(self) -> StageSetBuilder<Provider, E> {
         StageSetBuilder::default()
@@ -431,7 +431,7 @@ where
     TransactionLookupStage: Stage<Provider, E>,
     IndexStorageHistoryStage: Stage<Provider, E>,
     IndexAccountHistoryStage: Stage<Provider, E>,
-    E: GenericBlockExecutionError,
+    E: BlockExecError,
 {
     fn builder(self) -> StageSetBuilder<Provider, E> {
         StageSetBuilder::default()
