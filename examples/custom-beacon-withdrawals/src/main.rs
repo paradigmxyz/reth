@@ -19,9 +19,12 @@ use reth::{
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_ethereum_evm::EthEvmConfig;
-use reth_evm::execute::{
-    BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
-    InternalBlockExecutionError,
+use reth_evm::{
+    execute::{
+        BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
+        InternalBlockExecutionError,
+    },
+    Evm,
 };
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
 use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
