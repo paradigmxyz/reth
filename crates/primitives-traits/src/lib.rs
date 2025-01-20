@@ -93,6 +93,8 @@ pub use error::{GotExpected, GotExpectedBoxed};
 mod log;
 pub use alloy_primitives::{logs_bloom, Log, LogData};
 
+pub mod proofs;
+
 mod storage;
 pub use storage::StorageEntry;
 
