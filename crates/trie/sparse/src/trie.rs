@@ -1,4 +1,4 @@
-use crate::blinded::{BlindedProvider, DefaultBlindedProvider};
+use crate::blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode};
 use alloy_primitives::{
     hex, keccak256,
     map::{Entry, HashMap, HashSet},
@@ -170,10 +170,10 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     provider: P,
     /// All trie nodes.
     nodes: HashMap<Nibbles, SparseNode>,
-    /// All branch node hash masks.
-    branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
     /// All branch node tree masks.
     branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    /// All branch node hash masks.
+    branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
     /// All leaf values.
     values: HashMap<Nibbles, Vec<u8>>,
     /// Prefix set.
@@ -188,8 +188,8 @@ impl<P> fmt::Debug for RevealedSparseTrie<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RevealedSparseTrie")
             .field("nodes", &self.nodes)
-            .field("branch_hash_masks", &self.branch_node_hash_masks)
             .field("branch_tree_masks", &self.branch_node_tree_masks)
+            .field("branch_hash_masks", &self.branch_node_hash_masks)
             .field("values", &self.values)
             .field("prefix_set", &self.prefix_set)
             .field("updates", &self.updates)
@@ -203,8 +203,8 @@ impl Default for RevealedSparseTrie {
         Self {
             provider: Default::default(),
             nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
-            branch_node_hash_masks: HashMap::default(),
             branch_node_tree_masks: HashMap::default(),
+            branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             updates: None,
@@ -224,15 +224,15 @@ impl RevealedSparseTrie {
         let mut this = Self {
             provider: Default::default(),
             nodes: HashMap::default(),
-            branch_node_hash_masks: HashMap::default(),
             branch_node_tree_masks: HashMap::default(),
+            branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             rlp_buf: Vec::new(),
             updates: None,
         }
         .with_updates(retain_updates);
-        this.reveal_node(Nibbles::default(), node, hash_mask, tree_mask)?;
+        this.reveal_node(Nibbles::default(), node, tree_mask, hash_mask)?;
         Ok(this)
     }
 }
@@ -249,15 +249,15 @@ impl<P> RevealedSparseTrie<P> {
         let mut this = Self {
             provider,
             nodes: HashMap::default(),
-            branch_node_hash_masks: HashMap::default(),
             branch_node_tree_masks: HashMap::default(),
+            branch_node_hash_masks: HashMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             rlp_buf: Vec::new(),
             updates: None,
         }
         .with_updates(retain_updates);
-        this.reveal_node(Nibbles::default(), node, hash_mask, tree_mask)?;
+        this.reveal_node(Nibbles::default(), node, tree_mask, hash_mask)?;
         Ok(this)
     }
 
@@ -266,8 +266,8 @@ impl<P> RevealedSparseTrie<P> {
         RevealedSparseTrie {
             provider,
             nodes: self.nodes,
-            branch_node_hash_masks: self.branch_node_hash_masks,
             branch_node_tree_masks: self.branch_node_tree_masks,
+            branch_node_hash_masks: self.branch_node_hash_masks,
             values: self.values,
             prefix_set: self.prefix_set,
             updates: self.updates,
@@ -288,6 +288,11 @@ impl<P> RevealedSparseTrie<P> {
         self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
     }
 
+    /// Returns reference to all trie nodes.
+    pub const fn nodes_ref(&self) -> &HashMap<Nibbles, SparseNode> {
+        &self.nodes
+    }
+
     /// Returns a reference to the leaf value if present.
     pub fn get_leaf_value(&self, path: &Nibbles) -> Option<&Vec<u8>> {
         self.values.get(path)
@@ -303,19 +308,19 @@ impl<P> RevealedSparseTrie<P> {
         &mut self,
         path: Nibbles,
         node: TrieNode,
-        hash_mask: Option<TrieMask>,
         tree_mask: Option<TrieMask>,
+        hash_mask: Option<TrieMask>,
     ) -> SparseTrieResult<()> {
         // If the node is already revealed and it's not a hash node, do nothing.
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
             return Ok(())
         }
 
-        if let Some(hash_mask) = hash_mask {
-            self.branch_node_hash_masks.insert(path.clone(), hash_mask);
-        }
         if let Some(tree_mask) = tree_mask {
             self.branch_node_tree_masks.insert(path.clone(), tree_mask);
+        }
+        if let Some(hash_mask) = hash_mask {
+            self.branch_node_hash_masks.insert(path.clone(), hash_mask);
         }
 
         match node {
@@ -376,6 +381,7 @@ impl<P> RevealedSparseTrie<P> {
                             // Memoize the hash of a previously blinded node in a new extension
                             // node.
                             hash: Some(*hash),
+                            store_in_db_trie: None,
                         });
                         self.reveal_node_or_hash(child_path, &ext.child)?;
                     }
@@ -597,14 +603,14 @@ impl<P> RevealedSparseTrie<P> {
         while let Some((mut path, level)) = paths.pop() {
             match self.nodes.get(&path).unwrap() {
                 SparseNode::Empty | SparseNode::Hash(_) => {}
-                SparseNode::Leaf { hash, .. } => {
+                SparseNode::Leaf { key: _, hash } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
 
                     targets.push(path);
                 }
-                SparseNode::Extension { key, hash } => {
+                SparseNode::Extension { key, hash, store_in_db_trie: _ } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
@@ -616,7 +622,7 @@ impl<P> RevealedSparseTrie<P> {
                         paths.push((path, level + 1));
                     }
                 }
-                SparseNode::Branch { state_mask, hash, .. } => {
+                SparseNode::Branch { state_mask, hash, store_in_db_trie: _ } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
@@ -639,12 +645,26 @@ impl<P> RevealedSparseTrie<P> {
         targets
     }
 
-    fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
+    /// Look up or calculate the RLP of the node at the given path.
+    ///
+    /// # Panics
+    ///
+    /// If the node at provided path does not exist.
+    pub fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
         let mut buffers = RlpNodeBuffers::new_with_path(path);
         self.rlp_node(prefix_set, &mut buffers)
     }
 
-    fn rlp_node(&mut self, prefix_set: &mut PrefixSet, buffers: &mut RlpNodeBuffers) -> RlpNode {
+    /// Look up or calculate the RLP of the node at the given path specified in [`RlpNodeBuffers`].
+    ///
+    /// # Panics
+    ///
+    /// If the node at provided path does not exist.
+    pub fn rlp_node(
+        &mut self,
+        prefix_set: &mut PrefixSet,
+        buffers: &mut RlpNodeBuffers,
+    ) -> RlpNode {
         'main: while let Some((path, mut is_in_prefix_set)) = buffers.path_stack.pop() {
             // Check if the path is in the prefix set.
             // First, check the cached value. If it's `None`, then check the prefix set, and update
@@ -668,13 +688,15 @@ impl<P> RevealedSparseTrie<P> {
                         (rlp_node, SparseNodeType::Leaf)
                     }
                 }
-                SparseNode::Extension { key, hash } => {
+                SparseNode::Extension { key, hash, store_in_db_trie } => {
                     let mut child_path = path.clone();
                     child_path.extend_from_slice_unchecked(key);
-                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
+                    if let Some((hash, store_in_db_trie)) =
+                        hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
+                    {
                         (
                             RlpNode::word_rlp(&hash),
-                            SparseNodeType::Extension { store_in_db_trie: true },
+                            SparseNodeType::Extension { store_in_db_trie: Some(store_in_db_trie) },
                         )
                     } else if buffers.rlp_node_stack.last().is_some_and(|e| e.0 == child_path) {
                         let (_, child, child_node_type) = buffers.rlp_node_stack.pop().unwrap();
@@ -682,12 +704,24 @@ impl<P> RevealedSparseTrie<P> {
                         let rlp_node = ExtensionNodeRef::new(key, &child).rlp(&mut self.rlp_buf);
                         *hash = rlp_node.as_hash();
 
+                        let store_in_db_trie_value = child_node_type.store_in_db_trie();
+
+                        trace!(
+                            target: "trie::sparse",
+                            ?path,
+                            ?child_path,
+                            ?child_node_type,
+                            "Extension node"
+                        );
+
+                        *store_in_db_trie = store_in_db_trie_value;
+
                         (
                             rlp_node,
                             SparseNodeType::Extension {
                                 // Inherit the `store_in_db_trie` flag from the child node, which is
                                 // always the branch node
-                                store_in_db_trie: child_node_type.store_in_db_trie(),
+                                store_in_db_trie: store_in_db_trie_value,
                             },
                         )
                     } else {
@@ -703,7 +737,7 @@ impl<P> RevealedSparseTrie<P> {
                         buffers.rlp_node_stack.push((
                             path,
                             RlpNode::word_rlp(&hash),
-                            SparseNodeType::Branch { store_in_db_trie },
+                            SparseNodeType::Branch { store_in_db_trie: Some(store_in_db_trie) },
                         ));
                         continue
                     }
@@ -738,17 +772,19 @@ impl<P> RevealedSparseTrie<P> {
                                 let last_child_nibble = child_path.last().unwrap();
 
                                 // Determine whether we need to set trie mask bit.
-                                let should_set_tree_mask_bit =
-                                    // A blinded node has the tree mask bit set
-                                    (
-                                        child_node_type.is_hash() &&
-                                        self.branch_node_tree_masks
-                                            .get(&path)
-                                            .is_some_and(|mask| mask.is_bit_set(last_child_nibble))
-                                    ) ||
+                                let should_set_tree_mask_bit = if let Some(store_in_db_trie) =
+                                    child_node_type.store_in_db_trie()
+                                {
                                     // A branch or an extension node explicitly set the
                                     // `store_in_db_trie` flag
-                                    child_node_type.store_in_db_trie();
+                                    store_in_db_trie
+                                } else {
+                                    // A blinded node has the tree mask bit set
+                                    child_node_type.is_hash() &&
+                                        self.branch_node_tree_masks.get(&path).is_some_and(
+                                            |mask| mask.is_bit_set(last_child_nibble),
+                                        )
+                                };
                                 if should_set_tree_mask_bit {
                                     tree_mask.set_bit(last_child_nibble);
                                 }
@@ -769,15 +805,6 @@ impl<P> RevealedSparseTrie<P> {
                                     hash_mask.set_bit(last_child_nibble);
                                     hashes.push(hash);
                                 }
-
-                                trace!(
-                                    target: "trie::sparse",
-                                    ?path,
-                                    ?child_path,
-                                    tree_mask_bit_set = should_set_tree_mask_bit,
-                                    hash_mask_bit_set = hash.is_some(),
-                                    "Updating branch node child masks"
-                                );
                             }
 
                             // Insert children in the resulting buffer in a normal order,
@@ -796,6 +823,14 @@ impl<P> RevealedSparseTrie<P> {
                         }
                     }
 
+                    trace!(
+                        target: "trie::sparse",
+                        ?path,
+                        ?tree_mask,
+                        ?hash_mask,
+                        "Branch node masks"
+                    );
+
                     self.rlp_buf.clear();
                     let branch_node_ref =
                         BranchNodeRef::new(&buffers.branch_value_stack_buf, *state_mask);
@@ -807,10 +842,10 @@ impl<P> RevealedSparseTrie<P> {
                     let store_in_db_trie_value = if let Some(updates) =
                         self.updates.as_mut().filter(|_| retain_updates && !path.is_empty())
                     {
-                        // Store in DB trie if there are either any children that are stored in the
-                        // DB trie, or any children represent hashed values
                         let store_in_db_trie = !tree_mask.is_empty() || !hash_mask.is_empty();
                         if store_in_db_trie {
+                            // Store in DB trie if there are either any children that are stored in
+                            // the DB trie, or any children represent hashed values
                             hashes.reverse();
                             let branch_node = BranchNodeCompact::new(
                                 *state_mask,
@@ -820,6 +855,30 @@ impl<P> RevealedSparseTrie<P> {
                                 hash.filter(|_| path.is_empty()),
                             );
                             updates.updated_nodes.insert(path.clone(), branch_node);
+                        } else if self
+                            .branch_node_tree_masks
+                            .get(&path)
+                            .is_some_and(|mask| !mask.is_empty()) ||
+                            self.branch_node_hash_masks
+                                .get(&path)
+                                .is_some_and(|mask| !mask.is_empty())
+                        {
+                            // If new tree and hash masks are empty, but previously they weren't, we
+                            // need to remove the node update and add the node itself to the list of
+                            // removed nodes.
+                            updates.updated_nodes.remove(&path);
+                            updates.removed_nodes.insert(path.clone());
+                        } else if self
+                            .branch_node_hash_masks
+                            .get(&path)
+                            .is_none_or(|mask| mask.is_empty()) &&
+                            self.branch_node_hash_masks
+                                .get(&path)
+                                .is_none_or(|mask| mask.is_empty())
+                        {
+                            // If new tree and hash masks are empty, and they were previously empty
+                            // as well, we need to remove the node update.
+                            updates.updated_nodes.remove(&path);
                         }
 
                         store_in_db_trie
@@ -828,7 +887,10 @@ impl<P> RevealedSparseTrie<P> {
                     };
                     *store_in_db_trie = Some(store_in_db_trie_value);
 
-                    (rlp_node, SparseNodeType::Branch { store_in_db_trie: store_in_db_trie_value })
+                    (
+                        rlp_node,
+                        SparseNodeType::Branch { store_in_db_trie: Some(store_in_db_trie_value) },
+                    )
                 }
             };
             buffers.rlp_node_stack.push((path, rlp_node, node_type));
@@ -905,14 +967,24 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         if self.updates.is_some() {
                             // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
-                                if let Some(node) = self.provider.blinded_node(&current)? {
+                                if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                                    self.provider.blinded_node(&current)?
+                                {
                                     let decoded = TrieNode::decode(&mut &node[..])?;
-                                    trace!(target: "trie::sparse", ?current, ?decoded, "Revealing extension node child");
-                                    // We'll never have to update the revealed child node, only
-                                    // remove or do nothing, so
-                                    // we can safely ignore the hash mask here and
-                                    // pass `None`.
-                                    self.reveal_node(current.clone(), decoded, None, None)?;
+                                    trace!(
+                                        target: "trie::sparse",
+                                        ?current,
+                                        ?decoded,
+                                        ?tree_mask,
+                                        ?hash_mask,
+                                        "Revealing extension node child",
+                                    );
+                                    self.reveal_node(
+                                        current.clone(),
+                                        decoded,
+                                        tree_mask,
+                                        hash_mask,
+                                    )?;
                                 }
                             }
                         }
@@ -960,6 +1032,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                 return Err(SparseTrieErrorKind::BlindedNode { path: path.clone(), hash }.into())
             }
 
+            trace!(target: "trie::sparse", ?path, "Leaf node is not present in the trie");
             // Leaf is not present in the trie.
             return Ok(())
         }
@@ -1054,17 +1127,28 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         let mut child_path = removed_path.clone();
                         child_path.push_unchecked(child_nibble);
 
-                        trace!(target: "trie::sparse", ?removed_path, ?child_path, ?child, "Branch node has only one child");
+                        trace!(target: "trie::sparse", ?removed_path, ?child_path, "Branch node has only one child");
 
                         if self.nodes.get(&child_path).unwrap().is_hash() {
                             trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
-                            if let Some(node) = self.provider.blinded_node(&child_path)? {
+                            if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                                self.provider.blinded_node(&child_path)?
+                            {
                                 let decoded = TrieNode::decode(&mut &node[..])?;
-                                trace!(target: "trie::sparse", ?child_path, ?decoded, "Revealing remaining blinded branch child");
-                                // We'll never have to update the revealed branch node, only remove
-                                // or do nothing, so we can safely ignore the hash mask here and
-                                // pass `None`.
-                                self.reveal_node(child_path.clone(), decoded, None, None)?;
+                                trace!(
+                                    target: "trie::sparse",
+                                    ?child_path,
+                                    ?decoded,
+                                    ?tree_mask,
+                                    ?hash_mask,
+                                    "Revealing remaining blinded branch child"
+                                );
+                                self.reveal_node(
+                                    child_path.clone(),
+                                    decoded,
+                                    tree_mask,
+                                    hash_mask,
+                                )?;
                             }
                         }
 
@@ -1113,13 +1197,13 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         }
 
                         if let Some(updates) = self.updates.as_mut() {
+                            updates.updated_nodes.remove(&removed_path);
                             updates.removed_nodes.insert(removed_path.clone());
                         }
 
                         new_node
                     }
-                    // If more than one child is left set in the branch, we just re-insert it
-                    // as-is.
+                    // If more than one child is left set in the branch, we just re-insert it as-is.
                     else {
                         SparseNode::new_branch(state_mask)
                     }
@@ -1151,12 +1235,12 @@ enum SparseNodeType {
     /// Sparse extension node.
     Extension {
         /// A flag indicating whether the extension node should be stored in the database.
-        store_in_db_trie: bool,
+        store_in_db_trie: Option<bool>,
     },
     /// Sparse branch node.
     Branch {
         /// A flag indicating whether the branch node should be stored in the database.
-        store_in_db_trie: bool,
+        store_in_db_trie: Option<bool>,
     },
 }
 
@@ -1169,12 +1253,12 @@ impl SparseNodeType {
         matches!(self, Self::Branch { .. })
     }
 
-    const fn store_in_db_trie(&self) -> bool {
+    const fn store_in_db_trie(&self) -> Option<bool> {
         match *self {
             Self::Extension { store_in_db_trie } | Self::Branch { store_in_db_trie } => {
                 store_in_db_trie
             }
-            _ => false,
+            _ => None,
         }
     }
 }
@@ -1200,7 +1284,14 @@ pub enum SparseNode {
         key: Nibbles,
         /// Pre-computed hash of the sparse node.
         /// Can be reused unless this trie path has been updated.
+        ///
+        /// If [`None`], then the value is not known and should be calculated from scratch.
         hash: Option<B256>,
+        /// Pre-computed flag indicating whether the trie node should be stored in the database.
+        /// Can be reused unless this trie path has been updated.
+        ///
+        /// If [`None`], then the value is not known and should be calculated from scratch.
+        store_in_db_trie: Option<bool>,
     },
     /// Sparse branch node with state mask.
     Branch {
@@ -1208,9 +1299,13 @@ pub enum SparseNode {
         state_mask: TrieMask,
         /// Pre-computed hash of the sparse node.
         /// Can be reused unless this trie path has been updated.
+        ///
+        /// If [`None`], then the value is not known and should be calculated from scratch.
         hash: Option<B256>,
         /// Pre-computed flag indicating whether the trie node should be stored in the database.
         /// Can be reused unless this trie path has been updated.
+        ///
+        /// If [`None`], then the value is not known and should be calculated from scratch.
         store_in_db_trie: Option<bool>,
     },
 }
@@ -1242,7 +1337,7 @@ impl SparseNode {
 
     /// Create new [`SparseNode::Extension`] from the key slice.
     pub const fn new_ext(key: Nibbles) -> Self {
-        Self::Extension { key, hash: None }
+        Self::Extension { key, hash: None, store_in_db_trie: None }
     }
 
     /// Create new [`SparseNode::Leaf`] from leaf key and value.
@@ -1265,7 +1360,7 @@ struct RemovedSparseNode {
 
 /// Collection of reusable buffers for [`RevealedSparseTrie::rlp_node`].
 #[derive(Debug, Default)]
-struct RlpNodeBuffers {
+pub struct RlpNodeBuffers {
     /// Stack of paths we need rlp nodes for and whether the path is in the prefix set.
     path_stack: Vec<(Nibbles, Option<bool>)>,
     /// Stack of rlp nodes
@@ -2110,7 +2205,7 @@ mod tests {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
             let tree_mask = branch_node_tree_masks.get(&path).copied();
             sparse
-                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask, tree_mask)
+                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), tree_mask, hash_mask)
                 .unwrap();
         }
 
@@ -2136,7 +2231,7 @@ mod tests {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
             let tree_mask = branch_node_tree_masks.get(&path).copied();
             sparse
-                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask, tree_mask)
+                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), tree_mask, hash_mask)
                 .unwrap();
         }
 
@@ -2201,7 +2296,7 @@ mod tests {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
             let tree_mask = branch_node_tree_masks.get(&path).copied();
             sparse
-                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask, tree_mask)
+                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), tree_mask, hash_mask)
                 .unwrap();
         }
 
@@ -2231,7 +2326,7 @@ mod tests {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
             let tree_mask = branch_node_tree_masks.get(&path).copied();
             sparse
-                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask, tree_mask)
+                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), tree_mask, hash_mask)
                 .unwrap();
         }
 
@@ -2280,7 +2375,7 @@ mod tests {
         // Check that the root extension node exists
         assert_matches!(
             sparse.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Extension { key, hash: None }) if *key == Nibbles::from_nibbles([0x00])
+            Some(SparseNode::Extension { key, hash: None, store_in_db_trie: None }) if *key == Nibbles::from_nibbles([0x00])
         );
 
         // Insert the leaf with a different prefix
@@ -2299,7 +2394,7 @@ mod tests {
             let hash_mask = branch_node_hash_masks.get(&path).copied();
             let tree_mask = branch_node_tree_masks.get(&path).copied();
             sparse
-                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), hash_mask, tree_mask)
+                .reveal_node(path, TrieNode::decode(&mut &node[..]).unwrap(), tree_mask, hash_mask)
                 .unwrap();
         }
 

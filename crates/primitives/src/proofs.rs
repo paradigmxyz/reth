@@ -1,6 +1,7 @@
 //! Helper function for calculating Merkle proofs and hashes.
 
 use crate::Receipt;
+use alloy_consensus::TxReceipt;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 pub use alloy_trie::root::ordered_trie_root_with_encoder;
@@ -31,19 +32,14 @@ pub fn calculate_receipt_root_no_memo(receipts: &[&Receipt]) -> B256 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Block;
+    use crate::{Block, TxType};
     use alloy_consensus::EMPTY_ROOT_HASH;
     use alloy_genesis::GenesisAccount;
-    use alloy_primitives::{b256, hex_literal::hex, Address, U256};
+    use alloy_primitives::{b256, bloom, hex_literal::hex, Address, Log, LogData, U256};
     use alloy_rlp::Decodable;
     use reth_chainspec::{HOLESKY, MAINNET, SEPOLIA};
     use reth_trie_common::root::{state_root_ref_unhashed, state_root_unhashed};
     use std::collections::HashMap;
-
-    #[cfg(not(feature = "optimism"))]
-    use crate::TxType;
-    #[cfg(not(feature = "optimism"))]
-    use alloy_primitives::{bloom, Log, LogData};
 
     #[test]
     fn check_transaction_root() {
@@ -55,7 +51,6 @@ mod tests {
         assert_eq!(block.transactions_root, tx_root, "Must be the same");
     }
 
-    #[cfg(not(feature = "optimism"))]
     #[test]
     fn check_receipt_root_optimism() {
         use alloy_consensus::ReceiptWithBloom;

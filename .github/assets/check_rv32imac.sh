@@ -16,6 +16,7 @@ crates_to_check=(
     ## optimism
     reth-optimism-chainspec
     reth-optimism-forks
+    reth-optimism-primitives
 )
 
 # Array to hold the results

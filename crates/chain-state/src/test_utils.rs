@@ -4,7 +4,9 @@ use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
     CanonStateSubscriptions,
 };
-use alloy_consensus::{Header, Transaction as _, TxEip1559, EMPTY_ROOT_HASH};
+use alloy_consensus::{
+    Header, SignableTransaction, Transaction as _, TxEip1559, TxReceipt, EMPTY_ROOT_HASH,
+};
 use alloy_eips::{
     eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, INITIAL_BASE_FEE},
     eip7685::Requests,
@@ -17,6 +19,7 @@ use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
     proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
+    transaction::SignedTransactionIntoRecoveredExt,
     BlockBody, EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredBlock, RecoveredTx,
     SealedBlock, SealedHeader, Transaction, TransactionSigned,
 };
@@ -131,7 +134,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                     cumulative_gas_used: (idx as u64 + 1) * MIN_TRANSACTION_GAS,
                     ..Default::default()
                 }
-                .with_bloom()
+                .into_with_bloom()
             })
             .collect::<Vec<_>>();
 
@@ -210,8 +213,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let (block, senders) = block_with_senders.split_sealed();
         ExecutedBlock::new(
-            Arc::new(block),
-            Arc::new(senders),
+            Arc::new(RecoveredBlock::new_sealed(block, senders)),
             Arc::new(ExecutionOutcome::new(
                 BundleState::default(),
                 receipts,
@@ -251,7 +253,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         range.map(move |number| {
             let current_parent_hash = parent_hash;
             let block = self.get_executed_block_with_number(number, current_parent_hash);
-            parent_hash = block.block.hash();
+            parent_hash = block.recovered_block().hash();
             block
         })
     }

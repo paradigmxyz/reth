@@ -472,6 +472,13 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider<N> {
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         self.consistent_provider()?.block_body_indices(number)
     }
+
+    fn block_body_indices_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        self.consistent_provider()?.block_body_indices_range(range)
+    }
 }
 
 impl<N: ProviderNodeTypes> StageCheckpointReader for BlockchainProvider<N> {
@@ -792,7 +799,7 @@ mod tests {
     use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
     use reth_errors::ProviderError;
     use reth_execution_types::{Chain, ExecutionOutcome};
-    use reth_primitives::{EthPrimitives, Receipt, SealedBlock, StaticFileSegment};
+    use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock, SealedBlock, StaticFileSegment};
     use reth_primitives_traits::{BlockBody, SignedTransaction};
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
@@ -882,10 +889,9 @@ mod tests {
         let static_file_provider = factory.static_file_provider();
 
         // Write transactions to static files with the right `tx_num``
-        let mut bodies_cursor = provider_rw.tx_ref().cursor_read::<tables::BlockBodyIndices>()?;
-        let mut tx_num = bodies_cursor
-            .seek_exact(database_blocks.first().as_ref().unwrap().number.saturating_sub(1))?
-            .map(|(_, indices)| indices.next_tx_num())
+        let mut tx_num = provider_rw
+            .block_body_indices(database_blocks.first().as_ref().unwrap().number.saturating_sub(1))?
+            .map(|indices| indices.next_tx_num())
             .unwrap_or_default();
 
         // Insert blocks into the database
@@ -925,8 +931,7 @@ mod tests {
                         ExecutionOutcome { receipts: block_receipts.into(), ..Default::default() };
 
                     ExecutedBlock::new(
-                        Arc::new(block.clone()),
-                        Arc::new(senders),
+                        Arc::new(RecoveredBlock::new_sealed(block.clone(), senders)),
                         execution_outcome.into(),
                         Default::default(),
                         Default::default(),
@@ -987,10 +992,10 @@ mod tests {
                 if state.anchor().number + 1 == block_number {
                     let mut lowest_memory_block =
                         state.parent_state_chain().last().expect("qed").block();
-                    let num_hash = lowest_memory_block.block().num_hash();
+                    let num_hash = lowest_memory_block.recovered_block().num_hash();
 
                     let mut execution_output = (*lowest_memory_block.execution_output).clone();
-                    execution_output.first_block = lowest_memory_block.block().number;
+                    execution_output.first_block = lowest_memory_block.recovered_block().number;
                     lowest_memory_block.execution_output = Arc::new(execution_output);
 
                     // Push to disk
@@ -1055,8 +1060,10 @@ mod tests {
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock::new(
-                Arc::new(first_in_mem_block.clone()),
-                Arc::new(in_memory_block_senders),
+                Arc::new(RecoveredBlock::new_sealed(
+                    first_in_mem_block.clone(),
+                    in_memory_block_senders,
+                )),
                 Default::default(),
                 Default::default(),
                 Default::default(),
@@ -1089,8 +1096,10 @@ mod tests {
 
         // Insert the last block into the pending state
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            block: Arc::new(last_in_mem_block.clone()),
-            senders: Default::default(),
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                last_in_mem_block.clone(),
+                Default::default(),
+            )),
             execution_output: Default::default(),
             hashed_state: Default::default(),
             trie: Default::default(),
@@ -1145,8 +1154,10 @@ mod tests {
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock::new(
-                Arc::new(first_in_mem_block.clone()),
-                Arc::new(in_memory_block_senders),
+                Arc::new(RecoveredBlock::new_sealed(
+                    first_in_mem_block.clone(),
+                    in_memory_block_senders,
+                )),
                 Default::default(),
                 Default::default(),
                 Default::default(),
@@ -1197,8 +1208,10 @@ mod tests {
 
         // Set the block as pending
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            block: Arc::new(block.clone()),
-            senders: Default::default(),
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                block.clone(),
+                block.senders().unwrap(),
+            )),
             execution_output: Default::default(),
             hashed_state: Default::default(),
             trie: Default::default(),
@@ -1278,8 +1291,10 @@ mod tests {
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
             new: vec![ExecutedBlock::new(
-                Arc::new(first_in_mem_block.clone()),
-                Arc::new(in_memory_block_senders),
+                Arc::new(RecoveredBlock::new_sealed(
+                    first_in_mem_block.clone(),
+                    in_memory_block_senders,
+                )),
                 Default::default(),
                 Default::default(),
                 Default::default(),
@@ -1841,8 +1856,7 @@ mod tests {
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
                     ExecutedBlock::new(
-                        Arc::new(block.clone()),
-                        Arc::new(senders),
+                        Arc::new(RecoveredBlock::new_sealed(block.clone(), senders)),
                         Arc::new(ExecutionOutcome {
                             bundle: BundleState::new(
                                 in_memory_state.into_iter().map(|(address, (account, _))| {
@@ -1977,8 +1991,10 @@ mod tests {
         // adding a pending block to state can test pending() and  pending_state_by_hash() function
         let pending_block = database_blocks[database_blocks.len() - 1].clone();
         only_database_provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            block: Arc::new(pending_block.clone()),
-            senders: Default::default(),
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                pending_block.clone(),
+                Default::default(),
+            )),
             execution_output: Default::default(),
             hashed_state: Default::default(),
             trie: Default::default(),
@@ -2098,8 +2114,10 @@ mod tests {
         // Set the pending block in memory
         let pending_block = in_memory_blocks.last().unwrap();
         provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            block: Arc::new(pending_block.clone()),
-            senders: Default::default(),
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                pending_block.clone(),
+                Default::default(),
+            )),
             execution_output: Default::default(),
             hashed_state: Default::default(),
             trie: Default::default(),
@@ -2390,7 +2408,7 @@ mod tests {
         let mut in_memory_blocks: std::collections::VecDeque<_> = in_memory_blocks.into();
 
         $(
-            let tx_hash = |block: &SealedBlock| block.body().transactions[0].hash();
+            let tx_hash = |block: &SealedBlock| *block.body().transactions[0].tx_hash();
             let tx_num = |block: &SealedBlock| {
                 database_blocks
                     .iter()
@@ -2714,7 +2732,7 @@ mod tests {
             // above, we do not see it.
             assert!(matches!(
                 old_transaction_hash_fn(
-                    to_be_persisted_tx.hash(),
+                    *to_be_persisted_tx.tx_hash(),
                     provider.canonical_in_memory_state(),
                     provider.database.clone()
                 ),
@@ -2731,7 +2749,7 @@ mod tests {
 
             assert!(matches!(
                 correct_transaction_hash_fn(
-                    to_be_persisted_tx.hash(),
+                    *to_be_persisted_tx.tx_hash(),
                     provider.canonical_in_memory_state(),
                     provider.database
                 ),

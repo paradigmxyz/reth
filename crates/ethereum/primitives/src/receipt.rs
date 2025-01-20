@@ -184,3 +184,139 @@ impl InMemorySize for Receipt {
 }
 
 impl reth_primitives_traits::Receipt for Receipt {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eips::eip2718::Encodable2718;
+    use alloy_primitives::{address, b256, bytes, hex_literal::hex, Bytes};
+    use reth_codecs::Compact;
+
+    #[test]
+    fn test_decode_receipt() {
+        reth_codecs::test_utils::test_decode::<Receipt>(&hex!(
+            "c428b52ffd23fc42696156b10200f034792b6a94c3850215c2fef7aea361a0c31b79d9a32652eefc0d4e2e730036061cff7344b6fc6132b50cda0ed810a991ae58ef013150c12b2522533cb3b3a8b19b7786a8b5ff1d3cdc84225e22b02def168c8858df"
+        ));
+    }
+
+    // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
+    #[test]
+    fn encode_legacy_receipt() {
+        let expected = hex!("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
+
+        let mut data = Vec::with_capacity(expected.length());
+        let receipt = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 0x1u64,
+                logs: vec![Log::new_unchecked(
+                    address!("0000000000000000000000000000000000000011"),
+                    vec![
+                        b256!("000000000000000000000000000000000000000000000000000000000000dead"),
+                        b256!("000000000000000000000000000000000000000000000000000000000000beef"),
+                    ],
+                    bytes!("0100ff"),
+                )],
+                success: false,
+            },
+            logs_bloom: [0; 256].into(),
+        };
+
+        receipt.encode(&mut data);
+
+        // check that the rlp length equals the length of the expected rlp
+        assert_eq!(receipt.length(), expected.len());
+        assert_eq!(data, expected);
+    }
+
+    // Test vector from: https://eips.ethereum.org/EIPS/eip-2481
+    #[test]
+    fn decode_legacy_receipt() {
+        let data = hex!("f901668001b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f85ff85d940000000000000000000000000000000000000011f842a0000000000000000000000000000000000000000000000000000000000000deada0000000000000000000000000000000000000000000000000000000000000beef830100ff");
+
+        // EIP658Receipt
+        let expected = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::Legacy,
+                cumulative_gas_used: 0x1u64,
+                logs: vec![Log::new_unchecked(
+                    address!("0000000000000000000000000000000000000011"),
+                    vec![
+                        b256!("000000000000000000000000000000000000000000000000000000000000dead"),
+                        b256!("000000000000000000000000000000000000000000000000000000000000beef"),
+                    ],
+                    bytes!("0100ff"),
+                )],
+                success: false,
+            },
+            logs_bloom: [0; 256].into(),
+        };
+
+        let receipt = ReceiptWithBloom::decode(&mut &data[..]).unwrap();
+        assert_eq!(receipt, expected);
+    }
+
+    #[test]
+    fn gigantic_receipt() {
+        let receipt = Receipt {
+            cumulative_gas_used: 16747627,
+            success: true,
+            tx_type: TxType::Legacy,
+            logs: vec![
+                Log::new_unchecked(
+                    address!("4bf56695415f725e43c3e04354b604bcfb6dfb6e"),
+                    vec![b256!("c69dc3d7ebff79e41f525be431d5cd3cc08f80eaf0f7819054a726eeb7086eb9")],
+                    Bytes::from(vec![1; 0xffffff]),
+                ),
+                Log::new_unchecked(
+                    address!("faca325c86bf9c2d5b413cd7b90b209be92229c2"),
+                    vec![b256!("8cca58667b1e9ffa004720ac99a3d61a138181963b294d270d91c53d36402ae2")],
+                    Bytes::from(vec![1; 0xffffff]),
+                ),
+            ],
+        };
+
+        let mut data = vec![];
+        receipt.to_compact(&mut data);
+        let (decoded, _) = Receipt::from_compact(&data[..], data.len());
+        assert_eq!(decoded, receipt);
+    }
+
+    #[test]
+    fn test_encode_2718_length() {
+        let receipt = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::Eip1559,
+                success: true,
+                cumulative_gas_used: 21000,
+                logs: vec![],
+            },
+            logs_bloom: Bloom::default(),
+        };
+
+        let encoded = receipt.encoded_2718();
+        assert_eq!(
+            encoded.len(),
+            receipt.encode_2718_len(),
+            "Encoded length should match the actual encoded data length"
+        );
+
+        // Test for legacy receipt as well
+        let legacy_receipt = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::Legacy,
+                success: true,
+                cumulative_gas_used: 21000,
+                logs: vec![],
+            },
+            logs_bloom: Bloom::default(),
+        };
+
+        let legacy_encoded = legacy_receipt.encoded_2718();
+        assert_eq!(
+            legacy_encoded.len(),
+            legacy_receipt.encode_2718_len(),
+            "Encoded length for legacy receipt should match the actual encoded data length"
+        );
+    }
+}

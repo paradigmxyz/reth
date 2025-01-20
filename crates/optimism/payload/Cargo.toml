@@ -55,7 +55,6 @@ sha2.workspace = true
 
 [features]
 optimism = [
-	"reth-primitives/optimism",
 	"reth-provider/optimism",
 	"reth-optimism-evm/optimism",
 	"revm/optimism",
