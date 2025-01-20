@@ -12,13 +12,14 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     map::{HashMap, HashSet},
-    BlockNumber, B256, U256,
+    Address, BlockNumber, B256, U256,
 };
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
 };
 use block_buffer::BlockBuffer;
+use cached_state::ProviderCaches;
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
@@ -2368,40 +2369,15 @@ where
 
         info!(target: "engine::tree", "Spawning prewarm threads");
 
-        // TODO: isolate prewarm logic into method, making moves explicit
+        // Prewarm transactions
         for (tx, sender) in block.body().transactions().iter().zip(block.senders()) {
-            let Some(state_provider) = self.state_provider(block.parent_hash())? else {
-                error!(target: "engine::tree", parent=?block.parent_hash(), "Could not get state provider for prewarm");
-                continue
-            };
-
-            // Use the caches to create a new executor
-            let state_provider = CachedStateProvider::new_with_caches(
-                state_provider,
+            self.prewarm_transaction(
+                block.header().clone(),
+                tx.clone(),
+                *sender,
                 caches.clone(),
                 cache_metrics.clone(),
-            );
-
-            // clone and copy info required for execution
-            let evm_config = self.evm_config.clone();
-            let header = block.header().clone();
-            let tx = tx.clone();
-            let sender = *sender;
-
-            // spawn task executing the individual tx
-            self.prewarming_thread_pool.spawn(move || {
-                let state_provider = StateProviderDatabase::new(&state_provider);
-
-                // create a new executor and disable nonce checks in the env
-                let mut evm = evm_config.evm_for_block(state_provider, &header);
-
-                // create the tx env and reset nonce
-                let mut tx_env = evm_config.tx_env(&tx, sender);
-                tx_env.nonce = None;
-                if let Err(err) = evm.transact(tx_env) {
-                    error!(target: "engine::tree", ?err, tx_hash=?tx.tx_hash(), ?sender, "Error when executing prewarm transaction");
-                };
-            });
+            )?;
         }
 
         info!(target: "engine::tree", "Done spawning prewarm threads");
@@ -2603,6 +2579,45 @@ where
         }
 
         Ok(input)
+    }
+
+    /// Runs execution for a single transaction, spawning it in th eprewarm threadpool.
+    fn prewarm_transaction(
+        &self,
+        block: N::BlockHeader,
+        tx: N::SignedTx,
+        sender: Address,
+        caches: ProviderCaches,
+        cache_metrics: CachedStateMetrics,
+    ) -> Result<(), InsertBlockErrorKind> {
+        let Some(state_provider) = self.state_provider(block.parent_hash())? else {
+            error!(target: "engine::tree", parent=?block.parent_hash(), "Could not get state provider for prewarm");
+            return Ok(())
+        };
+
+        // Use the caches to create a new executor
+        let state_provider =
+            CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
+
+        // clone and copy info required for execution
+        let evm_config = self.evm_config.clone();
+
+        // spawn task executing the individual tx
+        self.prewarming_thread_pool.spawn(move || {
+            let state_provider = StateProviderDatabase::new(&state_provider);
+
+            // create a new executor and disable nonce checks in the env
+            let mut evm = evm_config.evm_for_block(state_provider, &block);
+
+            // create the tx env and reset nonce
+            let mut tx_env = evm_config.tx_env(&tx, sender);
+            tx_env.nonce = None;
+            if let Err(err) = evm.transact(tx_env) {
+                error!(target: "engine::tree", ?err, tx_hash=?tx.tx_hash(), ?sender, "Error when executing prewarm transaction");
+            };
+        });
+
+        Ok(())
     }
 
     /// Handles an error that occurred while inserting a block.
