@@ -8,7 +8,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_execution_errors::{BlockExecutionError, InternalBlockExecutionError};
 use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, RecoveredBlock, RecoveredTx, SealedHeader,
+    transaction::SignedTransactionIntoRecoveredExt, Recovered, RecoveredBlock, SealedHeader,
 };
 use reth_primitives_traits::{Block, BlockBody, NodePrimitives, SignedTransaction};
 use reth_trie::updates::TrieUpdates;
@@ -442,13 +442,13 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
         self.blocks.values().flat_map(|block| block.transactions_with_sender())
     }
 
-    /// Returns an iterator over all [`RecoveredTx`] in the blocks
+    /// Returns an iterator over all [`Recovered`] in the blocks
     ///
     /// Note: This clones the transactions since it is assumed this is part of a shared [Chain].
     #[inline]
     pub fn transactions_ecrecovered(
         &self,
-    ) -> impl Iterator<Item = RecoveredTx<<B::Body as BlockBody>::Transaction>> + '_ {
+    ) -> impl Iterator<Item = Recovered<<B::Body as BlockBody>::Transaction>> + '_ {
         self.transactions_with_sender().map(|(signer, tx)| tx.clone().with_signer(*signer))
     }
 

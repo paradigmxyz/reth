@@ -1,6 +1,6 @@
 //! Transaction types.
 
-use crate::RecoveredTx;
+use crate::Recovered;
 pub use alloy_consensus::transaction::PooledTransaction;
 use once_cell as _;
 #[allow(deprecated)]
@@ -31,4 +31,4 @@ pub use reth_ethereum_primitives::{Transaction, TransactionSigned};
 
 /// Type alias kept for backward compatibility.
 #[deprecated(note = "Use `Recovered` instead")]
-pub type TransactionSignedEcRecovered<T = TransactionSigned> = RecoveredTx<T>;
+pub type TransactionSignedEcRecovered<T = TransactionSigned> = Recovered<T>;

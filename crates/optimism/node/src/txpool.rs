@@ -11,7 +11,7 @@ use reth_node_api::{Block, BlockBody};
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_primitives::{OpBlock, OpTransactionSigned};
 use reth_primitives::{
-    transaction::TransactionConversionError, GotExpected, InvalidTransactionError, RecoveredTx,
+    transaction::TransactionConversionError, GotExpected, InvalidTransactionError, Recovered,
     SealedBlock,
 };
 use reth_primitives_traits::SignedTransaction;
@@ -50,7 +50,7 @@ pub struct OpPooledTransaction {
 
 impl OpPooledTransaction {
     /// Create new instance of [Self].
-    pub fn new(transaction: RecoveredTx<OpTransactionSigned>, encoded_length: usize) -> Self {
+    pub fn new(transaction: Recovered<OpTransactionSigned>, encoded_length: usize) -> Self {
         Self {
             inner: EthPooledTransaction::new(transaction, encoded_length),
             estimated_tx_compressed_size: Default::default(),
@@ -77,8 +77,8 @@ fn tx_estimated_size_fjord(input: &[u8]) -> u64 {
     fastlz_size.saturating_mul(836_500).saturating_sub(42_585_600).max(100_000_000)
 }
 
-impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for OpPooledTransaction {
-    fn from(tx: RecoveredTx<op_alloy_consensus::OpPooledTransaction>) -> Self {
+impl From<Recovered<op_alloy_consensus::OpPooledTransaction>> for OpPooledTransaction {
+    fn from(tx: Recovered<op_alloy_consensus::OpPooledTransaction>) -> Self {
         let encoded_len = tx.encode_2718_len();
         let tx = tx.map_transaction(|tx| tx.into());
         Self {
@@ -88,37 +88,37 @@ impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for OpPooledTran
     }
 }
 
-impl TryFrom<RecoveredTx<OpTransactionSigned>> for OpPooledTransaction {
+impl TryFrom<Recovered<OpTransactionSigned>> for OpPooledTransaction {
     type Error = TransactionConversionError;
 
-    fn try_from(value: RecoveredTx<OpTransactionSigned>) -> Result<Self, Self::Error> {
+    fn try_from(value: Recovered<OpTransactionSigned>) -> Result<Self, Self::Error> {
         let (tx, signer) = value.into_parts();
-        let pooled: RecoveredTx<op_alloy_consensus::OpPooledTransaction> =
-            RecoveredTx::new_unchecked(tx.try_into()?, signer);
+        let pooled: Recovered<op_alloy_consensus::OpPooledTransaction> =
+            Recovered::new_unchecked(tx.try_into()?, signer);
         Ok(pooled.into())
     }
 }
 
-impl From<OpPooledTransaction> for RecoveredTx<OpTransactionSigned> {
+impl From<OpPooledTransaction> for Recovered<OpTransactionSigned> {
     fn from(value: OpPooledTransaction) -> Self {
         value.inner.transaction
     }
 }
 
 impl PoolTransaction for OpPooledTransaction {
-    type TryFromConsensusError = <Self as TryFrom<RecoveredTx<Self::Consensus>>>::Error;
+    type TryFromConsensusError = <Self as TryFrom<Recovered<Self::Consensus>>>::Error;
     type Consensus = OpTransactionSigned;
     type Pooled = op_alloy_consensus::OpPooledTransaction;
 
-    fn clone_into_consensus(&self) -> RecoveredTx<Self::Consensus> {
+    fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.inner.transaction().clone()
     }
 
     fn try_consensus_into_pooled(
-        tx: RecoveredTx<Self::Consensus>,
-    ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
+        tx: Recovered<Self::Consensus>,
+    ) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
         let (tx, signer) = tx.into_parts();
-        Ok(RecoveredTx::new_unchecked(tx.try_into()?, signer))
+        Ok(Recovered::new_unchecked(tx.try_into()?, signer))
     }
 
     fn hash(&self) -> &TxHash {
@@ -210,12 +210,12 @@ impl EthPoolTransaction for OpPooledTransaction {
     fn try_into_pooled_eip4844(
         self,
         _sidecar: Arc<BlobTransactionSidecar>,
-    ) -> Option<RecoveredTx<Self::Pooled>> {
+    ) -> Option<Recovered<Self::Pooled>> {
         None
     }
 
     fn try_from_eip4844(
-        _tx: RecoveredTx<Self::Consensus>,
+        _tx: Recovered<Self::Consensus>,
         _sidecar: BlobTransactionSidecar,
     ) -> Option<Self> {
         None
@@ -463,7 +463,7 @@ mod tests {
     use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
     use reth_chainspec::MAINNET;
     use reth_optimism_primitives::OpTransactionSigned;
-    use reth_primitives::RecoveredTx;
+    use reth_primitives::Recovered;
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder, TransactionOrigin,
@@ -492,7 +492,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = OpTransactionSigned::new_unhashed(deposit_tx, signature);
-        let signed_recovered = RecoveredTx::new_unchecked(signed_tx, signer);
+        let signed_recovered = Recovered::new_unchecked(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();
         let pooled_tx = OpPooledTransaction::new(signed_recovered, len);
         let outcome = validator.validate_one(origin, pooled_tx);

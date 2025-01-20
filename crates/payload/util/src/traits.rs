@@ -1,5 +1,5 @@
 use alloy_primitives::Address;
-use reth_primitives::RecoveredTx;
+use reth_primitives::Recovered;
 
 /// Iterator that returns transactions for the block building process in the order they should be
 /// included in the block.
@@ -15,7 +15,7 @@ pub trait PayloadTransactions {
         &mut self,
         // In the future, `ctx` can include access to state for block building purposes.
         ctx: (),
-    ) -> Option<RecoveredTx<Self::Transaction>>;
+    ) -> Option<Recovered<Self::Transaction>>;
 
     /// Exclude descendants of the transaction with given sender and nonce from the iterator,
     /// because this transaction won't be included in the block.
@@ -35,7 +35,7 @@ impl<T> Default for NoopPayloadTransactions<T> {
 impl<T> PayloadTransactions for NoopPayloadTransactions<T> {
     type Transaction = T;
 
-    fn next(&mut self, _ctx: ()) -> Option<RecoveredTx<Self::Transaction>> {
+    fn next(&mut self, _ctx: ()) -> Option<Recovered<Self::Transaction>> {
         None
     }
 
