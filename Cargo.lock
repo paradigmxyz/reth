@@ -8333,6 +8333,7 @@ dependencies = [
  "derive_more",
  "eyre",
  "futures",
+ "maili-flz",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "parking_lot",
