@@ -327,13 +327,13 @@ where
 
         // Push transaction changeset and calculate header bloom filter for receipt.
         #[allow(clippy::needless_update)] // side-effect of optimism fields
-        receipts.push(Some(Receipt {
+        receipts.push(Receipt {
             tx_type: tx.tx_type(),
             success: result.is_success(),
             cumulative_gas_used,
             logs: result.into_logs().into_iter().collect(),
             ..Default::default()
-        }));
+        });
 
         // update add to total fees
         let miner_fee =
@@ -356,7 +356,7 @@ where
 
     // calculate the requests and the requests root
     let requests = if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-        let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter().flatten())
+        let deposit_requests = parse_deposits_from_receipts(&chain_spec, receipts.iter())
             .map_err(|err| PayloadBuilderError::Internal(RethError::Execution(err.into())))?;
 
         let mut requests = Requests::default();
