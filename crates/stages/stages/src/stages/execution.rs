@@ -1011,8 +1011,10 @@ mod tests {
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
         let modes = [None, Some(PruneModes::none())];
-        let random_filter =
-            ReceiptsLogPruneConfig(BTreeMap::from([(Address::random(), PruneMode::Before(100000))]));
+        let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
+            Address::random(),
+            PruneMode::Before(100000),
+        )]));
 
         // Tests node with database and node with static files
         for mut mode in modes {
