@@ -452,6 +452,12 @@ where
                                 continue
                             }
 
+                            // it's possible we have the entire block cached
+                            if let Some(block) = this.full_block_cache.get(&block_hash) {
+                                let _ = response_tx.send(Ok(block.clone_header()));
+                                continue
+                            }
+
                             // header is not in the cache, request it if this is the first
                             // consumer
                             if this.headers_cache.queue(block_hash, response_tx) {
