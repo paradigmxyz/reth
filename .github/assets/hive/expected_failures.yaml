@@ -13,6 +13,11 @@ rpc-compat:
   - eth_getTransactionReceipt/get-blob-tx (reth)
   - eth_getTransactionReceipt/get-dynamic-fee (reth)
 
+  # https://github.com/paradigmxyz/reth/issues/13879
+  - eth_createAccessList/create-al-contract-eip1559 (reth)
+  - eth_getBlockByNumber/get-genesis (reth)
+  - eth_getTransactionReceipt/get-setcode-tx (reth)
+
 # https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:
   - Withdrawals Fork On Genesis (Paris) (reth)
