@@ -6,6 +6,7 @@ use reth_db::{open_db_read_only, DatabaseEnv};
 use reth_node_ethereum::EthereumNode;
 use reth_node_types::NodeTypesWithDBAdapter;
 use reth_primitives::{SealedBlock, SealedHeader, TransactionSigned};
+use reth_primitives_traits::transaction::signed::SignedTransaction;
 use reth_provider::{
     providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
     ProviderFactory, ReceiptProvider, StateProvider, TransactionsProvider,
@@ -95,17 +96,17 @@ fn txs_provider_example<T: TransactionsProvider<Transaction = TransactionSigned>
 
     // Can query the tx by hash
     let tx_by_hash =
-        provider.transaction_by_hash(tx.hash())?.ok_or(eyre::eyre!("txhash not found"))?;
+        provider.transaction_by_hash(*tx.tx_hash())?.ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(tx, tx_by_hash);
 
     // Can query the tx by hash with info about the block it was included in
     let (tx, meta) = provider
-        .transaction_by_hash_with_meta(tx.hash())?
+        .transaction_by_hash_with_meta(*tx.tx_hash())?
         .ok_or(eyre::eyre!("txhash not found"))?;
-    assert_eq!(tx.hash(), meta.tx_hash);
+    assert_eq!(*tx.tx_hash(), meta.tx_hash);
 
     // Can reverse lookup the key too
-    let id = provider.transaction_id(tx.hash())?.ok_or(eyre::eyre!("txhash not found"))?;
+    let id = provider.transaction_id(*tx.tx_hash())?.ok_or(eyre::eyre!("txhash not found"))?;
     assert_eq!(id, txid);
 
     // Can find the block of a transaction given its key
@@ -181,8 +182,9 @@ fn receipts_provider_example<
 
     // Can query receipt by txhash too
     let tx = provider.transaction_by_id(txid)?.unwrap();
-    let receipt_by_hash =
-        provider.receipt_by_hash(tx.hash())?.ok_or(eyre::eyre!("tx receipt by hash not found"))?;
+    let receipt_by_hash = provider
+        .receipt_by_hash(*tx.tx_hash())?
+        .ok_or(eyre::eyre!("tx receipt by hash not found"))?;
     assert_eq!(receipt, receipt_by_hash);
 
     // Can query all the receipts in a block

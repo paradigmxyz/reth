@@ -55,4 +55,4 @@ std = [
     "alloy-trie/std",
     "op-alloy-consensus/std",
 ]
-optimism = ["reth-primitives/optimism", "reth-optimism-primitives/optimism"]
+optimism = ["reth-optimism-primitives/optimism"]

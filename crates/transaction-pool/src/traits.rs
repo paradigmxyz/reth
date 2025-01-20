@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
-    BlockHeader, Transaction as _, Typed2718,
+    BlockHeader, Signed, Transaction as _, Typed2718,
 };
 use alloy_eips::{
     eip2718::Encodable2718,
@@ -1249,7 +1249,8 @@ impl From<RecoveredTx<PooledTransaction>> for EthPooledTransaction {
                 // include the blob sidecar
                 let (tx, sig, hash) = tx.into_parts();
                 let (tx, blob) = tx.into_parts();
-                let tx = TransactionSigned::new(tx.into(), sig, hash);
+                let tx = Signed::new_unchecked(tx, sig, hash);
+                let tx = TransactionSigned::from(tx);
                 let tx = RecoveredTx::new_unchecked(tx, signer);
                 let mut pooled = Self::new(tx, encoded_length);
                 pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
@@ -1279,9 +1280,8 @@ impl PoolTransaction for EthPooledTransaction {
         tx: RecoveredTx<Self::Consensus>,
     ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
         let (tx, signer) = tx.into_parts();
-        let pooled = tx
-            .try_into_pooled()
-            .map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)?;
+        let pooled =
+            tx.try_into().map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)?;
         Ok(RecoveredTx::new_unchecked(pooled, signer))
     }
 

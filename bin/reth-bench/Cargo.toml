@@ -96,7 +96,7 @@ min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
-optimism = ["reth-primitives/optimism", "reth-node-core/optimism"]
+optimism = ["reth-node-core/optimism"]
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []

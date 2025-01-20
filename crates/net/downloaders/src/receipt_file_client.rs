@@ -240,14 +240,15 @@ mod test {
     struct MockReceiptContainer(Option<MockReceipt>);
 
     impl TryFrom<MockReceipt> for ReceiptWithBlockNumber {
-        type Error = &'static str;
+        type Error = FileClientError;
         fn try_from(exported_receipt: MockReceipt) -> Result<Self, Self::Error> {
             let MockReceipt { tx_type, status, cumulative_gas_used, logs, block_number: number } =
                 exported_receipt;
 
             #[allow(clippy::needless_update)]
             let receipt = Receipt {
-                tx_type: TxType::try_from(tx_type.to_be_bytes()[0])?,
+                tx_type: TxType::try_from(tx_type.to_be_bytes()[0])
+                    .map_err(|err| FileClientError::Rlp(err.into(), vec![tx_type]))?,
                 success: status != 0,
                 cumulative_gas_used,
                 logs,
@@ -276,11 +277,7 @@ mod test {
                 .0;
             src.advance(src.len() - buf_slice.len());
 
-            Ok(Some(
-                receipt
-                    .map(|receipt| receipt.try_into().map_err(FileClientError::from))
-                    .transpose()?,
-            ))
+            Ok(Some(receipt.map(|receipt| receipt.try_into()).transpose()?))
         }
     }
 
