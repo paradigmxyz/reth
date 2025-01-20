@@ -157,6 +157,7 @@ impl ConfigureEvmEnv for OpEvmConfig {
     type Header = Header;
     type Transaction = OpTransactionSigned;
     type Error = EIP1559ParamError;
+    type TxEnv = TxEnv;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &OpTransactionSigned, sender: Address) {
         transaction.fill_tx_env(tx_env, sender);

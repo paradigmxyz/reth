@@ -6,19 +6,19 @@ use alloy_primitives::U256;
 use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest, BlockId};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
-use reth_evm::env::EvmEnv;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv, TransactionEnv};
 use reth_provider::StateProvider;
 use reth_revm::{
     database::StateProviderDatabase,
     db::CacheDB,
-    primitives::{ExecutionResult, HaltReason, TransactTo},
+    primitives::{ExecutionResult, HaltReason},
 };
 use reth_rpc_eth_types::{
     revm_utils::{apply_state_overrides, caller_gas_allowance},
     EthApiError, RevertError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
-use revm_primitives::{db::Database, TxEnv};
+use revm_primitives::{db::Database, TxKind};
 use tracing::trace;
 
 /// Gas execution estimates
@@ -84,8 +84,8 @@ pub trait EstimateCall: Call {
         }
 
         // Optimize for simple transfer transactions, potentially reducing the gas estimate.
-        if tx_env.data.is_empty() {
-            if let TransactTo::Call(to) = tx_env.transact_to {
+        if tx_env.input().is_empty() {
+            if let TxKind::Call(to) = tx_env.kind() {
                 if let Ok(code) = db.db.account_code(&to) {
                     let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
                     if no_code_callee {
@@ -95,7 +95,7 @@ pub trait EstimateCall: Call {
                         // field combos that bump the price up, so we try executing the function
                         // with the minimum gas limit to make sure.
                         let mut tx_env = tx_env.clone();
-                        tx_env.gas_limit = MIN_TRANSACTION_GAS;
+                        tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
                         if let Ok((res, _)) = self.transact(&mut db, evm_env.clone(), tx_env) {
                             if res.result.is_success() {
                                 return Ok(U256::from(MIN_TRANSACTION_GAS))
@@ -109,7 +109,7 @@ pub trait EstimateCall: Call {
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
         // The caller allowance is check by doing `(account.balance - tx.value) / tx.gas_price`
-        if tx_env.gas_price > U256::ZERO {
+        if tx_env.gas_price() > U256::ZERO {
             // cap the highest gas limit by max gas caller can afford with given gas price
             highest_gas_limit = highest_gas_limit
                 .min(caller_gas_allowance(&mut db, &tx_env).map_err(Self::Error::from_eth_err)?);
@@ -119,7 +119,7 @@ pub trait EstimateCall: Call {
         let mut highest_gas_limit = highest_gas_limit.saturating_to::<u64>();
 
         // If the provided gas limit is less than computed cap, use that
-        tx_env.gas_limit = tx_env.gas_limit.min(highest_gas_limit);
+        tx_env.set_gas_limit(tx_env.gas_limit().min(highest_gas_limit));
 
         trace!(target: "rpc::eth::estimate", ?evm_env, ?tx_env, "Starting gas estimation");
 
@@ -169,7 +169,7 @@ pub trait EstimateCall: Call {
 
         // we know the tx succeeded with the configured gas limit, so we can use that as the
         // highest, in case we applied a gas cap due to caller allowance above
-        highest_gas_limit = tx_env.gas_limit;
+        highest_gas_limit = tx_env.gas_limit();
 
         // NOTE: this is the gas the transaction used, which is less than the
         // transaction requires to succeed.
@@ -186,7 +186,7 @@ pub trait EstimateCall: Call {
         let optimistic_gas_limit = (gas_used + gas_refund + CALL_STIPEND_GAS) * 64 / 63;
         if optimistic_gas_limit < highest_gas_limit {
             // Set the transaction's gas limit to the calculated optimistic gas limit.
-            tx_env.gas_limit = optimistic_gas_limit;
+            tx_env.set_gas_limit(optimistic_gas_limit);
             // Re-execute the transaction with the new gas limit and update the result and
             // environment.
             (res, (evm_env, tx_env)) = self.transact(&mut db, evm_env, tx_env)?;
@@ -221,7 +221,7 @@ pub trait EstimateCall: Call {
                 break
             };
 
-            tx_env.gas_limit = mid_gas_limit;
+            tx_env.set_gas_limit(mid_gas_limit);
 
             // Execute transaction and handle potential gas errors, adjusting limits accordingly.
             match self.transact(&mut db, evm_env.clone(), tx_env.clone()) {
@@ -282,15 +282,15 @@ pub trait EstimateCall: Call {
         &self,
         env_gas_limit: U256,
         evm_env: EvmEnv,
-        mut tx_env: TxEnv,
+        mut tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         db: &mut DB,
     ) -> Self::Error
     where
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let req_gas_limit = tx_env.gas_limit;
-        tx_env.gas_limit = env_gas_limit.try_into().unwrap_or(u64::MAX);
+        let req_gas_limit = tx_env.gas_limit();
+        tx_env.set_gas_limit(env_gas_limit.try_into().unwrap_or(u64::MAX));
         let (res, _) = match self.transact(db, evm_env, tx_env) {
             Ok(res) => res,
             Err(err) => return err,

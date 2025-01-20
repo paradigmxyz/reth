@@ -169,7 +169,7 @@ where
             let mut tx_env = self.evm_config.tx_env(transaction, *sender);
 
             if let Some(tx_env_overrides) = &mut self.tx_env_overrides {
-                tx_env_overrides.apply(&mut tx_env);
+                // tx_env_overrides.apply(&mut tx_env);
             }
 
             // Execute transaction.
