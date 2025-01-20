@@ -577,7 +577,7 @@ fn account_and_storage_trie() {
         assert!(!trie_updates
             .storage_tries_ref()
             .iter()
-            .any(|(_, u)| !u.storage_nodes_ref().is_empty() || !u.removed_nodes_ref().is_empty())); // no storage root update
+            .any(|(_, u)| !u.changed_nodes_ref().is_empty())); // no storage root update
 
         assert_eq!(trie_updates.changed_nodes_ref().len(), 1);
 
@@ -610,7 +610,7 @@ fn account_trie_around_extension_node() {
         &updates
             .changed_nodes_ref()
             .iter()
-            .map(|(k, v)| (k.clone(), v.clone().unwrap()))
+            .map(|(k, v)| (k.clone(), Some(v.clone().unwrap())))
             .collect(),
     );
 }
@@ -633,7 +633,7 @@ fn account_trie_around_extension_node_with_dbtrie() {
         .into_iter()
         .map(|item| {
             let (key, node) = item.unwrap();
-            (key.0, node)
+            (key.0, Some(node))
         })
         .collect();
     assert_trie_updates(&account_updates);
@@ -688,7 +688,7 @@ fn storage_trie_around_extension_node() {
         StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
     assert_eq!(expected_root, got);
     assert_eq!(expected_updates, updates);
-    assert_trie_updates(updates.storage_nodes_ref());
+    assert_trie_updates(updates.changed_nodes_ref());
 }
 
 fn extension_node_storage_trie<N: ProviderNodeTypes>(
@@ -717,7 +717,7 @@ fn extension_node_storage_trie<N: ProviderNodeTypes>(
 
     let root = hb.root();
     let (_, updates) = hb.split();
-    let trie_updates = StorageTrieUpdates::new(updates);
+    let trie_updates = StorageTrieUpdates::new(updates.into_iter().map(|(k, v)| (k, Some(v))));
     (root, trie_updates)
 }
 
@@ -745,14 +745,14 @@ fn extension_node_trie<N: ProviderNodeTypes>(
     hb.root()
 }
 
-fn assert_trie_updates(account_updates: &HashMap<Nibbles, BranchNodeCompact>) {
+fn assert_trie_updates(account_updates: &HashMap<Nibbles, Option<BranchNodeCompact>>) {
     assert_eq!(account_updates.len(), 2);
 
     let node = account_updates.get(&[0x3][..]).unwrap();
-    let expected = BranchNodeCompact::new(0b0011, 0b0001, 0b0000, vec![], None);
+    let expected = Some(BranchNodeCompact::new(0b0011, 0b0001, 0b0000, vec![], None));
     assert_eq!(node, &expected);
 
-    let node = account_updates.get(&[0x3, 0x0, 0xA, 0xF][..]).unwrap();
+    let node = account_updates.get(&[0x3, 0x0, 0xA, 0xF][..]).unwrap().clone().unwrap();
     assert_eq!(node.state_mask, TrieMask::new(0b101100000));
     assert_eq!(node.tree_mask, TrieMask::new(0b000000000));
     assert_eq!(node.hash_mask, TrieMask::new(0b001000000));

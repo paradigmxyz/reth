@@ -106,7 +106,9 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                             hb.root();
 
                             let (_, updates) = hb.split();
-                            let trie_updates = StorageTrieUpdates::new(updates);
+                            let trie_updates = StorageTrieUpdates::new(
+                                updates.into_iter().map(|(k, v)| (k, Some(v))),
+                            );
                             (init_storage, storage_updates, trie_updates)
                         },
                         |(init_storage, storage_updates, mut trie_updates)| {

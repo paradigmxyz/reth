@@ -1427,6 +1427,12 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
+    fn to_updated_nodes(
+        changed_nodes: HashMap<Nibbles, Option<BranchNodeCompact>>,
+    ) -> HashMap<Nibbles, BranchNodeCompact> {
+        changed_nodes.into_iter().filter_map(|(k, v)| v.map(|v| (k, v))).collect()
+    }
+
     /// Pad nibbles to the length of a B256 hash with zeros on the left.
     fn pad_nibbles_left(nibbles: Nibbles) -> Nibbles {
         let mut base =
@@ -1580,7 +1586,14 @@ mod tests {
         let sparse_updates = sparse.take_updates();
 
         assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq!(
+            hash_builder_updates.changed_nodes,
+            Iterator::chain(
+                sparse_updates.updated_nodes.into_iter().map(|(k, v)| (k, Some(v))),
+                sparse_updates.removed_nodes.into_iter().map(|k| (k, None))
+            )
+            .collect(),
+        );
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 
@@ -1611,7 +1624,14 @@ mod tests {
         let sparse_updates = sparse.take_updates();
 
         assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq!(
+            sparse_updates.updated_nodes,
+            hash_builder_updates
+                .changed_nodes
+                .into_iter()
+                .filter_map(|(k, v)| v.map(|v| (k, v)))
+                .collect()
+        );
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 
@@ -1640,7 +1660,10 @@ mod tests {
         let sparse_updates = sparse.take_updates();
 
         assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq!(
+            sparse_updates.updated_nodes,
+            to_updated_nodes(hash_builder_updates.changed_nodes)
+        );
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 
@@ -1679,7 +1702,7 @@ mod tests {
         assert_eq!(sparse_root, hash_builder_root);
         pretty_assertions::assert_eq!(
             BTreeMap::from_iter(sparse_updates.updated_nodes),
-            BTreeMap::from_iter(hash_builder_updates.account_nodes)
+            BTreeMap::from_iter(to_updated_nodes(hash_builder_updates.changed_nodes))
         );
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
@@ -1715,7 +1738,10 @@ mod tests {
         let sparse_updates = sparse.updates_ref();
 
         assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq!(
+            sparse_updates.updated_nodes,
+            to_updated_nodes(hash_builder_updates.changed_nodes)
+        );
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
 
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
@@ -1732,7 +1758,10 @@ mod tests {
         let sparse_updates = sparse.take_updates();
 
         assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq!(
+            sparse_updates.updated_nodes,
+            to_updated_nodes(hash_builder_updates.changed_nodes)
+        );
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 
@@ -2084,7 +2113,7 @@ mod tests {
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
                         sparse_updates.updated_nodes,
-                        hash_builder_updates.account_nodes
+                        to_updated_nodes(hash_builder_updates.changed_nodes)
                     );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
                     assert_eq_sparse_trie_proof_nodes(&updated_sparse, hash_builder_proof_nodes);
@@ -2115,7 +2144,7 @@ mod tests {
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
                         sparse_updates.updated_nodes,
-                        hash_builder_updates.account_nodes
+                        to_updated_nodes(hash_builder_updates.changed_nodes)
                     );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
                     assert_eq_sparse_trie_proof_nodes(&updated_sparse, hash_builder_proof_nodes);
@@ -2501,7 +2530,10 @@ mod tests {
         let sparse_updates = sparse.take_updates();
 
         assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq!(
+            sparse_updates.updated_nodes,
+            to_updated_nodes(hash_builder_updates.changed_nodes)
+        );
     }
 
     #[test]
