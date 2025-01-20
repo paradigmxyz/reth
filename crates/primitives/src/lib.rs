@@ -22,7 +22,6 @@
 extern crate alloc;
 
 mod block;
-pub mod proofs;
 mod receipt;
 pub use reth_static_file_types as static_file;
 pub mod transaction;
