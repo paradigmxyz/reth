@@ -4,10 +4,10 @@ use alloc::vec::Vec;
 
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockNumber, Log};
-use reth_execution_errors::{BlockExecutionError};
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::Receipts;
 use reth_primitives_traits::Receipt;
-use reth_prune_types::{PruneModes};
+use reth_prune_types::PruneModes;
 use revm::db::states::bundle_state::BundleRetention;
 
 /// Takes care of:
@@ -52,8 +52,7 @@ impl<T> Default for BlockBatchRecord<T> {
 
 impl<T> BlockBatchRecord<T> {
     /// Create a new receipts recorder with the given pruning configuration.
-    pub fn new(prune_modes: PruneModes) -> Self
-    {
+    pub fn new(prune_modes: PruneModes) -> Self {
         Self { prune_modes, ..Default::default() }
     }
 

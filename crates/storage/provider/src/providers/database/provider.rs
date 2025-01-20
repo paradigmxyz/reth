@@ -1846,7 +1846,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 continue
             }
 
-            // If there are new addreses to retain after this block number, track them
+            // If there are new addresses to retain after this block number, track them
             if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
                 allowed_addresses.extend(new_addresses.iter().copied());
             }
@@ -1856,14 +1856,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 if let Some(receipt) = receipt {
                     // Skip writing receipt if log filter is active and it does not have any logs to
                     // retain
-                    if prunable_receipts && has_contract_log_filter {
-                        if !receipt
+                    if prunable_receipts &&
+                        has_contract_log_filter &&
+                        !receipt
                             .logs()
                             .iter()
                             .any(|log| allowed_addresses.contains(&log.address))
-                        {
-                            continue
-                        }
+                    {
+                        continue
                     }
 
                     if let Some(writer) = &mut receipts_static_writer {
