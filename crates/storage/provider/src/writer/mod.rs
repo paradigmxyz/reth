@@ -1055,7 +1055,7 @@ mod tests {
     fn revert_to_indices() {
         let base: ExecutionOutcome = ExecutionOutcome {
             bundle: BundleState::default(),
-            receipts: vec![vec![Some(Receipt::default()); 2]; 7].into(),
+            receipts: vec![vec![Receipt::default(); 2]; 7].into(),
             first_block: 10,
             requests: Vec::new(),
         };
@@ -1266,7 +1266,7 @@ mod tests {
 
         let mut test: ExecutionOutcome = ExecutionOutcome {
             bundle: present_state,
-            receipts: vec![vec![Some(Receipt::default()); 2]; 1].into(),
+            receipts: vec![vec![Receipt::default(); 2]; 1].into(),
             first_block: 2,
             requests: Vec::new(),
         };

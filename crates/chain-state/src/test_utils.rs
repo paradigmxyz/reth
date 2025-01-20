@@ -294,7 +294,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let execution_outcome = ExecutionOutcome::new(
             bundle_state_builder.build(),
-            vec![vec![None]].into(),
+            vec![vec![]].into(),
             block.number,
             Vec::new(),
         );

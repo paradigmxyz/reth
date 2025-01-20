@@ -508,9 +508,7 @@ where
                             for block_receipts in chain_change.receipts {
                                 this.on_new_receipts(
                                     block_receipts.block_hash,
-                                    Ok(Some(Arc::new(
-                                        block_receipts.receipts.into_iter().flatten().collect(),
-                                    ))),
+                                    Ok(Some(Arc::new(block_receipts.receipts))),
                                 );
                             }
                         }
@@ -522,9 +520,7 @@ where
                             for block_receipts in chain_change.receipts {
                                 this.on_reorg_receipts(
                                     block_receipts.block_hash,
-                                    Ok(Some(Arc::new(
-                                        block_receipts.receipts.into_iter().flatten().collect(),
-                                    ))),
+                                    Ok(Some(Arc::new(block_receipts.receipts))),
                                 );
                             }
                         }
@@ -550,7 +546,7 @@ enum CacheAction<B: Block, R> {
 
 struct BlockReceipts<R> {
     block_hash: B256,
-    receipts: Vec<Option<R>>,
+    receipts: Vec<R>,
 }
 
 /// A change of the canonical chain

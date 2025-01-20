@@ -444,7 +444,7 @@ where
         self.strategy.state_mut().merge_transitions(retention);
 
         // store receipts in the set
-        self.batch_record.save_receipts(receipts)?;
+        self.batch_record.save_receipts(receipts);
 
         // store requests in the set
         self.batch_record.save_requests(requests);

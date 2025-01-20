@@ -198,7 +198,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
                 let receipt = receipt_iter
                     .next()
                     .ok_or_else(|| ProviderError::ReceiptNotFound(tx_num.into()))?;
-                block_receipts.push(Some(receipt));
+                block_receipts.push(receipt);
             }
             receipts.push(block_receipts);
         }
