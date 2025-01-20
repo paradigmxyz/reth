@@ -42,7 +42,7 @@ pub enum PruneSegment {
 }
 
 impl PruneSegment {
-    /// Returns minimum number of blocks to left in the database for this segment.
+    /// Returns minimum number of blocks to keep in the database for this segment.
     pub const fn min_blocks(&self, purpose: PrunePurpose) -> u64 {
         match self {
             Self::SenderRecovery | Self::TransactionLookup | Self::Headers | Self::Transactions => {
@@ -84,9 +84,6 @@ pub enum PruneSegmentError {
     /// Invalid configuration of a prune segment.
     #[error("the configuration provided for {0} is invalid")]
     Configuration(PruneSegment),
-    /// Receipts have been pruned
-    #[error("receipts have been pruned")]
-    ReceiptsPruned,
 }
 
 #[cfg(test)]
