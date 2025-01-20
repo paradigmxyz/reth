@@ -21,7 +21,6 @@ reth-static-file-types.workspace = true
 # ethereum
 alloy-consensus.workspace = true
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
-alloy-eips = { workspace = true, features = ["serde"] }
 alloy-trie = { workspace = true, features = ["serde"] }
 
 # for eip-4844
