@@ -18,7 +18,7 @@ use reth_db::{
     lockfile::StorageLock,
     static_file::{
         iter_static_files, BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask,
-        ReceiptMask, StaticFileCursor, TDWithHashMask, TransactionMask,
+        ReceiptMask, StaticFileCursor, TDWithHashMask, TransactionMask, WithdrawalsMask,
     },
     table::{Decompress, Value},
     tables,
@@ -1697,6 +1697,23 @@ impl<N: NodePrimitives> WithdrawalsProvider for StaticFileProvider<N> {
         }
         // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn withdrawals_by_block_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+        _timestamps: &[(BlockNumber, u64)],
+    ) -> ProviderResult<Vec<Option<Withdrawals>>> {
+        // Empty withdrawals post shangai are stored as Some([]), while pre shangai are stored as
+        // None
+        self.fetch_range_with_predicate(
+            StaticFileSegment::BlockMeta,
+            *range.start()..*range.end() + 1,
+            |cursor, number| {
+                cursor.get_one::<WithdrawalsMask>(number.into()).map(|w| w.map(|w| w.withdrawals))
+            },
+            |_| true,
+        )
     }
 }
 

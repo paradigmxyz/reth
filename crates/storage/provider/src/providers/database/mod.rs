@@ -549,6 +549,30 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
     ) -> ProviderResult<Option<Withdrawals>> {
         self.provider()?.withdrawals_by_block(id, timestamp)
     }
+
+    fn withdrawals_by_block_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+        timestamps: &[(BlockNumber, u64)],
+    ) -> ProviderResult<Vec<Option<Withdrawals>>> {
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::BlockMeta,
+            *range.start()..*range.end() + 1,
+            |static_file, range, _| {
+                static_file.withdrawals_by_block_range(
+                    range.start..=range.end.saturating_sub(1),
+                    timestamps,
+                )
+            },
+            |range, _| {
+                self.provider()?.withdrawals_by_block_range(
+                    range.start..=range.end.saturating_sub(1),
+                    timestamps,
+                )
+            },
+            |_| true,
+        )
+    }
 }
 
 impl<N: ProviderNodeTypes> OmmersProvider for ProviderFactory<N> {

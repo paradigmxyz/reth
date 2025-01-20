@@ -457,6 +457,14 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider<N> {
     ) -> ProviderResult<Option<Withdrawals>> {
         self.consistent_provider()?.withdrawals_by_block(id, timestamp)
     }
+
+    fn withdrawals_by_block_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+        timestamps: &[(BlockNumber, u64)],
+    ) -> ProviderResult<Vec<Option<Withdrawals>>> {
+        self.consistent_provider()?.withdrawals_by_block_range(range, timestamps)
+    }
 }
 
 impl<N: ProviderNodeTypes> OmmersProvider for BlockchainProvider<N> {

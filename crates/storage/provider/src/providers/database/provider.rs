@@ -1593,6 +1593,58 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Withdrawals
         }
         Ok(None)
     }
+
+    fn withdrawals_by_block_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+        timestamps: &[(BlockNumber, u64)],
+    ) -> ProviderResult<Vec<Option<Withdrawals>>> {
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::BlockMeta,
+            *range.start()..*range.end() + 1,
+            |static_file, range, _| {
+                static_file.withdrawals_by_block_range(
+                    range.start..=range.end.saturating_sub(1),
+                    timestamps,
+                )
+            },
+            |range, _| {
+                let chain_spec = self.chain_spec();
+                let first_block = range.start;
+
+                let capacity = if range.start >= range.end {
+                    return Ok(Vec::new())
+                } else {
+                    (range.end - range.start) as usize
+                };
+
+                let mut withdrawals_cursor = self.tx.cursor_read::<tables::BlockWithdrawals>()?;
+                let mut withdrawals = Vec::with_capacity(capacity);
+
+                for (number, (_, timestamp)) in
+                    range.zip(timestamps.iter().skip_while(|(block, _)| *block < first_block))
+                {
+                    // If we are past shanghai, then all blocks should have a withdrawal list,
+                    // even if empty
+                    let block_withdrawals =
+                        if chain_spec.is_shanghai_active_at_timestamp(*timestamp) {
+                            withdrawals_cursor
+                                .seek_exact(number)?
+                                .map(|(_, w)| w.withdrawals)
+                                .unwrap_or_default()
+                                .into()
+                        } else {
+                            None
+                        };
+
+                    withdrawals.push(block_withdrawals);
+                }
+
+                Ok(withdrawals)
+            },
+            |_| true,
+        )
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> OmmersProvider for DatabaseProvider<TX, N> {
