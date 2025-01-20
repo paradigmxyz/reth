@@ -5,4 +5,5 @@ use crate::RecoveredTx;
 use alloy_consensus::transaction::PooledTransaction;
 
 /// A signed pooled transaction with recovered signer.
+#[deprecated(note = "use `Recovered` instead")]
 pub type PooledTransactionsElementEcRecovered<T = PooledTransaction> = RecoveredTx<T>;
