@@ -45,7 +45,7 @@ pub struct OpPooledTransaction {
     #[deref]
     inner: EthPooledTransaction<OpTransactionSigned>,
     /// The estimated size of this transaction, lazily computed.
-    estimated_tx_compressed_size: OnceLock<U256>,
+    estimated_tx_compressed_size: OnceLock<u32>,
 }
 
 impl OpPooledTransaction {
@@ -60,8 +60,9 @@ impl OpPooledTransaction {
     /// Returns the estimated compressed size of a transaction in bytes scaled by 1e6.
     /// This value is computed based on the following formula:
     /// `max(minTransactionSize, intercept + fastlzCoef*fastlzSize)`
-    pub fn estimated_compressed_size(&self) -> &U256 {
-        self.estimated_tx_compressed_size
+    pub fn estimated_compressed_size(&self) -> u32 {
+        *self
+            .estimated_tx_compressed_size
             .get_or_init(|| tx_estimated_size_fjord(&self.inner.transaction().encoded_2718()))
     }
 }
@@ -70,13 +71,10 @@ impl OpPooledTransaction {
 /// This value is computed based on the following formula:
 /// max(minTransactionSize, intercept + fastlzCoef*fastlzSize)
 // TODO(mattsse): replace with library fn from revm or maili once available
-fn tx_estimated_size_fjord(input: &[u8]) -> U256 {
-    let fastlz_size = U256::from(maili_flz::flz_compress_len(input));
+fn tx_estimated_size_fjord(input: &[u8]) -> u32 {
+    let fastlz_size = maili_flz::flz_compress_len(input);
 
-    fastlz_size
-        .saturating_mul(U256::from(836_500))
-        .saturating_sub(U256::from(42_585_600))
-        .max(U256::from(100_000_000))
+    fastlz_size.saturating_mul(836_500).saturating_sub(42_585_600).max(100_000_000)
 }
 
 impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for OpPooledTransaction {
