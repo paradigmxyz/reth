@@ -105,13 +105,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
                 let mut block_state_calls = block_state_calls.into_iter().peekable();
+                let chain_spec = RpcNodeCore::provider(&this).chain_spec();
                 while let Some(block) = block_state_calls.next() {
                     // Increase number and timestamp for every new block
                     evm_env.block_env.number += U256::from(1);
                     evm_env.block_env.timestamp += U256::from(1);
 
                     if validation {
-                        let chain_spec = RpcNodeCore::provider(&this).chain_spec();
                         let base_fee_params = chain_spec
                             .base_fee_params_at_timestamp(evm_env.block_env.timestamp.to());
                         let base_fee = if let Some(latest) = blocks.last() {
