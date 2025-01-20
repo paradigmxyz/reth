@@ -1012,7 +1012,7 @@ mod tests {
         // This way we test both cases.
         let modes = [None, Some(PruneModes::none())];
         let random_filter =
-            ReceiptsLogPruneConfig(BTreeMap::from([(Address::random(), PruneMode::Full)]));
+            ReceiptsLogPruneConfig(BTreeMap::from([(Address::random(), PruneMode::Before(100000))]));
 
         // Tests node with database and node with static files
         for mut mode in modes {
