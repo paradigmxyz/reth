@@ -202,8 +202,8 @@ impl ProofSequencer {
 }
 
 /// A wrapper for the sender that signals completion when dropped
-#[derive(Deref)]
-pub(crate) struct StateHookSender<BPF: BlindedProviderFactory>(Sender<StateRootMessage<BPF>>);
+#[derive(Deref, Debug)]
+pub struct StateHookSender<BPF: BlindedProviderFactory>(Sender<StateRootMessage<BPF>>);
 
 impl<BPF: BlindedProviderFactory> StateHookSender<BPF> {
     pub(crate) const fn new(inner: Sender<StateRootMessage<BPF>>) -> Self {
@@ -325,9 +325,14 @@ where
         StateRootHandle::new(rx)
     }
 
+    /// Returns a [`StateHookSender`] that can be used to send state updates to this task.
+    pub fn state_hook_sender(&self) -> StateHookSender<BPF> {
+        StateHookSender::new(self.tx.clone())
+    }
+
     /// Returns a state hook to be used to send state updates to this task.
     pub fn state_hook(&self) -> impl OnStateHook {
-        let state_hook = StateHookSender::new(self.tx.clone());
+        let state_hook = self.state_hook_sender();
 
         move |state: &EvmState| {
             if let Err(error) = state_hook.send(StateRootMessage::StateUpdate(state.clone())) {
