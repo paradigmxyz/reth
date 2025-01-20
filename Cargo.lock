@@ -8588,13 +8588,11 @@ dependencies = [
  "pprof",
  "proptest",
  "proptest-arbitrary-interop",
- "reth-chainspec",
  "reth-codecs",
  "reth-ethereum-forks",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "reth-static-file-types",
- "reth-trie-common",
  "serde",
  "serde_json",
 ]

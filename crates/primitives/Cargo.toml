@@ -36,9 +36,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 # eth
-reth-chainspec = { workspace = true, features = ["arbitrary"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary", "test-utils"] }
-reth-trie-common = { workspace = true, features = ["arbitrary"] }
 
 alloy-rlp.workspace = true
 alloy-eips = { workspace = true, features = ["arbitrary"] }
@@ -71,9 +69,7 @@ std = [
 	"alloy-trie/std",
 	"reth-ethereum-forks/std",
 	"derive_more/std",
-	"reth-trie-common/std",
 	"serde_json/std",
-	"reth-chainspec/std",
 	"reth-ethereum-primitives/std",
 	"alloy-rlp/std"
 ]
@@ -89,11 +85,9 @@ arbitrary = [
 	"reth-codec",
 	"reth-ethereum-forks/arbitrary",
 	"reth-primitives-traits/arbitrary",
-	"reth-chainspec/arbitrary",
 	"alloy-consensus/arbitrary",
 	"alloy-primitives/arbitrary",
 	"alloy-trie/arbitrary",
-	"reth-trie-common/arbitrary",
 	"reth-ethereum-primitives/arbitrary",
 	"reth-codecs/arbitrary"
 ]
@@ -110,8 +104,6 @@ alloy-compat = [
 ]
 test-utils = [
 	"reth-primitives-traits/test-utils",
-	"reth-chainspec/test-utils",
-	"reth-trie-common/test-utils",
 	"arbitrary",
 	"reth-codecs/test-utils"
 ]
@@ -119,7 +111,6 @@ serde-bincode-compat = [
 	"alloy-eips/serde-bincode-compat",
 	"alloy-consensus/serde-bincode-compat",
 	"reth-primitives-traits/serde-bincode-compat",
-	"reth-trie-common/serde-bincode-compat",
 	"reth-ethereum-primitives/serde-bincode-compat"
 ]
 
