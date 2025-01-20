@@ -60,7 +60,7 @@ where
         &mut self,
         provider: &Provider,
         mut input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    ) -> Result<ExecOutput, StageError<BlockExecutionError>> {
         if let Some((target_prunable_block, prune_mode)) = self
             .prune_mode
             .map(|mode| {
@@ -106,19 +106,24 @@ where
         }
 
         info!(target: "sync::stages::index_storage_history::exec", ?first_sync, "Collecting indices");
-        let collector =
-            collect_history_indices::<_, tables::StorageChangeSets, tables::StoragesHistory, _>(
-                provider,
-                BlockNumberAddress::range(range.clone()),
-                |AddressStorageKey((address, storage_key)), highest_block_number| {
-                    StorageShardedKey::new(address, storage_key, highest_block_number)
-                },
-                |(key, value)| (key.block_number(), AddressStorageKey((key.address(), value.key))),
-                &self.etl_config,
-            )?;
+        let collector = collect_history_indices::<
+            _,
+            tables::StorageChangeSets,
+            tables::StoragesHistory,
+            _,
+            BlockExecutionError,
+        >(
+            provider,
+            BlockNumberAddress::range(range.clone()),
+            |AddressStorageKey((address, storage_key)), highest_block_number| {
+                StorageShardedKey::new(address, storage_key, highest_block_number)
+            },
+            |(key, value)| (key.block_number(), AddressStorageKey((key.address(), value.key))),
+            &self.etl_config,
+        )?;
 
         info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
-        load_history_indices::<_, tables::StoragesHistory, _>(
+        load_history_indices::<_, tables::StoragesHistory, _, BlockExecutionError>(
             provider,
             collector,
             first_sync,
@@ -137,7 +142,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    ) -> Result<UnwindOutput, StageError<BlockExecutionError>> {
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
@@ -165,7 +170,7 @@ mod tests {
         },
         transaction::DbTx,
     };
-    use reth_execution_errors::BlockExecError;
+    use reth_execution_errors::BlockExecutionError;
     use reth_primitives::StorageEntry;
     use reth_provider::{providers::StaticFileWriter, DatabaseProviderFactory};
     use reth_testing_utils::generators::{
@@ -534,10 +539,8 @@ mod tests {
         }
     }
 
-    impl<E> StageTestRunner<E> for IndexStorageHistoryTestRunner
-    where
-        E: BlockExecError,
-    {
+    impl StageTestRunner for IndexStorageHistoryTestRunner {
+        type E = BlockExecutionError;
         type S = IndexStorageHistoryStage;
 
         fn db(&self) -> &TestStageDB {

@@ -46,7 +46,7 @@ use alloy_primitives::B256;
 use reth_config::config::StageConfig;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_evm::execute::BlockExecutorProvider;
-use reth_execution_errors::BlockExecError;
+use reth_execution_errors::{BlockExecError, BlockExecutionError};
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
 use reth_primitives_traits::Block;
 use reth_provider::HeaderSyncGapProvider;
@@ -138,13 +138,13 @@ where
 {
     /// Appends the default offline stages and default finish stage to the given builder.
     pub fn add_offline_stages<Provider>(
-        default_offline: StageSetBuilder<Provider, E::Error>,
+        default_offline: StageSetBuilder<Provider, BlockExecutionError>,
         executor_factory: E,
         stages_config: StageConfig,
         prune_modes: PruneModes,
-    ) -> StageSetBuilder<Provider, E::Error>
+    ) -> StageSetBuilder<Provider, BlockExecutionError>
     where
-        OfflineStages<E>: StageSet<Provider, E::Error>,
+        OfflineStages<E>: StageSet<Provider, BlockExecutionError>,
     {
         StageSetBuilder::default()
             .add_set(default_offline)
@@ -153,16 +153,16 @@ where
     }
 }
 
-impl<P, H, B, E, Provider> StageSet<Provider> for DefaultStages<P, H, B, E>
+impl<P, H, B, E, Provider> StageSet<Provider, BlockExecutionError> for DefaultStages<P, H, B, E>
 where
     P: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader + 'static,
     B: BodyDownloader + 'static,
     E: BlockExecutorProvider,
-    OnlineStages<P, H, B>: StageSet<Provider>,
-    OfflineStages<E>: StageSet<Provider>,
+    OnlineStages<P, H, B>: StageSet<Provider, BlockExecutionError>,
+    OfflineStages<E>: StageSet<Provider, BlockExecutionError>,
 {
-    fn builder(self) -> StageSetBuilder<Provider, E::Error> {
+    fn builder(self) -> StageSetBuilder<Provider, BlockExecutionError> {
         Self::add_offline_stages(
             self.online.builder(),
             self.executor_factory,
@@ -214,21 +214,20 @@ where
     }
 }
 
-impl<P, H, B, E> OnlineStages<P, H, B, E>
+impl<P, H, B> OnlineStages<P, H, B>
 where
     P: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader<Header = <B::Block as Block>::Header> + 'static,
     B: BodyDownloader + 'static,
-    E: BlockExecError,
 {
     /// Create a new builder using the given headers stage.
     pub fn builder_with_headers<Provider>(
         headers: HeaderStage<P, H>,
         body_downloader: B,
-    ) -> StageSetBuilder<Provider, E>
+    ) -> StageSetBuilder<Provider, BlockExecutionError>
     where
-        HeaderStage<P, H>: Stage<Provider, E>,
-        BodyStage<B>: Stage<Provider, E>,
+        HeaderStage<P, H>: Stage<Provider, BlockExecutionError>,
+        BodyStage<B>: Stage<Provider, BlockExecutionError>,
     {
         StageSetBuilder::default().add_stage(headers).add_stage(BodyStage::new(body_downloader))
     }
@@ -241,10 +240,10 @@ where
         header_downloader: H,
         consensus: Arc<dyn Consensus<B::Block, Error = ConsensusError>>,
         stages_config: StageConfig,
-    ) -> StageSetBuilder<Provider, E>
+    ) -> StageSetBuilder<Provider, BlockExecutionError>
     where
-        BodyStage<B, E>: Stage<Provider, E>,
-        HeaderStage<P, H>: Stage<Provider, E>,
+        BodyStage<B>: Stage<Provider, BlockExecutionError>,
+        HeaderStage<P, H>: Stage<Provider, BlockExecutionError>,
     {
         StageSetBuilder::default()
             .add_stage(HeaderStage::new(
@@ -258,7 +257,7 @@ where
     }
 }
 
-impl<Provider, P, H, B, E> StageSet<Provider, E> for OnlineStages<P, H, B, E>
+impl<Provider, P, H, B, E> StageSet<Provider, E> for OnlineStages<P, H, B>
 where
     P: HeaderSyncGapProvider + 'static,
     H: HeaderDownloader<Header = <B::Block as Block>::Header> + 'static,
@@ -311,7 +310,7 @@ impl<EF> OfflineStages<EF> {
     }
 }
 
-impl<E, Provider> StageSet<Provider> for OfflineStages<E>
+impl<E, Provider> StageSet<Provider, E::Error> for OfflineStages<E>
 where
     E: BlockExecutorProvider,
     ExecutionStages<E>: StageSet<Provider, E::Error>,
@@ -368,7 +367,7 @@ impl<E> ExecutionStages<E> {
     }
 }
 
-impl<E, Provider> StageSet<Provider> for ExecutionStages<E>
+impl<E, Provider> StageSet<Provider, E::Error> for ExecutionStages<E>
 where
     E: BlockExecutorProvider,
     SenderRecoveryStage: Stage<Provider, E::Error>,

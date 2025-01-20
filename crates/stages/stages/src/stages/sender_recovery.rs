@@ -7,7 +7,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use reth_execution_errors::BlockExecError;
+use reth_execution_errors::{BlockExecError, BlockExecutionError};
 use reth_primitives::{GotExpected, NodePrimitives, StaticFileSegment};
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
@@ -32,7 +32,7 @@ const BATCH_SIZE: usize = 100_000;
 const WORKER_CHUNK_SIZE: usize = 100;
 
 /// Type alias for a sender that transmits the result of sender recovery.
-type RecoveryResultSender<E: BlockExecError> =
+type RecoveryResultSender<E> =
     mpsc::Sender<Result<(u64, Address), Box<SenderRecoveryStageError<E>>>>;
 
 /// The sender recovery stage iterates over existing transactions,
@@ -58,14 +58,13 @@ impl Default for SenderRecoveryStage {
     }
 }
 
-impl<Provider, E> Stage<Provider, E> for SenderRecoveryStage
+impl<Provider> Stage<Provider, BlockExecutionError> for SenderRecoveryStage
 where
     Provider: DBProvider<Tx: DbTxMut>
         + BlockReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + StatsReader
         + PruneCheckpointReader,
-    E: BlockExecError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -80,7 +79,7 @@ where
         &mut self,
         provider: &Provider,
         input: ExecInput,
-    ) -> Result<ExecOutput, StageError<E>> {
+    ) -> Result<ExecOutput, StageError<BlockExecutionError>> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -129,7 +128,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError<E>> {
+    ) -> Result<UnwindOutput, StageError<BlockExecutionError>> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Lookup latest tx id that we should unwind to
@@ -151,7 +150,7 @@ fn recover_range<Provider, CURSOR, E>(
     provider: &Provider,
     tx_batch_sender: mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender<E>)>>,
     senders_cursor: &mut CURSOR,
-) -> Result<(), StageError>
+) -> Result<(), StageError<E>>
 where
     Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
     CURSOR: DbCursorRW<tables::TransactionSenders>,
@@ -184,7 +183,7 @@ where
                 Ok(result) => result,
                 Err(error) => {
                     return match *error {
-                        SenderRecoveryStageError::FailedRecovery(err) => {
+                        SenderRecoveryStageError::<E>::FailedRecovery(err) => {
                             // get the block number for the bad transaction
                             let block_number = provider
                                 .tx_ref()
@@ -205,11 +204,13 @@ where
                                 ),
                             })
                         }
-                        SenderRecoveryStageError::StageError(err) => Err(err),
-                        SenderRecoveryStageError::RecoveredSendersMismatch(expectation) => {
+                        SenderRecoveryStageError::<E>::StageError(err) => Err(err),
+                        SenderRecoveryStageError::<E>::RecoveredSendersMismatch(expectation) => {
                             Err(StageError::Fatal(
-                                SenderRecoveryStageError::RecoveredSendersMismatch(expectation)
-                                    .into(),
+                                SenderRecoveryStageError::<E>::RecoveredSendersMismatch(
+                                    expectation,
+                                )
+                                .into(),
                             ))
                         }
                     }
@@ -225,7 +226,7 @@ where
     let expected = tx_range.end - tx_range.start;
     if processed_transactions != expected {
         return Err(StageError::Fatal(
-            SenderRecoveryStageError::RecoveredSendersMismatch(GotExpected {
+            SenderRecoveryStageError::<E>::RecoveredSendersMismatch(GotExpected {
                 got: processed_transactions,
                 expected,
             })
@@ -247,7 +248,7 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>,
     E: BlockExecError,
 {
-    let (tx_sender, tx_receiver) = mpsc::channel::<Vec<(Range<u64>, RecoveryResultSender)>>();
+    let (tx_sender, tx_receiver) = mpsc::channel::<Vec<(Range<u64>, RecoveryResultSender<E>)>>();
     let static_file_provider = provider.static_file_provider();
 
     // We do not use `tokio::task::spawn_blocking` because, during a shutdown,
@@ -312,10 +313,10 @@ where
 }
 
 #[inline]
-fn recover_sender<T: SignedTransaction>(
+fn recover_sender<T: SignedTransaction, E: BlockExecError>(
     (tx_id, tx): (TxNumber, T),
     rlp_buf: &mut Vec<u8>,
-) -> Result<(u64, Address), Box<SenderRecoveryStageError>> {
+) -> Result<(u64, Address), Box<SenderRecoveryStageError<E>>> {
     rlp_buf.clear();
     // We call [Signature::encode_and_recover_unchecked] because transactions run in the pipeline
     // are known to be valid - this means that we do not need to check whether or not the `s`
@@ -329,7 +330,9 @@ fn recover_sender<T: SignedTransaction>(
     Ok((tx_id, sender))
 }
 
-fn stage_checkpoint<Provider>(provider: &Provider) -> Result<EntitiesCheckpoint, StageError>
+fn stage_checkpoint<Provider>(
+    provider: &Provider,
+) -> Result<EntitiesCheckpoint, StageError<BlockExecutionError>>
 where
     Provider: StatsReader + StaticFileProviderFactory + PruneCheckpointReader,
 {
@@ -385,6 +388,7 @@ mod tests {
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
+    use reth_execution_errors::BlockExecutionError;
     use reth_primitives::{SealedBlock, TransactionSigned};
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::{
@@ -632,10 +636,8 @@ mod tests {
         }
     }
 
-    impl<E> StageTestRunner<E> for SenderRecoveryTestRunner
-    where
-        E: BlockExecError,
-    {
+    impl StageTestRunner for SenderRecoveryTestRunner {
+        type E = BlockExecutionError;
         type S = SenderRecoveryStage;
 
         fn db(&self) -> &TestStageDB {
@@ -704,10 +706,7 @@ mod tests {
         }
     }
 
-    impl<E> UnwindStageTestRunner<E> for SenderRecoveryTestRunner
-    where
-        E: BlockExecError,
-    {
+    impl UnwindStageTestRunner for SenderRecoveryTestRunner {
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             self.ensure_no_senders_by_block(input.unwind_to)
         }

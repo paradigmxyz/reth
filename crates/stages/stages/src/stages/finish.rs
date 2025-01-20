@@ -1,4 +1,4 @@
-use reth_execution_errors::BlockExecError;
+use reth_execution_errors::BlockExecutionError;
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
@@ -11,10 +11,7 @@ use reth_stages_api::{
 #[non_exhaustive]
 pub struct FinishStage;
 
-impl<Provider, E> Stage<Provider, E> for FinishStage
-where
-    E: BlockExecError,
-{
+impl<Provider> Stage<Provider, BlockExecutionError> for FinishStage {
     fn id(&self) -> StageId {
         StageId::Finish
     }
@@ -23,7 +20,7 @@ where
         &mut self,
         _provider: &Provider,
         input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    ) -> Result<ExecOutput, StageError<BlockExecutionError>> {
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(input.target()), done: true })
     }
 
@@ -31,7 +28,7 @@ where
         &mut self,
         _provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    ) -> Result<UnwindOutput, StageError<BlockExecutionError>> {
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
 }
@@ -43,6 +40,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, TestRunnerError,
         TestStageDB, UnwindStageTestRunner,
     };
+    use reth_execution_errors::BlockExecutionError;
     use reth_primitives::SealedHeader;
     use reth_provider::providers::StaticFileWriter;
     use reth_testing_utils::{
@@ -57,10 +55,8 @@ mod tests {
         db: TestStageDB,
     }
 
-    impl<E> StageTestRunner<E> for FinishTestRunner
-    where
-        E: BlockExecError,
-    {
+    impl StageTestRunner for FinishTestRunner {
+        type E = BlockExecutionError;
         type S = FinishStage;
 
         fn db(&self) -> &TestStageDB {

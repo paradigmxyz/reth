@@ -55,7 +55,6 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_execution_errors::BlockExecutionError;
     use reth_exex::ExExManagerHandle;
     use reth_primitives::{Account, Bytecode, SealedBlock, StaticFileSegment};
     use reth_provider::{
@@ -146,7 +145,7 @@ mod tests {
 
             // Check execution and create receipts and changesets according to the pruning
             // configuration
-            let mut execution_stage = ExecutionStage::<BlockExecutionError>::new(
+            let mut execution_stage = ExecutionStage::new(
                 EthExecutorProvider::ethereum(Arc::new(
                     ChainSpecBuilder::mainnet().berlin_activated().build(),
                 )),

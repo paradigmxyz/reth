@@ -1,7 +1,7 @@
 use crate::PipelineEvent;
 use alloy_eips::eip1898::BlockWithParent;
 use reth_consensus::ConsensusError;
-use reth_errors::{BlockExecError, DatabaseError, RethError};
+use reth_errors::{BlockExecError, BlockExecutionError, DatabaseError, RethError};
 use reth_network_p2p::error::DownloadError;
 use reth_provider::ProviderError;
 use reth_prune::{PruneSegment, PruneSegmentError, PrunerError};
@@ -35,7 +35,7 @@ where
 
 /// A stage execution error.
 #[derive(Error, Debug)]
-pub enum StageError<E: BlockExecError> {
+pub enum StageError<E: BlockExecError = BlockExecutionError> {
     /// The stage encountered an error related to a block.
     #[error("stage encountered an error in block #{number}: {error}", number = block.block.number)]
     Block {

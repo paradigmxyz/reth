@@ -67,7 +67,7 @@ where
                 BlockNumberList::new_pre_sorted(indices.iter().copied()),
             )?;
         }
-        Ok::<(), StageError>(())
+        Ok::<(), StageError<E>>(())
     };
 
     // observability
@@ -108,7 +108,7 @@ where
 /// `Address.StorageKey`). It flushes indices to disk when reaching a shard's max length
 /// (`NUM_OF_INDICES_IN_SHARD`) or when the partial key changes, ensuring the last previous partial
 /// key shard is stored.
-pub(crate) fn load_history_indices<Provider, H, P, E: BlockExecError>(
+pub(crate) fn load_history_indices<Provider, H, P, E>(
     provider: &Provider,
     mut collector: Collector<H::Key, H::Value>,
     append_only: bool,
@@ -120,6 +120,7 @@ where
     Provider: DBProvider<Tx: DbTxMut>,
     H: Table<Value = BlockNumberList>,
     P: Copy + Default + Eq,
+    E: BlockExecError,
 {
     let mut write_cursor = provider.tx_ref().cursor_write::<H>()?;
     let mut current_partial = P::default();

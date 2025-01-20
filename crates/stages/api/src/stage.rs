@@ -1,6 +1,6 @@
 use crate::{error::StageError, StageCheckpoint, StageId};
 use alloy_primitives::{BlockNumber, TxNumber};
-use reth_errors::BlockExecError;
+use reth_errors::{BlockExecError, BlockExecutionError};
 use reth_provider::{BlockReader, ProviderError};
 use std::{
     cmp::{max, min},
@@ -192,7 +192,7 @@ pub struct UnwindOutput {
 ///
 /// Stages receive [`DBProvider`](reth_provider::DBProvider).
 #[auto_impl::auto_impl(Box)]
-pub trait Stage<Provider, E>: Send + Sync
+pub trait Stage<Provider, E = BlockExecutionError>: Send + Sync
 where
     E: BlockExecError,
 {

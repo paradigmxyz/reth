@@ -262,7 +262,7 @@ where
     }
 }
 
-impl<E, Provider> Stage<Provider, E::Error> for ExecutionStage<E::Error>
+impl<E, Provider> Stage<Provider, E::Error> for ExecutionStage<E>
 where
     E: BlockExecutorProvider,
     Provider: DBProvider
@@ -284,14 +284,18 @@ where
         &mut self,
         cx: &mut Context<'_>,
         _: ExecInput,
-    ) -> Poll<Result<(), StageError>> {
+    ) -> Poll<Result<(), StageError<E::Error>>> {
         ready!(self.exex_manager_handle.poll_ready(cx));
 
         Poll::Ready(Ok(()))
     }
 
     /// Execute the stage
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError<E::Error>> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }

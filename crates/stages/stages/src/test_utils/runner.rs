@@ -19,13 +19,11 @@ pub(crate) enum TestRunnerError {
 }
 
 /// A generic test runner for stages.
-pub(crate) trait StageTestRunner<E>
-where
-    E: BlockExecError,
-{
+pub(crate) trait StageTestRunner {
+    type E: BlockExecError;
     type S: Stage<
             DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>,
-            E,
+            Self::E,
         > + 'static;
 
     /// Return a reference to the database.
@@ -35,10 +33,7 @@ where
     fn stage(&self) -> Self::S;
 }
 
-pub(crate) trait ExecuteStageTestRunner<E>: StageTestRunner<E>
-where
-    E: BlockExecError,
-{
+pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
     type Seed: Send + Sync;
 
     /// Seed database for stage execution
@@ -52,7 +47,10 @@ where
     ) -> Result<(), TestRunnerError>;
 
     /// Run [`Stage::execute`] and return a receiver for the result.
-    fn execute(&self, input: ExecInput) -> oneshot::Receiver<Result<ExecOutput, StageError<E>>> {
+    fn execute(
+        &self,
+        input: ExecInput,
+    ) -> oneshot::Receiver<Result<ExecOutput, StageError<Self::E>>> {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.db().factory.clone(), self.stage());
         tokio::spawn(async move {
@@ -73,15 +71,12 @@ where
     }
 }
 
-pub(crate) trait UnwindStageTestRunner<E>: StageTestRunner<E>
-where
-    E: BlockExecError,
-{
+pub(crate) trait UnwindStageTestRunner: StageTestRunner {
     /// Validate the unwind
     fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError>;
 
     /// Run [`Stage::unwind`] and return a receiver for the result.
-    async fn unwind(&self, input: UnwindInput) -> Result<UnwindOutput, StageError> {
+    async fn unwind(&self, input: UnwindInput) -> Result<UnwindOutput, StageError<Self::E>> {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.db().factory.clone(), self.stage());
         tokio::spawn(async move {

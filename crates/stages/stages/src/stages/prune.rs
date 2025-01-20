@@ -1,5 +1,5 @@
 use reth_db::{table::Value, transaction::DbTxMut};
-use reth_execution_errors::BlockExecError;
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::NodePrimitives;
 use reth_provider::{
     BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
@@ -37,14 +37,13 @@ impl PruneStage {
     }
 }
 
-impl<Provider, E> Stage<Provider, E> for PruneStage
+impl<Provider> Stage<Provider, BlockExecutionError> for PruneStage
 where
     Provider: DBProvider<Tx: DbTxMut>
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
-    E: BlockExecError,
 {
     fn id(&self) -> StageId {
         StageId::Prune
@@ -54,7 +53,7 @@ where
         &mut self,
         provider: &Provider,
         input: ExecInput,
-    ) -> Result<ExecOutput, StageError<E>> {
+    ) -> Result<ExecOutput, StageError<BlockExecutionError>> {
         let mut pruner = PrunerBuilder::default()
             .segments(self.prune_modes.clone())
             .delete_limit(self.commit_threshold)
@@ -102,7 +101,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError<E>> {
+    ) -> Result<UnwindOutput, StageError<BlockExecutionError>> {
         // We cannot recover the data that was pruned in `execute`, so we just update the
         // checkpoints.
         let prune_checkpoints = provider.get_prune_checkpoints()?;
@@ -131,14 +130,13 @@ impl PruneSenderRecoveryStage {
     }
 }
 
-impl<Provider, E> Stage<Provider, E> for PruneSenderRecoveryStage
+impl<Provider> Stage<Provider, BlockExecutionError> for PruneSenderRecoveryStage
 where
     Provider: DBProvider<Tx: DbTxMut>
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + BlockReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>,
-    E: BlockExecError,
 {
     fn id(&self) -> StageId {
         StageId::PruneSenderRecovery
@@ -148,7 +146,7 @@ where
         &mut self,
         provider: &Provider,
         input: ExecInput,
-    ) -> Result<ExecOutput, StageError<E>> {
+    ) -> Result<ExecOutput, StageError<BlockExecutionError>> {
         let mut result = self.0.execute(provider, input)?;
 
         // Adjust the checkpoint to the highest pruned block number of the Sender Recovery segment
@@ -169,7 +167,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    ) -> Result<UnwindOutput, StageError<BlockExecutionError>> {
         self.0.unwind(provider, input)
     }
 }
@@ -182,6 +180,7 @@ mod tests {
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
     use alloy_primitives::B256;
+    use reth_execution_errors::BlockExecutionError;
     use reth_primitives::SealedBlock;
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::{
@@ -198,6 +197,7 @@ mod tests {
     }
 
     impl StageTestRunner for PruneTestRunner {
+        type E = BlockExecutionError;
         type S = PruneStage;
 
         fn db(&self) -> &TestStageDB {
@@ -269,10 +269,7 @@ mod tests {
         }
     }
 
-    impl<E> UnwindStageTestRunner<E> for PruneTestRunner
-    where
-        E: BlockExecError,
-    {
+    impl UnwindStageTestRunner for PruneTestRunner {
         fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
             Ok(())
         }

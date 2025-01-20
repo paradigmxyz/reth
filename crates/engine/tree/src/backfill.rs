@@ -8,7 +8,7 @@
 //! These modes are mutually exclusive and the node can only be in one mode at a time.
 
 use futures::FutureExt;
-use reth_errors::BlockExecError;
+use reth_errors::{BlockExecError, BlockExecutionError};
 use reth_provider::providers::ProviderNodeTypes;
 use reth_stages_api::{ControlFlow, Pipeline, PipelineError, PipelineTarget, PipelineWithResult};
 use reth_tasks::TaskSpawner;
@@ -65,13 +65,16 @@ pub enum BackfillAction {
 
 /// The events that can be emitted on backfill sync.
 #[derive(Debug)]
-pub enum BackfillEvent {
+pub enum BackfillEvent<E = BlockExecutionError>
+where
+    E: BlockExecError,
+{
     /// Backfill sync started.
     Started(PipelineTarget),
     /// Backfill sync finished.
     ///
     /// If this is returned, backfill sync is idle.
-    Finished(Result<ControlFlow, PipelineError>),
+    Finished(Result<ControlFlow, PipelineError<E>>),
     /// Sync task was dropped after it was started, unable to receive it because
     /// channel closed. This would indicate a panicked task.
     TaskDropped(String),
@@ -91,7 +94,10 @@ pub struct PipelineSync<N: ProviderNodeTypes> {
 
 impl<N: ProviderNodeTypes> PipelineSync<N> {
     /// Create a new instance.
-    pub fn new(pipeline: Pipeline<N, E>, pipeline_task_spawner: Box<dyn TaskSpawner>) -> Self {
+    pub fn new(
+        pipeline: Pipeline<N, BlockExecutionError>,
+        pipeline_task_spawner: Box<dyn TaskSpawner>,
+    ) -> Self {
         Self {
             pipeline_task_spawner,
             pipeline_state: PipelineState::Idle(Some(pipeline)),
@@ -213,7 +219,7 @@ impl<N: ProviderNodeTypes> BackfillSync for PipelineSync<N> {
 /// blockchain tree any messages that would result in database writes, since it would result in a
 /// deadlock.
 #[derive(Debug)]
-enum PipelineState<N: ProviderNodeTypes, E: BlockExecError> {
+enum PipelineState<N: ProviderNodeTypes, E: BlockExecError = BlockExecutionError> {
     /// Pipeline is idle.
     Idle(Option<Pipeline<N, E>>),
     /// Pipeline is running and waiting for a response

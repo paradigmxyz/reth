@@ -3,7 +3,7 @@ use alloy_primitives::Address;
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db::tables;
 use reth_db_api::{models::ShardedKey, table::Decode, transaction::DbTxMut};
-use reth_execution_errors::BlockExecError;
+use reth_execution_errors::BlockExecutionError;
 use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
@@ -43,11 +43,10 @@ impl Default for IndexAccountHistoryStage {
     }
 }
 
-impl<Provider, E> Stage<Provider, E> for IndexAccountHistoryStage
+impl<Provider> Stage<Provider, BlockExecutionError> for IndexAccountHistoryStage
 where
     Provider:
         DBProvider<Tx: DbTxMut> + HistoryWriter + PruneCheckpointReader + PruneCheckpointWriter,
-    E: BlockExecError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -59,7 +58,7 @@ where
         &mut self,
         provider: &Provider,
         mut input: ExecInput,
-    ) -> Result<ExecOutput, StageError> {
+    ) -> Result<ExecOutput, StageError<BlockExecutionError>> {
         if let Some((target_prunable_block, prune_mode)) = self
             .prune_mode
             .map(|mode| {
@@ -105,17 +104,22 @@ where
         }
 
         info!(target: "sync::stages::index_account_history::exec", ?first_sync, "Collecting indices");
-        let collector =
-            collect_history_indices::<_, tables::AccountChangeSets, tables::AccountsHistory, _>(
-                provider,
-                range.clone(),
-                ShardedKey::new,
-                |(index, value)| (index, value.address),
-                &self.etl_config,
-            )?;
+        let collector = collect_history_indices::<
+            _,
+            tables::AccountChangeSets,
+            tables::AccountsHistory,
+            _,
+            BlockExecutionError,
+        >(
+            provider,
+            range.clone(),
+            ShardedKey::new,
+            |(index, value)| (index, value.address),
+            &self.etl_config,
+        )?;
 
         info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
-        load_history_indices::<_, tables::AccountsHistory, _>(
+        load_history_indices::<_, tables::AccountsHistory, _, BlockExecutionError>(
             provider,
             collector,
             first_sync,
@@ -132,7 +136,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    ) -> Result<UnwindOutput, StageError<BlockExecutionError>> {
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
@@ -161,6 +165,7 @@ mod tests {
         },
         transaction::DbTx,
     };
+    use reth_execution_errors::BlockExecutionError;
     use reth_provider::{providers::StaticFileWriter, DatabaseProviderFactory};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_contract_account_range,
@@ -512,7 +517,8 @@ mod tests {
         }
     }
 
-    impl<E> StageTestRunner<E> for IndexAccountHistoryTestRunner<E> {
+    impl StageTestRunner for IndexAccountHistoryTestRunner {
+        type E = BlockExecutionError;
         type S = IndexAccountHistoryStage;
 
         fn db(&self) -> &TestStageDB {

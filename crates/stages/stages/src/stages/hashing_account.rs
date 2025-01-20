@@ -7,7 +7,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_execution_errors::BlockExecError;
+use reth_execution_errors::{BlockExecError, BlockExecutionError};
 use reth_primitives::Account;
 use reth_provider::{AccountExtReader, DBProvider, HashingWriter, StatsReader};
 use reth_stages_api::{
@@ -62,7 +62,10 @@ impl AccountHashingStage {
     pub fn seed<Tx: DbTx + DbTxMut + 'static, N: reth_provider::providers::ProviderNodeTypes>(
         provider: &reth_provider::DatabaseProvider<Tx, N>,
         opts: SeedOpts,
-    ) -> Result<Vec<(alloy_primitives::Address, reth_primitives::Account)>, StageError>
+    ) -> Result<
+        Vec<(alloy_primitives::Address, reth_primitives::Account)>,
+        StageError<BlockExecutionError>,
+    >
     where
         N::Primitives: reth_primitives_traits::FullNodePrimitives<
             Block = reth_primitives::Block,
@@ -132,10 +135,9 @@ impl Default for AccountHashingStage {
     }
 }
 
-impl<Provider, E> Stage<Provider, E> for AccountHashingStage
+impl<Provider> Stage<Provider, BlockExecutionError> for AccountHashingStage
 where
     Provider: DBProvider<Tx: DbTxMut> + HashingWriter + AccountExtReader + StatsReader,
-    E: BlockExecError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -143,7 +145,11 @@ where
     }
 
     /// Execute the stage.
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError<BlockExecutionError>> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -234,7 +240,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    ) -> Result<UnwindOutput, StageError<BlockExecutionError>> {
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
@@ -254,10 +260,13 @@ where
 }
 
 /// Flushes channels hashes to ETL collector.
-fn collect(
+fn collect<E>(
     channels: &mut Vec<Receiver<(RawKey<B256>, RawValue<Account>)>>,
     collector: &mut Collector<RawKey<B256>, RawValue<Account>>,
-) -> Result<(), StageError> {
+) -> Result<(), StageError<E>>
+where
+    E: BlockExecError,
+{
     for channel in channels.iter_mut() {
         while let Ok((key, v)) = channel.recv() {
             collector.insert(key, v)?;
@@ -356,6 +365,7 @@ mod tests {
         use super::*;
         use crate::test_utils::TestStageDB;
         use alloy_primitives::Address;
+        use reth_execution_errors::BlockExecutionError;
         use reth_provider::DatabaseProviderFactory;
 
         pub(crate) struct AccountHashingTestRunner {
@@ -431,10 +441,8 @@ mod tests {
             }
         }
 
-        impl<E> StageTestRunner<E> for AccountHashingTestRunner
-        where
-            E: BlockExecError,
-        {
+        impl StageTestRunner for AccountHashingTestRunner {
+            type E = BlockExecutionError;
             type S = AccountHashingStage;
 
             fn db(&self) -> &TestStageDB {

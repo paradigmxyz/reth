@@ -8,7 +8,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
-use reth_execution_errors::BlockExecError;
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::NodePrimitives;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
@@ -57,7 +57,7 @@ impl TransactionLookupStage {
     }
 }
 
-impl<Provider, E> Stage<Provider, E> for TransactionLookupStage
+impl<Provider> Stage<Provider, BlockExecutionError> for TransactionLookupStage
 where
     Provider: DBProvider<Tx: DbTxMut>
         + PruneCheckpointWriter
@@ -66,7 +66,6 @@ where
         + StatsReader
         + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + TransactionsProviderExt,
-    E: BlockExecError,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -78,7 +77,7 @@ where
         &mut self,
         provider: &Provider,
         mut input: ExecInput,
-    ) -> Result<ExecOutput, StageError<E>> {
+    ) -> Result<ExecOutput, StageError<BlockExecutionError>> {
         if let Some((target_prunable_block, prune_mode)) = self
             .prune_mode
             .map(|mode| {
@@ -193,7 +192,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError<E>> {
+    ) -> Result<UnwindOutput, StageError<BlockExecutionError>> {
         let tx = provider.tx_ref();
         let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.chunk_size);
 
@@ -225,10 +224,11 @@ where
     }
 }
 
-fn stage_checkpoint<Provider, E>(provider: &Provider) -> Result<EntitiesCheckpoint, StageError<E>>
+fn stage_checkpoint<Provider>(
+    provider: &Provider,
+) -> Result<EntitiesCheckpoint, StageError<BlockExecutionError>>
 where
     Provider: PruneCheckpointReader + StaticFileProviderFactory + StatsReader,
-    E: BlockExecError,
 {
     let pruned_entries = provider
         .get_prune_checkpoint(PruneSegment::TransactionLookup)?
@@ -258,6 +258,7 @@ mod tests {
     };
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
+    use reth_execution_errors::BlockExecutionError;
     use reth_primitives::SealedBlock;
     use reth_provider::{
         providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
@@ -481,10 +482,8 @@ mod tests {
         }
     }
 
-    impl<E> StageTestRunner<E> for TransactionLookupTestRunner
-    where
-        E: BlockExecError,
-    {
+    impl StageTestRunner for TransactionLookupTestRunner {
+        type E = BlockExecutionError;
         type S = TransactionLookupStage;
 
         fn db(&self) -> &TestStageDB {
@@ -571,10 +570,7 @@ mod tests {
         }
     }
 
-    impl<E> UnwindStageTestRunner<E> for TransactionLookupTestRunner
-    where
-        E: BlockExecError,
-    {
+    impl UnwindStageTestRunner for TransactionLookupTestRunner {
         fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
             self.ensure_no_hash_by_block(input.unwind_to)
         }
