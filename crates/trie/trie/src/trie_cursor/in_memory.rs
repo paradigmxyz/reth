@@ -1,9 +1,9 @@
 use super::{TrieCursor, TrieCursorFactory};
 use crate::{
-    forward_cursor::{ForwardInMemoryCursor, OptionForwardInMemoryCursor},
+    forward_cursor::OptionForwardInMemoryCursor,
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
 };
-use alloy_primitives::{map::HashSet, B256};
+use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
 
