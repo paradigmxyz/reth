@@ -3,11 +3,20 @@ use std::os::unix::net::UnixStream;
 use std::result::Result::Ok;
 use thiserror::Error;
 use reth_storage_errors::db::DatabaseError;
+use std::time::{SystemTime, UNIX_EPOCH};
+use rand::{thread_rng, Rng};
 
 const OP_PUT: u8 = 1;
 const OP_GET: u8 = 2;
 const OP_DELETE: u8 = 3;
 const OP_WRITE: u8 = 4;
+const OP_FIRST: u8 = 5;
+const OP_SEEK_EXACT: u8 = 6;
+const OP_SEEK: u8 = 7;
+const OP_NEXT: u8 = 8;
+const OP_PREV: u8 = 9;
+const OP_LAST: u8 = 10;
+const OP_CURRENT: u8 = 11;
 
 const STATUS_SUCCESS: u8 = 1;
 const STATUS_ERROR: u8 = 0;
@@ -202,6 +211,148 @@ impl ScalerizeClient {
         }
     }
 
+    pub fn first(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+        let mut request = vec![OP_FIRST];
+        request.extend_from_slice(&table_code.to_be_bytes());
+        request.extend_from_slice(&cursor_id);
+        
+        println!("FIRST REQUEST: {:?}", request);
+        self.stream.write_all(&request)?;
+        self.stream.flush()?;
+
+        let response = self.read_full_response()?;
+        let status = response[0];
+        let data = &response[1..];
+
+        match status {
+            STATUS_SUCCESS => self.parse_key_value_response(data, key_len),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
+            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
+        }
+    }
+
+    pub fn seek_exact(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8]) -> Result<Vec<u8>, ClientError> {
+        let mut request = vec![OP_SEEK_EXACT];
+        request.extend_from_slice(&table_code.to_be_bytes());
+        request.extend_from_slice(&cursor_id);
+        request.extend_from_slice(key);
+        
+        println!("SEEK_EXACT REQUEST: {:?}", request);
+        self.stream.write_all(&request)?;
+        self.stream.flush()?;
+
+        let response = self.read_full_response()?;
+        let status = response[0];
+        let data = &response[1..];
+
+        match status {
+            STATUS_SUCCESS => Ok(data.to_vec()),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
+            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
+        }
+    }
+
+    pub fn seek(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8]) -> Result<Vec<u8>, ClientError> {
+        let mut request = vec![OP_SEEK];
+        request.extend_from_slice(&table_code.to_be_bytes());
+        request.extend_from_slice(&cursor_id);
+        request.extend_from_slice(key);
+        
+        println!("SEEK REQUEST: {:?}", request);
+        self.stream.write_all(&request)?;
+        self.stream.flush()?;
+
+        let response = self.read_full_response()?;
+        let status = response[0];
+        let data = &response[1..];
+
+        match status {
+            STATUS_SUCCESS => Ok(data.to_vec()),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
+            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
+        }
+    }
+
+    pub fn next(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+        let mut request = vec![OP_NEXT];
+        request.extend_from_slice(&table_code.to_be_bytes());
+        request.extend_from_slice(&cursor_id);
+        
+        println!("NEXT REQUEST: {:?}", request);
+        self.stream.write_all(&request)?;
+        self.stream.flush()?;
+
+        let response = self.read_full_response()?;
+        let status = response[0];
+        let data = &response[1..];
+
+        match status {
+            STATUS_SUCCESS => self.parse_key_value_response(data, key_len),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
+            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
+        }
+    }
+
+    pub fn prev(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+        let mut request = vec![OP_PREV];
+        request.extend_from_slice(&table_code.to_be_bytes());
+        request.extend_from_slice(&cursor_id);
+        
+        println!("PREV REQUEST: {:?}", request);
+        self.stream.write_all(&request)?;
+        self.stream.flush()?;
+
+        let response = self.read_full_response()?;
+        let status = response[0];
+        let data = &response[1..];
+
+        match status {
+            STATUS_SUCCESS => self.parse_key_value_response(data, key_len),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
+            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
+        }
+    }
+
+    pub fn last(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+        let mut request = vec![OP_LAST];
+        request.extend_from_slice(&table_code.to_be_bytes());
+        request.extend_from_slice(&cursor_id);
+        
+        println!("LAST REQUEST: {:?}", request);
+        self.stream.write_all(&request)?;
+        self.stream.flush()?;
+
+        let response = self.read_full_response()?;
+        let status = response[0];
+        let data = &response[1..];
+
+        match status {
+            STATUS_SUCCESS => self.parse_key_value_response(data, key_len),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
+            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
+        }
+    }
+
+    pub fn current(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+        let mut request = vec![OP_CURRENT];
+        request.extend_from_slice(&table_code.to_be_bytes());
+        request.extend_from_slice(&cursor_id);
+        
+        println!("PREV REQUEST: {:?}", request);
+        self.stream.write_all(&request)?;
+        self.stream.flush()?;
+
+        let response = self.read_full_response()?;
+        let status = response[0];
+        let data = &response[1..];
+
+        match status {
+            STATUS_SUCCESS => self.parse_key_value_response(data, key_len),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
+            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
+        }
+    }
+
     pub fn check_additional_messages(&mut self) {
         println!("Checking for additional messages...");
         // Set socket to non-blocking mode for checking additional messages
@@ -232,6 +383,37 @@ impl ScalerizeClient {
         // Set socket back to blocking mode
         self.stream.set_nonblocking(false).unwrap_or_else(|e| println!("Failed to set blocking mode: {}", e));
     }
+
+    fn parse_key_value_response(&self, data: &[u8], key_len_in_bytes: u32) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+        if data.len() < key_len_in_bytes.try_into().unwrap() {
+            return Err(ClientError::InvalidResponse("Response too short for key length".to_string()));
+        }
+        
+        if data.len() < key_len_in_bytes.try_into().unwrap() {
+            return Err(ClientError::InvalidResponse("Response too short for key".to_string()));
+        }
+        
+        let key = data[0..key_len_in_bytes as usize].to_vec();
+        let value = data[key_len_in_bytes as usize..].to_vec();
+        Ok((key, value))
+    }
+}
+
+pub fn generate_unique_bytes() -> [u8; 8] {
+    // Get current timestamp with nanosecond precision
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+    
+    // Generate random number for additional entropy
+    let random = thread_rng().gen::<u32>() as u64;
+    
+    // Combine timestamp and random data
+    let unique_num = (timestamp << 32) | random;
+    
+    // Convert to bytes
+    unique_num.to_be_bytes()
 }
 
 impl std::fmt::Debug for ScalerizeClient {

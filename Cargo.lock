@@ -7099,6 +7099,7 @@ dependencies = [
  "pprof",
  "primitive-types 0.10.1",
  "proptest",
+ "rand 0.8.5",
  "reth-db-api",
  "reth-fs-util",
  "reth-libmdbx",

@@ -12,6 +12,7 @@ description = "Database primitives used in reth."
 workspace = true
 
 [dependencies]
+rand = "0.8"
 rlp = "0.5.0"
 primitive-types = "0.10" 
 # reth

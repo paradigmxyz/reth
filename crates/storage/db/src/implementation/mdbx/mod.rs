@@ -520,7 +520,7 @@ mod tests {
     use reth_libmdbx::Error;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
-    use scalerize_client::ScalerizeClient;
+    use scalerize_client::{generate_unique_bytes, ScalerizeClient};
     use std::{ptr::null, str::FromStr};
     use tempfile::TempDir;
     use bytes::BytesMut;
@@ -892,6 +892,13 @@ mod tests {
         let tx = db.tx().expect(ERROR_INIT_TX);
         let mut cursor = tx.cursor_read::<CanonicalHeaders>().unwrap();
         assert_eq!(cursor.current(), Ok(None));
+        assert_eq!(cursor.current(), Ok(None));
+        while let Some((key, value)) = cursor.prev().unwrap() {
+            println!("PREV Key: {}, Value: {:?}", key, value);
+        }
+        while let Some((key, value)) = cursor.next().unwrap() {
+            println!("NEXT Key: {}, Value: {:?}", key, value);
+        }
 
         // Seek exact
         let exact = cursor.seek_exact(missing_key).unwrap();
@@ -943,8 +950,40 @@ mod tests {
         // assert_eq!(res, vec![0, 1, 2, 3, 4, 5]);
         // tx.commit().expect(ERROR_COMMIT);
 
-        let key1 = B256::random();
-        let key2 = B256::random();
+        // let key1 = B256::random();
+        // let key2 = B256::random();
+        // let key3 = B256::random();
+        let key1 = B256::from([
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let key2 = B256::from([
+            1u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let key3 = B256::from([
+            2u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let key4 = B256::from([
+            1u8, 1u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+        println!("KEY 1: {:?}", key1.as_slice());
+        println!("KEY 2: {:?}", key2.as_slice());
+        println!("KEY 3: {:?}", key3.as_slice());
+
         let value1 = Account {
             nonce: 1,
             balance: U256::from(1000),
@@ -957,6 +996,12 @@ mod tests {
             bytecode_hash: Some(U256::from(12345).into()),
         };
 
+        let value3 = Account {
+            nonce: 3,
+            balance: U256::from(3000),
+            bytecode_hash: Some(U256::from(12345).into()),
+        };
+
         let rlp_encoded1 = rlp::encode(&value1);
         println!("RLP Encoded Value 1: {:?}", rlp_encoded1.to_vec());
         let decoded_account: Account = rlp::decode(&rlp_encoded1).expect("Failed to decode RLP");
@@ -965,6 +1010,11 @@ mod tests {
         let rlp_encoded2 = rlp::encode(&value2);
         println!("RLP Encoded Value 2: {:?}", rlp_encoded2.to_vec());
         let decoded_account: Account = rlp::decode(&rlp_encoded2).expect("Failed to decode RLP");
+        println!("Decoded Account 2: {:?}", decoded_account);
+
+        let rlp_encoded3 = rlp::encode(&value3);
+        println!("RLP Encoded Value 2: {:?}", rlp_encoded2.to_vec());
+        let decoded_account: Account = rlp::decode(&rlp_encoded3).expect("Failed to decode RLP");
         println!("Decoded Account 2: {:?}", decoded_account);
 
         let mut scalerize_client = ScalerizeClient::connect()
@@ -1004,7 +1054,23 @@ mod tests {
                 println!("Write request failed with error: {:?}", e);
             }
         }
-        
+
+        let put_response = scalerize_client.put(0, key3.as_slice(),None, &rlp_encoded3)
+        .expect("PUT REQUEST FAILED");
+
+        println!("BYTES TO BE DECODED:{:?}", &put_response);
+        let rlp = Rlp::new(&put_response);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        println!("PUT Account:{:?}", decoded_account);
+
+        match scalerize_client.write() {
+            Ok(_) => {
+                println!("WRITTEN TO DB");
+            }
+            Err(e) => {
+                println!("Write request failed with error: {:?}", e);
+            }
+        }
         // Try put request for table which does not exists
         // let put_response = scalerize_client.put(2, key2.as_slice(),&[], &rlp_encoded)
         // .expect("Failed to get put response");
@@ -1085,54 +1151,43 @@ mod tests {
         // //     value: U256::from(1),
         // // };
 
-        let rlp_encoded = rlp::encode(&entry1);
-        let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
-        println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
-        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry1.key.as_slice()), &rlp_encoded)
+        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry1.key.as_slice()), &entry1.value.to_be_bytes::<32>())
         .expect("Failed to get put response");
-        
-        println!("BYTES TO BE DECODED:{:?}", &put_response);
-        let rlp = Rlp::new(&put_response);
-        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
-        println!("PUT Storage Entry:{:?}", decoded_storage_entry);
+        println!("PUT RESPONSE: {:?}", put_response);
 
-
-
-        let rlp_encoded = rlp::encode(&entry2);
-        let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
-        println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
-        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry2.key.as_slice()), &rlp_encoded)
+        // let rlp_encoded = rlp::encode(&entry2);
+        // let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
+        // println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
+        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry2.key.as_slice()), &entry2.value.to_be_bytes::<32>())
         .expect("Failed to get put response");
-        
-        println!("BYTES TO BE DECODED:{:?}", &put_response);
-        let rlp = Rlp::new(&put_response);
-        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
-        println!("PUT Storage Entry:{:?}", decoded_storage_entry);
+        println!("PUT RESPONSE: {:?}", put_response);
 
-
-
-        let rlp_encoded = rlp::encode(&entry3);
-        let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
-        println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
-        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry3.key.as_slice()), &rlp_encoded)
+        // let rlp_encoded = rlp::encode(&entry3);
+        // let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
+        // println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
+        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry3.key.as_slice()), &entry3.value.to_be_bytes::<32>())
         .expect("Failed to get put response");
+        println!("PUT RESPONSE: {:?}", put_response);
+
         
-        println!("BYTES TO BE DECODED:{:?}", &put_response);
-        let rlp = Rlp::new(&put_response);
-        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
-        println!("PUT Storage Entry:{:?}", decoded_storage_entry);
+        // println!("BYTES TO BE DECODED:{:?}", &put_response);
+        // let rlp = Rlp::new(&put_response);
+        // let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
+        // println!("PUT Storage Entry:{:?}", decoded_storage_entry);
 
 
-        let rlp_encoded = rlp::encode(&entry4);
-        let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
-        println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
-        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry4.key.as_slice()), &rlp_encoded)
+        // let rlp_encoded = rlp::encode(&entry4);
+        // let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
+        // println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
+        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry4.key.as_slice()), &entry4.value.to_be_bytes::<32>())
         .expect("Failed to get put response");
+        println!("PUT RESPONSE: {:?}", put_response);
+
         
-        println!("BYTES TO BE DECODED:{:?}", &put_response);
-        let rlp = Rlp::new(&put_response);
-        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
-        println!("PUT Storage Entry:{:?}", decoded_storage_entry);
+        // println!("BYTES TO BE DECODED:{:?}", &put_response);
+        // let rlp = Rlp::new(&put_response);
+        // let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
+        // println!("PUT Storage Entry:{:?}", decoded_storage_entry);
 
         match scalerize_client.write() {
             Ok(_) => {
@@ -1146,12 +1201,40 @@ mod tests {
         let get_response = scalerize_client.get(1, key1.as_slice()).
         expect("Failed to get response");
 
-        println!("BYTES TO BE DECODED:{:?}", &get_response);
-        let rlp = Rlp::new(&get_response);
-        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
-        println!("GET Storage Entry:{:?}", decoded_storage_entry);
 
-        
+        let storage_entry = StorageEntry{
+            key: B256::from_slice(&get_response[..32]),
+            value:U256::from_be_slice(&get_response[32..]),
+        };
+       
+        println!("GET Storage Entry:{:?}", storage_entry);
+
+        // println!("BYTES TO BE DECODED:{:?}", &get_response);
+        // let rlp = Rlp::new(&get_response);
+        // let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
+        // println!("GET Storage Entry:{:?}", decoded_storage_entry);
+
+        // this will delete all entries for HashedStorages for account address key1
+        // match scalerize_client.delete(1, key1.as_slice(), &[]) {
+        //     Ok(_) => {
+        //         println!("DELETE REQUEST SUCCESSFUL");
+        //     }
+        //     Err(e) => {
+        //         println!("Delete request failed with error: {:?}", e);
+        //     }
+        // }
+
+        // this will delete all entries in the substore created for an account
+        // match scalerize_client.delete(0, key1.as_slice(), &[]) {
+        //     Ok(_) => {
+        //         println!("DELETE REQUEST SUCCESSFUL");
+        //     }
+        //     Err(e) => {
+        //         println!("Delete request failed with error: {:?}", e);
+        //     }
+        // }
+
+        // let rlp_encoded = rlp::encode(&entry1);
 
         // this will delete only entry for table HashedStorages with account address == key1 and subkey == entry1
         match scalerize_client.delete(1, key1.as_slice(), Some(entry1.key.as_slice())) {
@@ -1176,20 +1259,27 @@ mod tests {
         let get_response = scalerize_client.get(1, key1.as_slice()).
         expect("Failed to get response");
 
-        println!("BYTES TO BE DECODED:{:?}", &get_response);
-        let rlp = Rlp::new(&get_response);
-        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
-        println!("GET Storage Entry:{:?}", decoded_storage_entry);
+        let storage_entry = StorageEntry{
+            key: B256::from_slice(&get_response[..32]),
+            value:U256::from_be_slice(&get_response[32..]),
+        };
+       
+        println!("GET Storage Entry:{:?}", storage_entry);
+
+        // println!("BYTES TO BE DECODED:{:?}", &get_response);
+        // let rlp = Rlp::new(&get_response);
+        // let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
+        // println!("GET Storage Entry:{:?}", decoded_storage_entry);
 
         // this will delete all the entries for key
-        match scalerize_client.delete(1, key1.as_slice(), None) {
-            Ok(_) => {
-                println!("DELETE REQUEST SUCCESSFUL");
-            }
-            Err(e) => {
-                println!("Delete request failed with error: {:?}", e);
-            }
-        }
+        // match scalerize_client.delete(1, key1.as_slice(), None) {
+        //     Ok(_) => {
+        //         println!("DELETE REQUEST SUCCESSFUL");
+        //     }
+        //     Err(e) => {
+        //         println!("Delete request failed with error: {:?}", e);
+        //     }
+        // }
 
         match scalerize_client.write() {
             Ok(_) => {
@@ -1200,15 +1290,300 @@ mod tests {
             }
         }
 
+        let get_response = scalerize_client.get(1, key1.as_slice()).
+        expect("Failed to get response");
+
+        let storage_entry = StorageEntry{
+            key: B256::from_slice(&get_response[..32]),
+            value:U256::from_be_slice(&get_response[32..]),
+        };
+       
+        println!("GET Storage Entry:{:?}", storage_entry);
+
+        // this will delete all the entries for key
+        // match scalerize_client.delete(1, key1.as_slice(), None) {
+        //     Ok(_) => {
+        //         println!("DELETE REQUEST SUCCESSFUL");
+        //     }
+        //     Err(e) => {
+        //         println!("Delete request failed with error: {:?}", e);
+        //     }
+        // }
+
+        // match scalerize_client.write() {
+        //     Ok(_) => {
+        //         println!("WRITTEN TO DB");
+        //     }
+        //     Err(e) => {
+        //         println!("Write request failed with error: {:?}", e);
+        //     }
+        // }
+
         // this should fail since we deleted all entries for that key 
         let get_response = scalerize_client.get(1, key1.as_slice()).
         expect("Failed to get response");
 
-        println!("BYTES TO BE DECODED:{:?}", &get_response);
-        let rlp = Rlp::new(&get_response);
-        let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
-        println!("GET Storage Entry:{:?}", decoded_storage_entry);
+        let storage_entry = StorageEntry{
+            key: B256::from_slice(&get_response[..32]),
+            value:U256::from_be_slice(&get_response[32..]),
+        };
+       
+        println!("GET Storage Entry:{:?}", storage_entry);
 
+        let cursor_id_1 = generate_unique_bytes();
+        let cursor_id_2 = generate_unique_bytes();
+        let cursor_id_3 = generate_unique_bytes();
+        let cursor_id_4 = generate_unique_bytes();
+        let cursor_id_5 = generate_unique_bytes();
+
+        let first_response = scalerize_client.first(0, cursor_id_1.to_vec(), 32).
+        expect("Failed to get first entry for accounts");
+
+        let key = first_response.0;
+        let encoded_account = first_response.1;
+
+        println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        let rlp = Rlp::new(&encoded_account);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        println!("FIRST ACCOUNT KEY: {:?}", key);
+        println!("FIRST ACCOUNT :{:?}", decoded_account);
+
+        let seek_exact_response = scalerize_client.seek_exact(0, cursor_id_2.to_vec(), key2.as_slice()).
+        expect("Failed to get seek_exact for accounts");
+
+        if !seek_exact_response.is_empty() {
+            let rlp = Rlp::new(&seek_exact_response);
+            let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+            println!("SEEK_EXACT ACCOUNT KEY: {:?}", key2);
+            println!("SEEK_EXACT ACCOUNT :{:?}", decoded_account);
+        } else {
+            println!("SEEK_EXACT response is empty");
+        }
+
+        let seek_exact_response = scalerize_client.seek_exact(0, cursor_id_2.to_vec(), key2.as_slice()).
+        expect("Failed to get seek_exact for accounts");
+        
+        if !seek_exact_response.is_empty() {
+            let rlp = Rlp::new(&seek_exact_response);
+            let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+            println!("SEEK_EXACT ACCOUNT KEY: {:?}", key2);
+            println!("SEEK_EXACT ACCOUNT :{:?}", decoded_account);
+        } else {
+            println!("SEEK_EXACT response is empty");
+        }
+
+        let seek_exact_response = scalerize_client.seek_exact(0, cursor_id_2.to_vec(), key2.as_slice()).
+        expect("Failed to get seek_exact for accounts");
+        if !seek_exact_response.is_empty() {
+            let rlp = Rlp::new(&seek_exact_response);
+            let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+            println!("SEEK_EXACT ACCOUNT KEY: {:?}", key2);
+            println!("SEEK_EXACT ACCOUNT :{:?}", decoded_account);
+        } else {
+            println!("SEEK_EXACT response is empty");
+        }
+
+      
+        let seek_exact_response = scalerize_client.seek_exact(0, cursor_id_2.to_vec(), key4.as_slice()).
+        expect("Failed to get seek_exact for accounts");
+
+        if !seek_exact_response.is_empty() {
+            let rlp = Rlp::new(&seek_exact_response);
+            let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+            println!("SEEK_EXACT ACCOUNT KEY: {:?}", key4);
+            println!("SEEK_EXACT ACCOUNT :{:?}", decoded_account);
+        } else {
+            println!("SEEK_EXACT response is empty");
+        }
+
+        let seek_response = scalerize_client.seek(0, cursor_id_2.to_vec(), key2.as_slice()).
+        expect("Failed to get seek for accounts");
+        let rlp = Rlp::new(&seek_response);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        println!("SEEK ACCOUNT KEY: {:?}", key2);
+        println!("SEEK ACCOUNT :{:?}", decoded_account);
+       
+
+        let seek_response = scalerize_client.seek(0, cursor_id_2.to_vec(), key4.as_slice()).
+        expect("Failed to get seek_exact for accounts");
+        let rlp = Rlp::new(&seek_response);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        println!("SEEK ACCOUNT KEY: {:?}", key4);
+        println!("SEEK ACCOUNT :{:?}", decoded_account);
+
+        let next_response = scalerize_client.next(0, cursor_id_3.to_vec(), 32).
+        expect("Failed to get first entry for accounts");
+
+        let key = next_response.0;
+        let encoded_account = next_response.1;
+
+        println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        let rlp = Rlp::new(&encoded_account);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        println!("NEXT ACCOUNT KEY: {:?}", key);
+        println!("NEXT ACCOUNT :{:?}", decoded_account);
+
+        let next_response = scalerize_client.next(0, cursor_id_3.to_vec(), 32).
+        expect("Failed to get first entry for accounts");
+
+        let key = next_response.0;
+        let encoded_account = next_response.1;
+
+        println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        let rlp = Rlp::new(&encoded_account);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        println!("NEXT ACCOUNT KEY: {:?}", key);
+        println!("NEXT ACCOUNT :{:?}", decoded_account);
+
+        let next_response = scalerize_client.next(0, cursor_id_3.to_vec(), 32).
+        expect("Failed to get first entry for accounts");
+
+        let key = next_response.0;
+        let encoded_account = next_response.1;
+
+        println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        let rlp = Rlp::new(&encoded_account);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        println!("NEXT ACCOUNT KEY: {:?}", key);
+        println!("NEXT ACCOUNT :{:?}", decoded_account);
+
+        // let next_response = scalerize_client.next(0, cursor_id_3.to_vec(), 32).
+        // expect("Failed to get first entry for accounts");
+
+        // let key = next_response.0;
+        // let encoded_account = next_response.1;
+
+        // println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        // let rlp = Rlp::new(&encoded_account);
+        // let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        // println!("NEXT ACCOUNT KEY: {:?}", key);
+        // println!("NEXT ACCOUNT :{:?}", decoded_account);
+        
+
+
+
+        let prev_response = scalerize_client.prev(0, cursor_id_3.to_vec(), 32).
+        expect("Failed to get first entry for accounts");
+
+        let key = prev_response.0;
+        let encoded_account = prev_response.1;
+
+        println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        let rlp = Rlp::new(&encoded_account);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        println!("PREV ACCOUNT KEY: {:?}", key);
+        println!("PREV ACCOUNT :{:?}", decoded_account);
+
+        let prev_response = scalerize_client.prev(0, cursor_id_3.to_vec(), 32).
+        expect("Failed to get first entry for accounts");
+
+        let key = prev_response.0;
+        let encoded_account = prev_response.1;
+
+        println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        let rlp = Rlp::new(&encoded_account);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        println!("PREV ACCOUNT KEY: {:?}", key);
+        println!("PREV ACCOUNT :{:?}", decoded_account);
+
+        // let prev_response = scalerize_client.prev(0, cursor_id_3.to_vec(), 32).
+        // expect("Failed to get first entry for accounts");
+
+        // let key = prev_response.0;
+        // let encoded_account = prev_response.1;
+
+        // println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        // let rlp = Rlp::new(&encoded_account);
+        // let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        // println!("PREV ACCOUNT KEY: {:?}", key);
+        // println!("PREV ACCOUNT :{:?}", decoded_account);
+
+        // let prev_response = scalerize_client.prev(0, cursor_id_3.to_vec(), 32).
+        // expect("Failed to get first entry for accounts");
+
+        // let key = prev_response.0;
+        // let encoded_account = prev_response.1;
+
+        // println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        // let rlp = Rlp::new(&encoded_account);
+        // let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        // println!("PREV ACCOUNT KEY: {:?}", key);
+        // println!("PREV ACCOUNT :{:?}", decoded_account);
+
+        let prev_response = scalerize_client.prev(0, cursor_id_4.to_vec(), 32).
+        expect("Failed to get first entry for accounts");
+
+        let key = prev_response.0;
+        let encoded_account = prev_response.1;
+
+        println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        let rlp = Rlp::new(&encoded_account);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        println!("PREV ACCOUNT KEY: {:?}", key);
+        println!("PREV ACCOUNT :{:?}", decoded_account);
+
+
+        let prev_response = scalerize_client.prev(0, cursor_id_4.to_vec(), 32).
+        expect("Failed to get first entry for accounts");
+
+        let key = prev_response.0;
+        let encoded_account = prev_response.1;
+
+        println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        let rlp = Rlp::new(&encoded_account);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        println!("PREV ACCOUNT KEY: {:?}", key);
+        println!("PREV ACCOUNT :{:?}", decoded_account);
+
+        let last_response = scalerize_client.last(0, cursor_id_4.to_vec(), 32).
+        expect("Failed to get first entry for accounts");
+
+        let key = last_response.0;
+        let encoded_account = last_response.1;
+
+        println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        let rlp = Rlp::new(&encoded_account);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        println!("LAST ACCOUNT KEY: {:?}", key);
+        println!("LAST ACCOUNT :{:?}", decoded_account);
+
+        let current_response = scalerize_client.current(0, cursor_id_4.to_vec(), 32).
+        expect("Failed to get first entry for accounts");
+
+        let key = current_response.0;
+        let encoded_account = current_response.1;
+
+        println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        let rlp = Rlp::new(&encoded_account);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        println!("CURRENT ACCOUNT KEY: {:?}", key);
+        println!("CURRENT ACCOUNT :{:?}", decoded_account);
+
+        let current_response = scalerize_client.current(0, cursor_id_5.to_vec(), 32).
+        expect("Failed to get first entry for accounts");
+
+        let key = current_response.0;
+        let encoded_account = current_response.1;
+
+        println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        let rlp = Rlp::new(&encoded_account);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+
+        println!("CURRENT ACCOUNT KEY: {:?}", key);
+        println!("CURRENT ACCOUNT :{:?}", decoded_account);
         Ok(())
     }
 
@@ -1238,16 +1613,20 @@ mod tests {
         let key1 = Address::with_last_byte(1);
         let key2 = Address::with_last_byte(2);
         let key3 = Address::with_last_byte(3);
+        let key4 = Address::with_last_byte(4);
         let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
 
         assert!(cursor.insert(key1, Account::default()).is_ok());
-        assert!(cursor.insert(key2, Account::default()).is_ok());
         assert!(cursor.insert(key3, Account::default()).is_ok());
+        assert!(cursor.insert(key4, Account::default()).is_ok());
 
         // Seek & delete key2
         cursor.seek_exact(key2).unwrap();
+        println!("{:?}", cursor.current());
         assert_eq!(cursor.delete_current(), Ok(()));
         assert_eq!(cursor.seek_exact(key2), Ok(None));
+        println!("{:?}", cursor.current());
+
 
         // Seek & delete key2 again
         assert_eq!(cursor.seek_exact(key2), Ok(None));
