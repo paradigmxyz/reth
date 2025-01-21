@@ -549,7 +549,12 @@ impl ExecutionInfo {
         }
     }
 
-    /// Returns true if the transaction would exceed the block limits.
+    /// Returns true if the transaction would exceed the block limits:
+    /// - block gas limit: ensures the transaction still fits into the block.
+    /// - tx DA limit: if configured, ensures the tx does not exceed the maximum allowed DA limit
+    ///   per tx.
+    /// - block DA limit: if configured, ensures the transaction's DA size does not exceed the
+    ///   maximum allowed DA limit per block.
     pub fn is_tx_over_limits(
         &self,
         tx: &OpTransactionSigned,
