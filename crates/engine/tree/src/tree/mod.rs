@@ -381,27 +381,27 @@ impl<N: NodePrimitives> TreeState<N> {
     /// Determines if the second block is a direct descendant of the first block.
     ///
     /// If the two blocks are the same, this returns `false`.
-    fn is_descendant(&self, first: BlockNumHash, second: &Header) -> bool {
+    fn is_descendant(&self, first: BlockNumHash, second: &N::BlockHeader) -> bool {
         // If the second block's parent is the first block's hash, then it is a direct descendant
         // and we can return early.
-        if second.parent_hash == first.hash {
+        if second.parent_hash() == first.hash {
             return true
         }
 
         // If the second block is lower than, or has the same block number, they are not
         // descendants.
-        if second.number <= first.number {
+        if second.number() <= first.number {
             return false
         }
 
         // iterate through parents of the second until we reach the number
-        let Some(mut current_block) = self.block_by_hash(second.parent_hash) else {
+        let Some(mut current_block) = self.block_by_hash(second.parent_hash()) else {
             // If we can't find its parent in the tree, we can't continue, so return false
             return false
         };
 
         while current_block.number() > first.number {
-            let Some(block) = self.block_by_hash(current_block.header.parent_hash()) else {
+            let Some(block) = self.block_by_hash(current_block.header().parent_hash()) else {
                 // If we can't find its parent in the tree, we can't continue, so return false
                 return false
             };
@@ -546,7 +546,7 @@ where
     /// Channels to the persistence layer.
     persistence: PersistenceHandle<N>,
     /// Tracks the state changes of the persistence task.
-    persistence_state: PersistenceState,
+    persistence_state: PersistenceState<N>,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
@@ -621,7 +621,7 @@ where
         state: EngineApiTreeState<N>,
         canonical_in_memory_state: CanonicalInMemoryState<N>,
         persistence: PersistenceHandle<N>,
-        persistence_state: PersistenceState,
+        persistence_state: PersistenceState<N>,
         payload_builder: PayloadBuilderHandle<T>,
         config: TreeConfig,
         engine_kind: EngineApiKind,
@@ -1225,7 +1225,7 @@ where
 
     /// Helper method to save blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're saving blocks.
-    fn persist_blocks(&mut self, blocks_to_persist: Vec<ExecutedBlock>) {
+    fn persist_blocks(&mut self, blocks_to_persist: Vec<ExecutedBlock<N>>) {
         if blocks_to_persist.is_empty() {
             debug!(target: "engine::tree", "Returned empty set of blocks to persist");
             return
@@ -2323,7 +2323,10 @@ where
         trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
 
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
-        let persistence_not_in_progress = !self.persistence_state.in_progress();
+
+        let block_number = block.number();
+        let block_hash = block.hash();
+        let sealed_block = Arc::new(block.clone_sealed_block());
 
         // We only run the parallel state root if we are currently persisting blocks that are all
         // ancestors of the one we are executing. If we're committing ancestor blocks, then: any
@@ -2338,8 +2341,8 @@ where
                     // Get the highest block num and hash
                     let Some(highest_num_hash) = blocks
                         .iter()
-                        .max_by_key(|elem| elem.block().num_hash().number)
-                        .map(|block| block.block.num_hash())
+                        .max_by_key(|elem| elem.recovered_block().num_hash().number)
+                        .map(|block| block.recovered_block().num_hash())
                     else {
                         // If the blocks are empty for some reason, we can actually proceed here.
                         return true
@@ -2352,13 +2355,13 @@ where
                         return false
                     }
 
-                    self.state.tree_state.is_descendant(highest_num_hash, &block.header)
+                    self.state.tree_state.is_descendant(highest_num_hash, block.header())
                 }
                 CurrentPersistenceAction::RemovingBlocks { new_tip_num: _ } => false,
             }
         });
 
-        let (state_root_handle, state_root_task_config, state_hook) = if persistence_not_in_progress &&
+        let (state_root_handle, state_root_task_config, state_hook) = if is_descendant_block &&
             self.config.use_state_root_task()
         {
             let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
@@ -2401,7 +2404,7 @@ where
         // is being persisted as we are computing in parallel, because we initialize
         // a different database transaction per thread and it might end up with a
         // different view of the database.
-        let (state_root, trie_output, root_elapsed) = if persistence_not_in_progress {
+        let (state_root, trie_output, root_elapsed) = if is_descendant_block {
             if self.config.use_state_root_task() {
                 let state_root_handle = state_root_handle
                     .expect("state root handle must exist if use_state_root_task is true");
@@ -2438,7 +2441,7 @@ where
                 }
             }
         } else {
-            debug!(target: "engine::tree", block=?block_num_hash, ?persistence_not_in_progress, "Failed to compute state root in parallel");
+            debug!(target: "engine::tree", block=?sealed_block.num_hash(), ?is_descendant_block, "Failed to compute state root in parallel");
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
@@ -3500,15 +3503,24 @@ mod tests {
     #[test]
     fn test_tree_state_normal_descendant() {
         let mut tree_state = TreeState::new(BlockNumHash::default());
-        let blocks: Vec<_> = TestBlockBuilder::default().get_executed_blocks(1..4).collect();
+        let blocks: Vec<_> = TestBlockBuilder::eth().get_executed_blocks(1..4).collect();
 
         tree_state.insert_executed(blocks[0].clone());
-        assert!(tree_state.is_descendant(blocks[0].block.num_hash(), &blocks[1].block.header));
+        assert!(tree_state.is_descendant(
+            blocks[0].recovered_block().num_hash(),
+            &blocks[1].recovered_block().header()
+        ));
 
         tree_state.insert_executed(blocks[1].clone());
 
-        assert!(tree_state.is_descendant(blocks[0].block.num_hash(), &blocks[2].block.header));
-        assert!(tree_state.is_descendant(blocks[1].block.num_hash(), &blocks[2].block.header));
+        assert!(tree_state.is_descendant(
+            blocks[0].recovered_block().num_hash(),
+            &blocks[2].recovered_block().header()
+        ));
+        assert!(tree_state.is_descendant(
+            blocks[1].recovered_block().num_hash(),
+            &blocks[2].recovered_block().header()
+        ));
     }
 
     #[tokio::test]

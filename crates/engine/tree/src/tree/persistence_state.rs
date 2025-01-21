@@ -1,13 +1,14 @@
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use reth_chain_state::ExecutedBlock;
+use reth_primitives_traits::NodePrimitives;
 use std::{collections::VecDeque, time::Instant};
 use tokio::sync::oneshot;
 use tracing::{debug, trace};
 
 /// The state of the persistence task.
 #[derive(Default, Debug)]
-pub struct PersistenceState {
+pub struct PersistenceState<N: NodePrimitives> {
     /// Hash and number of the last block persisted.
     ///
     /// This tracks the chain height that is persisted on disk
@@ -15,13 +16,13 @@ pub struct PersistenceState {
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
     pub(crate) rx:
-        Option<(oneshot::Receiver<Option<BlockNumHash>>, Instant, CurrentPersistenceAction)>,
+        Option<(oneshot::Receiver<Option<BlockNumHash>>, Instant, CurrentPersistenceAction<N>)>,
     /// The block above which blocks should be removed from disk, because there has been an on disk
     /// reorg.
     pub(crate) remove_above_state: VecDeque<u64>,
 }
 
-impl PersistenceState {
+impl<N: NodePrimitives> PersistenceState<N> {
     /// Determines if there is a persistence task in progress by checking if the
     /// receiver is set.
     pub(crate) const fn in_progress(&self) -> bool {
@@ -41,7 +42,7 @@ impl PersistenceState {
     /// Sets the state for a block save operation.
     pub(crate) fn start_save(
         &mut self,
-        to_save: Vec<ExecutedBlock>,
+        to_save: Vec<ExecutedBlock<N>>,
         rx: oneshot::Receiver<Option<BlockNumHash>>,
     ) {
         self.rx =
@@ -50,7 +51,7 @@ impl PersistenceState {
 
     /// Returns the current persistence action. If there is no persistence task in progress, then
     /// this returns `None`.
-    pub(crate) fn current_action(&self) -> Option<&CurrentPersistenceAction> {
+    pub(crate) fn current_action(&self) -> Option<&CurrentPersistenceAction<N>> {
         self.rx.as_ref().map(|rx| &rx.2)
     }
 
@@ -76,11 +77,11 @@ impl PersistenceState {
 
 /// The currently running persistence action.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CurrentPersistenceAction {
+pub(crate) enum CurrentPersistenceAction<N: NodePrimitives> {
     /// The persistence task is saving blocks.
     SavingBlocks {
         /// The blocks being saved
-        blocks: Vec<ExecutedBlock>,
+        blocks: Vec<ExecutedBlock<N>>,
     },
     /// The persistence task is removing blocks.
     RemovingBlocks {

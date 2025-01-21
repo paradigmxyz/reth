@@ -1,7 +1,7 @@
 use crate::{BlockNumReader, DatabaseProviderFactory, HeaderProvider};
 use alloy_primitives::B256;
 use reth_errors::ProviderError;
-use reth_storage_api::{BlockReader, DBProvider, StateCommitmentProvider};
+use reth_storage_api::{DBProvider, StateCommitmentProvider};
 use reth_storage_errors::provider::ProviderResult;
 
 use reth_trie::HashedPostState;
@@ -73,7 +73,7 @@ where
         // Check that the currently stored tip is included on-disk.
         // This means that the database has moved, but the view was not reorged.
         if let Some(tip) = self.tip {
-            if provider_ro.block_by_hash(tip)?.is_none() {
+            if provider_ro.header(&tip)?.is_none() {
                 return Err(ConsistentViewError::Reorged { block: tip }.into())
             }
         }
