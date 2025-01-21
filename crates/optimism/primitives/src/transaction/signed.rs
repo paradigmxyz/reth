@@ -29,6 +29,7 @@ use reth_primitives_traits::{
     transaction::error::TransactionConversionError,
     InMemorySize, SignedTransaction,
 };
+use reth_primitives_traits::transaction::signed::RecoveryError;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -79,7 +80,7 @@ impl SignedTransaction for OpTransactionSigned {
         &self.signature
     }
 
-    fn recover_signer(&self) -> Option<Address> {
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = self.transaction {

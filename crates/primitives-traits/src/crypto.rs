@@ -23,6 +23,7 @@ pub mod secp256k1 {
     use super::impl_secp256k1 as imp;
 
     pub use imp::{public_key_to_address, sign_message};
+    use crate::transaction::signed::RecoveryError;
 
     /// Recover signer from message hash, _without ensuring that the signature has a low `s`
     /// value_.
@@ -30,7 +31,7 @@ pub mod secp256k1 {
     /// Using this for signature validation will succeed, even if the signature is malleable or not
     /// compliant with EIP-2. This is provided for compatibility with old signatures which have
     /// large `s` values.
-    pub fn recover_signer_unchecked(signature: &Signature, hash: B256) -> Option<Address> {
+    pub fn recover_signer_unchecked(signature: &Signature, hash: B256) -> Result<Address, RecoveryError> {
         let mut sig: [u8; 65] = [0; 65];
 
         sig[0..32].copy_from_slice(&signature.r().to_be_bytes::<32>());
@@ -39,7 +40,7 @@ pub mod secp256k1 {
 
         // NOTE: we are removing error from underlying crypto library as it will restrain primitive
         // errors and we care only if recovery is passing or not.
-        imp::recover_signer_unchecked(&sig, &hash.0).ok()
+        imp::recover_signer_unchecked(&sig, &hash.0).map_err(|_| RecoveryError::InvalidSignature)
     }
 
     /// Recover signer address from message hash. This ensures that the signature S value is
@@ -47,9 +48,9 @@ pub mod secp256k1 {
     /// [EIP-2](https://eips.ethereum.org/EIPS/eip-2).
     ///
     /// If the S value is too large, then this will return `None`
-    pub fn recover_signer(signature: &Signature, hash: B256) -> Option<Address> {
+    pub fn recover_signer(signature: &Signature, hash: B256) -> Result<Address, RecoveryError> {
         if signature.s() > SECP256K1N_HALF {
-            return None
+            return Err(RecoveryError::InvalidSignature);
         }
 
         recover_signer_unchecked(signature, hash)
@@ -178,7 +179,7 @@ mod tests {
         sig[32..64].copy_from_slice(&signature.s().to_be_bytes::<32>());
         sig[64] = signature.v() as u8;
 
-        assert_eq!(recover_signer_unchecked(&sig, &hash), Ok(signer));
+        assert_eq!(recover_signer_unchecked(&sig, &hash).ok(), Some(signer));
     }
 
     #[cfg(not(feature = "secp256k1"))]
@@ -200,7 +201,7 @@ mod tests {
         sig[32..64].copy_from_slice(&signature.s().to_be_bytes::<32>());
         sig[64] = signature.v() as u8;
 
-        assert_eq!(recover_signer_unchecked(&sig, &hash).ok(), Some(signer));
+        assert_eq!(recover_signer_unchecked(&sig, &hash), Ok(signer));
     }
 
     #[test]

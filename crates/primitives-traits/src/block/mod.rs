@@ -19,6 +19,7 @@ use crate::{
     BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde, SealedHeader,
     SignedTransaction,
 };
+use crate::transaction::signed::RecoveryError;
 
 /// Bincode-compatible header type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]
@@ -121,7 +122,7 @@ pub trait Block:
     }
 
     /// Expensive operation that recovers transaction signer.
-    fn senders(&self) -> Option<Vec<Address>>
+    fn senders(&self) -> Result<Vec<Address>, RecoveryError>
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
@@ -156,13 +157,15 @@ pub trait Block:
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
         let senders = if self.body().transactions().len() == senders.len() {
-            senders
+            Ok(senders)
         } else {
-            let Some(senders) = self.body().recover_signers_unchecked() else { return Err(self) };
-            senders
+            self.body().recover_signers_unchecked()
         };
 
-        Ok(RecoveredBlock::new_unhashed(self, senders))
+        match senders {
+            Ok(senders) => Ok(RecoveredBlock::new_unhashed(self, senders)),
+            Err(_) => Err(self),
+        }
     }
 
     /// **Expensive**. Transform into a [`RecoveredBlock`] by recovering senders in the contained
@@ -173,8 +176,9 @@ pub trait Block:
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
-        let senders = self.senders()?;
-        Some(RecoveredBlock::new_unhashed(self, senders))
+        self.senders()
+            .map(|senders| RecoveredBlock::new_unhashed(self, senders))
+            .ok()
     }
 }
 

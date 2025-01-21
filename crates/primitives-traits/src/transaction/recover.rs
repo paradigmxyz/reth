@@ -12,11 +12,12 @@ mod rayon {
     use alloc::vec::Vec;
     use alloy_primitives::Address;
     use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+    use crate::transaction::signed::RecoveryError;
 
     /// Recovers a list of signers from a transaction list iterator.
     ///
     /// Returns `None`, if some transaction's signature is invalid
-    pub fn recover_signers<'a, I, T>(txes: I) -> Option<Vec<Address>>
+    pub fn recover_signers<'a, I, T>(txes: I) -> Result<Vec<Address>, RecoveryError>
     where
         T: SignedTransaction,
         I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,
@@ -28,7 +29,7 @@ mod rayon {
     /// signature has a low `s` value_.
     ///
     /// Returns `None`, if some transaction's signature is invalid.
-    pub fn recover_signers_unchecked<'a, I, T>(txes: I) -> Option<Vec<Address>>
+    pub fn recover_signers_unchecked<'a, I, T>(txes: I) -> Result<Vec<Address>, RecoveryError>
     where
         T: SignedTransaction,
         I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,

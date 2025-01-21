@@ -95,7 +95,7 @@ impl<B: Block> RecoveredBlock<B> {
         let senders = if block.body().transaction_count() == senders.len() {
             senders
         } else {
-            let Ok(senders) = block.body().try_recover_signers() else {
+            let Ok(senders) = block.body().recover_signers() else {
                 return Err(SealedBlockRecoveryError::new(SealedBlock::new_unchecked(block, hash)));
             };
             senders
@@ -115,7 +115,7 @@ impl<B: Block> RecoveredBlock<B> {
         let senders = if block.body().transaction_count() == senders.len() {
             senders
         } else {
-            let Ok(senders) = block.body().try_recover_signers_unchecked() else {
+            let Ok(senders) = block.body().recover_signers_unchecked() else {
                 return Err(SealedBlockRecoveryError::new(SealedBlock::new_unchecked(block, hash)));
             };
             senders
@@ -123,41 +123,12 @@ impl<B: Block> RecoveredBlock<B> {
         Ok(Self::new(block, senders, hash))
     }
 
-    /// A safer variant of [`Self::new_unhashed`] that checks if the number of senders is equal to
-    /// the number of transactions in the block and recovers the senders from the transactions, if
-    /// not using [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction)
-    /// to recover the senders.
-    pub fn try_new_unhashed(block: B, senders: Vec<Address>) -> Result<Self, RecoveryError> {
-        let senders = if block.body().transaction_count() == senders.len() {
-            senders
-        } else {
-            block.body().try_recover_signers()?
-        };
-        Ok(Self::new_unhashed(block, senders))
-    }
-
-    /// A safer variant of [`Self::new_unhashed`] that checks if the number of senders is equal to
-    /// the number of transactions in the block and recovers the senders from the transactions, if
-    /// not using [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction)
-    /// to recover the senders.
-    pub fn try_new_unhashed_unchecked(
-        block: B,
-        senders: Vec<Address>,
-    ) -> Result<Self, RecoveryError> {
-        let senders = if block.body().transaction_count() == senders.len() {
-            senders
-        } else {
-            block.body().try_recover_signers_unchecked()?
-        };
-        Ok(Self::new_unhashed(block, senders))
-    }
-
     /// Recovers the senders from the transactions in the block using
     /// [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction).
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover(block: B) -> Result<Self, RecoveryError> {
-        let senders = block.body().try_recover_signers()?;
+        let senders = block.body().recover_signers()?;
         Ok(Self::new_unhashed(block, senders))
     }
 
@@ -166,7 +137,7 @@ impl<B: Block> RecoveredBlock<B> {
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover_unchecked(block: B) -> Result<Self, RecoveryError> {
-        let senders = block.body().try_recover_signers_unchecked()?;
+        let senders = block.body().recover_signers_unchecked()?;
         Ok(Self::new_unhashed(block, senders))
     }
 
@@ -175,9 +146,7 @@ impl<B: Block> RecoveredBlock<B> {
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover_sealed(block: SealedBlock<B>) -> Result<Self, SealedBlockRecoveryError<B>> {
-        let Ok(senders) = block.body().try_recover_signers() else {
-            return Err(SealedBlockRecoveryError::new(block));
-        };
+        let senders = block.body().recover_signers().map_err(|_| SealedBlockRecoveryError::new(block.clone()))?;
         let (block, hash) = block.split();
         Ok(Self::new(block, senders, hash))
     }
@@ -189,9 +158,8 @@ impl<B: Block> RecoveredBlock<B> {
     pub fn try_recover_sealed_unchecked(
         block: SealedBlock<B>,
     ) -> Result<Self, SealedBlockRecoveryError<B>> {
-        let Ok(senders) = block.body().try_recover_signers_unchecked() else {
-            return Err(SealedBlockRecoveryError::new(block));
-        };
+        let senders = block.body().recover_signers_unchecked()
+            .map_err(|_| SealedBlockRecoveryError::new(block.clone()))?;
         let (block, hash) = block.split();
         Ok(Self::new(block, senders, hash))
     }

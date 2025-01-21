@@ -26,6 +26,7 @@ use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
+use reth_primitives_traits::transaction::signed::RecoveryError;
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -724,7 +725,7 @@ impl SignedTransaction for TransactionSigned {
         recover_signer(&self.signature, signature_hash)
     }
 
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Result<Address, RecoveryError> {
         self.encode_for_signing(buf);
         let signature_hash = keccak256(buf);
         recover_signer_unchecked(&self.signature, signature_hash)

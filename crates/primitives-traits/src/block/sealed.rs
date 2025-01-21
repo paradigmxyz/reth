@@ -11,6 +11,7 @@ use alloy_primitives::{Address, BlockHash, Sealable, Sealed, B256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::ops::Deref;
+use crate::transaction::signed::RecoveryError;
 
 /// Sealed full block composed of the block's header and body.
 ///
@@ -128,7 +129,13 @@ impl<B: Block> SealedBlock<B> {
         self,
         senders: Vec<Address>,
     ) -> Result<RecoveredBlock<B>, BlockRecoveryError<Self>> {
-        RecoveredBlock::try_recover_sealed_with_senders(self, senders)
+        let senders = if self.body().transaction_count() == senders.len() {
+            senders
+        } else {
+            self.body().recover_signers()
+                .map_err(|_| BlockRecoveryError::new(self.clone()))?
+        };
+        Ok(RecoveredBlock::new_sealed(self, senders))
     }
 
     /// Converts this block into a [`RecoveredBlock`] with the given senders if the number of
@@ -142,7 +149,13 @@ impl<B: Block> SealedBlock<B> {
         self,
         senders: Vec<Address>,
     ) -> Result<RecoveredBlock<B>, BlockRecoveryError<Self>> {
-        RecoveredBlock::try_recover_sealed_with_senders_unchecked(self, senders)
+        let senders = if self.body().transaction_count() == senders.len() {
+            senders
+        } else {
+            self.body().recover_signers_unchecked()
+                .map_err(|_| BlockRecoveryError::new(self.clone()))?
+        };
+        Ok(RecoveredBlock::new_sealed(self, senders))
     }
 
     /// Recovers the senders from the transactions in the block using
@@ -150,7 +163,9 @@ impl<B: Block> SealedBlock<B> {
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover(self) -> Result<RecoveredBlock<B>, BlockRecoveryError<Self>> {
-        RecoveredBlock::try_recover_sealed(self)
+        let senders = self.body().recover_signers()
+            .map_err(|_| BlockRecoveryError::new(self.clone()))?;
+        Ok(RecoveredBlock::new_sealed(self, senders))
     }
 
     /// Recovers the senders from the transactions in the block using
@@ -158,7 +173,9 @@ impl<B: Block> SealedBlock<B> {
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover_unchecked(self) -> Result<RecoveredBlock<B>, BlockRecoveryError<Self>> {
-        RecoveredBlock::try_recover_sealed_unchecked(self)
+        let senders = self.body().recover_signers_unchecked()
+            .map_err(|_| BlockRecoveryError::new(self.clone()))?;
+        Ok(RecoveredBlock::new_sealed(self, senders))
     }
 
     /// Returns reference to block header.
@@ -179,7 +196,7 @@ impl<B: Block> SealedBlock<B> {
     /// Recovers all senders from the transactions in the block.
     ///
     /// Returns `None` if any of the transactions fail to recover the sender.
-    pub fn senders(&self) -> Option<Vec<Address>> {
+    pub fn senders(&self) -> Result<Vec<Address>, RecoveryError> {
         self.body().recover_signers()
     }
 
