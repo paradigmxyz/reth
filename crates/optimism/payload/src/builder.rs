@@ -1,13 +1,14 @@
 //! Optimism payload builder implementation.
 
 use crate::{
-    config::OpBuilderConfig,
+    config::{OpBuilderConfig, OpDAConfig},
     error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
 };
 use alloy_consensus::{Eip658Value, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
 use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_rlp::Encodable;
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
@@ -132,6 +133,7 @@ where
 
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
+            da_config: self.config.da_config.clone(),
             chain_spec: client.chain_spec(),
             config,
             evm_env,
@@ -193,6 +195,7 @@ where
         let config = PayloadConfig { parent_header: Arc::new(parent), attributes };
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
+            da_config: self.config.da_config.clone(),
             chain_spec: client.chain_spec(),
             config,
             evm_env,
@@ -527,6 +530,8 @@ pub struct ExecutionInfo {
     pub receipts: Vec<OpReceipt>,
     /// All gas used so far
     pub cumulative_gas_used: u64,
+    /// Estimated DA size
+    pub cumulative_da_bytes_used: u64,
     /// Tracks fees from executed mempool transactions
     pub total_fees: U256,
 }
@@ -539,8 +544,35 @@ impl ExecutionInfo {
             executed_senders: Vec::with_capacity(capacity),
             receipts: Vec::with_capacity(capacity),
             cumulative_gas_used: 0,
+            cumulative_da_bytes_used: 0,
             total_fees: U256::ZERO,
         }
+    }
+
+    /// Returns true if the transaction would exceed the block limits:
+    /// - block gas limit: ensures the transaction still fits into the block.
+    /// - tx DA limit: if configured, ensures the tx does not exceed the maximum allowed DA limit
+    ///   per tx.
+    /// - block DA limit: if configured, ensures the transaction's DA size does not exceed the
+    ///   maximum allowed DA limit per block.
+    pub fn is_tx_over_limits(
+        &self,
+        tx: &OpTransactionSigned,
+        block_gas_limit: u64,
+        tx_data_limit: Option<u64>,
+        block_data_limit: Option<u64>,
+    ) -> bool {
+        if tx_data_limit.is_some_and(|da_limit| tx.length() as u64 > da_limit) {
+            return true;
+        }
+
+        if block_data_limit
+            .is_some_and(|da_limit| self.cumulative_da_bytes_used + (tx.length() as u64) > da_limit)
+        {
+            return true;
+        }
+
+        self.cumulative_gas_used + tx.gas_limit() > block_gas_limit
     }
 }
 
@@ -549,6 +581,8 @@ impl ExecutionInfo {
 pub struct OpPayloadBuilderCtx<EvmConfig> {
     /// The type that knows how to perform system calls and configure the evm.
     pub evm_config: EvmConfig,
+    /// The DA config for the payload builder
+    pub da_config: OpDAConfig,
     /// The chainspec
     pub chain_spec: Arc<OpChainSpec>,
     /// How to build the payload.
@@ -848,13 +882,14 @@ where
         DB: Database<Error = ProviderError>,
     {
         let block_gas_limit = self.block_gas_limit();
+        let block_da_limit = self.da_config.max_da_block_size();
+        let tx_da_limit = self.da_config.max_da_tx_size();
         let base_fee = self.base_fee();
 
         let mut evm = self.evm_config.evm_with_env(&mut *db, self.evm_env.clone());
 
         while let Some(tx) = best_txs.next(()) {
-            // ensure we still have capacity for this transaction
-            if info.cumulative_gas_used + tx.gas_limit() > block_gas_limit {
+            if info.is_tx_over_limits(tx.tx(), block_gas_limit, tx_da_limit, block_da_limit) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -909,6 +944,7 @@ where
             // add gas used by the transaction to cumulative gas used, before creating the
             // receipt
             info.cumulative_gas_used += gas_used;
+            info.cumulative_da_bytes_used += tx.length() as u64;
 
             let receipt = alloy_consensus::Receipt {
                 status: Eip658Value::Eip658(result.is_success()),
