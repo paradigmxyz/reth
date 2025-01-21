@@ -939,8 +939,8 @@ mod tests {
         let state_sorted = Arc::new(input.state.clone().into_sorted());
         let config = StateRootConfig {
             consistent_view: ConsistentDbView::new(factory, None),
-            nodes_sorted: nodes_sorted.clone(),
-            state_sorted: state_sorted.clone(),
+            nodes_sorted,
+            state_sorted,
             prefix_sets: Arc::new(input.prefix_sets),
         };
         let num_threads =
