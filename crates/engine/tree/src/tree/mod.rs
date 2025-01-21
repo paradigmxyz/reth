@@ -2269,108 +2269,90 @@ where
 
         let persistence_not_in_progress = !self.persistence_state.in_progress();
 
-        let state_root_result = std::thread::scope(|_scope| {
-            let (state_root_handle, state_root_task_config, state_hook) =
-                if persistence_not_in_progress && self.config.use_state_root_task() {
-                    let consistent_view =
-                        ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-                    let state_root_config = StateRootConfig::new_from_input(
-                        consistent_view.clone(),
-                        self.compute_trie_input(consistent_view, block.header().parent_hash())
-                            .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
-                    );
+        let (state_root_handle, state_root_task_config, state_hook) = if persistence_not_in_progress &&
+            self.config.use_state_root_task()
+        {
+            let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+            let state_root_config = StateRootConfig::new_from_input(
+                consistent_view.clone(),
+                self.compute_trie_input(consistent_view, block.header().parent_hash())
+                    .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
+            );
 
-                    let state_root_task = StateRootTask::new(
-                        state_root_config.clone(),
-                        self.state_root_task_pool.clone(),
-                    );
-                    let state_hook = Box::new(state_root_task.state_hook()) as Box<dyn OnStateHook>;
-                    (Some(state_root_task.spawn()), Some(state_root_config), state_hook)
-                } else {
-                    (None, None, Box::new(NoopHook::default()) as Box<dyn OnStateHook>)
-                };
+            let state_root_task =
+                StateRootTask::new(state_root_config.clone(), self.state_root_task_pool.clone());
+            let state_hook = Box::new(state_root_task.state_hook()) as Box<dyn OnStateHook>;
+            (Some(state_root_task.spawn()), Some(state_root_config), state_hook)
+        } else {
+            (None, None, Box::new(NoopHook::default()) as Box<dyn OnStateHook>)
+        };
 
-            let execution_start = Instant::now();
-            let output = self.metrics.executor.execute_metered(executor, &block, state_hook)?;
-            let execution_time = execution_start.elapsed();
-            trace!(target: "engine::tree", elapsed = ?execution_time, ?block_number, "Executed block");
+        let execution_start = Instant::now();
+        let output = self.metrics.executor.execute_metered(executor, &block, state_hook)?;
+        let execution_time = execution_start.elapsed();
+        trace!(target: "engine::tree", elapsed = ?execution_time, ?block_number, "Executed block");
 
-            if let Err(err) = self.consensus.validate_block_post_execution(
-                &block,
-                PostExecutionInput::new(&output.receipts, &output.requests),
-            ) {
-                // call post-block hook
-                self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
-                return Err(err.into())
-            }
+        if let Err(err) = self.consensus.validate_block_post_execution(
+            &block,
+            PostExecutionInput::new(&output.receipts, &output.requests),
+        ) {
+            // call post-block hook
+            self.invalid_block_hook.on_invalid_block(&parent_block, &block, &output, None);
+            return Err(err.into())
+        }
 
-            let hashed_state = self.provider.hashed_post_state(&output.state);
+        let hashed_state = self.provider.hashed_post_state(&output.state);
 
-            trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
-            let root_time = Instant::now();
+        trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
+        let root_time = Instant::now();
 
-            // We attempt to compute state root in parallel if we are currently not persisting
-            // anything to database. This is safe, because the database state cannot
-            // change until we finish parallel computation. It is important that nothing
-            // is being persisted as we are computing in parallel, because we initialize
-            // a different database transaction per thread and it might end up with a
-            // different view of the database.
-            let (state_root, trie_updates, root_elapsed) = if persistence_not_in_progress {
-                if self.config.use_state_root_task() {
-                    let state_root_handle = state_root_handle
-                        .expect("state root handle must exist if use_state_root_task is true");
-                    let state_root_config = state_root_task_config.expect("task config is present");
+        // We attempt to compute state root in parallel if we are currently not persisting
+        // anything to database. This is safe, because the database state cannot
+        // change until we finish parallel computation. It is important that nothing
+        // is being persisted as we are computing in parallel, because we initialize
+        // a different database transaction per thread and it might end up with a
+        // different view of the database.
+        let (state_root, trie_output, root_elapsed) = if persistence_not_in_progress {
+            if self.config.use_state_root_task() {
+                let state_root_handle = state_root_handle
+                    .expect("state root handle must exist if use_state_root_task is true");
+                let state_root_config = state_root_task_config.expect("task config is present");
 
-                    // Handle state root result from task using handle
-                    self.handle_state_root_result(
-                        state_root_handle,
-                        state_root_config,
-                        sealed_block.as_ref(),
-                        &hashed_state,
-                        &state_provider,
-                        root_time,
-                    )?
-                } else {
-                    match self
-                        .compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
-                    {
-                        Ok(result) => {
-                            info!(
-                                target: "engine::tree",
-                                block = ?sealed_block.num_hash(),
-                                regular_state_root = ?result.0,
-                                "Regular root task finished"
-                            );
-                            (result.0, result.1, root_time.elapsed())
-                        }
-                        Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(
-                            error,
-                        ))) => {
-                            debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
-                            let (root, updates) =
-                                state_provider.state_root_with_updates(hashed_state.clone())?;
-                            (root, updates, root_time.elapsed())
-                        }
-                        Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
-                    }
-                }
+                // Handle state root result from task using handle
+                self.handle_state_root_result(
+                    state_root_handle,
+                    state_root_config,
+                    sealed_block.as_ref(),
+                    &hashed_state,
+                    &state_provider,
+                    root_time,
+                )?
             } else {
-                debug!(target: "engine::tree", block=?sealed_block.num_hash(), ?persistence_not_in_progress, "Failed to compute state root in parallel");
-                let (root, updates) =
-                    state_provider.state_root_with_updates(hashed_state.clone())?;
-                (root, updates, root_time.elapsed())
-            };
-
-            Result::<_, InsertBlockErrorKind>::Ok((
-                state_root,
-                trie_updates,
-                hashed_state,
-                output,
-                root_elapsed,
-            ))
-        })?;
-
-        let (state_root, trie_output, hashed_state, output, root_elapsed) = state_root_result;
+                match self.compute_state_root_parallel(block.header().parent_hash(), &hashed_state)
+                {
+                    Ok(result) => {
+                        info!(
+                            target: "engine::tree",
+                            block = ?sealed_block.num_hash(),
+                            regular_state_root = ?result.0,
+                            "Regular root task finished"
+                        );
+                        (result.0, result.1, root_time.elapsed())
+                    }
+                    Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
+                        debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
+                        let (root, updates) =
+                            state_provider.state_root_with_updates(hashed_state.clone())?;
+                        (root, updates, root_time.elapsed())
+                    }
+                    Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
+                }
+            }
+        } else {
+            debug!(target: "engine::tree", block=?sealed_block.num_hash(), ?persistence_not_in_progress, "Failed to compute state root in parallel");
+            let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
+            (root, updates, root_time.elapsed())
+        };
 
         if state_root != block.header().state_root() {
             // call post-block hook
