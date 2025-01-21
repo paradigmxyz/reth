@@ -32,14 +32,14 @@ pub(crate) enum WorkerRequest {
 /// respond to.
 pub(crate) fn spawn_workers(
     url: &str,
-    number: u64,
+    worker_count: u64,
     data_file: &Path,
 ) -> UnboundedReceiver<WorkerResponse> {
     // Create channels for communication between workers and orchestrator
     let (orchestrator_tx, orchestrator_rx) = unbounded_channel();
 
     // Initiate workers
-    for worker_id in 0..number {
+    for worker_id in 0..worker_count {
         let orchestrator_tx = orchestrator_tx.clone();
         let data_file = data_file.to_path_buf();
         let url = url.to_string();

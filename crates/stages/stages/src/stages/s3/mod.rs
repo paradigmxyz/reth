@@ -52,34 +52,39 @@ where
         cx: &mut Context<'_>,
         input: ExecInput,
     ) -> Poll<Result<(), StageError>> {
-        // We are currently fetching and may have downloaded ranges that we can process.
-        if let Some(rx) = &mut self.fetch_rx {
-            // Whether we have downloaded all the required files.
-            let mut is_done = false;
+        loop {
+            // We are currently fetching and may have downloaded ranges that we can process.
+            if let Some(rx) = &mut self.fetch_rx {
+                // Whether we have downloaded all the required files.
+                let mut is_done = false;
 
-            let response = match ready!(rx.poll_recv(cx)) {
-                Some(Ok(response)) => {
-                    is_done = response.is_done();
-                    Ok(())
+                let response = match ready!(rx.poll_recv(cx)) {
+                    Some(Ok(response)) => {
+                        is_done = response.is_done();
+                        Ok(())
+                    }
+                    Some(Err(_)) => todo!(), // TODO: DownloaderError -> StageError
+                    None => Err(StageError::ChannelClosed),
+                };
+
+                if is_done {
+                    self.fetch_rx = None;
                 }
-                Some(Err(_)) => todo!(), // TODO: DownloaderError -> StageError
-                None => Err(StageError::ChannelClosed),
-            };
 
-            if is_done {
-                self.fetch_rx = None;
+                return Poll::Ready(response)
             }
 
-            return Poll::Ready(response)
-        }
+            // Spawns the downloader task if there are any missing files
+            if let Some(fetch_rx) = self.maybe_spawn_fetch(input) {
+                self.fetch_rx = Some(fetch_rx);
 
-        // Spawns the downloader task if there are any missing files
-        if let Some(fetch_rx) = self.maybe_spawn_fetch(input) {
-            self.fetch_rx = Some(fetch_rx);
-            return Poll::Pending
-        }
+                // Polls fetch_rx & registers waker
+                continue
+            }
 
-        Poll::Ready(Ok(()))
+            // No files to be downloaded
+            return Poll::Ready(Ok(()))
+        }
     }
 
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError>

@@ -99,16 +99,16 @@ pub async fn fetch(
                 }
             };
 
-            let worker = workers.get(&available_worker).expect("should exist");
-            match missing_chunks.next() {
-                Some(RemainingChunkRange { index, start, end }) => {
-                    debug!(target: "sync::stages::s3::downloader", ?available_worker, start, end, "Worker download request.");
-                    let _ = worker.send(WorkerRequest::Download { chunk_index: index, start, end });
-                }
-                None => {
-                    let _ = worker.send(WorkerRequest::Finish);
-                }
-            }
+            let msg = if let Some(RemainingChunkRange { index, start, end }) = missing_chunks.next()
+            {
+                debug!(target: "sync::stages::s3::downloader", ?available_worker, start, end, "Worker download request.");
+                WorkerRequest::Download { chunk_index: index, start, end }
+            } else {
+                debug!(target: "sync::stages::s3::downloader", ?available_worker, "Sent Finish command to worker.");
+                WorkerRequest::Finish
+            };
+
+            let _ = workers.get(&available_worker).expect("should exist").send(msg);
         }
     }
 
@@ -117,9 +117,13 @@ pub async fn fetch(
         check_file_hash(&data_file, &file_hash)?;
     }
 
-    // Move downloaded file to desired directory.
+    // No longer need the metadata file.
     metadata.delete()?;
-    reth_fs_util::rename(data_file, target_dir.join(filename))?;
+
+    // Move downloaded file to desired directory.
+    let file_directory = target_dir.join(filename);
+    reth_fs_util::rename(data_file, &file_directory)?;
+    info!(target: "sync::stages::s3::downloader", ?file_directory, "Moved file from temporary to target directory.");
 
     Ok(())
 }
