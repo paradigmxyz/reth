@@ -944,7 +944,7 @@ mod tests {
             prefix_sets: Arc::new(input.prefix_sets),
         };
         let num_threads =
-            std::thread::available_parallelism().map_or(1, |num| (num.get() / 2).max(1));
+            std::thread::available_parallelism().map_or(1, |num| (num.get() / 2).max(2));
 
         let state_root_task_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads)
