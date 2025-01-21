@@ -828,6 +828,7 @@ mod tests {
     };
     use std::sync::Arc;
 
+    #[allow(dead_code)]
     fn convert_revm_to_reth_account(revm_account: &RevmAccount) -> RethAccount {
         RethAccount {
             balance: revm_account.info.balance,
@@ -840,6 +841,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
         let all_addresses: Vec<Address> = (0..num_accounts).map(|_| rng.gen()).collect();
@@ -885,6 +887,7 @@ mod tests {
 
     // TODO: reenable test once gh worker hang is figured out.
     // #[test]
+    #[allow(dead_code)]
     fn test_state_root_task() {
         reth_tracing::init_test_tracing();
 
