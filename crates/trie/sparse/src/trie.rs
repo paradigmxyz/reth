@@ -2341,7 +2341,7 @@ mod tests {
     /// different prefix: 0x0100. Hash builder trie has only the first two leaves, and we have
     /// proofs for them.
     ///
-    /// 1. Insert the leaf 0x0100 into the sparse trie, and check that the root extensino node was
+    /// 1. Insert the leaf 0x0100 into the sparse trie, and check that the root extension node was
     ///    turned into a branch node.
     /// 2. Reveal the leaf 0x0001 in the sparse trie, and check that the root branch node wasn't
     ///    overwritten with the extension node from the proof.

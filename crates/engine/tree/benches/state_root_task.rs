@@ -14,11 +14,7 @@ use reth_provider::{
     test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
     AccountReader, HashingWriter, ProviderFactory,
 };
-use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
-    trie_cursor::InMemoryTrieCursorFactory, TrieInput,
-};
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use reth_trie::TrieInput;
 use revm_primitives::{
     Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot, HashMap,
     B256, KECCAK_EMPTY, U256,
@@ -210,10 +206,6 @@ fn bench_state_root(c: &mut Criterion) {
                             ConsistentDbView::new(factory, None),
                             trie_input,
                         );
-                        let provider = config.consistent_view.provider_ro().unwrap();
-                        let nodes_sorted = config.nodes_sorted.clone();
-                        let state_sorted = config.state_sorted.clone();
-                        let prefix_sets = config.prefix_sets.clone();
                         let num_threads = std::thread::available_parallelism()
                             .map_or(1, |num| (num.get() / 2).max(1));
 
@@ -225,45 +217,13 @@ fn bench_state_root(c: &mut Criterion) {
                                 .expect("Failed to create proof worker thread pool"),
                         );
 
-                        (
-                            config,
-                            state_updates,
-                            provider,
-                            nodes_sorted,
-                            state_sorted,
-                            prefix_sets,
-                            state_root_task_pool,
-                        )
+                        (config, state_updates, state_root_task_pool)
                     },
-                    |(
-                        config,
-                        state_updates,
-                        provider,
-                        nodes_sorted,
-                        state_sorted,
-                        prefix_sets,
-                        state_root_task_pool,
-                    )| {
-                        let blinded_provider_factory = ProofBlindedProviderFactory::new(
-                            InMemoryTrieCursorFactory::new(
-                                DatabaseTrieCursorFactory::new(provider.tx_ref()),
-                                &nodes_sorted,
-                            ),
-                            HashedPostStateCursorFactory::new(
-                                DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                                &state_sorted,
-                            ),
-                            prefix_sets,
-                        );
-
-                        black_box(std::thread::scope(|scope| {
-                            let task = StateRootTask::new(
-                                config,
-                                blinded_provider_factory,
-                                state_root_task_pool,
-                            );
+                    |(config, state_updates, state_root_task_pool)| {
+                        black_box({
+                            let task = StateRootTask::new(config, state_root_task_pool);
                             let mut hook = task.state_hook();
-                            let handle = task.spawn(scope);
+                            let handle = task.spawn();
 
                             for update in state_updates {
                                 hook.on_state(&update)
@@ -271,7 +231,7 @@ fn bench_state_root(c: &mut Criterion) {
                             drop(hook);
 
                             handle.wait_for_result().expect("task failed")
-                        }));
+                        });
                     },
                 )
             },
