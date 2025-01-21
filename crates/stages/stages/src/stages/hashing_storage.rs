@@ -9,6 +9,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_etl::Collector;
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives::StorageEntry;
 use reth_provider::{DBProvider, HashingWriter, StatsReader, StorageReader};
 use reth_stages_api::{
@@ -62,7 +63,7 @@ impl Default for StorageHashingStage {
     }
 }
 
-impl<Provider> Stage<Provider> for StorageHashingStage
+impl<Provider> Stage<Provider, BlockExecutionError> for StorageHashingStage
 where
     Provider: DBProvider<Tx: DbTxMut> + StorageReader + HashingWriter + StatsReader,
 {
@@ -72,7 +73,11 @@ where
     }
 
     /// Execute the stage.
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError<BlockExecutionError>> {
         let tx = provider.tx_ref();
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
@@ -165,7 +170,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    ) -> Result<UnwindOutput, StageError<BlockExecutionError>> {
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
@@ -187,7 +192,7 @@ where
 fn collect(
     channels: &mut Vec<Receiver<(Vec<u8>, CompactU256)>>,
     collector: &mut Collector<Vec<u8>, CompactU256>,
-) -> Result<(), StageError> {
+) -> Result<(), StageError<BlockExecutionError>> {
     for channel in channels.iter_mut() {
         while let Ok((key, v)) = channel.recv() {
             collector.insert(key, v)?;
@@ -219,6 +224,7 @@ mod tests {
         cursor::{DbCursorRW, DbDupCursorRO},
         models::StoredBlockBodyIndices,
     };
+    use reth_execution_errors::BlockExecutionError;
     use reth_primitives::SealedBlock;
     use reth_primitives_traits::SignedTransaction;
     use reth_provider::providers::StaticFileWriter;
@@ -313,6 +319,7 @@ mod tests {
     }
 
     impl StageTestRunner for StorageHashingTestRunner {
+        type E = BlockExecutionError;
         type S = StorageHashingStage;
 
         fn db(&self) -> &TestStageDB {

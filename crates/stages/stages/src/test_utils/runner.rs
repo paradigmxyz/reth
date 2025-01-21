@@ -1,5 +1,6 @@
 use super::TestStageDB;
 use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
+use reth_execution_errors::BlockExecError;
 use reth_provider::{test_utils::MockNodeTypesWithDB, DatabaseProvider, ProviderError};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageError, StageExt, UnwindInput, UnwindOutput,
@@ -19,8 +20,11 @@ pub(crate) enum TestRunnerError {
 
 /// A generic test runner for stages.
 pub(crate) trait StageTestRunner {
-    type S: Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>
-        + 'static;
+    type E: BlockExecError;
+    type S: Stage<
+            DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>,
+            Self::E,
+        > + 'static;
 
     /// Return a reference to the database.
     fn db(&self) -> &TestStageDB;
@@ -43,7 +47,10 @@ pub(crate) trait ExecuteStageTestRunner: StageTestRunner {
     ) -> Result<(), TestRunnerError>;
 
     /// Run [`Stage::execute`] and return a receiver for the result.
-    fn execute(&self, input: ExecInput) -> oneshot::Receiver<Result<ExecOutput, StageError>> {
+    fn execute(
+        &self,
+        input: ExecInput,
+    ) -> oneshot::Receiver<Result<ExecOutput, StageError<Self::E>>> {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.db().factory.clone(), self.stage());
         tokio::spawn(async move {
@@ -69,7 +76,7 @@ pub(crate) trait UnwindStageTestRunner: StageTestRunner {
     fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError>;
 
     /// Run [`Stage::unwind`] and return a receiver for the result.
-    async fn unwind(&self, input: UnwindInput) -> Result<UnwindOutput, StageError> {
+    async fn unwind(&self, input: UnwindInput) -> Result<UnwindOutput, StageError<Self::E>> {
         let (tx, rx) = oneshot::channel();
         let (db, mut stage) = (self.db().factory.clone(), self.stage());
         tokio::spawn(async move {

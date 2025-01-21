@@ -21,6 +21,7 @@ reth-db.workspace = true
 reth-db-api.workspace = true
 reth-etl.workspace = true
 reth-evm.workspace = true
+reth-execution-errors.workspace = true
 reth-exex.workspace = true
 reth-network-p2p.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
@@ -64,7 +65,6 @@ reth-chainspec.workspace = true
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils", "mdbx"] }
 reth-evm-ethereum.workspace = true
-reth-execution-errors.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-downloaders.workspace = true

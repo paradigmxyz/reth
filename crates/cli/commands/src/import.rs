@@ -166,7 +166,7 @@ pub fn build_import_pipeline<N, C, E>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     disable_exec: bool,
     executor: E,
-) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent<N::Primitives>>)>
+) -> eyre::Result<(Pipeline<N, E>, impl Stream<Item = NodeEvent<N::Primitives>>)>
 where
     N: ProviderNodeTypes + CliNodeTypes,
     C: Consensus<BlockTy<N>, Error = ConsensusError> + 'static,

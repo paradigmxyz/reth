@@ -4,6 +4,7 @@ use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
 use reth_db::tables;
 use reth_db_api::transaction::{DbTx, DbTxMut};
+use reth_execution_errors::{BlockExecError, BlockExecutionError};
 use reth_primitives::{GotExpected, SealedHeader};
 use reth_provider::{
     DBProvider, HeaderProvider, ProviderError, StageCheckpointReader, StageCheckpointWriter,
@@ -100,7 +101,7 @@ impl MerkleStage {
     pub fn get_execution_checkpoint(
         &self,
         provider: &impl StageCheckpointReader,
-    ) -> Result<Option<MerkleCheckpoint>, StageError> {
+    ) -> Result<Option<MerkleCheckpoint>, StageError<BlockExecutionError>> {
         let buf =
             provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
 
@@ -117,7 +118,7 @@ impl MerkleStage {
         &self,
         provider: &impl StageCheckpointWriter,
         checkpoint: Option<MerkleCheckpoint>,
-    ) -> Result<(), StageError> {
+    ) -> Result<(), StageError<BlockExecutionError>> {
         let mut buf = vec![];
         if let Some(checkpoint) = checkpoint {
             debug!(
@@ -131,7 +132,7 @@ impl MerkleStage {
     }
 }
 
-impl<Provider> Stage<Provider> for MerkleStage
+impl<Provider> Stage<Provider, BlockExecutionError> for MerkleStage
 where
     Provider: DBProvider<Tx: DbTxMut>
         + TrieWriter
@@ -151,7 +152,11 @@ where
     }
 
     /// Execute the stage.
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError<BlockExecutionError>> {
         let threshold = match self {
             Self::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
@@ -291,7 +296,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    ) -> Result<UnwindOutput, StageError<BlockExecutionError>> {
         let tx = provider.tx_ref();
         let range = input.unwind_block_range();
         if matches!(self, Self::Execution { .. }) {
@@ -344,11 +349,11 @@ where
 
 /// Check that the computed state root matches the root in the expected header.
 #[inline]
-fn validate_state_root<H: BlockHeader + Sealable + Debug>(
+fn validate_state_root<H: BlockHeader + Sealable + Debug, E: BlockExecError>(
     got: B256,
     expected: SealedHeader<H>,
     target_block: BlockNumber,
-) -> Result<(), StageError> {
+) -> Result<(), StageError<E>> {
     if got == expected.state_root() {
         Ok(())
     } else {
@@ -372,6 +377,7 @@ mod tests {
     use alloy_primitives::{keccak256, U256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
+    use reth_execution_errors::BlockExecutionError;
     use reth_primitives::{SealedBlock, StaticFileSegment, StorageEntry};
     use reth_provider::{providers::StaticFileWriter, StaticFileProviderFactory};
     use reth_stages_api::StageUnitCheckpoint;
@@ -477,6 +483,7 @@ mod tests {
     }
 
     impl StageTestRunner for MerkleTestRunner {
+        type E = BlockExecutionError;
         type S = MerkleStage;
 
         fn db(&self) -> &TestStageDB {

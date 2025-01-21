@@ -11,6 +11,7 @@ use reth_db_api::{
     DbTxUnwindExt,
 };
 use reth_etl::Collector;
+use reth_execution_errors::BlockExecutionError;
 use reth_network_p2p::headers::{downloader::HeaderDownloader, error::HeadersDownloaderError};
 use reth_primitives::{NodePrimitives, SealedHeader, StaticFileSegment};
 use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader};
@@ -91,7 +92,10 @@ where
     ///
     /// Writes to static files ( `Header | HeaderTD | HeaderHash` ) and [`tables::HeaderNumbers`]
     /// database table.
-    fn write_headers<P>(&mut self, provider: &P) -> Result<BlockNumber, StageError>
+    fn write_headers<P>(
+        &mut self,
+        provider: &P,
+    ) -> Result<BlockNumber, StageError<BlockExecutionError>>
     where
         P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
         Downloader: HeaderDownloader<Header = <P::Primitives as NodePrimitives>::BlockHeader>,
@@ -198,7 +202,7 @@ where
     }
 }
 
-impl<Provider, P, D> Stage<Provider> for HeaderStage<P, D>
+impl<Provider, P, D> Stage<Provider, BlockExecutionError> for HeaderStage<P, D>
 where
     Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory,
     P: HeaderSyncGapProvider<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>,
@@ -214,7 +218,7 @@ where
         &mut self,
         cx: &mut Context<'_>,
         input: ExecInput,
-    ) -> Poll<Result<(), StageError>> {
+    ) -> Poll<Result<(), StageError<BlockExecutionError>>> {
         let current_checkpoint = input.checkpoint();
 
         // Return if stage has already completed the gap on the ETL files
@@ -287,7 +291,11 @@ where
 
     /// Download the headers in reverse order (falling block numbers)
     /// starting from the tip of the chain
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError<BlockExecutionError>> {
         let current_checkpoint = input.checkpoint();
 
         if self.sync_gap.as_ref().ok_or(StageError::MissingSyncGap)?.is_closed() {
@@ -335,7 +343,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    ) -> Result<UnwindOutput, StageError<BlockExecutionError>> {
         self.sync_gap.take();
 
         // First unwind the db tables, until the unwind_to block number. use the walker to unwind
@@ -421,6 +429,7 @@ mod tests {
         use reth_downloaders::headers::reverse_headers::{
             ReverseHeadersDownloader, ReverseHeadersDownloaderBuilder,
         };
+        use reth_execution_errors::BlockExecutionError;
         use reth_network_p2p::test_utils::{TestHeaderDownloader, TestHeadersClient};
         use reth_provider::{test_utils::MockNodeTypesWithDB, BlockNumReader};
         use tokio::sync::watch;
@@ -456,6 +465,7 @@ mod tests {
         impl<D: HeaderDownloader<Header = alloy_consensus::Header> + 'static> StageTestRunner
             for HeadersTestRunner<D>
         {
+            type E = BlockExecutionError;
             type S = HeaderStage<ProviderFactory<MockNodeTypesWithDB>, D>;
 
             fn db(&self) -> &TestStageDB {

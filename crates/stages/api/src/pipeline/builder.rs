@@ -1,14 +1,18 @@
 use crate::{pipeline::BoxedStage, MetricEventsSender, Pipeline, Stage, StageId, StageSet};
 use alloy_primitives::{BlockNumber, B256};
+use reth_errors::BlockExecError;
 use reth_provider::{providers::ProviderNodeTypes, DatabaseProviderFactory, ProviderFactory};
 use reth_static_file::StaticFileProducer;
 use tokio::sync::watch;
 
 /// Builds a [`Pipeline`].
 #[must_use = "call `build` to construct the pipeline"]
-pub struct PipelineBuilder<Provider> {
+pub struct PipelineBuilder<Provider, E>
+where
+    E: BlockExecError,
+{
     /// All configured stages in the order they will be executed.
-    stages: Vec<BoxedStage<Provider>>,
+    stages: Vec<BoxedStage<Provider, E>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
     /// A receiver for the current chain tip to sync to.
@@ -17,11 +21,14 @@ pub struct PipelineBuilder<Provider> {
     fail_on_unwind: bool,
 }
 
-impl<Provider> PipelineBuilder<Provider> {
+impl<Provider, E> PipelineBuilder<Provider, E>
+where
+    E: BlockExecError,
+{
     /// Add a stage to the pipeline.
     pub fn add_stage<S>(mut self, stage: S) -> Self
     where
-        S: Stage<Provider> + 'static,
+        S: Stage<Provider, E> + 'static,
     {
         self.stages.push(Box::new(stage));
         self
@@ -34,7 +41,7 @@ impl<Provider> PipelineBuilder<Provider> {
     /// To customize the stages in the set (reorder, disable, insert a stage) call
     /// [`builder`][StageSet::builder] on the set which will convert it to a
     /// [`StageSetBuilder`][crate::StageSetBuilder].
-    pub fn add_stages<Set: StageSet<Provider>>(mut self, set: Set) -> Self {
+    pub fn add_stages<Set: StageSet<Provider, E>>(mut self, set: Set) -> Self {
         let states = set.builder().build();
         self.stages.reserve_exact(states.len());
         for stage in states {
@@ -74,7 +81,7 @@ impl<Provider> PipelineBuilder<Provider> {
         self,
         provider_factory: ProviderFactory<N>,
         static_file_producer: StaticFileProducer<ProviderFactory<N>>,
-    ) -> Pipeline<N>
+    ) -> Pipeline<N, E>
     where
         N: ProviderNodeTypes,
         ProviderFactory<N>: DatabaseProviderFactory<ProviderRW = Provider>,
@@ -94,7 +101,10 @@ impl<Provider> PipelineBuilder<Provider> {
     }
 }
 
-impl<Provider> Default for PipelineBuilder<Provider> {
+impl<Provider, E> Default for PipelineBuilder<Provider, E>
+where
+    E: BlockExecError,
+{
     fn default() -> Self {
         Self {
             stages: Vec::new(),
@@ -106,7 +116,10 @@ impl<Provider> Default for PipelineBuilder<Provider> {
     }
 }
 
-impl<Provider> std::fmt::Debug for PipelineBuilder<Provider> {
+impl<Provider, E> std::fmt::Debug for PipelineBuilder<Provider, E>
+where
+    E: BlockExecError,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PipelineBuilder")
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())

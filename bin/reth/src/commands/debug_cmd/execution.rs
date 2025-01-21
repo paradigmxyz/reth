@@ -68,7 +68,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         provider_factory: ProviderFactory<N>,
         task_executor: &TaskExecutor,
         static_file_producer: StaticFileProducer<ProviderFactory<N>>,
-    ) -> eyre::Result<Pipeline<N>>
+    ) -> eyre::Result<Pipeline<N, E>>
     where
         N: ProviderNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives> + CliNodeTypes,
         Client: EthBlockClient + 'static,

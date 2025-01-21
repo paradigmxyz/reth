@@ -37,7 +37,7 @@ pub fn build_networked_pipeline<N, Client, Executor>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     executor: Executor,
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
-) -> eyre::Result<Pipeline<N>>
+) -> eyre::Result<Pipeline<N, Executor::Error>>
 where
     N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
@@ -83,7 +83,7 @@ pub fn build_pipeline<N, H, B, Executor>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     executor: Executor,
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
-) -> eyre::Result<Pipeline<N>>
+) -> eyre::Result<Pipeline<N, Executor::Error>>
 where
     N: ProviderNodeTypes,
     H: HeaderDownloader<Header = HeaderTy<N>> + 'static,

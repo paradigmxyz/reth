@@ -114,7 +114,11 @@ where
 
 impl<E, P> Stream for StreamBackfillJob<E, P, SingleBlockStreamItem<E::Primitives>>
 where
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>> + Clone + 'static,
+    E: BlockExecutorProvider<
+            Primitives: NodePrimitives<Block = P::Block>,
+            Error = BlockExecutionError,
+        > + Clone
+        + 'static,
     P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
 {
     type Item = BackfillJobResult<SingleBlockStreamItem<E::Primitives>>;
@@ -147,7 +151,11 @@ where
 
 impl<E, P> Stream for StreamBackfillJob<E, P, BatchBlockStreamItem<E::Primitives>>
 where
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>> + Clone + 'static,
+    E: BlockExecutorProvider<
+            Primitives: NodePrimitives<Block = P::Block>,
+            Error = BlockExecutionError,
+        > + Clone
+        + 'static,
     P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
 {
     type Item = BackfillJobResult<BatchBlockStreamItem<E::Primitives>>;

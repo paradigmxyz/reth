@@ -2,6 +2,7 @@ use super::missing_static_data_error;
 use futures_util::TryStreamExt;
 use reth_db::{tables, transaction::DbTx};
 use reth_db_api::{cursor::DbCursorRO, transaction::DbTxMut};
+use reth_execution_errors::BlockExecutionError;
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_primitives::StaticFileSegment;
 use reth_provider::{
@@ -68,7 +69,7 @@ impl<D: BodyDownloader> BodyStage<D> {
         &self,
         provider: &Provider,
         unwind_block: Option<u64>,
-    ) -> Result<(), StageError>
+    ) -> Result<(), StageError<BlockExecutionError>>
     where
         Provider: DBProvider<Tx: DbTxMut> + BlockReader + StaticFileProviderFactory,
     {
@@ -141,7 +142,7 @@ impl<D: BodyDownloader> BodyStage<D> {
     }
 }
 
-impl<Provider, D> Stage<Provider> for BodyStage<D>
+impl<Provider, D> Stage<Provider, BlockExecutionError> for BodyStage<D>
 where
     Provider: DBProvider<Tx: DbTxMut>
         + StaticFileProviderFactory
@@ -159,7 +160,7 @@ where
         &mut self,
         cx: &mut Context<'_>,
         input: ExecInput,
-    ) -> Poll<Result<(), StageError>> {
+    ) -> Poll<Result<(), StageError<BlockExecutionError>>> {
         if input.target_reached() || self.buffer.is_some() {
             return Poll::Ready(Ok(()))
         }
@@ -185,7 +186,11 @@ where
 
     /// Download block bodies from the last checkpoint for this stage up until the latest synced
     /// header, limited by the stage's batch size.
-    fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+    fn execute(
+        &mut self,
+        provider: &Provider,
+        input: ExecInput,
+    ) -> Result<ExecOutput, StageError<BlockExecutionError>> {
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -225,7 +230,7 @@ where
         &mut self,
         provider: &Provider,
         input: UnwindInput,
-    ) -> Result<UnwindOutput, StageError> {
+    ) -> Result<UnwindOutput, StageError<BlockExecutionError>> {
         self.buffer.take();
 
         self.ensure_consistency(provider, Some(input.unwind_to))?;
@@ -488,6 +493,7 @@ mod tests {
             models::{StoredBlockBodyIndices, StoredBlockOmmers},
             transaction::{DbTx, DbTxMut},
         };
+        use reth_execution_errors::BlockExecutionError;
         use reth_network_p2p::{
             bodies::{
                 downloader::{BodyDownloader, BodyDownloaderResult},
@@ -543,6 +549,7 @@ mod tests {
         }
 
         impl StageTestRunner for BodyTestRunner {
+            type E = BlockExecutionError;
             type S = BodyStage<TestBodyDownloader>;
 
             fn db(&self) -> &TestStageDB {

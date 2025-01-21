@@ -1,5 +1,6 @@
 use alloy_primitives::B256;
 use reth_chainspec::ChainSpec;
+use reth_errors::BlockExecutionError;
 use reth_network_p2p::test_utils::TestFullBlockClient;
 use reth_primitives::{BlockBody, SealedHeader};
 use reth_provider::{
@@ -43,12 +44,15 @@ impl TestPipelineBuilder {
     }
 
     /// Builds the pipeline.
-    pub fn build(self, chain_spec: Arc<ChainSpec>) -> Pipeline<MockNodeTypesWithDB> {
+    pub fn build(
+        self,
+        chain_spec: Arc<ChainSpec>,
+    ) -> Pipeline<MockNodeTypesWithDB, BlockExecutionError> {
         reth_tracing::init_test_tracing();
 
         // Setup pipeline
         let (tip_tx, _tip_rx) = watch::channel(B256::default());
-        let pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+        let pipeline = Pipeline::<MockNodeTypesWithDB, BlockExecutionError>::builder()
             .add_stages(TestStages::new(self.pipeline_exec_outputs, Default::default()))
             .with_tip_sender(tip_tx);
 
