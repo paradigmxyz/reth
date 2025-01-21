@@ -257,7 +257,7 @@ impl ProofSequencer {
 }
 
 /// A wrapper for the sender that signals completion when dropped
-#[derive(Deref, Debug)]
+#[derive(Deref, Debug, Clone)]
 pub struct StateHookSender(Sender<StateRootMessage>);
 
 impl StateHookSender {

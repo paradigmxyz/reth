@@ -11,7 +11,8 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
-    map::{HashMap, HashSet},
+    keccak256,
+    map::{B256Set, HashMap, HashSet},
     Address, BlockNumber, B256, U256,
 };
 use alloy_rpc_types_engine::{
@@ -37,7 +38,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::BlockExecutorProvider,
     system_calls::{NoopHook, OnStateHook},
-    ConfigureEvm, Evm
+    ConfigureEvm, Evm,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
@@ -53,11 +54,16 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{
-    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState, TrieInput,
+    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState,
+    MultiProofTargets, TrieInput,
 };
 use reth_trie_db::DatabaseTrieCursorFactory;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use root::{StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootTask};
+use revm_primitives::ResultAndState;
+use root::{
+    StateHookSender, StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootMessage,
+    StateRootTask,
+};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
@@ -2357,33 +2363,8 @@ where
             return Err(e.into())
         }
 
-        // Use cached state provider before executing, this does nothing currently, will be used in
-        // prewarming
-        let caches = ProviderCacheBuilder::default().build_caches();
-        let cache_metrics = CachedStateMetrics::zeroed();
-        let state_provider = CachedStateProvider::new_with_caches(
-            state_provider,
-            caches.clone(),
-            cache_metrics.clone(),
-        );
-
-        info!(target: "engine::tree", "Spawning prewarm threads");
-
-        // Prewarm transactions
-        for (tx, sender) in block.body().transactions().iter().zip(block.senders()) {
-            self.prewarm_transaction(
-                block.header().clone(),
-                tx.clone(),
-                *sender,
-                caches.clone(),
-                cache_metrics.clone(),
-            )?;
-        }
-
-        info!(target: "engine::tree", "Done spawning prewarm threads");
-        trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
-        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
-
+        let block_number = block.number();
+        let block_hash = block.hash();
         let sealed_block = Arc::new(block.clone_sealed_block());
 
         // We only run the parallel state root if we are currently persisting blocks that are all
@@ -2415,6 +2396,36 @@ where
                 (None, None, Box::new(NoopHook::default()) as Box<dyn OnStateHook>)
             };
 
+        // Use cached state provider before executing, this does nothing currently, will be used in
+        // prewarming
+        let caches = ProviderCacheBuilder::default().build_caches();
+        let cache_metrics = CachedStateMetrics::zeroed();
+        let state_provider = CachedStateProvider::new_with_caches(
+            state_provider,
+            caches.clone(),
+            cache_metrics.clone(),
+        );
+
+        info!(target: "engine::tree", "Spawning prewarm threads");
+
+        // Prewarm transactions
+        for (tx, sender) in block.body().transactions().iter().zip(block.senders()) {
+            let state_root_sender = state_root_sender.clone();
+
+            self.prewarm_transaction(
+                block.header().clone(),
+                tx.clone(),
+                *sender,
+                caches.clone(),
+                cache_metrics.clone(),
+                state_root_sender,
+            )?;
+        }
+
+        info!(target: "engine::tree", "Done spawning prewarm threads");
+        trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
+
+        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
         let execution_start = Instant::now();
         let output = self.metrics.executor.execute_metered(executor, &block, state_hook)?;
         let execution_time = execution_start.elapsed();
@@ -2589,6 +2600,7 @@ where
         sender: Address,
         caches: ProviderCaches,
         cache_metrics: CachedStateMetrics,
+        state_root_sender: Option<StateHookSender>,
     ) -> Result<(), InsertBlockErrorKind> {
         let Some(state_provider) = self.state_provider(block.parent_hash())? else {
             error!(target: "engine::tree", parent=?block.parent_hash(), "Could not get state provider for prewarm");
@@ -2611,10 +2623,30 @@ where
 
             // create the tx env and reset nonce
             let mut tx_env = evm_config.tx_env(&tx, sender);
-            tx_env.nonce = None;
-            if let Err(err) = evm.transact(tx_env) {
-                error!(target: "engine::tree", ?err, tx_hash=?tx.tx_hash(), ?sender, "Error when executing prewarm transaction");
+            tx_env.set_nonce(None);
+            let ResultAndState { state, .. } = match evm.transact(tx_env) {
+                Ok(res) => res,
+                Err(err) => {
+                    error!(target: "engine::tree", ?err, tx_hash=?tx.tx_hash(), ?sender, "Error when executing prewarm transaction");
+                    return
+                }
             };
+
+            let Some(state_root_sender) = state_root_sender else {
+                return
+            };
+
+            let mut targets = MultiProofTargets::default();
+            for (addr, account) in state {
+                let mut storage_set = B256Set::default();
+                for (key, _) in account.storage {
+                    storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
+                }
+
+                targets.insert(keccak256(addr), storage_set);
+            }
+
+            let _ = state_root_sender.send(StateRootMessage::PrefetchProofs(targets));
         });
 
         Ok(())
