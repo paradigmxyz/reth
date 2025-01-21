@@ -943,8 +943,11 @@ mod tests {
             state_sorted,
             prefix_sets: Arc::new(input.prefix_sets),
         };
+
+        // The thread pool requires at least 2 threads as it contains a long running sparse trie
+        // task.
         let num_threads =
-            std::thread::available_parallelism().map_or(1, |num| (num.get() / 2).max(2));
+            std::thread::available_parallelism().map_or(2, |num| (num.get() / 2).max(2));
 
         let state_root_task_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads)
