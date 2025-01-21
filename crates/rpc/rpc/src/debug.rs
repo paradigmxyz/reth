@@ -168,7 +168,7 @@ where
                     .iter()
                     .map(|tx| {
                         tx.recover_signer()
-                            .ok_or(EthApiError::InvalidTransactionSignature)
+                            .map_err(|_| EthApiError::InvalidTransactionSignature)
                             .map_err(Eth::Error::from_eth_err)
                     })
                     .collect::<Result<Vec<_>, Eth::Error>>()?
@@ -179,7 +179,7 @@ where
                     .iter()
                     .map(|tx| {
                         tx.recover_signer_unchecked()
-                            .ok_or(EthApiError::InvalidTransactionSignature)
+                            .map_err(|_| EthApiError::InvalidTransactionSignature)
                             .map_err(Eth::Error::from_eth_err)
                     })
                     .collect::<Result<Vec<_>, Eth::Error>>()?

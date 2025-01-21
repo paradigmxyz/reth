@@ -21,8 +21,9 @@ where
 {
     // Note: we assume this transaction is valid, because it's mined (or part of pending block)
     // and we don't need to check for pre EIP-2
-    let from =
-        transaction.recover_signer_unchecked().ok_or(EthApiError::InvalidTransactionSignature)?;
+    let from = transaction
+        .recover_signer_unchecked()
+        .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
     // get the previous transaction cumulative gas used
     let gas_used = if meta.index == 0 {

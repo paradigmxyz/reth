@@ -1569,11 +1569,14 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
     ) -> ProviderResult<Vec<Address>> {
         let txes = self.transactions_by_tx_range(range)?;
         reth_primitives_traits::transaction::recover::recover_signers(&txes)
-            .ok_or(ProviderError::SenderRecoveryError)
+            .map_err(|_| ProviderError::SenderRecoveryError)
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        Ok(self.transaction_by_id_unhashed(id)?.and_then(|tx| tx.recover_signer()))
+        match self.transaction_by_id_unhashed(id)? {
+            Some(tx) => Ok(tx.recover_signer().ok()),
+            None => Ok(None),
+        }
     }
 }
 

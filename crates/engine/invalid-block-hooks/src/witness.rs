@@ -1,7 +1,6 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{keccak256, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
-use eyre::OptionExt;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
@@ -87,7 +86,8 @@ where
         // Re-execute all of the transactions in the block to load all touched accounts into
         // the cache DB.
         for tx in block.body().transactions() {
-            let signer = tx.recover_signer().ok_or_eyre("failed to recover sender")?;
+            let signer =
+                tx.recover_signer().map_err(|_| eyre::eyre!("failed to recover sender"))?;
             evm.transact_commit(self.evm_config.tx_env(tx, signer))?;
         }
 
