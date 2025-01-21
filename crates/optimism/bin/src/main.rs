@@ -5,8 +5,6 @@
 use clap::Parser;
 use reth_optimism_cli::{chainspec::OpChainSpecParser, Cli};
 use reth_optimism_node::{args::RollupArgs, OpNode};
-
-use tracing as _;
 use tracing::info;
 
 #[global_allocator]
