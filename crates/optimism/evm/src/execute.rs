@@ -19,7 +19,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm, Evm, TxEnvOverrides,
+    ConfigureEvmFor, Evm, TxEnvOverrides,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
@@ -73,12 +73,7 @@ where
         Receipt = OpReceipt,
         SignedTx: OpTransaction,
     >,
-    EvmConfig: Clone
-        + Unpin
-        + Sync
-        + Send
-        + 'static
-        + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    EvmConfig: Clone + Unpin + Sync + Send + 'static + ConfigureEvmFor<N>,
 {
     type Primitives = N;
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
@@ -151,7 +146,7 @@ where
         SignedTx: OpTransaction,
         Receipt: DepositReceipt,
     >,
-    EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    EvmConfig: ConfigureEvmFor<N>,
 {
     type DB = DB;
     type Primitives = N;
