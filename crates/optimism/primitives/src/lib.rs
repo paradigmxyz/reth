@@ -18,7 +18,7 @@ use reth_primitives_traits::Block;
 pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType};
 
 mod receipt;
-pub use receipt::OpReceipt;
+pub use receipt::{DepositReceipt, OpReceipt};
 
 /// Optimism-specific block type.
 pub type OpBlock = alloy_consensus::Block<OpTransactionSigned>;
@@ -38,5 +38,3 @@ impl reth_primitives_traits::NodePrimitives for OpPrimitives {
     type SignedTx = OpTransactionSigned;
     type Receipt = OpReceipt;
 }
-
-use once_cell as _;

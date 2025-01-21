@@ -178,14 +178,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{fs::File, sync::Arc};
-
-    use eyre::OptionExt;
+    use super::Storage;
     use reth_exex_types::ExExNotification;
     use reth_provider::Chain;
     use reth_testing_utils::generators::{self, random_block};
-
-    use super::Storage;
+    use std::{fs::File, sync::Arc};
 
     #[test]
     fn test_roundtrip() -> eyre::Result<()> {
@@ -194,12 +191,8 @@ mod tests {
         let temp_dir = tempfile::tempdir()?;
         let storage: Storage = Storage::new(&temp_dir)?;
 
-        let old_block = random_block(&mut rng, 0, Default::default())
-            .seal_with_senders()
-            .ok_or_eyre("failed to recover senders")?;
-        let new_block = random_block(&mut rng, 0, Default::default())
-            .seal_with_senders()
-            .ok_or_eyre("failed to recover senders")?;
+        let old_block = random_block(&mut rng, 0, Default::default()).try_recover()?;
+        let new_block = random_block(&mut rng, 0, Default::default()).try_recover()?;
 
         let notification = ExExNotification::ChainReorged {
             new: Arc::new(Chain::new(vec![new_block], Default::default(), None)),

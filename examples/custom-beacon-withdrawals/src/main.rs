@@ -3,30 +3,31 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
-#[cfg(feature = "optimism")]
-use reth::revm::primitives::OptimismFields;
 use reth::{
     api::{ConfigureEvm, NodeTypesWithEngine},
     builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
     cli::Cli,
     providers::ProviderError,
     revm::{
-        interpreter::Host,
-        primitives::{address, Address, Bytes, Env, TransactTo, TxEnv, U256},
-        Database, DatabaseCommit, Evm, State,
+        primitives::{address, Address},
+        Database, DatabaseCommit, State,
     },
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_evm::execute::{
-    BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
-    InternalBlockExecutionError,
+use reth_evm::{
+    execute::{
+        BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
+        InternalBlockExecutionError,
+    },
+    Evm,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};
-use reth_primitives::{BlockWithSenders, EthPrimitives, Receipt};
+use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
 use std::{fmt::Display, sync::Arc};
 
 pub const SYSTEM_ADDRESS: Address = address!("fffffffffffffffffffffffffffffffffffffffe");
@@ -125,10 +126,13 @@ where
     type Primitives = EthPrimitives;
     type Error = BlockExecutionError;
 
-    fn apply_pre_execution_changes(&mut self, block: &BlockWithSenders) -> Result<(), Self::Error> {
+    fn apply_pre_execution_changes(
+        &mut self,
+        block: &RecoveredBlock<reth_primitives::Block>,
+    ) -> Result<(), Self::Error> {
         // Set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
-            (*self.chain_spec).is_spurious_dragon_active_at_block(block.header.number);
+            (*self.chain_spec).is_spurious_dragon_active_at_block(block.number());
         self.state.set_state_clear_flag(state_clear_flag);
 
         Ok(())
@@ -136,19 +140,19 @@ where
 
     fn execute_transactions(
         &mut self,
-        _block: &BlockWithSenders,
+        _block: &RecoveredBlock<reth_primitives::Block>,
     ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
         Ok(ExecuteOutput { receipts: vec![], gas_used: 0 })
     }
 
     fn apply_post_execution_changes(
         &mut self,
-        block: &BlockWithSenders,
+        block: &RecoveredBlock<reth_primitives::Block>,
         _receipts: &[Receipt],
     ) -> Result<Requests, Self::Error> {
-        let mut evm = self.evm_config.evm_for_block(&mut self.state, &block.header);
+        let mut evm = self.evm_config.evm_for_block(&mut self.state, block.header());
 
-        if let Some(withdrawals) = block.body.withdrawals.as_ref() {
+        if let Some(withdrawals) = block.body().withdrawals.as_ref() {
             apply_withdrawals_contract_call(withdrawals, &mut evm)?;
         }
 
@@ -173,19 +177,11 @@ sol!(
 
 /// Applies the post-block call to the withdrawal / deposit contract, using the given block,
 /// [`ChainSpec`], EVM.
-pub fn apply_withdrawals_contract_call<EXT, DB: Database + DatabaseCommit>(
+pub fn apply_withdrawals_contract_call(
     withdrawals: &[Withdrawal],
-    evm: &mut Evm<'_, EXT, DB>,
-) -> Result<(), BlockExecutionError>
-where
-    DB::Error: std::fmt::Display,
-{
-    // get previous env
-    let previous_env = Box::new(evm.context.env().clone());
-
-    // modify env for pre block call
-    fill_tx_env_with_system_contract_call(
-        &mut evm.context.evm.env,
+    evm: &mut impl Evm<Error: Display, DB: DatabaseCommit>,
+) -> Result<(), BlockExecutionError> {
+    let mut state = match evm.transact_system_call(
         SYSTEM_ADDRESS,
         WITHDRAWALS_ADDRESS,
         withdrawalsCall {
@@ -194,12 +190,9 @@ where
         }
         .abi_encode()
         .into(),
-    );
-
-    let mut state = match evm.transact() {
+    ) {
         Ok(res) => res.state,
         Err(e) => {
-            evm.context.evm.env = previous_env;
             return Err(BlockExecutionError::Internal(InternalBlockExecutionError::Other(
                 format!("withdrawal contract system call revert: {}", e).into(),
             )))
@@ -209,47 +202,8 @@ where
     // Clean-up post system tx context
     state.remove(&SYSTEM_ADDRESS);
     state.remove(&evm.block().coinbase);
-    evm.context.evm.db.commit(state);
-    // re-set the previous env
-    evm.context.evm.env = previous_env;
+
+    evm.db_mut().commit(state);
 
     Ok(())
-}
-
-fn fill_tx_env_with_system_contract_call(
-    env: &mut Env,
-    caller: Address,
-    contract: Address,
-    data: Bytes,
-) {
-    env.tx = TxEnv {
-        caller,
-        transact_to: TransactTo::Call(contract),
-        // Explicitly set nonce to None so revm does not do any nonce checks
-        nonce: None,
-        gas_limit: 30_000_000,
-        value: U256::ZERO,
-        data,
-        // Setting the gas price to zero enforces that no value is transferred as part of the call,
-        // and that the call will not count against the block's gas limit
-        gas_price: U256::ZERO,
-        // The chain ID check is not relevant here and is disabled if set to None
-        chain_id: None,
-        // Setting the gas priority fee to None ensures the effective gas price is derived from the
-        // `gas_price` field, which we need to be zero
-        gas_priority_fee: None,
-        access_list: Vec::new(),
-        // blob fields can be None for this tx
-        blob_hashes: Vec::new(),
-        max_fee_per_blob_gas: None,
-        authorization_list: None,
-        #[cfg(feature = "optimism")]
-        optimism: OptimismFields::default(),
-    };
-
-    // ensure the block gas limit is >= the tx
-    env.block.gas_limit = U256::from(env.tx.gas_limit);
-
-    // disable the base fee check for this call by setting the base fee to zero
-    env.block.basefee = U256::ZERO;
 }

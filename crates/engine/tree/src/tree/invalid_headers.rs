@@ -111,7 +111,7 @@ mod tests {
     fn test_hit_eviction() {
         let mut cache = InvalidHeaderCache::new(10);
         let header = Header::default();
-        let header = SealedHeader::seal(header);
+        let header = SealedHeader::seal_slow(header);
         cache.insert(header.block_with_parent());
         assert_eq!(cache.headers.get(&header.hash()).unwrap().hit_count, 0);
 

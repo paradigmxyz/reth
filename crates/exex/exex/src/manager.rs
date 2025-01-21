@@ -664,7 +664,7 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::SealedBlockWithSenders;
+    use reth_primitives::RecoveredBlock;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockReader,
         BlockWriter, Chain, DatabaseProviderFactory, StorageLocation, TransactionVariant,
@@ -766,9 +766,9 @@ mod tests {
             ExExManager::new((), vec![exex_handle], 10, wal, empty_finalized_header_stream());
 
         // Define the notification for testing
-        let mut block1: SealedBlockWithSenders = Default::default();
-        block1.block.set_hash(B256::new([0x01; 32]));
-        block1.block.set_block_number(10);
+        let mut block1: RecoveredBlock<reth_primitives::Block> = Default::default();
+        block1.set_hash(B256::new([0x01; 32]));
+        block1.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
@@ -784,9 +784,9 @@ mod tests {
         assert_eq!(exex_manager.next_id, 1);
 
         // Push another notification
-        let mut block2: SealedBlockWithSenders = Default::default();
-        block2.block.set_hash(B256::new([0x02; 32]));
-        block2.block.set_block_number(20);
+        let mut block2: RecoveredBlock<reth_primitives::Block> = Default::default();
+        block2.set_hash(B256::new([0x02; 32]));
+        block2.set_block_number(20);
 
         let notification2 = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block2.clone()], Default::default(), Default::default())),
@@ -827,7 +827,7 @@ mod tests {
         );
 
         // Push some notifications to fill part of the buffer
-        let mut block1: SealedBlockWithSenders = Default::default();
+        let mut block1: RecoveredBlock<reth_primitives::Block> = Default::default();
         block1.set_hash(B256::new([0x01; 32]));
         block1.set_block_number(10);
 
@@ -1116,13 +1116,13 @@ mod tests {
         assert_eq!(exex_handle.next_notification_id, 0);
 
         // Setup two blocks for the chain commit notification
-        let mut block1: SealedBlockWithSenders = Default::default();
-        block1.block.set_hash(B256::new([0x01; 32]));
-        block1.block.set_block_number(10);
+        let mut block1: RecoveredBlock<reth_primitives::Block> = Default::default();
+        block1.set_hash(B256::new([0x01; 32]));
+        block1.set_block_number(10);
 
-        let mut block2: SealedBlockWithSenders = Default::default();
-        block2.block.set_hash(B256::new([0x02; 32]));
-        block2.block.set_block_number(11);
+        let mut block2: RecoveredBlock<reth_primitives::Block> = Default::default();
+        block2.set_hash(B256::new([0x02; 32]));
+        block2.set_block_number(11);
 
         // Setup a notification
         let notification = ExExNotification::ChainCommitted {
@@ -1169,9 +1169,9 @@ mod tests {
         // Set finished_height to a value higher than the block tip
         exex_handle.finished_height = Some(BlockNumHash::new(15, B256::random()));
 
-        let mut block1: SealedBlockWithSenders = Default::default();
-        block1.block.set_hash(B256::new([0x01; 32]));
-        block1.block.set_block_number(10);
+        let mut block1: RecoveredBlock<reth_primitives::Block> = Default::default();
+        block1.set_hash(B256::new([0x01; 32]));
+        block1.set_block_number(10);
 
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
@@ -1300,7 +1300,7 @@ mod tests {
             genesis_block.number + 1,
             BlockParams { parent: Some(genesis_hash), ..Default::default() },
         )
-        .seal_with_senders::<reth_primitives::Block>()
+        .try_recover()
         .unwrap();
         let provider_rw = provider_factory.database_provider_rw().unwrap();
         provider_rw.insert_block(block.clone(), StorageLocation::Database).unwrap();

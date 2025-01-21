@@ -17,7 +17,6 @@ use reth_provider::{
     providers::ProviderNodeTypes, BlockExecutionWriter, BlockNumReader, ChainStateBlockReader,
     ChainStateBlockWriter, ProviderFactory, StaticFileProviderFactory, StorageLocation,
 };
-use reth_prune::PruneModes;
 use reth_stages::{
     sets::{DefaultStages, OfflineStages},
     stages::ExecutionStage,
@@ -120,7 +119,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         let builder = if self.offline {
             Pipeline::<N>::builder().add_stages(
-                OfflineStages::new(executor, config.stages, PruneModes::default())
+                OfflineStages::new(executor, config.stages, prune_modes.clone())
                     .builder()
                     .disable(reth_stages::StageId::SenderRecovery),
             )
@@ -145,7 +144,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                         max_duration: None,
                     },
                     stage_conf.execution_external_clean_threshold(),
-                    prune_modes,
+                    prune_modes.clone(),
                     ExExManagerHandle::empty(),
                 )),
             )
@@ -153,7 +152,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         let pipeline = builder.build(
             provider_factory.clone(),
-            StaticFileProducer::new(provider_factory, PruneModes::default()),
+            StaticFileProducer::new(provider_factory, prune_modes),
         );
         Ok(pipeline)
     }

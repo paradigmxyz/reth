@@ -11,7 +11,7 @@ use eyre::Ok;
 use futures_util::Future;
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
-use reth_node_api::{Block, BlockTy, EngineTypes, FullNodeComponents};
+use reth_node_api::{Block, BlockBody, BlockTy, EngineTypes, FullNodeComponents};
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes, NodeTypesWithEngine};
 use reth_node_core::primitives::SignedTransaction;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
@@ -232,7 +232,7 @@ where
         // get head block from notifications stream and verify the tx has been pushed to the
         // pool is actually present in the canonical block
         let head = self.engine_api.canonical_stream.next().await.unwrap();
-        let tx = head.tip().transactions().first();
+        let tx = head.tip().body().transactions().first();
         assert_eq!(tx.unwrap().tx_hash().as_slice(), tip_tx_hash.as_slice());
 
         loop {

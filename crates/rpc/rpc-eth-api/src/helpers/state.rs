@@ -219,9 +219,8 @@ pub trait LoadState:
     {
         async move {
             if at.is_pending() {
-                let PendingBlockEnv { cfg, block_env, origin } =
-                    self.pending_block_env_and_cfg()?;
-                Ok(((cfg, block_env).into(), origin.state_block_id()))
+                let PendingBlockEnv { evm_env, origin } = self.pending_block_env_and_cfg()?;
+                Ok((evm_env, origin.state_block_id()))
             } else {
                 // Use cached values if there is no pending block
                 let block_hash = RpcNodeCore::provider(self)

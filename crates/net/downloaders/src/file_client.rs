@@ -11,6 +11,7 @@ use reth_network_p2p::{
     error::RequestError,
     headers::client::{HeadersClient, HeadersDirection, HeadersFut, HeadersRequest},
     priority::Priority,
+    BlockClient,
 };
 use reth_network_peers::PeerId;
 use reth_primitives::SealedHeader;
@@ -40,7 +41,7 @@ pub const DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE: u64 = 1_000_000_000;
 /// transactions in memory for use in the bodies stage.
 ///
 /// This reads the entire file into memory, so it is not suitable for large files.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileClient<B: Block = reth_primitives::Block> {
     /// The buffered headers retrieved when fetching new bodies.
     headers: HashMap<BlockNumber, B::Header>,
@@ -116,7 +117,7 @@ impl<B: FullBlock> FileClient<B> {
     /// Clones and returns the highest header of this client has or `None` if empty. Seals header
     /// before returning.
     pub fn tip_header(&self) -> Option<SealedHeader<B::Header>> {
-        self.headers.get(&self.max_block()?).map(|h| SealedHeader::seal(h.clone()))
+        self.headers.get(&self.max_block()?).map(|h| SealedHeader::seal_slow(h.clone()))
     }
 
     /// Returns true if all blocks are canonical (no gaps)
@@ -350,6 +351,10 @@ impl<B: FullBlock> DownloadClient for FileClient<B> {
     }
 }
 
+impl<B: FullBlock> BlockClient for FileClient<B> {
+    type Block = B;
+}
+
 /// Chunks file into several [`FileClient`]s.
 #[derive(Debug)]
 pub struct ChunkedFileReader {
@@ -546,11 +551,12 @@ mod tests {
 
         let client: Arc<FileClient> =
             Arc::new(FileClient::from_file(file.into()).await.unwrap().with_bodies(bodies.clone()));
-        let mut downloader = BodiesDownloaderBuilder::default().build(
-            client.clone(),
-            Arc::new(TestConsensus::default()),
-            factory,
-        );
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .build::<reth_primitives::Block, _, _>(
+                client.clone(),
+                Arc::new(TestConsensus::default()),
+                factory,
+            );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(
@@ -571,10 +577,10 @@ mod tests {
         let file = tempfile::tempfile().unwrap();
         let client: Arc<FileClient> = Arc::new(
             FileClient::from_file(file.into()).await.unwrap().with_headers(HashMap::from([
-                (0u64, p0.clone().unseal()),
-                (1, p1.clone().unseal()),
-                (2, p2.clone().unseal()),
-                (3, p3.clone().unseal()),
+                (0u64, p0.clone_header()),
+                (1, p1.clone_header()),
+                (2, p2.clone_header()),
+                (3, p3.clone_header()),
             ])),
         );
 
@@ -628,11 +634,12 @@ mod tests {
         // insert headers in db for the bodies downloader
         insert_headers(factory.db_ref().db(), &headers);
 
-        let mut downloader = BodiesDownloaderBuilder::default().build(
-            client.clone(),
-            Arc::new(TestConsensus::default()),
-            factory,
-        );
+        let mut downloader = BodiesDownloaderBuilder::default()
+            .build::<reth_primitives::Block, _, _>(
+                client.clone(),
+                Arc::new(TestConsensus::default()),
+                factory,
+            );
         downloader.set_download_range(0..=19).expect("failed to set download range");
 
         assert_matches!(

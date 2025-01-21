@@ -15,13 +15,13 @@ use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResu
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
     state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
-    ConfigureEvm,
+    ConfigureEvm, Evm,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, BlockExt, Receipt,
-    Receipts,
+    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, Receipt, Receipts,
 };
+use reth_primitives_traits::{block::Block as _, SignedTransaction};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -325,23 +325,23 @@ where
         let tx_recovered = tx.clone().try_into_ecrecovered().map_err(|_| {
             BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError)
         })?;
-        evm_config.fill_tx_env(evm.tx_mut(), &tx_recovered, tx_recovered.signer());
-        let exec_result = match evm.transact() {
+        let tx_env = evm_config.tx_env(&tx_recovered, tx_recovered.signer());
+        let exec_result = match evm.transact(tx_env) {
             Ok(result) => result,
             error @ Err(EVMError::Transaction(_) | EVMError::Header(_)) => {
-                trace!(target: "engine::stream::reorg", hash = %tx.hash(), ?error, "Error executing transaction from next block");
+                trace!(target: "engine::stream::reorg", hash = %tx.tx_hash(), ?error, "Error executing transaction from next block");
                 continue
             }
             // Treat error as fatal
             Err(error) => {
                 return Err(RethError::Execution(BlockExecutionError::Validation(
-                    BlockValidationError::EVM { hash: tx.hash(), error: Box::new(error) },
+                    BlockValidationError::EVM { hash: *tx.tx_hash(), error: Box::new(error) },
                 )))
             }
         };
         evm.db_mut().commit(exec_result.state);
 
-        if let Some(blob_tx) = tx.transaction.as_eip4844() {
+        if let Some(blob_tx) = tx.as_eip4844() {
             sum_blob_gas_used += blob_tx.blob_gas();
             versioned_hashes.extend(blob_tx.blob_versioned_hashes.clone());
         }

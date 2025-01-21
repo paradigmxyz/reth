@@ -20,18 +20,15 @@ use core::{
     mem,
 };
 use derive_more::{AsRef, Deref};
-#[cfg(not(feature = "std"))]
-use once_cell::sync::OnceCell as OnceLock;
-use op_alloy_consensus::{OpPooledTransaction, OpTypedTransaction, TxDeposit};
+use op_alloy_consensus::{DepositTransaction, OpPooledTransaction, OpTypedTransaction, TxDeposit};
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
+    sync::OnceLock,
     transaction::error::TransactionConversionError,
     InMemorySize, SignedTransaction,
 };
-#[cfg(feature = "std")]
-use std::sync::OnceLock;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -121,6 +118,19 @@ impl SignedTransaction for OpTransactionSigned {
 
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
+    }
+}
+
+/// A trait that represents an optimism transaction, mainly used to indicate whether or not the
+/// transaction is a deposit transaction.
+pub trait OpTransaction {
+    /// Whether or not the transaction is a dpeosit transaction.
+    fn is_deposit(&self) -> bool;
+}
+
+impl OpTransaction for OpTransactionSigned {
+    fn is_deposit(&self) -> bool {
+        self.is_deposit()
     }
 }
 
@@ -598,6 +608,26 @@ impl TryFrom<OpTransactionSigned> for OpPooledTransaction {
             }
             OpTypedTransaction::Deposit(_) => Err(TransactionConversionError::UnsupportedForP2P),
         }
+    }
+}
+
+impl DepositTransaction for OpTransactionSigned {
+    fn source_hash(&self) -> Option<B256> {
+        match &self.transaction {
+            OpTypedTransaction::Deposit(tx) => Some(tx.source_hash),
+            _ => None,
+        }
+    }
+
+    fn mint(&self) -> Option<u128> {
+        match &self.transaction {
+            OpTypedTransaction::Deposit(tx) => tx.mint,
+            _ => None,
+        }
+    }
+
+    fn is_system_transaction(&self) -> bool {
+        self.is_deposit()
     }
 }
 

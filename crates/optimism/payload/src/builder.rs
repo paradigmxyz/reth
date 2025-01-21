@@ -16,7 +16,9 @@ use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::{
+    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, NextBlockEnvAttributes,
+};
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
@@ -26,9 +28,9 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{
-    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, BlockExt,
-    SealedHeader, TxType,
+    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, SealedHeader,
 };
+use reth_primitives_traits::{block::Block as _, RecoveredBlock};
 use reth_provider::{
     HashedPostStateProvider, ProviderError, StateProofProvider, StateProviderFactory,
     StateRootProvider,
@@ -39,10 +41,7 @@ use reth_transaction_pool::{
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
-    primitives::{
-        BlockEnv, CfgEnvWithHandlerCfg, EVMError, EnvWithHandlerCfg, InvalidTransaction,
-        ResultAndState, TxEnv,
-    },
+    primitives::{EVMError, InvalidTransaction, ResultAndState},
     Database, DatabaseCommit,
 };
 use std::{fmt::Display, sync::Arc};
@@ -128,7 +127,6 @@ where
         let evm_env = self
             .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
-        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
         let BuildArguments { client, pool: _, mut cached_reads, config, cancel, best_payload } =
             args;
@@ -138,8 +136,7 @@ where
             da_config: self.config.da_config.clone(),
             chain_spec: client.chain_spec(),
             config,
-            initialized_cfg: cfg_env_with_handler_cfg,
-            initialized_block_env: block_env,
+            evm_env,
             cancel,
             best_payload,
         };
@@ -194,7 +191,6 @@ where
 
         let evm_env =
             self.cfg_and_block_env(&attributes, &parent).map_err(PayloadBuilderError::other)?;
-        let EvmEnv { cfg_env_with_handler_cfg, block_env } = evm_env;
 
         let config = PayloadConfig { parent_header: Arc::new(parent), attributes };
         let ctx = OpPayloadBuilderCtx {
@@ -202,8 +198,7 @@ where
             da_config: self.config.da_config.clone(),
             chain_spec: client.chain_spec(),
             config,
-            initialized_cfg: cfg_env_with_handler_cfg,
-            initialized_block_env: block_env,
+            evm_env,
             cancel: Default::default(),
             best_payload: Default::default(),
         };
@@ -405,7 +400,7 @@ where
         let header = Header {
             parent_hash: ctx.parent().hash(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: ctx.initialized_block_env.coinbase,
+            beneficiary: ctx.evm_env.block_env.coinbase,
             state_root,
             transactions_root,
             receipts_root,
@@ -441,8 +436,10 @@ where
 
         // create the executed block data
         let executed: ExecutedBlock<OpPrimitives> = ExecutedBlock {
-            block: sealed_block.clone(),
-            senders: Arc::new(info.executed_senders),
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                sealed_block.as_ref().clone(),
+                info.executed_senders,
+            )),
             execution_output: Arc::new(execution_outcome),
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
@@ -586,9 +583,7 @@ pub struct OpPayloadBuilderCtx<EvmConfig> {
     /// How to build the payload.
     pub config: PayloadConfig<OpPayloadBuilderAttributes>,
     /// Evm Settings
-    pub initialized_cfg: CfgEnvWithHandlerCfg,
-    /// Block config
-    pub initialized_block_env: BlockEnv,
+    pub evm_env: EvmEnv,
     /// Marker to check whether the job has been cancelled.
     pub cancel: Cancelled,
     /// The currently best payload.
@@ -617,22 +612,22 @@ impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
     pub fn block_gas_limit(&self) -> u64 {
         self.attributes()
             .gas_limit
-            .unwrap_or_else(|| self.initialized_block_env.gas_limit.saturating_to())
+            .unwrap_or_else(|| self.evm_env.block_env.gas_limit.saturating_to())
     }
 
     /// Returns the block number for the block.
     pub fn block_number(&self) -> u64 {
-        self.initialized_block_env.number.to()
+        self.evm_env.block_env.number.to()
     }
 
     /// Returns the current base fee
     pub fn base_fee(&self) -> u64 {
-        self.initialized_block_env.basefee.to()
+        self.evm_env.block_env.basefee.to()
     }
 
     /// Returns the current blob gas price.
     pub fn get_blob_gasprice(&self) -> Option<u64> {
-        self.initialized_block_env.get_blob_gasprice().map(|gasprice| gasprice as u64)
+        self.evm_env.block_env.get_blob_gasprice().map(|gasprice| gasprice as u64)
     }
 
     /// Returns the blob fields for the header.
@@ -751,8 +746,7 @@ where
         SystemCaller::new(self.evm_config.clone(), self.chain_spec.clone())
             .pre_block_beacon_root_contract_call(
                 db,
-                &self.initialized_cfg,
-                &self.initialized_block_env,
+                &self.evm_env,
                 self.attributes().payload_attributes.parent_beacon_block_root,
             )
             .map_err(|err| {
@@ -776,13 +770,7 @@ where
         DB: Database<Error = ProviderError>,
     {
         let mut info = ExecutionInfo::with_capacity(self.attributes().transactions.len());
-
-        let env = EnvWithHandlerCfg::new_with_cfg_env(
-            self.initialized_cfg.clone(),
-            self.initialized_block_env.clone(),
-            TxEnv::default(),
-        );
-        let mut evm = self.evm_config.evm_with_env(&mut *db, env);
+        let mut evm = self.evm_config.evm_with_env(&mut *db, self.evm_env.clone());
 
         for sequencer_tx in &self.attributes().transactions {
             // A sequencer's block should never contain blob transactions.
@@ -819,9 +807,9 @@ where
                     ))
                 })?;
 
-            *evm.tx_mut() = self.evm_config.tx_env(sequencer_tx.tx(), sequencer_tx.signer());
+            let tx_env = self.evm_config.tx_env(sequencer_tx.tx(), sequencer_tx.signer());
 
-            let ResultAndState { result, state } = match evm.transact() {
+            let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
                     match err {
@@ -893,12 +881,7 @@ where
         let tx_da_limit = self.da_config.max_da_tx_size();
         let base_fee = self.base_fee();
 
-        let env = EnvWithHandlerCfg::new_with_cfg_env(
-            self.initialized_cfg.clone(),
-            self.initialized_block_env.clone(),
-            TxEnv::default(),
-        );
-        let mut evm = self.evm_config.evm_with_env(&mut *db, env);
+        let mut evm = self.evm_config.evm_with_env(&mut *db, self.evm_env.clone());
 
         while let Some(tx) = best_txs.next(()) {
             if info.is_tx_over_limits(tx.tx(), block_gas_limit, tx_da_limit, block_da_limit) {
@@ -910,7 +893,7 @@ where
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
-            if tx.is_eip4844() || tx.tx_type() == TxType::Deposit as u8 {
+            if tx.is_eip4844() || tx.tx_type() == OpTxType::Deposit {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
                 continue
             }
@@ -921,9 +904,9 @@ where
             }
 
             // Configure the environment for the tx.
-            *evm.tx_mut() = self.evm_config.tx_env(tx.tx(), tx.signer());
+            let tx_env = self.evm_config.tx_env(tx.tx(), tx.signer());
 
-            let ResultAndState { result, state } = match evm.transact() {
+            let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
                     match err {

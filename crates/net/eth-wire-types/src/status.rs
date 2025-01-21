@@ -222,7 +222,7 @@ mod tests {
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
     use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};
-    use reth_primitives::{EthereumHardfork, ForkHash, ForkId, Head};
+    use reth_ethereum_forks::{EthereumHardfork, ForkHash, ForkId, Head};
     use std::str::FromStr;
 
     #[test]

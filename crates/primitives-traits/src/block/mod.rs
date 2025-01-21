@@ -1,16 +1,32 @@
 //! Block abstraction.
 
+pub(crate) mod sealed;
+pub use sealed::SealedBlock;
+
+pub(crate) mod recovered;
+pub use recovered::RecoveredBlock;
+
 pub mod body;
+pub mod error;
 pub mod header;
 
-use alloc::fmt;
+use alloc::{fmt, vec::Vec};
 use alloy_consensus::Header;
+use alloy_primitives::{Address, B256};
 use alloy_rlp::{Decodable, Encodable};
 
 use crate::{
-    BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde,
+    BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde, SealedHeader,
     SignedTransaction,
 };
+
+/// Bincode-compatible header type serde implementations.
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    pub use super::{
+        recovered::serde_bincode_compat::RecoveredBlock, sealed::serde_bincode_compat::SealedBlock,
+    };
+}
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlock:
@@ -29,9 +45,10 @@ impl<T> FullBlock for T where
 pub type BlockTx<B> = <<B as Block>::Body as BlockBody>::Transaction;
 
 /// Abstraction of block data type.
-// todo: make sealable super-trait, depends on <https://github.com/paradigmxyz/reth/issues/11449>
-// todo: make with senders extension trait, so block can be impl by block type already containing
-// senders
+///
+/// This type defines the structure of a block in the blockchain.
+/// A [`Block`] is composed of a header and a body.
+/// It is expected that a block can always be completely reconstructed from its header and body.
 pub trait Block:
     Send
     + Sync
@@ -49,11 +66,29 @@ pub trait Block:
     /// Header part of the block.
     type Header: BlockHeader;
 
-    /// The block's body contains the transactions in the block.
+    /// The block's body contains the transactions in the block and additional data, e.g.
+    /// withdrawals in ethereum.
     type Body: BlockBody<OmmerHeader = Self::Header>;
 
     /// Create new block instance.
     fn new(header: Self::Header, body: Self::Body) -> Self;
+
+    /// Create new a sealed block instance from a sealed header and the block body.
+    fn new_sealed(header: SealedHeader<Self::Header>, body: Self::Body) -> SealedBlock<Self> {
+        SealedBlock::from_sealed_parts(header, body)
+    }
+
+    /// Seal the block with a known hash.
+    ///
+    /// WARNING: This method does not perform validation whether the hash is correct.
+    fn seal(self, hash: B256) -> SealedBlock<Self> {
+        SealedBlock::new_unchecked(self, hash)
+    }
+
+    /// Calculate the header hash and seal the block so that it can't be changed.
+    fn seal_slow(self) -> SealedBlock<Self> {
+        SealedBlock::seal_slow(self)
+    }
 
     /// Returns reference to block header.
     fn header(&self) -> &Self::Header;
@@ -63,6 +98,84 @@ pub trait Block:
 
     /// Splits the block into its header and body.
     fn split(self) -> (Self::Header, Self::Body);
+
+    /// Returns a tuple of references to the block's header and body.
+    fn split_ref(&self) -> (&Self::Header, &Self::Body) {
+        (self.header(), self.body())
+    }
+
+    /// Consumes the block and returns the header.
+    fn into_header(self) -> Self::Header {
+        self.split().0
+    }
+
+    /// Consumes the block and returns the body.
+    fn into_body(self) -> Self::Body {
+        self.split().1
+    }
+
+    /// Returns the rlp length of the block with the given header and body.
+    fn rlp_length(header: &Self::Header, body: &Self::Body) -> usize {
+        // TODO(mattsse): replace default impl with <https://github.com/alloy-rs/alloy/pull/1906>
+        header.length() + body.length()
+    }
+
+    /// Expensive operation that recovers transaction signer.
+    fn senders(&self) -> Option<Vec<Address>>
+    where
+        <Self::Body as BlockBody>::Transaction: SignedTransaction,
+    {
+        self.body().recover_signers()
+    }
+
+    /// Transform into a [`RecoveredBlock`].
+    ///
+    /// # Panics
+    ///
+    /// If the number of senders does not match the number of transactions in the block
+    /// and the signer recovery for one of the transactions fails.
+    ///
+    /// Note: this is expected to be called with blocks read from disk.
+    #[track_caller]
+    fn with_senders_unchecked(self, senders: Vec<Address>) -> RecoveredBlock<Self>
+    where
+        <Self::Body as BlockBody>::Transaction: SignedTransaction,
+    {
+        self.try_with_senders_unchecked(senders).expect("stored block is valid")
+    }
+
+    /// Transform into a [`RecoveredBlock`] using the given senders.
+    ///
+    /// If the number of senders does not match the number of transactions in the block, this falls
+    /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
+    ///
+    /// Returns an error if a signature is invalid.
+    #[track_caller]
+    fn try_with_senders_unchecked(self, senders: Vec<Address>) -> Result<RecoveredBlock<Self>, Self>
+    where
+        <Self::Body as BlockBody>::Transaction: SignedTransaction,
+    {
+        let senders = if self.body().transactions().len() == senders.len() {
+            senders
+        } else {
+            let Some(senders) = self.body().recover_signers_unchecked() else { return Err(self) };
+            senders
+        };
+
+        Ok(RecoveredBlock::new_unhashed(self, senders))
+    }
+
+    /// **Expensive**. Transform into a [`RecoveredBlock`] by recovering senders in the contained
+    /// transactions.
+    ///
+    /// Returns `None` if a transaction is invalid.
+    fn with_recovered_senders(self) -> Option<RecoveredBlock<Self>>
+    where
+        <Self::Body as BlockBody>::Transaction: SignedTransaction,
+    {
+        let senders = self.senders()?;
+        Some(RecoveredBlock::new_unhashed(self, senders))
+    }
 }
 
 impl<T> Block for alloy_consensus::Block<T>
