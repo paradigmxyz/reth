@@ -362,7 +362,10 @@ impl<N: NodePrimitives> WithdrawalsProvider for StaticFileJarProvider<'_, N> {
         _: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
         if let Some(num) = id.as_number() {
-            return Ok(self.cursor()?.get_one::<WithdrawalsMask>(num.into())?.map(|s| s.withdrawals))
+            return Ok(self
+                .cursor()?
+                .get_one::<WithdrawalsMask>(num.into())?
+                .and_then(|s| s.withdrawals))
         }
         // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
