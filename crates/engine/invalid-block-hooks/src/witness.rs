@@ -6,7 +6,7 @@ use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
-    state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm, Evm,
+    state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvmFor, Evm,
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
@@ -63,7 +63,7 @@ where
     ) -> eyre::Result<()>
     where
         N: NodePrimitives,
-        EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+        EvmConfig: ConfigureEvmFor<N>,
     {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
@@ -289,7 +289,7 @@ where
         + Send
         + Sync
         + 'static,
-    EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    EvmConfig: ConfigureEvmFor<N>,
 {
     fn on_invalid_block(
         &self,

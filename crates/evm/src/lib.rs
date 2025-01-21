@@ -29,6 +29,9 @@ pub mod env;
 pub mod execute;
 pub use env::EvmEnv;
 
+mod aliases;
+pub use aliases::*;
+
 #[cfg(feature = "std")]
 pub mod metrics;
 pub mod noop;
