@@ -8,6 +8,7 @@ use reth_trie::HashedPostState;
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 
 pub use reth_storage_errors::provider::ConsistentViewError;
+use tracing::debug;
 
 /// A consistent view over state in the database.
 ///
@@ -36,7 +37,8 @@ where
         + StateCommitmentProvider,
 {
     /// Creates new consistent database view.
-    pub const fn new(factory: Factory, tip: Option<B256>) -> Self {
+    pub fn new(factory: Factory, tip: Option<B256>) -> Self {
+        debug!(target: "providers::consistent_view", ?tip, "Initializing consistent view provider with latest tip num and hash");
         Self { factory, tip }
     }
 
@@ -45,6 +47,7 @@ where
         let provider_ro = provider.database_provider_ro()?;
         let last_num = provider_ro.last_block_number()?;
         let tip = provider_ro.sealed_header(last_num)?.map(|h| h.hash());
+        debug!(target: "providers::consistent_view", ?tip, ?last_num, "Initializing consistent view provider after fetching tip num and hash");
         Ok(Self::new(provider, tip))
     }
 

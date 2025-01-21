@@ -1042,6 +1042,35 @@ where
         Ok(true)
     }
 
+    /// Returns whether or not the input block is a descendant of the blocks being persisted.
+    fn is_descendant_of_persisting_blocks(&self, block: &N::BlockHeader) -> bool {
+        self.persistence_state.current_action().is_none_or(|action| {
+            match action {
+                CurrentPersistenceAction::SavingBlocks { blocks } => {
+                    // Get the highest block num and hash
+                    let Some(highest_num_hash) = blocks
+                        .iter()
+                        .max_by_key(|elem| elem.recovered_block().num_hash().number)
+                        .map(|block| block.recovered_block().num_hash())
+                    else {
+                        // If the blocks are empty for some reason, we can actually proceed here.
+                        return true
+                    };
+
+                    // The block being validated can't be a descendant if its number is lower than
+                    // the highest block being persisted. In that case, it's likely a fork of a
+                    // lower block.
+                    if block.number() <= highest_num_hash.number {
+                        return false
+                    }
+
+                    self.state.tree_state.is_descendant(highest_num_hash, block)
+                }
+                CurrentPersistenceAction::RemovingBlocks { new_tip_num: _ } => false,
+            }
+        })
+    }
+
     /// Invoked when we receive a new forkchoice update message. Calls into the blockchain tree
     /// to resolve chain forks and ensure that the Execution Layer is working with the latest valid
     /// chain.
@@ -2335,31 +2364,11 @@ where
         // in-memory trie updates we collect in `compute_state_root_parallel`.
         //
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
-        let is_descendant_block = self.persistence_state.current_action().is_none_or(|action| {
-            match action {
-                CurrentPersistenceAction::SavingBlocks { blocks } => {
-                    // Get the highest block num and hash
-                    let Some(highest_num_hash) = blocks
-                        .iter()
-                        .max_by_key(|elem| elem.recovered_block().num_hash().number)
-                        .map(|block| block.recovered_block().num_hash())
-                    else {
-                        // If the blocks are empty for some reason, we can actually proceed here.
-                        return true
-                    };
-
-                    // The block being validated can't be a descendant if its number is lower than
-                    // the highest block being persisted. In that case, it's likely a fork of a
-                    // lower block.
-                    if block_number <= highest_num_hash.number {
-                        return false
-                    }
-
-                    self.state.tree_state.is_descendant(highest_num_hash, block.header())
-                }
-                CurrentPersistenceAction::RemovingBlocks { new_tip_num: _ } => false,
-            }
-        });
+        let is_descendant_block = self.is_descendant_of_persisting_blocks(block.header());
+        // TODO: remove this, just for making sure things work
+        if is_descendant_block {
+            info!(target: "engine::tree", "Block is descendant of persisting blocks!");
+        }
 
         let (state_root_handle, state_root_task_config, state_hook) = if is_descendant_block &&
             self.config.use_state_root_task()
