@@ -34,7 +34,7 @@ impl<Eth, EthFilter> EngineEthApi<Eth, EthFilter> {
 }
 
 #[async_trait::async_trait]
-impl<Eth, EthFilter> EngineEthApiServer<RpcBlock<Eth::NetworkTypes>>
+impl<Eth, EthFilter> EngineEthApiServer<RpcBlock<Eth::NetworkTypes>, RpcReceipt<Eth::NetworkTypes>>
     for EngineEthApi<Eth, EthFilter>
 where
     Eth: EthApiServer<
@@ -103,9 +103,23 @@ where
         self.eth.block_by_number(number, full).instrument(engine_span!()).await
     }
 
+    async fn block_receipts(
+        &self,
+        block_id: BlockId,
+    ) -> Result<Option<Vec<RpcReceipt<Eth::NetworkTypes>>>> {
+        self.eth.block_receipts(block_id).instrument(engine_span!()).await
+    }
+
     /// Handler for: `eth_sendRawTransaction`
     async fn send_raw_transaction(&self, bytes: Bytes) -> Result<B256> {
         self.eth.send_raw_transaction(bytes).instrument(engine_span!()).await
+    }
+
+    async fn transaction_receipt(
+        &self,
+        hash: B256,
+    ) -> Result<Option<RpcReceipt<Eth::NetworkTypes>>> {
+        self.eth.transaction_receipt(hash).instrument(engine_span!()).await
     }
 
     /// Handler for `eth_getLogs`

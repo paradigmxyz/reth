@@ -12,19 +12,20 @@
 
 extern crate alloc;
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::sync::Arc;
 use alloy_consensus::Header;
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, U256};
+use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::FillTxEnv;
 use reth_revm::{
     inspector_handle_register,
     primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Database, Evm, EvmBuilder, GetInspector,
+    Database, EvmBuilder, GetInspector,
 };
 
 mod config;
@@ -39,44 +40,48 @@ pub use receipts::*;
 mod error;
 pub use error::OpBlockExecutionError;
 use revm_primitives::{
-    BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, Env, HandlerCfg, OptimismFields, SpecId, TxKind,
+    BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, EVMError, Env, HandlerCfg, OptimismFields,
+    ResultAndState, SpecId, TxKind,
 };
 
-/// Optimism-related EVM configuration.
-#[derive(Debug, Clone)]
-pub struct OpEvmConfig {
-    chain_spec: Arc<OpChainSpec>,
-}
+/// OP EVM implementation.
+#[derive(derive_more::Debug, derive_more::Deref, derive_more::DerefMut, derive_more::From)]
+#[debug(bound(DB::Error: Debug))]
+pub struct OpEvm<'a, EXT, DB: Database>(reth_revm::Evm<'a, EXT, DB>);
 
-impl OpEvmConfig {
-    /// Creates a new [`OpEvmConfig`] with the given chain spec.
-    pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
-        Self { chain_spec }
+impl<EXT, DB: Database> Evm for OpEvm<'_, EXT, DB> {
+    type DB = DB;
+    type Tx = TxEnv;
+    type Error = EVMError<DB::Error>;
+
+    fn block(&self) -> &BlockEnv {
+        self.0.block()
     }
 
-    /// Returns the chain spec associated with this configuration.
-    pub const fn chain_spec(&self) -> &Arc<OpChainSpec> {
-        &self.chain_spec
-    }
-}
-
-impl ConfigureEvmEnv for OpEvmConfig {
-    type Header = Header;
-    type Transaction = OpTransactionSigned;
-    type Error = EIP1559ParamError;
-
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &OpTransactionSigned, sender: Address) {
-        transaction.fill_tx_env(tx_env, sender);
+    fn into_env(self) -> EvmEnv {
+        let Env { cfg, block, tx: _ } = *self.0.context.evm.inner.env;
+        EvmEnv {
+            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg {
+                cfg_env: cfg,
+                handler_cfg: self.0.handler.cfg,
+            },
+            block_env: block,
+        }
     }
 
-    fn fill_tx_env_system_contract_call(
-        &self,
-        env: &mut Env,
+    fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error> {
+        *self.tx_mut() = tx;
+        self.0.transact()
+    }
+
+    fn transact_system_call(
+        &mut self,
         caller: Address,
         contract: Address,
         data: Bytes,
-    ) {
-        env.tx = TxEnv {
+    ) -> Result<ResultAndState, Self::Error> {
+        #[allow(clippy::needless_update)] // side-effect of optimism fields
+        let tx_env = TxEnv {
             caller,
             transact_to: TxKind::Call(contract),
             // Explicitly set nonce to None so revm does not do any nonce checks
@@ -107,11 +112,54 @@ impl ConfigureEvmEnv for OpEvmConfig {
             },
         };
 
+        *self.tx_mut() = tx_env;
+
+        let prev_block_env = self.block().clone();
+
         // ensure the block gas limit is >= the tx
-        env.block.gas_limit = U256::from(env.tx.gas_limit);
+        self.block_mut().gas_limit = U256::from(self.tx().gas_limit);
 
         // disable the base fee check for this call by setting the base fee to zero
-        env.block.basefee = U256::ZERO;
+        self.block_mut().basefee = U256::ZERO;
+
+        let res = self.0.transact();
+
+        // re-set the block env
+        *self.block_mut() = prev_block_env;
+
+        res
+    }
+
+    fn db_mut(&mut self) -> &mut Self::DB {
+        &mut self.context.evm.db
+    }
+}
+
+/// Optimism-related EVM configuration.
+#[derive(Debug, Clone)]
+pub struct OpEvmConfig {
+    chain_spec: Arc<OpChainSpec>,
+}
+
+impl OpEvmConfig {
+    /// Creates a new [`OpEvmConfig`] with the given chain spec.
+    pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
+        Self { chain_spec }
+    }
+
+    /// Returns the chain spec associated with this configuration.
+    pub const fn chain_spec(&self) -> &Arc<OpChainSpec> {
+        &self.chain_spec
+    }
+}
+
+impl ConfigureEvmEnv for OpEvmConfig {
+    type Header = Header;
+    type Transaction = OpTransactionSigned;
+    type Error = EIP1559ParamError;
+
+    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &OpTransactionSigned, sender: Address) {
+        transaction.fill_tx_env(tx_env, sender);
     }
 
     fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
@@ -168,29 +216,25 @@ impl ConfigureEvmEnv for OpEvmConfig {
 }
 
 impl ConfigureEvm for OpEvmConfig {
-    fn evm_with_env<DB: Database>(
-        &self,
-        db: DB,
-        mut evm_env: EvmEnv,
-        tx: TxEnv,
-    ) -> Evm<'_, (), DB> {
+    type Evm<'a, DB: Database + 'a, I: 'a> = OpEvm<'a, I, DB>;
+
+    fn evm_with_env<DB: Database>(&self, db: DB, mut evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
         evm_env.cfg_env_with_handler_cfg.handler_cfg.is_optimism = true;
 
         EvmBuilder::default()
             .with_db(db)
             .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
             .with_block_env(evm_env.block_env)
-            .with_tx_env(tx)
             .build()
+            .into()
     }
 
     fn evm_with_env_and_inspector<DB, I>(
         &self,
         db: DB,
         mut evm_env: EvmEnv,
-        tx: TxEnv,
         inspector: I,
-    ) -> Evm<'_, I, DB>
+    ) -> Self::Evm<'_, DB, I>
     where
         DB: Database,
         I: GetInspector<DB>,
@@ -202,9 +246,9 @@ impl ConfigureEvm for OpEvmConfig {
             .with_external_context(inspector)
             .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
             .with_block_env(evm_env.block_env)
-            .with_tx_env(tx)
             .append_handler_register(inspector_handle_register)
             .build()
+            .into()
     }
 }
 
@@ -269,7 +313,7 @@ mod tests {
 
         let evm_env = EvmEnv::default();
 
-        let evm = evm_config.evm_with_env(db, evm_env.clone(), Default::default());
+        let evm = evm_config.evm_with_env(db, evm_env.clone());
 
         // Check that the EVM environment
         assert_eq!(evm.context.evm.env.cfg, evm_env.cfg_env_with_handler_cfg.cfg_env);
@@ -298,7 +342,7 @@ mod tests {
             ..Default::default()
         };
 
-        let evm = evm_config.evm_with_env(db, evm_env, Default::default());
+        let evm = evm_config.evm_with_env(db, evm_env);
 
         // Check that the EVM environment is initialized with the custom environment
         assert_eq!(evm.context.evm.inner.env.cfg, cfg);
@@ -323,15 +367,13 @@ mod tests {
             number: U256::from(42),
             ..Default::default()
         };
-        let tx = TxEnv { gas_limit: 5_000_000, gas_price: U256::from(50), ..Default::default() };
 
         let evm_env = EvmEnv { block_env: block, ..Default::default() };
 
-        let evm = evm_config.evm_with_env(db, evm_env.clone(), tx.clone());
+        let evm = evm_config.evm_with_env(db, evm_env.clone());
 
         // Verify that the block and transaction environments are set correctly
         assert_eq!(evm.context.evm.env.block, evm_env.block_env);
-        assert_eq!(evm.context.evm.env.tx, tx);
 
         // Default spec ID
         assert_eq!(evm.handler.spec_id(), SpecId::LATEST);
@@ -356,7 +398,7 @@ mod tests {
             ..Default::default()
         };
 
-        let evm = evm_config.evm_with_env(db, evm_env, Default::default());
+        let evm = evm_config.evm_with_env(db, evm_env);
 
         // Check that the spec ID is setup properly
         assert_eq!(evm.handler.spec_id(), SpecId::ECOTONE);
@@ -378,12 +420,7 @@ mod tests {
             ..Default::default()
         };
 
-        let evm = evm_config.evm_with_env_and_inspector(
-            db,
-            evm_env.clone(),
-            Default::default(),
-            NoOpInspector,
-        );
+        let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector);
 
         // Check that the EVM environment is set to default values
         assert_eq!(evm.context.evm.env.block, evm_env.block_env);
@@ -403,7 +440,6 @@ mod tests {
 
         let cfg = CfgEnv::default().with_chain_id(111);
         let block = BlockEnv::default();
-        let tx = TxEnv::default();
         let evm_env = EvmEnv {
             block_env: block,
             cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg {
@@ -412,13 +448,11 @@ mod tests {
             },
         };
 
-        let evm =
-            evm_config.evm_with_env_and_inspector(db, evm_env.clone(), tx.clone(), NoOpInspector);
+        let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector);
 
         // Check that the EVM environment is set with custom configuration
         assert_eq!(evm.context.evm.env.cfg, cfg);
         assert_eq!(evm.context.evm.env.block, evm_env.block_env);
-        assert_eq!(evm.context.evm.env.tx, tx);
         assert_eq!(evm.context.external, NoOpInspector);
         assert_eq!(evm.handler.spec_id(), SpecId::LATEST);
 
@@ -438,15 +472,12 @@ mod tests {
             number: U256::from(42),
             ..Default::default()
         };
-        let tx = TxEnv { gas_limit: 5_000_000, gas_price: U256::from(50), ..Default::default() };
         let evm_env = EvmEnv { block_env: block, ..Default::default() };
 
-        let evm =
-            evm_config.evm_with_env_and_inspector(db, evm_env.clone(), tx.clone(), NoOpInspector);
+        let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector);
 
         // Verify that the block and transaction environments are set correctly
         assert_eq!(evm.context.evm.env.block, evm_env.block_env);
-        assert_eq!(evm.context.evm.env.tx, tx);
         assert_eq!(evm.context.external, NoOpInspector);
         assert_eq!(evm.handler.spec_id(), SpecId::LATEST);
 
@@ -468,12 +499,7 @@ mod tests {
             ..Default::default()
         };
 
-        let evm = evm_config.evm_with_env_and_inspector(
-            db,
-            evm_env.clone(),
-            Default::default(),
-            NoOpInspector,
-        );
+        let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector);
 
         // Check that the spec ID is set properly
         assert_eq!(evm.handler.spec_id(), SpecId::ECOTONE);

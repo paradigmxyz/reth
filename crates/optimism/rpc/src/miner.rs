@@ -2,7 +2,7 @@
 
 use alloy_primitives::U64;
 use jsonrpsee_core::{async_trait, RpcResult};
-pub use op_alloy_rpc_jsonrpsee::traits::MinerApiExtServer;
+pub use maili_rpc::MinerApiExtServer;
 use reth_optimism_payload_builder::config::OpDAConfig;
 use tracing::debug;
 

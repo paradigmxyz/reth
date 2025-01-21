@@ -7,12 +7,16 @@ rpc-compat:
   - debug_getRawTransaction/get-invalid-hash (reth)
 
   - eth_call/call-callenv (reth)
-  - eth_feeHistory/fee-history (reth)
   - eth_getStorageAt/get-storage-invalid-key-too-large (reth)
   - eth_getStorageAt/get-storage-invalid-key (reth)
   - eth_getTransactionReceipt/get-access-list (reth)
   - eth_getTransactionReceipt/get-blob-tx (reth)
   - eth_getTransactionReceipt/get-dynamic-fee (reth)
+
+  # https://github.com/paradigmxyz/reth/issues/13879
+  - eth_createAccessList/create-al-contract-eip1559 (reth)
+  - eth_getBlockByNumber/get-genesis (reth)
+  - eth_getTransactionReceipt/get-setcode-tx (reth)
 
 # https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:
