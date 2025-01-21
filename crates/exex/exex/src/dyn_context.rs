@@ -26,7 +26,7 @@ pub struct ExExContextDyn<N: NodePrimitives = EthPrimitives> {
     /// # Important
     ///
     /// The exex should emit a `FinishedHeight` whenever a processed block is safe to prune.
-    /// Additionally, the exex can pre-emptively emit a `FinishedHeight` event to specify what
+    /// Additionally, the exex can preemptively emit a `FinishedHeight` event to specify what
     /// blocks to receive notifications for.
     pub events: mpsc::UnboundedSender<ExExEvent>,
     /// Channel to receive [`ExExNotification`](crate::ExExNotification)s.
