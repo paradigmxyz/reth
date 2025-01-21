@@ -2555,7 +2555,7 @@ where
     }
 
     /// Waits for the result on the input [`StateRootHandle`], and handles it, falling back to
-    /// the hash builder-based state root calculation if the it fails.
+    /// the hash builder-based state root calculation if it fails.
     fn handle_state_root_result(
         &self,
         state_root_handle: StateRootHandle,
