@@ -28,6 +28,6 @@ impl<T> BlockRecoveryError<T> {
 
 impl<T> From<BlockRecoveryError<T>> for RecoveryError {
     fn from(_: BlockRecoveryError<T>) -> Self {
-        Self::Recovery
+        Self
     }
 }

@@ -19,7 +19,6 @@ use crate::{
     BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde, SealedHeader,
     SignedTransaction,
 };
-use crate::transaction::signed::RecoveryError;
 
 /// Bincode-compatible header type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]
@@ -31,14 +30,14 @@ pub mod serde_bincode_compat {
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlock:
-    Block<Header: FullBlockHeader, Body: FullBlockBody> + alloy_rlp::Encodable + alloy_rlp::Decodable
+Block<Header: FullBlockHeader, Body: FullBlockBody> + alloy_rlp::Encodable + alloy_rlp::Decodable
 {
 }
 
 impl<T> FullBlock for T where
     T: Block<Header: FullBlockHeader, Body: FullBlockBody>
-        + alloy_rlp::Encodable
-        + alloy_rlp::Decodable
+    + alloy_rlp::Encodable
+    + alloy_rlp::Decodable
 {
 }
 
@@ -51,18 +50,18 @@ pub type BlockTx<B> = <<B as Block>::Body as BlockBody>::Transaction;
 /// A [`Block`] is composed of a header and a body.
 /// It is expected that a block can always be completely reconstructed from its header and body.
 pub trait Block:
-    Send
-    + Sync
-    + Unpin
-    + Clone
-    + Default
-    + fmt::Debug
-    + PartialEq
-    + Eq
-    + InMemorySize
-    + MaybeSerde
-    + Encodable
-    + Decodable
+Send
++ Sync
++ Unpin
++ Clone
++ Default
++ fmt::Debug
++ PartialEq
++ Eq
++ InMemorySize
++ MaybeSerde
++ Encodable
++ Decodable
 {
     /// Header part of the block.
     type Header: BlockHeader;
@@ -122,7 +121,7 @@ pub trait Block:
     }
 
     /// Expensive operation that recovers transaction signer.
-    fn senders(&self) -> Result<Vec<Address>, RecoveryError>
+    fn senders(&self) -> Option<Vec<Address>>
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
@@ -157,15 +156,13 @@ pub trait Block:
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
         let senders = if self.body().transactions().len() == senders.len() {
-            Ok(senders)
+            senders
         } else {
-            self.body().recover_signers_unchecked()
+            let Some(senders) = self.body().recover_signers_unchecked() else { return Err(self) };
+            senders
         };
 
-        match senders {
-            Ok(senders) => Ok(RecoveredBlock::new_unhashed(self, senders)),
-            Err(_) => Err(self),
-        }
+        Ok(RecoveredBlock::new_unhashed(self, senders))
     }
 
     /// **Expensive**. Transform into a [`RecoveredBlock`] by recovering senders in the contained
@@ -176,9 +173,8 @@ pub trait Block:
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
-        self.senders()
-            .map(|senders| RecoveredBlock::new_unhashed(self, senders))
-            .ok()
+        let senders = self.senders()?;
+        Some(RecoveredBlock::new_unhashed(self, senders))
     }
 }
 

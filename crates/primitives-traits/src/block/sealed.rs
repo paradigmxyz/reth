@@ -11,7 +11,6 @@ use alloy_primitives::{Address, BlockHash, Sealable, Sealed, B256};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::ops::Deref;
-use crate::transaction::signed::RecoveryError;
 
 /// Sealed full block composed of the block's header and body.
 ///
@@ -129,13 +128,7 @@ impl<B: Block> SealedBlock<B> {
         self,
         senders: Vec<Address>,
     ) -> Result<RecoveredBlock<B>, BlockRecoveryError<Self>> {
-        let senders = if self.body().transaction_count() == senders.len() {
-            senders
-        } else {
-            self.body().recover_signers()
-                .map_err(|_| BlockRecoveryError::new(self.clone()))?
-        };
-        Ok(RecoveredBlock::new_sealed(self, senders))
+        RecoveredBlock::try_recover_sealed_with_senders(self, senders)
     }
 
     /// Converts this block into a [`RecoveredBlock`] with the given senders if the number of
@@ -149,13 +142,7 @@ impl<B: Block> SealedBlock<B> {
         self,
         senders: Vec<Address>,
     ) -> Result<RecoveredBlock<B>, BlockRecoveryError<Self>> {
-        let senders = if self.body().transaction_count() == senders.len() {
-            senders
-        } else {
-            self.body().recover_signers_unchecked()
-                .map_err(|_| BlockRecoveryError::new(self.clone()))?
-        };
-        Ok(RecoveredBlock::new_sealed(self, senders))
+        RecoveredBlock::try_recover_sealed_with_senders_unchecked(self, senders)
     }
 
     /// Recovers the senders from the transactions in the block using
@@ -163,9 +150,7 @@ impl<B: Block> SealedBlock<B> {
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover(self) -> Result<RecoveredBlock<B>, BlockRecoveryError<Self>> {
-        let senders = self.body().recover_signers()
-            .map_err(|_| BlockRecoveryError::new(self.clone()))?;
-        Ok(RecoveredBlock::new_sealed(self, senders))
+        RecoveredBlock::try_recover_sealed(self)
     }
 
     /// Recovers the senders from the transactions in the block using
@@ -173,9 +158,7 @@ impl<B: Block> SealedBlock<B> {
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
     pub fn try_recover_unchecked(self) -> Result<RecoveredBlock<B>, BlockRecoveryError<Self>> {
-        let senders = self.body().recover_signers_unchecked()
-            .map_err(|_| BlockRecoveryError::new(self.clone()))?;
-        Ok(RecoveredBlock::new_sealed(self, senders))
+        RecoveredBlock::try_recover_sealed_unchecked(self)
     }
 
     /// Returns reference to block header.
@@ -196,7 +179,7 @@ impl<B: Block> SealedBlock<B> {
     /// Recovers all senders from the transactions in the block.
     ///
     /// Returns `None` if any of the transactions fail to recover the sender.
-    pub fn senders(&self) -> Result<Vec<Address>, RecoveryError> {
+    pub fn senders(&self) -> Option<Vec<Address>> {
         self.body().recover_signers()
     }
 
@@ -434,7 +417,7 @@ pub(super) mod serde_bincode_compat {
     }
 
     impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static>
-        From<&'a super::SealedBlock<T>> for SealedBlock<'a, T>
+    From<&'a super::SealedBlock<T>> for SealedBlock<'a, T>
     {
         fn from(value: &'a super::SealedBlock<T>) -> Self {
             Self { header: (&value.header).into(), body: (&value.body).into() }
@@ -442,7 +425,7 @@ pub(super) mod serde_bincode_compat {
     }
 
     impl<'a, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static>
-        From<SealedBlock<'a, T>> for super::SealedBlock<T>
+    From<SealedBlock<'a, T>> for super::SealedBlock<T>
     {
         fn from(value: SealedBlock<'a, T>) -> Self {
             Self::from_sealed_parts(value.header.into(), value.body.into())
@@ -450,7 +433,7 @@ pub(super) mod serde_bincode_compat {
     }
 
     impl<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static>
-        SerializeAs<super::SealedBlock<T>> for SealedBlock<'_, T>
+    SerializeAs<super::SealedBlock<T>> for SealedBlock<'_, T>
     {
         fn serialize_as<S>(source: &super::SealedBlock<T>, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -461,7 +444,7 @@ pub(super) mod serde_bincode_compat {
     }
 
     impl<'de, T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static>
-        DeserializeAs<'de, super::SealedBlock<T>> for SealedBlock<'de, T>
+    DeserializeAs<'de, super::SealedBlock<T>> for SealedBlock<'de, T>
     {
         fn deserialize_as<D>(deserializer: D) -> Result<super::SealedBlock<T>, D::Error>
         where
@@ -472,7 +455,7 @@ pub(super) mod serde_bincode_compat {
     }
 
     impl<T: Block<Header: SerdeBincodeCompat, Body: SerdeBincodeCompat> + 'static>
-        SerdeBincodeCompat for super::SealedBlock<T>
+    SerdeBincodeCompat for super::SealedBlock<T>
     {
         type BincodeRepr<'a> = SealedBlock<'a, T>;
     }
