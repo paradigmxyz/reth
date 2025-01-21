@@ -2836,7 +2836,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         let tx_count = block.body().transaction_count() as u64;
 
         // Ensures we have all the senders for the block's transactions.
-        for (transaction, sender) in block.body().transactions().iter().zip(block.senders_iter()) {
+        for (transaction, sender) in block.body().transactions_iter().zip(block.senders_iter()) {
             let hash = transaction.tx_hash();
 
             if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
