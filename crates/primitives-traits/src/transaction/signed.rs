@@ -195,7 +195,7 @@ pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also
     /// [`SignedTransaction::recover_signer`].
-    fn try_into_ecrecovered(mut self) -> Result<Recovered<Self>, Self> {
+    fn try_into_ecrecovered(self) -> Result<Recovered<Self>, Self> {
         match self.recover_signer() {
             Ok(signer) => Ok(Recovered::new_unchecked(self, signer)),
             Err(_) => Err(self),
