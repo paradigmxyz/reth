@@ -19,14 +19,13 @@ use once_cell as _;
 use once_cell::sync::OnceCell as OnceLock;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
-    transaction::error::TransactionConversionError,
+    transaction::{error::TransactionConversionError, signed::RecoveryError},
     FillTxEnv, InMemorySize, SignedTransaction,
 };
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
-use reth_primitives_traits::transaction::signed::RecoveryError;
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -725,7 +724,10 @@ impl SignedTransaction for TransactionSigned {
         recover_signer(&self.signature, signature_hash)
     }
 
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Result<Address, RecoveryError> {
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
         self.encode_for_signing(buf);
         let signature_hash = keccak256(buf);
         recover_signer_unchecked(&self.signature, signature_hash)

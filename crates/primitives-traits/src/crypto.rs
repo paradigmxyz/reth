@@ -224,7 +224,7 @@ mod tests {
             B256::from_slice(&secp256k1_secret.secret_bytes()[..]),
             hash,
         )
-            .expect("secp256k1 sign");
+        .expect("secp256k1 sign");
         let k256_signature =
             impl_k256::sign_message(B256::from_slice(&k256_secret.to_bytes()[..]), hash)
                 .expect("k256 sign");

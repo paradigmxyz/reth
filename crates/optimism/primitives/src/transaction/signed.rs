@@ -26,10 +26,9 @@ use proptest as _;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     sync::OnceLock,
-    transaction::error::TransactionConversionError,
+    transaction::{error::TransactionConversionError, signed::RecoveryError},
     InMemorySize, SignedTransaction,
 };
-use reth_primitives_traits::transaction::signed::RecoveryError;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]

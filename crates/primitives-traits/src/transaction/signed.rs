@@ -21,21 +21,21 @@ impl<T> FullSignedTx for T where T: SignedTransaction + FillTxEnv + MaybeCompact
 /// A signed transaction.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait SignedTransaction:
-Send
-+ Sync
-+ Unpin
-+ Clone
-+ fmt::Debug
-+ PartialEq
-+ Eq
-+ Hash
-+ alloy_rlp::Encodable
-+ alloy_rlp::Decodable
-+ Encodable2718
-+ Decodable2718
-+ alloy_consensus::Transaction
-+ MaybeSerde
-+ InMemorySize
+    Send
+    + Sync
+    + Unpin
+    + Clone
+    + fmt::Debug
+    + PartialEq
+    + Eq
+    + Hash
+    + alloy_rlp::Encodable
+    + alloy_rlp::Decodable
+    + Encodable2718
+    + Decodable2718
+    + alloy_consensus::Transaction
+    + MaybeSerde
+    + InMemorySize
 {
     /// Returns reference to transaction hash.
     fn tx_hash(&self) -> &TxHash;
@@ -90,7 +90,10 @@ Send
 
     /// Same as [`Self::recover_signer_unchecked`] but receives a buffer to operate on. This is used
     /// during batch recovery to avoid allocating a new buffer for each transaction.
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Result<Address, RecoveryError>;
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError>;
 
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.

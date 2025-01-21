@@ -30,14 +30,14 @@ pub mod serde_bincode_compat {
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullBlock:
-Block<Header: FullBlockHeader, Body: FullBlockBody> + alloy_rlp::Encodable + alloy_rlp::Decodable
+    Block<Header: FullBlockHeader, Body: FullBlockBody> + alloy_rlp::Encodable + alloy_rlp::Decodable
 {
 }
 
 impl<T> FullBlock for T where
     T: Block<Header: FullBlockHeader, Body: FullBlockBody>
-    + alloy_rlp::Encodable
-    + alloy_rlp::Decodable
+        + alloy_rlp::Encodable
+        + alloy_rlp::Decodable
 {
 }
 
@@ -50,18 +50,18 @@ pub type BlockTx<B> = <<B as Block>::Body as BlockBody>::Transaction;
 /// A [`Block`] is composed of a header and a body.
 /// It is expected that a block can always be completely reconstructed from its header and body.
 pub trait Block:
-Send
-+ Sync
-+ Unpin
-+ Clone
-+ Default
-+ fmt::Debug
-+ PartialEq
-+ Eq
-+ InMemorySize
-+ MaybeSerde
-+ Encodable
-+ Decodable
+    Send
+    + Sync
+    + Unpin
+    + Clone
+    + Default
+    + fmt::Debug
+    + PartialEq
+    + Eq
+    + InMemorySize
+    + MaybeSerde
+    + Encodable
+    + Decodable
 {
     /// Header part of the block.
     type Header: BlockHeader;

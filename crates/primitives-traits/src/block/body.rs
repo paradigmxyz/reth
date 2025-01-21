@@ -19,19 +19,19 @@ impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> + Mayb
 /// This type is a container for everything that is included in a block except the header.
 /// For ethereum this includes transactions, ommers, and withdrawals.
 pub trait BlockBody:
-Send
-+ Sync
-+ Unpin
-+ Clone
-+ Default
-+ fmt::Debug
-+ PartialEq
-+ Eq
-+ alloy_rlp::Encodable
-+ alloy_rlp::Decodable
-+ InMemorySize
-+ MaybeSerde
-+ 'static
+    Send
+    + Sync
+    + Unpin
+    + Clone
+    + Default
+    + fmt::Debug
+    + PartialEq
+    + Eq
+    + alloy_rlp::Encodable
+    + alloy_rlp::Decodable
+    + InMemorySize
+    + MaybeSerde
+    + 'static
 {
     /// Ordered list of signed transactions as committed in block.
     type Transaction: SignedTransaction;

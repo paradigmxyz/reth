@@ -8,11 +8,10 @@ pub use iter::*;
 
 #[cfg(feature = "rayon")]
 mod rayon {
-    use crate::SignedTransaction;
+    use crate::{transaction::signed::RecoveryError, SignedTransaction};
     use alloc::vec::Vec;
     use alloy_primitives::Address;
     use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-    use crate::transaction::signed::RecoveryError;
 
     /// Recovers a list of signers from a transaction list iterator.
     ///
