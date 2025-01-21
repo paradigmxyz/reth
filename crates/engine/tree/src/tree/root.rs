@@ -341,7 +341,8 @@ where
 
     /// Spawns the state root task and returns a handle to await its result.
     pub fn spawn(self) -> StateRootHandle {
-        let sparse_trie_tx = Self::spawn_sparse_trie(self.config.clone(), self.tx.clone());
+        let sparse_trie_tx =
+            Self::spawn_sparse_trie(self.thread_pool.clone(), self.config.clone(), self.tx.clone());
         let (tx, rx) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("State Root Task".to_string())
@@ -358,23 +359,21 @@ where
 
     /// Spawn long running sparse trie task that forwards the final result upon completion.
     fn spawn_sparse_trie(
+        thread_pool: Arc<rayon::ThreadPool>,
         config: StateRootConfig<Factory>,
         task_tx: Sender<StateRootMessage>,
     ) -> Sender<SparseTrieUpdate> {
         let (tx, rx) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("Sparse Trie Task".to_string())
-            .spawn(move || {
-                debug!(target: "engine::tree", "Starting sparse trie task");
-                let result = match run_sparse_trie(config, rx) {
-                    Ok((state_root, trie_updates, iterations)) => {
-                        StateRootMessage::RootCalculated { state_root, trie_updates, iterations }
-                    }
-                    Err(error) => StateRootMessage::RootCalculationError(error),
-                };
-                let _ = task_tx.send(result);
-            })
-            .expect("failed to spawn sparse trie thread");
+        thread_pool.spawn(move || {
+            debug!(target: "engine::tree", "Starting sparse trie task");
+            let result = match run_sparse_trie(config, rx) {
+                Ok((state_root, trie_updates, iterations)) => {
+                    StateRootMessage::RootCalculated { state_root, trie_updates, iterations }
+                }
+                Err(error) => StateRootMessage::RootCalculationError(error),
+            };
+            let _ = task_tx.send(result);
+        });
         tx
     }
 

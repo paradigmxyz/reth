@@ -2276,11 +2276,8 @@ where
                         ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
                     let state_root_config = StateRootConfig::new_from_input(
                         consistent_view.clone(),
-                        self.compute_trie_input(
-                            consistent_view.clone(),
-                            block.header().parent_hash(),
-                        )
-                        .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
+                        self.compute_trie_input(consistent_view, block.header().parent_hash())
+                            .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
                     );
 
                     let state_root_task = StateRootTask::new(
