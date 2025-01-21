@@ -31,7 +31,10 @@ use reth_engine_primitives::{
     OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::{execute::BlockExecutorProvider, system_calls::OnStateHook};
+use reth_evm::{
+    execute::BlockExecutorProvider,
+    system_calls::{NoopHook, OnStateHook},
+};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::PayloadBuilderAttributes;
@@ -47,16 +50,10 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
-    prefix_set::TriePrefixSetsMut,
-    proof::ProofBlindedProviderFactory,
-    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
-    updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted, TrieInput,
+    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState, TrieInput,
 };
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use reth_trie_db::DatabaseTrieCursorFactory;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::EvmState;
 use root::{StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootTask};
 use std::{
     cmp::Ordering,
@@ -483,15 +480,6 @@ pub enum TreeAction {
         /// The sync target head hash
         sync_target_head: B256,
     },
-}
-
-/// Context used to keep alive the required values when returning a state hook
-/// from a scoped thread.
-struct StateHookContext<P> {
-    provider_ro: P,
-    nodes_sorted: Arc<TrieUpdatesSorted>,
-    state_sorted: Arc<HashedPostStateSorted>,
-    prefix_sets: Arc<TriePrefixSetsMut>,
 }
 
 /// The engine API tree handler implementation.
@@ -2281,12 +2269,11 @@ where
 
         let persistence_not_in_progress = !self.persistence_state.in_progress();
 
-        let state_root_result = std::thread::scope(|scope| {
-            let (state_root_handle, in_memory_trie_cursor, state_hook) =
+        let state_root_result = std::thread::scope(|_scope| {
+            let (state_root_handle, state_root_task_config, state_hook) =
                 if persistence_not_in_progress && self.config.use_state_root_task() {
                     let consistent_view =
                         ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-
                     let state_root_config = StateRootConfig::new_from_input(
                         consistent_view.clone(),
                         self.compute_trie_input(
@@ -2296,45 +2283,14 @@ where
                         .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
                     );
 
-                    let provider_ro = consistent_view.provider_ro()?;
-                    let nodes_sorted = state_root_config.nodes_sorted.clone();
-                    let state_sorted = state_root_config.state_sorted.clone();
-                    let prefix_sets = state_root_config.prefix_sets.clone();
-
-                    // context will hold the values that need to be kept alive
-                    let context =
-                        StateHookContext { provider_ro, nodes_sorted, state_sorted, prefix_sets };
-
-                    // it is ok to leak here because we are in a scoped thread, the
-                    // memory will be freed when the thread completes
-                    let context = Box::leak(Box::new(context));
-
-                    let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
-                        DatabaseTrieCursorFactory::new(context.provider_ro.tx_ref()),
-                        &context.nodes_sorted,
-                    );
-                    let blinded_provider_factory = ProofBlindedProviderFactory::new(
-                        in_memory_trie_cursor.clone(),
-                        HashedPostStateCursorFactory::new(
-                            DatabaseHashedCursorFactory::new(context.provider_ro.tx_ref()),
-                            &context.state_sorted,
-                        ),
-                        context.prefix_sets.clone(),
-                    );
-
                     let state_root_task = StateRootTask::new(
-                        state_root_config,
-                        blinded_provider_factory,
+                        state_root_config.clone(),
                         self.state_root_task_pool.clone(),
                     );
-                    let state_hook = state_root_task.state_hook();
-                    (
-                        Some(state_root_task.spawn(scope)),
-                        Some(in_memory_trie_cursor),
-                        Box::new(state_hook) as Box<dyn OnStateHook>,
-                    )
+                    let state_hook = Box::new(state_root_task.state_hook()) as Box<dyn OnStateHook>;
+                    (Some(state_root_task.spawn()), Some(state_root_config), state_hook)
                 } else {
-                    (None, None, Box::new(|_state: &EvmState| {}) as Box<dyn OnStateHook>)
+                    (None, None, Box::new(NoopHook::default()) as Box<dyn OnStateHook>)
                 };
 
             let execution_start = Instant::now();
@@ -2366,16 +2322,15 @@ where
                 if self.config.use_state_root_task() {
                     let state_root_handle = state_root_handle
                         .expect("state root handle must exist if use_state_root_task is true");
-                    let in_memory_trie_cursor = in_memory_trie_cursor
-                        .expect("in memory trie cursor must exist if use_state_root_task is true");
+                    let state_root_config = state_root_task_config.expect("task config is present");
 
                     // Handle state root result from task using handle
                     self.handle_state_root_result(
                         state_root_handle,
+                        state_root_config,
                         sealed_block.as_ref(),
                         &hashed_state,
                         &state_provider,
-                        in_memory_trie_cursor,
                         root_time,
                     )?
                 } else {
@@ -2559,10 +2514,10 @@ where
     fn handle_state_root_result(
         &self,
         state_root_handle: StateRootHandle,
+        state_root_task_config: StateRootConfig<P>,
         sealed_block: &SealedBlock<N::Block>,
         hashed_state: &HashedPostState,
         state_provider: impl StateRootProvider,
-        in_memory_trie_cursor: impl TrieCursorFactory,
         root_time: Instant,
     ) -> Result<(B256, TrieUpdates, Duration), InsertBlockErrorKind> {
         match state_root_handle.wait_for_result() {
@@ -2590,6 +2545,11 @@ where
                         state_provider.state_root_with_updates(hashed_state.clone())?;
 
                     if regular_root == sealed_block.header().state_root() {
+                        let provider_ro = state_root_task_config.consistent_view.provider_ro()?;
+                        let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
+                            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                            &state_root_task_config.nodes_sorted,
+                        );
                         compare_trie_updates(
                             in_memory_trie_cursor,
                             task_trie_updates.clone(),
