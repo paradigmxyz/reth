@@ -248,7 +248,7 @@ impl<N: NodePrimitives> Chain<N> {
             self.blocks().iter().zip(self.execution_outcome.receipts().iter())
         {
             let mut tx_receipts = Vec::with_capacity(receipts.len());
-            for (tx, receipt) in block.body().transactions().iter().zip(receipts.iter()) {
+            for (tx, receipt) in block.body().transactions_iter().zip(receipts.iter()) {
                 tx_receipts.push((
                     tx.trie_hash(),
                     receipt.as_ref().expect("receipts have not been pruned").clone(),
@@ -431,7 +431,7 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
     /// Returns an iterator over all transactions in the chain.
     #[inline]
     pub fn transactions(&self) -> impl Iterator<Item = &<B::Body as BlockBody>::Transaction> + '_ {
-        self.blocks.values().flat_map(|block| block.body().transactions().iter())
+        self.blocks.values().flat_map(|block| block.body().transactions_iter())
     }
 
     /// Returns an iterator over all transactions and their senders.
@@ -457,7 +457,7 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
     pub fn transaction_hashes(&self) -> impl Iterator<Item = TxHash> + '_ {
         self.blocks
             .values()
-            .flat_map(|block| block.body().transactions().iter().map(|tx| tx.trie_hash()))
+            .flat_map(|block| block.body().transactions_iter().map(|tx| tx.trie_hash()))
     }
 }
 
