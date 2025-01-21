@@ -596,7 +596,7 @@ where
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
         let num_threads =
-            std::thread::available_parallelism().map_or(1, |num| (num.get() / 2).max(1));
+            std::thread::available_parallelism().map_or(1, |num| (num.get() / 2).max(2));
 
         let state_root_task_pool = Arc::new(
             rayon::ThreadPoolBuilder::new()
