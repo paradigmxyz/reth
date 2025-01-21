@@ -885,7 +885,7 @@ mod tests {
         updates
     }
 
-    // TODO: reenable test once gh worker hang is figured out.
+    // TODO: re-enable test once gh worker hang is figured out.
     // #[test]
     #[allow(dead_code)]
     fn test_state_root_task() {
