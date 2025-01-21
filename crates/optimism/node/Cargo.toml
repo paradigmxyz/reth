@@ -44,6 +44,9 @@ reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"] }
 
+# maili
+maili-protocol.workspace = true
+
 # revm with required optimism features
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
@@ -130,6 +133,7 @@ test-utils = [
 	"reth-transaction-pool/test-utils",
 	"reth-trie-db/test-utils",
 	"revm/test-utils",
+    "maili-protocol/test-utils",
 	"reth-optimism-node/test-utils",
 	"reth-optimism-primitives/arbitrary",
 	"reth-primitives-traits/test-utils"

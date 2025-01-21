@@ -474,9 +474,11 @@ op-alloy-rpc-types = { version = "0.9.0", default-features = false }
 op-alloy-rpc-types-engine = { version =  "0.9.0", default-features = false }
 op-alloy-network = { version =  "0.9.0", default-features = false }
 op-alloy-consensus = { version =  "0.9.0", default-features = false }
+
 ## op-maili
-maili-rpc = { version =  "0.1.6", default-features = false }
-maili-flz = { version =  "0.1.6", default-features = false }
+maili-rpc = { version =  "0.1.7", default-features = false }
+maili-flz = { version =  "0.1.7", default-features = false }
+maili-protocol = { version =  "0.1.7", default-features = false }
 
 # misc
 aquamarine = "0.6"
