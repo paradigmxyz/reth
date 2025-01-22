@@ -29,7 +29,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("cargo:rustc-env=VERGEN_GIT_SHA_SHORT={}", &sha[..8]);
 
     // Set the build profile
-    let profile = env::var("PROFILE")?;
+    let out_dir = env::var("OUT_DIR").unwrap();
+    let profile = out_dir.rsplit(std::path::MAIN_SEPARATOR).nth(3).unwrap();
     println!("cargo:rustc-env=RETH_BUILD_PROFILE={profile}");
 
     // Set formatted version strings

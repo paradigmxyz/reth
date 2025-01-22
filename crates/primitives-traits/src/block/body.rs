@@ -33,18 +33,23 @@ pub trait BlockBody:
     + MaybeSerde
     + 'static
 {
-    /// Ordered list of signed transactions as committed in block.
+    /// Ordered list of signed transactions as committed in the block.
     type Transaction: SignedTransaction;
 
     /// Ommer header type.
     type OmmerHeader: BlockHeader;
 
-    /// Returns reference to transactions in block.
+    /// Returns reference to transactions in the block.
     fn transactions(&self) -> &[Self::Transaction];
+
+    /// Returns an iterator over the transactions in the block.
+    fn transactions_iter(&self) -> impl Iterator<Item = &Self::Transaction> {
+        self.transactions().iter()
+    }
 
     /// Returns an iterator over all transaction hashes in the block body.
     fn transaction_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
-        self.transactions().iter().map(|tx| tx.tx_hash())
+        self.transactions_iter().map(|tx| tx.tx_hash())
     }
 
     /// Returns the number of the transactions in the block.
@@ -57,7 +62,7 @@ pub trait BlockBody:
 
     /// Returns `true` if the block body contains a transaction of the given type.
     fn contains_transaction_type(&self, tx_type: u8) -> bool {
-        self.transactions().iter().any(|tx| tx.is_type(tx_type))
+        self.transactions_iter().any(|tx| tx.is_type(tx_type))
     }
 
     /// Calculate the transaction root for the block body.
@@ -89,12 +94,12 @@ pub trait BlockBody:
 
     /// Calculates the total blob gas used by _all_ EIP-4844 transactions in the block.
     fn blob_gas_used(&self) -> u64 {
-        self.transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
+        self.transactions_iter().filter_map(|tx| tx.blob_gas_used()).sum()
     }
 
     /// Returns an iterator over all blob versioned hashes in the block body.
     fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
-        self.transactions().iter().filter_map(|tx| tx.blob_versioned_hashes()).flatten()
+        self.transactions_iter().filter_map(|tx| tx.blob_versioned_hashes()).flatten()
     }
 
     /// Returns an iterator over the encoded 2718 transactions.
@@ -104,7 +109,7 @@ pub trait BlockBody:
     /// See also [`Encodable2718`].
     #[doc(alias = "raw_transactions_iter")]
     fn encoded_2718_transactions_iter(&self) -> impl Iterator<Item = Vec<u8>> + '_ {
-        self.transactions().iter().map(|tx| tx.encoded_2718())
+        self.transactions_iter().map(|tx| tx.encoded_2718())
     }
 
     /// Returns a vector of encoded 2718 transactions.

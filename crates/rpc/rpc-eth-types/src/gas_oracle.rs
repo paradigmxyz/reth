@@ -226,7 +226,7 @@ where
         let parent_hash = block.parent_hash();
 
         // sort the functions by ascending effective tip first
-        let sorted_transactions = block.body().transactions().iter().sorted_by_cached_key(|tx| {
+        let sorted_transactions = block.body().transactions_iter().sorted_by_cached_key(|tx| {
             if let Some(base_fee) = base_fee_per_gas {
                 (*tx).effective_tip_per_gas(base_fee)
             } else {

@@ -12,8 +12,9 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives-traits.workspace = true
 reth-fs-util.workspace = true
+reth-primitives-traits.workspace = true
+reth-prune-types.workspace = true
 reth-static-file-types.workspace = true
 
 # ethereum
