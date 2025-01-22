@@ -268,6 +268,7 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
 
+        self.inner.validator.validate_execution_requests(&execution_requests)?;
         Ok(self
             .inner
             .beacon_consensus
