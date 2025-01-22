@@ -251,7 +251,7 @@ where
             }
 
             // check if the sender was the coinbase, if so, ignore
-            if let Some(sender) = tx.recover_signer() {
+            if let Ok(sender) = tx.recover_signer() {
                 if sender == block.beneficiary() {
                     continue
                 }

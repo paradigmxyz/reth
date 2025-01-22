@@ -3,7 +3,7 @@ use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
 use derive_more::Display;
-use reth_primitives_traits::GotExpected;
+use reth_primitives_traits::{transaction::signed::RecoveryError, GotExpected};
 use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
 
@@ -148,6 +148,12 @@ pub enum ProviderError {
 impl From<alloy_rlp::Error> for ProviderError {
     fn from(error: alloy_rlp::Error) -> Self {
         Self::Rlp(error)
+    }
+}
+
+impl From<RecoveryError> for ProviderError {
+    fn from(_: RecoveryError) -> Self {
+        Self::SenderRecoveryError
     }
 }
 

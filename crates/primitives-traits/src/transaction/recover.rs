@@ -8,7 +8,7 @@ pub use iter::*;
 
 #[cfg(feature = "rayon")]
 mod rayon {
-    use crate::SignedTransaction;
+    use crate::{transaction::signed::RecoveryError, SignedTransaction};
     use alloc::vec::Vec;
     use alloy_primitives::Address;
     use rayon::prelude::{IntoParallelIterator, ParallelIterator};
@@ -16,7 +16,7 @@ mod rayon {
     /// Recovers a list of signers from a transaction list iterator.
     ///
     /// Returns `None`, if some transaction's signature is invalid
-    pub fn recover_signers<'a, I, T>(txes: I) -> Option<Vec<Address>>
+    pub fn recover_signers<'a, I, T>(txes: I) -> Result<Vec<Address>, RecoveryError>
     where
         T: SignedTransaction,
         I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,
@@ -28,7 +28,7 @@ mod rayon {
     /// signature has a low `s` value_.
     ///
     /// Returns `None`, if some transaction's signature is invalid.
-    pub fn recover_signers_unchecked<'a, I, T>(txes: I) -> Option<Vec<Address>>
+    pub fn recover_signers_unchecked<'a, I, T>(txes: I) -> Result<Vec<Address>, RecoveryError>
     where
         T: SignedTransaction,
         I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,
@@ -39,14 +39,14 @@ mod rayon {
 
 #[cfg(not(feature = "rayon"))]
 mod iter {
-    use crate::SignedTransaction;
+    use crate::{transaction::signed::RecoveryError, SignedTransaction};
     use alloc::vec::Vec;
     use alloy_primitives::Address;
 
     /// Recovers a list of signers from a transaction list iterator.
     ///
-    /// Returns `None`, if some transaction's signature is invalid
-    pub fn recover_signers<'a, I, T>(txes: I) -> Option<Vec<Address>>
+    /// Returns `Err(RecoveryError)`, if some transaction's signature is invalid
+    pub fn recover_signers<'a, I, T>(txes: I) -> Result<Vec<Address>, RecoveryError>
     where
         T: SignedTransaction,
         I: IntoIterator<Item = &'a T> + IntoIterator<Item = &'a T>,
@@ -57,8 +57,8 @@ mod iter {
     /// Recovers a list of signers from a transaction list iterator _without ensuring that the
     /// signature has a low `s` value_.
     ///
-    /// Returns `None`, if some transaction's signature is invalid.
-    pub fn recover_signers_unchecked<'a, I, T>(txes: I) -> Option<Vec<Address>>
+    /// Returns `Err(RecoveryError)`, if some transaction's signature is invalid.
+    pub fn recover_signers_unchecked<'a, I, T>(txes: I) -> Result<Vec<Address>, RecoveryError>
     where
         T: SignedTransaction,
         I: IntoIterator<Item = &'a T> + IntoIterator<Item = &'a T>,
