@@ -156,12 +156,7 @@ pub trait Block:
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
         let senders = if self.body().transactions().len() == senders.len() {
-            // Verify the provided senders are correct
-            let recovered = self.body().recover_signers_unchecked();
-            match recovered {
-                Ok(recovered_senders) if recovered_senders == senders => senders,
-                _ => return Err(self),
-            }
+            senders
         } else {
             // Fall back to recovery if lengths don't match
             let Ok(senders) = self.body().recover_signers_unchecked() else { return Err(self) };
