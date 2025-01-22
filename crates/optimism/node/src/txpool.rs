@@ -61,9 +61,9 @@ impl OpPooledTransaction {
     /// This value is computed based on the following formula:
     /// `max(minTransactionSize, intercept + fastlzCoef*fastlzSize)`
     pub fn estimated_compressed_size(&self) -> u64 {
-        *self
-            .estimated_tx_compressed_size
-            .get_or_init(|| op_alloy_flz::tx_estimated_size_fjord(&self.inner.transaction().encoded_2718()))
+        *self.estimated_tx_compressed_size.get_or_init(|| {
+            op_alloy_flz::tx_estimated_size_fjord(&self.inner.transaction().encoded_2718())
+        })
     }
 }
 
