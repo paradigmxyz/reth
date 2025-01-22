@@ -286,13 +286,13 @@ impl From<TypedTransaction> for Transaction {
 pub struct TransactionSigned {
     /// Transaction hash
     #[serde(skip)]
-    pub hash: OnceLock<TxHash>,
+    hash: OnceLock<TxHash>,
     /// The transaction signature values
-    pub signature: Signature,
+    signature: Signature,
     /// Raw transaction info
     #[deref]
     #[as_ref]
-    pub transaction: Transaction,
+    transaction: Transaction,
 }
 
 impl Default for TransactionSigned {
@@ -326,6 +326,21 @@ impl TransactionSigned {
     /// Creates a new signed transaction from the given transaction, signature and hash.
     pub fn new(transaction: Transaction, signature: Signature, hash: B256) -> Self {
         Self { hash: hash.into(), signature, transaction }
+    }
+
+    /// Returns the transaction.
+    pub const fn transaction(&self) -> &Transaction {
+        &self.transaction
+    }
+
+    /// Returns the transaction hash.
+    pub fn hash(&self) -> &B256 {
+        self.hash.get_or_init(|| self.recalculate_hash())
+    }
+
+    /// Returns the transaction signature.
+    pub const fn signature(&self) -> &Signature {
+        &self.signature
     }
 
     /// Creates a new signed transaction from the given transaction and signature without the hash.
@@ -366,6 +381,12 @@ impl TransactionSigned {
             Transaction::Eip4844(tx) => Some(tx),
             _ => None,
         }
+    }
+}
+
+impl core::ops::DerefMut for TransactionSigned {
+    fn deref_mut(&mut self) -> &mut Transaction {
+        &mut self.transaction
     }
 }
 
