@@ -16,36 +16,29 @@ struct EntryDiff<T> {
     database: T,
 }
 
+#[derive(Debug)]
+struct BranchNodeCompactDiff {
+    task: Option<Option<BranchNodeCompact>>,
+    regular: Option<Option<BranchNodeCompact>>,
+    database: Option<BranchNodeCompact>,
+}
+
 #[derive(Debug, Default)]
 struct TrieUpdatesDiff {
-    account_nodes: HashMap<Nibbles, EntryDiff<Option<BranchNodeCompact>>>,
-    removed_nodes: HashMap<Nibbles, EntryDiff<bool>>,
+    changed_nodes: HashMap<Nibbles, BranchNodeCompactDiff>,
     storage_tries: HashMap<B256, StorageTrieDiffEntry>,
 }
 
 impl TrieUpdatesDiff {
-    fn has_differences(&self) -> bool {
-        !self.account_nodes.is_empty() ||
-            !self.removed_nodes.is_empty() ||
-            !self.storage_tries.is_empty()
+    fn is_empty(&self) -> bool {
+        self.changed_nodes.is_empty() && self.storage_tries.is_empty()
     }
 
     pub(super) fn log_differences(mut self) {
-        if self.has_differences() {
-            for (path, EntryDiff { task, regular, database }) in &mut self.account_nodes {
-                debug!(target: "engine::tree", ?path, ?task, ?regular, ?database, "Difference in account trie updates");
-            }
-
-            for (
-                path,
-                EntryDiff {
-                    task: task_removed,
-                    regular: regular_removed,
-                    database: database_not_exists,
-                },
-            ) in &self.removed_nodes
+        if !self.is_empty() {
+            for (path, BranchNodeCompactDiff { task, regular, database }) in &mut self.changed_nodes
             {
-                debug!(target: "engine::tree", ?path, ?task_removed, ?regular_removed, ?database_not_exists, "Difference in removed account trie nodes");
+                debug!(target: "engine::tree", ?path, ?task, ?regular, ?database, "Difference in account trie updates");
             }
 
             for (address, storage_diff) in self.storage_tries {
@@ -75,21 +68,10 @@ impl StorageTrieDiffEntry {
                     debug!(target: "engine::tree", ?address, ?task, ?regular, ?database, "Difference in storage trie deletion");
                 }
 
-                for (path, EntryDiff { task, regular, database }) in &mut storage_diff.storage_nodes
+                for (path, BranchNodeCompactDiff { task, regular, database }) in
+                    &mut storage_diff.changed_nodes
                 {
                     debug!(target: "engine::tree", ?address, ?path, ?task, ?regular, ?database, "Difference in storage trie updates");
-                }
-
-                for (
-                    path,
-                    EntryDiff {
-                        task: task_removed,
-                        regular: regular_removed,
-                        database: database_not_exists,
-                    },
-                ) in &storage_diff.removed_nodes
-                {
-                    debug!(target: "engine::tree", ?address, ?path, ?task_removed, ?regular_removed, ?database_not_exists, "Difference in removed storage trie nodes");
                 }
             }
         }
@@ -99,15 +81,12 @@ impl StorageTrieDiffEntry {
 #[derive(Debug, Default)]
 struct StorageTrieUpdatesDiff {
     is_deleted: Option<EntryDiff<bool>>,
-    storage_nodes: HashMap<Nibbles, EntryDiff<Option<BranchNodeCompact>>>,
-    removed_nodes: HashMap<Nibbles, EntryDiff<bool>>,
+    changed_nodes: HashMap<Nibbles, BranchNodeCompactDiff>,
 }
 
 impl StorageTrieUpdatesDiff {
-    fn has_differences(&self) -> bool {
-        self.is_deleted.is_some() ||
-            !self.storage_nodes.is_empty() ||
-            !self.removed_nodes.is_empty()
+    fn is_empty(&self) -> bool {
+        self.is_deleted.is_none() && self.changed_nodes.is_empty()
     }
 }
 
@@ -115,58 +94,31 @@ impl StorageTrieUpdatesDiff {
 /// and logs the differences if there's any.
 pub(super) fn compare_trie_updates(
     trie_cursor_factory: impl TrieCursorFactory,
-    task: TrieUpdates,
-    regular: TrieUpdates,
+    mut task: TrieUpdates,
+    mut regular: TrieUpdates,
 ) -> Result<(), DatabaseError> {
-    let mut task = adjust_trie_updates(task);
-    let mut regular = adjust_trie_updates(regular);
-
     let mut diff = TrieUpdatesDiff::default();
 
     // compare account nodes
     let mut account_trie_cursor = trie_cursor_factory.account_trie_cursor()?;
-    for key in task
-        .account_nodes
-        .keys()
-        .chain(regular.account_nodes.keys())
+    for key in Iterator::chain(task.changed_nodes.keys(), regular.changed_nodes.keys())
         .cloned()
         .collect::<BTreeSet<_>>()
     {
-        let (task, regular) = (task.account_nodes.remove(&key), regular.account_nodes.remove(&key));
+        let task = task.changed_nodes.remove(&key);
+        let regular = regular.changed_nodes.remove(&key);
         let database = account_trie_cursor.seek_exact(key.clone())?.map(|x| x.1);
-
-        if !branch_nodes_equal(task.as_ref(), regular.as_ref(), database.as_ref())? {
-            diff.account_nodes.insert(key, EntryDiff { task, regular, database });
+        if !branch_nodes_equal(&task, &regular, &database) {
+            diff.changed_nodes.insert(key, BranchNodeCompactDiff { task, regular, database });
         }
     }
 
-    // compare removed nodes
-    let mut account_trie_cursor = trie_cursor_factory.account_trie_cursor()?;
-    for key in task
-        .removed_nodes
-        .iter()
-        .chain(regular.removed_nodes.iter())
-        .cloned()
-        .collect::<BTreeSet<_>>()
-    {
-        let (task, regular) =
-            (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
-        let database = account_trie_cursor.seek_exact(key.clone())?.is_none();
-        if task != regular {
-            diff.removed_nodes.insert(key, EntryDiff { task, regular, database });
-        }
-    }
-
-    // compare storage tries
-    for key in task
-        .storage_tries
-        .keys()
-        .chain(regular.storage_tries.keys())
+    for key in Iterator::chain(task.storage_tries.keys(), regular.storage_tries.keys())
         .copied()
         .collect::<BTreeSet<_>>()
     {
-        let (mut task, mut regular) =
-            (task.storage_tries.remove(&key), regular.storage_tries.remove(&key));
+        let mut task = task.storage_tries.remove(&key);
+        let mut regular = regular.storage_tries.remove(&key);
         if task != regular {
             if let Some((task, regular)) = task.as_mut().zip(regular.as_mut()) {
                 let storage_diff = compare_storage_trie_updates(
@@ -174,7 +126,7 @@ pub(super) fn compare_trie_updates(
                     task,
                     regular,
                 )?;
-                if storage_diff.has_differences() {
+                if !storage_diff.is_empty() {
                     diff.storage_tries.insert(key, StorageTrieDiffEntry::Value(storage_diff));
                 }
             } else {
@@ -209,68 +161,19 @@ fn compare_storage_trie_updates<C: TrieCursor>(
 
     // compare storage nodes
     let mut storage_trie_cursor = trie_cursor()?;
-    for key in task
-        .storage_nodes
-        .keys()
-        .chain(regular.storage_nodes.keys())
+    for key in Iterator::chain(task.changed_nodes.keys(), regular.changed_nodes.keys())
         .cloned()
         .collect::<BTreeSet<_>>()
     {
-        let (task, regular) = (task.storage_nodes.remove(&key), regular.storage_nodes.remove(&key));
+        let task = task.changed_nodes.remove(&key);
+        let regular = regular.changed_nodes.remove(&key);
         let database = storage_trie_cursor.seek_exact(key.clone())?.map(|x| x.1);
-        if !branch_nodes_equal(task.as_ref(), regular.as_ref(), database.as_ref())? {
-            diff.storage_nodes.insert(key, EntryDiff { task, regular, database });
-        }
-    }
-
-    // compare removed nodes
-    let mut storage_trie_cursor = trie_cursor()?;
-    for key in task
-        .removed_nodes
-        .iter()
-        .chain(regular.removed_nodes.iter())
-        .cloned()
-        .collect::<BTreeSet<_>>()
-    {
-        let (task, regular) =
-            (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
-        let database = storage_trie_cursor.seek_exact(key.clone())?.map(|x| x.1).is_none();
-        if task != regular {
-            diff.removed_nodes.insert(key, EntryDiff { task, regular, database });
+        if !branch_nodes_equal(&task, &regular, &database) {
+            diff.changed_nodes.insert(key, BranchNodeCompactDiff { task, regular, database });
         }
     }
 
     Ok(diff)
-}
-
-/// Filters the removed nodes of both account trie updates and storage trie updates, so that they
-/// don't include those nodes that were also updated.
-fn adjust_trie_updates(trie_updates: TrieUpdates) -> TrieUpdates {
-    TrieUpdates {
-        removed_nodes: trie_updates
-            .removed_nodes
-            .into_iter()
-            .filter(|key| !trie_updates.account_nodes.contains_key(key))
-            .collect(),
-        storage_tries: trie_updates
-            .storage_tries
-            .into_iter()
-            .map(|(address, updates)| {
-                (
-                    address,
-                    StorageTrieUpdates {
-                        removed_nodes: updates
-                            .removed_nodes
-                            .into_iter()
-                            .filter(|key| !updates.storage_nodes.contains_key(key))
-                            .collect(),
-                        ..updates
-                    },
-                )
-            })
-            .collect(),
-        ..trie_updates
-    }
 }
 
 /// Compares the branch nodes from state root task and regular state root calculation.
@@ -280,25 +183,9 @@ fn adjust_trie_updates(trie_updates: TrieUpdates) -> TrieUpdates {
 ///
 /// Returns `true` if they are equal.
 fn branch_nodes_equal(
-    task: Option<&BranchNodeCompact>,
-    regular: Option<&BranchNodeCompact>,
-    database: Option<&BranchNodeCompact>,
-) -> Result<bool, DatabaseError> {
-    Ok(match (task, regular) {
-        (Some(task), Some(regular)) => {
-            task.state_mask == regular.state_mask &&
-                task.tree_mask == regular.tree_mask &&
-                task.hash_mask == regular.hash_mask &&
-                task.hashes == regular.hashes &&
-                task.root_hash == regular.root_hash
-        }
-        (None, None) => true,
-        _ => {
-            if task.is_some() {
-                task == database
-            } else {
-                regular == database
-            }
-        }
-    })
+    task: &Option<Option<BranchNodeCompact>>,
+    regular: &Option<Option<BranchNodeCompact>>,
+    database: &Option<BranchNodeCompact>,
+) -> bool {
+    regular.as_ref().unwrap_or(database) == task.as_ref().unwrap_or(database)
 }

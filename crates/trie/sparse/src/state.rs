@@ -454,8 +454,11 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         self.state.as_revealed_mut().map(|state| {
             let updates = state.take_updates();
             TrieUpdates {
-                account_nodes: updates.updated_nodes,
-                removed_nodes: updates.removed_nodes,
+                changed_nodes: Iterator::chain(
+                    updates.removed_nodes.into_iter().map(|k| (k, None)),
+                    updates.updated_nodes.into_iter().map(|(k, v)| (k, Some(v))),
+                )
+                .collect(),
                 storage_tries: self
                     .storages
                     .iter_mut()
@@ -464,8 +467,11 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                         let updates = trie.take_updates();
                         let updates = StorageTrieUpdates {
                             is_deleted: updates.wiped,
-                            storage_nodes: updates.updated_nodes,
-                            removed_nodes: updates.removed_nodes,
+                            changed_nodes: Iterator::chain(
+                                updates.removed_nodes.into_iter().map(|k| (k, None)),
+                                updates.updated_nodes.into_iter().map(|(k, v)| (k, Some(v))),
+                            )
+                            .collect(),
                         };
                         (*address, updates)
                     })
@@ -742,16 +748,11 @@ mod tests {
         pretty_assertions::assert_eq!(
             sparse_updates,
             TrieUpdates {
-                account_nodes: HashMap::default(),
+                changed_nodes: HashMap::default(),
                 storage_tries: HashMap::from_iter([(
                     b256!("1100000000000000000000000000000000000000000000000000000000000000"),
-                    StorageTrieUpdates {
-                        is_deleted: true,
-                        storage_nodes: HashMap::default(),
-                        removed_nodes: HashSet::default()
-                    }
+                    StorageTrieUpdates { is_deleted: true, changed_nodes: HashMap::default() }
                 )]),
-                removed_nodes: HashSet::default()
             }
         );
     }
