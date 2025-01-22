@@ -19,7 +19,6 @@ use std::{
 use crate::{
     capability::{SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
-    p2pstream::DisconnectP2P,
     CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, Status, UnauthedEthStream,
 };
 use bytes::{Bytes, BytesMut};
