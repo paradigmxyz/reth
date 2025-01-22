@@ -72,7 +72,7 @@ impl OpPooledTransaction {
 /// max(minTransactionSize, intercept + fastlzCoef*fastlzSize)
 // TODO(mattsse): replace with library fn from revm or maili once available
 fn tx_estimated_size_fjord(input: &[u8]) -> u64 {
-    let fastlz_size = maili_flz::flz_compress_len(input) as u64;
+    let fastlz_size = op_alloy_flz::flz_compress_len(input) as u64;
 
     fastlz_size.saturating_mul(836_500).saturating_sub(42_585_600).max(100_000_000)
 }
