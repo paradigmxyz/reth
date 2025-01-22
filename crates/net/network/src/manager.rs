@@ -142,7 +142,25 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     disconnect_metrics: DisconnectMetrics,
 }
 
-// === impl NetworkManager ===
+impl NetworkManager {
+    /// Creates the manager of a new network with [`EthNetworkPrimitives`] types.
+    ///
+    /// ```no_run
+    /// # async fn f() {
+    /// use reth_chainspec::MAINNET;
+    /// use reth_network::{NetworkConfig, NetworkManager};
+    /// let config =
+    ///     NetworkConfig::builder_with_rng_secret_key().build_with_noop_provider(MAINNET.clone());
+    /// let manager = NetworkManager::eth(config).await;
+    /// # }
+    /// ```
+    pub async fn eth<C: BlockNumReader + 'static>(
+        config: NetworkConfig<C, EthNetworkPrimitives>,
+    ) -> Result<Self, NetworkError> {
+        Self::new(config).await
+    }
+}
+
 impl<N: NetworkPrimitives> NetworkManager<N> {
     /// Sets the dedicated channel for events indented for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
