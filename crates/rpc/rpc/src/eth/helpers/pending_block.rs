@@ -5,11 +5,7 @@ use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
-use reth_primitives::{
-    logs_bloom,
-    proofs::{calculate_receipt_root_no_memo, calculate_transaction_root},
-    BlockBody, Receipt,
-};
+use reth_primitives::{logs_bloom, proofs::calculate_transaction_root, BlockBody, Receipt};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderReceipt, ProviderTx,
     StateProviderFactory,
@@ -64,7 +60,8 @@ where
         let chain_spec = self.provider().chain_spec();
 
         let transactions_root = calculate_transaction_root(&transactions);
-        let receipts_root = calculate_receipt_root_no_memo(&receipts.iter().collect::<Vec<_>>());
+        let receipts_root =
+            Receipt::calculate_receipt_root_no_memo(&receipts.iter().collect::<Vec<_>>());
 
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| &r.logs));
 

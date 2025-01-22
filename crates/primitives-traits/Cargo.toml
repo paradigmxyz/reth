@@ -54,6 +54,7 @@ rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-codecs.workspace = true
+reth-chainspec = { workspace = true, features = ["arbitrary"] }
 
 alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
 alloy-consensus = { workspace = true, features = ["arbitrary", "serde"] }
@@ -93,12 +94,14 @@ std = [
 	"thiserror/std",
 	"alloy-trie/std",
 	"op-alloy-consensus?/std",
-	"serde_json/std"
+	"serde_json/std",
+	"reth-chainspec/std"
 ]
 secp256k1 = ["dep:secp256k1"]
 test-utils = [
 	"arbitrary",
-	"reth-codecs?/test-utils"
+	"reth-codecs?/test-utils",
+	"reth-chainspec/test-utils"
 ]
 arbitrary = [
 	"std",
@@ -113,7 +116,8 @@ arbitrary = [
 	"secp256k1?/global-context",
 	"secp256k1?/rand",
 	"op-alloy-consensus?/arbitrary",
-	"alloy-trie/arbitrary"
+	"alloy-trie/arbitrary",
+	"reth-chainspec/arbitrary"
 ]
 serde-bincode-compat = [
 	"serde",

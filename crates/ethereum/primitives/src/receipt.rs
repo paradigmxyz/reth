@@ -3,9 +3,10 @@ use alloy_consensus::{
     Eip2718EncodableReceipt, Eip658Value, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
 };
-use alloy_primitives::{Bloom, Log};
+use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header};
-use reth_primitives_traits::InMemorySize;
+use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
 use serde::{Deserialize, Serialize};
 
 /// Typed ethereum transaction receipt.
@@ -79,6 +80,13 @@ impl Receipt {
             receipt: Self { cumulative_gas_used, tx_type, success, logs },
             logs_bloom,
         })
+    }
+
+    /// Calculates the receipt root for a header for the reference type of [Receipt].
+    ///
+    /// NOTE: Prefer `proofs::calculate_receipt_root` if you have log blooms memoized.
+    pub fn calculate_receipt_root_no_memo(receipts: &[&Self]) -> B256 {
+        ordered_trie_root_with_encoder(receipts, |r, buf| r.with_bloom_ref().encode_2718(buf))
     }
 }
 
@@ -188,9 +196,21 @@ impl reth_primitives_traits::Receipt for Receipt {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TransactionSigned;
     use alloy_eips::eip2718::Encodable2718;
-    use alloy_primitives::{address, b256, bytes, hex_literal::hex, Bytes};
+    use alloy_primitives::{
+        address, b256, bloom, bytes, hex_literal::hex, Address, Bytes, Log, LogData,
+    };
+    use alloy_rlp::Decodable;
     use reth_codecs::Compact;
+    use reth_primitives_traits::proofs::{
+        calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root,
+    };
+
+    /// Ethereum full block.
+    ///
+    /// Withdrawals can be optionally included at the end of the RLP encoded message.
+    pub(crate) type Block<T = TransactionSigned> = alloy_consensus::Block<T>;
 
     #[test]
     fn test_decode_receipt() {
@@ -318,5 +338,60 @@ mod tests {
             legacy_receipt.encode_2718_len(),
             "Encoded length for legacy receipt should match the actual encoded data length"
         );
+    }
+
+    #[test]
+    fn check_transaction_root() {
+        let data = &hex!("f90262f901f9a092230ce5476ae868e98c7979cfc165a93f8b6ad1922acf2df62e340916efd49da01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa02307107a867056ca33b5087e77c4174f47625e48fb49f1c70ced34890ddd88f3a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba0c598f69a5674cae9337261b669970e24abc0b46e6d284372a239ec8ccbf20b0ab901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8618203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0");
+        let block_rlp = &mut data.as_slice();
+        let block: Block = Block::decode(block_rlp).unwrap();
+
+        let tx_root = calculate_transaction_root(&block.body.transactions);
+        assert_eq!(block.transactions_root, tx_root, "Must be the same");
+    }
+
+    #[test]
+    fn check_withdrawals_root() {
+        // Single withdrawal, amount 0
+        // https://github.com/ethereum/tests/blob/9760400e667eba241265016b02644ef62ab55de2/BlockchainTests/EIPTests/bc4895-withdrawals/amountIs0.json
+        let data = &hex!("f90238f90219a0151934ad9b654c50197f37018ee5ee9bb922dec0a1b5e24a6d679cb111cdb107a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0046119afb1ab36aaa8f66088677ed96cd62762f6d3e65642898e189fbe702d51a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff8082079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a048a703da164234812273ea083e4ec3d09d028300cd325b46a6a75402e5a7ab95c0c0d9d8808094c94f5374fce5edbc8e2a8697c15331677e6ebf0b80");
+        let block: Block = Block::decode(&mut data.as_slice()).unwrap();
+        assert!(block.body.withdrawals.is_some());
+        let withdrawals = block.body.withdrawals.as_ref().unwrap();
+        assert_eq!(withdrawals.len(), 1);
+        let withdrawals_root = calculate_withdrawals_root(withdrawals);
+        assert_eq!(block.withdrawals_root, Some(withdrawals_root));
+
+        // 4 withdrawals, identical indices
+        // https://github.com/ethereum/tests/blob/9760400e667eba241265016b02644ef62ab55de2/BlockchainTests/EIPTests/bc4895-withdrawals/twoIdenticalIndex.json
+        let data = &hex!("f9028cf90219a0151934ad9b654c50197f37018ee5ee9bb922dec0a1b5e24a6d679cb111cdb107a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0ccf7b62d616c2ad7af862d67b9dcd2119a90cebbff8c3cd1e5d7fc99f8755774a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008001887fffffffffffffff8082079e42a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42188000000000000000009a0a95b9a7b58a6b3cb4001eb0be67951c5517141cb0183a255b5cae027a7b10b36c0c0f86cda808094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da028094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da018094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710da028094c94f5374fce5edbc8e2a8697c15331677e6ebf0b822710");
+        let block: Block = Block::decode(&mut data.as_slice()).unwrap();
+        assert!(block.body.withdrawals.is_some());
+        let withdrawals = block.body.withdrawals.as_ref().unwrap();
+        assert_eq!(withdrawals.len(), 4);
+        let withdrawals_root = calculate_withdrawals_root(withdrawals);
+        assert_eq!(block.withdrawals_root, Some(withdrawals_root));
+    }
+    #[test]
+    fn check_receipt_root_optimism() {
+        use alloy_consensus::ReceiptWithBloom;
+
+        let logs = vec![Log {
+            address: Address::ZERO,
+            data: LogData::new_unchecked(vec![], Default::default()),
+        }];
+        let bloom = bloom!("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001");
+        let receipt = ReceiptWithBloom {
+            receipt: Receipt {
+                tx_type: TxType::Eip2930,
+                success: true,
+                cumulative_gas_used: 102068,
+                logs,
+            },
+            logs_bloom: bloom,
+        };
+        let receipt = vec![receipt];
+        let root = calculate_receipt_root(&receipt);
+        assert_eq!(root, b256!("fe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0"));
     }
 }

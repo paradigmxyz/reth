@@ -40,14 +40,20 @@ pub use reth_primitives_traits::{
 pub use static_file::StaticFileSegment;
 
 pub use alloy_consensus::{
-    transaction::{PooledTransaction, Recovered as RecoveredTx, TransactionMeta},
+    transaction::{PooledTransaction, Recovered, TransactionMeta},
     ReceiptWithBloom,
 };
+
+/// Recovered transaction
+#[deprecated(note = "use `Recovered` instead")]
+pub type RecoveredTx<T> = Recovered<T>;
+
 pub use transaction::{
     util::secp256k1::{public_key_to_address, recover_signer_unchecked, sign_message},
-    InvalidTransactionError, PooledTransactionsElementEcRecovered, Transaction, TransactionSigned,
-    TransactionSignedEcRecovered, TxType,
+    InvalidTransactionError, Transaction, TransactionSigned, TxType,
 };
+#[allow(deprecated)]
+pub use transaction::{PooledTransactionsElementEcRecovered, TransactionSignedEcRecovered};
 
 // Re-exports
 pub use reth_ethereum_forks::*;

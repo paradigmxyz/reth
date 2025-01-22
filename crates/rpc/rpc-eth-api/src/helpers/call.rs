@@ -105,13 +105,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
                 let mut block_state_calls = block_state_calls.into_iter().peekable();
+                let chain_spec = RpcNodeCore::provider(&this).chain_spec();
                 while let Some(block) = block_state_calls.next() {
                     // Increase number and timestamp for every new block
                     evm_env.block_env.number += U256::from(1);
                     evm_env.block_env.timestamp += U256::from(1);
 
                     if validation {
-                        let chain_spec = RpcNodeCore::provider(&this).chain_spec();
                         let base_fee_params = chain_spec
                             .base_fee_params_at_timestamp(evm_env.block_env.timestamp.to());
                         let base_fee = if let Some(latest) = blocks.last() {
@@ -502,7 +502,7 @@ pub trait Call:
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env, Default::default());
+        let mut evm = self.evm_config().evm_with_env(db, evm_env);
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
         let evm_env = evm.into_env();
 
@@ -522,12 +522,7 @@ pub trait Call:
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(
-            db,
-            evm_env,
-            Default::default(),
-            inspector,
-        );
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
         let evm_env = evm.into_env();
 
@@ -684,7 +679,7 @@ pub trait Call:
         I: IntoIterator<Item = (&'a Address, &'a <Self::Evm as ConfigureEvmEnv>::Transaction)>,
         <Self::Evm as ConfigureEvmEnv>::Transaction: SignedTransaction,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env, Default::default());
+        let mut evm = self.evm_config().evm_with_env(db, evm_env);
         let mut index = 0;
         for (sender, tx) in transactions {
             if *tx.tx_hash() == target_tx_hash {

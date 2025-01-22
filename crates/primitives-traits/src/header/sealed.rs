@@ -96,14 +96,16 @@ impl<H: Sealable> SealedHeader<H> {
         let hash = self.hash();
         (self.header, hash)
     }
+}
 
-    /// Clones the header and returns a new sealed header.
-    pub fn cloned(self) -> Self
+impl<H: Sealable> SealedHeader<&H> {
+    /// Maps a `SealedHeader<&H>` to a `SealedHeader<H>` by cloning the header.
+    pub fn cloned(self) -> SealedHeader<H>
     where
         H: Clone,
     {
-        let (header, hash) = self.split();
-        Self::new(header, hash)
+        let Self { hash, header } = self;
+        SealedHeader { hash, header: header.clone() }
     }
 }
 

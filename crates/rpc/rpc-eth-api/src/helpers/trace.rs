@@ -45,12 +45,7 @@ pub trait Trace:
         EthApiError: From<DB::Error>,
         I: GetInspector<DB>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(
-            db,
-            evm_env,
-            Default::default(),
-            inspector,
-        );
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
         let evm_env = evm.into_env();
         Ok((res, (evm_env, tx_env)))
