@@ -8,7 +8,8 @@ use alloy_rpc_types_engine::{
     PayloadError,
 };
 use assert_matches::assert_matches;
-use reth_primitives::{proofs, Block, SealedBlock, SealedHeader, TransactionSigned};
+use reth_primitives::{Block, SealedBlock, SealedHeader, TransactionSigned};
+use reth_primitives_traits::proofs;
 use reth_rpc_types_compat::engine::payload::{block_to_payload, block_to_payload_v1};
 use reth_testing_utils::generators::{
     self, random_block, random_block_range, BlockParams, BlockRangeParams, Rng,

@@ -49,6 +49,7 @@ parking_lot.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-tokio-util.workspace = true
 reth-testing-utils.workspace = true
