@@ -15,6 +15,7 @@ use reth_provider::{
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, TransactionCompat,
+    L2EthApiExt
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
@@ -47,6 +48,39 @@ where
         }
 
         // submit the transaction to the pool with a `Local` origin
+        let hash = self
+            .pool()
+            .add_transaction(TransactionOrigin::Local, pool_transaction)
+            .await
+            .map_err(Self::Error::from_eth_err)?;
+
+        Ok(hash)
+    }
+}
+
+// Likely not the best place for this api. This RpcAddOn should only be present
+// when the config for it is enabled.
+impl<N> L2EthApiExt for OpEthApi<N>
+where
+    Self: LoadTransaction<Provider: BlockReaderIdExt>,
+    N: OpNodeCore<Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>>,
+{
+    async fn send_raw_transaction_conditional(&self, tx: Bytes, conditional: TransactionConditional) -> RpcResult<B256> {
+        // (1) sanity check the conditional
+        // conditional.validate() (< max cost, max > min, etc, etc)
+
+        // (2) forward using the sequencer client if set and skip pool submission
+
+        // (3) validation. block & state
+        let header = self.provider().latest_header()?.header();
+        // conditional.matches_block_number(header.number);
+        // conditional.matches_timestamp(header.timestamp);
+        // ...
+
+        // Can we attach attach a condititional to this transaction? Type here is not OpTransactionSigned.
+        // If we can't do this, then perhaps we need a custom pool interface.
+        let recovered = recover_raw_transaction(&tx)?.with_conditional(conditional);
+        let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
         let hash = self
             .pool()
             .add_transaction(TransactionOrigin::Local, pool_transaction)
