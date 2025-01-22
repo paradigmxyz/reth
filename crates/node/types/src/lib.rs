@@ -234,16 +234,19 @@ where
 }
 
 /// Helper adapter type for accessing [`NodePrimitives::Block`] on [`NodeTypes`].
-pub type BlockTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::Block;
+pub type BlockTy<N> = <PrimitivesTy<N> as NodePrimitives>::Block;
 
 /// Helper adapter type for accessing [`NodePrimitives::BlockHeader`] on [`NodeTypes`].
-pub type HeaderTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockHeader;
+pub type HeaderTy<N> = <PrimitivesTy<N> as NodePrimitives>::BlockHeader;
 
 /// Helper adapter type for accessing [`NodePrimitives::BlockBody`] on [`NodeTypes`].
-pub type BodyTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockBody;
+pub type BodyTy<N> = <PrimitivesTy<N> as NodePrimitives>::BlockBody;
 
 /// Helper adapter type for accessing [`NodePrimitives::SignedTx`] on [`NodeTypes`].
-pub type TxTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::SignedTx;
+pub type TxTy<N> = <PrimitivesTy<N> as NodePrimitives>::SignedTx;
 
 /// Helper adapter type for accessing [`NodePrimitives::Receipt`] on [`NodeTypes`].
-pub type ReceiptTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::Receipt;
+pub type ReceiptTy<N> = <PrimitivesTy<N> as NodePrimitives>::Receipt;
+
+/// Helper type for getting the `Primitives` associated type from a [`NodeTypes`].
+pub type PrimitivesTy<N> = <N as NodeTypes>::Primitives;
