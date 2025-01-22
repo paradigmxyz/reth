@@ -1254,7 +1254,7 @@ where
 
     /// Helper method to save blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're saving blocks.
-    fn persist_blocks(&mut self, blocks_to_persist: Vec<ExecutedBlock<N>>) {
+    fn persist_blocks(&mut self, blocks_to_persist: Vec<ExecutedBlockWithTrieUpdates<N>>) {
         if blocks_to_persist.is_empty() {
             debug!(target: "engine::tree", "Returned empty set of blocks to persist");
             return
@@ -2348,13 +2348,10 @@ where
         let state_provider =
             CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
-        let sealed_block = Arc::new(block.clone_sealed_block());
         trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
 
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
 
-        let block_number = block.number();
-        let block_hash = block.hash();
         let sealed_block = Arc::new(block.clone_sealed_block());
 
         // We only run the parallel state root if we are currently persisting blocks that are all
@@ -2446,7 +2443,7 @@ where
                 }
             }
         } else {
-            debug!(target: "engine::tree", block=?sealed_block.num_hash(), ?is_descendant_block, "Failed to compute state root in parallel");
+            debug!(target: "engine::tree", block=?block_num_hash, ?is_descendant_block, "Failed to compute state root in parallel");
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
@@ -3513,18 +3510,18 @@ mod tests {
         tree_state.insert_executed(blocks[0].clone());
         assert!(tree_state.is_descendant(
             blocks[0].recovered_block().num_hash(),
-            &blocks[1].recovered_block().header()
+            blocks[1].recovered_block().header()
         ));
 
         tree_state.insert_executed(blocks[1].clone());
 
         assert!(tree_state.is_descendant(
             blocks[0].recovered_block().num_hash(),
-            &blocks[2].recovered_block().header()
+            blocks[2].recovered_block().header()
         ));
         assert!(tree_state.is_descendant(
             blocks[1].recovered_block().num_hash(),
-            &blocks[2].recovered_block().header()
+            blocks[2].recovered_block().header()
         ));
     }
 
@@ -3804,7 +3801,7 @@ mod tests {
         assert_eq!(saved_blocks, vec![blocks[0].clone()]);
 
         // send the response so we can advance again
-        sender.send(Some(blocks[0].block.num_hash())).unwrap();
+        sender.send(Some(blocks[0].recovered_block().num_hash())).unwrap();
 
         // reorg case
         let result = test_harness.tree.on_new_head(fork_block_5.recovered_block().hash()).unwrap();

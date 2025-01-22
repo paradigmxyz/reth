@@ -1,6 +1,6 @@
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_primitives_traits::NodePrimitives;
 use std::{collections::VecDeque, time::Instant};
 use tokio::sync::oneshot;
@@ -42,7 +42,7 @@ impl<N: NodePrimitives> PersistenceState<N> {
     /// Sets the state for a block save operation.
     pub(crate) fn start_save(
         &mut self,
-        to_save: Vec<ExecutedBlock<N>>,
+        to_save: Vec<ExecutedBlockWithTrieUpdates<N>>,
         rx: oneshot::Receiver<Option<BlockNumHash>>,
     ) {
         self.rx =
@@ -81,7 +81,7 @@ pub(crate) enum CurrentPersistenceAction<N: NodePrimitives> {
     /// The persistence task is saving blocks.
     SavingBlocks {
         /// The blocks being saved
-        blocks: Vec<ExecutedBlock<N>>,
+        blocks: Vec<ExecutedBlockWithTrieUpdates<N>>,
     },
     /// The persistence task is removing blocks.
     RemovingBlocks {

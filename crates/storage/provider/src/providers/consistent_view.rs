@@ -71,7 +71,26 @@ where
         let provider_ro = self.factory.database_provider_ro()?;
 
         // Check that the currently stored tip is included on-disk.
-        // This means that the database has moved, but the view was not reorged.
+        // This means that the database may have moved, but the view was not reorged.
+        //
+        // NOTE: We must use `sealed_header` with the block number here, because if we are using
+        // the consistent view provider while we're persisting blocks, we may enter a race
+        // condition. Recall that we always commit to static files first, then the database, and
+        // that block hash to block number indexes are contained in the database. If we were to
+        // fetch the block by hash while we're persisting, the following situation may occur:
+        //
+        // 1. Persistence appends the latest block to static files.
+        // 2. We initialize the consistent view provider, which fetches based on `last_block_number`
+        //    and `sealed_header`, which both check static files, setting the tip to the newly
+        //    committed block.
+        // 3. We attempt to fetch a header by hash, using for example the `header` method. This
+        //    checks the database first, to fetch the number corresponding to the hash. Because the
+        //    database has not been committed yet, this fails, and we return
+        //    `ConsistentViewError::Reorged`.
+        // 4. Some time later, the database commits.
+        //
+        // To ensure this doesn't happen, we just have to make sure that we fetch from the same
+        // data source that we used during initialization. In this case, that is static files
         if let Some((hash, number)) = self.tip {
             if provider_ro.sealed_header(number)?.is_none_or(|header| header.hash() != hash) {
                 return Err(ConsistentViewError::Reorged { block: hash }.into())
