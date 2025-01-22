@@ -19,7 +19,7 @@ use once_cell as _;
 use once_cell::sync::OnceCell as OnceLock;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
-    transaction::error::TransactionConversionError,
+    transaction::{error::TransactionConversionError, signed::RecoveryError},
     FillTxEnv, InMemorySize, SignedTransaction,
 };
 use revm_primitives::{AuthorizationList, TxEnv};
@@ -719,12 +719,15 @@ impl SignedTransaction for TransactionSigned {
         &self.signature
     }
 
-    fn recover_signer(&self) -> Option<Address> {
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
         let signature_hash = self.signature_hash();
         recover_signer(&self.signature, signature_hash)
     }
 
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
         self.encode_for_signing(buf);
         let signature_hash = keccak256(buf);
         recover_signer_unchecked(&self.signature, signature_hash)
@@ -940,10 +943,10 @@ mod tests {
 
         // recover signer, expect failure
         let hash = *tx.tx_hash();
-        assert!(recover_signer(signature, hash).is_none());
+        assert!(recover_signer(signature, hash).is_err());
 
         // use unchecked, ensure it succeeds (the signature is valid if not for EIP-2)
-        assert!(recover_signer_unchecked(signature, hash).is_some());
+        assert!(recover_signer_unchecked(signature, hash).is_ok());
     }
 
     #[test]
@@ -1002,8 +1005,8 @@ mod tests {
 
         let decoded = TransactionSigned::decode_2718(&mut &tx_bytes[..]).unwrap();
         assert_eq!(
-            decoded.recover_signer(),
-            Some(Address::from_str("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5").unwrap())
+            decoded.recover_signer().unwrap(),
+            Address::from_str("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5").unwrap()
         );
     }
 
@@ -1018,8 +1021,10 @@ mod tests {
         let decoded = TransactionSigned::decode_2718(&mut raw_tx.as_slice()).unwrap();
         assert!(alloy_consensus::Typed2718::is_eip4844(&decoded));
 
-        let from = decoded.recover_signer();
-        assert_eq!(from, Some(address!("A83C816D4f9b2783761a22BA6FADB0eB0606D7B2")));
+        assert_eq!(
+            decoded.recover_signer().ok(),
+            Some(address!("A83C816D4f9b2783761a22BA6FADB0eB0606D7B2"))
+        );
 
         let tx = decoded.transaction;
 
@@ -1182,7 +1187,8 @@ mod tests {
         let mut pointer = raw.as_ref();
         let tx = TransactionSigned::decode(&mut pointer).unwrap();
         assert_eq!(*tx.tx_hash(), hash, "Expected same hash");
-        assert_eq!(tx.recover_signer(), Some(signer), "Recovering signer should pass.");
+        let recovered = tx.recover_signer().expect("Recovering signer should pass");
+        assert_eq!(recovered, signer);
     }
 
     #[test]
@@ -1252,7 +1258,7 @@ mod tests {
         let data = hex!("f8ea0c850ba43b7400832dc6c0942935aa0a2d2fbb791622c29eb1c117b65b7a908580b884590528a9000000000000000000000001878ace42092b7f1ae1f28d16c1272b1aa80ca4670000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000d02ab486cedc0000000000000000000000000000000000000000000000000000557fe293cabc08cf1ca05bfaf3fda0a56b49cc78b22125feb5ae6a99d2b4781f00507d8b02c173771c85a0b5da0dbe6c5bc53740d0071fc83eb17ba0f709e49e9ae7df60dee625ef51afc5");
         let tx = TransactionSigned::decode_2718(&mut data.as_slice()).unwrap();
         let sender = tx.recover_signer();
-        assert!(sender.is_none());
+        assert!(sender.is_err());
         let sender = tx.recover_signer_unchecked().unwrap();
 
         assert_eq!(sender, address!("7e9e359edf0dbacf96a9952fa63092d919b0842b"));
