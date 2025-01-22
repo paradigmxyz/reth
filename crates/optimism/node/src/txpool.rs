@@ -325,29 +325,49 @@ where
         }
     }
 
-    /// Validates a single transaction.
-    ///
-    /// See also [`TransactionValidator::validate_transaction`]
-    ///
-    /// This behaves the same as [`EthTransactionValidator::validate_one`], but in addition, ensures
-    /// that the account has enough balance to cover the L1 gas cost.
-    pub fn validate_one(
+    fn validate_batch(
         &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
+        transactions: Vec<(TransactionOrigin, Tx)>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        let outcomes = self.inner.validate_all(transactions);
+
+        outcomes
+            .into_iter()
+            .map(|outcome| self.validate_gas_fee(self.validate_transaction_type(outcome)))
+            .collect()
+    }
+
+    fn validate_transaction_type(
+        &self,
+        outcome: TransactionValidationOutcome<Tx>,
     ) -> TransactionValidationOutcome<Tx> {
-        if transaction.is_eip4844() {
-            return TransactionValidationOutcome::Invalid(
+        match outcome {
+            TransactionValidationOutcome::Valid {
+                balance: _,
+                state_nonce: _,
                 transaction,
+                propagate: _,
+            } if transaction.transaction().is_eip4844() => TransactionValidationOutcome::Invalid(
+                transaction.into_transaction(),
                 InvalidTransactionError::TxTypeNotSupported.into(),
-            )
+            ),
+            TransactionValidationOutcome::Invalid(tx, _) if tx.is_eip4844() => {
+                TransactionValidationOutcome::Invalid(
+                    tx,
+                    InvalidTransactionError::TxTypeNotSupported.into(),
+                )
+            }
+            _ => outcome,
         }
+    }
 
-        let outcome = self.inner.validate_one(origin, transaction);
-
+    fn validate_gas_fee(
+        &self,
+        outcome: TransactionValidationOutcome<Tx>,
+    ) -> TransactionValidationOutcome<Tx> {
         if !self.requires_l1_data_gas_fee() {
             // no need to check L1 gas fee
-            return outcome
+            return outcome;
         }
 
         // ensure that the account has enough balance to cover the L1 gas cost
@@ -385,7 +405,7 @@ where
                         GotExpected { got: balance, expected: cost }.into(),
                     )
                     .into(),
-                )
+                );
             }
 
             return TransactionValidationOutcome::Valid {
@@ -393,10 +413,32 @@ where
                 state_nonce,
                 transaction: valid_tx,
                 propagate,
-            }
+            };
         }
 
         outcome
+    }
+
+    /// Validates a single transaction.
+    ///
+    /// See also [`TransactionValidator::validate_transaction`]
+    ///
+    /// This behaves the same as [`EthTransactionValidator::validate_one`], but in addition, ensures
+    /// that the account has enough balance to cover the L1 gas cost.
+    pub fn validate_one(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        if transaction.is_eip4844() {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::TxTypeNotSupported.into(),
+            );
+        }
+
+        let outcome = self.inner.validate_one(origin, transaction);
+        self.validate_gas_fee(outcome)
     }
 
     /// Validates all given transactions.
@@ -408,7 +450,7 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+        self.validate_batch(transactions)
     }
 }
 
@@ -502,5 +544,42 @@ mod tests {
             _ => panic!("Expected invalid transaction"),
         };
         assert_eq!(err.to_string(), "transaction type not supported");
+    }
+
+    #[test]
+    fn validate_optimism_transaction_all() {
+        let client = MockEthProvider::default();
+        let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
+            .no_shanghai()
+            .no_cancun()
+            .build(client, InMemoryBlobStore::default());
+        let validator = OpTransactionValidator::new(validator);
+
+        let origin = TransactionOrigin::External;
+        let signer = Default::default();
+        let deposit_tx = OpTypedTransaction::Deposit(TxDeposit {
+            source_hash: Default::default(),
+            from: signer,
+            to: TxKind::Create,
+            mint: None,
+            value: U256::ZERO,
+            gas_limit: 0,
+            is_system_transaction: false,
+            input: Default::default(),
+        });
+        let signature = Signature::test_signature();
+        let signed_tx = OpTransactionSigned::new_unhashed(deposit_tx, signature);
+        let signed_recovered = Recovered::new_unchecked(signed_tx, signer);
+        let len = signed_recovered.encode_2718_len();
+        let pooled_tx = OpPooledTransaction::new(signed_recovered, len);
+        let outcomes = validator.validate_all(vec![(origin, pooled_tx)]);
+
+        for outcome in outcomes {
+            let err = match outcome {
+                TransactionValidationOutcome::Invalid(_, err) => err,
+                _ => panic!("Expected invalid transaction"),
+            };
+            assert_eq!(err.to_string(), "transaction type not supported");
+        }
     }
 }
