@@ -37,10 +37,7 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
-use reth_eth_wire::{
-    capability::CapabilityMessage, Capabilities, DisconnectReason, EthNetworkPrimitives,
-    NetworkPrimitives,
-};
+use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{
@@ -441,20 +438,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         }
     }
 
-    /// Event hook for an unexpected message from the peer.
-    fn on_invalid_message(
-        &mut self,
-        peer_id: PeerId,
-        _capabilities: Arc<Capabilities>,
-        _message: CapabilityMessage<N>,
-    ) {
-        trace!(target: "net", ?peer_id, "received unexpected message");
-        self.swarm
-            .state_mut()
-            .peers_mut()
-            .apply_reputation_change(&peer_id, ReputationChangeKind::BadProtocol);
-    }
-
     /// Sends an event to the [`TransactionsManager`](crate::transactions::TransactionsManager) if
     /// configured.
     fn notify_tx_manager(&self, event: NetworkTransactionEvent<N>) {
@@ -702,10 +685,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         // handle event
         match event {
             SwarmEvent::ValidMessage { peer_id, message } => self.on_peer_message(peer_id, message),
-            SwarmEvent::InvalidCapabilityMessage { peer_id, capabilities, message } => {
-                self.on_invalid_message(peer_id, capabilities, message);
-                self.metrics.invalid_messages_received.increment(1);
-            }
             SwarmEvent::TcpListenerClosed { remote_addr } => {
                 trace!(target: "net", ?remote_addr, "TCP listener closed.");
             }
