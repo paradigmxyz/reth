@@ -2640,7 +2640,7 @@ mod tests {
                 transaction_sender,
                 |block: &SealedBlock, tx_num: TxNumber, _: B256, _: &Vec<Vec<Receipt>>| (
                     tx_num,
-                    block.body().transactions[test_tx_index].recover_signer()
+                    block.body().transactions[test_tx_index].recover_signer().ok()
                 ),
                 u64::MAX
             ),
