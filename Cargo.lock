@@ -7868,8 +7868,8 @@ dependencies = [
 name = "reth-network-types"
 version = "1.1.5"
 dependencies = [
+ "alloy-eip2124",
  "humantime-serde",
- "reth-ethereum-forks",
  "reth-net-banlist",
  "reth-network-peers",
  "serde",
