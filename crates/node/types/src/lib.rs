@@ -19,7 +19,8 @@ use reth_db_api::{
     database_metrics::{DatabaseMetadata, DatabaseMetrics},
     Database,
 };
-use reth_engine_primitives::{BuiltPayload, EngineTypes};
+use reth_engine_primitives::EngineTypes;
+use reth_payload_primitives::BuiltPayload;
 use reth_trie_db::StateCommitment;
 
 /// The type that configures the essential types of an Ethereum-like node.

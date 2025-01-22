@@ -7302,6 +7302,7 @@ dependencies = [
  "reth-ethereum-forks",
  "reth-evm",
  "reth-fs-util",
+ "reth-payload-primitives",
  "reth-payload-validator",
  "reth-primitives",
  "reth-primitives-traits",
@@ -8203,6 +8204,7 @@ dependencies = [
  "reth-chainspec",
  "reth-db-api",
  "reth-engine-primitives",
+ "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-trie-db",
 ]

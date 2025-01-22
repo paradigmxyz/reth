@@ -26,9 +26,8 @@ use reth_chain_state::{
 use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
 pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
-    BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError,
-    EngineApiMessageVersion, EngineTypes, EngineValidator, ForkchoiceStateTracker,
-    OnForkChoiceUpdated,
+    BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes,
+    EngineValidator, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::{
@@ -37,7 +36,7 @@ use reth_evm::{
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
-use reth_payload_primitives::PayloadBuilderAttributes;
+use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_primitives::{
     EthPrimitives, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
