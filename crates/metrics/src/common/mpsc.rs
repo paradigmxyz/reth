@@ -2,12 +2,12 @@
 //! sent, number of errors, etc.
 
 use crate::Metrics;
-use core::{
+use futures::Stream;
+use metrics::Counter;
+use std::{
     pin::Pin,
     task::{ready, Context, Poll},
 };
-use futures::Stream;
-use metrics::Counter;
 use tokio::sync::mpsc::{
     self,
     error::{SendError, TryRecvError, TrySendError},
