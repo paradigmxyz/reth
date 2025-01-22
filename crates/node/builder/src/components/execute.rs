@@ -12,9 +12,7 @@ pub trait ExecutorBuilder<Node: FullNodeTypes>: Send {
     type EVM: ConfigureEvmFor<<Node::Types as NodeTypes>::Primitives>;
 
     /// The type that knows how to execute blocks.
-    type Executor: BlockExecutorProvider<
-        Primitives = <Node::Types as reth_node_api::NodeTypes>::Primitives,
-    >;
+    type Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>;
 
     /// Creates the EVM config.
     fn build_evm(
@@ -27,8 +25,7 @@ impl<Node, F, Fut, EVM, Executor> ExecutorBuilder<Node> for F
 where
     Node: FullNodeTypes,
     EVM: ConfigureEvmFor<<Node::Types as NodeTypes>::Primitives>,
-    Executor:
-        BlockExecutorProvider<Primitives = <Node::Types as reth_node_api::NodeTypes>::Primitives>,
+    Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<(EVM, Executor)>> + Send,
 {
