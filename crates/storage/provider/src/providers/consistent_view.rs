@@ -45,6 +45,22 @@ where
     /// Creates new consistent database view with latest tip.
     pub fn new_with_latest_tip(provider: Factory) -> ProviderResult<Self> {
         let provider_ro = provider.database_provider_ro()?;
+        // NOTE: there is a RACE CONDITION here! If we are currently persisting block N, during a
+        // commit, we first commit to static files, then commit to the DB.
+        //
+        // This is to prevent other race conditions, eg something checking the stage finish
+        // thresholds and then attempting to read a static file that is not committed yet.
+        //
+        // HOWEVER, because we commit in this order, and the `last_block_number` + header by number
+        // methods check static files, these methods will return a high block number, one that may
+        // not be in the DB's hash indeces yet.
+        //
+        // This means if we go:
+        //
+        // let last_num = provider_ro.last_block_number()?;
+        // let tip = provider_ro.sealed_header(last_num)?.map(|h| h.hash());
+        // // this returns `None`, because it only checks the DB, which is not committed yet
+        // let tip = provider_ro.header(tip.hash())?;
         let last_num = provider_ro.last_block_number()?;
         let tip = provider_ro.sealed_header(last_num)?.map(|h| h.hash());
         debug!(target: "providers::consistent_view", ?tip, ?last_num, "Initializing consistent view provider after fetching tip num and hash");
@@ -77,6 +93,7 @@ where
         // This means that the database has moved, but the view was not reorged.
         if let Some(tip) = self.tip {
             if provider_ro.header(&tip)?.is_none() {
+            tracing::debug!(target: "providers::consistent_view", tip=?self.tip, "Could not initialize consistent vieiw RO provider");
                 return Err(ConsistentViewError::Reorged { block: tip }.into())
             }
         }
