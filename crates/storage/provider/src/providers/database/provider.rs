@@ -691,9 +691,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
                     match known_senders.get(&tx_num) {
                         None => {
                             // recover the sender from the transaction if not found
-                            let sender = tx
-                                .recover_signer_unchecked()
-                                .map_err(|_| ProviderError::SenderRecoveryError)?;
+                            let sender = tx.recover_signer_unchecked()?;
                             senders.push(sender);
                         }
                         Some(sender) => senders.push(*sender),

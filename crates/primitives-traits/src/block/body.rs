@@ -122,7 +122,7 @@ pub trait BlockBody:
     where
         Self::Transaction: SignedTransaction,
     {
-        crate::transaction::recover::recover_signers(self.transactions())
+        crate::transaction::recover::recover_signers(self.transactions()).map_err(|_| RecoveryError)
     }
 
     /// Recover signer addresses for all transactions in the block body.

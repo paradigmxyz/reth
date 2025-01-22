@@ -299,8 +299,7 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
         let txs = self.transactions_by_tx_range(range)?;
-        reth_primitives_traits::transaction::recover::recover_signers(&txs)
-            .map_err(|_| ProviderError::SenderRecoveryError)
+        Ok(reth_primitives_traits::transaction::recover::recover_signers(&txs)?)
     }
 
     fn transaction_sender(&self, num: TxNumber) -> ProviderResult<Option<Address>> {

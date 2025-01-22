@@ -187,8 +187,8 @@ impl SignedTransaction for op_alloy_consensus::OpPooledTransaction {
 /// Extension trait for [`SignedTransaction`] to convert it into [`Recovered`].
 pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
     /// Tries to recover signer and return [`Recovered`] by cloning the type.
-    fn try_ecrecovered(&self) -> Option<Recovered<Self>> {
-        self.recover_signer().ok().map(|signer| Recovered::new_unchecked(self.clone(), signer))
+    fn try_ecrecovered(&self) -> Result<Recovered<Self>, RecoveryError> {
+        self.recover_signer().map(|signer| Recovered::new_unchecked(self.clone(), signer))
     }
 
     /// Tries to recover signer and return [`Recovered`].
@@ -206,8 +206,8 @@ pub trait SignedTransactionIntoRecoveredExt: SignedTransaction {
     /// ensuring that the signature has a low `s` value_ (EIP-2).
     ///
     /// Returns `None` if the transaction's signature is invalid.
-    fn into_ecrecovered_unchecked(self) -> Option<Recovered<Self>> {
-        self.recover_signer_unchecked().ok().map(|signer| Recovered::new_unchecked(self, signer))
+    fn into_ecrecovered_unchecked(self) -> Result<Recovered<Self>, RecoveryError> {
+        self.recover_signer_unchecked().map(|signer| Recovered::new_unchecked(self, signer))
     }
 
     /// Returns the [`Recovered`] transaction with the given sender.
