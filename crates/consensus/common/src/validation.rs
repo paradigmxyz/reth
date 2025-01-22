@@ -340,7 +340,8 @@ mod tests {
     use alloy_primitives::{Address, Bytes, PrimitiveSignature as Signature, U256};
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_primitives::{proofs, BlockBody, Transaction, TransactionSigned};
+    use reth_primitives::{BlockBody, Transaction, TransactionSigned};
+    use reth_primitives_traits::proofs;
 
     fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
         let mut rng = rand::thread_rng();
