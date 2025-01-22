@@ -612,6 +612,10 @@ tikv-jemallocator = "0.6"
 tracy-client = "0.17.3"
 snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 
+# TODO: When we build for a windows target on an ubuntu runner, crunchy tries to
+# get the wrong path, update this when the workflow has been updated
+crunchy = "=0.2.2"
+
 # [patch.crates-io]
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "5492e40" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "5492e40" }
