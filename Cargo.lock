@@ -9276,6 +9276,7 @@ dependencies = [
  "derive_more",
  "reth-fs-util",
  "reth-primitives-traits",
+ "reth-prune-types",
  "reth-static-file-types",
  "thiserror 2.0.11",
 ]

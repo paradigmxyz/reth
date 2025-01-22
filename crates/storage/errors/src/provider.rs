@@ -4,6 +4,7 @@ use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
 use derive_more::Display;
 use reth_primitives_traits::GotExpected;
+use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
 
 /// Provider result type.
@@ -15,6 +16,9 @@ pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
+    /// Pruning error.
+    #[error(transparent)]
+    Pruning(#[from] PruneSegmentError),
     /// RLP error.
     #[error("{_0}")]
     Rlp(alloy_rlp::Error),
