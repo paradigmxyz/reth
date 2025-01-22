@@ -5508,9 +5508,11 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-serde",
+ "ethereum_ssz",
  "maili-protocol",
  "op-alloy-consensus",
  "serde",
+ "snap",
  "thiserror 2.0.11",
 ]
 
