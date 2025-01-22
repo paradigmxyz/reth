@@ -95,14 +95,13 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
                     #[cfg(all(feature = "scroll", not(feature = "optimism")))]
                     crate::TxType::L1Message => {
                         use alloy_consensus::Transaction as _;
-                        let fields =
-                            inner
-                                .fields
-                                .clone()
-                                .deserialize_into::<reth_scroll_primitives::ScrollL1MessageTransactionFields>()
-                                .map_err(|e| ConversionError::Custom(e.to_string()))?;
+                        let fields = inner
+                            .fields
+                            .clone()
+                            .deserialize_into::<scroll_alloy_consensus::ScrollL1MessageTransactionFields>()
+                            .map_err(|e| ConversionError::Custom(e.to_string()))?;
                         (
-                            Transaction::L1Message(reth_scroll_primitives::TxL1Message {
+                            Transaction::L1Message(scroll_alloy_consensus::TxL1Message {
                                 queue_index: fields.queue_index,
                                 gas_limit: inner.gas_limit(),
                                 to: inner.to().ok_or_else(|| ConversionError::Custom(
@@ -113,7 +112,7 @@ impl TryFrom<AnyRpcTransaction> for TransactionSigned {
                                 sender: fields.sender,
                                 input: inner.input().clone(),
                             }),
-                            reth_scroll_primitives::TxL1Message::signature(),
+                            scroll_alloy_consensus::TxL1Message::signature(),
                             _hash,
                         )
                     }

@@ -228,6 +228,7 @@ where
     }
 
     /// Returns the wrapped pool.
+    #[allow(clippy::missing_const_for_fn)]
     pub(crate) fn inner(&self) -> &PoolInner<V, T, S> {
         &self.pool
     }

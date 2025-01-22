@@ -19,7 +19,8 @@ concurrency:
 jobs:
   test:
     name: test / ${{ matrix.type }} (${{ matrix.partition }}/${{ matrix.total_partitions }})
-    runs-on: ubuntu-latest
+    runs-on:
+      group: scroll-reth-runner-group
     env:
       RUST_BACKTRACE: 1
     strategy:
@@ -42,7 +43,7 @@ jobs:
             partition: 2
             total_partitions: 2
           - type: scroll
-            args: -p "reth-scroll-*" --locked --features "scroll"
+            args: -p "reth-scroll-*" -p "scroll-alloy-*" --locked --features "scroll"
             partition: 1
             total_partitions: 1
           - type: book

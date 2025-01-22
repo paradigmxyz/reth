@@ -45,11 +45,13 @@ pub struct EthTransactionValidator<Client, T> {
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     /// Returns the configured chain spec
+    #[allow(clippy::missing_const_for_fn)]
     pub fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.inner.chain_spec
     }
 
     /// Returns the configured client
+    #[allow(clippy::missing_const_for_fn)]
     pub fn client(&self) -> &Client {
         &self.inner.client
     }
@@ -165,6 +167,7 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
 
 impl<Client, Tx> EthTransactionValidatorInner<Client, Tx> {
     /// Returns the configured chain id
+    #[allow(clippy::missing_const_for_fn)]
     pub(crate) fn chain_id(&self) -> u64 {
         self.chain_spec.chain().id()
     }

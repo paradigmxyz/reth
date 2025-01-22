@@ -134,6 +134,7 @@ dependencies = [
  "auto_impl",
  "c-kzg",
  "derive_more",
+ "k256",
  "rand 0.8.5",
  "serde",
  "serde_with",
@@ -2694,7 +2695,6 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-revm",
- "reth-scroll-primitives",
  "reth-stages",
  "revm",
  "serde",
@@ -6851,7 +6851,6 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-prune-types",
- "reth-scroll-primitives",
  "reth-stages-types",
  "reth-storage-errors",
  "reth-tracing",
@@ -7545,7 +7544,6 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-revm",
- "reth-scroll-primitives",
  "reth-testing-utils",
  "revm-primitives",
  "secp256k1",
@@ -8603,13 +8601,13 @@ dependencies = [
  "reth-codecs",
  "reth-ethereum-forks",
  "reth-primitives-traits",
- "reth-scroll-primitives",
  "reth-static-file-types",
  "reth-testing-utils",
  "reth-trie-common",
  "reth-zstd-compressors",
  "revm-primitives",
  "rstest",
+ "scroll-alloy-consensus",
  "secp256k1",
  "serde",
  "serde_json",
@@ -8643,6 +8641,7 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "revm-primitives",
+ "scroll-alloy-consensus",
  "secp256k1",
  "serde",
  "serde_json",
@@ -8687,7 +8686,6 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-prune-types",
- "reth-scroll-primitives",
  "reth-stages-types",
  "reth-storage-api",
  "reth-storage-errors",
@@ -9187,8 +9185,8 @@ dependencies = [
  "reth-scroll-chainspec",
  "reth-scroll-consensus",
  "reth-scroll-forks",
- "reth-scroll-primitives",
  "revm",
+ "scroll-alloy-consensus",
  "thiserror 2.0.11",
  "tracing",
 ]
@@ -9225,9 +9223,12 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-rpc",
+ "reth-rpc-server-types",
  "reth-scroll-chainspec",
  "reth-scroll-engine",
  "reth-scroll-evm",
+ "reth-scroll-primitives",
+ "reth-scroll-rpc",
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-db",
@@ -9241,18 +9242,67 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-serde",
  "arbitrary",
- "bincode",
  "bytes",
+ "derive_more",
  "modular-bitfield",
+ "once_cell",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "reth-codecs",
- "reth-codecs-derive",
+ "reth-primitives-traits",
+ "reth-zstd-compressors",
+ "revm-primitives",
+ "rstest",
+ "scroll-alloy-consensus",
+ "secp256k1",
  "serde",
- "test-fuzz",
+]
+
+[[package]]
+name = "reth-scroll-rpc"
+version = "1.1.5"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rpc-types-debug",
+ "alloy-rpc-types-eth",
+ "derive_more",
+ "jsonrpsee-core",
+ "jsonrpsee-types",
+ "op-alloy-consensus",
+ "op-alloy-network",
+ "op-alloy-rpc-types",
+ "op-alloy-rpc-types-engine",
+ "parking_lot",
+ "reqwest",
+ "reth-chainspec",
+ "reth-evm",
+ "reth-network-api",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-optimism-chainspec",
+ "reth-primitives",
+ "reth-provider",
+ "reth-rpc",
+ "reth-rpc-api",
+ "reth-rpc-eth-api",
+ "reth-rpc-eth-types",
+ "reth-rpc-server-types",
+ "reth-scroll-chainspec",
+ "reth-scroll-evm",
+ "reth-tasks",
+ "reth-transaction-pool",
+ "revm",
+ "scroll-alloy-consensus",
+ "scroll-alloy-network",
+ "scroll-alloy-rpc-types",
+ "serde_json",
+ "thiserror 2.0.11",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -9306,7 +9356,6 @@ dependencies = [
  "reth-prune",
  "reth-prune-types",
  "reth-revm",
- "reth-scroll-primitives",
  "reth-stages-api",
  "reth-static-file",
  "reth-storage-errors",
@@ -9618,7 +9667,6 @@ dependencies = [
  "reth-metrics",
  "reth-primitives",
  "reth-provider",
- "reth-scroll-primitives",
  "reth-storage-errors",
  "reth-trie",
  "reth-trie-common",
@@ -10180,6 +10228,61 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "scroll-alloy-consensus"
+version = "1.1.5"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-serde",
+ "arbitrary",
+ "bincode",
+ "derive_more",
+ "modular-bitfield",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.8.5",
+ "reth-codecs",
+ "reth-codecs-derive",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "test-fuzz",
+]
+
+[[package]]
+name = "scroll-alloy-network"
+version = "1.1.5"
+dependencies = [
+ "alloy-consensus",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "alloy-signer",
+ "scroll-alloy-consensus",
+ "scroll-alloy-rpc-types",
+]
+
+[[package]]
+name = "scroll-alloy-rpc-types"
+version = "1.1.5"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-network-primitives",
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "alloy-serde",
+ "arbitrary",
+ "derive_more",
+ "scroll-alloy-consensus",
+ "serde",
+ "serde_json",
+ "similar-asserts",
+]
 
 [[package]]
 name = "scroll-reth"

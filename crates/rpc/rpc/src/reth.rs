@@ -22,6 +22,7 @@ pub struct RethApi<Provider> {
 
 impl<Provider> RethApi<Provider> {
     /// The provider that can interact with the chain.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn provider(&self) -> &Provider {
         &self.inner.provider
     }

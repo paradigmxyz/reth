@@ -37,9 +37,9 @@ pub use reth_primitives_traits::{
     FillTxEnv, WithEncoded,
 };
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
-#[cfg(all(feature = "scroll", not(feature = "optimism")))]
-use reth_scroll_primitives::l1_transaction::TxL1Message;
 use revm_primitives::{AuthorizationList, TxEnv};
+#[cfg(all(feature = "scroll", not(feature = "optimism")))]
+use scroll_alloy_consensus::TxL1Message;
 use serde::{Deserialize, Serialize};
 pub use signature::{recover_signer, recover_signer_unchecked};
 pub use tx_type::TxType;
@@ -566,7 +566,7 @@ impl reth_codecs::Compact for Transaction {
                         (Self::Deposit(tx), buf)
                     }
                     #[cfg(all(feature = "scroll", not(feature = "optimism")))]
-                    reth_scroll_primitives::L1_MESSAGE_TRANSACTION_TYPE => {
+                    scroll_alloy_consensus::L1_MESSAGE_TRANSACTION_TYPE => {
                         let (tx, buf) = TxL1Message::from_compact(buf, buf.len());
                         (Self::L1Message(tx), buf)
                     }
@@ -1175,7 +1175,7 @@ impl reth_primitives_traits::FillTxEnv for TransactionSigned {
                 tx_env.gas_limit = tx.gas_limit;
                 tx_env.gas_price = U256::ZERO;
                 tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to();
+                tx_env.transact_to = TxKind::Call(tx.to);
                 tx_env.value = tx.value;
                 tx_env.data = tx.input.clone();
                 tx_env.chain_id = None;
@@ -1672,7 +1672,7 @@ pub mod serde_bincode_compat {
         #[cfg(all(feature = "optimism", not(feature = "scroll")))]
         Deposit(op_alloy_consensus::serde_bincode_compat::TxDeposit<'a>),
         #[cfg(all(feature = "scroll", not(feature = "optimism")))]
-        L1Message(Cow<'a, reth_scroll_primitives::l1_transaction::TxL1Message>),
+        L1Message(Cow<'a, scroll_alloy_consensus::TxL1Message>),
     }
 
     impl<'a> From<&'a super::Transaction> for Transaction<'a> {

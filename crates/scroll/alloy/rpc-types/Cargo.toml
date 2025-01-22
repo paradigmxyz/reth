@@ -1,0 +1,60 @@
+[package]
+name = "scroll-alloy-rpc-types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+scroll-alloy-consensus = { workspace = true, features = ["serde"] }
+alloy-consensus = { version = "0.9.2", default-features = false }
+alloy-eips = { version = "0.9.2", features = ["serde"], default-features = false }
+alloy-network-primitives = { version = "0.9.2", default-features = false }
+alloy-primitives = { version = "0.8.12", features = ["map", "rlp", "serde"], default-features = false }
+alloy-rpc-types-eth = { version = "0.9.2", features = ["serde"], default-features = false }
+alloy-serde = { version = "0.9.2", default-features = false }
+arbitrary = { version = "1.4", features = ["derive", "derive"], optional = true }
+derive_more = { version = "1.0", default-features = false }
+serde = { version = "1.0", features = ["derive", "alloc", "derive"], default-features = false }
+serde_json = { version = "1.0", features = ["alloc"], default-features = false }
+
+[dev-dependencies]
+similar-asserts = "1.6"
+alloy-consensus = { version = "0.9.2", features = ["arbitrary"], default-features = false }
+alloy-primitives = { version = "0.8.12", features = ["arbitrary"], default-features = false }
+alloy-rpc-types-eth = { version = "0.9.2", features = ["arbitrary"], default-features = false }
+arbitrary = { version = "1.4", features = ["derive", "derive"] }
+
+[features]
+arbitrary = [
+	"std",
+	"dep:arbitrary",
+	"alloy-primitives/arbitrary",
+	"alloy-rpc-types-eth/arbitrary",
+	"scroll-alloy-consensus/arbitrary",
+	"alloy-consensus/arbitrary",
+	"alloy-eips/arbitrary",
+	"alloy-serde/arbitrary",
+]
+default = ["std"]
+k256 = [
+	"alloy-rpc-types-eth/k256",
+	"scroll-alloy-consensus/k256"
+]
+std = [
+	"alloy-network-primitives/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"alloy-rpc-types-eth/std",
+	"alloy-consensus/std",
+	"alloy-serde/std",
+	"derive_more/std",
+	"serde/std",
+	"serde_json/std",
+]

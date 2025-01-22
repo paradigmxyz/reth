@@ -112,6 +112,7 @@ pub mod test_utils {
         }
 
         /// Returns the path to the database.
+        #[allow(clippy::missing_const_for_fn)]
         pub fn path(&self) -> &Path {
             &self.path
         }

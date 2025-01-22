@@ -34,6 +34,7 @@ alloy-eips.workspace = true
 
 # scroll
 reth-scroll-consensus.workspace = true
+scroll-alloy-consensus.workspace = true
 
 # misc
 auto_impl.workspace = true
@@ -43,7 +44,6 @@ tracing.workspace = true
 
 [dev-dependencies]
 eyre.workspace = true
-reth-scroll-primitives.workspace = true
 
 [features]
 optimism = [

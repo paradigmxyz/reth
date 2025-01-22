@@ -106,6 +106,7 @@ impl<B: reth_primitives_traits::Block> BlockWithSenders<B> {
     }
 
     /// Returns all senders of the transactions in the block.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn senders(&self) -> &[Address] {
         &self.senders
     }
@@ -519,6 +520,7 @@ impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
 
 impl<B: reth_primitives_traits::Block> SealedBlockWithSenders<B> {
     /// Returns all senders of the transactions in the block.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn senders(&self) -> &[Address] {
         &self.senders
     }

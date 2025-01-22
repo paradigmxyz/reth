@@ -39,6 +39,7 @@ impl<Eth> EthBundle<Eth> {
     }
 
     /// Access the underlying `Eth` API.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn eth_api(&self) -> &Eth {
         &self.inner.eth_api
     }

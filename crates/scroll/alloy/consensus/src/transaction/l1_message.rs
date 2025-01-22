@@ -1,13 +1,14 @@
 //! Scroll L1 message transaction
 
-use alloy_consensus::{Transaction, Typed2718};
+use crate::ScrollTxType;
+use alloy_consensus::{Sealable, Transaction, Typed2718};
 use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718};
 use alloy_primitives::{
+    keccak256,
     private::alloy_rlp::{Encodable, Header},
-    Address, Bytes, ChainId, PrimitiveSignature as Signature, TxKind, B256, U256,
+    Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::Decodable;
-use bytes::BufMut;
 use serde::{Deserialize, Serialize};
 #[cfg(any(test, feature = "reth-codec"))]
 use {reth_codecs::Compact, reth_codecs_derive::add_arbitrary_tests};
@@ -54,11 +55,6 @@ impl TxL1Message {
     /// Returns an empty signature for the [`TxL1Message`], which don't include a signature.
     pub fn signature() -> Signature {
         Signature::new(U256::ZERO, U256::ZERO, false)
-    }
-
-    /// Returns the destination of the transaction as a [`TxKind`].
-    pub const fn to(&self) -> TxKind {
-        TxKind::Call(self.to)
     }
 
     /// Decodes the inner [`TxL1Message`] fields from RLP bytes.
@@ -115,7 +111,7 @@ impl TxL1Message {
 
     /// Encode the fields of the transaction without a RLP header.
     /// <https://github.com/scroll-tech/go-ethereum/blob/9fff27e4f34fb5097100ed76ee725ce056267f4b/core/types/l1_message_tx.go#L12-L19>
-    fn rlp_encode_fields(&self, out: &mut dyn BufMut) {
+    fn rlp_encode_fields(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.queue_index.encode(out);
         self.gas_limit.encode(out);
         self.to.encode(out);
@@ -134,7 +130,7 @@ impl TxL1Message {
     }
 
     /// RLP encodes the transaction.
-    pub fn rlp_encode(&self, out: &mut dyn BufMut) {
+    pub fn rlp_encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.rlp_header().encode(out);
         self.rlp_encode_fields(out);
     }
@@ -150,7 +146,14 @@ impl TxL1Message {
         self.rlp_encoded_length() + 1
     }
 
+    /// EIP-2718 encode the transaction.
+    pub fn eip2718_encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        out.put_u8(L1_MESSAGE_TRANSACTION_TYPE);
+        self.rlp_encode(out)
+    }
+
     /// Calculates the in-memory size of the [`TxL1Message`] transaction.
+    #[allow(clippy::missing_const_for_fn)]
     #[inline]
     pub fn size(&self) -> usize {
         size_of::<u64>() + // queue_index
@@ -160,11 +163,18 @@ impl TxL1Message {
             self.input.len() + // input
             size_of::<Address>() // sender
     }
+
+    /// Calculates the hash of the [`TxL1Message`] transaction.
+    pub fn tx_hash(&self) -> TxHash {
+        let mut buf = Vec::with_capacity(self.eip2718_encoded_length());
+        self.eip2718_encode(&mut buf);
+        keccak256(&buf)
+    }
 }
 
 impl Typed2718 for TxL1Message {
     fn ty(&self) -> u8 {
-        self.tx_type()
+        ScrollTxType::L1Message as u8
     }
 }
 
@@ -199,7 +209,7 @@ impl Decodable2718 for TxL1Message {
 }
 
 impl Encodable for TxL1Message {
-    fn encode(&self, out: &mut dyn BufMut) {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.rlp_encode(out)
     }
 
@@ -255,12 +265,12 @@ impl Transaction for TxL1Message {
         false
     }
 
-    fn is_create(&self) -> bool {
-        false
+    fn kind(&self) -> TxKind {
+        TxKind::Call(self.to)
     }
 
-    fn kind(&self) -> TxKind {
-        self.to()
+    fn is_create(&self) -> bool {
+        false
     }
 
     fn value(&self) -> U256 {
@@ -284,6 +294,12 @@ impl Transaction for TxL1Message {
     }
 }
 
+impl Sealable for TxL1Message {
+    fn hash_slow(&self) -> B256 {
+        self.tx_hash()
+    }
+}
+
 /// Scroll specific transaction fields
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -295,15 +311,109 @@ pub struct ScrollL1MessageTransactionFields {
     pub sender: Address,
 }
 
+/// L1 message transactions don't have a signature, however, we include an empty signature in the
+/// response for better compatibility.
+///
+/// This function can be used as `serialize_with` serde attribute for the [`TxL1Message`] and will
+/// flatten [`TxL1Message::signature`] into response.
+///
+/// <https://github.com/scroll-tech/go-ethereum/blob/develop/core/types/l1_message_tx.go#L51>.
+#[cfg(feature = "serde")]
+pub fn serde_l1_message_tx_rpc<T: serde::Serialize, S: serde::Serializer>(
+    value: &T,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    struct SerdeHelper<'a, T> {
+        #[serde(flatten)]
+        value: &'a T,
+        #[serde(flatten)]
+        signature: Signature,
+    }
+
+    SerdeHelper { value, signature: TxL1Message::signature() }.serialize(serializer)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::TxL1Message;
+    use super::*;
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{address, bytes, hex, Bytes, U256};
+    use alloy_rlp::BytesMut;
     use arbitrary::Arbitrary;
-    use bytes::BytesMut;
     use rand::Rng;
     use reth_codecs::{test_utils::UnusedBits, validate_bitflag_backwards_compat};
+
+    #[test]
+    fn test_rlp_roundtrip() {
+        // <https://scrollscan.com/tx/0xace7103cc22a372c81cda04e15442a721cd3d5d64eda2e1578ba310d91597d97>
+        let bytes = Bytes::from_static(&hex!("7ef9015a830e7991831e848094781e90f1c8fc4611c9b7497c3b47f99ef6969cbc80b901248ef1332e000000000000000000000000c186fa914353c44b2e33ebe05f21846f1048beda0000000000000000000000003bad7ad0728f9917d1bf08af5782dcbd516cdd96000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e799100000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000044493a4f8411b3f3d662006b9bf68884e71f1fc0f8ea04e4cb188354738202c3e34a473b93000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000947885bcbd5cecef1336b5300fb5186a12ddd8c478"));
+        let tx_a = TxL1Message::decode(&mut bytes[1..].as_ref()).unwrap();
+        let mut buf_a = BytesMut::default();
+        tx_a.encode(&mut buf_a);
+        assert_eq!(&buf_a[..], &bytes[1..]);
+    }
+
+    #[test]
+    fn test_encode_decode_fields() {
+        let original = TxL1Message {
+            queue_index: 100,
+            gas_limit: 0,
+            to: Address::default(),
+            value: U256::default(),
+            sender: Address::default(),
+            input: Bytes::default(),
+        };
+        let mut buffer = BytesMut::new();
+        original.rlp_encode_fields(&mut buffer);
+        let decoded = TxL1Message::rlp_decode_fields(&mut &buffer[..]).expect("Failed to decode");
+
+        assert_eq!(original, decoded);
+    }
+
+    #[test]
+    fn test_encode_with_and_without_header() {
+        let tx_deposit = TxL1Message {
+            queue_index: 0,
+            gas_limit: 50000,
+            to: Address::default(),
+            value: U256::default(),
+            sender: Address::default(),
+            input: Bytes::default(),
+        };
+
+        let mut buffer_with_header = BytesMut::new();
+        tx_deposit.encode(&mut buffer_with_header);
+
+        let mut buffer_without_header = BytesMut::new();
+        tx_deposit.rlp_encode_fields(&mut buffer_without_header);
+
+        assert!(buffer_with_header.len() > buffer_without_header.len());
+    }
+
+    #[test]
+    fn test_payload_length() {
+        let tx_deposit = TxL1Message {
+            queue_index: 0,
+            gas_limit: 50000,
+            to: Address::default(),
+            value: U256::default(),
+            sender: Address::default(),
+            input: Bytes::default(),
+        };
+
+        assert!(tx_deposit.size() > tx_deposit.rlp_encoded_fields_length());
+    }
+
+    #[test]
+    fn test_deserialize_hex_to_u64() {
+        let rpc_tx = r#"{"gas":"0x1e8480","input":"0x8ef1332e000000000000000000000000c186fa914353c44b2e33ebe05f21846f1048beda0000000000000000000000003bad7ad0728f9917d1bf08af5782dcbd516cdd96000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000e7ba000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000044493a4f846ffc1507cbfe98a2b0ba1f06ea7e4eb749c001f78f6cb5540daa556a0566322a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","to":"0x781e90f1c8fc4611c9b7497c3b47f99ef6969cbc","value":"0x0","sender":"0x7885bcbd5cecef1336b5300fb5186a12ddd8c478","queueIndex":"0xe7ba0"}"#;
+        // let obj: TxL1Message = serde_json::from_str(rpc_tx).unwrap();
+        let obj = serde_json::from_str::<TxL1Message>(rpc_tx).unwrap();
+        assert_eq!(obj.queue_index, 0xe7ba0);
+    }
 
     #[test]
     fn test_bincode_roundtrip() {

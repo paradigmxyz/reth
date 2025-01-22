@@ -59,6 +59,7 @@ impl EthBuiltPayload {
     }
 
     /// Returns the built block(sealed)
+    #[allow(clippy::missing_const_for_fn)]
     pub fn block(&self) -> &SealedBlock {
         &self.block
     }
@@ -69,6 +70,7 @@ impl EthBuiltPayload {
     }
 
     /// Returns the blob sidecars.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn sidecars(&self) -> &[BlobTransactionSidecar] {
         &self.sidecars
     }

@@ -390,6 +390,37 @@ lint-other-targets:
 	--all-features \
 	-- -D warnings
 
+lint-scroll-reth:
+	cargo +nightly clippy \
+	--workspace \
+	--bin "scroll-reth" \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--features "scroll $(BIN_OTHER_FEATURES) skip-state-root-validation" \
+	-- -D warnings
+
+lint-all:
+	cargo +nightly clippy \
+	--workspace \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--all-features \
+	--locked
+
+lint-udeps:
+	cargo +nightly udeps --workspace --lib --examples --tests --benches --all-features --locked \
+        --exclude reth-optimism-cli --exclude reth-optimism-consensus --exclude reth-optimism-payload-builder \
+        --exclude reth-optimism-node --exclude reth-optimism-evm --exclude reth-optimism-node --exclude reth-optimism-rpc \
+        --exclude op-reth --exclude "example-*" --exclude reth --exclude reth-payload-primitives \
+        --exclude reth-e2e-test-utils --exclude reth-ethereum-payload-builder --exclude reth-exex-test-utils \
+        --exclude reth-node-ethereum --exclude reth-scroll-cli --exclude reth-scroll-evm \
+        --exclude reth-scroll-node --exclude "scroll-reth" --exclude reth-scroll-engine --exclude reth-scroll-rpc \
+        --exclude reth-scroll-trie
+
 lint-codespell: ensure-codespell
 	codespell --skip "*.json"
 
@@ -403,8 +434,11 @@ lint:
 	make fmt && \
 	make lint-reth && \
 	make lint-op-reth && \
+	make lint-scroll-reth &&  \
 	make lint-other-targets && \
-	make lint-codespell
+	make lint-codespell && \
+	make lint-all && \
+	make lint-udeps
 
 fix-lint-reth:
 	cargo +nightly clippy \

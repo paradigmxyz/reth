@@ -48,6 +48,7 @@ impl FeeHistoryCache {
 
     /// How the cache is configured.
     #[inline]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn config(&self) -> &FeeHistoryCacheConfig {
         &self.inner.config
     }

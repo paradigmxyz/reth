@@ -88,15 +88,18 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     }
 
     /// Returns the [`PeerId`] used in the network.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn peer_id(&self) -> &PeerId {
         &self.inner.local_peer_id
     }
 
+    #[allow(clippy::missing_const_for_fn)]
     fn manager(&self) -> &UnboundedSender<NetworkHandleMessage<N>> {
         &self.inner.to_manager_tx
     }
 
     /// Returns the mode of the network, either pow, or pos
+    #[allow(clippy::missing_const_for_fn)]
     pub fn mode(&self) -> &NetworkMode {
         &self.inner.network_mode
     }
@@ -182,11 +185,13 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     }
 
     /// Whether tx gossip is disabled
+    #[allow(clippy::missing_const_for_fn)]
     pub fn tx_gossip_disabled(&self) -> bool {
         self.inner.tx_gossip_disabled
     }
 
     /// Returns the secret key used for authenticating sessions.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn secret_key(&self) -> &SecretKey {
         &self.inner.secret_key
     }

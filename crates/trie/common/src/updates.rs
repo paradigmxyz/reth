@@ -361,6 +361,7 @@ pub struct TrieUpdatesSorted {
 
 impl TrieUpdatesSorted {
     /// Returns reference to updated account nodes.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn account_nodes_ref(&self) -> &[(Nibbles, BranchNodeCompact)] {
         &self.account_nodes
     }
@@ -394,6 +395,7 @@ impl StorageTrieUpdatesSorted {
     }
 
     /// Returns reference to updated storage nodes.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn storage_nodes_ref(&self) -> &[(Nibbles, BranchNodeCompact)] {
         &self.storage_nodes
     }

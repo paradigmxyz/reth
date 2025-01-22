@@ -98,6 +98,7 @@ where
     }
 
     /// Returns all currently active filters
+    #[allow(clippy::missing_const_for_fn)]
     pub fn active_filters(&self) -> &ActiveFilters<RpcTransaction<Eth::NetworkTypes>> {
         &self.inner.active_filters
     }

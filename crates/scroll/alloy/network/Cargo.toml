@@ -1,0 +1,23 @@
+[package]
+name = "scroll-alloy-network"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+scroll-alloy-consensus.workspace = true
+scroll-alloy-rpc-types.workspace = true
+
+# alloy
+alloy-consensus.workspace = true
+alloy-network.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
+alloy-signer.workspace = true

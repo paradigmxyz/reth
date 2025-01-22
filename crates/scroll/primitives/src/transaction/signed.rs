@@ -1,0 +1,596 @@
+//! A signed Scroll transaction.
+
+use crate::ScrollTxType;
+use alloc::vec::Vec;
+use alloy_consensus::{
+    transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930,
+    TxLegacy, Typed2718,
+};
+use alloy_eips::{
+    eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
+    eip2930::AccessList,
+    eip7702::SignedAuthorization,
+};
+use alloy_primitives::{
+    keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
+};
+use alloy_rlp::Header;
+#[cfg(feature = "reth-codec")]
+use arbitrary as _;
+use core::{
+    hash::{Hash, Hasher},
+    mem,
+};
+use derive_more::{AsRef, Deref};
+#[cfg(not(feature = "std"))]
+use once_cell::sync::OnceCell as OnceLock;
+#[cfg(any(test, feature = "reth-codec"))]
+use proptest as _;
+use reth_primitives_traits::{
+    crypto::secp256k1::{recover_signer, recover_signer_unchecked},
+    InMemorySize, SignedTransaction,
+};
+use scroll_alloy_consensus::{ScrollTypedTransaction, TxL1Message};
+#[cfg(feature = "std")]
+use std::sync::OnceLock;
+
+/// Signed transaction.
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Eq, AsRef, Deref)]
+pub struct ScrollTransactionSigned {
+    /// Transaction hash
+    #[cfg_attr(feature = "serde", serde(skip))]
+    pub hash: OnceLock<TxHash>,
+    /// The transaction signature values
+    pub signature: Signature,
+    /// Raw transaction info
+    #[deref]
+    #[as_ref]
+    pub transaction: ScrollTypedTransaction,
+}
+
+impl ScrollTransactionSigned {
+    /// Calculates hash of given transaction and signature and returns new instance.
+    pub fn new(transaction: ScrollTypedTransaction, signature: Signature) -> Self {
+        let signed_tx = Self::new_unhashed(transaction, signature);
+        if signed_tx.ty() != ScrollTxType::L1Message {
+            signed_tx.hash.get_or_init(|| signed_tx.recalculate_hash());
+        }
+
+        signed_tx
+    }
+
+    /// Creates a new signed transaction from the given transaction and signature without the hash.
+    ///
+    /// Note: this only calculates the hash on the first [`ScrollTransactionSigned::hash`] call.
+    pub fn new_unhashed(transaction: ScrollTypedTransaction, signature: Signature) -> Self {
+        Self { hash: Default::default(), signature, transaction }
+    }
+
+    /// Returns whether this transaction is a l1 message.
+    pub const fn is_l1_message(&self) -> bool {
+        matches!(self.transaction, ScrollTypedTransaction::L1Message(_))
+    }
+}
+
+impl SignedTransaction for ScrollTransactionSigned {
+    fn tx_hash(&self) -> &TxHash {
+        self.hash.get_or_init(|| self.recalculate_hash())
+    }
+
+    fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
+    fn recover_signer(&self) -> Option<Address> {
+        // Scroll's L1 message does not have a signature. Directly return the `sender` address.
+        if let ScrollTypedTransaction::L1Message(TxL1Message { sender, .. }) = self.transaction {
+            return Some(sender)
+        }
+
+        let Self { transaction, signature, .. } = self;
+        let signature_hash = signature_hash(transaction);
+        recover_signer(signature, signature_hash)
+    }
+
+    fn recover_signer_unchecked(&self) -> Option<Address> {
+        // Scroll's L1 message does not have a signature. Directly return the `sender` address.
+        if let ScrollTypedTransaction::L1Message(TxL1Message { sender, .. }) = &self.transaction {
+            return Some(*sender)
+        }
+
+        let Self { transaction, signature, .. } = self;
+        let signature_hash = signature_hash(transaction);
+        recover_signer_unchecked(signature, signature_hash)
+    }
+
+    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+        match &self.transaction {
+            // Scroll's L1 message does not have a signature. Directly return the `sender` address.
+            ScrollTypedTransaction::L1Message(tx) => return Some(tx.sender),
+            ScrollTypedTransaction::Legacy(tx) => tx.encode_for_signing(buf),
+            ScrollTypedTransaction::Eip2930(tx) => tx.encode_for_signing(buf),
+            ScrollTypedTransaction::Eip1559(tx) => tx.encode_for_signing(buf),
+        };
+        recover_signer_unchecked(&self.signature, keccak256(buf))
+    }
+
+    fn recalculate_hash(&self) -> B256 {
+        keccak256(self.encoded_2718())
+    }
+}
+
+#[cfg(feature = "scroll")]
+impl reth_primitives_traits::FillTxEnv for ScrollTransactionSigned {
+    fn fill_tx_env(&self, tx_env: &mut revm_primitives::TxEnv, sender: Address) {
+        let envelope = self.encoded_2718();
+
+        tx_env.caller = sender;
+        match &self.transaction {
+            ScrollTypedTransaction::Legacy(tx) => {
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = alloy_primitives::U256::from(tx.gas_price);
+                tx_env.gas_priority_fee = None;
+                tx_env.transact_to = tx.to;
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = tx.chain_id;
+                tx_env.nonce = Some(tx.nonce);
+                tx_env.access_list.clear();
+                tx_env.blob_hashes.clear();
+                tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list = None;
+            }
+            ScrollTypedTransaction::Eip2930(tx) => {
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = alloy_primitives::U256::from(tx.gas_price);
+                tx_env.gas_priority_fee = None;
+                tx_env.transact_to = tx.to;
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = Some(tx.chain_id);
+                tx_env.nonce = Some(tx.nonce);
+                tx_env.access_list.clone_from(&tx.access_list.0);
+                tx_env.blob_hashes.clear();
+                tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list = None;
+            }
+            ScrollTypedTransaction::Eip1559(tx) => {
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = alloy_primitives::U256::from(tx.max_fee_per_gas);
+                tx_env.gas_priority_fee =
+                    Some(alloy_primitives::U256::from(tx.max_priority_fee_per_gas));
+                tx_env.transact_to = tx.to;
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = Some(tx.chain_id);
+                tx_env.nonce = Some(tx.nonce);
+                tx_env.access_list.clone_from(&tx.access_list.0);
+                tx_env.blob_hashes.clear();
+                tx_env.max_fee_per_blob_gas.take();
+                tx_env.authorization_list = None;
+            }
+            ScrollTypedTransaction::L1Message(tx) => {
+                tx_env.access_list.clear();
+                tx_env.gas_limit = tx.gas_limit;
+                tx_env.gas_price = alloy_primitives::U256::ZERO;
+                tx_env.gas_priority_fee = None;
+                tx_env.transact_to = TxKind::Call(tx.to);
+                tx_env.value = tx.value;
+                tx_env.data = tx.input.clone();
+                tx_env.chain_id = None;
+                tx_env.nonce = None;
+                tx_env.authorization_list = None;
+
+                tx_env.scroll = revm_primitives::ScrollFields {
+                    is_l1_msg: true,
+                    rlp_bytes: Some(envelope.into()),
+                };
+                return
+            }
+        }
+
+        tx_env.scroll =
+            revm_primitives::ScrollFields { is_l1_msg: false, rlp_bytes: Some(envelope.into()) }
+    }
+}
+
+impl InMemorySize for ScrollTransactionSigned {
+    #[inline]
+    fn size(&self) -> usize {
+        mem::size_of::<TxHash>() + self.transaction.size() + mem::size_of::<Signature>()
+    }
+}
+
+impl alloy_rlp::Encodable for ScrollTransactionSigned {
+    fn encode(&self, out: &mut dyn alloy_rlp::bytes::BufMut) {
+        self.network_encode(out);
+    }
+
+    fn length(&self) -> usize {
+        let mut payload_length = self.encode_2718_len();
+        if !Encodable2718::is_legacy(self) {
+            payload_length += Header { list: false, payload_length }.length();
+        }
+
+        payload_length
+    }
+}
+
+impl alloy_rlp::Decodable for ScrollTransactionSigned {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Self::network_decode(buf).map_err(Into::into)
+    }
+}
+
+impl Encodable2718 for ScrollTransactionSigned {
+    fn type_flag(&self) -> Option<u8> {
+        if Typed2718::is_legacy(self) {
+            None
+        } else {
+            Some(self.ty())
+        }
+    }
+
+    fn encode_2718_len(&self) -> usize {
+        match &self.transaction {
+            ScrollTypedTransaction::Legacy(legacy_tx) => {
+                legacy_tx.eip2718_encoded_length(&self.signature)
+            }
+            ScrollTypedTransaction::Eip2930(access_list_tx) => {
+                access_list_tx.eip2718_encoded_length(&self.signature)
+            }
+            ScrollTypedTransaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.eip2718_encoded_length(&self.signature)
+            }
+            ScrollTypedTransaction::L1Message(l1_message) => l1_message.eip2718_encoded_length(),
+        }
+    }
+
+    fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
+        let Self { transaction, signature, .. } = self;
+
+        match &transaction {
+            ScrollTypedTransaction::Legacy(legacy_tx) => {
+                // do nothing w/ with_header
+                legacy_tx.eip2718_encode(signature, out)
+            }
+            ScrollTypedTransaction::Eip2930(access_list_tx) => {
+                access_list_tx.eip2718_encode(signature, out)
+            }
+            ScrollTypedTransaction::Eip1559(dynamic_fee_tx) => {
+                dynamic_fee_tx.eip2718_encode(signature, out)
+            }
+            ScrollTypedTransaction::L1Message(l1_message) => l1_message.encode_2718(out),
+        }
+    }
+}
+
+impl Decodable2718 for ScrollTransactionSigned {
+    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
+        match ty.try_into().map_err(|_| Eip2718Error::UnexpectedType(ty))? {
+            ScrollTxType::Legacy => Err(Eip2718Error::UnexpectedType(0)),
+            ScrollTxType::Eip2930 => {
+                let (tx, signature, hash) = TxEip2930::rlp_decode_signed(buf)?.into_parts();
+                let signed_tx = Self::new_unhashed(ScrollTypedTransaction::Eip2930(tx), signature);
+                signed_tx.hash.get_or_init(|| hash);
+                Ok(signed_tx)
+            }
+            ScrollTxType::Eip1559 => {
+                let (tx, signature, hash) = TxEip1559::rlp_decode_signed(buf)?.into_parts();
+                let signed_tx = Self::new_unhashed(ScrollTypedTransaction::Eip1559(tx), signature);
+                signed_tx.hash.get_or_init(|| hash);
+                Ok(signed_tx)
+            }
+            ScrollTxType::L1Message => Ok(Self::new_unhashed(
+                ScrollTypedTransaction::L1Message(TxL1Message::rlp_decode(buf)?),
+                TxL1Message::signature(),
+            )),
+        }
+    }
+
+    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
+        let (transaction, signature) = TxLegacy::rlp_decode_with_signature(buf)?;
+        let signed_tx = Self::new_unhashed(ScrollTypedTransaction::Legacy(transaction), signature);
+
+        Ok(signed_tx)
+    }
+}
+
+impl Transaction for ScrollTransactionSigned {
+    fn chain_id(&self) -> Option<u64> {
+        self.deref().chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.deref().nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.deref().gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.deref().gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.deref().max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.deref().max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.deref().max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.deref().priority_fee_or_price()
+    }
+
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.deref().effective_gas_price(base_fee)
+    }
+
+    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        self.deref().effective_tip_per_gas(base_fee)
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.deref().is_dynamic_fee()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.deref().kind()
+    }
+
+    fn is_create(&self) -> bool {
+        self.deref().is_create()
+    }
+
+    fn value(&self) -> Uint<256, 4> {
+        self.deref().value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.deref().input()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.deref().access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        self.deref().blob_versioned_hashes()
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.deref().authorization_list()
+    }
+}
+
+impl Typed2718 for ScrollTransactionSigned {
+    fn ty(&self) -> u8 {
+        self.deref().ty()
+    }
+}
+
+impl PartialEq for ScrollTransactionSigned {
+    fn eq(&self, other: &Self) -> bool {
+        self.signature == other.signature &&
+            self.transaction == other.transaction &&
+            self.tx_hash() == other.tx_hash()
+    }
+}
+
+impl Hash for ScrollTransactionSigned {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.signature.hash(state);
+        self.transaction.hash(state);
+    }
+}
+
+#[cfg(feature = "reth-codec")]
+impl reth_codecs::Compact for ScrollTransactionSigned {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let start = buf.as_mut().len();
+
+        // Placeholder for bitflags.
+        // The first byte uses 4 bits as flags: IsCompressed[1bit], TxType[2bits], Signature[1bit]
+        buf.put_u8(0);
+
+        let sig_bit = self.signature.to_compact(buf) as u8;
+        let zstd_bit = self.transaction.input().len() >= 32;
+
+        let tx_bits = if zstd_bit {
+            let mut tmp = Vec::with_capacity(256);
+            if cfg!(feature = "std") {
+                reth_zstd_compressors::TRANSACTION_COMPRESSOR.with(|compressor| {
+                    let mut compressor = compressor.borrow_mut();
+                    let tx_bits = self.transaction.to_compact(&mut tmp);
+                    buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                    tx_bits as u8
+                })
+            } else {
+                let mut compressor = reth_zstd_compressors::create_tx_compressor();
+                let tx_bits = self.transaction.to_compact(&mut tmp);
+                buf.put_slice(&compressor.compress(&tmp).expect("Failed to compress"));
+                tx_bits as u8
+            }
+        } else {
+            self.transaction.to_compact(buf) as u8
+        };
+
+        // Replace bitflags with the actual values
+        buf.as_mut()[start] = sig_bit | (tx_bits << 1) | ((zstd_bit as u8) << 3);
+
+        buf.as_mut().len() - start
+    }
+
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
+        // The first byte uses 4 bits as flags: IsCompressed[1], TxType[2], Signature[1]
+        let bitflags = buf.get_u8() as usize;
+
+        let sig_bit = bitflags & 1;
+        let (signature, buf) = Signature::from_compact(buf, sig_bit);
+
+        let zstd_bit = bitflags >> 3;
+        let (transaction, buf) = if zstd_bit != 0 {
+            if cfg!(feature = "std") {
+                reth_zstd_compressors::TRANSACTION_DECOMPRESSOR.with(|decompressor| {
+                    let mut decompressor = decompressor.borrow_mut();
+
+                    // TODO: enforce that zstd is only present at a "top" level type
+                    let transaction_type = (bitflags & 0b110) >> 1;
+                    let (transaction, _) = ScrollTypedTransaction::from_compact(
+                        decompressor.decompress(buf),
+                        transaction_type,
+                    );
+
+                    (transaction, buf)
+                })
+            } else {
+                let mut decompressor = reth_zstd_compressors::create_tx_decompressor();
+                let transaction_type = (bitflags & 0b110) >> 1;
+                let (transaction, _) = ScrollTypedTransaction::from_compact(
+                    decompressor.decompress(buf),
+                    transaction_type,
+                );
+
+                (transaction, buf)
+            }
+        } else {
+            let transaction_type = bitflags >> 1;
+            ScrollTypedTransaction::from_compact(buf, transaction_type)
+        };
+
+        (Self { signature, transaction, hash: Default::default() }, buf)
+    }
+}
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a> arbitrary::Arbitrary<'a> for ScrollTransactionSigned {
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        #[allow(unused_mut)]
+        let mut transaction = ScrollTypedTransaction::arbitrary(u)?;
+
+        let secp = secp256k1::Secp256k1::new();
+        let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
+        let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
+            B256::from_slice(&key_pair.secret_bytes()[..]),
+            signature_hash(&transaction),
+        )
+        .unwrap();
+
+        let signature =
+            if is_l1_message(&transaction) { TxL1Message::signature() } else { signature };
+
+        Ok(Self::new(transaction, signature))
+    }
+}
+
+/// Calculates the signing hash for the transaction.
+fn signature_hash(tx: &ScrollTypedTransaction) -> B256 {
+    match tx {
+        ScrollTypedTransaction::Legacy(tx) => tx.signature_hash(),
+        ScrollTypedTransaction::Eip2930(tx) => tx.signature_hash(),
+        ScrollTypedTransaction::Eip1559(tx) => tx.signature_hash(),
+        ScrollTypedTransaction::L1Message(_) => B256::ZERO,
+    }
+}
+
+/// Returns `true` if transaction is l1 message.
+pub const fn is_l1_message(tx: &ScrollTypedTransaction) -> bool {
+    matches!(tx, ScrollTypedTransaction::L1Message(_))
+}
+
+impl<T: Into<ScrollTypedTransaction>> From<Signed<T>> for ScrollTransactionSigned {
+    fn from(value: Signed<T>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        let this = Self::new(tx.into(), sig);
+        this.hash.get_or_init(|| hash);
+        this
+    }
+}
+
+/// Bincode-compatible transaction type serde implementations.
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    use alloc::borrow::Cow;
+    use alloy_consensus::transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxLegacy};
+    use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
+    use reth_primitives_traits::{serde_bincode_compat::SerdeBincodeCompat, SignedTransaction};
+    use serde::{Deserialize, Serialize};
+
+    /// Bincode-compatible [`super::ScrollTypedTransaction`] serde implementation.
+    #[derive(Debug, Serialize, Deserialize)]
+    #[allow(missing_docs)]
+    enum ScrollTypedTransaction<'a> {
+        Legacy(TxLegacy<'a>),
+        Eip2930(TxEip2930<'a>),
+        Eip1559(TxEip1559<'a>),
+        L1Message(Cow<'a, scroll_alloy_consensus::TxL1Message>),
+    }
+
+    impl<'a> From<&'a super::ScrollTypedTransaction> for ScrollTypedTransaction<'a> {
+        fn from(value: &'a super::ScrollTypedTransaction) -> Self {
+            match value {
+                super::ScrollTypedTransaction::Legacy(tx) => Self::Legacy(TxLegacy::from(tx)),
+                super::ScrollTypedTransaction::Eip2930(tx) => Self::Eip2930(TxEip2930::from(tx)),
+                super::ScrollTypedTransaction::Eip1559(tx) => Self::Eip1559(TxEip1559::from(tx)),
+                super::ScrollTypedTransaction::L1Message(tx) => Self::L1Message(Cow::Borrowed(tx)),
+            }
+        }
+    }
+
+    impl<'a> From<ScrollTypedTransaction<'a>> for super::ScrollTypedTransaction {
+        fn from(value: ScrollTypedTransaction<'a>) -> Self {
+            match value {
+                ScrollTypedTransaction::Legacy(tx) => Self::Legacy(tx.into()),
+                ScrollTypedTransaction::Eip2930(tx) => Self::Eip2930(tx.into()),
+                ScrollTypedTransaction::Eip1559(tx) => Self::Eip1559(tx.into()),
+                ScrollTypedTransaction::L1Message(tx) => Self::L1Message(tx.into_owned()),
+            }
+        }
+    }
+
+    /// Bincode-compatible [`super::ScrollTransactionSigned`] serde implementation.
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct ScrollTransactionSigned<'a> {
+        hash: TxHash,
+        signature: Signature,
+        transaction: ScrollTypedTransaction<'a>,
+    }
+
+    impl<'a> From<&'a super::ScrollTransactionSigned> for ScrollTransactionSigned<'a> {
+        fn from(value: &'a super::ScrollTransactionSigned) -> Self {
+            Self {
+                hash: *value.tx_hash(),
+                signature: value.signature,
+                transaction: ScrollTypedTransaction::from(&value.transaction),
+            }
+        }
+    }
+
+    impl<'a> From<ScrollTransactionSigned<'a>> for super::ScrollTransactionSigned {
+        fn from(value: ScrollTransactionSigned<'a>) -> Self {
+            Self {
+                hash: value.hash.into(),
+                signature: value.signature,
+                transaction: value.transaction.into(),
+            }
+        }
+    }
+
+    impl SerdeBincodeCompat for super::ScrollTransactionSigned {
+        type BincodeRepr<'a> = ScrollTransactionSigned<'a>;
+    }
+}

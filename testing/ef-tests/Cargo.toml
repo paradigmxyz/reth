@@ -19,7 +19,6 @@ asm-keccak = [
     "revm/asm-keccak",
 ]
 scroll = [
-    "reth-scroll-primitives",
     "reth-revm/scroll",
     "reth-primitives/scroll",
     "reth-provider/scroll",
@@ -42,8 +41,6 @@ reth-evm-ethereum.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
-
-reth-scroll-primitives = { workspace = true, optional = true }
 
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true

@@ -30,6 +30,7 @@ reth-rpc.workspace = true
 reth-tracing.workspace = true
 reth-transaction-pool.workspace = true
 reth-trie-db.workspace = true
+reth-rpc-server-types.workspace = true
 
 # alloy
 alloy-rpc-types-engine.workspace = true
@@ -38,6 +39,8 @@ alloy-rpc-types-engine.workspace = true
 reth-scroll-chainspec.workspace = true
 reth-scroll-engine.workspace = true
 reth-scroll-evm.workspace = true
+reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"] }
+reth-scroll-rpc.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -46,12 +49,14 @@ alloy-primitives.workspace = true
 eyre.workspace = true
 
 [features]
+default = ["reth-codec"]
 optimism = [
 	"reth-db/optimism",
 	"reth-primitives/optimism",
 	"reth-provider/optimism",
 	"reth-scroll-evm/optimism",
-	"reth-scroll-engine/optimism"
+	"reth-scroll-engine/optimism",
+	"reth-scroll-rpc/optimism",
 ]
 scroll = [
 	"reth-db/scroll",
@@ -60,6 +65,14 @@ scroll = [
 	"reth-provider/scroll",
 	"reth-evm/scroll",
 	"reth-scroll-evm/scroll",
-	"reth-scroll-engine/scroll"
+	"reth-scroll-engine/scroll",
+	"reth-scroll-rpc/scroll",
+	"reth-scroll-primitives/scroll",
+	"reth-primitives-traits/scroll"
+]
+reth-codec = [
+	"reth-primitives/reth-codec",
+	"reth-primitives-traits/reth-codec",
+	"reth-scroll-primitives/reth-codec"
 ]
 skip-state-root-validation = []

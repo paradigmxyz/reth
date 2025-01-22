@@ -31,7 +31,7 @@ alloy-trie = { workspace = true, features = ["serde"] }
 
 # scroll
 revm-primitives = { workspace = true, features = ["serde"] }
-reth-scroll-primitives = { workspace = true, optional = true, features = ["serde"] }
+scroll-alloy-consensus = { workspace = true, optional = true, features = ["serde", "arbitrary"] }
 
 # optimism
 op-alloy-rpc-types = { workspace = true, optional = true }
@@ -149,8 +149,9 @@ arbitrary = [
 	"alloy-trie/arbitrary",
 	"reth-trie-common/arbitrary",
 	"dep:secp256k1",
-	"reth-scroll-primitives?/arbitrary"
+	"scroll-alloy-consensus?/arbitrary"
 ]
+
 secp256k1 = [
 	"reth-primitives-traits/secp256k1",
 ]
@@ -185,11 +186,12 @@ serde-bincode-compat = [
 	"op-alloy-consensus?/serde-bincode-compat",
 	"reth-primitives-traits/serde-bincode-compat",
 	"reth-trie-common/serde-bincode-compat",
+	"scroll-alloy-consensus?/serde-bincode-compat",
 ]
 scroll = [
+	"dep:scroll-alloy-consensus",
 	"reth-primitives-traits/scroll",
 	"reth-testing-utils/scroll",
-	"reth-scroll-primitives",
 ]
 
 [[bench]]

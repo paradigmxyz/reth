@@ -101,6 +101,7 @@ impl<T> BlockBatchRecord<T> {
     }
 
     /// Returns the recorded requests.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn requests(&self) -> &[Requests] {
         &self.requests
     }

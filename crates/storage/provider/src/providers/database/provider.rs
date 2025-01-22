@@ -539,6 +539,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     }
 
     /// Returns a reference to the chain specification.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn chain_spec(&self) -> &N::ChainSpec {
         &self.chain_spec
     }

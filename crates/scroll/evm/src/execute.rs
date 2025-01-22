@@ -370,7 +370,7 @@ mod tests {
                 ..Default::default()
             }),
             TxType::L1Message => {
-                reth_primitives::Transaction::L1Message(reth_scroll_primitives::TxL1Message {
+                reth_primitives::Transaction::L1Message(scroll_alloy_consensus::TxL1Message {
                     sender: Address::random(),
                     to: Address::ZERO,
                     ..Default::default()

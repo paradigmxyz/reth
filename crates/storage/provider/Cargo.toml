@@ -78,8 +78,6 @@ reth-trie = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 
-reth-scroll-primitives.workspace = true
-
 parking_lot.workspace = true
 tempfile.workspace = true
 assert_matches.workspace = true
@@ -115,7 +113,6 @@ serde = [
     "reth-execution-types/serde",
     "reth-trie-db/serde",
     "reth-trie/serde",
-    "reth-scroll-primitives/serde"
 ]
 test-utils = [
     "reth-db/test-utils",

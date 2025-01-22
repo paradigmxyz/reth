@@ -84,6 +84,7 @@ impl OpEngineValidator {
 
     /// Returns the chain spec used by the validator.
     #[inline]
+    #[allow(clippy::missing_const_for_fn)]
     fn chain_spec(&self) -> &OpChainSpec {
         self.inner.chain_spec()
     }

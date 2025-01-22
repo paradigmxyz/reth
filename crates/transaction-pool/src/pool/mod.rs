@@ -1078,6 +1078,7 @@ impl<T: PoolTransaction> AddedPendingTransaction<T> {
     }
 
     /// Returns if the transaction should be propagated.
+    #[allow(clippy::missing_const_for_fn)]
     pub(crate) fn is_propagate_allowed(&self) -> bool {
         self.transaction.propagate
     }
@@ -1168,6 +1169,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the discarded transactions if there were any
+    #[allow(clippy::missing_const_for_fn)]
     pub(crate) fn discarded_transactions(&self) -> Option<&[Arc<ValidPoolTransaction<T>>]> {
         match self {
             Self::Pending(tx) => Some(&tx.discarded),
@@ -1211,6 +1213,7 @@ impl<T: PoolTransaction> AddedTransaction<T> {
 
     /// Returns the [`TransactionId`] of the added transaction
     #[cfg(test)]
+    #[allow(clippy::missing_const_for_fn)]
     pub(crate) fn id(&self) -> &TransactionId {
         match self {
             Self::Pending(added) => added.transaction.id(),

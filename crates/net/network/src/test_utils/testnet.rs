@@ -100,6 +100,7 @@ where
     }
 
     /// Return a slice of all peers.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn peers(&self) -> &[Peer<C, Pool>] {
         &self.peers
     }
@@ -331,6 +332,7 @@ impl<C, Pool> TestnetHandle<C, Pool> {
     }
 
     /// Returns the [`PeerHandle`]s of this [`Testnet`].
+    #[allow(clippy::missing_const_for_fn)]
     pub fn peers(&self) -> &[PeerHandle<Pool>] {
         &self.peers
     }

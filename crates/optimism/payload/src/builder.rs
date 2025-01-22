@@ -570,6 +570,7 @@ pub struct OpPayloadBuilderCtx<EvmConfig> {
 
 impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
     /// Returns the parent block the payload will be build on.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn parent(&self) -> &SealedHeader {
         &self.config.parent_header
     }

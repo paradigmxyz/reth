@@ -170,6 +170,7 @@ impl OpBuiltPayload {
     }
 
     /// Returns the built block(sealed)
+    #[allow(clippy::missing_const_for_fn)]
     pub fn block(&self) -> &SealedBlockFor<OpBlock> {
         &self.block
     }

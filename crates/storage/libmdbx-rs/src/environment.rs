@@ -60,12 +60,14 @@ impl Environment {
 
     /// Returns true if the environment was opened as WRITEMAP.
     #[inline]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn is_write_map(&self) -> bool {
         self.inner.env_kind.is_write_map()
     }
 
     /// Returns the kind of the environment.
     #[inline]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn env_kind(&self) -> EnvironmentKind {
         self.inner.env_kind
     }
@@ -84,6 +86,7 @@ impl Environment {
 
     /// Returns the transaction manager.
     #[inline]
+    #[allow(clippy::missing_const_for_fn)]
     pub(crate) fn txn_manager(&self) -> &TxnManager {
         &self.inner.txn_manager
     }
@@ -131,6 +134,7 @@ impl Environment {
     /// The caller **must** ensure that the pointer is never dereferenced after the environment has
     /// been dropped.
     #[inline]
+    #[allow(clippy::missing_const_for_fn)]
     pub(crate) fn env_ptr(&self) -> *mut ffi::MDBX_env {
         self.inner.env
     }

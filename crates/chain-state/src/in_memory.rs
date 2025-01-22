@@ -827,11 +827,13 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     }
 
     /// Returns a reference to the executed block.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn block(&self) -> &SealedBlockFor<N::Block> {
         &self.block
     }
 
     /// Returns a reference to the block's senders
+    #[allow(clippy::missing_const_for_fn)]
     pub fn senders(&self) -> &Vec<Address> {
         &self.senders
     }
@@ -844,16 +846,19 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     }
 
     /// Returns a reference to the block's execution outcome
+    #[allow(clippy::missing_const_for_fn)]
     pub fn execution_outcome(&self) -> &ExecutionOutcome<N::Receipt> {
         &self.execution_output
     }
 
     /// Returns a reference to the hashed state result of the execution outcome
+    #[allow(clippy::missing_const_for_fn)]
     pub fn hashed_state(&self) -> &HashedPostState {
         &self.hashed_state
     }
 
     /// Returns a reference to the trie updates for the block
+    #[allow(clippy::missing_const_for_fn)]
     pub fn trie_updates(&self) -> &TrieUpdates {
         &self.trie
     }

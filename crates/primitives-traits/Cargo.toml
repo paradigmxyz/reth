@@ -23,8 +23,11 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-trie.workspace = true
 
-# revm-primitives scroll re-export
+# revm-primitives
 revm-primitives = { workspace = true, default-features = false }
+
+# scroll
+scroll-alloy-consensus = { workspace = true, optional = true }
 
 # op
 op-alloy-consensus = { workspace = true, optional = true }
@@ -115,14 +118,16 @@ arbitrary = [
 	"secp256k1?/global-context",
 	"secp256k1?/rand",
 	"op-alloy-consensus?/arbitrary",
-	"alloy-trie/arbitrary"
+	"alloy-trie/arbitrary",
+	"scroll-alloy-consensus?/arbitrary"
 ]
 serde-bincode-compat = [
 	"serde",
 	"serde_with",
 	"alloy-consensus/serde-bincode-compat",
 	"alloy-eips/serde-bincode-compat",
-	"op-alloy-consensus?/serde-bincode-compat"
+	"op-alloy-consensus?/serde-bincode-compat",
+	"scroll-alloy-consensus?/serde-bincode-compat"
 ]
 serde = [
 	"dep:serde",
@@ -136,16 +141,19 @@ serde = [
 	"op-alloy-consensus?/serde",
 	"k256/serde",
 	"secp256k1?/serde",
-	"alloy-trie/serde"
+	"alloy-trie/serde",
+	"scroll-alloy-consensus?/serde"
 ]
 reth-codec = [
 	"dep:reth-codecs",
 	"dep:modular-bitfield",
 	"dep:byteorder",
+	"scroll-alloy-consensus?/reth-codec"
 ]
 op = [
 	"dep:op-alloy-consensus",
 ]
+scroll-in-memory-size = ["scroll-alloy-consensus"]
 scroll = ["revm-primitives/scroll"]
 rayon = [
 	"dep:rayon",

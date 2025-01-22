@@ -3,8 +3,11 @@
 
 mod builder;
 pub use builder::{
-    consensus::ScrollConsensusBuilder, engine::ScrollEngineValidatorBuilder,
-    execution::ScrollExecutorBuilder, network::ScrollNetworkBuilder, payload::ScrollPayloadBuilder,
+    consensus::ScrollConsensusBuilder,
+    engine::{ScrollEngineValidator, ScrollEngineValidatorBuilder},
+    execution::ScrollExecutorBuilder,
+    network::ScrollNetworkBuilder,
+    payload::ScrollPayloadBuilder,
     pool::ScrollPoolBuilder,
 };
 

@@ -1073,6 +1073,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     }
 
     /// Returns directory where `static_files` are located.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn directory(&self) -> &Path {
         &self.path
     }
@@ -1166,12 +1167,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
     /// Returns `static_files` directory
     #[cfg(any(test, feature = "test-utils"))]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
     /// Returns `static_files` transaction index
     #[cfg(any(test, feature = "test-utils"))]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn tx_index(&self) -> &RwLock<SegmentRanges> {
         &self.static_files_tx_index
     }
