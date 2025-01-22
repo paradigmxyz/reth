@@ -234,9 +234,13 @@ where
                         hash_builder.updates_len();
                     if retain_updates && total_updates_len as u64 >= self.threshold {
                         let (walker_stack, walker_deleted_keys) = account_node_iter.walker.split();
-                        trie_updates.removed_nodes.extend(walker_deleted_keys);
+                        trie_updates
+                            .changed_nodes
+                            .extend(walker_deleted_keys.into_iter().map(|k| (k, None)));
                         let (hash_builder, hash_builder_updates) = hash_builder.split();
-                        trie_updates.account_nodes.extend(hash_builder_updates);
+                        trie_updates
+                            .changed_nodes
+                            .extend(hash_builder_updates.into_iter().map(|(k, v)| (k, Some(v))));
 
                         let state = IntermediateStateRootState {
                             hash_builder,

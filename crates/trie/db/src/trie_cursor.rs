@@ -127,17 +127,8 @@ where
             self.cursor.delete_current_duplicates()?;
         }
 
-        // Merge updated and removed nodes. Updated nodes must take precedence.
-        let mut storage_updates = updates
-            .removed_nodes_ref()
-            .iter()
-            .filter_map(|n| (!updates.storage_nodes_ref().contains_key(n)).then_some((n, None)))
-            .collect::<Vec<_>>();
-        storage_updates.extend(
-            updates.storage_nodes_ref().iter().map(|(nibbles, node)| (nibbles, Some(node))),
-        );
-
         // Sort trie node updates.
+        let mut storage_updates = updates.changed_nodes_ref().iter().collect::<Vec<_>>();
         storage_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
         let mut num_entries = 0;
