@@ -16,8 +16,8 @@ use alloy_primitives::{Address, B256};
 use alloy_rlp::{Decodable, Encodable};
 
 use crate::{
-    BlockBody, BlockHeader, FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde, SealedHeader,
-    SignedTransaction,
+    transaction::signed::RecoveryError, BlockBody, BlockHeader, FullBlockBody, FullBlockHeader,
+    InMemorySize, MaybeSerde, SealedHeader, SignedTransaction,
 };
 
 /// Bincode-compatible header type serde implementations.
@@ -121,7 +121,7 @@ pub trait Block:
     }
 
     /// Expensive operation that recovers transaction signer.
-    fn senders(&self) -> Option<Vec<Address>>
+    fn senders(&self) -> Result<Vec<Address>, RecoveryError>
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
@@ -158,10 +158,10 @@ pub trait Block:
         let senders = if self.body().transactions().len() == senders.len() {
             senders
         } else {
-            let Some(senders) = self.body().recover_signers_unchecked() else { return Err(self) };
+            // Fall back to recovery if lengths don't match
+            let Ok(senders) = self.body().recover_signers_unchecked() else { return Err(self) };
             senders
         };
-
         Ok(RecoveredBlock::new_unhashed(self, senders))
     }
 
@@ -173,7 +173,7 @@ pub trait Block:
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
-        let senders = self.senders()?;
+        let senders = self.body().recover_signers().ok()?;
         Some(RecoveredBlock::new_unhashed(self, senders))
     }
 }

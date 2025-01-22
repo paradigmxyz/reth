@@ -38,6 +38,10 @@ pub mod rpc;
 
 pub mod setup;
 
+/// Type aliases for traits that are often used together
+pub mod aliases;
+pub use aliases::*;
+
 /// Support for installing the ExExs (execution extensions) in a node.
 pub mod exex;
 

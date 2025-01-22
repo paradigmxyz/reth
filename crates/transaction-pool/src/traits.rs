@@ -21,7 +21,7 @@ use reth_execution_types::ChangedAccount;
 use reth_primitives::{
     kzg::KzgSettings,
     transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
-    PooledTransaction, RecoveredTx, SealedBlock, Transaction, TransactionSigned,
+    PooledTransaction, Recovered, SealedBlock, Transaction, TransactionSigned,
 };
 use reth_primitives_traits::{Block, SignedTransaction};
 #[cfg(feature = "serde")]
@@ -257,7 +257,7 @@ pub trait TransactionPool: Send + Sync + Clone {
     fn get_pooled_transaction_element(
         &self,
         tx_hash: TxHash,
-    ) -> Option<RecoveredTx<<Self::Transaction as PoolTransaction>::Pooled>>;
+    ) -> Option<Recovered<<Self::Transaction as PoolTransaction>::Pooled>>;
 
     /// Returns an iterator that yields transactions that are ready for block production.
     ///
@@ -570,18 +570,18 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 // === impl AllPoolTransactions ===
 
 impl<T: PoolTransaction> AllPoolTransactions<T> {
-    /// Returns an iterator over all pending [`RecoveredTx`] transactions.
-    pub fn pending_recovered(&self) -> impl Iterator<Item = RecoveredTx<T::Consensus>> + '_ {
+    /// Returns an iterator over all pending [`Recovered`] transactions.
+    pub fn pending_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
         self.pending.iter().map(|tx| tx.transaction.clone().into())
     }
 
-    /// Returns an iterator over all queued [`RecoveredTx`] transactions.
-    pub fn queued_recovered(&self) -> impl Iterator<Item = RecoveredTx<T::Consensus>> + '_ {
+    /// Returns an iterator over all queued [`Recovered`] transactions.
+    pub fn queued_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
         self.queued.iter().map(|tx| tx.transaction.clone().into())
     }
 
     /// Returns an iterator over all transactions, both pending and queued.
-    pub fn all(&self) -> impl Iterator<Item = RecoveredTx<T::Consensus>> + '_ {
+    pub fn all(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
         self.pending.iter().chain(self.queued.iter()).map(|tx| tx.transaction.clone().into())
     }
 }
@@ -968,9 +968,9 @@ pub trait PoolTransaction:
     + Send
     + Sync
     + Clone
-    + TryFrom<RecoveredTx<Self::Consensus>, Error = Self::TryFromConsensusError>
-    + Into<RecoveredTx<Self::Consensus>>
-    + From<RecoveredTx<Self::Pooled>>
+    + TryFrom<Recovered<Self::Consensus>, Error = Self::TryFromConsensusError>
+    + Into<Recovered<Self::Consensus>>
+    + From<Recovered<Self::Pooled>>
 {
     /// Associated error type for the `try_from_consensus` method.
     type TryFromConsensusError: fmt::Display;
@@ -983,7 +983,7 @@ pub trait PoolTransaction:
 
     /// Define a method to convert from the `Consensus` type to `Self`
     fn try_from_consensus(
-        tx: RecoveredTx<Self::Consensus>,
+        tx: Recovered<Self::Consensus>,
     ) -> Result<Self, Self::TryFromConsensusError> {
         tx.try_into()
     }
@@ -991,29 +991,29 @@ pub trait PoolTransaction:
     /// Clone the transaction into a consensus variant.
     ///
     /// This method is preferred when the [`PoolTransaction`] already wraps the consensus variant.
-    fn clone_into_consensus(&self) -> RecoveredTx<Self::Consensus> {
+    fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.clone().into_consensus()
     }
 
     /// Define a method to convert from the `Self` type to `Consensus`
-    fn into_consensus(self) -> RecoveredTx<Self::Consensus> {
+    fn into_consensus(self) -> Recovered<Self::Consensus> {
         self.into()
     }
 
     /// Define a method to convert from the `Pooled` type to `Self`
-    fn from_pooled(pooled: RecoveredTx<Self::Pooled>) -> Self {
+    fn from_pooled(pooled: Recovered<Self::Pooled>) -> Self {
         pooled.into()
     }
 
     /// Tries to convert the `Consensus` type into the `Pooled` type.
-    fn try_into_pooled(self) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
+    fn try_into_pooled(self) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
         Self::try_consensus_into_pooled(self.into_consensus())
     }
 
     /// Tries to convert the `Consensus` type into the `Pooled` type.
     fn try_consensus_into_pooled(
-        tx: RecoveredTx<Self::Consensus>,
-    ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError>;
+        tx: Recovered<Self::Consensus>,
+    ) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError>;
 
     /// Converts the `Pooled` type into the `Consensus` type.
     fn pooled_into_consensus(tx: Self::Pooled) -> Self::Consensus {
@@ -1160,13 +1160,13 @@ pub trait EthPoolTransaction: PoolTransaction {
     fn try_into_pooled_eip4844(
         self,
         sidecar: Arc<BlobTransactionSidecar>,
-    ) -> Option<RecoveredTx<Self::Pooled>>;
+    ) -> Option<Recovered<Self::Pooled>>;
 
     /// Tries to convert the `Consensus` type with a blob sidecar into the `Pooled` type.
     ///
     /// Returns `None` if passed transaction is not a blob transaction.
     fn try_from_eip4844(
-        tx: RecoveredTx<Self::Consensus>,
+        tx: Recovered<Self::Consensus>,
         sidecar: BlobTransactionSidecar,
     ) -> Option<Self>;
 
@@ -1183,12 +1183,12 @@ pub trait EthPoolTransaction: PoolTransaction {
 
 /// The default [`PoolTransaction`] for the [Pool](crate::Pool) for Ethereum.
 ///
-/// This type is essentially a wrapper around [`RecoveredTx`] with additional
+/// This type is essentially a wrapper around [`Recovered`] with additional
 /// fields derived from the transaction that are frequently used by the pools for ordering.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EthPooledTransaction<T = TransactionSigned> {
     /// `EcRecovered` transaction, the consensus format.
-    pub transaction: RecoveredTx<T>,
+    pub transaction: Recovered<T>,
 
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
@@ -1209,7 +1209,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
     ///
     /// Caution: In case of blob transactions, this does marks the blob sidecar as
     /// [`EthBlobTransactionSidecar::Missing`]
-    pub fn new(transaction: RecoveredTx<T>, encoded_length: usize) -> Self {
+    pub fn new(transaction: Recovered<T>, encoded_length: usize) -> Self {
         let mut blob_sidecar = EthBlobTransactionSidecar::None;
 
         let gas_cost = U256::from(transaction.max_fee_per_gas())
@@ -1234,14 +1234,14 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
     }
 
     /// Return the reference to the underlying transaction.
-    pub const fn transaction(&self) -> &RecoveredTx<T> {
+    pub const fn transaction(&self) -> &Recovered<T> {
         &self.transaction
     }
 }
 
 /// Conversion from the network transaction type to the pool transaction type.
-impl From<RecoveredTx<PooledTransaction>> for EthPooledTransaction {
-    fn from(tx: RecoveredTx<PooledTransaction>) -> Self {
+impl From<Recovered<PooledTransaction>> for EthPooledTransaction {
+    fn from(tx: Recovered<PooledTransaction>) -> Self {
         let encoded_length = tx.encode_2718_len();
         let (tx, signer) = tx.into_parts();
         match tx {
@@ -1251,14 +1251,14 @@ impl From<RecoveredTx<PooledTransaction>> for EthPooledTransaction {
                 let (tx, blob) = tx.into_parts();
                 let tx = Signed::new_unchecked(tx, sig, hash);
                 let tx = TransactionSigned::from(tx);
-                let tx = RecoveredTx::new_unchecked(tx, signer);
+                let tx = Recovered::new_unchecked(tx, signer);
                 let mut pooled = Self::new(tx, encoded_length);
                 pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
                 pooled
             }
             tx => {
                 // no blob sidecar
-                let tx = RecoveredTx::new_unchecked(tx.into(), signer);
+                let tx = Recovered::new_unchecked(tx.into(), signer);
                 Self::new(tx, encoded_length)
             }
         }
@@ -1272,17 +1272,17 @@ impl PoolTransaction for EthPooledTransaction {
 
     type Pooled = PooledTransaction;
 
-    fn clone_into_consensus(&self) -> RecoveredTx<Self::Consensus> {
+    fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.transaction().clone()
     }
 
     fn try_consensus_into_pooled(
-        tx: RecoveredTx<Self::Consensus>,
-    ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
+        tx: Recovered<Self::Consensus>,
+    ) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
         let (tx, signer) = tx.into_parts();
         let pooled =
             tx.try_into().map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)?;
-        Ok(RecoveredTx::new_unchecked(pooled, signer))
+        Ok(Recovered::new_unchecked(pooled, signer))
     }
 
     /// Returns hash of the transaction.
@@ -1413,16 +1413,16 @@ impl EthPoolTransaction for EthPooledTransaction {
     fn try_into_pooled_eip4844(
         self,
         sidecar: Arc<BlobTransactionSidecar>,
-    ) -> Option<RecoveredTx<Self::Pooled>> {
+    ) -> Option<Recovered<Self::Pooled>> {
         let (signed_transaction, signer) = self.into_consensus().into_parts();
         let pooled_transaction =
             signed_transaction.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)).ok()?;
 
-        Some(RecoveredTx::new_unchecked(pooled_transaction, signer))
+        Some(Recovered::new_unchecked(pooled_transaction, signer))
     }
 
     fn try_from_eip4844(
-        tx: RecoveredTx<Self::Consensus>,
+        tx: Recovered<Self::Consensus>,
         sidecar: BlobTransactionSidecar,
     ) -> Option<Self> {
         let (tx, signer) = tx.into_parts();
@@ -1451,10 +1451,10 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 }
 
-impl TryFrom<RecoveredTx<TransactionSigned>> for EthPooledTransaction {
+impl TryFrom<Recovered<TransactionSigned>> for EthPooledTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from(tx: RecoveredTx<TransactionSigned>) -> Result<Self, Self::Error> {
+    fn try_from(tx: Recovered<TransactionSigned>) -> Result<Self, Self::Error> {
         // ensure we can handle the transaction type and its format
         match tx.ty() {
             0..=EIP1559_TX_TYPE_ID | EIP7702_TX_TYPE_ID => {
@@ -1478,7 +1478,7 @@ impl TryFrom<RecoveredTx<TransactionSigned>> for EthPooledTransaction {
     }
 }
 
-impl From<EthPooledTransaction> for RecoveredTx<TransactionSigned> {
+impl From<EthPooledTransaction> for Recovered<TransactionSigned> {
     fn from(tx: EthPooledTransaction) -> Self {
         tx.transaction
     }
@@ -1690,7 +1690,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = RecoveredTx::new_unchecked(signed_tx, Default::default());
+        let transaction = Recovered::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly
@@ -1711,7 +1711,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = RecoveredTx::new_unchecked(signed_tx, Default::default());
+        let transaction = Recovered::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly
@@ -1732,7 +1732,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = RecoveredTx::new_unchecked(signed_tx, Default::default());
+        let transaction = Recovered::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly
@@ -1755,7 +1755,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = RecoveredTx::new_unchecked(signed_tx, Default::default());
+        let transaction = Recovered::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 300);
 
         // Check that the pooled transaction is created correctly
@@ -1778,7 +1778,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = TransactionSigned::new_unhashed(tx, signature);
-        let transaction = RecoveredTx::new_unchecked(signed_tx, Default::default());
+        let transaction = Recovered::new_unchecked(signed_tx, Default::default());
         let pooled_tx = EthPooledTransaction::new(transaction.clone(), 200);
 
         // Check that the pooled transaction is created correctly

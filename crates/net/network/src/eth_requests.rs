@@ -158,9 +158,7 @@ where
         &self,
         _peer_id: PeerId,
         request: GetBlockBodies,
-        response: oneshot::Sender<
-            RequestResult<BlockBodies<<C::Block as reth_primitives_traits::Block>::Body>>,
-        >,
+        response: oneshot::Sender<RequestResult<BlockBodies<<C::Block as Block>::Body>>>,
     ) {
         self.metrics.eth_bodies_requests_received_total.increment(1);
         let mut bodies = Vec::new();

@@ -22,18 +22,22 @@ use reth_basic_payload_builder::{
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_errors::RethError;
-use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::{
+    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, NextBlockEnvAttributes,
+};
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
-    proofs::{self},
     Block, BlockBody, EthereumHardforks, InvalidTransactionError, Receipt, RecoveredBlock,
     TransactionSigned,
 };
-use reth_primitives_traits::{Block as _, SignedTransaction};
+use reth_primitives_traits::{
+    proofs::{self},
+    Block as _, SignedTransaction,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
@@ -224,7 +228,7 @@ where
         PayloadBuilderError::Internal(err.into())
     })?;
 
-    let mut evm = evm_config.evm_with_env(&mut db, evm_env, Default::default());
+    let mut evm = evm_config.evm_with_env(&mut db, evm_env);
 
     let mut receipts = Vec::new();
     while let Some(pool_tx) = best_txs.next() {
@@ -270,9 +274,9 @@ where
         }
 
         // Configure the environment for the tx.
-        *evm.tx_mut() = evm_config.tx_env(tx.tx(), tx.signer());
+        let tx_env = evm_config.tx_env(tx.tx(), tx.signer());
 
-        let ResultAndState { result, state } = match evm.transact() {
+        let ResultAndState { result, state } = match evm.transact(tx_env) {
             Ok(res) => res,
             Err(err) => {
                 match err {

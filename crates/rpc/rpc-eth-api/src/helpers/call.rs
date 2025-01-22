@@ -17,16 +17,14 @@ use alloy_rpc_types_eth::{
 };
 use futures::Future;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm};
 use reth_node_api::BlockBody;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockIdReader, ChainSpecProvider, ProviderHeader};
 use reth_revm::{
     database::StateProviderDatabase,
     db::CacheDB,
-    primitives::{
-        BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, ExecutionResult, ResultAndState, TxEnv,
-    },
+    primitives::{BlockEnv, ExecutionResult, ResultAndState, TxEnv},
     DatabaseRef,
 };
 use reth_rpc_eth_types::{
@@ -41,7 +39,6 @@ use reth_rpc_eth_types::{
 };
 use revm::{Database, DatabaseCommit, GetInspector};
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
-use revm_primitives::Env;
 use tracing::trace;
 
 /// Result type for `eth_simulateV1` RPC method.
@@ -108,13 +105,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
                 let mut block_state_calls = block_state_calls.into_iter().peekable();
+                let chain_spec = RpcNodeCore::provider(&this).chain_spec();
                 while let Some(block) = block_state_calls.next() {
                     // Increase number and timestamp for every new block
                     evm_env.block_env.number += U256::from(1);
                     evm_env.block_env.timestamp += U256::from(1);
 
                     if validation {
-                        let chain_spec = RpcNodeCore::provider(&this).chain_spec();
                         let base_fee_params = chain_spec
                             .base_fee_params_at_timestamp(evm_env.block_env.timestamp.to());
                         let base_fee = if let Some(latest) = blocks.last() {
@@ -493,7 +490,7 @@ pub trait Call:
         f(StateProviderTraitObjWrapper(&state))
     }
 
-    /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
+    /// Executes the [`TxEnv`] against the given [Database] without committing state
     /// changes.
     fn transact<DB>(
         &self,
@@ -505,21 +502,14 @@ pub trait Call:
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env, tx_env);
-        let res = evm.transact().map_err(Self::Error::from_evm_err)?;
-        let (_, env) = evm.into_db_and_env_with_handler_cfg();
+        let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
+        let evm_env = evm.into_env();
 
-        let EnvWithHandlerCfg { env, handler_cfg } = env;
-        let Env { cfg, block, tx } = *env;
-        let evm_env = EvmEnv {
-            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg { cfg_env: cfg, handler_cfg },
-            block_env: block,
-        };
-
-        Ok((res, (evm_env, tx)))
+        Ok((res, (evm_env, tx_env)))
     }
 
-    /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
+    /// Executes the [`EvmEnv`] against the given [Database] without committing state
     /// changes.
     fn transact_with_inspector<DB>(
         &self,
@@ -532,18 +522,11 @@ pub trait Call:
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, tx_env, inspector);
-        let res = evm.transact().map_err(Self::Error::from_evm_err)?;
-        let (_, env) = evm.into_db_and_env_with_handler_cfg();
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
+        let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
+        let evm_env = evm.into_env();
 
-        let EnvWithHandlerCfg { env, handler_cfg } = env;
-        let Env { cfg, block, tx } = *env;
-        let evm_env = EvmEnv {
-            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg { cfg_env: cfg, handler_cfg },
-            block_env: block,
-        };
-
-        Ok((res, (evm_env, tx)))
+        Ok((res, (evm_env, tx_env)))
     }
 
     /// Executes the call request at the given [`BlockId`].
@@ -581,7 +564,7 @@ pub trait Call:
     /// Prepares the state and env for the given [`TransactionRequest`] at the given [`BlockId`] and
     /// executes the closure on a new task returning the result of the closure.
     ///
-    /// This returns the configured [`EnvWithHandlerCfg`] for the given [`TransactionRequest`] at
+    /// This returns the configured [`EvmEnv`] for the given [`TransactionRequest`] at
     /// the given [`BlockId`] and with configured call settings: `prepare_call_env`.
     ///
     /// This is primarily used by `eth_call`.
@@ -696,7 +679,7 @@ pub trait Call:
         I: IntoIterator<Item = (&'a Address, &'a <Self::Evm as ConfigureEvmEnv>::Transaction)>,
         <Self::Evm as ConfigureEvmEnv>::Transaction: SignedTransaction,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env, Default::default());
+        let mut evm = self.evm_config().evm_with_env(db, evm_env);
         let mut index = 0;
         for (sender, tx) in transactions {
             if *tx.tx_hash() == target_tx_hash {
@@ -704,8 +687,8 @@ pub trait Call:
                 break
             }
 
-            self.evm_config().fill_tx_env(evm.tx_mut(), tx, *sender);
-            evm.transact_commit().map_err(Self::Error::from_evm_err)?;
+            let tx_env = self.evm_config().tx_env(tx, *sender);
+            evm.transact_commit(tx_env).map_err(Self::Error::from_evm_err)?;
             index += 1;
         }
         Ok(index)
@@ -790,7 +773,7 @@ pub trait Call:
         Ok(env)
     }
 
-    /// Prepares the [`EnvWithHandlerCfg`] for execution of calls.
+    /// Prepares the [`EvmEnv`] for execution of calls.
     ///
     /// Does not commit any changes to the underlying database.
     ///

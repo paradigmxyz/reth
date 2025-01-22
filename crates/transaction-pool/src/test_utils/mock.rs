@@ -30,7 +30,7 @@ use rand::{
 };
 use reth_primitives::{
     transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
-    PooledTransaction, RecoveredTx, Transaction, TransactionSigned, TxType,
+    PooledTransaction, Recovered, Transaction, TransactionSigned, TxType,
 };
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use std::{ops::Range, sync::Arc, time::Instant, vec::IntoIter};
@@ -668,22 +668,22 @@ impl PoolTransaction for MockTransaction {
     type Pooled = PooledTransaction;
 
     fn try_from_consensus(
-        tx: RecoveredTx<Self::Consensus>,
+        tx: Recovered<Self::Consensus>,
     ) -> Result<Self, Self::TryFromConsensusError> {
         tx.try_into()
     }
 
-    fn into_consensus(self) -> RecoveredTx<Self::Consensus> {
+    fn into_consensus(self) -> Recovered<Self::Consensus> {
         self.into()
     }
 
-    fn from_pooled(pooled: RecoveredTx<Self::Pooled>) -> Self {
+    fn from_pooled(pooled: Recovered<Self::Pooled>) -> Self {
         pooled.into()
     }
 
     fn try_consensus_into_pooled(
-        tx: RecoveredTx<Self::Consensus>,
-    ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
+        tx: Recovered<Self::Consensus>,
+    ) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
         let (tx, signer) = tx.into_parts();
         Self::Pooled::try_from(tx)
             .map(|tx| tx.with_signer(signer))
@@ -869,7 +869,7 @@ impl EthPoolTransaction for MockTransaction {
     fn try_into_pooled_eip4844(
         self,
         sidecar: Arc<BlobTransactionSidecar>,
-    ) -> Option<RecoveredTx<Self::Pooled>> {
+    ) -> Option<Recovered<Self::Pooled>> {
         let (tx, signer) = self.into_consensus().into_parts();
         tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
             .map(|tx| tx.with_signer(signer))
@@ -877,7 +877,7 @@ impl EthPoolTransaction for MockTransaction {
     }
 
     fn try_from_eip4844(
-        tx: RecoveredTx<Self::Consensus>,
+        tx: Recovered<Self::Consensus>,
         sidecar: BlobTransactionSidecar,
     ) -> Option<Self> {
         let (tx, signer) = tx.into_parts();
@@ -903,10 +903,10 @@ impl EthPoolTransaction for MockTransaction {
     }
 }
 
-impl TryFrom<RecoveredTx<TransactionSigned>> for MockTransaction {
+impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from(tx: RecoveredTx<TransactionSigned>) -> Result<Self, Self::Error> {
+    fn try_from(tx: Recovered<TransactionSigned>) -> Result<Self, Self::Error> {
         let sender = tx.signer();
         let transaction = tx.into_tx();
         let hash = *transaction.tx_hash();
@@ -1044,16 +1044,16 @@ impl TryFrom<RecoveredTx<TransactionSigned>> for MockTransaction {
     }
 }
 
-impl From<RecoveredTx<PooledTransaction>> for MockTransaction {
-    fn from(tx: RecoveredTx<PooledTransaction>) -> Self {
+impl From<Recovered<PooledTransaction>> for MockTransaction {
+    fn from(tx: Recovered<PooledTransaction>) -> Self {
         let (tx, signer) = tx.into_parts();
-        RecoveredTx::<TransactionSigned>::new_unchecked(tx.into(), signer).try_into().expect(
+        Recovered::<TransactionSigned>::new_unchecked(tx.into(), signer).try_into().expect(
             "Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction",
         )
     }
 }
 
-impl From<MockTransaction> for RecoveredTx<TransactionSigned> {
+impl From<MockTransaction> for Recovered<TransactionSigned> {
     fn from(tx: MockTransaction) -> Self {
         let signed_tx =
             TransactionSigned::new(tx.clone().into(), Signature::test_signature(), *tx.hash());
@@ -1180,9 +1180,9 @@ impl proptest::arbitrary::Arbitrary for MockTransaction {
 
         arb::<(TransactionSigned, Address)>()
             .prop_map(|(signed_transaction, signer)| {
-                RecoveredTx::new_unchecked(signed_transaction, signer)
+                Recovered::new_unchecked(signed_transaction, signer)
                     .try_into()
-                    .expect("Failed to create an Arbitrary MockTransaction via RecoveredTx")
+                    .expect("Failed to create an Arbitrary MockTransaction from a Recovered tx")
             })
             .boxed()
     }
