@@ -121,7 +121,7 @@ pub trait EngineValidator<Types: EngineTypes>: PayloadValidator {
         &self,
         requests: &Requests,
     ) -> Result<(), EngineObjectValidationError> {
-        validate_execution_requests(requests).map_err(|e| EngineObjectValidationError::from(e))
+        validate_execution_requests(requests)
     }
 
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
