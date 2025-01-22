@@ -28,4 +28,4 @@ alloy-eips.workspace = true
 reth-primitives-traits.workspace = true
 
 [features]
-scroll = ["reth-primitives/scroll"]
+scroll = []

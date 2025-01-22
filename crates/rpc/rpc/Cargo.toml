@@ -104,12 +104,10 @@ js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
 scroll = [
     "reth-evm/scroll",
     "reth-rpc-eth-types/scroll",
-    "reth-primitives/scroll",
     "reth-revm/scroll",
     "reth-provider/scroll",
     "reth-testing-utils/scroll",
     "reth-evm-ethereum/scroll",
     "reth-rpc-eth-api/scroll",
-    "revm-primitives/scroll",
     "revm/scroll",
 ]

@@ -36,5 +36,5 @@ std = [
 	"alloy-rlp/std",
 	"alloy-rpc-types-engine/std"
 ]
-scroll = ["reth-primitives/scroll"]
-optimism = ["reth-primitives/optimism"]
+scroll = []
+optimism = []

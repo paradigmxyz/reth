@@ -52,7 +52,6 @@ eyre.workspace = true
 default = ["reth-codec"]
 optimism = [
 	"reth-db/optimism",
-	"reth-primitives/optimism",
 	"reth-provider/optimism",
 	"reth-scroll-evm/optimism",
 	"reth-scroll-engine/optimism",
@@ -61,7 +60,6 @@ optimism = [
 scroll = [
 	"reth-db/scroll",
 	"reth-node-builder/scroll",
-	"reth-primitives/scroll",
 	"reth-provider/scroll",
 	"reth-evm/scroll",
 	"reth-scroll-evm/scroll",

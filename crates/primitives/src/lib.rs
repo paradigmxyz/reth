@@ -19,11 +19,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(feature = "optimism")]
-use op_alloy_consensus as _;
-#[cfg(feature = "scroll")]
-use scroll_alloy_consensus as _;
-
 extern crate alloc;
 
 mod block;

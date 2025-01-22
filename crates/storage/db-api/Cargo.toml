@@ -92,4 +92,4 @@ optimism = [
 	"op",
 ]
 op = ["dep:reth-optimism-primitives", "reth-codecs/op"]
-scroll = ["reth-primitives/scroll"]
+scroll = []

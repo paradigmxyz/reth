@@ -133,7 +133,6 @@ test-utils = [
     "reth-optimism-primitives?/arbitrary",
 ]
 scroll = [
-    "reth-primitives/scroll",
     "reth-testing-utils/scroll",
     "reth-db/scroll",
     "reth-trie-db/scroll",

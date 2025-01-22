@@ -42,7 +42,6 @@ serde_json.workspace = true
 [features]
 scroll = [
     "reth-evm/scroll",
-    "reth-primitives/scroll",
     "reth-revm/scroll",
     "reth-provider/scroll",
     "reth-trie/scroll",

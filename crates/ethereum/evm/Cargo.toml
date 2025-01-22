@@ -61,7 +61,4 @@ std = [
 	"reth-chainspec/std",
 	"derive_more/std"
 ]
-scroll = [
-	"reth-primitives/scroll",
-	"reth-testing-utils/scroll",
-]
+scroll = ["reth-testing-utils/scroll"]

@@ -65,7 +65,6 @@ client = ["jsonrpsee/client", "jsonrpsee/async-client"]
 scroll = [
     "reth-provider/scroll",
     "reth-revm/scroll",
-    "reth-primitives/scroll",
     "reth-evm/scroll",
     "reth-rpc-eth-types/scroll",
 ]

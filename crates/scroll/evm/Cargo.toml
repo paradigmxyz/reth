@@ -46,13 +46,9 @@ tracing.workspace = true
 eyre.workspace = true
 
 [features]
-optimism = [
-	"reth-primitives/optimism",
-	"revm/optimism"
-]
+optimism = ["revm/optimism"]
 scroll = [
 	"reth-evm/scroll",
-	"reth-primitives/scroll",
 	"reth-revm/scroll",
 	"reth-scroll-consensus/scroll",
 	"revm/scroll"

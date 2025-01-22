@@ -58,6 +58,7 @@ impl<B: Block> RecoveredBlock<B> {
     }
 
     /// Returns the recovered senders.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn senders(&self) -> &[Address] {
         &self.senders
     }

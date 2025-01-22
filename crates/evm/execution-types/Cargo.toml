@@ -70,7 +70,4 @@ std = [
 	"reth-trie-common?/std",
     "reth-ethereum-primitives/std"
 ]
-scroll = [
-	"revm/scroll",
-	"reth-primitives/scroll"
-]
+scroll = ["revm/scroll"]

@@ -811,6 +811,7 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     }
 
     /// Returns a reference to [`RecoveredBlock`]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn recovered_block(&self) -> &RecoveredBlock<N::Block> {
         &self.recovered_block
     }

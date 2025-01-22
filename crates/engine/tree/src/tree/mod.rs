@@ -38,9 +38,7 @@ use reth_evm::{
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_primitives::{
-    EthPrimitives, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-};
+use reth_primitives::{EthPrimitives, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_primitives_traits::Block;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -2343,8 +2341,8 @@ where
                     }
                     Err(ParallelStateRootError::Provider(ProviderError::ConsistentView(error))) => {
                         debug!(target: "engine", %error, "Parallel state root computation failed consistency check, falling back");
-                        let (root, updates) =
-                            state_provider.state_root_from_state_with_updates(hashed_state.clone())?;
+                        let (root, updates) = state_provider
+                            .state_root_from_state_with_updates(hashed_state.clone())?;
                         (root, updates, root_time.elapsed())
                     }
                     Err(error) => return Err(InsertBlockErrorKind::Other(Box::new(error))),
@@ -2352,7 +2350,8 @@ where
             }
         } else {
             debug!(target: "engine::tree", block=?sealed_block.num_hash(), ?persistence_not_in_progress, "Failed to compute state root in parallel");
-            let (root, updates) = state_provider.state_root_from_state_with_updates(hashed_state.clone())?;
+            let (root, updates) =
+                state_provider.state_root_from_state_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
 
@@ -2530,7 +2529,7 @@ where
                     }
 
                     let (regular_root, regular_updates) =
-                        state_provider.state_root_with_updates(hashed_state.clone())?;
+                        state_provider.state_root_from_state_with_updates(hashed_state.clone())?;
 
                     if regular_root == sealed_block.header().state_root() {
                         let provider_ro = state_root_task_config.consistent_view.provider_ro()?;
@@ -2555,7 +2554,7 @@ where
                 info!(target: "engine::tree", ?error, "Failed to wait for state root task result");
                 // Fall back to sequential calculation
                 let (root, updates) =
-                    state_provider.state_root_with_updates(hashed_state.clone())?;
+                    state_provider.state_root_from_state_with_updates(hashed_state.clone())?;
                 Ok((root, updates, root_time.elapsed()))
             }
         }

@@ -128,7 +128,6 @@ scroll = [
     "reth-testing-utils?/scroll",
     "reth-trie/scroll",
     "reth-provider/scroll",
-    "reth-primitives/scroll",
     "reth-evm/scroll",
     "reth-execution-types/scroll",
     "reth-trie-db/scroll",

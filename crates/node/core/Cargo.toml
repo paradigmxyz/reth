@@ -81,7 +81,6 @@ optimism = ["reth-db/optimism"]
 jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = ["reth-primitives/asm-keccak", "alloy-primitives/asm-keccak"]
 scroll = [
-    "reth-primitives/scroll",
     "reth-db/scroll",
     "reth-rpc-eth-types/scroll",
 ]
