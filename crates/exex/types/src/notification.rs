@@ -174,7 +174,7 @@ pub(super) mod serde_bincode_compat {
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_execution_types::Chain;
-        use reth_primitives::SealedBlockWithSenders;
+        use reth_primitives::RecoveredBlock;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
         use std::sync::Arc;
@@ -193,18 +193,14 @@ pub(super) mod serde_bincode_compat {
             let data = Data {
                 notification: ExExNotification::ChainReorged {
                     old: Arc::new(Chain::new(
-                        vec![SealedBlockWithSenders::arbitrary(&mut arbitrary::Unstructured::new(
-                            &bytes,
-                        ))
-                        .unwrap()],
+                        vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                            .unwrap()],
                         Default::default(),
                         None,
                     )),
                     new: Arc::new(Chain::new(
-                        vec![SealedBlockWithSenders::arbitrary(&mut arbitrary::Unstructured::new(
-                            &bytes,
-                        ))
-                        .unwrap()],
+                        vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                            .unwrap()],
                         Default::default(),
                         None,
                     )),

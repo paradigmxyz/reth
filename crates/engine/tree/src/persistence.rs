@@ -142,11 +142,11 @@ where
         &self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
-        debug!(target: "engine::persistence", first=?blocks.first().map(|b| b.block.num_hash()), last=?blocks.last().map(|b| b.block.num_hash()), "Saving range of blocks");
+        debug!(target: "engine::persistence", first=?blocks.first().map(|b| b.recovered_block.num_hash()), last=?blocks.last().map(|b| b.recovered_block.num_hash()), "Saving range of blocks");
         let start_time = Instant::now();
         let last_block_hash_num = blocks.last().map(|block| BlockNumHash {
-            hash: block.block().hash(),
-            number: block.block().header().number(),
+            hash: block.recovered_block().hash(),
+            number: block.recovered_block().header().number(),
         });
 
         if last_block_hash_num.is_some() {
@@ -339,7 +339,7 @@ mod tests {
         let mut test_block_builder = TestBlockBuilder::eth();
         let executed =
             test_block_builder.get_executed_block_with_number(block_number, B256::random());
-        let block_hash = executed.block().hash();
+        let block_hash = executed.recovered_block().hash();
 
         let blocks = vec![executed];
         let (tx, rx) = oneshot::channel();
@@ -363,7 +363,7 @@ mod tests {
 
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks = test_block_builder.get_executed_blocks(0..5).collect::<Vec<_>>();
-        let last_hash = blocks.last().unwrap().block().hash();
+        let last_hash = blocks.last().unwrap().recovered_block().hash();
         let (tx, rx) = oneshot::channel();
 
         persistence_handle.save_blocks(blocks, tx).unwrap();
@@ -380,7 +380,7 @@ mod tests {
         let mut test_block_builder = TestBlockBuilder::eth();
         for range in ranges {
             let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
-            let last_hash = blocks.last().unwrap().block().hash();
+            let last_hash = blocks.last().unwrap().recovered_block().hash();
             let (tx, rx) = oneshot::channel();
 
             persistence_handle.save_blocks(blocks, tx).unwrap();

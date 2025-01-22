@@ -9,9 +9,9 @@ use crate::{
 use op_alloy_consensus::OpPooledTransaction;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
+use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvmFor};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
-use reth_node_api::{AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, TxTy};
+use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
@@ -318,15 +318,14 @@ where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
 {
     type EVM = OpEvmConfig;
-    type Executor = BasicBlockExecutorProvider<OpExecutionStrategyFactory>;
+    type Executor = BasicBlockExecutorProvider<OpExecutionStrategyFactory<OpPrimitives>>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let evm_config = OpEvmConfig::new(ctx.chain_spec());
-        let strategy_factory =
-            OpExecutionStrategyFactory::new(ctx.chain_spec(), evm_config.clone());
+        let strategy_factory = OpExecutionStrategyFactory::optimism(ctx.chain_spec());
         let executor = BasicBlockExecutorProvider::new(strategy_factory);
 
         Ok((evm_config, executor))
@@ -485,7 +484,7 @@ where
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
             + Unpin
             + 'static,
-        Evm: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>,
+        Evm: ConfigureEvmFor<<Node::Types as NodeTypes>::Primitives>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
             evm_config,

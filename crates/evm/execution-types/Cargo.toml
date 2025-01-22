@@ -36,7 +36,7 @@ reth-ethereum-primitives.workspace = true
 
 [features]
 default = ["std"]
-optimism = ["reth-primitives/optimism", "revm/optimism"]
+optimism = ["revm/optimism"]
 serde = [
 	"dep:serde",
 	"rand/serde",
@@ -55,7 +55,8 @@ serde-bincode-compat = [
 	"reth-primitives-traits/serde-bincode-compat",
 	"serde_with",
 	"alloy-eips/serde-bincode-compat",
-    "alloy-consensus/serde-bincode-compat",
+	"alloy-consensus/serde-bincode-compat",
+	"reth-ethereum-primitives/serde-bincode-compat"
 ]
 std = [
 	"reth-primitives/std",

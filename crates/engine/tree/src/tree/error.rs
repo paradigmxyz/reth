@@ -4,7 +4,7 @@ use alloy_consensus::BlockHeader;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
 use reth_evm::execute::InternalBlockExecutionError;
-use reth_primitives::SealedBlockFor;
+use reth_primitives::SealedBlock;
 use reth_primitives_traits::{Block, BlockBody};
 use tokio::sync::oneshot::error::TryRecvError;
 
@@ -27,7 +27,7 @@ pub enum AdvancePersistenceError {
     .block.parent_hash(),
     .kind)]
 struct InsertBlockErrorData<B: Block> {
-    block: SealedBlockFor<B>,
+    block: SealedBlock<B>,
     #[source]
     kind: InsertBlockErrorKind,
 }
@@ -45,11 +45,11 @@ impl<B: Block> std::fmt::Debug for InsertBlockErrorData<B> {
 }
 
 impl<B: Block> InsertBlockErrorData<B> {
-    const fn new(block: SealedBlockFor<B>, kind: InsertBlockErrorKind) -> Self {
+    const fn new(block: SealedBlock<B>, kind: InsertBlockErrorKind) -> Self {
         Self { block, kind }
     }
 
-    fn boxed(block: SealedBlockFor<B>, kind: InsertBlockErrorKind) -> Box<Self> {
+    fn boxed(block: SealedBlock<B>, kind: InsertBlockErrorKind) -> Box<Self> {
         Box::new(Self::new(block, kind))
     }
 }
@@ -65,23 +65,23 @@ pub struct InsertBlockError<B: Block> {
 
 impl<B: Block> InsertBlockError<B> {
     /// Create a new `InsertInvalidBlockErrorTwo`
-    pub fn new(block: SealedBlockFor<B>, kind: InsertBlockErrorKind) -> Self {
+    pub fn new(block: SealedBlock<B>, kind: InsertBlockErrorKind) -> Self {
         Self { inner: InsertBlockErrorData::boxed(block, kind) }
     }
 
     /// Create a new `InsertInvalidBlockError` from a consensus error
-    pub fn consensus_error(error: ConsensusError, block: SealedBlockFor<B>) -> Self {
+    pub fn consensus_error(error: ConsensusError, block: SealedBlock<B>) -> Self {
         Self::new(block, InsertBlockErrorKind::Consensus(error))
     }
 
     /// Create a new `InsertInvalidBlockError` from a consensus error
-    pub fn sender_recovery_error(block: SealedBlockFor<B>) -> Self {
+    pub fn sender_recovery_error(block: SealedBlock<B>) -> Self {
         Self::new(block, InsertBlockErrorKind::SenderRecovery)
     }
 
     /// Consumes the error and returns the block that resulted in the error
     #[inline]
-    pub fn into_block(self) -> SealedBlockFor<B> {
+    pub fn into_block(self) -> SealedBlock<B> {
         self.inner.block
     }
 
@@ -93,13 +93,13 @@ impl<B: Block> InsertBlockError<B> {
 
     /// Returns the block that resulted in the error
     #[inline]
-    pub const fn block(&self) -> &SealedBlockFor<B> {
+    pub const fn block(&self) -> &SealedBlock<B> {
         &self.inner.block
     }
 
     /// Consumes the type and returns the block and error kind.
     #[inline]
-    pub fn split(self) -> (SealedBlockFor<B>, InsertBlockErrorKind) {
+    pub fn split(self) -> (SealedBlock<B>, InsertBlockErrorKind) {
         let inner = *self.inner;
         (inner.block, inner.kind)
     }

@@ -17,6 +17,7 @@ reth-chainspec.workspace = true
 reth-consensus-common.workspace = true
 reth-consensus.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
@@ -44,6 +45,7 @@ std = [
     "reth-consensus/std",
     "reth-consensus-common/std",
     "reth-primitives/std",
+    "reth-primitives-traits/std",
     "reth-optimism-forks/std",
     "reth-optimism-chainspec/std",
     "reth-optimism-primitives/std",
@@ -53,5 +55,5 @@ std = [
     "alloy-trie/std",
     "op-alloy-consensus/std",
 ]
-optimism = ["reth-primitives/optimism", "reth-optimism-primitives/optimism"]
+optimism = ["reth-optimism-primitives/optimism"]
 scroll = []

@@ -1,5 +1,6 @@
 //! Command for debugging merkle tree calculation.
 use crate::{args::NetworkArgs, utils::get_single_header};
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
@@ -128,7 +129,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         info!(target: "reth::cli", target_block_number=self.to, "Finished downloading tip of block range");
 
         // build the full block client
-        let consensus: Arc<dyn Consensus<Error = ConsensusError>> =
+        let consensus: Arc<dyn Consensus<BlockTy<N>, Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
         let block_range_client = FullBlockClient::new(fetch_client, consensus);
 
@@ -153,18 +154,17 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         for block in blocks.into_iter().rev() {
             let block_number = block.number;
-            let sealed_block = block
-                .try_seal_with_senders::<BlockTy<N>>()
-                .map_err(|block| eyre::eyre!("Error sealing block with senders: {block:?}"))?;
+            let sealed_block =
+                block.try_recover().map_err(|_| eyre::eyre!("Error sealing block with senders"))?;
             trace!(target: "reth::cli", block_number, "Executing block");
 
             provider_rw.insert_block(sealed_block.clone(), StorageLocation::Database)?;
 
-            td += sealed_block.difficulty;
+            td += sealed_block.difficulty();
             let mut executor = executor_provider.batch_executor(StateProviderDatabase::new(
                 LatestStateProviderRef::new(&provider_rw),
             ));
-            executor.execute_and_verify_one(&sealed_block.clone().unseal())?;
+            executor.execute_and_verify_one(&sealed_block)?;
             let execution_outcome = executor.finalize();
 
             provider_rw.write_state(

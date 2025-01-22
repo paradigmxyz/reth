@@ -47,6 +47,7 @@ alloy-signer-local = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true

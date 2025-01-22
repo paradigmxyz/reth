@@ -233,18 +233,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
+    use crate::wal::{cache::CachedBlock, Wal};
     use alloy_primitives::B256;
-    use eyre::OptionExt;
     use itertools::Itertools;
     use reth_exex_types::ExExNotification;
     use reth_provider::Chain;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, BlockParams, BlockRangeParams,
     };
-
-    use crate::wal::{cache::CachedBlock, Wal};
+    use std::sync::Arc;
 
     fn read_notifications(wal: &Wal) -> eyre::Result<Vec<ExExNotification>> {
         wal.inner.storage.files_range()?.map_or(Ok(Vec::new()), |range| {
@@ -279,26 +276,20 @@ mod tests {
         // Create 4 canonical blocks and one reorged block with number 2
         let blocks = random_block_range(&mut rng, 0..=3, BlockRangeParams::default())
             .into_iter()
-            .map(|block| {
-                block
-                    .seal_with_senders::<reth_primitives::Block>()
-                    .ok_or_eyre("failed to recover senders")
-            })
-            .collect::<eyre::Result<Vec<_>>>()?;
+            .map(|block| block.try_recover())
+            .collect::<Result<Vec<_>, _>>()?;
         let block_1_reorged = random_block(
             &mut rng,
             1,
             BlockParams { parent: Some(blocks[0].hash()), ..Default::default() },
         )
-        .seal_with_senders::<reth_primitives::Block>()
-        .ok_or_eyre("failed to recover senders")?;
+        .try_recover()?;
         let block_2_reorged = random_block(
             &mut rng,
             2,
             BlockParams { parent: Some(blocks[1].hash()), ..Default::default() },
         )
-        .seal_with_senders::<reth_primitives::Block>()
-        .ok_or_eyre("failed to recover senders")?;
+        .try_recover()?;
 
         // Create notifications for the above blocks.
         // 1. Committed notification for blocks with number 0 and 1

@@ -189,9 +189,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     let fetch_client = Arc::new(network.fetch_client().await?);
 
                     // Use `to` as the tip for the stage
-                    let tip: P::BlockHeader = fetch_client
-                        .get_header(BlockHashOrNumber::Number(self.to))
-                        .await?
+                    let tip: P::BlockHeader = loop {
+                            match fetch_client.get_header(BlockHashOrNumber::Number(self.to)).await {
+                                Ok(header) => break header,
+                                Err(error) if error.is_retryable() => {
+                                    warn!(target: "reth::cli", "Error requesting header: {error}. Retrying...")
+                                }
+                                Err(error) => return Err(error.into()),
+                            }
+                        }
                         .into_data()
                         .ok_or(StageError::MissingSyncGap)?;
                     let (_, rx) = watch::channel(tip.hash_slow());

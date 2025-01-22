@@ -91,11 +91,11 @@ impl Case for BlockchainTestCase {
 
                 // Insert initial test state into the provider.
                 provider.insert_historical_block(
-                    SealedBlock::new(
+                    SealedBlock::<reth_primitives::Block>::from_sealed_parts(
                         case.genesis_block_header.clone().into(),
                         BlockBody::default(),
                     )
-                    .try_seal_with_senders()
+                    .try_recover()
                     .unwrap(),
                 )?;
                 case.pre.write_to_db(provider.tx_ref())?;
@@ -111,10 +111,9 @@ impl Case for BlockchainTestCase {
 
                 // Decode and insert blocks, creating a chain of blocks for the test case.
                 let last_block = case.blocks.iter().try_fold(None, |_, block| {
-                    let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-                    provider.insert_historical_block(
-                        decoded.clone().try_seal_with_senders().unwrap(),
-                    )?;
+                    let decoded =
+                        SealedBlock::<reth_primitives::Block>::decode(&mut block.rlp.as_ref())?;
+                    provider.insert_historical_block(decoded.clone().try_recover().unwrap())?;
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;
                 provider

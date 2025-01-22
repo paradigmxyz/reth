@@ -22,12 +22,15 @@ use reth::{
     revm::{
         inspector_handle_register,
         interpreter::{Interpreter, OpCode},
+        primitives::{Env, EnvWithHandlerCfg},
         Database, Evm, EvmContext, Inspector,
     },
     rpc::{api::eth::helpers::Call, compat::transaction::transaction_to_call_request},
     transaction_pool::TransactionPool,
 };
+use reth_evm::EvmEnv;
 use reth_node_ethereum::node::EthereumNode;
+use revm_primitives::CfgEnvWithHandlerCfg;
 
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
@@ -61,7 +64,16 @@ fn main() {
                                     call_request,
                                     BlockNumberOrTag::Latest.into(),
                                     EvmOverrides::default(),
-                                    move |db, env| {
+                                    move |db, evm_env, tx_env| {
+                                        let EvmEnv {
+                                            cfg_env_with_handler_cfg:
+                                                CfgEnvWithHandlerCfg { handler_cfg, cfg_env },
+                                            block_env,
+                                        } = evm_env;
+                                        let env = EnvWithHandlerCfg {
+                                            handler_cfg,
+                                            env: Env::boxed(cfg_env, block_env, tx_env),
+                                        };
                                         let mut dummy_inspector = DummyInspector::default();
                                         {
                                             // configure the evm with the custom inspector
