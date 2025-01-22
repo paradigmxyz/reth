@@ -270,7 +270,7 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
-    use reth_primitives::proofs;
+    use reth_primitives_traits::proofs;
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
         let header = reth_primitives::Header { gas_limit, ..Default::default() };

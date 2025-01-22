@@ -31,11 +31,13 @@ use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
-    proofs::{self},
     Block, BlockBody, EthereumHardforks, InvalidTransactionError, Receipt, RecoveredBlock,
     TransactionSigned,
 };
-use reth_primitives_traits::{Block as _, SignedTransaction};
+use reth_primitives_traits::{
+    proofs::{self},
+    Block as _, SignedTransaction,
+};
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
