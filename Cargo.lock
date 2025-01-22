@@ -7179,7 +7179,6 @@ dependencies = [
  "reth-evm",
  "reth-exex-types",
  "reth-metrics",
- "reth-network",
  "reth-network-p2p",
  "reth-payload-builder",
  "reth-payload-builder-primitives",

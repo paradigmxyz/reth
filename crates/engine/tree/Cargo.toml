@@ -34,8 +34,6 @@ reth-trie-db.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse.workspace = true
 reth-trie.workspace = true
-# TODO(mattsse): get rid of this by optimizing cache
-reth-network.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
@@ -126,6 +124,5 @@ test-utils = [
 	"reth-trie-sparse/test-utils",
 	"reth-prune-types?/test-utils",
 	"reth-trie-db/test-utils",
-	"reth-trie-parallel/test-utils",
-	"reth-network/test-utils"
+	"reth-trie-parallel/test-utils"
 ]
