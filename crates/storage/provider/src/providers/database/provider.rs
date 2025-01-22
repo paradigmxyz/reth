@@ -991,7 +991,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
         if let Some(num) = self.block_number(*block_hash)? {
             Ok(self.header_by_number(num)?)
         } else {
-            tracing::debug!(target: "providers::consistent_view", ?block_hash, "COULD NOT GET NUMBER");
             Ok(None)
         }
     }
@@ -2856,7 +2855,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             writer.append_header(block.header(), ttd, &block.hash())?;
         }
 
-        tracing::debug!(target: "providers::consistent_view", hash=?block.hash(), block_number, "WRITING BLOCK");
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderNumbers);
 

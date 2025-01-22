@@ -158,7 +158,6 @@ where
             UnifiedStorageWriter::commit(provider_rw)?;
         }
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
-        debug!(target: "engine::persistence", "Finished saving range of blocks");
         Ok(last_block_hash_num)
     }
 }
