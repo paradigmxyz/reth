@@ -22,4 +22,8 @@ futures = { workspace = true, optional = true }
 tokio-util = { workspace = true, optional = true }
 
 [features]
+default = ["std"]
+std = [
+    "futures/std",
+]
 common = ["tokio", "futures", "tokio-util"]
