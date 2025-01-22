@@ -123,11 +123,11 @@ pub trait BlockBody:
     }
 
     /// Recover signer addresses for all transactions in the block body.
-    fn recover_signers(&self) -> Option<Vec<Address>>
+    fn recover_signers(&self) -> Result<Vec<Address>, RecoveryError>
     where
         Self::Transaction: SignedTransaction,
     {
-        crate::transaction::recover::recover_signers(self.transactions())
+        crate::transaction::recover::recover_signers(self.transactions()).map_err(|_| RecoveryError)
     }
 
     /// Recover signer addresses for all transactions in the block body.
@@ -137,14 +137,14 @@ pub trait BlockBody:
     where
         Self::Transaction: SignedTransaction,
     {
-        self.recover_signers().ok_or(RecoveryError)
+        self.recover_signers()
     }
 
     /// Recover signer addresses for all transactions in the block body _without ensuring that the
     /// signature has a low `s` value_.
     ///
     /// Returns `None`, if some transaction's signature is invalid.
-    fn recover_signers_unchecked(&self) -> Option<Vec<Address>>
+    fn recover_signers_unchecked(&self) -> Result<Vec<Address>, RecoveryError>
     where
         Self::Transaction: SignedTransaction,
     {
@@ -159,7 +159,7 @@ pub trait BlockBody:
     where
         Self::Transaction: SignedTransaction,
     {
-        self.recover_signers_unchecked().ok_or(RecoveryError)
+        self.recover_signers_unchecked()
     }
 }
 
