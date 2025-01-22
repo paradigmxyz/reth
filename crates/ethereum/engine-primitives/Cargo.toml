@@ -36,13 +36,14 @@ serde_json.workspace = true
 [features]
 default = ["std"]
 std = [
-    "reth-chainspec/std",
-    "reth-primitives/std",
-    "alloy-primitives/std",
-    "alloy-eips/std",
-    "alloy-rpc-types-engine/std",
-    "alloy-rlp/std",
-    "serde/std",
-    "sha2/std",
-    "serde_json/std",
+	"reth-chainspec/std",
+	"reth-primitives/std",
+	"alloy-primitives/std",
+	"alloy-eips/std",
+	"alloy-rpc-types-engine/std",
+	"alloy-rlp/std",
+	"serde/std",
+	"sha2/std",
+	"serde_json/std",
+	"reth-engine-primitives/std"
 ]
