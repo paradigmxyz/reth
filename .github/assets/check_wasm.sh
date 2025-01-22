@@ -58,6 +58,7 @@ exclude_crates=(
   reth-invalid-block-hooks # reth-provider
   reth-libmdbx # mdbx
   reth-mdbx-sys # mdbx
+  reth-payload-builder # reth-metrics 
   reth-provider # tokio
   reth-prune # tokio
   reth-stages-api # reth-provider, reth-prune
