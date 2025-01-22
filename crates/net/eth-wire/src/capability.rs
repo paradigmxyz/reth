@@ -34,7 +34,7 @@ impl RawCapabilityMessage {
     ///
     /// Caller must ensure that the rlp encoded `payload` matches the given `id`.
     ///
-    /// See also  [`EthMessage`]
+    /// See also  [`EthMessage`](crate::EthMessage)
     pub const fn eth(id: EthMessageID, payload: Bytes) -> Self {
         Self::new(id as usize, payload)
     }
