@@ -8413,6 +8413,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types-eth",
  "arbitrary",
  "bytes",
  "derive_more",

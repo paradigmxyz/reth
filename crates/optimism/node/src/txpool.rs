@@ -50,6 +50,13 @@ pub struct OpPooledTransaction<
     estimated_tx_compressed_size: OnceLock<u64>,
     /// The pooled transaction type.
     _pd: core::marker::PhantomData<Pooled>,
+
+    /// Optional conditional attached to this transaction. Is this
+    /// needed if this field is on OpTransactionSigned?
+    conditional: Option<TransactionConditional>,
+
+    /// Indiciator if this transaction has been marked as rejected
+    rejected: AtomicBool, // (is AtomicBool appropriate here?)
 }
 
 impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
@@ -58,6 +65,7 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
         Self {
             inner: EthPooledTransaction::new(transaction, encoded_length),
             estimated_tx_compressed_size: Default::default(),
+            conditional: None,
             _pd: core::marker::PhantomData,
         }
     }
@@ -69,6 +77,21 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
         *self.estimated_tx_compressed_size.get_or_init(|| {
             op_alloy_flz::tx_estimated_size_fjord(&self.inner.transaction().encoded_2718())
         })
+    }
+
+    // TODO: Setter with the conditional
+    pub fn conditional(&self) -> Option<&TransactionConditional> {
+        self.conditional.as_ref()
+    }
+
+    /// Mark this transaction as rejected
+    pub fn reject(&self) {
+        self.rejected.store(true, Ordering::Relaxed);
+    }
+
+    /// Returns true if this transaction has been marked as rejected
+    pub fn rejected(&self) -> bool {
+        self.rejected.load(Ordering::Relaxed)
     }
 }
 
@@ -351,6 +374,19 @@ where
             )
         }
 
+        // If validated at the RPC layer pre-submission, this is not needed. The pool simply
+        // needs handle the rejected status on the pooled transaction set by the builder
+        if let Some(conditional) = transaction.conditional() {
+            //let client = self.client();
+            //let header = client.latest_header()?.header();
+            //if !conditional.matches_block_number(header.number()) {
+            //    return TransactionValidationOutcome::Invalid(
+            //        transaction,
+            //        InvalidTransactionError::TxTypeNotSupported.into(),
+            //    )
+            //}
+        }
+
         let outcome = self.inner.validate_one(origin, transaction);
 
         if !self.requires_l1_data_gas_fee() {
@@ -396,6 +432,13 @@ where
                     .into(),
                 )
             }
+
+            // Conditional transactions should not be propagated
+            // let propagate = if transaction.transaction_conditional().is_some() {
+            //     false
+            // } else {
+            //     propagate
+            // };
 
             return TransactionValidationOutcome::Valid {
                 balance,

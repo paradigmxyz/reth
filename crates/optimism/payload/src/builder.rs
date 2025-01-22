@@ -976,6 +976,17 @@ where
                 return Ok(Some(()))
             }
 
+            // check the conditional if present on the transaction
+            if let Some(conditional) = tx.transaction_conditional() {
+                best_txs.mark_invalid(tx.signer(), tx.nonce());
+
+                // This rejected transaction should be removed by the pool. Can we effectively
+                // do this with the pool wrapper? Can `best_transactions` yield non-rejected txs
+                tx.reject();
+
+                continue
+            }
+
             // Configure the environment for the tx.
             let tx_env = self.evm_config.tx_env(tx.tx(), tx.signer());
 
