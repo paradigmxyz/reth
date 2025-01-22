@@ -232,6 +232,11 @@ impl<T> ExecutionOutcome<T> {
         self.first_block
     }
 
+    /// Return last block of the execution outcome
+    pub fn last_block(&self) -> BlockNumber {
+        (self.first_block + self.len() as u64).saturating_sub(1)
+    }
+
     /// Revert the state to the given block number.
     ///
     /// Returns false if the block number is not in the bundle state.
