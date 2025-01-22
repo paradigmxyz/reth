@@ -44,4 +44,5 @@ std = [
     "alloy-rlp/std",
     "serde/std",
     "sha2/std",
+    "serde_json/std",
 ]
