@@ -32,3 +32,17 @@ futures.workspace = true
 # misc
 serde.workspace = true
 thiserror.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "reth-execution-types/std",
+    "reth-primitives/std",
+    "reth-primitives-traits/std",
+    "alloy-primitives/std",
+    "alloy-consensus/std",
+    "alloy-rpc-types-engine/std",
+    "futures/std",
+    "serde/std",
+    "thiserror/std",
+]
