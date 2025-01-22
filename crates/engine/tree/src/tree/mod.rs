@@ -2365,10 +2365,6 @@ where
         //
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
         let is_descendant_block = self.is_descendant_of_persisting_blocks(block.header());
-        // TODO: remove this, just for making sure things work
-        if is_descendant_block {
-            info!(target: "engine::tree", "Block is descendant of persisting blocks!");
-        }
 
         let (state_root_handle, state_root_task_config, state_hook) = if is_descendant_block &&
             self.config.use_state_root_task()

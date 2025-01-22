@@ -587,10 +587,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         M: Fn(&BlockState<N::Primitives>) -> ProviderResult<R>,
     {
         if let Some(Some(block_state)) = self.head_block.as_ref().map(|b| b.block_on_chain(id)) {
-            tracing::debug!(target: "providers::consistent_view", ?id, "Fetching from block state");
             return fetch_from_block_state(block_state)
         }
-        tracing::debug!(target: "providers::consistent_view", ?id, "Fetching from db");
         fetch_from_db(&self.storage_provider)
     }
 }
