@@ -6,9 +6,9 @@ use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
-use reth_evm::ConfigureEvm;
+use reth_evm::ConfigureEvmFor;
 use reth_evm_ethereum::EthEvmConfig;
-use reth_node_api::{FullNodeTypes, HeaderTy, NodeTypesWithEngine, TxTy};
+use reth_node_api::{FullNodeTypes, NodeTypesWithEngine, TxTy};
 use reth_node_builder::{
     components::PayloadServiceBuilder, BuilderContext, PayloadBuilderConfig, PayloadTypes,
 };
@@ -33,7 +33,7 @@ impl EthereumPayloadBuilder {
     where
         Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
         Node: FullNodeTypes<Types = Types>,
-        Evm: ConfigureEvm<Header = HeaderTy<Types>, Transaction = TxTy<Node::Types>>,
+        Evm: ConfigureEvmFor<Types::Primitives>,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
             + Unpin
             + 'static,
