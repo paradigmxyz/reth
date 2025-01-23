@@ -526,9 +526,11 @@ where
         let mut last_update_time = None;
 
         loop {
+            trace!(target: "engine::root", "entering main channel receiving loop");
             match self.rx.recv() {
                 Ok(message) => match message {
                     StateRootMessage::PrefetchProofs(targets) => {
+                        trace!(target: "engine::root", "processing StateRootMessage::PrefetchProofs");
                         debug!(
                             target: "engine::root",
                             len = targets.len(),
@@ -544,6 +546,7 @@ where
                         );
                     }
                     StateRootMessage::StateUpdate(update) => {
+                        trace!(target: "engine::root", "processing StateRootMessage::StateUpdate");
                         if updates_received == 0 {
                             first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
@@ -567,13 +570,15 @@ where
                         );
                     }
                     StateRootMessage::FinishedStateUpdates => {
-                        trace!(target: "engine::root", "Finished state updates");
+                        trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
                         updates_finished = true;
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
+                        trace!(target: "engine::root", "processing StateRootMessage::ProofCalculated");
                         if proof_calculated.is_from_state_update() {
                             proofs_processed += 1;
                         }
+
                         debug!(
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
@@ -599,6 +604,7 @@ where
                         }
                     }
                     StateRootMessage::RootCalculated { state_root, trie_updates, iterations } => {
+                        trace!(target: "engine::root", "processing StateRootMessage::RootCalculated");
                         let total_time =
                             first_update_time.expect("first update time should be set").elapsed();
                         let time_from_last_update =
@@ -694,7 +700,7 @@ where
         let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
             ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
         })?;
-        trace!(target: "engine::root", ?elapsed, "Root calculation completed");
+        trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
     }
 
     debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
