@@ -24,7 +24,7 @@ reth-errors.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
-alloy-eips = { workspace = true, features = ["kzg"] }
+alloy-eips.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
