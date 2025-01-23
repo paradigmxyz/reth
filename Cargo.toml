@@ -289,13 +289,6 @@ codegen-units = 1
 inherits = "release"
 lto = "fat"
 
-[profile.reproducible]
-inherits = "release"
-debug = false
-panic = "abort"
-codegen-units = 1
-overflow-checks = true
-
 [workspace.dependencies]
 # reth
 op-reth = { path = "crates/optimism/bin" }
