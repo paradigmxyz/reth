@@ -893,9 +893,10 @@ pub enum NewCanonicalChain<N: NodePrimitives = EthPrimitives> {
         /// All blocks of the _new_ chain
         new: Vec<ExecutedBlockWithTrieUpdates<N>>,
         /// All blocks of the _old_ chain
+        ///
         /// These are not [`ExecutedBlockWithTrieUpdates`] because we don't always have the trie
         /// updates for the old canonical chain. For example, in case of node being restarted right
-        /// before the reorg TrieUpdates can't be fetched from database and won't be available.
+        /// before the reorg [`TrieUpdates`] can't be fetched from database.
         old: Vec<ExecutedBlock<N>>,
     },
 }
