@@ -73,7 +73,7 @@ where
         Receipt = OpReceipt,
         SignedTx: OpTransaction,
     >,
-    EvmConfig: Clone + Unpin + Sync + Send + 'static + ConfigureEvmFor<N>,
+    EvmConfig: ConfigureEvmFor<N> + Clone + Unpin + Sync + Send + 'static,
 {
     type Primitives = N;
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =

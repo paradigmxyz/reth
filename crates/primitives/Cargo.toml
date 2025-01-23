@@ -21,7 +21,6 @@ reth-static-file-types.workspace = true
 # ethereum
 alloy-consensus.workspace = true
 alloy-primitives = { workspace = true, features = ["rand", "rlp"] }
-alloy-trie = { workspace = true, features = ["serde"] }
 
 # for eip-4844
 c-kzg = { workspace = true, features = ["serde"], optional = true }
@@ -66,7 +65,6 @@ std = [
 	"alloy-primitives/std",
 	"once_cell/std",
 	"serde/std",
-	"alloy-trie/std",
 	"reth-ethereum-forks/std",
 	"derive_more/std",
 	"serde_json/std",
@@ -87,7 +85,6 @@ arbitrary = [
 	"reth-primitives-traits/arbitrary",
 	"alloy-consensus/arbitrary",
 	"alloy-primitives/arbitrary",
-	"alloy-trie/arbitrary",
 	"reth-ethereum-primitives/arbitrary",
 	"reth-codecs/arbitrary"
 ]

@@ -1,6 +1,6 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
-use super::{EthApiError, EthResult};
+use super::EthResult;
 use alloy_consensus::{transaction::TransactionMeta, ReceiptEnvelope, TxReceipt};
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
@@ -21,8 +21,7 @@ where
 {
     // Note: we assume this transaction is valid, because it's mined (or part of pending block)
     // and we don't need to check for pre EIP-2
-    let from =
-        transaction.recover_signer_unchecked().ok_or(EthApiError::InvalidTransactionSignature)?;
+    let from = transaction.recover_signer_unchecked()?;
 
     // get the previous transaction cumulative gas used
     let gas_used = if meta.index == 0 {
