@@ -137,7 +137,7 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_hash.len()
     }
 
-    /// Returns the [`ExecutedBlock`] by hash.
+    /// Returns the [`ExecutedBlockWithTrieUpdates`] by hash.
     fn executed_block_by_hash(&self, hash: B256) -> Option<&ExecutedBlockWithTrieUpdates<N>> {
         self.blocks_by_hash.get(&hash)
     }
@@ -2047,7 +2047,7 @@ where
             // Try reinserting the reorged canonical chain. This is only possible if we have
             // `persisted_trie_updatess` for those blocks.
             let old = old
-                .into_iter()
+                .iter()
                 .filter_map(|block| {
                     let (_, trie) = self
                         .state
