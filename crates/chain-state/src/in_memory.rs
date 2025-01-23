@@ -838,6 +838,9 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 }
 
 /// An [`ExecutedBlock`] with its [`TrieUpdates`].
+///
+/// We store it as separate type because [`TrieUpdates`] are only available for blocks stored in
+/// memory and can't be obtained for canonical persisted blocks.
 #[derive(Clone, Debug, PartialEq, Eq, Default, derive_more::Deref, derive_more::DerefMut)]
 pub struct ExecutedBlockWithTrieUpdates<N: NodePrimitives = EthPrimitives> {
     /// Inner [`ExecutedBlock`].
