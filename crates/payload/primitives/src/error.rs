@@ -1,5 +1,6 @@
 //! Error types emitted by types or implementations of this crate.
 
+use alloc::boxed::Box;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceUpdateError;
 use reth_errors::{ProviderError, RethError};

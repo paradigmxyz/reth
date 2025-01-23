@@ -56,6 +56,8 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// All `eth` request variants.
     EthRequest(PeerRequest<N>),
     /// Any other or manually crafted eth message.
+    ///
+    /// Caution: It is expected that this is a valid `eth_` capability message.
     Other(RawCapabilityMessage),
 }
 

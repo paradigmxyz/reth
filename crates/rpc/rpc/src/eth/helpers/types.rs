@@ -5,7 +5,7 @@ use alloy_network::{Ethereum, Network};
 use alloy_primitives::PrimitiveSignature as Signature;
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
-use reth_primitives::{RecoveredTx, TransactionSigned};
+use reth_primitives::{Recovered, TransactionSigned};
 use reth_primitives_traits::SignedTransaction;
 use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::EthApiError;
@@ -40,7 +40,7 @@ where
 
     fn fill(
         &self,
-        tx: RecoveredTx<TransactionSigned>,
+        tx: Recovered<TransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();

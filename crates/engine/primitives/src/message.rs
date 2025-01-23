@@ -6,15 +6,15 @@ use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadSidecar, ForkChoiceUpdateResult, ForkchoiceState,
     ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId, PayloadStatus, PayloadStatusEnum,
 };
-use futures::{future::Either, FutureExt, TryFutureExt};
-use reth_errors::RethResult;
-use reth_payload_builder_primitives::PayloadBuilderError;
-use std::{
-    fmt::Display,
+use core::{
+    fmt::{self, Display},
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
 };
+use futures::{future::Either, FutureExt, TryFutureExt};
+use reth_errors::RethResult;
+use reth_payload_builder_primitives::PayloadBuilderError;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Represents the outcome of forkchoice update.
@@ -168,7 +168,7 @@ pub enum BeaconEngineMessage<Engine: EngineTypes> {
 }
 
 impl<Engine: EngineTypes> Display for BeaconEngineMessage<Engine> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NewPayload { payload, .. } => {
                 write!(

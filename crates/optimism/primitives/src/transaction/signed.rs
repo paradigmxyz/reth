@@ -26,7 +26,7 @@ use proptest as _;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
     sync::OnceLock,
-    transaction::error::TransactionConversionError,
+    transaction::{error::TransactionConversionError, signed::RecoveryError},
     InMemorySize, SignedTransaction,
 };
 
@@ -79,11 +79,11 @@ impl SignedTransaction for OpTransactionSigned {
         &self.signature
     }
 
-    fn recover_signer(&self) -> Option<Address> {
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+            return Ok(from)
         }
 
         let Self { transaction, signature, .. } = self;
@@ -91,11 +91,11 @@ impl SignedTransaction for OpTransactionSigned {
         recover_signer(signature, signature_hash)
     }
 
-    fn recover_signer_unchecked(&self) -> Option<Address> {
+    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = &self.transaction {
-            return Some(*from)
+            return Ok(*from)
         }
 
         let Self { transaction, signature, .. } = self;
@@ -103,11 +103,14 @@ impl SignedTransaction for OpTransactionSigned {
         recover_signer_unchecked(signature, signature_hash)
     }
 
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
         match &self.transaction {
             // Optimism's Deposit transaction does not have a signature. Directly return the
             // `from` address.
-            OpTypedTransaction::Deposit(tx) => return Some(tx.from),
+            OpTypedTransaction::Deposit(tx) => return Ok(tx.from),
             OpTypedTransaction::Legacy(tx) => tx.encode_for_signing(buf),
             OpTypedTransaction::Eip2930(tx) => tx.encode_for_signing(buf),
             OpTypedTransaction::Eip1559(tx) => tx.encode_for_signing(buf),

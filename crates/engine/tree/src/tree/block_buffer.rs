@@ -1,9 +1,9 @@
 use crate::tree::metrics::BlockBufferMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber};
-use reth_network::cache::LruCache;
 use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::Block;
+use schnellru::{ByLength, LruMap};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Contains the tree of pending blocks that cannot be executed due to missing parent.
@@ -32,7 +32,7 @@ pub(super) struct BlockBuffer<B: Block> {
     /// first in line for evicting if `max_blocks` limit is hit.
     ///
     /// Used as counter of amount of blocks inside buffer.
-    pub(crate) lru: LruCache<BlockHash>,
+    pub(crate) lru: LruMap<BlockHash, ()>,
     /// Various metrics for the block buffer.
     pub(crate) metrics: BlockBufferMetrics,
 }
@@ -44,7 +44,7 @@ impl<B: Block> BlockBuffer<B> {
             blocks: Default::default(),
             parent_to_child: Default::default(),
             earliest_blocks: Default::default(),
-            lru: LruCache::new(limit),
+            lru: LruMap::new(ByLength::new(limit)),
             metrics: Default::default(),
         }
     }
@@ -71,7 +71,7 @@ impl<B: Block> BlockBuffer<B> {
         self.earliest_blocks.entry(block.number()).or_default().insert(hash);
         self.blocks.insert(hash, block);
 
-        if let (_, Some(evicted_hash)) = self.lru.insert_and_get_evicted(hash) {
+        if let Some(evicted_hash) = self.insert_hash_and_get_evicted(hash) {
             // evict the block if limit is hit
             if let Some(evicted_block) = self.remove_block(&evicted_hash) {
                 // evict the block if limit is hit
@@ -79,6 +79,18 @@ impl<B: Block> BlockBuffer<B> {
             }
         }
         self.metrics.blocks.set(self.blocks.len() as f64);
+    }
+
+    /// Inserts the hash and returns the oldest evicted hash if any.
+    fn insert_hash_and_get_evicted(&mut self, entry: BlockHash) -> Option<BlockHash> {
+        let new = self.lru.peek(&entry).is_none();
+        let evicted = if new && self.lru.limiter().max_length() as usize <= self.lru.len() {
+            self.lru.pop_oldest().map(|(k, ())| k)
+        } else {
+            None
+        };
+        self.lru.get_or_insert(entry, || ());
+        evicted
     }
 
     /// Removes the given block from the buffer and also all the children of the block.

@@ -1,7 +1,7 @@
 //! EVM component for the node builder.
 use crate::{BuilderContext, FullNodeTypes};
-use reth_evm::execute::BlockExecutorProvider;
-use reth_node_api::{ConfigureEvm, HeaderTy, TxTy};
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
+use reth_node_api::PrimitivesTy;
 use std::future::Future;
 
 /// A type that knows how to build the executor types.
@@ -9,12 +9,10 @@ pub trait ExecutorBuilder<Node: FullNodeTypes>: Send {
     /// The EVM config to use.
     ///
     /// This provides the node with the necessary configuration to configure an EVM.
-    type EVM: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>;
+    type EVM: ConfigureEvmFor<PrimitivesTy<Node::Types>>;
 
     /// The type that knows how to execute blocks.
-    type Executor: BlockExecutorProvider<
-        Primitives = <Node::Types as reth_node_api::NodeTypes>::Primitives,
-    >;
+    type Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>;
 
     /// Creates the EVM config.
     fn build_evm(
@@ -26,9 +24,8 @@ pub trait ExecutorBuilder<Node: FullNodeTypes>: Send {
 impl<Node, F, Fut, EVM, Executor> ExecutorBuilder<Node> for F
 where
     Node: FullNodeTypes,
-    EVM: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>,
-    Executor:
-        BlockExecutorProvider<Primitives = <Node::Types as reth_node_api::NodeTypes>::Primitives>,
+    EVM: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
+    Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<(EVM, Executor)>> + Send,
 {

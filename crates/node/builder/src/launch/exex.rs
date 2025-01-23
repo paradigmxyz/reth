@@ -9,7 +9,7 @@ use reth_exex::{
     ExExContext, ExExHandle, ExExManager, ExExManagerHandle, ExExNotificationSource, Wal,
     DEFAULT_EXEX_MANAGER_CAPACITY,
 };
-use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_primitives::Head;
 use reth_provider::CanonStateSubscriptions;
 use reth_tracing::tracing::{debug, info};
@@ -42,7 +42,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
     /// installed.
     pub async fn launch(
         self,
-    ) -> eyre::Result<Option<ExExManagerHandle<<Node::Types as NodeTypes>::Primitives>>> {
+    ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<Node::Types>>>> {
         let Self { head, extensions, components, config_container } = self;
 
         if extensions.is_empty() {

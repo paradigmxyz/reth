@@ -232,6 +232,11 @@ impl<T> ExecutionOutcome<T> {
         self.first_block
     }
 
+    /// Return last block of the execution outcome
+    pub fn last_block(&self) -> BlockNumber {
+        (self.first_block + self.len() as u64).saturating_sub(1)
+    }
+
     /// Revert the state to the given block number.
     ///
     /// Returns false if the block number is not in the bundle state.
@@ -362,7 +367,7 @@ impl ExecutionOutcome {
     /// of receipt. This is a expensive operation.
     pub fn ethereum_receipts_root(&self, _block_number: BlockNumber) -> Option<B256> {
         self.receipts.root_slow(self.block_number_to_index(_block_number)?, |receipts| {
-            reth_primitives::proofs::calculate_receipt_root_no_memo(receipts)
+            reth_primitives::Receipt::calculate_receipt_root_no_memo(receipts)
         })
     }
 }

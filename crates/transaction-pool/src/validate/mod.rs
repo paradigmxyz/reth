@@ -9,7 +9,7 @@ use crate::{
 use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives::{RecoveredTx, SealedBlock};
+use reth_primitives::{Recovered, SealedBlock};
 use std::{fmt, future::Future, time::Instant};
 
 mod constants;
@@ -391,7 +391,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// Converts to this type into the consensus transaction of the pooled transaction.
     ///
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
-    pub fn to_consensus(&self) -> RecoveredTx<T::Consensus> {
+    pub fn to_consensus(&self) -> Recovered<T::Consensus> {
         self.transaction.clone_into_consensus()
     }
 
