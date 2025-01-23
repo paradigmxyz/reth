@@ -614,6 +614,8 @@ snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 
 # TODO: When we build for a windows target on an ubuntu runner, crunchy tries to
 # get the wrong path, update this when the workflow has been updated
+#
+# See: https://github.com/eira-fransham/crunchy/issues/13
 crunchy = "=0.2.2"
 
 # [patch.crates-io]
