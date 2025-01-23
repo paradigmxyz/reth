@@ -7,8 +7,7 @@ use crate::{
 };
 use reth_ecies::ECIESError;
 use reth_eth_wire::{
-    capability::CapabilityMessage, errors::EthStreamError, Capabilities, DisconnectReason,
-    EthVersion, NetworkPrimitives, Status,
+    errors::EthStreamError, Capabilities, DisconnectReason, EthVersion, NetworkPrimitives, Status,
 };
 use reth_network_api::PeerInfo;
 use reth_network_peers::{NodeRecord, PeerId};
@@ -256,15 +255,6 @@ pub enum ActiveSessionMessage<N: NetworkPrimitives> {
         peer_id: PeerId,
         /// Message received from the peer.
         message: PeerMessage<N>,
-    },
-    /// Received a message that does not match the announced capabilities of the peer.
-    InvalidMessage {
-        /// Identifier of the remote peer.
-        peer_id: PeerId,
-        /// Announced capabilities of the remote peer.
-        capabilities: Arc<Capabilities>,
-        /// Message received from the peer.
-        message: CapabilityMessage<N>,
     },
     /// Received a bad message from the peer.
     BadMessage {

@@ -7,7 +7,7 @@ use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
 use reth_node_api::FullNodeComponents;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_primitives::RecoveredTx;
+use reth_primitives::Recovered;
 use reth_primitives_traits::transaction::signed::SignedTransaction;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ProviderTx, ReceiptProvider, TransactionsProvider,
@@ -84,7 +84,7 @@ where
 
     fn fill(
         &self,
-        tx: RecoveredTx<OpTransactionSigned>,
+        tx: Recovered<OpTransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();

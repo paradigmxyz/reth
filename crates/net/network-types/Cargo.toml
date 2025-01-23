@@ -15,7 +15,8 @@ workspace = true
 # reth
 reth-network-peers.workspace = true
 reth-net-banlist.workspace = true
-reth-ethereum-forks.workspace = true
+
+alloy-eip2124.workspace = true
 
 # misc
 serde = { workspace = true, optional = true }
@@ -29,6 +30,6 @@ tracing.workspace = true
 serde = [
 	"dep:serde",
 	"dep:humantime-serde",
-	"reth-ethereum-forks/serde"
+	"alloy-eip2124/serde"
 ]
 test-utils = []

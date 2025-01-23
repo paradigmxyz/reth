@@ -5,12 +5,12 @@ use crate::{
         Components, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, NodeComponents,
         PayloadServiceBuilder, PoolBuilder,
     },
-    BuilderContext, ConfigureEvm, FullNodeTypes,
+    BuilderContext, FullNodeTypes,
 };
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
 use reth_network::NetworkPrimitives;
-use reth_node_api::{BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, TxTy};
+use reth_node_api::{BlockTy, BodyTy, HeaderTy, NodeTypesWithEngine, PrimitivesTy, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{future::Future, marker::PhantomData};
@@ -405,12 +405,10 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    EVM: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>,
-    Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
-    Cons: FullConsensus<<Node::Types as NodeTypes>::Primitives, Error = ConsensusError>
-        + Clone
-        + Unpin
-        + 'static,
+    EVM: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
+    Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
+    Cons:
+        FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
 {
     type Components = Components<Node, N, Pool, EVM, Executor, Cons>;
 

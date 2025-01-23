@@ -22,7 +22,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::RecoveredTx;
+use reth_primitives::Recovered;
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -143,7 +143,7 @@ impl TransactionPool for NoopTransactionPool {
     fn get_pooled_transaction_element(
         &self,
         _tx_hash: TxHash,
-    ) -> Option<RecoveredTx<<Self::Transaction as PoolTransaction>::Pooled>> {
+    ) -> Option<Recovered<<Self::Transaction as PoolTransaction>::Pooled>> {
         None
     }
 

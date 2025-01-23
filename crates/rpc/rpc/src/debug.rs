@@ -166,23 +166,19 @@ where
                     .body()
                     .transactions()
                     .iter()
-                    .map(|tx| {
-                        tx.recover_signer()
-                            .ok_or(EthApiError::InvalidTransactionSignature)
-                            .map_err(Eth::Error::from_eth_err)
-                    })
-                    .collect::<Result<Vec<_>, Eth::Error>>()?
+                    .map(|tx| tx.recover_signer().map_err(Eth::Error::from_eth_err))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .collect()
             } else {
                 block
                     .body()
                     .transactions()
                     .iter()
-                    .map(|tx| {
-                        tx.recover_signer_unchecked()
-                            .ok_or(EthApiError::InvalidTransactionSignature)
-                            .map_err(Eth::Error::from_eth_err)
-                    })
-                    .collect::<Result<Vec<_>, Eth::Error>>()?
+                    .map(|tx| tx.recover_signer_unchecked().map_err(Eth::Error::from_eth_err))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_iter()
+                    .collect()
             };
 
         self.trace_block(Arc::new(block.with_senders_unchecked(senders)), evm_env, opts).await
@@ -872,7 +868,7 @@ where
             .block_with_senders_by_id(block_id, TransactionVariant::NoHash)
             .to_rpc_result()?
             .unwrap_or_default();
-        Ok(block.into_transactions_ecrecovered().map(|tx| tx.encoded_2718().into()).collect())
+        Ok(block.into_transactions_recovered().map(|tx| tx.encoded_2718().into()).collect())
     }
 
     /// Handler for `debug_getRawReceipts`

@@ -21,6 +21,7 @@ reth-trie-db.workspace = true
 [features]
 default = ["std"]
 std = [
-    "reth-primitives-traits/std",
-    "reth-chainspec/std",
+	"reth-primitives-traits/std",
+	"reth-chainspec/std",
+	"reth-engine-primitives/std"
 ]

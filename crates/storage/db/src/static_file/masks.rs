@@ -1,10 +1,13 @@
 use crate::{
     add_static_file_mask,
     static_file::mask::{ColumnSelectorOne, ColumnSelectorTwo},
-    BlockBodyIndices, BlockWithdrawals, HeaderTerminalDifficulties,
+    BlockBodyIndices, HeaderTerminalDifficulties,
 };
 use alloy_primitives::BlockHash;
-use reth_db_api::{models::StoredBlockOmmers, table::Table};
+use reth_db_api::{
+    models::{StaticFileBlockWithdrawals, StoredBlockOmmers},
+    table::Table,
+};
 
 // HEADER MASKS
 add_static_file_mask! {
@@ -53,6 +56,6 @@ add_static_file_mask! {
     OmmersMask<H>, StoredBlockOmmers<H>, 0b010
 }
 add_static_file_mask! {
-    #[doc = "Mask for a `StoredBlockWithdrawals` from BlockMeta static file segment"]
-    WithdrawalsMask, <BlockWithdrawals as Table>::Value, 0b100
+    #[doc = "Mask for a `StaticFileBlockWithdrawals` from BlockMeta static file segment"]
+    WithdrawalsMask, StaticFileBlockWithdrawals, 0b100
 }
