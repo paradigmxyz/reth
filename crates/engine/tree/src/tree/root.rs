@@ -304,7 +304,7 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     hashed_state
 }
 
-/// Input parameters for spawning a multiproof calculation
+/// Input parameters for spawning a multiproof calculation.
 #[derive(Debug)]
 struct MultiproofInput<Factory> {
     config: StateRootConfig<Factory>,
@@ -315,14 +315,14 @@ struct MultiproofInput<Factory> {
     thread_pool: Arc<rayon::ThreadPool>,
 }
 
-/// Manages concurrent multiproof calculations
+/// Manages concurrent multiproof calculations.
 #[derive(Debug)]
 struct MultiproofManager<Factory> {
-    /// Maximum number of concurrent calculations
+    /// Maximum number of concurrent calculations.
     max_concurrent: usize,
-    /// Currently running calculations
+    /// Currently running calculations.
     inflight: usize,
-    /// Queued calculations
+    /// Queued calculations.
     pending: VecDeque<MultiproofInput<Factory>>,
 }
 
@@ -336,6 +336,7 @@ where
         + 'static,
 {
     fn new(thread_pool_size: usize) -> Self {
+        // we keep 2 threads to be used internally by [`StateRootTask`]
         let max_concurrent = thread_pool_size.saturating_sub(2);
         Self { max_concurrent, inflight: 0, pending: VecDeque::with_capacity(max_concurrent) }
     }
