@@ -119,7 +119,7 @@ pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
 
 /// Type that validates the payloads processed by the engine.
 pub trait EngineValidator<Types: EngineTypes>: PayloadValidator {
-    /// Validates the execution requests according to EIP-7685.
+    /// Validates the execution requests according to [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685).
     fn validate_execution_requests(
         &self,
         requests: &Requests,
