@@ -2211,7 +2211,8 @@ where
         &mut self,
         block: RecoveredBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertBlockErrorKind> {
-        debug!(target: "engine::tree", block=?block.num_hash(), parent = ?block.parent_hash(), state_root = ?block.state_root(), "Inserting new block into tree");
+        let block_num_hash = block.num_hash();
+        debug!(target: "engine::tree", block=?block_num_hash, parent = ?block.parent_hash(), state_root = ?block.state_root(), "Inserting new block into tree");
 
         if self.block_by_hash(block.hash())?.is_some() {
             return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid))
@@ -2219,11 +2220,12 @@ where
 
         let start = Instant::now();
 
-        trace!(target: "engine::tree", block=?block.num_hash(), "Validating block consensus");
+        trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
+
         // validate block consensus rules
         self.validate_block(&block)?;
 
-        trace!(target: "engine::tree", block=?block.num_hash(), parent=?block.parent_hash(), "Fetching block state provider");
+        trace!(target: "engine::tree", block=?block_num_hash, parent=?block.parent_hash(), "Fetching block state provider");
         let Some(state_provider) = self.state_provider(block.parent_hash())? else {
             // we don't have the state required to execute this block, buffering it and find the
             // missing parent block
@@ -2262,13 +2264,10 @@ where
         let state_provider =
             CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
 
-        trace!(target: "engine::tree", block=?block.num_hash(), "Executing block");
-        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
-
-        let block_number = block.number();
-        let block_hash = block.hash();
         let sealed_block = Arc::new(block.clone_sealed_block());
+        trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
 
+        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
         let persistence_not_in_progress = !self.persistence_state.in_progress();
 
         let (state_root_handle, state_root_task_config, state_hook) = if persistence_not_in_progress &&
@@ -2292,7 +2291,7 @@ where
         let execution_start = Instant::now();
         let output = self.metrics.executor.execute_metered(executor, &block, state_hook)?;
         let execution_time = execution_start.elapsed();
-        trace!(target: "engine::tree", elapsed = ?execution_time, ?block_number, "Executed block");
+        trace!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
@@ -2305,7 +2304,7 @@ where
 
         let hashed_state = self.provider.hashed_post_state(&output.state);
 
-        trace!(target: "engine::tree", block=?sealed_block.num_hash(), "Calculating block state root");
+        trace!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
         let root_time = Instant::now();
 
         // We attempt to compute state root in parallel if we are currently not persisting
@@ -2335,7 +2334,7 @@ where
                     Ok(result) => {
                         info!(
                             target: "engine::tree",
-                            block = ?sealed_block.num_hash(),
+                            block = ?block_num_hash,
                             regular_state_root = ?result.0,
                             "Regular root task finished"
                         );
@@ -2351,7 +2350,7 @@ where
                 }
             }
         } else {
-            debug!(target: "engine::tree", block=?sealed_block.num_hash(), ?persistence_not_in_progress, "Failed to compute state root in parallel");
+            debug!(target: "engine::tree", block=?block_num_hash, ?persistence_not_in_progress, "Failed to compute state root in parallel");
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
@@ -2371,18 +2370,18 @@ where
         }
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
-        debug!(target: "engine::tree", ?root_elapsed, block=?sealed_block.num_hash(), "Calculated state root");
+        debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
 
         let executed: ExecutedBlock<N> = ExecutedBlock {
             recovered_block: Arc::new(block),
-            execution_output: Arc::new(ExecutionOutcome::from((output, block_number))),
+            execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
             hashed_state: Arc::new(hashed_state),
             trie: Arc::new(trie_output),
         };
 
         if self.state.tree_state.canonical_block_hash() == executed.recovered_block().parent_hash()
         {
-            debug!(target: "engine::tree", pending = ?executed.recovered_block().num_hash() ,"updating pending block");
+            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
             // if the parent is the canonical head, we can insert the block as the pending block
             self.canonical_in_memory_state.set_pending_block(executed.clone());
         }
@@ -2392,14 +2391,14 @@ where
 
         // emit insert event
         let elapsed = start.elapsed();
-        let engine_event = if self.is_fork(block_hash)? {
+        let engine_event = if self.is_fork(block_num_hash.hash)? {
             BeaconConsensusEngineEvent::ForkBlockAdded(sealed_block, elapsed)
         } else {
             BeaconConsensusEngineEvent::CanonicalBlockAdded(sealed_block, elapsed)
         };
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
-        debug!(target: "engine::tree", block=?BlockNumHash::new(block_number, block_hash), "Finished inserting block");
+        debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
     }
 
