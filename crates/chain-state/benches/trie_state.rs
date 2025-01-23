@@ -149,15 +149,16 @@ impl TrieUpdatesFactory {
 
     fn generate<R: Rng>(&self, rng: &mut R) -> TrieUpdates {
         TrieUpdates {
-            account_nodes: self
+            changed_nodes: self
                 .account_nibbles_choices
-                .choose_multiple(rng, self.num_updated_nodes)
-                .map(|k| (k.clone(), BranchNodeCompact::default()))
-                .collect(),
-            removed_nodes: self
-                .account_nibbles_choices
-                .choose_multiple(rng, self.num_removed_nodes)
-                .cloned()
+                .choose_multiple(rng, self.num_updated_nodes + self.num_removed_nodes)
+                .enumerate()
+                .map(|(i, k)| {
+                    (
+                        k.clone(),
+                        (i < self.num_updated_nodes).then_some(BranchNodeCompact::default()),
+                    )
+                })
                 .collect(),
             storage_tries: self
                 .hashed_address_choices
@@ -167,15 +168,21 @@ impl TrieUpdatesFactory {
                         *k,
                         StorageTrieUpdates {
                             is_deleted: false,
-                            storage_nodes: (self
+                            changed_nodes: (self
                                 .storage_nibbles_choices
-                                .choose_multiple(rng, self.num_updated_nodes_per_storage_trie)
-                                .map(|k| (k.clone(), BranchNodeCompact::default()))
-                                .collect()),
-                            removed_nodes: (self
-                                .storage_nibbles_choices
-                                .choose_multiple(rng, self.num_removed_nodes_per_storage_trie)
-                                .cloned()
+                                .choose_multiple(
+                                    rng,
+                                    self.num_updated_nodes_per_storage_trie +
+                                        self.num_removed_nodes_per_storage_trie,
+                                )
+                                .enumerate()
+                                .map(|(i, k)| {
+                                    (
+                                        k.clone(),
+                                        (i < self.num_updated_nodes_per_storage_trie)
+                                            .then_some(BranchNodeCompact::default()),
+                                    )
+                                })
                                 .collect()),
                         },
                     )
