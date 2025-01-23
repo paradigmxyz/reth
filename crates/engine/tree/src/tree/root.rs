@@ -349,7 +349,7 @@ where
 
     /// Spawns a new multiproof calculation or enqueues it for later if
     /// `max_concurrent` are already inflight.
-    fn try_spawn(&mut self, input: MultiproofInput<Factory>) {
+    fn spawn_or_queue(&mut self, input: MultiproofInput<Factory>) {
         if self.inflight >= self.max_concurrent {
             self.pending.push_back(input);
             return;
@@ -526,7 +526,7 @@ where
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &targets);
 
-        self.multiproof_manager.try_spawn(MultiproofInput {
+        self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
             hashed_state_update: Default::default(),
             proof_targets: targets,
@@ -545,7 +545,7 @@ where
         let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
-        self.multiproof_manager.try_spawn(MultiproofInput {
+        self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
             hashed_state_update,
             proof_targets,
