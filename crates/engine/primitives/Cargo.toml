@@ -24,6 +24,7 @@ reth-errors.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-eips.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -36,13 +37,14 @@ thiserror.workspace = true
 [features]
 default = ["std"]
 std = [
-    "reth-execution-types/std",
-    "reth-primitives/std",
-    "reth-primitives-traits/std",
-    "alloy-primitives/std",
-    "alloy-consensus/std",
-    "alloy-rpc-types-engine/std",
-    "futures/std",
-    "serde/std",
-    "thiserror/std",
+	"reth-execution-types/std",
+	"reth-primitives/std",
+	"reth-primitives-traits/std",
+	"alloy-primitives/std",
+	"alloy-consensus/std",
+	"alloy-rpc-types-engine/std",
+	"futures/std",
+	"serde/std",
+	"thiserror/std",
+	"alloy-eips/std"
 ]

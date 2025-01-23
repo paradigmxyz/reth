@@ -8,8 +8,7 @@ use alloy_rpc_types_engine::{
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_engine_primitives::{
-    BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
-    OnForkChoiceUpdated,
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, OnForkChoiceUpdated,
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
@@ -17,6 +16,7 @@ use reth_evm::{
     state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
     ConfigureEvm, Evm,
 };
+use reth_payload_primitives::EngineApiMessageVersion;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
     transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, Receipt, Receipts,
