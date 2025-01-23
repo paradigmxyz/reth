@@ -43,6 +43,7 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
+use revm::primitives::TxEnv;
 use std::sync::Arc;
 
 /// Storage implementation for Optimism.
@@ -190,6 +191,7 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
+        Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
     >,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
@@ -239,6 +241,7 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
+        Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
     >,
 {
     type EthApi = OpEthApi<N>;

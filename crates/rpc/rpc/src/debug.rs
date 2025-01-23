@@ -15,11 +15,10 @@ use alloy_rpc_types_trace::geth::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
-use reth_evm::TransactionEnv;
 use reth_evm::{
     env::EvmEnv,
     execute::{BlockExecutorProvider, Executor},
-    ConfigureEvmEnv,
+    ConfigureEvmEnv, TransactionEnv,
 };
 use reth_primitives::{NodePrimitives, ReceiptWithBloom, RecoveredBlock};
 use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
@@ -449,7 +448,7 @@ where
                             let env = revm_primitives::Env::boxed(
                                 evm_env.cfg_env_with_handler_cfg.cfg_env,
                                 evm_env.block_env,
-                                tx_env,
+                                tx_env.into(),
                             );
                             inspector.json_result(res, &env, db).map_err(Eth::Error::from_eth_err)
                         })
@@ -784,7 +783,7 @@ where
                     let env = revm_primitives::Env::boxed(
                         evm_env.cfg_env_with_handler_cfg.cfg_env,
                         evm_env.block_env,
-                        tx_env,
+                        tx_env.into(),
                     );
                     let result =
                         inspector.json_result(res, &env, db).map_err(Eth::Error::from_eth_err)?;

@@ -28,7 +28,8 @@ where
 
 impl<N> Call for OpEthApi<N>
 where
-    Self: LoadState<Evm: ConfigureEvm<Header = ProviderHeader<Self::Provider>>> + SpawnBlocking,
+    Self: LoadState<Evm: ConfigureEvm<Header = ProviderHeader<Self::Provider>, TxEnv = TxEnv>>
+        + SpawnBlocking,
     Self::Error: From<OpEthApiError>,
     N: OpNodeCore,
 {

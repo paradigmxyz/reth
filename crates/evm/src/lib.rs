@@ -24,7 +24,9 @@ use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{Database, DatabaseCommit, GetInspector};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EVMError, ResultAndState, SpecId, TxEnv, TxKind};
+use revm_primitives::{
+    BlockEnv, CfgEnvWithHandlerCfg, EVMError, ResultAndState, SpecId, TxEnv, TxKind,
+};
 
 pub mod either;
 /// EVM environment configuration.
@@ -90,7 +92,11 @@ pub trait Evm {
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// The EVM implementation.
-    type Evm<'a, DB: Database + 'a, I: 'a>: Evm<Tx = Self::TxEnv, DB = DB, Error = EVMError<DB::Error>>;
+    type Evm<'a, DB: Database + 'a, I: 'a>: Evm<
+        Tx = Self::TxEnv,
+        DB = DB,
+        Error = EVMError<DB::Error>,
+    >;
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id and transaction environment.
@@ -182,7 +188,12 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     }
 
     /// Fill transaction environment from a transaction  and the given sender address.
-    fn fill_tx_env(&self, tx_env: &mut Self::TxEnv, transaction: &Self::Transaction, sender: Address);
+    fn fill_tx_env(
+        &self,
+        tx_env: &mut Self::TxEnv,
+        transaction: &Self::Transaction,
+        sender: Address,
+    );
 
     /// Returns a [`CfgEnvWithHandlerCfg`] for the given header.
     fn cfg_env(&self, header: &Self::Header) -> CfgEnvWithHandlerCfg {
@@ -268,24 +279,10 @@ pub struct NextBlockEnvAttributes {
     pub gas_limit: u64,
 }
 
-/// Function hook that allows to modify a transaction environment.
-pub trait TxEnvOverrides {
-    /// Apply the overrides by modifying the given `TxEnv`.
-    fn apply(&mut self, env: &mut TxEnv);
-}
-
-impl<F> TxEnvOverrides for F
-where
-    F: FnMut(&mut TxEnv),
-{
-    fn apply(&mut self, env: &mut TxEnv) {
-        self(env)
-    }
-}
-
-
 /// Abstraction over transaction environment.
-pub trait TransactionEnv: Debug + Default + Clone + Send + Sync + 'static {
+pub trait TransactionEnv:
+    Into<revm_primitives::TxEnv> + Debug + Default + Clone + Send + Sync + 'static
+{
     /// Returns configured gas limit.
     fn gas_limit(&self) -> u64;
 
@@ -304,7 +301,7 @@ pub trait TransactionEnv: Debug + Default + Clone + Send + Sync + 'static {
     /// Set access list.
     fn set_access_list(&mut self, access_list: AccessList);
 
-    /// REturns calldata for the transaction.
+    /// Returns calldata for the transaction.
     fn input(&self) -> &Bytes;
 
     /// Returns [`TxKind`] of the transaction.

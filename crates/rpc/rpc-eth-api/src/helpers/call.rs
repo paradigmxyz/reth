@@ -3,7 +3,8 @@
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
-    helpers::estimate::EstimateCall, FromEthApiError, FromEvmError, FullEthApiTypes, RpcBlock, RpcNodeCore
+    helpers::estimate::EstimateCall, FromEthApiError, FromEvmError, FullEthApiTypes, RpcBlock,
+    RpcNodeCore,
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1559::calc_next_block_base_fee, eip2930::AccessListResult};
@@ -15,9 +16,8 @@ use alloy_rpc_types_eth::{
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use futures::Future;
-use reth_evm::TransactionEnv;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm, TransactionEnv};
 use reth_node_api::BlockBody;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockIdReader, ChainSpecProvider, ProviderHeader};
@@ -491,6 +491,7 @@ pub trait Call:
 
     /// Executes the [`TxEnv`] against the given [Database] without committing state
     /// changes.
+    #[expect(clippy::type_complexity)]
     fn transact<DB>(
         &self,
         db: DB,
@@ -510,6 +511,7 @@ pub trait Call:
 
     /// Executes the [`EvmEnv`] against the given [Database] without committing state
     /// changes.
+    #[expect(clippy::type_complexity)]
     fn transact_with_inspector<DB>(
         &self,
         db: DB,
@@ -529,12 +531,18 @@ pub trait Call:
     }
 
     /// Executes the call request at the given [`BlockId`].
+    #[expect(clippy::type_complexity)]
     fn transact_call_at(
         &self,
         request: TransactionRequest,
         at: BlockId,
         overrides: EvmOverrides,
-    ) -> impl Future<Output = Result<(ResultAndState, (EvmEnv, <Self::Evm as ConfigureEvmEnv>::TxEnv)), Self::Error>> + Send
+    ) -> impl Future<
+        Output = Result<
+            (ResultAndState, (EvmEnv, <Self::Evm as ConfigureEvmEnv>::TxEnv)),
+            Self::Error,
+        >,
+    > + Send
     where
         Self: LoadPendingBlock,
     {
@@ -584,7 +592,11 @@ pub trait Call:
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
         Self: LoadPendingBlock,
-        F: FnOnce(StateCacheDbRefMutWrapper<'_, '_>, EvmEnv, <Self::Evm as ConfigureEvmEnv>::TxEnv) -> Result<R, Self::Error>
+        F: FnOnce(
+                StateCacheDbRefMutWrapper<'_, '_>,
+                EvmEnv,
+                <Self::Evm as ConfigureEvmEnv>::TxEnv,
+            ) -> Result<R, Self::Error>
             + Send
             + 'static,
         R: Send + 'static,

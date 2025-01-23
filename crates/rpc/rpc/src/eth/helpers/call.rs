@@ -7,12 +7,10 @@ use reth_evm::ConfigureEvm;
 use reth_provider::{BlockReader, ProviderHeader};
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
-    FullEthApiTypes,
+    FromEthApiError, FullEthApiTypes, IntoEthApiError,
 };
-use reth_rpc_eth_api::FromEthApiError;
 use reth_rpc_eth_types::{revm_utils::CallFees, RpcInvalidTransactionError};
 use revm_primitives::{BlockEnv, TxEnv, TxKind, U256};
-use reth_rpc_eth_api::IntoEthApiError;
 
 impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig>
 where
@@ -23,7 +21,8 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadState<Evm: ConfigureEvm<TxEnv = TxEnv, Header = ProviderHeader<Self::Provider>>> + SpawnBlocking,
+    Self: LoadState<Evm: ConfigureEvm<TxEnv = TxEnv, Header = ProviderHeader<Self::Provider>>>
+        + SpawnBlocking,
     EvmConfig: ConfigureEvm<Header = Header>,
     Provider: BlockReader,
 {

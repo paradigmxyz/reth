@@ -33,6 +33,7 @@ pub trait Trace:
 {
     /// Executes the [`EvmEnv`] against the given [Database] without committing state
     /// changes.
+    #[expect(clippy::type_complexity)]
     fn inspect<DB, I>(
         &self,
         db: DB,
@@ -88,7 +89,7 @@ pub trait Trace:
     fn spawn_trace_at_with_state<F, R>(
         &self,
         evm_env: EvmEnv,
-        tx_env:<Self::Evm as ConfigureEvmEnv>::TxEnv,
+        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
