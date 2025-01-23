@@ -39,6 +39,17 @@ use tracing::{debug, error, trace};
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
+/// Determines the size of the thread pool to be used in [`StateRootTask`].
+/// It should be enough to handle all the expected multiproof calculations
+/// triggered in parallel (one per state update received) plus two threads used
+/// internally in [`StateRootTask`].
+///
+/// NOTE: this value can be greater than the available cores in the host, it
+/// represents the maximum number of threads that can be handled by the pool.
+pub(crate) fn thread_pool_size() -> usize {
+    std::thread::available_parallelism().map_or(16, |num| (num.get() / 2).max(16))
+}
+
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates and the total time spent.
 #[derive(Debug)]
@@ -975,10 +986,7 @@ mod tests {
             prefix_sets: Arc::new(input.prefix_sets),
         };
 
-        // The thread pool requires at least 2 threads as it contains a long running sparse trie
-        // task.
-        let num_threads =
-            std::thread::available_parallelism().map_or(4, |num| (num.get() / 2).max(4));
+        let num_threads = thread_pool_size();
 
         let state_root_task_pool = rayon::ThreadPoolBuilder::new()
             .num_threads(num_threads)
