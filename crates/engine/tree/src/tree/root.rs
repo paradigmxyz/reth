@@ -40,14 +40,11 @@ use tracing::{debug, error, trace};
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
 /// Determines the size of the thread pool to be used in [`StateRootTask`].
-/// It should be enough to handle all the expected multiproof calculations
-/// triggered in parallel (one per state update received) plus two threads used
-/// internally in [`StateRootTask`].
 ///
 /// NOTE: this value can be greater than the available cores in the host, it
 /// represents the maximum number of threads that can be handled by the pool.
 pub(crate) fn thread_pool_size() -> usize {
-    std::thread::available_parallelism().map_or(16, |num| (num.get() / 2).max(16))
+    std::thread::available_parallelism().map_or(4, |num| (num.get() / 2).max(4))
 }
 
 /// Outcome of the state root computation, including the state root itself with
