@@ -1,7 +1,7 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_errors::ProviderError;
 use reth_primitives::{EthPrimitives, NodePrimitives};
 use reth_provider::{
@@ -140,7 +140,7 @@ where
 
     fn on_save_blocks(
         &self,
-        blocks: Vec<ExecutedBlock<N::Primitives>>,
+        blocks: Vec<ExecutedBlockWithTrieUpdates<N::Primitives>>,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
         debug!(target: "engine::persistence", first=?blocks.first().map(|b| b.recovered_block.num_hash()), last=?blocks.last().map(|b| b.recovered_block.num_hash()), "Saving range of blocks");
         let start_time = Instant::now();
@@ -181,7 +181,7 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     ///
     /// First, header, transaction, and receipt-related data should be written to static files.
     /// Then the execution history-related data will be written to the database.
-    SaveBlocks(Vec<ExecutedBlock<N>>, oneshot::Sender<Option<BlockNumHash>>),
+    SaveBlocks(Vec<ExecutedBlockWithTrieUpdates<N>>, oneshot::Sender<Option<BlockNumHash>>),
 
     /// Removes block data above the given block number from the database.
     ///
@@ -258,7 +258,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     /// If there are no blocks to persist, then `None` is sent in the sender.
     pub fn save_blocks(
         &self,
-        blocks: Vec<ExecutedBlock<T>>,
+        blocks: Vec<ExecutedBlockWithTrieUpdates<T>>,
         tx: oneshot::Sender<Option<BlockNumHash>>,
     ) -> Result<(), SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveBlocks(blocks, tx))
