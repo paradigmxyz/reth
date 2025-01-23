@@ -810,22 +810,32 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         Self { recovered_block, execution_output, hashed_state, trie }
     }
 
+    /// Returns a reference to an inner [`SealedBlock`]
+    #[inline]
+    pub fn sealed_block(&self) -> &SealedBlock<N::Block> {
+        self.recovered_block.sealed_block()
+    }
+
     /// Returns a reference to [`RecoveredBlock`]
+    #[inline]
     pub fn recovered_block(&self) -> &RecoveredBlock<N::Block> {
         &self.recovered_block
     }
 
     /// Returns a reference to the block's execution outcome
+    #[inline]
     pub fn execution_outcome(&self) -> &ExecutionOutcome<N::Receipt> {
         &self.execution_output
     }
 
     /// Returns a reference to the hashed state result of the execution outcome
+    #[inline]
     pub fn hashed_state(&self) -> &HashedPostState {
         &self.hashed_state
     }
 
     /// Returns a reference to the trie updates for the block
+    #[inline]
     pub fn trie_updates(&self) -> &TrieUpdates {
         &self.trie
     }
