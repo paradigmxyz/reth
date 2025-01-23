@@ -2651,7 +2651,7 @@ where
 
             // create the tx env and reset nonce
             let mut tx_env = evm_config.tx_env(&tx, sender);
-            tx_env.set_nonce(None);
+            tx_env.unset_nonce();
 
             // exit early if execution is done
             if execution_finished.load(std::sync::atomic::Ordering::SeqCst) {
