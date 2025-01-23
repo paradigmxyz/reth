@@ -1260,7 +1260,7 @@ where
                     EngineApiRequest::InsertExecutedBlock(block) => {
                         debug!(target: "engine::tree", block=?block.recovered_block().num_hash(), "inserting already executed block");
                         let now = Instant::now();
-                        let sealed_block = Arc::new(block.recovered_block().sealed_block().clone());
+                        let sealed_block = Arc::new(block.sealed_block().clone());
                         self.state.tree_state.insert_executed(block);
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
 
