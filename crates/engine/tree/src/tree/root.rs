@@ -660,7 +660,7 @@ where
                             continue
                         };
 
-                        if proof_calculated.is_from_state_update() {
+                        if !proof_calculated.update.state.is_empty() {
                             proofs_processed += 1;
                         }
 
