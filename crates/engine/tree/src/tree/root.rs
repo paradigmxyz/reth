@@ -160,6 +160,25 @@ pub struct ProofCalculated {
     sequence_number: u64,
     /// Sparse trie update
     update: SparseTrieUpdate,
+    /// The source of the proof fetch, whether it was requested as a prefetch or as a result of a
+    /// state update.
+    source: ProofFetchSource,
+}
+
+impl ProofCalculated {
+    /// Returns true if the proof was calculated as a result of a state update.
+    pub(crate) const fn is_from_state_update(&self) -> bool {
+        matches!(self.source, ProofFetchSource::StateUpdate)
+    }
+}
+
+/// Whether or not a proof was fetched due to a state update, or due to a prefetch command.
+#[derive(Debug)]
+pub enum ProofFetchSource {
+    /// The proof was fetched due to a prefetch command.
+    Prefetch,
+    /// The proof was fetched due to a state update.
+    StateUpdate,
 }
 
 /// Handle to track proof calculation ordering
@@ -395,6 +414,7 @@ where
             proof_sequence_number,
             state_root_message_sender,
             thread_pool,
+            ProofFetchSource::Prefetch,
         );
     }
 
@@ -421,6 +441,7 @@ where
             proof_sequence_number,
             state_root_message_sender,
             thread_pool,
+            ProofFetchSource::StateUpdate,
         );
     }
 
@@ -431,6 +452,7 @@ where
         proof_sequence_number: u64,
         state_root_message_sender: Sender<StateRootMessage>,
         thread_pool: Arc<rayon::ThreadPool>,
+        source: ProofFetchSource,
     ) {
         // Dispatch proof gathering for this state update
         thread_pool.clone().spawn(move || {
@@ -459,6 +481,7 @@ where
                                 targets: proof_targets,
                                 multiproof: proof,
                             },
+                            source,
                         }),
                     ));
                 }
@@ -548,7 +571,9 @@ where
                         updates_finished = true;
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
-                        proofs_processed += 1;
+                        if proof_calculated.is_from_state_update() {
+                            proofs_processed += 1;
+                        }
                         debug!(
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
