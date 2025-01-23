@@ -20,10 +20,10 @@ pub use alloy_rpc_types_engine::{
 };
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_chainspec::ChainSpec;
-use reth_engine_primitives::{BuiltPayload, EngineTypes, EngineValidator, PayloadValidator};
+use reth_engine_primitives::{EngineTypes, EngineValidator, PayloadValidator};
 use reth_payload_primitives::{
-    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    PayloadOrAttributes, PayloadTypes,
+    validate_version_specific_fields, BuiltPayload, EngineApiMessageVersion,
+    EngineObjectValidationError, PayloadOrAttributes, PayloadTypes,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Block, NodePrimitives, SealedBlock};
