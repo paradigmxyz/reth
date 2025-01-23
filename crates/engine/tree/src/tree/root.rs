@@ -40,6 +40,8 @@ use tracing::{debug, error, trace};
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
 /// Determines the size of the thread pool to be used in [`StateRootTask`].
+/// It should be at least three, one for multiproof calculations  plus two to be
+/// used internally in [`StateRootTask`].
 ///
 /// NOTE: this value can be greater than the available cores in the host, it
 /// represents the maximum number of threads that can be handled by the pool.
@@ -316,6 +318,9 @@ struct MultiproofInput<Factory> {
 }
 
 /// Manages concurrent multiproof calculations.
+/// Takes care of not having more calculations in flight than a given thread
+/// pool size, further calculation requests are queued and spawn later, after
+/// availability has been signaled.
 #[derive(Debug)]
 struct MultiproofManager<Factory> {
     /// Maximum number of concurrent calculations.
@@ -335,12 +340,15 @@ where
         + Sync
         + 'static,
 {
+    /// Creates a new [`MultiproofManager`].
     fn new(thread_pool_size: usize) -> Self {
         // we keep 2 threads to be used internally by [`StateRootTask`]
         let max_concurrent = thread_pool_size.saturating_sub(2);
         Self { max_concurrent, inflight: 0, pending: VecDeque::with_capacity(max_concurrent) }
     }
 
+    /// Spawns a new multiproof calculation or enqueues it for later if
+    /// `max_concurrent` are already inflight.
     fn try_spawn(&mut self, input: MultiproofInput<Factory>) {
         if self.inflight >= self.max_concurrent {
             self.pending.push_back(input);
@@ -350,6 +358,8 @@ where
         self.spawn_multiproof(input);
     }
 
+    /// Signals that a multiproof calculation has finished and there's room to
+    /// spawn a new calculation if needed.
     fn on_calculation_complete(&mut self) {
         self.inflight = self.inflight.saturating_sub(1);
 
@@ -358,6 +368,7 @@ where
         }
     }
 
+    /// Spawns a multiproof calculation.
     fn spawn_multiproof(&mut self, input: MultiproofInput<Factory>) {
         let MultiproofInput {
             config,
