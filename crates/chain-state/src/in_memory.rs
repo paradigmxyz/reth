@@ -841,11 +841,21 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
 ///
 /// We store it as separate type because [`TrieUpdates`] are only available for blocks stored in
 /// memory and can't be obtained for canonical persisted blocks.
-#[derive(Clone, Debug, PartialEq, Eq, Default, derive_more::Deref, derive_more::DerefMut)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Default,
+    derive_more::Deref,
+    derive_more::DerefMut,
+    derive_more::Into,
+)]
 pub struct ExecutedBlockWithTrieUpdates<N: NodePrimitives = EthPrimitives> {
     /// Inner [`ExecutedBlock`].
     #[deref]
     #[deref_mut]
+    #[into]
     pub block: ExecutedBlock<N>,
     /// Trie updates that result of applying the block.
     pub trie: Arc<TrieUpdates>,
@@ -883,6 +893,9 @@ pub enum NewCanonicalChain<N: NodePrimitives = EthPrimitives> {
         /// All blocks of the _new_ chain
         new: Vec<ExecutedBlockWithTrieUpdates<N>>,
         /// All blocks of the _old_ chain
+        /// These are not [`ExecutedBlockWithTrieUpdates`] because we don't always have the trie
+        /// updates for the old canonical chain. For example, in case of node being restarted right
+        /// before the reorg TrieUpdates can't be fetched from database and won't be available.
         old: Vec<ExecutedBlock<N>>,
     },
 }
