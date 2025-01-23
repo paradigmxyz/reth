@@ -59,10 +59,9 @@ use reth_trie::{
 };
 use reth_trie_db::DatabaseTrieCursorFactory;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::ResultAndState;
+use revm_primitives::{EvmState, ResultAndState};
 use root::{
-    StateHookSender, StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootMessage,
-    StateRootTask,
+    StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootMessage, StateRootTask,
 };
 use std::{
     cmp::Ordering,
@@ -70,6 +69,7 @@ use std::{
     fmt::Debug,
     ops::Bound,
     sync::{
+        atomic::AtomicBool,
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
         Arc,
     },
@@ -2363,8 +2363,6 @@ where
             return Err(e.into())
         }
 
-        let block_number = block.number();
-        let block_hash = block.hash();
         let sealed_block = Arc::new(block.clone_sealed_block());
 
         // We only run the parallel state root if we are currently persisting blocks that are all
@@ -2377,7 +2375,10 @@ where
         let is_descendant_of_persisting_blocks =
             self.is_descendant_of_persisting_blocks(block.header());
 
-        let (state_root_handle, state_root_task_config, state_hook) =
+        // Atomic bool for letting the prewarm tasks know when to stop
+        let execution_finished = Arc::new(AtomicBool::new(false));
+
+        let (state_root_handle, state_root_task_config, state_root_sender, state_hook) =
             if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
                 let state_root_config = StateRootConfig::new_from_input(
@@ -2390,14 +2391,28 @@ where
                     state_root_config.clone(),
                     self.state_root_task_pool.clone(),
                 );
-                let state_hook = Box::new(state_root_task.state_hook()) as Box<dyn OnStateHook>;
-                (Some(state_root_task.spawn()), Some(state_root_config), state_hook)
+                let state_root_sender = state_root_task.state_root_message_sender();
+                let mut state_hook = state_root_task.state_hook();
+
+                // Ensure that prewarm tasks don't send proof messages after state hook sender is
+                // dropped
+                let execution_finished = execution_finished.clone();
+                let state_hook = Box::new(move |state: &EvmState| {
+                    execution_finished.store(true, std::sync::atomic::Ordering::SeqCst);
+                    state_hook.on_state(state)
+                }) as Box<dyn OnStateHook>;
+                (
+                    Some(state_root_task.spawn()),
+                    Some(state_root_config),
+                    Some(state_root_sender),
+                    state_hook,
+                )
             } else {
-                (None, None, Box::new(NoopHook::default()) as Box<dyn OnStateHook>)
+                (None, None, None, Box::new(NoopHook::default()) as Box<dyn OnStateHook>)
             };
 
-        // Use cached state provider before executing, this does nothing currently, will be used in
-        // prewarming
+        // Use cached state provider before executing, used in execution after prewarming threads
+        // complete
         let caches = ProviderCacheBuilder::default().build_caches();
         let cache_metrics = CachedStateMetrics::zeroed();
         let state_provider = CachedStateProvider::new_with_caches(
@@ -2419,6 +2434,7 @@ where
                 caches.clone(),
                 cache_metrics.clone(),
                 state_root_sender,
+                execution_finished.clone(),
             )?;
         }
 
@@ -2593,6 +2609,7 @@ where
     }
 
     /// Runs execution for a single transaction, spawning it in th eprewarm threadpool.
+    #[allow(clippy::too_many_arguments)]
     fn prewarm_transaction(
         &self,
         block: N::BlockHeader,
@@ -2600,7 +2617,8 @@ where
         sender: Address,
         caches: ProviderCaches,
         cache_metrics: CachedStateMetrics,
-        state_root_sender: Option<StateHookSender>,
+        state_root_sender: Option<Sender<StateRootMessage>>,
+        execution_finished: Arc<AtomicBool>,
     ) -> Result<(), InsertBlockErrorKind> {
         let Some(state_provider) = self.state_provider(block.parent_hash())? else {
             error!(target: "engine::tree", parent=?block.parent_hash(), "Could not get state provider for prewarm");
@@ -2631,6 +2649,10 @@ where
                     return
                 }
             };
+
+            if execution_finished.load(std::sync::atomic::Ordering::SeqCst) {
+                return
+            }
 
             let Some(state_root_sender) = state_root_sender else {
                 return
@@ -3008,7 +3030,6 @@ mod tests {
     use reth_ethereum_primitives::{Block, EthPrimitives};
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives::{Block, EthPrimitives};
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
