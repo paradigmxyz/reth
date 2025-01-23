@@ -1,5 +1,6 @@
 use crate::{
     identifier::{SenderId, TransactionId},
+    metrics::PendingEvictionMetrics,
     pool::{
         best::{BestTransactions, BestTransactionsWithFees},
         size::SizeTracker,
@@ -48,6 +49,8 @@ pub struct PendingPool<T: TransactionOrdering> {
     /// Used to broadcast new transactions that have been added to the `PendingPool` to existing
     /// `static_files` of this pool.
     new_transaction_notifier: broadcast::Sender<PendingTransaction<T>>,
+    /// Metrics for evictions
+    eviction_metrics: PendingEvictionMetrics,
 }
 
 // === impl PendingPool ===
@@ -64,6 +67,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             highest_nonces: Default::default(),
             size_of: Default::default(),
             new_transaction_notifier,
+            eviction_metrics: Default::default(),
         }
     }
 
@@ -468,6 +472,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         &mut self,
         limit: SubPoolLimit,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let start = std::time::Instant::now();
         let mut removed = Vec::new();
         // return early if the pool is already under the limits
         if !self.exceeds(&limit) {
@@ -483,6 +488,9 @@ impl<T: TransactionOrdering> PendingPool<T> {
         // now repeat for local transactions, since local transactions must be removed now for the
         // pool to be under the limit
         self.remove_to_limit(&limit, true, &mut removed);
+
+        self.eviction_metrics.pending_eviction_duration_seconds.record(start.elapsed());
+        self.eviction_metrics.pending_transactions_evicted.increment(removed.len() as u64);
 
         removed
     }
