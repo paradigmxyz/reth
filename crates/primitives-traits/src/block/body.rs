@@ -47,6 +47,13 @@ pub trait BlockBody:
         self.transactions().iter()
     }
 
+    /// Clones the transactions in the block.
+    ///
+    /// This is a convenience function for `transactions().to_vec()`
+    fn clone_transactions(&self) -> Vec<Self::Transaction> {
+        self.transactions().to_vec()
+    }
+
     /// Returns an iterator over all transaction hashes in the block body.
     fn transaction_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
         self.transactions_iter().map(|tx| tx.tx_hash())
