@@ -256,7 +256,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
     }
 
     /// Returns true if the message variant is a request.
-    pub fn is_request(&self) -> bool {
+    pub const fn is_request(&self) -> bool {
         matches!(
             self,
             Self::GetBlockBodies(_) |
@@ -268,7 +268,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
     }
 
     /// Returns true if the message variant is a response to a request.
-    pub fn is_response(&self) -> bool {
+    pub const fn is_response(&self) -> bool {
         matches!(
             self,
             Self::PooledTransactions(_) |
