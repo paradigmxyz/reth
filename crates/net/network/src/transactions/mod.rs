@@ -1217,7 +1217,7 @@ where
             let mut new_txs = Vec::with_capacity(transactions.len());
             for tx in transactions {
                 // recover transaction
-                let tx = match tx.try_into_ecrecovered() {
+                let tx = match tx.try_into_recovered() {
                     Ok(tx) => tx,
                     Err(badtx) => {
                         trace!(target: "net::tx",

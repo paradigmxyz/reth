@@ -180,7 +180,7 @@ where
                     .collect()
             };
 
-        self.trace_block(Arc::new(block.with_senders_unchecked(senders)), evm_env, opts).await
+        self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts).await
     }
 
     /// Replays a block and returns the trace of each transaction.
