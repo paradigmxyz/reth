@@ -8,7 +8,6 @@ use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::EthApiBuilderCtx;
-use reth_primitives::EthPrimitives;
 use reth_provider::{
     BlockNumReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
     NodePrimitivesProvider, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
@@ -30,6 +29,7 @@ use reth_tasks::{
 use reth_transaction_pool::TransactionPool;
 
 pub use receipt::ScrollReceiptBuilder;
+use reth_scroll_primitives::ScrollPrimitives;
 use scroll_alloy_network::Scroll;
 
 use crate::ScrollEthApiError;
@@ -73,7 +73,7 @@ where
     N: ScrollNodeCore<
         Provider: BlockReaderIdExt
                       + ChainSpecProvider
-                      + CanonStateSubscriptions<Primitives = EthPrimitives>
+                      + CanonStateSubscriptions<Primitives = ScrollPrimitives>
                       + Clone
                       + 'static,
     >,

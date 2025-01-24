@@ -245,6 +245,14 @@ mod op {
     impl_compression_for_compact!(OpTransactionSigned, OpReceipt);
 }
 
+#[cfg(feature = "op")]
+mod scroll {
+    use super::*;
+    use reth_scroll_primitives::{ScrollReceipt, ScrollTransactionSigned};
+
+    impl_compression_for_compact!(ScrollTransactionSigned, ScrollReceipt);
+}
+
 macro_rules! impl_compression_fixed_compact {
     ($($name:tt),+) => {
         $(

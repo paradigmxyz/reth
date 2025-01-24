@@ -11,3 +11,5 @@ pub use execute::{
     ScrollExecutionStrategy, ScrollExecutionStrategyFactory, ScrollExecutorProvider,
 };
 mod execute;
+mod receipt;
+pub use receipt::{BasicScrollReceiptBuilder, ReceiptBuilderCtx, ScrollReceiptBuilder};

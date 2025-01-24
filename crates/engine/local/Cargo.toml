@@ -31,6 +31,9 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 
+# scroll
+scroll-alloy-rpc-types-engine = { workspace = true, optional = true }
+
 # async
 tokio.workspace = true
 tokio-stream.workspace = true
@@ -49,3 +52,4 @@ workspace = true
 op = [
     "dep:op-alloy-rpc-types-engine"
 ]
+scroll-alloy-traits = ["dep:scroll-alloy-rpc-types-engine"]

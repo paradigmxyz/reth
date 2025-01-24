@@ -4,7 +4,7 @@ use alloy_consensus::BlockHeader;
 use alloy_rpc_types_eth::BlockId;
 use reth_chainspec::ChainSpecProvider;
 use reth_node_api::BlockBody;
-use reth_primitives::{Receipt, TransactionMeta, TransactionSigned};
+use reth_primitives::TransactionMeta;
 use reth_provider::{BlockReader, HeaderProvider};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
@@ -12,7 +12,9 @@ use reth_rpc_eth_api::{
 };
 use scroll_alloy_network::Network;
 
+use reth_primitives_traits::SignedTransaction;
 use reth_scroll_chainspec::ScrollChainSpec;
+use reth_scroll_primitives::{ScrollReceipt, ScrollTransactionSigned};
 use scroll_alloy_rpc_types::ScrollTransactionReceipt;
 
 use crate::{eth::ScrollNodeCore, ScrollEthApi, ScrollEthApiError, ScrollReceiptBuilder};
@@ -22,7 +24,7 @@ where
     Self: LoadBlock<
         Error = ScrollEthApiError,
         NetworkTypes: Network<ReceiptResponse = ScrollTransactionReceipt>,
-        Provider: BlockReader<Receipt = Receipt, Transaction = TransactionSigned>,
+        Provider: BlockReader<Receipt = ScrollReceipt, Transaction = ScrollTransactionSigned>,
     >,
     N: ScrollNodeCore<Provider: ChainSpecProvider<ChainSpec = ScrollChainSpec> + HeaderProvider>,
 {
@@ -48,7 +50,7 @@ where
                 .enumerate()
                 .map(|(idx, (tx, receipt))| -> Result<_, _> {
                     let meta = TransactionMeta {
-                        tx_hash: tx.hash(),
+                        tx_hash: *tx.tx_hash(),
                         index: idx as u64,
                         block_hash,
                         block_number,

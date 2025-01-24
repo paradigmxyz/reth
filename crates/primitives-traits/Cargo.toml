@@ -157,7 +157,7 @@ reth-codec = [
 op = [
 	"dep:op-alloy-consensus",
 ]
-scroll-in-memory-size = ["scroll-alloy-consensus"]
+scroll-alloy-traits = ["scroll-alloy-consensus"]
 scroll = ["revm-primitives/scroll"]
 rayon = [
 	"dep:rayon",

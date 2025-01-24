@@ -11,8 +11,8 @@ use serde_with as _;
 
 mod transaction;
 pub use transaction::{
-    ScrollL1MessageTransactionFields, ScrollTxEnvelope, ScrollTxType, ScrollTypedTransaction,
-    TxL1Message, L1_MESSAGE_TRANSACTION_TYPE, L1_MESSAGE_TX_TYPE_ID,
+    ScrollL1MessageTransactionFields, ScrollPooledTransaction, ScrollTxEnvelope, ScrollTxType,
+    ScrollTypedTransaction, TxL1Message, L1_MESSAGE_TRANSACTION_TYPE, L1_MESSAGE_TX_TYPE_ID,
 };
 
 mod receipt;

@@ -1,13 +1,14 @@
 //! Loads Scroll pending block for an RPC response.
 
 use alloy_consensus::{
-    constants::EMPTY_WITHDRAWALS, proofs::calculate_transaction_root, Header, EMPTY_OMMER_ROOT_HASH,
+    constants::EMPTY_WITHDRAWALS, proofs::calculate_transaction_root, Header, Transaction,
+    TxReceipt, EMPTY_OMMER_ROOT_HASH,
 };
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::{logs_bloom, B256, U256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
-use reth_primitives::{proofs::calculate_receipt_root_no_memo, BlockBody, Receipt};
+use reth_primitives::BlockBody;
 use reth_provider::{
     BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderHeader, ProviderReceipt,
     ProviderTx, StateProviderFactory,
@@ -17,8 +18,11 @@ use reth_rpc_eth_api::{
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::PendingBlock;
+use reth_scroll_forks::ScrollHardforks;
+use reth_scroll_primitives::{ScrollBlock, ScrollReceipt, ScrollTransactionSigned};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::primitives::{BlockEnv, ExecutionResult};
+use scroll_alloy_consensus::{ScrollTransactionReceipt, ScrollTxType};
 use scroll_alloy_network::Network;
 
 use crate::ScrollEthApi;
@@ -33,11 +37,11 @@ where
         >,
     N: RpcNodeCore<
         Provider: BlockReaderIdExt<
-            Transaction = reth_primitives::TransactionSigned,
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
+            Transaction = ScrollTransactionSigned,
+            Block = ScrollBlock,
+            Receipt = ScrollReceipt,
             Header = reth_primitives::Header,
-        > + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+        > + ChainSpecProvider<ChainSpec: EthChainSpec + ScrollHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
         Evm: ConfigureEvm<
@@ -62,14 +66,16 @@ where
         state_root: B256,
         transactions: Vec<ProviderTx<Self::Provider>>,
         receipts: &[ProviderReceipt<Self::Provider>],
-    ) -> reth_provider::ProviderBlock<Self::Provider> {
+    ) -> ProviderBlock<Self::Provider> {
         let chain_spec = self.provider().chain_spec();
         let timestamp = block_env.timestamp.to::<u64>();
 
         let transactions_root = calculate_transaction_root(&transactions);
-        let receipts_root = calculate_receipt_root_no_memo(&receipts.iter().collect::<Vec<_>>());
+        let receipts_root = ProviderReceipt::<Self::Provider>::calculate_receipt_root_no_memo(
+            &receipts.iter().collect::<Vec<_>>(),
+        );
 
-        let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| &r.logs));
+        let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| r.logs()));
         let is_cancun = chain_spec.is_cancun_active_at_timestamp(timestamp);
         let is_prague = chain_spec.is_prague_active_at_timestamp(timestamp);
         let is_shanghai = chain_spec.is_shanghai_active_at_timestamp(timestamp);
@@ -90,7 +96,7 @@ where
             number: block_env.number.to::<u64>(),
             gas_limit: block_env.gas_limit.to::<u64>(),
             difficulty: U256::ZERO,
-            gas_used: receipts.last().map(|r| r.cumulative_gas_used).unwrap_or_default(),
+            gas_used: receipts.last().map(|r| r.cumulative_gas_used()).unwrap_or_default(),
             blob_gas_used: is_cancun.then(|| {
                 transactions.iter().map(|tx| tx.blob_gas_used().unwrap_or_default()).sum::<u64>()
             }),
@@ -112,14 +118,20 @@ where
         tx: &ProviderTx<Self::Provider>,
         result: ExecutionResult,
         cumulative_gas_used: u64,
-    ) -> reth_provider::ProviderReceipt<Self::Provider> {
-        #[allow(clippy::needless_update)]
-        Receipt {
-            tx_type: tx.tx_type(),
-            success: result.is_success(),
+    ) -> ProviderReceipt<Self::Provider> {
+        let receipt = alloy_consensus::Receipt {
+            status: result.is_success().into(),
             cumulative_gas_used,
-            logs: result.into_logs(),
-            ..Default::default()
+            logs: result.into_logs().into_iter().collect(),
+        };
+
+        let into_scroll_receipt =
+            |inner: alloy_consensus::Receipt| ScrollTransactionReceipt::new(inner, U256::ZERO);
+        match tx.tx_type() {
+            ScrollTxType::Legacy => ScrollReceipt::Legacy(into_scroll_receipt(receipt)),
+            ScrollTxType::Eip2930 => ScrollReceipt::Eip2930(into_scroll_receipt(receipt)),
+            ScrollTxType::Eip1559 => ScrollReceipt::Eip1559(into_scroll_receipt(receipt)),
+            ScrollTxType::L1Message => ScrollReceipt::L1Message(receipt),
         }
     }
 }

@@ -1983,7 +1983,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2831,7 +2831,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4699,7 +4699,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -6168,7 +6168,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6917,6 +6917,7 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-prune-types",
+ "reth-scroll-primitives",
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie-common",
@@ -7191,6 +7192,7 @@ dependencies = [
  "reth-prune",
  "reth-stages-api",
  "reth-transaction-pool",
+ "scroll-alloy-rpc-types-engine",
  "tokio",
  "tokio-stream",
  "tracing",
@@ -8586,6 +8588,7 @@ dependencies = [
  "reth-errors",
  "reth-primitives",
  "revm-primitives",
+ "scroll-alloy-rpc-types-engine",
  "serde",
  "thiserror 2.0.11",
  "tokio",
@@ -9166,6 +9169,7 @@ dependencies = [
  "reth-scroll-chainspec",
  "reth-scroll-evm",
  "reth-scroll-node",
+ "reth-scroll-primitives",
  "reth-tracing",
  "tracing",
 ]
@@ -9179,16 +9183,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "reth-scroll-engine"
+name = "reth-scroll-engine-primitives"
 version = "1.1.5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-engine",
+ "reth-chain-state",
+ "reth-chainspec",
+ "reth-engine-primitives",
+ "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-primitives",
+ "reth-primitives-traits",
+ "reth-rpc-types-compat",
  "reth-scroll-chainspec",
  "reth-scroll-forks",
+ "reth-scroll-primitives",
+ "scroll-alloy-rpc-types-engine",
+ "serde",
+ "sha2 0.10.8",
 ]
 
 [[package]]
@@ -9210,7 +9226,9 @@ dependencies = [
  "reth-scroll-chainspec",
  "reth-scroll-consensus",
  "reth-scroll-forks",
+ "reth-scroll-primitives",
  "revm",
+ "revm-primitives",
  "scroll-alloy-consensus",
  "thiserror 2.0.11",
  "tracing",
@@ -9231,11 +9249,15 @@ dependencies = [
 name = "reth-scroll-node"
 version = "1.1.5"
 dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "eyre",
  "reth-consensus",
  "reth-db",
+ "reth-engine-local",
+ "reth-eth-wire-types",
  "reth-ethereum-engine-primitives",
  "reth-ethereum-forks",
  "reth-evm",
@@ -9250,13 +9272,28 @@ dependencies = [
  "reth-rpc",
  "reth-rpc-server-types",
  "reth-scroll-chainspec",
- "reth-scroll-engine",
+ "reth-scroll-engine-primitives",
  "reth-scroll-evm",
+ "reth-scroll-payload",
  "reth-scroll-primitives",
  "reth-scroll-rpc",
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-db",
+ "revm",
+ "scroll-alloy-consensus",
+ "scroll-alloy-rpc-types-engine",
+ "thiserror 2.0.11",
+ "tokio",
+]
+
+[[package]]
+name = "reth-scroll-payload"
+version = "1.1.5"
+dependencies = [
+ "futures-util",
+ "reth-payload-builder",
+ "reth-payload-primitives",
 ]
 
 [[package]]
@@ -9304,12 +9341,14 @@ dependencies = [
  "parking_lot",
  "reqwest",
  "reth-chainspec",
+ "reth-ethereum-primitives",
  "reth-evm",
  "reth-network-api",
  "reth-node-api",
  "reth-node-builder",
  "reth-optimism-chainspec",
  "reth-primitives",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-rpc",
  "reth-rpc-api",
@@ -9318,6 +9357,8 @@ dependencies = [
  "reth-rpc-server-types",
  "reth-scroll-chainspec",
  "reth-scroll-evm",
+ "reth-scroll-forks",
+ "reth-scroll-primitives",
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
@@ -9768,6 +9809,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "19.3.0"
+source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v54#467ffa62439a95f4e977950cb645a035586f90cf"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -9801,6 +9843,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "15.1.0"
+source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v54#467ffa62439a95f4e977950cb645a035586f90cf"
 dependencies = [
  "cfg-if",
  "revm-primitives",
@@ -9810,6 +9853,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "16.0.0"
+source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v54#467ffa62439a95f4e977950cb645a035586f90cf"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -9828,6 +9872,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "15.1.0"
+source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v54#467ffa62439a95f4e977950cb645a035586f90cf"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10074,7 +10119,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10309,15 +10354,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "scroll-alloy-rpc-types-engine"
+version = "1.1.5"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rpc-types-engine",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "scroll-reth"
 version = "1.1.5"
 dependencies = [
  "clap",
  "reth-cli-util",
- "reth-node-builder",
  "reth-provider",
  "reth-scroll-cli",
  "reth-scroll-node",
+ "tracing",
 ]
 
 [[package]]
@@ -11018,7 +11073,7 @@ dependencies = [
  "getrandom 0.2.15",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11581,7 +11636,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69fff37da548239c3bf9e64a12193d261e8b22b660991c6fd2df057c168f435f"
 dependencies = [
  "cc",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -12014,7 +12069,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

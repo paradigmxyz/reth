@@ -114,6 +114,7 @@ arbitrary = [
 ]
 optimism = ["reth-db-api/optimism"]
 op = ["reth-db-api/op"]
+scroll-alloy-traits = ["reth-db-api/scroll-alloy-traits"]
 disable-lock = []
 scroll = []
 

@@ -6,7 +6,7 @@ pub use builder::{
     consensus::ScrollConsensusBuilder,
     engine::{ScrollEngineValidator, ScrollEngineValidatorBuilder},
     execution::ScrollExecutorBuilder,
-    network::ScrollNetworkBuilder,
+    network::{ScrollNetworkBuilder, ScrollNetworkPrimitives},
     payload::ScrollPayloadBuilder,
     pool::ScrollPoolBuilder,
 };
@@ -14,8 +14,11 @@ pub use builder::{
 mod addons;
 pub use addons::ScrollAddOns;
 
-mod storage;
-pub use storage::ScrollStorage;
-
 mod node;
 pub use node::ScrollNode;
+
+mod pool;
+pub use pool::{ScrollNoopTransactionPool, ScrollPooledTransaction};
+
+mod storage;
+pub use storage::ScrollStorage;

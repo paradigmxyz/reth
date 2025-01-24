@@ -1,6 +1,5 @@
-use alloy_primitives::{Sealable, U256};
+use alloy_primitives::U256;
 use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError};
-use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
 use reth_node_api::PayloadValidator;
 use reth_node_builder::{
     rpc::EngineValidatorBuilder, AddOnsContext, EngineApiMessageVersion,
@@ -8,9 +7,12 @@ use reth_node_builder::{
     PayloadOrAttributes,
 };
 use reth_node_types::NodeTypesWithEngine;
-use reth_primitives::{Block, BlockExt, EthPrimitives, SealedBlockFor};
+use reth_primitives::SealedBlock;
+use reth_primitives_traits::Block as _;
 use reth_scroll_chainspec::ScrollChainSpec;
-use reth_scroll_engine::try_into_block;
+use reth_scroll_engine_primitives::{try_into_block, ScrollEngineTypes};
+use reth_scroll_primitives::{ScrollBlock, ScrollPrimitives};
+use scroll_alloy_rpc_types_engine::ScrollPayloadAttributes;
 use std::sync::Arc;
 
 /// The block difficulty for in turn signing in the Clique consensus.
@@ -26,8 +28,8 @@ impl<Node, Types> EngineValidatorBuilder<Node> for ScrollEngineValidatorBuilder
 where
     Types: NodeTypesWithEngine<
         ChainSpec = ScrollChainSpec,
-        Primitives = EthPrimitives,
-        Engine = EthEngineTypes,
+        Primitives = ScrollPrimitives,
+        Engine = ScrollEngineTypes,
     >,
     Node: FullNodeComponents<Types = Types>,
 {
@@ -47,12 +49,12 @@ pub struct ScrollEngineValidator {
 
 impl<Types> EngineValidator<Types> for ScrollEngineValidator
 where
-    Types: EngineTypes<PayloadAttributes = EthPayloadAttributes>,
+    Types: EngineTypes<PayloadAttributes = ScrollPayloadAttributes>,
 {
     fn validate_version_specific_fields(
         &self,
         _version: EngineApiMessageVersion,
-        _payload_or_attrs: PayloadOrAttributes<'_, EthPayloadAttributes>,
+        _payload_or_attrs: PayloadOrAttributes<'_, ScrollPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
         Ok(())
     }
@@ -60,20 +62,20 @@ where
     fn ensure_well_formed_attributes(
         &self,
         _version: EngineApiMessageVersion,
-        _attributes: &EthPayloadAttributes,
+        _attributes: &ScrollPayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
         Ok(())
     }
 }
 
 impl PayloadValidator for ScrollEngineValidator {
-    type Block = Block;
+    type Block = ScrollBlock;
 
     fn ensure_well_formed_payload(
         &self,
         payload: ExecutionPayload,
         sidecar: ExecutionPayloadSidecar,
-    ) -> Result<SealedBlockFor<Self::Block>, PayloadError> {
+    ) -> Result<SealedBlock<Self::Block>, PayloadError> {
         let expected_hash = payload.block_hash();
 
         // First parse the block
@@ -81,23 +83,18 @@ impl PayloadValidator for ScrollEngineValidator {
 
         // Seal the block with the in-turn difficulty and return if hashes match
         block.header.difficulty = CLIQUE_IN_TURN_DIFFICULTY;
-        let sealed_block_in_turn = block.seal_ref_slow();
-        if sealed_block_in_turn.hash() == expected_hash {
-            let hash = sealed_block_in_turn.hash();
-            return Ok(block.seal(hash))
+        let block_hash_in_turn = block.hash_slow();
+        if block_hash_in_turn == expected_hash {
+            return Ok(block.seal(block_hash_in_turn));
         }
 
         // Seal the block with the no-turn difficulty and return if hashes match
         block.header.difficulty = CLIQUE_NO_TURN_DIFFICULTY;
-        let sealed_block_no_turn = block.seal_ref_slow();
-        if sealed_block_no_turn.hash() == expected_hash {
-            let hash = sealed_block_no_turn.hash();
-            return Ok(block.seal(hash))
+        let block_hash_no_turn = block.hash_slow();
+        if block_hash_no_turn == expected_hash {
+            return Ok(block.seal(block_hash_no_turn));
         }
 
-        Err(PayloadError::BlockHash {
-            execution: sealed_block_no_turn.hash(),
-            consensus: expected_hash,
-        })
+        Err(PayloadError::BlockHash { execution: block_hash_no_turn, consensus: expected_hash })
     }
 }

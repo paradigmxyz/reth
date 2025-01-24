@@ -4,7 +4,8 @@ use alloy_consensus::{Signed, Transaction as _};
 use alloy_primitives::{Bytes, PrimitiveSignature as Signature, Sealable, Sealed, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use reth_node_api::FullNodeComponents;
-use reth_primitives::{RecoveredTx, TransactionSigned};
+use reth_primitives::Recovered;
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ProviderTx, ReceiptProvider, TransactionsProvider,
 };
@@ -13,10 +14,11 @@ use reth_rpc_eth_api::{
     FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
+use reth_scroll_primitives::{ScrollReceipt, ScrollTransactionSigned};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-use scroll_alloy_consensus::ScrollTxEnvelope;
-use scroll_alloy_rpc_types::Transaction;
+use scroll_alloy_consensus::{ScrollTxEnvelope, ScrollTypedTransaction};
+use scroll_alloy_rpc_types::{ScrollTransactionRequest, Transaction};
 
 use crate::{eth::ScrollNodeCore, ScrollEthApi, ScrollEthApiError};
 
@@ -55,36 +57,31 @@ where
 {
 }
 
-impl<N> TransactionCompat for ScrollEthApi<N>
+impl<N> TransactionCompat<ScrollTransactionSigned> for ScrollEthApi<N>
 where
-    N: FullNodeComponents<Provider: ReceiptProvider<Receipt = reth_primitives::Receipt>>,
+    N: FullNodeComponents<Provider: ReceiptProvider<Receipt = ScrollReceipt>>,
 {
     type Transaction = Transaction;
     type Error = ScrollEthApiError;
 
     fn fill(
         &self,
-        tx: RecoveredTx<TransactionSigned>,
+        tx: Recovered<ScrollTransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
-        let hash = tx.hash();
-        let TransactionSigned { transaction, signature, .. } = tx.into_tx();
+        let hash = *tx.tx_hash();
+        let ScrollTransactionSigned { transaction, signature, .. } = tx.into_tx();
 
         let inner = match transaction {
-            reth_primitives::Transaction::Legacy(tx) => {
+            ScrollTypedTransaction::Legacy(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            ScrollTypedTransaction::Eip2930(tx) => {
                 Signed::new_unchecked(tx, signature, hash).into()
             }
-            reth_primitives::Transaction::Eip2930(tx) => {
+            ScrollTypedTransaction::Eip1559(tx) => {
                 Signed::new_unchecked(tx, signature, hash).into()
             }
-            reth_primitives::Transaction::Eip1559(tx) => {
-                Signed::new_unchecked(tx, signature, hash).into()
-            }
-            reth_primitives::Transaction::Eip4844(_) | reth_primitives::Transaction::Eip7702(_) => {
-                unreachable!()
-            }
-            reth_primitives::Transaction::L1Message(tx) => {
+            ScrollTypedTransaction::L1Message(tx) => {
                 ScrollTxEnvelope::L1Message(tx.seal_unchecked(hash))
             }
         };
@@ -121,14 +118,15 @@ where
     fn build_simulate_v1_transaction(
         &self,
         request: alloy_rpc_types_eth::TransactionRequest,
-    ) -> Result<TransactionSigned, Self::Error> {
+    ) -> Result<ScrollTransactionSigned, Self::Error> {
+        let request: ScrollTransactionRequest = request.into();
         let Ok(tx) = request.build_typed_tx() else {
             return Err(ScrollEthApiError::Eth(EthApiError::TransactionConversionError))
         };
 
         // Create an empty signature for the transaction.
         let signature = Signature::new(Default::default(), Default::default(), false);
-        Ok(TransactionSigned::new_unhashed(tx.into(), signature))
+        Ok(ScrollTransactionSigned::new_unhashed(tx, signature))
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
