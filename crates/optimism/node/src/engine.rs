@@ -115,7 +115,7 @@ where
                 "non-empty execution requests".to_string().into(),
             ))
         }
-        Ok(()) 
+        Ok(())
     }
 
     fn validate_version_specific_fields(
