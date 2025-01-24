@@ -3104,6 +3104,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-network-proxy"
+version = "0.0.0"
+dependencies = [
+ "eyre",
+ "futures",
+ "reth-chainspec",
+ "reth-network",
+ "reth-tracing",
+ "tokio",
+]
+
+[[package]]
 name = "example-network-txpool"
 version = "0.0.0"
 dependencies = [
