@@ -53,19 +53,19 @@ rand.workspace = true
 [features]
 default = ["std"]
 std = [
-	"reth-primitives-traits/std",
-	"reth-codecs?/std",
-	"alloy-consensus/std",
-	"alloy-eips/std",
-	"alloy-primitives/std",
-	"serde?/std",
-	"bytes?/std",
-	"derive_more/std",
-	"revm-primitives?/std",
-	"secp256k1?/std",
-	"alloy-rlp/std",
-	"reth-zstd-compressors?/std",
-	"op-alloy-consensus/std",
+    "reth-primitives-traits/std",
+    "reth-codecs?/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "serde?/std",
+    "bytes?/std",
+    "derive_more/std",
+    "revm-primitives?/std",
+    "secp256k1?/std",
+    "alloy-rlp/std",
+    "reth-zstd-compressors?/std",
+    "op-alloy-consensus/std",
 ]
 reth-codec = [
     "dep:reth-codecs",
@@ -76,7 +76,7 @@ reth-codec = [
     "reth-codecs?/op",
     "dep:bytes",
     "dep:modular-bitfield",
-    "dep:reth-zstd-compressors"
+    "dep:reth-zstd-compressors",
 ]
 serde = [
     "dep:serde",
@@ -92,10 +92,10 @@ serde = [
     "secp256k1?/serde",
 ]
 serde-bincode-compat = [
-	"alloy-consensus/serde-bincode-compat",
-	"alloy-eips/serde-bincode-compat",
-	"op-alloy-consensus/serde-bincode-compat",
-	"reth-primitives-traits/serde-bincode-compat"
+    "alloy-consensus/serde-bincode-compat",
+    "alloy-eips/serde-bincode-compat",
+    "op-alloy-consensus/serde-bincode-compat",
+    "reth-primitives-traits/serde-bincode-compat",
 ]
 arbitrary = [
     "dep:arbitrary",
@@ -112,5 +112,5 @@ arbitrary = [
 ]
 optimism = [
     "dep:revm-primitives",
-	"revm-primitives/optimism",
+    "revm-primitives/optimism",
 ]

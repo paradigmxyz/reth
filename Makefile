@@ -405,6 +405,9 @@ lint-other-targets:
 lint-codespell: ensure-codespell
 	codespell --skip "*.json"
 
+lint-cargo-toml:
+	dprint fmt
+
 ensure-codespell:
 	@if ! command -v codespell &> /dev/null; then \
 		echo "codespell not found. Please install it by running the command `pip install codespell` or refer to the following link for more information: https://github.com/codespell-project/codespell" \
