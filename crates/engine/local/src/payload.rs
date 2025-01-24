@@ -60,6 +60,21 @@ where
     }
 }
 
+#[cfg(feature = "scroll-alloy-traits")]
+impl<ChainSpec> PayloadAttributesBuilder<scroll_alloy_rpc_types_engine::ScrollPayloadAttributes>
+    for LocalPayloadAttributesBuilder<ChainSpec>
+where
+    ChainSpec: Send + Sync + EthereumHardforks + 'static,
+{
+    fn build(&self, timestamp: u64) -> scroll_alloy_rpc_types_engine::ScrollPayloadAttributes {
+        scroll_alloy_rpc_types_engine::ScrollPayloadAttributes {
+            payload_attributes: self.build(timestamp),
+            transactions: None,
+            no_tx_pool: false,
+        }
+    }
+}
+
 /// A temporary workaround to support local payload engine launcher for arbitrary payload
 /// attributes.
 // TODO(mattsse): This should be reworked so that LocalPayloadAttributesBuilder can be implemented

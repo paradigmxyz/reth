@@ -118,6 +118,21 @@ impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
     }
 }
 
+#[cfg(feature = "scroll-alloy-traits")]
+impl PayloadAttributes for scroll_alloy_rpc_types_engine::ScrollPayloadAttributes {
+    fn timestamp(&self) -> u64 {
+        self.payload_attributes.timestamp
+    }
+
+    fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
+        self.payload_attributes.withdrawals.as_ref()
+    }
+
+    fn parent_beacon_block_root(&self) -> Option<B256> {
+        self.payload_attributes.parent_beacon_block_root
+    }
+}
+
 /// A builder that can return the current payload attribute.
 pub trait PayloadAttributesBuilder<Attributes>: Send + Sync + 'static {
     /// Return a new payload attribute from the builder.
