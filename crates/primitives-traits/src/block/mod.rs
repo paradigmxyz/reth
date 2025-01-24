@@ -153,14 +153,14 @@ pub trait Block:
         Ok(RecoveredBlock::new_unhashed(self, senders))
     }
 
-    /// Transform the block into a [`RecoveredBlock`] using the given senders.
+    /// Transform the block into a [`RecoveredBlock`] using the given signers.
     ///
-    /// Note: This method assumes the senders are correct and does not validate them.
-    fn into_recovered_with_senders(self, senders: Vec<Address>) -> RecoveredBlock<Self>
+    /// Note: This method assumes the signers are correct and does not validate them.
+    fn into_recovered_with_signers(self, signers: Vec<Address>) -> RecoveredBlock<Self>
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
-        RecoveredBlock::new_unhashed(self, senders)
+        RecoveredBlock::new_unhashed(self, signers)
     }
 
     /// **Expensive**. Transform into a [`RecoveredBlock`] by recovering senders in the contained
