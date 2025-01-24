@@ -273,6 +273,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             self,
             Self::PooledTransactions(_) |
                 Self::Receipts(_) |
+                Self::BlockHeaders(_) |
                 Self::BlockBodies(_) |
                 Self::NodeData(_)
         )
