@@ -1,7 +1,11 @@
 //! Implementation of the [`BlockExecutionStrategy`] for Scroll.
 
-use crate::{ForkError, ScrollEvmConfig};
-use alloy_consensus::{Header, Transaction};
+use crate::{
+    config::{ScrollConfigureEvm, ScrollEvmT},
+    receipt::{BasicScrollReceiptBuilder, ReceiptBuilderCtx, ScrollReceiptBuilder},
+    ForkError, ScrollEvmConfig,
+};
+use alloy_consensus::{Header, Transaction, TxReceipt, Typed2718};
 use alloy_eips::eip7685::Requests;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
@@ -10,73 +14,68 @@ use reth_evm::{
         BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
         BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput, ProviderError,
     },
-    ConfigureEvm, ConfigureEvmEnv,
+    Evm,
 };
-use reth_primitives::{
-    gas_spent_by_transactions, BlockWithSenders, EthPrimitives, GotExpected,
-    InvalidTransactionError, Receipt, TransactionSigned, TxType,
-};
-use reth_revm::primitives::{CfgEnvWithHandlerCfg, U256};
+use reth_primitives::{gas_spent_by_transactions, GotExpected, InvalidTransactionError};
+use reth_primitives_traits::{BlockBody, NodePrimitives, RecoveredBlock, SignedTransaction};
+use reth_revm::primitives::U256;
 use reth_scroll_chainspec::{ChainSpecProvider, ScrollChainSpec};
 use reth_scroll_consensus::{apply_curie_hard_fork, L1_GAS_PRICE_ORACLE_ADDRESS};
 use reth_scroll_forks::{ScrollHardfork, ScrollHardforks};
+use reth_scroll_primitives::{transaction::signed::IsL1Message, ScrollPrimitives, ScrollReceipt};
 use revm::{
-    primitives::{BlockEnv, EnvWithHandlerCfg, ExecutionResult, ResultAndState},
+    primitives::{ExecutionResult, ResultAndState},
     Database, DatabaseCommit, State,
 };
 use std::{
     fmt::{Debug, Display},
     sync::Arc,
 };
+use tracing::trace;
 
 /// The Scroll block execution strategy.
 #[derive(Debug)]
-pub struct ScrollExecutionStrategy<DB, EvmConfig> {
+pub struct ScrollExecutionStrategy<DB, N: NodePrimitives, EvmConfig> {
     /// Evm configuration.
     evm_config: EvmConfig,
     /// Current state for the execution.
     state: State<DB>,
+    /// Receipt builder.
+    receipt_builder: Arc<dyn ScrollReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
 }
 
-impl<DB, EvmConfig> ScrollExecutionStrategy<DB, EvmConfig> {
-    /// Returns an instance of [`ScrollExecutionStrategy`].
-    pub const fn new(evm_config: EvmConfig, state: State<DB>) -> Self {
-        Self { evm_config, state }
-    }
-}
-
-impl<DB, EvmConfig> ScrollExecutionStrategy<DB, EvmConfig>
+impl<DB, N, EvmConfig> ScrollExecutionStrategy<DB, N, EvmConfig>
 where
-    EvmConfig: ConfigureEvmEnv<Header = Header>,
+    N: NodePrimitives,
 {
-    /// Configures a new evm configuration and block environment for the given block.
-    ///
-    /// # Caution
-    ///
-    /// This does not initialize the tx environment.
-    fn evm_env_for_block(&self, header: &Header) -> EnvWithHandlerCfg {
-        let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-        let mut block_env = BlockEnv::default();
-        self.evm_config.fill_cfg_and_block_env(&mut cfg, &mut block_env, header);
-
-        EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, Default::default())
+    /// Returns an instance of [`ScrollExecutionStrategy`].
+    pub const fn new(
+        evm_config: EvmConfig,
+        state: State<DB>,
+        receipt_builder: Arc<dyn ScrollReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
+    ) -> Self {
+        Self { evm_config, state, receipt_builder }
     }
 }
 
-impl<DB, EvmConfig> BlockExecutionStrategy for ScrollExecutionStrategy<DB, EvmConfig>
+impl<DB, N, EvmConfig> BlockExecutionStrategy for ScrollExecutionStrategy<DB, N, EvmConfig>
 where
     DB: Database<Error: Into<ProviderError> + Display>,
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>
+    N: NodePrimitives<BlockHeader = Header, Receipt = ScrollReceipt, SignedTx: IsL1Message>,
+    EvmConfig: ScrollConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
         + ChainSpecProvider<ChainSpec = ScrollChainSpec>,
 {
     type DB = DB;
-    type Primitives = EthPrimitives;
+    type Primitives = N;
     type Error = BlockExecutionError;
 
-    fn apply_pre_execution_changes(&mut self, block: &BlockWithSenders) -> Result<(), Self::Error> {
+    fn apply_pre_execution_changes(
+        &mut self,
+        block: &RecoveredBlock<N::Block>,
+    ) -> Result<(), Self::Error> {
         // set state clear flag if the block is after the Spurious Dragon hardfork.
-        let state_clear_flag =
-            (*self.evm_config.chain_spec()).is_spurious_dragon_active_at_block(block.header.number);
+        let state_clear_flag = (*self.evm_config.chain_spec())
+            .is_spurious_dragon_active_at_block(block.header().number);
         self.state.set_state_clear_flag(state_clear_flag);
 
         // load the l1 gas oracle contract in cache
@@ -100,19 +99,18 @@ where
 
     fn execute_transactions(
         &mut self,
-        block: &BlockWithSenders,
-    ) -> Result<ExecuteOutput, Self::Error> {
-        let env = self.evm_env_for_block(&block.header);
-        let mut evm = self.evm_config.evm_with_env(&mut self.state, env);
+        block: &RecoveredBlock<N::Block>,
+    ) -> Result<ExecuteOutput<N::Receipt>, Self::Error> {
+        let mut evm = self.evm_config.scroll_evm_for_block(&mut self.state, block.header());
 
         let mut cumulative_gas_used = 0;
-        let mut receipts = Vec::with_capacity(block.body.transactions.len());
+        let mut receipts = Vec::with_capacity(block.body().transactions().len());
         let chain_spec = self.evm_config.chain_spec();
 
         for (sender, transaction) in block.transactions_with_sender() {
             // The sum of the transaction’s gas limit and the gas utilized in this block prior,
             // must be no greater than the block’s gasLimit.
-            let block_available_gas = block.header.gas_limit - cumulative_gas_used;
+            let block_available_gas = block.header().gas_limit - cumulative_gas_used;
             if transaction.gas_limit() > block_available_gas {
                 return Err(BlockValidationError::TransactionGasLimitMoreThanAvailableBlockGas {
                     transaction_gas_limit: transaction.gas_limit(),
@@ -122,46 +120,45 @@ where
             }
 
             // verify the transaction type is accepted by the current fork.
-            match transaction.tx_type() {
-                TxType::Eip2930 if !chain_spec.is_curie_active_at_block(block.number) => {
-                    return Err(ConsensusError::InvalidTransaction(
-                        InvalidTransactionError::Eip2930Disabled,
-                    )
-                    .into())
-                }
-                TxType::Eip1559 if !chain_spec.is_curie_active_at_block(block.number) => {
-                    return Err(ConsensusError::InvalidTransaction(
-                        InvalidTransactionError::Eip1559Disabled,
-                    )
-                    .into())
-                }
-                TxType::Eip4844 => {
-                    return Err(ConsensusError::InvalidTransaction(
-                        InvalidTransactionError::Eip4844Disabled,
-                    )
-                    .into())
-                }
-                TxType::Eip7702 => {
-                    return Err(ConsensusError::InvalidTransaction(
-                        InvalidTransactionError::Eip7702Disabled,
-                    )
-                    .into())
-                }
-                _ => (),
-            };
-
-            self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
-            if transaction.is_l1_message() {
-                evm.context.evm.env.cfg.disable_base_fee = true; // disable base fee for l1 msg
+            if transaction.is_eip2930() && !chain_spec.is_curie_active_at_block(block.number) {
+                return Err(ConsensusError::InvalidTransaction(
+                    InvalidTransactionError::Eip2930Disabled,
+                )
+                .into())
             }
+            if transaction.is_eip1559() && !chain_spec.is_curie_active_at_block(block.number) {
+                return Err(ConsensusError::InvalidTransaction(
+                    InvalidTransactionError::Eip1559Disabled,
+                )
+                .into())
+            }
+            if transaction.is_eip4844() {
+                return Err(ConsensusError::InvalidTransaction(
+                    InvalidTransactionError::Eip4844Disabled,
+                )
+                .into())
+            }
+            if transaction.is_eip7702() {
+                return Err(ConsensusError::InvalidTransaction(
+                    InvalidTransactionError::Eip7702Disabled,
+                )
+                .into())
+            }
+
+            let tx_env = self.evm_config.tx_env(transaction, *sender);
+
+            // disable the base fee checks for l1 messages.
+            evm.with_base_fee_check(!transaction.is_l1_message());
 
             // execute the transaction and commit the result to the database
             let ResultAndState { result, state } =
-                evm.transact().map_err(|err| BlockValidationError::EVM {
+                evm.transact(tx_env).map_err(|err| BlockValidationError::EVM {
                     hash: transaction.recalculate_hash(),
                     error: Box::new(err.map_db_err(|e| e.into())),
                 })?;
             evm.db_mut().commit(state);
+
+            trace!(target: "evm", ?transaction, "executed transaction");
 
             let l1_fee = if transaction.is_l1_message() {
                 // l1 messages do not get any gas refunded
@@ -172,22 +169,19 @@ where
                 U256::ZERO
             } else {
                 // compute l1 fee for all non-l1 transaction
-                let l1_block_info =
-                    evm.context.evm.inner.l1_block_info.as_ref().expect("l1_block_info loaded");
-                let transaction_rlp_bytes =
-                    evm.context.evm.env.tx.scroll.rlp_bytes.as_ref().expect("rlp_bytes loaded");
-                l1_block_info.calculate_tx_l1_cost(transaction_rlp_bytes, evm.handler.cfg.spec_id)
+                evm.l1_fee().expect("l1 fee loaded")
             };
 
             cumulative_gas_used += result.gas_used();
 
-            receipts.push(Receipt {
-                tx_type: transaction.tx_type(),
-                success: result.is_success(),
+            let ctx = ReceiptBuilderCtx {
+                header: block.header(),
+                tx: transaction,
+                result,
                 cumulative_gas_used,
-                logs: result.into_logs(),
                 l1_fee,
-            })
+            };
+            receipts.push(self.receipt_builder.build_receipt(ctx))
         }
 
         Ok(ExecuteOutput { receipts, gas_used: cumulative_gas_used })
@@ -195,8 +189,8 @@ where
 
     fn apply_post_execution_changes(
         &mut self,
-        _block: &BlockWithSenders,
-        _receipts: &[Receipt],
+        _block: &RecoveredBlock<N::Block>,
+        _receipts: &[N::Receipt],
     ) -> Result<Requests, Self::Error> {
         Ok(Default::default())
     }
@@ -211,12 +205,12 @@ where
 
     fn validate_block_post_execution(
         &self,
-        block: &BlockWithSenders,
-        receipts: &[Receipt],
+        block: &RecoveredBlock<N::Block>,
+        receipts: &[N::Receipt],
         _requests: &Requests,
     ) -> Result<(), ConsensusError> {
         // verify the block gas used
-        let cumulative_gas_used = receipts.last().map(|r| r.cumulative_gas_used).unwrap_or(0);
+        let cumulative_gas_used = receipts.last().map(|r| r.cumulative_gas_used()).unwrap_or(0);
         if block.gas_used != cumulative_gas_used {
             return Err(ConsensusError::BlockGasUsed {
                 gas: GotExpected { got: cumulative_gas_used, expected: block.gas_used },
@@ -225,17 +219,17 @@ where
         }
 
         // verify the receipts logs bloom and root
-        if self.evm_config.chain_spec().is_byzantium_active_at_block(block.header.number) {
+        if self.evm_config.chain_spec().is_byzantium_active_at_block(block.header().number) {
             if let Err(error) = reth_ethereum_consensus::verify_receipts(
-                block.header.receipts_root,
-                block.header.logs_bloom,
+                block.header().receipts_root,
+                block.header().logs_bloom,
                 receipts,
             ) {
                 tracing::debug!(
                     %error,
                     ?receipts,
-                    header_receipt_root = ?block.header.receipts_root,
-                    header_bloom = ?block.header.logs_bloom,
+                    header_receipt_root = ?block.header().receipts_root,
+                    header_bloom = ?block.header().logs_bloom,
                     "failed to verify receipts"
                 );
                 return Err(error);
@@ -248,32 +242,50 @@ where
 
 /// The factory for a [`ScrollExecutionStrategy`].
 #[derive(Clone, Debug)]
-pub struct ScrollExecutionStrategyFactory<EvmConfig = ScrollEvmConfig> {
+pub struct ScrollExecutionStrategyFactory<
+    N: NodePrimitives = ScrollPrimitives,
+    EvmConfig = ScrollEvmConfig,
+> {
     /// The Evm configuration for the [`ScrollExecutionStrategy`].
     evm_config: EvmConfig,
+    /// Receipt builder.
+    receipt_builder: Arc<dyn ScrollReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
 }
 
 impl ScrollExecutionStrategyFactory {
+    /// Returns a default Scroll factory.
+    pub fn scroll(chain_spec: Arc<ScrollChainSpec>) -> Self {
+        Self::new(ScrollEvmConfig::new(chain_spec), BasicScrollReceiptBuilder::default())
+    }
+}
+
+impl<N: NodePrimitives, EvmConfig> ScrollExecutionStrategyFactory<N, EvmConfig>
+where
+    EvmConfig: Clone,
+{
     /// Returns a new instance of the [`ScrollExecutionStrategyFactory`].
-    pub const fn new(chain_spec: Arc<ScrollChainSpec>) -> Self {
-        let evm_config = ScrollEvmConfig::new(chain_spec);
-        Self { evm_config }
+    pub fn new(
+        evm_config: EvmConfig,
+        receipt_builder: impl ScrollReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
+    ) -> Self {
+        Self { evm_config, receipt_builder: Arc::new(receipt_builder) }
     }
 
     /// Returns the EVM configuration for the strategy factory.
-    pub fn evm_config(&self) -> ScrollEvmConfig {
+    pub fn evm_config(&self) -> EvmConfig {
         self.evm_config.clone()
     }
 }
 
-impl<EvmConfig> BlockExecutionStrategyFactory for ScrollExecutionStrategyFactory<EvmConfig>
+impl<N, EvmConfig> BlockExecutionStrategyFactory for ScrollExecutionStrategyFactory<N, EvmConfig>
 where
-    EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>
+    N: NodePrimitives<BlockHeader = Header, Receipt = ScrollReceipt, SignedTx: IsL1Message>,
+    EvmConfig: ScrollConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
         + ChainSpecProvider<ChainSpec = ScrollChainSpec>,
 {
-    type Primitives = EthPrimitives;
+    type Primitives = N;
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
-        ScrollExecutionStrategy<DB, EvmConfig>;
+        ScrollExecutionStrategy<DB, N, EvmConfig>;
 
     /// Creates a strategy using the give database.
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
@@ -282,7 +294,7 @@ where
     {
         let state =
             State::builder().with_database(db).without_state_clear().with_bundle_update().build();
-        ScrollExecutionStrategy::new(self.evm_config.clone(), state)
+        ScrollExecutionStrategy::new(self.evm_config.clone(), state, self.receipt_builder.clone())
     }
 }
 
@@ -293,10 +305,15 @@ pub struct ScrollExecutorProvider;
 
 impl ScrollExecutorProvider {
     /// Creates a new default scroll executor provider.
-    pub const fn scroll(
+    pub fn scroll(
         chain_spec: Arc<ScrollChainSpec>,
     ) -> BasicBlockExecutorProvider<ScrollExecutionStrategyFactory> {
-        BasicBlockExecutorProvider::new(ScrollExecutionStrategyFactory::new(chain_spec))
+        let evm_config = ScrollEvmConfig::new(chain_spec);
+        let receipt_builder = BasicScrollReceiptBuilder::default();
+        BasicBlockExecutorProvider::new(ScrollExecutionStrategyFactory::new(
+            evm_config,
+            receipt_builder,
+        ))
     }
 }
 
@@ -306,7 +323,7 @@ mod tests {
     use crate::{ScrollEvmConfig, ScrollExecutionStrategy, ScrollExecutionStrategyFactory};
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::execute::ExecuteOutput;
-    use reth_primitives::{Block, BlockBody, BlockWithSenders, Receipt, TransactionSigned, TxType};
+    use reth_primitives::{Block, BlockBody};
     use reth_primitives_traits::transaction::signed::SignedTransaction;
     use reth_scroll_chainspec::{ScrollChainConfig, ScrollChainSpecBuilder};
     use reth_scroll_consensus::{
@@ -314,6 +331,7 @@ mod tests {
         CURIE_L1_GAS_PRICE_ORACLE_STORAGE, IS_CURIE_SLOT, L1_BASE_FEE_SLOT, L1_BLOB_BASE_FEE_SLOT,
         L1_GAS_PRICE_ORACLE_ADDRESS, OVER_HEAD_SLOT, SCALAR_SLOT,
     };
+    use reth_scroll_primitives::ScrollTransactionSigned;
     use revm::{
         db::{
             states::{bundle_state::BundleRetention, StorageSlot},
@@ -321,24 +339,32 @@ mod tests {
         },
         primitives::{AccountInfo, Address, Bytecode, TxKind, B256, U256},
     };
+    use scroll_alloy_consensus::{ScrollTransactionReceipt, ScrollTxType, ScrollTypedTransaction};
 
     const BLOCK_GAS_LIMIT: u64 = 10_000_000;
     const SCROLL_CHAIN_ID: u64 = 534352;
     const NOT_CURIE_BLOCK_NUMBER: u64 = 7096835;
     const CURIE_BLOCK_NUMBER: u64 = 7096837;
 
-    fn strategy() -> ScrollExecutionStrategy<EmptyDBTyped<ProviderError>, ScrollEvmConfig> {
+    fn strategy(
+    ) -> ScrollExecutionStrategy<EmptyDBTyped<ProviderError>, ScrollPrimitives, ScrollEvmConfig>
+    {
         let chain_spec =
             Arc::new(ScrollChainSpecBuilder::scroll_mainnet().build(ScrollChainConfig::mainnet()));
-        let factory = ScrollExecutionStrategyFactory::new(chain_spec);
+        let evm_config = ScrollEvmConfig::new(chain_spec);
+        let factory =
+            ScrollExecutionStrategyFactory::new(evm_config, BasicScrollReceiptBuilder::default());
         let db = EmptyDBTyped::<ProviderError>::new();
 
         factory.create_strategy(db)
     }
 
-    fn block(number: u64, transactions: Vec<TransactionSigned>) -> BlockWithSenders {
+    fn block(
+        number: u64,
+        transactions: Vec<ScrollTransactionSigned>,
+    ) -> RecoveredBlock<<ScrollPrimitives as NodePrimitives>::Block> {
         let senders = transactions.iter().map(|t| t.recover_signer().unwrap()).collect();
-        BlockWithSenders::new_unchecked(
+        RecoveredBlock::new_unhashed(
             Block {
                 header: Header { number, gas_limit: BLOCK_GAS_LIMIT, ..Default::default() },
                 body: BlockBody { transactions, ..Default::default() },
@@ -347,46 +373,43 @@ mod tests {
         )
     }
 
-    fn transaction(typ: TxType, gas_limit: u64) -> TransactionSigned {
-        let mut transaction = match typ {
-            TxType::Legacy => reth_primitives::Transaction::Legacy(alloy_consensus::TxLegacy {
+    fn transaction(typ: ScrollTxType, gas_limit: u64) -> ScrollTransactionSigned {
+        let transaction = match typ {
+            ScrollTxType::Legacy => ScrollTypedTransaction::Legacy(alloy_consensus::TxLegacy {
                 to: TxKind::Call(Address::ZERO),
+                chain_id: Some(SCROLL_CHAIN_ID),
+                gas_limit,
                 ..Default::default()
             }),
-            TxType::Eip2930 => reth_primitives::Transaction::Eip2930(alloy_consensus::TxEip2930 {
+            ScrollTxType::Eip2930 => ScrollTypedTransaction::Eip2930(alloy_consensus::TxEip2930 {
                 to: TxKind::Call(Address::ZERO),
+                chain_id: SCROLL_CHAIN_ID,
+                gas_limit,
                 ..Default::default()
             }),
-            TxType::Eip1559 => reth_primitives::Transaction::Eip1559(alloy_consensus::TxEip1559 {
+            ScrollTxType::Eip1559 => ScrollTypedTransaction::Eip1559(alloy_consensus::TxEip1559 {
                 to: TxKind::Call(Address::ZERO),
+                chain_id: SCROLL_CHAIN_ID,
+                gas_limit,
                 ..Default::default()
             }),
-            TxType::Eip4844 => reth_primitives::Transaction::Eip4844(alloy_consensus::TxEip4844 {
-                to: Address::ZERO,
-                ..Default::default()
-            }),
-            TxType::Eip7702 => reth_primitives::Transaction::Eip7702(alloy_consensus::TxEip7702 {
-                to: Address::ZERO,
-                ..Default::default()
-            }),
-            TxType::L1Message => {
-                reth_primitives::Transaction::L1Message(scroll_alloy_consensus::TxL1Message {
+            ScrollTxType::L1Message => {
+                ScrollTypedTransaction::L1Message(scroll_alloy_consensus::TxL1Message {
                     sender: Address::random(),
                     to: Address::ZERO,
+                    gas_limit,
                     ..Default::default()
                 })
             }
         };
-        transaction.set_chain_id(SCROLL_CHAIN_ID);
-        transaction.set_gas_limit(gas_limit);
 
         let pk = B256::random();
         let signature = reth_primitives::sign_message(pk, transaction.signature_hash()).unwrap();
-        TransactionSigned::new_unhashed(transaction, signature)
+        ScrollTransactionSigned::new_unhashed(transaction, signature)
     }
 
     fn execute_transactions(
-        tx_type: TxType,
+        tx_type: ScrollTxType,
         block_number: u64,
         expected_l1_fee: U256,
         expected_error: Option<&str>,
@@ -440,13 +463,21 @@ mod tests {
             assert_eq!(res.unwrap_err().to_string(), error);
         } else {
             let ExecuteOutput { receipts, .. } = res?;
-            let expected = vec![Receipt {
-                tx_type,
+            let inner = alloy_consensus::Receipt {
                 cumulative_gas_used: MIN_TRANSACTION_GAS,
-                success: true,
-                l1_fee: expected_l1_fee,
+                status: true.into(),
                 ..Default::default()
-            }];
+            };
+            let into_scroll_receipt = |inner: alloy_consensus::Receipt| {
+                ScrollTransactionReceipt::new(inner, expected_l1_fee)
+            };
+            let receipt = match tx_type {
+                ScrollTxType::Legacy => ScrollReceipt::Legacy(into_scroll_receipt(inner)),
+                ScrollTxType::Eip2930 => ScrollReceipt::Eip2930(into_scroll_receipt(inner)),
+                ScrollTxType::Eip1559 => ScrollReceipt::Eip1559(into_scroll_receipt(inner)),
+                ScrollTxType::L1Message => ScrollReceipt::L1Message(inner),
+            };
+            let expected = vec![receipt];
 
             assert_eq!(receipts, expected);
         }
@@ -515,7 +546,7 @@ mod tests {
         let mut strategy = strategy();
 
         // prepare transaction exceeding block gas limit
-        let transaction = transaction(TxType::Legacy, BLOCK_GAS_LIMIT + 1);
+        let transaction = transaction(ScrollTxType::Legacy, BLOCK_GAS_LIMIT + 1);
         let block = block(7096837, vec![transaction]);
 
         // execute and verify error
@@ -529,34 +560,10 @@ mod tests {
     }
 
     #[test]
-    fn test_execute_transactions_eip4844() -> eyre::Result<()> {
-        // Execute eip4844 transaction
-        execute_transactions(
-            TxType::Eip4844,
-            CURIE_BLOCK_NUMBER,
-            U256::ZERO,
-            Some("EIP-4844 transactions are disabled"),
-        )?;
-        Ok(())
-    }
-
-    #[test]
-    fn test_execute_transactions_eip7702() -> eyre::Result<()> {
-        // Execute eip7702 transaction
-        execute_transactions(
-            TxType::Eip7702,
-            CURIE_BLOCK_NUMBER,
-            U256::ZERO,
-            Some("EIP-7702 transactions are disabled"),
-        )?;
-        Ok(())
-    }
-
-    #[test]
     fn test_execute_transactions_l1_message() -> eyre::Result<()> {
         // Execute l1 message on curie block
         let expected_l1_fee = U256::ZERO;
-        execute_transactions(TxType::L1Message, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transactions(ScrollTxType::L1Message, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
         Ok(())
     }
 
@@ -564,7 +571,7 @@ mod tests {
     fn test_execute_transactions_legacy_curie_fork() -> eyre::Result<()> {
         // Execute legacy transaction on curie block
         let expected_l1_fee = U256::from(10);
-        execute_transactions(TxType::Legacy, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transactions(ScrollTxType::Legacy, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
         Ok(())
     }
 
@@ -572,7 +579,7 @@ mod tests {
     fn test_execute_transactions_legacy_not_curie_fork() -> eyre::Result<()> {
         // Execute legacy before curie block
         let expected_l1_fee = U256::from(2);
-        execute_transactions(TxType::Legacy, NOT_CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transactions(ScrollTxType::Legacy, NOT_CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
         Ok(())
     }
 
@@ -580,7 +587,7 @@ mod tests {
     fn test_execute_transactions_eip2930_curie_fork() -> eyre::Result<()> {
         // Execute eip2930 transaction on curie block
         let expected_l1_fee = U256::from(10);
-        execute_transactions(TxType::Eip2930, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transactions(ScrollTxType::Eip2930, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
         Ok(())
     }
 
@@ -588,7 +595,7 @@ mod tests {
     fn test_execute_transactions_eip2930_not_curie_fork() -> eyre::Result<()> {
         // Execute eip2930 transaction before curie block
         execute_transactions(
-            TxType::Eip2930,
+            ScrollTxType::Eip2930,
             NOT_CURIE_BLOCK_NUMBER,
             U256::ZERO,
             Some("EIP-2930 transactions are disabled"),
@@ -600,7 +607,7 @@ mod tests {
     fn test_execute_transactions_eip1559_curie_fork() -> eyre::Result<()> {
         // Execute eip1559 transaction on curie block
         let expected_l1_fee = U256::from(10);
-        execute_transactions(TxType::Eip1559, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
+        execute_transactions(ScrollTxType::Eip1559, CURIE_BLOCK_NUMBER, expected_l1_fee, None)?;
         Ok(())
     }
 
@@ -608,7 +615,7 @@ mod tests {
     fn test_execute_transactions_eip_not_curie_fork() -> eyre::Result<()> {
         // Execute eip1559 transaction before curie block
         execute_transactions(
-            TxType::Eip1559,
+            ScrollTxType::Eip1559,
             NOT_CURIE_BLOCK_NUMBER,
             U256::ZERO,
             Some("EIP-1559 transactions are disabled"),

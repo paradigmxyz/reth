@@ -23,6 +23,7 @@ reth-revm.workspace = true
 
 # revm
 revm = { workspace = true, features = ["optional_no_base_fee"] }
+revm-primitives.workspace = true
 
 # scroll
 reth-scroll-chainspec.workspace = true
@@ -34,6 +35,7 @@ alloy-eips.workspace = true
 
 # scroll
 reth-scroll-consensus.workspace = true
+reth-scroll-primitives.workspace = true
 scroll-alloy-consensus.workspace = true
 
 # misc
@@ -44,6 +46,8 @@ tracing.workspace = true
 
 [dev-dependencies]
 eyre.workspace = true
+reth-primitives = { workspace = true, features = ["serde-bincode-compat", "reth-codec"] }
+reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
 
 [features]
 optimism = ["revm/optimism"]
@@ -51,5 +55,7 @@ scroll = [
 	"reth-evm/scroll",
 	"reth-revm/scroll",
 	"reth-scroll-consensus/scroll",
-	"revm/scroll"
+	"revm/scroll",
+	"revm-primitives/scroll",
+	"reth-scroll-primitives/scroll"
 ]

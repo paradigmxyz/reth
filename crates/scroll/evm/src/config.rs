@@ -1,17 +1,68 @@
+use core::fmt::Debug;
 use reth_chainspec::{ChainSpecProvider, Head};
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, NextBlockEnvAttributes};
-use reth_primitives::{transaction::FillTxEnv, TransactionSigned};
-use reth_revm::{inspector_handle_register, Database, Evm, GetInspector};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm, NextBlockEnvAttributes};
+use reth_primitives::transaction::FillTxEnv;
+use reth_revm::{
+    inspector_handle_register,
+    precompile::Bytes,
+    primitives::{EVMError, Env, ResultAndState},
+    Database, GetInspector,
+};
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_forks::ScrollHardfork;
+use reth_scroll_primitives::ScrollTransactionSigned;
 use revm::{
-    precompile::{Address, Bytes},
+    precompile::Address,
     primitives::{
-        AnalysisKind, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, Env, HandlerCfg, SpecId, TxEnv, U256,
+        AnalysisKind, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, HandlerCfg, SpecId, TxEnv, U256,
     },
     EvmBuilder,
 };
 use std::{convert::Infallible, sync::Arc};
+
+/// Scroll EVM implementation.
+#[derive(derive_more::Debug, derive_more::Deref, derive_more::DerefMut, derive_more::From)]
+#[debug(bound(DB::Error: Debug))]
+pub struct ScrollEvm<'a, EXT, DB: Database>(revm::Evm<'a, EXT, DB>);
+
+impl<EXT, DB: Database> Evm for ScrollEvm<'_, EXT, DB> {
+    type DB = DB;
+    type Tx = TxEnv;
+    type Error = EVMError<DB::Error>;
+
+    fn block(&self) -> &BlockEnv {
+        self.0.block()
+    }
+
+    fn into_env(self) -> EvmEnv {
+        let Env { cfg, block, tx: _ } = *self.0.context.evm.inner.env;
+        EvmEnv {
+            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg {
+                cfg_env: cfg,
+                handler_cfg: self.0.handler.cfg,
+            },
+            block_env: block,
+        }
+    }
+
+    fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error> {
+        *self.tx_mut() = tx;
+        self.0.transact()
+    }
+
+    fn transact_system_call(
+        &mut self,
+        _caller: Address,
+        _contract: Address,
+        _data: Bytes,
+    ) -> Result<ResultAndState, Self::Error> {
+        Err(Self::Error::Custom("Scroll does not support system calls".into()))
+    }
+
+    fn db_mut(&mut self) -> &mut Self::DB {
+        &mut self.context.evm.db
+    }
+}
 
 /// Scroll EVM configuration.
 #[derive(Clone, Debug)]
@@ -40,45 +91,45 @@ impl ScrollEvmConfig {
 }
 
 impl ConfigureEvm for ScrollEvmConfig {
-    type DefaultExternalContext<'a> = ();
+    type Evm<'a, DB: Database + 'a, I: 'a> = ScrollEvm<'a, I, DB>;
 
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
-        EvmBuilder::default().with_db(db).scroll().build()
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
+        EvmBuilder::default()
+            .with_db(db)
+            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+            .with_block_env(evm_env.block_env)
+            .build()
+            .into()
     }
 
-    fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
+    fn evm_with_env_and_inspector<DB, I>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv,
+        inspector: I,
+    ) -> Self::Evm<'_, DB, I>
     where
         DB: Database,
         I: GetInspector<DB>,
     {
         EvmBuilder::default()
-            .with_db(db)
             .with_external_context(inspector)
-            .scroll()
+            .with_db(db)
+            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+            .with_block_env(evm_env.block_env)
             .append_handler_register(inspector_handle_register)
             .build()
+            .into()
     }
-
-    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
 }
 
 impl ConfigureEvmEnv for ScrollEvmConfig {
-    type Transaction = TransactionSigned;
+    type Transaction = ScrollTransactionSigned;
     type Header = alloy_consensus::Header;
     type Error = Infallible;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &Self::Transaction, sender: Address) {
         transaction.fill_tx_env(tx_env, sender);
-    }
-
-    fn fill_tx_env_system_contract_call(
-        &self,
-        _env: &mut Env,
-        _caller: Address,
-        _contract: Address,
-        _data: Bytes,
-    ) {
-        /* noop */
     }
 
     fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
@@ -158,6 +209,52 @@ impl ConfigureEvmEnv for ScrollEvmConfig {
         };
 
         Ok((cfg_with_handler_cfg, block_env).into())
+    }
+}
+
+pub(crate) trait ScrollConfigureEvm: ConfigureEvm {
+    type Evm<'a, DB: Database + 'a, I: 'a>: Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>>
+        + ScrollEvmT;
+
+    fn scroll_evm_for_block<'a, DB: Database>(
+        &'a self,
+        db: DB,
+        header: &'a Self::Header,
+    ) -> <Self as ScrollConfigureEvm>::Evm<'a, DB, ()>;
+}
+
+impl ScrollConfigureEvm for ScrollEvmConfig {
+    type Evm<'a, DB: Database + 'a, I: 'a> = ScrollEvm<'a, (), DB>;
+
+    fn scroll_evm_for_block<'a, DB: Database>(
+        &'a self,
+        db: DB,
+        header: &'a Self::Header,
+    ) -> <Self as ScrollConfigureEvm>::Evm<'a, DB, ()> {
+        self.evm_for_block(db, header)
+    }
+}
+
+pub(crate) trait ScrollEvmT {
+    /// Sets whether the evm should enable or disable the base fee checks.
+    fn with_base_fee_check(&mut self, enabled: bool);
+    /// Returns the l1 fee for the transaction.
+    fn l1_fee(&self) -> Option<U256>;
+}
+
+impl<DB> ScrollEvmT for ScrollEvm<'_, (), DB>
+where
+    DB: Database,
+{
+    /// Sets whether the evm should enable or disable the base fee checks.
+    fn with_base_fee_check(&mut self, enabled: bool) {
+        self.0.context.evm.inner.env.cfg.disable_base_fee = !enabled;
+    }
+
+    fn l1_fee(&self) -> Option<U256> {
+        let l1_block_info = self.0.context.evm.inner.l1_block_info.as_ref()?;
+        let transaction_rlp_bytes = self.0.context.evm.env.tx.scroll.rlp_bytes.as_ref()?;
+        Some(l1_block_info.calculate_tx_l1_cost(transaction_rlp_bytes, self.handler.cfg.spec_id))
     }
 }
 
