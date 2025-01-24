@@ -228,7 +228,6 @@ impl ConfigureEvm for OpEvmConfig {
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
             cfg_env: evm_env.cfg_env,
-            #[allow(clippy::needless_update)]
             handler_cfg: HandlerCfg { spec_id: evm_env.spec, is_optimism: true },
         };
 
@@ -252,7 +251,6 @@ impl ConfigureEvm for OpEvmConfig {
     {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
             cfg_env: evm_env.cfg_env,
-            #[allow(clippy::needless_update)]
             handler_cfg: HandlerCfg { spec_id: evm_env.spec, is_optimism: true },
         };
 

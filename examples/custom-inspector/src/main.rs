@@ -67,11 +67,7 @@ fn main() {
                                     move |db, evm_env, tx_env| {
                                         let EvmEnv { cfg_env, block_env, spec } = evm_env;
                                         let env = EnvWithHandlerCfg {
-                                            #[allow(clippy::needless_update)]
-                                            handler_cfg: HandlerCfg {
-                                                spec_id: spec,
-                                                ..Default::default()
-                                            },
+                                            handler_cfg: HandlerCfg::new(spec),
                                             env: Env::boxed(cfg_env, block_env, tx_env),
                                         };
                                         let mut dummy_inspector = DummyInspector::default();

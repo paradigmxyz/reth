@@ -8,7 +8,8 @@ pub struct EvmEnv<Spec = SpecId> {
     pub cfg_env: CfgEnv,
     /// The block environment containing block-specific data
     pub block_env: BlockEnv,
-    /// The spec id of the chain
+    /// The spec id of the chain. Specifies which hardfork is currently active, `Spec` type will
+    /// most likely be an enum over hardforks.
     pub spec: Spec,
 }
 
@@ -19,7 +20,7 @@ impl<Spec> EvmEnv<Spec> {
     ///
     /// * `cfg_env_with_handler_cfg` - The configuration environment with handler settings
     /// * `block` - The block environment containing block-specific data
-    pub const fn new(cfg_env: CfgEnv, spec: Spec, block_env: BlockEnv) -> Self {
+    pub const fn new(cfg_env: CfgEnv, block_env: BlockEnv, spec: Spec) -> Self {
         Self { cfg_env, spec, block_env }
     }
 

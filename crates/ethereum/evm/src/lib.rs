@@ -241,8 +241,7 @@ impl ConfigureEvm for EthEvmConfig {
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
             cfg_env: evm_env.cfg_env,
-            #[allow(clippy::needless_update)] // side-effect of optimism fields
-            handler_cfg: HandlerCfg { spec_id: evm_env.spec, ..Default::default() },
+            handler_cfg: HandlerCfg::new(evm_env.spec),
         };
         EthEvm(
             EvmBuilder::default()
@@ -265,8 +264,7 @@ impl ConfigureEvm for EthEvmConfig {
     {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
             cfg_env: evm_env.cfg_env,
-            #[allow(clippy::needless_update)] // side-effect of optimism fields
-            handler_cfg: HandlerCfg { spec_id: evm_env.spec, ..Default::default() },
+            handler_cfg: HandlerCfg::new(evm_env.spec),
         };
         EthEvm(
             EvmBuilder::default()
