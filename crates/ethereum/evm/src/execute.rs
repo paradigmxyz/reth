@@ -702,7 +702,8 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
+                .cancun_activated()
+                .prague_activated()
                 .build(),
         );
 
@@ -740,6 +741,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
+                .cancun_activated()
                 .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(1))
                 .build(),
         );
@@ -749,6 +751,8 @@ mod tests {
             timestamp: 1,
             number: fork_activation_block,
             requests_hash: Some(EMPTY_REQUESTS_HASH),
+            excess_blob_gas: Some(0),
+            parent_beacon_block_root: Some(B256::random()),
             ..Header::default()
         };
         let provider = executor_provider(chain_spec);
@@ -790,6 +794,7 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
+                .cancun_activated()
                 .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(1))
                 .build(),
         );
@@ -802,6 +807,8 @@ mod tests {
             timestamp: 1,
             number: fork_activation_block,
             requests_hash: Some(EMPTY_REQUESTS_HASH),
+            excess_blob_gas: Some(0),
+            parent_beacon_block_root: Some(B256::random()),
             ..Header::default()
         };
 
@@ -827,12 +834,12 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
+                .cancun_activated()
+                .prague_activated()
                 .build(),
         );
 
-        let mut header = chain_spec.genesis_header().clone();
-        header.requests_hash = Some(EMPTY_REQUESTS_HASH);
+        let header = chain_spec.genesis_header().clone();
         let header_hash = header.hash_slow();
 
         let provider = executor_provider(chain_spec);
@@ -864,6 +871,8 @@ mod tests {
             timestamp: 1,
             number: 1,
             requests_hash: Some(EMPTY_REQUESTS_HASH),
+            excess_blob_gas: Some(0),
+            parent_beacon_block_root: Some(B256::random()),
             ..Header::default()
         };
         let header_hash = header.hash_slow();
@@ -897,6 +906,8 @@ mod tests {
             timestamp: 1,
             number: 2,
             requests_hash: Some(EMPTY_REQUESTS_HASH),
+            excess_blob_gas: Some(0),
+            parent_beacon_block_root: Some(B256::random()),
             ..Header::default()
         };
 
@@ -935,7 +946,8 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
+                .cancun_activated()
+                .prague_activated()
                 .build(),
         );
 
@@ -1084,7 +1096,8 @@ mod tests {
         let chain_spec = Arc::new(
             ChainSpecBuilder::from(&*MAINNET)
                 .shanghai_activated()
-                .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
+                .cancun_activated()
+                .prague_activated()
                 .build(),
         );
 
@@ -1102,7 +1115,13 @@ mod tests {
         let withdrawal =
             Withdrawal { index: 0, validator_index: 0, address: withdrawal_recipient, amount: 1 };
 
-        let header = Header { timestamp: 1, number: 1, ..Header::default() };
+        let header = Header {
+            timestamp: 1,
+            number: 1,
+            excess_blob_gas: Some(0),
+            parent_beacon_block_root: Some(B256::random()),
+            ..Header::default()
+        };
 
         let block = &RecoveredBlock::new_unhashed(
             Block {

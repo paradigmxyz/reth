@@ -28,7 +28,7 @@ use reth_primitives_traits::transaction::execute::FillTxEnv;
 use reth_revm::{inspector_handle_register, Database, EvmBuilder};
 use revm_primitives::{
     AnalysisKind, BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, CfgEnvWithHandlerCfg, EVMError,
-    Env, ResultAndState, SpecId, TxEnv, TxKind,
+    Env, HandlerCfg, ResultAndState, SpecId, TxEnv, TxKind,
 };
 
 mod config;
@@ -152,20 +152,43 @@ impl ConfigureEvmEnv for EthEvmConfig {
     type Error = Infallible;
     type TxEnv = TxEnv;
 
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        transaction.fill_tx_env(tx_env, sender);
+    fn tx_env(&self, transaction: &TransactionSigned, sender: Address) -> Self::TxEnv {
+        let mut tx_env = TxEnv::default();
+        transaction.fill_tx_env(&mut tx_env, sender);
+        tx_env
     }
 
-    fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Header) {
+    fn evm_env(&self, header: &Self::Header) -> EvmEnv {
         let spec_id = config::revm_spec(self.chain_spec(), header);
 
+        let mut cfg_env = CfgEnv::default();
         cfg_env.chain_id = self.chain_spec.chain().id();
-        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
+        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::default();
 
-        cfg_env.handler_cfg.spec_id = spec_id;
+        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env,
+            #[allow(clippy::needless_update)] // side-effect of optimism fields
+            handler_cfg: HandlerCfg { spec_id, ..Default::default() },
+        };
+
+        let block_env = BlockEnv {
+            number: U256::from(header.number()),
+            coinbase: header.beneficiary(),
+            timestamp: U256::from(header.timestamp()),
+            difficulty: if spec_id >= SpecId::MERGE { U256::ZERO } else { header.difficulty() },
+            prevrandao: if spec_id >= SpecId::MERGE { header.mix_hash() } else { None },
+            gas_limit: U256::from(header.gas_limit()),
+            basefee: U256::from(header.base_fee_per_gas().unwrap_or_default()),
+            // EIP-4844 excess blob gas of this block, introduced in Cancun
+            blob_excess_gas_and_price: header.excess_blob_gas.map(|excess_blob_gas| {
+                BlobExcessGasAndPrice::new(excess_blob_gas, spec_id >= SpecId::PRAGUE)
+            }),
+        };
+
+        EvmEnv { cfg_env_with_handler_cfg, block_env }
     }
 
-    fn next_cfg_and_block_env(
+    fn next_evm_env(
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
@@ -296,7 +319,7 @@ mod tests {
         // Use the `EthEvmConfig` to fill the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
         let EvmEnv { cfg_env_with_handler_cfg, .. } =
-            EthEvmConfig::new(Arc::new(chain_spec.clone())).cfg_and_block_env(&header);
+            EthEvmConfig::new(Arc::new(chain_spec.clone())).evm_env(&header);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec

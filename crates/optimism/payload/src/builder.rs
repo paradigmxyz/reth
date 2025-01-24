@@ -173,7 +173,7 @@ where
             prev_randao: attributes.prev_randao(),
             gas_limit: attributes.gas_limit.unwrap_or(parent.gas_limit),
         };
-        self.evm_config.next_cfg_and_block_env(parent, next_attributes)
+        self.evm_config.next_evm_env(parent, next_attributes)
     }
 
     /// Computes the witness for the payload.
