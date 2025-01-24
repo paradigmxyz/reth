@@ -215,7 +215,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Run dprint
         uses: dprint/check@v2.2
         with:
