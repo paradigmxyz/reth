@@ -25,10 +25,10 @@ use reth_chainspec::ChainSpec;
 use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm, NextBlockEnvAttributes};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::transaction::execute::FillTxEnv;
-use reth_revm::{inspector_handle_register, Database, EvmBuilder};
+use reth_revm::{inspector_handle_register, Database, EvmBuilder, GetInspector};
 use revm_primitives::{
     AnalysisKind, BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, CfgEnvWithHandlerCfg, EVMError,
-    Env, ResultAndState, SpecId, TxEnv, TxKind,
+    ResultAndState, SpecId, TxEnv, TxKind,
 };
 
 mod config;
@@ -45,33 +45,71 @@ pub mod dao_fork;
 pub mod eip6110;
 
 /// Ethereum EVM implementation.
-#[derive(derive_more::Debug, derive_more::Deref, derive_more::DerefMut, derive_more::From)]
+#[derive(derive_more::Debug)]
 #[debug(bound(DB::Error: Debug))]
-pub struct EthEvm<'a, EXT, DB: Database>(reth_revm::Evm<'a, EXT, DB>);
+pub struct EthEvm<DB: Database> {
+    db: Option<DB>,
+    evm_env: EvmEnv,
+}
 
-impl<EXT, DB: Database> Evm for EthEvm<'_, EXT, DB> {
+impl<DB: Database> EthEvm<DB> {
+    /// Creates a new EVM instance.
+    pub fn new(db: DB, evm_env: EvmEnv) -> Self {
+        Self { db: Some(db), evm_env }
+    }
+}
+
+impl<DB: Database> Evm for EthEvm<DB> {
     type DB = DB;
     type Tx = TxEnv;
     type Error = EVMError<DB::Error>;
 
     fn block(&self) -> &BlockEnv {
-        self.0.block()
+        &self.evm_env.block_env
     }
 
     fn into_env(self) -> EvmEnv {
-        let Env { cfg, block, tx: _ } = *self.0.context.evm.inner.env;
-        EvmEnv {
-            cfg_env_with_handler_cfg: CfgEnvWithHandlerCfg {
-                cfg_env: cfg,
-                handler_cfg: self.0.handler.cfg,
-            },
-            block_env: block,
-        }
+        self.evm_env
     }
 
     fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error> {
-        *self.tx_mut() = tx;
-        self.0.transact()
+        let db = self.db.take().expect("db is set");
+
+        let mut evm = EvmBuilder::default()
+            .with_db(db)
+            .with_cfg_env_with_handler_cfg(self.evm_env.cfg_env_with_handler_cfg.clone())
+            .with_block_env(self.evm_env.block_env.clone())
+            .with_tx_env(tx)
+            .build();
+
+        let res = evm.transact();
+
+        self.db = Some(evm.context.evm.inner.db);
+
+        res
+    }
+
+    fn inspect(
+        &mut self,
+        tx: Self::Tx,
+        inspector: impl GetInspector<Self::DB>,
+    ) -> Result<ResultAndState, Self::Error> {
+        let db = self.db.take().expect("db is set");
+
+        let mut evm = EvmBuilder::default()
+            .with_db(db)
+            .with_external_context(inspector)
+            .with_cfg_env_with_handler_cfg(self.evm_env.cfg_env_with_handler_cfg.clone())
+            .with_block_env(self.evm_env.block_env.clone())
+            .with_tx_env(tx)
+            .append_handler_register(inspector_handle_register)
+            .build();
+
+        let res = evm.transact();
+
+        self.db = Some(evm.context.evm.inner.db);
+
+        res
     }
 
     fn transact_system_call(
@@ -105,26 +143,24 @@ impl<EXT, DB: Database> Evm for EthEvm<'_, EXT, DB> {
             ..Default::default()
         };
 
-        *self.tx_mut() = tx_env;
-
         let prev_block_env = self.block().clone();
 
         // ensure the block gas limit is >= the tx
-        self.block_mut().gas_limit = U256::from(self.tx().gas_limit);
+        self.evm_env.block_env.gas_limit = U256::from(tx_env.gas_limit);
 
         // disable the base fee check for this call by setting the base fee to zero
-        self.block_mut().basefee = U256::ZERO;
+        self.evm_env.block_env.basefee = U256::ZERO;
 
-        let res = self.0.transact();
+        let res = self.transact(tx_env);
 
         // re-set the block env
-        *self.block_mut() = prev_block_env;
+        self.evm_env.block_env = prev_block_env;
 
         res
     }
 
     fn db_mut(&mut self) -> &mut Self::DB {
-        &mut self.context.evm.db
+        self.db.as_mut().expect("db is set")
     }
 }
 
@@ -228,37 +264,10 @@ impl ConfigureEvmEnv for EthEvmConfig {
 }
 
 impl ConfigureEvm for EthEvmConfig {
-    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
+    type Evm<DB: Database> = EthEvm<DB>;
 
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
-        EthEvm(
-            EvmBuilder::default()
-                .with_db(db)
-                .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
-                .with_block_env(evm_env.block_env)
-                .build(),
-        )
-    }
-
-    fn evm_with_env_and_inspector<DB, I>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        inspector: I,
-    ) -> Self::Evm<'_, DB, I>
-    where
-        DB: Database,
-        I: reth_revm::GetInspector<DB>,
-    {
-        EthEvm(
-            EvmBuilder::default()
-                .with_db(db)
-                .with_external_context(inspector)
-                .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
-                .with_block_env(evm_env.block_env)
-                .append_handler_register(inspector_handle_register)
-                .build(),
-        )
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<DB> {
+        EthEvm::new(db, evm_env)
     }
 }
 

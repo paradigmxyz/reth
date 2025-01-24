@@ -46,7 +46,7 @@ pub mod test_utils;
 /// At this point, assumed to be implemented on wrappers around [`revm::Evm`].
 pub trait Evm {
     /// Database type held by the EVM.
-    type DB;
+    type DB: Database;
     /// Transaction environment
     type Tx;
     /// Error type.
@@ -60,6 +60,13 @@ pub trait Evm {
 
     /// Executes the given transaction.
     fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error>;
+
+    /// Executes the given transaction with the given inspector.
+    fn inspect(
+        &mut self,
+        tx: Self::Tx,
+        inspector: impl GetInspector<Self::DB>,
+    ) -> Result<ResultAndState, Self::Error>;
 
     /// Executes a system call.
     fn transact_system_call(
@@ -87,13 +94,13 @@ pub trait Evm {
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// The EVM implementation.
-    type Evm<'a, DB: Database + 'a, I: 'a>: Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>>;
+    type Evm<DB: Database>: Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>>;
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id and transaction environment.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()>;
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<DB>;
 
     /// Returns a new EVM with the given database configured with `cfg` and `block_env`
     /// configuration derived from the given header. Relies on
@@ -102,26 +109,10 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// # Caution
     ///
     /// This does not initialize the tx environment.
-    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Self::Evm<'_, DB, ()> {
+    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Self::Evm<DB> {
         let evm_env = self.cfg_and_block_env(header);
         self.evm_with_env(db, evm_env)
     }
-
-    /// Returns a new EVM with the given database configured with the given environment settings,
-    /// including the spec id.
-    ///
-    /// This will use the given external inspector as the EVM external context.
-    ///
-    /// This will preserve any handler modifications
-    fn evm_with_env_and_inspector<DB, I>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        inspector: I,
-    ) -> Self::Evm<'_, DB, I>
-    where
-        DB: Database,
-        I: GetInspector<DB>;
 }
 
 impl<'b, T> ConfigureEvm for &'b T
@@ -129,27 +120,14 @@ where
     T: ConfigureEvm,
     &'b T: ConfigureEvmEnv<Header = T::Header>,
 {
-    type Evm<'a, DB: Database + 'a, I: 'a> = T::Evm<'a, DB, I>;
+    type Evm<DB: Database> = T::Evm<DB>;
 
-    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Self::Evm<'_, DB, ()> {
+    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Self::Evm<DB> {
         (*self).evm_for_block(db, header)
     }
 
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<DB> {
         (*self).evm_with_env(db, evm_env)
-    }
-
-    fn evm_with_env_and_inspector<DB, I>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        inspector: I,
-    ) -> Self::Evm<'_, DB, I>
-    where
-        DB: Database,
-        I: GetInspector<DB>,
-    {
-        (*self).evm_with_env_and_inspector(db, evm_env, inspector)
     }
 }
 
