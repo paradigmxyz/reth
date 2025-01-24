@@ -2500,14 +2500,16 @@ where
         match state_root_handle.wait_for_result() {
             Ok(StateRootComputeOutcome {
                 state_root: (task_state_root, task_trie_updates),
-                time_from_last_update,
+                total_time,
                 ..
             }) => {
+                let root_time = root_time.elapsed();
                 info!(
                     target: "engine::tree",
                     block = ?sealed_block.num_hash(),
                     ?task_state_root,
-                    task_elapsed = ?time_from_last_update,
+                    task_elapsed = ?total_time,
+                    elapsed_since_execution = ?root_time,
                     "Task state root finished"
                 );
 
@@ -2538,7 +2540,7 @@ where
                     }
                 }
 
-                Ok((task_state_root, task_trie_updates, time_from_last_update))
+                Ok((task_state_root, task_trie_updates, root_time))
             }
             Err(error) => {
                 info!(target: "engine::tree", ?error, "Failed to wait for state root task result");
