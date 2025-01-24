@@ -315,26 +315,11 @@ where
         }
     }
 
-    /// Validates a single transaction.
-    ///
-    /// See also [`TransactionValidator::validate_transaction`]
-    ///
-    /// This behaves the same as [`EthTransactionValidator::validate_one`], but in addition, ensures
-    /// that the account has enough balance to cover the L1 gas cost.
-    pub fn validate_one(
+    /// Validates the gas fees of a transaction
+    pub fn validate_gas_fees(
         &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
+        outcome: TransactionValidationOutcome<Tx>,
     ) -> TransactionValidationOutcome<Tx> {
-        if transaction.is_eip4844() {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::TxTypeNotSupported.into(),
-            )
-        }
-
-        let outcome = self.inner.validate_one(origin, transaction);
-
         if !self.requires_l1_data_gas_fee() {
             // no need to check L1 gas fee
             return outcome
@@ -375,7 +360,7 @@ where
                         GotExpected { got: balance, expected: cost }.into(),
                     )
                     .into(),
-                )
+                );
             }
 
             return TransactionValidationOutcome::Valid {
@@ -383,10 +368,72 @@ where
                 state_nonce,
                 transaction: valid_tx,
                 propagate,
-            }
+            };
         }
 
         outcome
+    }
+
+    /// Validates the type of transaction
+    pub fn validate_transaction_type(
+        &self,
+        outcome: TransactionValidationOutcome<Tx>,
+    ) -> TransactionValidationOutcome<Tx> {
+        if let TransactionValidationOutcome::Valid {
+            balance,
+            state_nonce,
+            transaction: valid_tx,
+            propagate,
+        } = outcome
+        {
+            if valid_tx.transaction().is_eip4844() {
+                return TransactionValidationOutcome::Invalid(
+                    valid_tx.into_transaction(),
+                    InvalidTransactionError::TxTypeNotSupported.into(),
+                );
+            }
+            return TransactionValidationOutcome::Valid {
+                balance,
+                state_nonce,
+                transaction: valid_tx,
+                propagate,
+            };
+        }
+        outcome
+    }
+
+    /// Validates a single transaction.
+    ///
+    /// See also [`TransactionValidator::validate_transaction`]
+    ///
+    /// This behaves the same as [`EthTransactionValidator::validate_one`], but in addition, ensures
+    /// that the account has enough balance to cover the L1 gas cost.
+    pub fn validate_one(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+    ) -> TransactionValidationOutcome<Tx> {
+        if transaction.is_eip4844() {
+            return TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::TxTypeNotSupported.into(),
+            );
+        }
+
+        let outcome = self.inner.validate_one(origin, transaction);
+        self.validate_gas_fees(outcome)
+    }
+
+    /// Validates all given transactions.
+    pub fn validate_batch(
+        &self,
+        transactions: Vec<(TransactionOrigin, Tx)>,
+    ) -> Vec<TransactionValidationOutcome<Tx>> {
+        let outcomes = self.validate_all(transactions);
+        outcomes
+            .into_iter()
+            .map(|outcome| self.validate_gas_fees(self.validate_transaction_type(outcome)))
+            .collect()
     }
 
     /// Validates all given transactions.
@@ -398,7 +445,7 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)).collect()
+        self.validate_batch(transactions)
     }
 }
 
