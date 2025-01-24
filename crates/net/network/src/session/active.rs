@@ -616,7 +616,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
 
                 // check whether we should throttle incoming messages
                 if this.received_requests_from_remote.len() > MAX_QUEUED_OUTGOING_RESPONSES {
-                    // we're currently waiting for the responses to the peer's requests with aren't
+                    // we're currently waiting for the responses to the peer's requests which aren't
                     // queued as outgoing yet
                     //
                     // Note: we don't need to register the waker here because we polled the requests
