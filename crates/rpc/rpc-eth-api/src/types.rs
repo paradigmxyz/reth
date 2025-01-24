@@ -11,7 +11,10 @@ use reth_provider::{ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
-use crate::{AsEthApiError, FromEthApiError, FromEvmError, RpcNodeCore};
+use crate::{
+    helpers::bitfinity_evm_rpc::BitfinityEvmRpc, AsEthApiError, FromEthApiError, FromEvmError,
+    RpcNodeCore,
+};
 
 /// Network specific `eth` API types.
 pub trait EthApiTypes: Send + Sync + Clone {
@@ -61,7 +64,7 @@ where
                 Transaction = RpcTransaction<Self::NetworkTypes>,
                 Error = RpcError<Self>,
             >,
-        >,
+        > + BitfinityEvmRpc<Transaction = <Self::Provider as TransactionsProvider>::Transaction>,
 {
 }
 
@@ -77,6 +80,6 @@ impl<T> FullEthApiTypes for T where
                 Transaction = RpcTransaction<T::NetworkTypes>,
                 Error = RpcError<T>,
             >,
-        >
+        > + BitfinityEvmRpc<Transaction = <Self::Provider as TransactionsProvider>::Transaction>
 {
 }
