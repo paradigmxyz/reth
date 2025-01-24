@@ -15,7 +15,7 @@ use std::net::SocketAddr;
 use tokio::net::TcpStream;
 use tokio_util::codec::{Decoder, Framed, LengthDelimitedCodec};
 
-pub type P2pPassthroughTcpStream = P2PStream<Framed<TcpStream, LengthDelimitedCodec>>;
+pub type P2pPassthroughTcpStream = P2PStream<Framzzed<TcpStream, LengthDelimitedCodec>>;
 
 /// Returns a new testing `HelloMessage` and new secretkey
 pub fn eth_hello() -> (HelloMessageWithProtocols, SecretKey) {
@@ -60,7 +60,7 @@ pub async fn connect_passthrough(
     p2p_stream
 }
 
-/// A Rplx subprotocol for testing
+/// An Rplx subprotocol for testing
 pub mod proto {
     use super::*;
     use crate::{protocol::Protocol, Capability};
