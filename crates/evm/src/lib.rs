@@ -17,11 +17,16 @@
 
 extern crate alloc;
 
+use core::fmt::Debug;
+
 use alloy_consensus::BlockHeader as _;
+use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{Database, DatabaseCommit, GetInspector};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, EVMError, ResultAndState, SpecId, TxEnv};
+use revm_primitives::{
+    BlockEnv, CfgEnvWithHandlerCfg, EVMError, ResultAndState, SpecId, TxEnv, TxKind,
+};
 
 pub mod either;
 /// EVM environment configuration.
@@ -87,7 +92,11 @@ pub trait Evm {
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
     /// The EVM implementation.
-    type Evm<'a, DB: Database + 'a, I: 'a>: Evm<Tx = TxEnv, DB = DB, Error = EVMError<DB::Error>>;
+    type Evm<'a, DB: Database + 'a, I: 'a>: Evm<
+        Tx = Self::TxEnv,
+        DB = DB,
+        Error = EVMError<DB::Error>,
+    >;
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id and transaction environment.
@@ -127,7 +136,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 impl<'b, T> ConfigureEvm for &'b T
 where
     T: ConfigureEvm,
-    &'b T: ConfigureEvmEnv<Header = T::Header>,
+    &'b T: ConfigureEvmEnv<Header = T::Header, TxEnv = T::TxEnv>,
 {
     type Evm<'a, DB: Database + 'a, I: 'a> = T::Evm<'a, DB, I>;
 
@@ -165,18 +174,26 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// The transaction type.
     type Transaction: SignedTransaction;
 
+    /// Transaction environment used by EVM.
+    type TxEnv: TransactionEnv;
+
     /// The error type that is returned by [`Self::next_cfg_and_block_env`].
     type Error: core::error::Error + Send + Sync;
 
     /// Returns a [`TxEnv`] from a transaction and [`Address`].
-    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> TxEnv {
-        let mut tx_env = TxEnv::default();
+    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv {
+        let mut tx_env = Default::default();
         self.fill_tx_env(&mut tx_env, transaction, signer);
         tx_env
     }
 
     /// Fill transaction environment from a transaction  and the given sender address.
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &Self::Transaction, sender: Address);
+    fn fill_tx_env(
+        &self,
+        tx_env: &mut Self::TxEnv,
+        transaction: &Self::Transaction,
+        sender: Address,
+    );
 
     /// Returns a [`CfgEnvWithHandlerCfg`] for the given header.
     fn cfg_env(&self, header: &Self::Header) -> CfgEnvWithHandlerCfg {
@@ -262,17 +279,77 @@ pub struct NextBlockEnvAttributes {
     pub gas_limit: u64,
 }
 
-/// Function hook that allows to modify a transaction environment.
-pub trait TxEnvOverrides {
-    /// Apply the overrides by modifying the given `TxEnv`.
-    fn apply(&mut self, env: &mut TxEnv);
+/// Abstraction over transaction environment.
+pub trait TransactionEnv:
+    Into<revm_primitives::TxEnv> + Debug + Default + Clone + Send + Sync + 'static
+{
+    /// Returns configured gas limit.
+    fn gas_limit(&self) -> u64;
+
+    /// Set the gas limit.
+    fn set_gas_limit(&mut self, gas_limit: u64);
+
+    /// Set the gas limit.
+    fn with_gas_limit(mut self, gas_limit: u64) -> Self {
+        self.set_gas_limit(gas_limit);
+        self
+    }
+
+    /// Returns configured gas price.
+    fn gas_price(&self) -> U256;
+
+    /// Returns configured value.
+    fn value(&self) -> U256;
+
+    /// Caller of the transaction.
+    fn caller(&self) -> Address;
+
+    /// Set access list.
+    fn set_access_list(&mut self, access_list: AccessList);
+
+    /// Set access list.
+    fn with_access_list(mut self, access_list: AccessList) -> Self {
+        self.set_access_list(access_list);
+        self
+    }
+
+    /// Returns calldata for the transaction.
+    fn input(&self) -> &Bytes;
+
+    /// Returns [`TxKind`] of the transaction.
+    fn kind(&self) -> TxKind;
 }
 
-impl<F> TxEnvOverrides for F
-where
-    F: FnMut(&mut TxEnv),
-{
-    fn apply(&mut self, env: &mut TxEnv) {
-        self(env)
+impl TransactionEnv for TxEnv {
+    fn gas_limit(&self) -> u64 {
+        self.gas_limit
+    }
+
+    fn set_gas_limit(&mut self, gas_limit: u64) {
+        self.gas_limit = gas_limit;
+    }
+
+    fn gas_price(&self) -> U256 {
+        self.gas_price.to()
+    }
+
+    fn value(&self) -> U256 {
+        self.value
+    }
+
+    fn caller(&self) -> Address {
+        self.caller
+    }
+
+    fn set_access_list(&mut self, access_list: AccessList) {
+        self.access_list = access_list.to_vec();
+    }
+
+    fn input(&self) -> &Bytes {
+        &self.data
+    }
+
+    fn kind(&self) -> TxKind {
+        self.transact_to
     }
 }

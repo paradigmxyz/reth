@@ -150,6 +150,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
     type Header = Header;
     type Transaction = TransactionSigned;
     type Error = Infallible;
+    type TxEnv = TxEnv;
 
     fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
         self.inner.fill_tx_env(tx_env, transaction, sender)
