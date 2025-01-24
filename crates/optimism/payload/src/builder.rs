@@ -17,7 +17,8 @@ use reth_basic_payload_builder::*;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::{
-    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, NextBlockEnvAttributes,
+    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Evm,
+    NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
@@ -125,7 +126,7 @@ where
         Txs: PayloadTransactions<Transaction = OpTransactionSigned>,
     {
         let evm_env = self
-            .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
+            .evm_env(&args.config.attributes, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
         let BuildArguments { client, pool: _, mut cached_reads, config, cancel, best_payload } =
@@ -162,11 +163,11 @@ where
 
     /// Returns the configured [`EvmEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
-    pub fn cfg_and_block_env(
+    pub fn evm_env(
         &self,
         attributes: &OpPayloadBuilderAttributes,
         parent: &Header,
-    ) -> Result<EvmEnv, EvmConfig::Error> {
+    ) -> Result<EvmEnv<EvmConfig::Spec>, EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: attributes.timestamp(),
             suggested_fee_recipient: attributes.suggested_fee_recipient(),
@@ -189,8 +190,7 @@ where
         let attributes = OpPayloadBuilderAttributes::try_new(parent.hash(), attributes, 3)
             .map_err(PayloadBuilderError::other)?;
 
-        let evm_env =
-            self.cfg_and_block_env(&attributes, &parent).map_err(PayloadBuilderError::other)?;
+        let evm_env = self.evm_env(&attributes, &parent).map_err(PayloadBuilderError::other)?;
 
         let config = PayloadConfig { parent_header: Arc::new(parent), attributes };
         let ctx = OpPayloadBuilderCtx {
@@ -578,7 +578,7 @@ impl ExecutionInfo {
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug)]
-pub struct OpPayloadBuilderCtx<EvmConfig> {
+pub struct OpPayloadBuilderCtx<EvmConfig: ConfigureEvmEnv> {
     /// The type that knows how to perform system calls and configure the evm.
     pub evm_config: EvmConfig,
     /// The DA config for the payload builder
@@ -588,14 +588,14 @@ pub struct OpPayloadBuilderCtx<EvmConfig> {
     /// How to build the payload.
     pub config: PayloadConfig<OpPayloadBuilderAttributes>,
     /// Evm Settings
-    pub evm_env: EvmEnv,
+    pub evm_env: EvmEnv<EvmConfig::Spec>,
     /// Marker to check whether the job has been cancelled.
     pub cancel: Cancelled,
     /// The currently best payload.
     pub best_payload: Option<OpBuiltPayload>,
 }
 
-impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
+impl<EvmConfig: ConfigureEvmEnv> OpPayloadBuilderCtx<EvmConfig> {
     /// Returns the parent block the payload will be build on.
     pub fn parent(&self) -> &SealedHeader {
         &self.config.parent_header

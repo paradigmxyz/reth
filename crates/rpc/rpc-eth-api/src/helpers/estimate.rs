@@ -36,7 +36,7 @@ pub trait EstimateCall: Call {
     ///  - `nonce` is set to `None`
     fn estimate_gas_with<S>(
         &self,
-        mut evm_env: EvmEnv,
+        mut evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
         mut request: TransactionRequest,
         state: S,
         state_override: Option<StateOverride>,
@@ -46,12 +46,12 @@ pub trait EstimateCall: Call {
     {
         // Disabled because eth_estimateGas is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>
-        evm_env.cfg_env_with_handler_cfg.disable_eip3607 = true;
+        evm_env.cfg_env.disable_eip3607 = true;
 
         // The basefee should be ignored for eth_estimateGas and similar
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
-        evm_env.cfg_env_with_handler_cfg.disable_base_fee = true;
+        evm_env.cfg_env.disable_base_fee = true;
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.nonce = None;
@@ -281,7 +281,7 @@ pub trait EstimateCall: Call {
     fn map_out_of_gas_err<DB>(
         &self,
         env_gas_limit: U256,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
         mut tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         db: &mut DB,
     ) -> Self::Error

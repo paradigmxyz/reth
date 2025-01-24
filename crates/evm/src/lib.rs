@@ -57,9 +57,6 @@ pub trait Evm {
     /// Reference to [`BlockEnv`].
     fn block(&self) -> &BlockEnv;
 
-    /// Consumes the type and returns the underlying [`EvmEnv`].
-    fn into_env(self) -> EvmEnv;
-
     /// Executes the given transaction.
     fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error>;
 
@@ -99,7 +96,11 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// including the spec id and transaction environment.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()>;
+    fn evm_with_env<DB: Database>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv<Self::Spec>,
+    ) -> Self::Evm<'_, DB, ()>;
 
     /// Returns a new EVM with the given database configured with `cfg` and `block_env`
     /// configuration derived from the given header. Relies on
@@ -122,7 +123,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     fn evm_with_env_and_inspector<DB, I>(
         &self,
         db: DB,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<Self::Spec>,
         inspector: I,
     ) -> Self::Evm<'_, DB, I>
     where
@@ -133,7 +134,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 impl<'b, T> ConfigureEvm for &'b T
 where
     T: ConfigureEvm,
-    &'b T: ConfigureEvmEnv<Header = T::Header, TxEnv = T::TxEnv>,
+    &'b T: ConfigureEvmEnv<Header = T::Header, TxEnv = T::TxEnv, Spec = T::Spec>,
 {
     type Evm<'a, DB: Database + 'a, I: 'a> = T::Evm<'a, DB, I>;
 
@@ -141,14 +142,18 @@ where
         (*self).evm_for_block(db, header)
     }
 
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
+    fn evm_with_env<DB: Database>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv<Self::Spec>,
+    ) -> Self::Evm<'_, DB, ()> {
         (*self).evm_with_env(db, evm_env)
     }
 
     fn evm_with_env_and_inspector<DB, I>(
         &self,
         db: DB,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<Self::Spec>,
         inspector: I,
     ) -> Self::Evm<'_, DB, I>
     where
@@ -177,11 +182,14 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// The error type that is returned by [`Self::next_evm_env`].
     type Error: core::error::Error + Send + Sync;
 
+    /// Identifier of the EVM specification.
+    type Spec: Into<revm_primitives::SpecId> + Debug + Copy + Send + Sync;
+
     /// Returns a [`TxEnv`] from a transaction and [`Address`].
     fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv;
 
     /// Creates a new [`EvmEnv`] for the given header.
-    fn evm_env(&self, header: &Self::Header) -> EvmEnv;
+    fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec>;
 
     /// Returns the configured [`EvmEnv`] for `parent + 1` block.
     ///
@@ -192,7 +200,7 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> Result<EvmEnv, Self::Error>;
+    ) -> Result<EvmEnv<Self::Spec>, Self::Error>;
 }
 
 /// Represents additional attributes required to configure the next block.
