@@ -37,7 +37,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
-use revm::{Database, DatabaseCommit, GetInspector};
+use revm::{Database, DatabaseCommit};
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use tracing::trace;
 
@@ -170,6 +170,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let mut senders = Vec::with_capacity(calls.len());
                     let mut results = Vec::with_capacity(calls.len());
 
+                    let mut evm = this.evm_config().evm_with_env(&mut db, evm_env.clone());
+
                     while let Some(call) = calls.next() {
                         let sender = call.from.unwrap_or_default();
 
@@ -180,29 +182,28 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             validation,
                             default_gas_limit,
                             evm_env.cfg_env_with_handler_cfg.chain_id,
-                            &mut db,
+                            evm.db_mut(),
                             this.tx_resp_builder(),
                         )?;
 
                         let tx_env = this.evm_config().tx_env(&tx, sender);
 
-                        let (res, (_, tx_env)) = {
+                        let res = {
                             if trace_transfers {
-                                this.transact_with_inspector(
-                                    &mut db,
-                                    evm_env.clone(),
-                                    tx_env,
+                                evm.inspect(
+                                    tx_env.clone(),
                                     TransferInspector::new(false).with_logs(true),
-                                )?
+                                )
                             } else {
-                                this.transact(&mut db, evm_env.clone(), tx_env.clone())?
+                                evm.transact(tx_env.clone())
                             }
+                            .map_err(Self::Error::from_evm_err)?
                         };
 
                         if calls.peek().is_some() || block_state_calls.peek().is_some() {
                             // need to apply the state changes of this call before executing the
                             // next call
-                            db.commit(res.state);
+                            evm.db_mut().commit(res.state);
                         }
 
                         transactions.push(tx);
@@ -503,26 +504,6 @@ pub trait Call:
         EthApiError: From<DB::Error>,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);
-        let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
-        let evm_env = evm.into_env();
-
-        Ok((res, (evm_env, tx_env)))
-    }
-
-    /// Executes the [`EvmEnv`] against the given [Database] without committing state
-    /// changes.
-    fn transact_with_inspector<DB>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        tx_env: TxEnv,
-        inspector: impl GetInspector<DB>,
-    ) -> Result<(ResultAndState, (EvmEnv, TxEnv)), Self::Error>
-    where
-        DB: Database,
-        EthApiError: From<DB::Error>,
-    {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
         let evm_env = evm.into_env();
 
