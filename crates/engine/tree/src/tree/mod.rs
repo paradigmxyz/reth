@@ -594,10 +594,7 @@ where
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
-        // The thread pool requires at least 2 threads as it contains a long running sparse trie
-        // task.
-        let num_threads =
-            std::thread::available_parallelism().map_or(2, |num| (num.get() / 2).max(2));
+        let num_threads = root::thread_pool_size();
 
         let state_root_task_pool = Arc::new(
             rayon::ThreadPoolBuilder::new()
