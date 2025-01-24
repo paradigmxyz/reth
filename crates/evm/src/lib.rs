@@ -17,10 +17,10 @@
 
 extern crate alloc;
 
-use core::fmt::Debug;
-
+use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Address, Bytes, B256, U256};
+use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{Database, DatabaseCommit, GetInspector};
 use revm_primitives::{BlockEnv, EVMError, ResultAndState, TxEnv, TxKind};
@@ -187,6 +187,12 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
 
     /// Returns a [`TxEnv`] from a transaction and [`Address`].
     fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv;
+
+    /// Returns a [`TxEnv`] from a [`Recovered`] transaction.
+    fn tx_env_from_recovered(&self, tx: Recovered<&Self::Transaction>) -> Self::TxEnv {
+        let (tx, address) = tx.into_parts();
+        self.tx_env(tx, address)
+    }
 
     /// Creates a new [`EvmEnv`] for the given header.
     fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec>;
