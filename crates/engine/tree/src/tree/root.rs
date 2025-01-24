@@ -46,7 +46,7 @@ const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 /// NOTE: this value can be greater than the available cores in the host, it
 /// represents the maximum number of threads that can be handled by the pool.
 pub(crate) fn thread_pool_size() -> usize {
-    std::thread::available_parallelism().map_or(4, |num| (num.get() / 2).max(4))
+    std::thread::available_parallelism().map_or(3, |num| (num.get() / 2).max(3))
 }
 
 /// Outcome of the state root computation, including the state root itself with
