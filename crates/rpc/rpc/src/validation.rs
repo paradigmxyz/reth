@@ -469,7 +469,7 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     executor_provider: E,
     /// Set of disallowed addresses
     disallow: HashSet<Address>,
-    /// The maximum block distance (parent to latest) allowed for validation
+    /// The maximum block distance - parent to latest - allowed for validation
     validation_window: u64,
     /// Cached state reads to avoid redundant disk I/O across multiple validation attempts
     /// targeting the same state. Stores a tuple of (`block_hash`, `cached_reads`) for the
