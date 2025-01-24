@@ -19,6 +19,7 @@
 //! use reth_consensus::{ConsensusError, FullConsensus};
 //! use reth_engine_primitives::PayloadValidator;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+//! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::{Header, PooledTransaction, TransactionSigned};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
@@ -30,21 +31,12 @@
 //! use reth_transaction_pool::{PoolTransaction, TransactionPool};
 //! use std::sync::Arc;
 //!
-//! pub async fn launch<
-//!     Provider,
-//!     Pool,
-//!     Network,
-//!     Events,
-//!     EvmConfig,
-//!     BlockExecutor,
-//!     Consensus,
-//!     Validator,
-//! >(
+//! pub async fn launch<Provider, Pool, Network, Events, BlockExecutor, Consensus, Validator>(
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
 //!     events: Events,
-//!     evm_config: EvmConfig,
+//!     evm_config: EthEvmConfig,
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //!     validator: Validator,
@@ -66,7 +58,6 @@
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     Events:
 //!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
-//!     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
 //!     Consensus: FullConsensus<Error = ConsensusError> + Clone + 'static,
 //!     Validator: PayloadValidator<Block = reth_primitives::Block>,
@@ -103,6 +94,7 @@
 //! use reth_consensus::{ConsensusError, FullConsensus};
 //! use reth_engine_primitives::{EngineTypes, PayloadValidator};
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+//! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::{Header, PooledTransaction, TransactionSigned};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
@@ -125,7 +117,6 @@
 //!     Events,
 //!     EngineApi,
 //!     EngineT,
-//!     EvmConfig,
 //!     BlockExecutor,
 //!     Consensus,
 //!     Validator,
@@ -135,7 +126,7 @@
 //!     network: Network,
 //!     events: Events,
 //!     engine_api: EngineApi,
-//!     evm_config: EvmConfig,
+//!     evm_config: EthEvmConfig,
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //!     validator: Validator,
@@ -159,7 +150,6 @@
 //!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
 //!     EngineT: EngineTypes,
-//!     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
 //!     Consensus: FullConsensus<Error = ConsensusError> + Clone + 'static,
 //!     Validator: PayloadValidator<Block = reth_primitives::Block>,

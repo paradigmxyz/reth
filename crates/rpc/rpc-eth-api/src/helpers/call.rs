@@ -489,7 +489,7 @@ pub trait Call:
         f(StateProviderTraitObjWrapper(&state))
     }
 
-    /// Executes the [`TxEnv`] against the given [Database] without committing state
+    /// Executes the `TxEnv` against the given [Database] without committing state
     /// changes.
     #[expect(clippy::type_complexity)]
     fn transact<DB>(
@@ -705,9 +705,9 @@ pub trait Call:
         Ok(index)
     }
 
-    /// Configures a new [`TxEnv`]  for the [`TransactionRequest`]
+    /// Configures a new `TxEnv`  for the [`TransactionRequest`]
     ///
-    /// All [`TxEnv`] fields are derived from the given [`TransactionRequest`], if fields are
+    /// All `TxEnv` fields are derived from the given [`TransactionRequest`], if fields are
     /// `None`, they fall back to the [`BlockEnv`]'s settings.
     fn create_txn_env(
         &self,
