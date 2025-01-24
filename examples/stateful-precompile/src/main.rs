@@ -13,9 +13,7 @@ use reth::{
         handler::register::EvmHandler,
         inspector_handle_register,
         precompile::{Precompile, PrecompileSpecId},
-        primitives::{
-            CfgEnvWithHandlerCfg, Env, PrecompileResult, SpecId, StatefulPrecompileMut, TxEnv,
-        },
+        primitives::{Env, PrecompileResult, SpecId, StatefulPrecompileMut, TxEnv},
         ContextPrecompile, ContextPrecompiles, Database, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
@@ -152,20 +150,20 @@ impl ConfigureEvmEnv for MyEvmConfig {
     type Error = Infallible;
     type TxEnv = TxEnv;
 
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        self.inner.fill_tx_env(tx_env, transaction, sender)
+    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv {
+        self.inner.tx_env(transaction, signer)
     }
 
-    fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
-        self.inner.fill_cfg_env(cfg_env, header)
+    fn evm_env(&self, header: &Self::Header) -> EvmEnv {
+        self.inner.evm_env(header)
     }
 
-    fn next_cfg_and_block_env(
+    fn next_evm_env(
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
     ) -> Result<EvmEnv, Self::Error> {
-        self.inner.next_cfg_and_block_env(parent, attributes)
+        self.inner.next_evm_env(parent, attributes)
     }
 }
 
