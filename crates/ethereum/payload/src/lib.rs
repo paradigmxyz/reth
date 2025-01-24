@@ -81,11 +81,11 @@ where
 {
     /// Returns the configured [`EvmEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
-    fn cfg_and_block_env(
+    fn evm_env(
         &self,
         config: &PayloadConfig<EthPayloadBuilderAttributes>,
         parent: &Header,
-    ) -> Result<EvmEnv, EvmConfig::Error> {
+    ) -> Result<EvmEnv<EvmConfig::Spec>, EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: config.attributes.timestamp(),
             suggested_fee_recipient: config.attributes.suggested_fee_recipient(),
@@ -111,7 +111,7 @@ where
         args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
         let evm_env = self
-            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .evm_env(&args.config, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
         let pool = args.pool.clone();
@@ -140,7 +140,7 @@ where
         );
 
         let evm_env = self
-            .cfg_and_block_env(&args.config, &args.config.parent_header)
+            .evm_env(&args.config, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
         let pool = args.pool.clone();
@@ -167,7 +167,7 @@ pub fn default_ethereum_payload<EvmConfig, Pool, Client, F>(
     evm_config: EvmConfig,
     builder_config: EthereumBuilderConfig,
     args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
-    evm_env: EvmEnv,
+    evm_env: EvmEnv<EvmConfig::Spec>,
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
 where

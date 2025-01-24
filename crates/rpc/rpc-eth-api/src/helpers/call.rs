@@ -93,9 +93,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let mut parent_hash = base_block.hash();
 
             // Only enforce base fee if validation is enabled
-            evm_env.cfg_env_with_handler_cfg.disable_base_fee = !validation;
+            evm_env.cfg_env.disable_base_fee = !validation;
             // Always disable EIP-3607
-            evm_env.cfg_env_with_handler_cfg.disable_eip3607 = true;
+            evm_env.cfg_env.disable_eip3607 = true;
 
             let this = self.clone();
             self.spawn_with_state_at_block(block, move |state| {
@@ -178,7 +178,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             call,
                             validation,
                             default_gas_limit,
-                            evm_env.cfg_env_with_handler_cfg.chain_id,
+                            evm_env.cfg_env.chain_id,
                             &mut db,
                             this.tx_resp_builder(),
                         )?;
@@ -387,7 +387,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// [`BlockId`].
     fn create_access_list_with(
         &self,
-        mut evm_env: EvmEnv,
+        mut evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
         at: BlockId,
         mut request: TransactionRequest,
     ) -> Result<AccessListResult, Self::Error>
@@ -400,12 +400,12 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
         // we want to disable this in eth_createAccessList, since this is common practice used by
         // other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
-        evm_env.cfg_env_with_handler_cfg.disable_block_gas_limit = true;
+        evm_env.cfg_env.disable_block_gas_limit = true;
 
         // The basefee should be ignored for eth_createAccessList
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
-        evm_env.cfg_env_with_handler_cfg.disable_base_fee = true;
+        evm_env.cfg_env.disable_base_fee = true;
 
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
@@ -427,7 +427,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         // can consume the list since we're not using the request anymore
         let initial = request.access_list.take().unwrap_or_default();
 
-        let precompiles = get_precompiles(evm_env.cfg_env_with_handler_cfg.handler_cfg.spec_id);
+        let precompiles = get_precompiles(evm_env.spec.into());
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
 
         let (result, (evm_env, mut tx_env)) =
@@ -495,16 +495,21 @@ pub trait Call:
     fn transact<DB>(
         &self,
         db: DB,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
         tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
-    ) -> Result<(ResultAndState, (EvmEnv, <Self::Evm as ConfigureEvmEnv>::TxEnv)), Self::Error>
+    ) -> Result<
+        (
+            ResultAndState,
+            (EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>, <Self::Evm as ConfigureEvmEnv>::TxEnv),
+        ),
+        Self::Error,
+    >
     where
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        let mut evm = self.evm_config().evm_with_env(db, evm_env.clone());
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
-        let evm_env = evm.into_env();
 
         Ok((res, (evm_env, tx_env)))
     }
@@ -515,17 +520,22 @@ pub trait Call:
     fn transact_with_inspector<DB>(
         &self,
         db: DB,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
         tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         inspector: impl GetInspector<DB>,
-    ) -> Result<(ResultAndState, (EvmEnv, <Self::Evm as ConfigureEvmEnv>::TxEnv)), Self::Error>
+    ) -> Result<
+        (
+            ResultAndState,
+            (EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>, <Self::Evm as ConfigureEvmEnv>::TxEnv),
+        ),
+        Self::Error,
+    >
     where
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env.clone(), inspector);
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
-        let evm_env = evm.into_env();
 
         Ok((res, (evm_env, tx_env)))
     }
@@ -539,7 +549,13 @@ pub trait Call:
         overrides: EvmOverrides,
     ) -> impl Future<
         Output = Result<
-            (ResultAndState, (EvmEnv, <Self::Evm as ConfigureEvmEnv>::TxEnv)),
+            (
+                ResultAndState,
+                (
+                    EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+                    <Self::Evm as ConfigureEvmEnv>::TxEnv,
+                ),
+            ),
             Self::Error,
         >,
     > + Send
@@ -594,7 +610,7 @@ pub trait Call:
         Self: LoadPendingBlock,
         F: FnOnce(
                 StateCacheDbRefMutWrapper<'_, '_>,
-                EvmEnv,
+                EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
                 <Self::Evm as ConfigureEvmEnv>::TxEnv,
             ) -> Result<R, Self::Error>
             + Send
@@ -680,7 +696,7 @@ pub trait Call:
     fn replay_transactions_until<'a, DB, I>(
         &self,
         db: &mut DB,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
         transactions: I,
         target_tx_hash: B256,
     ) -> Result<usize, Self::Error>
@@ -728,13 +744,17 @@ pub trait Call:
     ///  - `nonce` is set to `None`
     ///
     /// In addition, this changes the block's gas limit to the configured [`Self::call_gas_limit`].
+    #[expect(clippy::type_complexity)]
     fn prepare_call_env<DB>(
         &self,
-        mut evm_env: EvmEnv,
+        mut evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
         mut request: TransactionRequest,
         db: &mut CacheDB<DB>,
         overrides: EvmOverrides,
-    ) -> Result<(EvmEnv, <Self::Evm as ConfigureEvmEnv>::TxEnv), Self::Error>
+    ) -> Result<
+        (EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>, <Self::Evm as ConfigureEvmEnv>::TxEnv),
+        Self::Error,
+    >
     where
         DB: DatabaseRef,
         EthApiError: From<<DB as DatabaseRef>::Error>,
@@ -751,12 +771,12 @@ pub trait Call:
 
         // Disabled because eth_call is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>
-        evm_env.cfg_env_with_handler_cfg.disable_eip3607 = true;
+        evm_env.cfg_env.disable_eip3607 = true;
 
         // The basefee should be ignored for eth_call
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
-        evm_env.cfg_env_with_handler_cfg.disable_base_fee = true;
+        evm_env.cfg_env.disable_base_fee = true;
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.nonce = None;

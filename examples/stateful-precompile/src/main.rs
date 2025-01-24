@@ -13,7 +13,10 @@ use reth::{
         handler::register::EvmHandler,
         inspector_handle_register,
         precompile::{Precompile, PrecompileSpecId},
-        primitives::{Env, PrecompileResult, SpecId, StatefulPrecompileMut, TxEnv},
+        primitives::{
+            CfgEnvWithHandlerCfg, Env, HandlerCfg, PrecompileResult, SpecId, StatefulPrecompileMut,
+            TxEnv,
+        },
         ContextPrecompile, ContextPrecompiles, Database, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
@@ -149,6 +152,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
     type Transaction = TransactionSigned;
     type Error = Infallible;
     type TxEnv = TxEnv;
+    type Spec = SpecId;
 
     fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv {
         self.inner.tx_env(transaction, signer)
@@ -171,10 +175,15 @@ impl ConfigureEvm for MyEvmConfig {
     type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
 
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
+        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env: evm_env.cfg_env,
+            handler_cfg: HandlerCfg::new(evm_env.spec),
+        };
+
         let new_cache = self.precompile_cache.clone();
         EvmBuilder::default()
             .with_db(db)
-            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
             .with_block_env(evm_env.block_env)
             // add additional precompiles
             .append_handler_register_box(Box::new(move |handler| {
@@ -194,11 +203,15 @@ impl ConfigureEvm for MyEvmConfig {
         DB: Database,
         I: GetInspector<DB>,
     {
+        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env: evm_env.cfg_env,
+            handler_cfg: HandlerCfg::new(evm_env.spec),
+        };
         let new_cache = self.precompile_cache.clone();
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
-            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
             .with_block_env(evm_env.block_env)
             // add additional precompiles
             .append_handler_register_box(Box::new(move |handler| {

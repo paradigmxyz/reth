@@ -69,7 +69,11 @@ pub trait LoadPendingBlock:
     fn pending_block_env_and_cfg(
         &self,
     ) -> Result<
-        PendingBlockEnv<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>,
+        PendingBlockEnv<
+            ProviderBlock<Self::Provider>,
+            ProviderReceipt<Self::Provider>,
+            <Self::Evm as ConfigureEvmEnv>::Spec,
+        >,
         Self::Error,
     > {
         if let Some(block) =
@@ -234,7 +238,7 @@ pub trait LoadPendingBlock:
     #[expect(clippy::type_complexity)]
     fn build_block(
         &self,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
         parent_hash: B256,
     ) -> Result<
         (RecoveredBlock<ProviderBlock<Self::Provider>>, Vec<ProviderReceipt<Self::Provider>>),
