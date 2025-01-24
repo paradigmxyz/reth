@@ -91,30 +91,29 @@ fn main() {
                             builder.launch_with(launcher)
                         })
                         .await?;
+
+                    let blockchain_provider = handle.node.provider.clone();
+                    let config = handle.node.config.config.clone();
+                    let chain = handle.node.chain_spec();
+                    let datadir = handle.node.data_dir.clone();
+                    let (provider_factory, bitfinity) = handle.bitfinity_import.clone().expect("Bitfinity import not configured");                    
+
+                    // Init bitfinity import
+                    let import = BitfinityImportCommand::new(
+                        config,
+                        datadir,
+                        chain,
+                        bitfinity.clone(),
+                        provider_factory,
+                        blockchain_provider,
+                    );
+                    let _import_handle = import.schedule_execution().await?;
+
                     handle.node_exit_future.await
                 }
                 true => {
                     info!(target: "reth::cli", "Running with legacy engine");
                     let handle = builder.launch_node(EthereumNode::default()).await?;
-                    let blockchain_provider = handle.node.provider.clone();
-                    let config = handle.node.config.config.clone();
-                    let chain = handle.node.chain_spec();
-                    let datadir = handle.node.data_dir.clone();
-                    let (provider_factory, bitfinity) = handle.bitfinity_import.clone().expect("Bitfinity import not configured");
-
-                    // Init bitfinity import
-                    {
-                        let import = BitfinityImportCommand::new(
-                            config,
-                            datadir,
-                            chain,
-                            bitfinity,
-                            provider_factory,
-                            blockchain_provider,
-                        );
-                        let _import_handle = import.schedule_execution().await?;
-                    };
-
                     handle.node_exit_future.await
                 }
             }

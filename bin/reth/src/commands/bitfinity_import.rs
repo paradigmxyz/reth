@@ -21,14 +21,16 @@ use reth_node_core::{args::BitfinityImportArgs, dirs::ChainPath};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{EthPrimitives, SealedHeader};
-use reth_provider::providers::BlockchainProvider;
+use reth_provider::providers::BlockchainProvider2;
 use reth_provider::{
     BlockNumReader, CanonChainTracker, ChainSpecProvider, DatabaseProviderFactory, HeaderProvider,
     ProviderError, ProviderFactory,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
-    prelude::*, stages::{ExecutionStage, SenderRecoveryStage}, ExecutionStageThresholds, Pipeline, StageSet
+    prelude::*,
+    stages::{ExecutionStage, SenderRecoveryStage},
+    ExecutionStageThresholds, Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -52,7 +54,8 @@ pub struct BitfinityImportCommand {
 
     provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
 
-    blockchain_provider: BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+    blockchain_provider:
+        BlockchainProvider2<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
 }
 
 /// Manually implement `Debug` for `ImportCommand` because `BlockchainProvider` doesn't implement it.
@@ -77,7 +80,7 @@ impl BitfinityImportCommand {
         chain: Arc<ChainSpec>,
         bitfinity: BitfinityImportArgs,
         provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
-        blockchain_provider: BlockchainProvider<
+        blockchain_provider: BlockchainProvider2<
             NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>,
         >,
     ) -> Self {

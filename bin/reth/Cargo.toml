@@ -120,6 +120,7 @@ revm-primitives.workspace = true
 reth-db-common.workspace = true
 reth-db = { workspace = true, features = ["mdbx", "test-utils"] }
 serial_test.workspace = true
+reth-node-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
 default = ["jemalloc"]
