@@ -411,7 +411,7 @@ ensure-codespell:
 		exit 1; \
     fi
 
-lint-cargo-toml: ensure-dprint
+lint-toml: ensure-dprint
 	dprint fmt
 
 ensure-dprint:
@@ -425,7 +425,8 @@ lint:
 	make lint-reth && \
 	make lint-op-reth && \
 	make lint-other-targets && \
-	make lint-codespell
+	make lint-codespell && \
+	make lint-toml
 
 fix-lint-reth:
 	cargo +nightly clippy \
