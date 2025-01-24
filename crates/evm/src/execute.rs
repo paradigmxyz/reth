@@ -8,7 +8,7 @@ pub use reth_execution_errors::{
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
-use crate::{system_calls::OnStateHook, TxEnvOverrides};
+use crate::system_calls::OnStateHook;
 use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
@@ -37,9 +37,6 @@ pub trait Executor<DB> {
     type Output;
     /// The error type returned by the executor.
     type Error;
-
-    /// Initialize the executor with the given transaction environment overrides.
-    fn init(&mut self, _tx_env_overrides: Box<dyn TxEnvOverrides>) {}
 
     /// Consumes the type and executes the block.
     ///
@@ -199,9 +196,6 @@ pub trait BlockExecutionStrategy {
     /// The error type returned by this strategy's methods.
     type Error: From<ProviderError> + core::error::Error;
 
-    /// Initialize the strategy with the given transaction environment overrides.
-    fn init(&mut self, _tx_env_overrides: Box<dyn TxEnvOverrides>) {}
-
     /// Applies any necessary changes before executing the block's transactions.
     fn apply_pre_execution_changes(
         &mut self,
@@ -340,10 +334,6 @@ where
     type Input<'a> = &'a RecoveredBlock<<S::Primitives as NodePrimitives>::Block>;
     type Output = BlockExecutionOutput<<S::Primitives as NodePrimitives>::Receipt>;
     type Error = S::Error;
-
-    fn init(&mut self, env_overrides: Box<dyn TxEnvOverrides>) {
-        self.strategy.init(env_overrides);
-    }
 
     fn execute(mut self, block: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         self.strategy.apply_pre_execution_changes(block)?;
@@ -518,7 +508,7 @@ mod tests {
     use reth_chainspec::{ChainSpec, MAINNET};
     use reth_primitives::EthPrimitives;
     use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::{address, bytes, AccountInfo, TxEnv, KECCAK_EMPTY};
+    use revm_primitives::{address, bytes, AccountInfo, KECCAK_EMPTY};
     use std::sync::Arc;
 
     #[derive(Clone, Default)]
@@ -732,29 +722,6 @@ mod tests {
         assert_eq!(block_execution_output.receipts, expected_receipts);
         assert_eq!(block_execution_output.requests, expected_apply_post_execution_changes_result);
         assert_eq!(block_execution_output.state, expected_finish_result);
-    }
-
-    #[test]
-    fn test_tx_env_overrider() {
-        let strategy_factory = TestExecutorStrategyFactory {
-            execute_transactions_result: ExecuteOutput {
-                receipts: vec![Receipt::default()],
-                gas_used: 10,
-            },
-            apply_post_execution_changes_result: Requests::new(vec![bytes!("deadbeef")]),
-            finish_result: BundleState::default(),
-        };
-        let provider = BasicBlockExecutorProvider::new(strategy_factory);
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-
-        // if we want to apply tx env overrides the executor must be mut.
-        let mut executor = provider.executor(db);
-        // execute consumes the executor, so we can only call it once.
-        executor.init(Box::new(|tx_env: &mut TxEnv| {
-            tx_env.nonce.take();
-        }));
-        let result = executor.execute(&Default::default());
-        assert!(result.is_ok());
     }
 
     fn setup_state_with_account(

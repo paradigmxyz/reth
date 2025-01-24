@@ -18,7 +18,7 @@ use reth_rpc_eth_types::{
 };
 use revm::{db::CacheDB, Database, DatabaseCommit, GetInspector, Inspector};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
-use revm_primitives::{EvmState, ExecutionResult, ResultAndState, TxEnv};
+use revm_primitives::{EvmState, ExecutionResult, ResultAndState};
 use std::{fmt::Display, sync::Arc};
 
 /// Executes CPU heavy tasks.
@@ -33,13 +33,14 @@ pub trait Trace:
 {
     /// Executes the [`EvmEnv`] against the given [Database] without committing state
     /// changes.
+    #[expect(clippy::type_complexity)]
     fn inspect<DB, I>(
         &self,
         db: DB,
         evm_env: EvmEnv,
-        tx_env: TxEnv,
+        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         inspector: I,
-    ) -> Result<(ResultAndState, (EvmEnv, TxEnv)), Self::Error>
+    ) -> Result<(ResultAndState, (EvmEnv, <Self::Evm as ConfigureEvmEnv>::TxEnv)), Self::Error>
     where
         DB: Database,
         EthApiError: From<DB::Error>,
@@ -61,7 +62,7 @@ pub trait Trace:
     fn trace_at<F, R>(
         &self,
         evm_env: EvmEnv,
-        tx_env: TxEnv,
+        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
@@ -88,7 +89,7 @@ pub trait Trace:
     fn spawn_trace_at_with_state<F, R>(
         &self,
         evm_env: EvmEnv,
-        tx_env: TxEnv,
+        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
