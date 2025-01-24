@@ -13,7 +13,7 @@
 extern crate alloc;
 
 use alloc::sync::Arc;
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, U256};
 use core::fmt::Debug;
@@ -159,21 +159,42 @@ impl ConfigureEvmEnv for OpEvmConfig {
     type Error = EIP1559ParamError;
     type TxEnv = TxEnv;
 
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &OpTransactionSigned, sender: Address) {
-        transaction.fill_tx_env(tx_env, sender);
+    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv {
+        let mut tx_env = TxEnv::default();
+        transaction.fill_tx_env(&mut tx_env, signer);
+        tx_env
     }
 
-    fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
-        let spec_id = revm_spec(self.chain_spec(), header);
+    fn evm_env(&self, header: &Self::Header) -> EvmEnv {
+        let spec_id = config::revm_spec(self.chain_spec(), header);
 
+        let mut cfg_env = CfgEnv::default();
         cfg_env.chain_id = self.chain_spec.chain().id();
-        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::Analyse;
+        cfg_env.perf_analyse_created_bytecodes = AnalysisKind::default();
 
-        cfg_env.handler_cfg.spec_id = spec_id;
-        cfg_env.handler_cfg.is_optimism = true;
+        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env,
+            handler_cfg: HandlerCfg { spec_id, is_optimism: true },
+        };
+
+        let block_env = BlockEnv {
+            number: U256::from(header.number()),
+            coinbase: header.beneficiary(),
+            timestamp: U256::from(header.timestamp()),
+            difficulty: if spec_id >= SpecId::MERGE { U256::ZERO } else { header.difficulty() },
+            prevrandao: if spec_id >= SpecId::MERGE { header.mix_hash() } else { None },
+            gas_limit: U256::from(header.gas_limit()),
+            basefee: U256::from(header.base_fee_per_gas().unwrap_or_default()),
+            // EIP-4844 excess blob gas of this block, introduced in Cancun
+            blob_excess_gas_and_price: header.excess_blob_gas().map(|excess_blob_gas| {
+                BlobExcessGasAndPrice::new(excess_blob_gas, spec_id >= SpecId::PRAGUE)
+            }),
+        };
+
+        EvmEnv { cfg_env_with_handler_cfg, block_env }
     }
 
-    fn next_cfg_and_block_env(
+    fn next_evm_env(
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
@@ -298,8 +319,7 @@ mod tests {
         // Use the `OpEvmConfig` to create the `cfg_env` and `block_env` based on the ChainSpec,
         // Header, and total difficulty
         let EvmEnv { cfg_env_with_handler_cfg, .. } =
-            OpEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() }))
-                .cfg_and_block_env(&header);
+            OpEvmConfig::new(Arc::new(OpChainSpec { inner: chain_spec.clone() })).evm_env(&header);
 
         // Assert that the chain ID in the `cfg_env` is correctly set to the chain ID of the
         // ChainSpec

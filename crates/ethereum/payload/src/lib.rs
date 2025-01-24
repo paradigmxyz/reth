@@ -92,7 +92,7 @@ where
             prev_randao: config.attributes.prev_randao(),
             gas_limit: self.builder_config.gas_limit(parent.gas_limit),
         };
-        self.evm_config.next_cfg_and_block_env(parent, next_attributes)
+        self.evm_config.next_evm_env(parent, next_attributes)
     }
 }
 
