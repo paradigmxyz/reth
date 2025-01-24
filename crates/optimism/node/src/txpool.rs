@@ -329,35 +329,52 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Tx)>,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
-        let outcomes = self.inner.validate_all(transactions);
+        let length = transactions.len();
+        let mut transactions_to_validate = Vec::with_capacity(length);
+        let mut invalid_tx_type_outcomes = Vec::new();
+        for (i, (tx_origin, tx)) in transactions.into_iter().enumerate() {
+            match Self::validate_transaction_type(tx) {
+                Ok(tx) => transactions_to_validate.push((tx_origin, tx)),
+                Err(outcome) => invalid_tx_type_outcomes.push((i, outcome)),
+            }
+        }
+        let validated_outcomes = self.inner.validate_all(transactions_to_validate);
+
+        // final vector containing all outcomes
+        let mut outcomes = Vec::with_capacity(length);
+
+        // merge outcomes vectors, keeping original order
+        let mut invalid_type_outcomes_it = invalid_tx_type_outcomes.into_iter();
+        let mut validated_outcomes_it = validated_outcomes.into_iter();
+        let mut curr_invalid_type_outcome = invalid_type_outcomes_it.next();
+        let mut curr_validated_outcome = validated_outcomes_it.next();
+        for i in 0..length {
+            match curr_invalid_type_outcome {
+                Some((j, outcome)) if i == j => {
+                    outcomes.push(outcome);
+                    curr_invalid_type_outcome = invalid_type_outcomes_it.next();
+                    continue;
+                }
+                _ => {}
+            }
+
+            if let Some(outcome) = curr_validated_outcome {
+                outcomes.push(self.validate_gas_fee(outcome));
+                curr_validated_outcome = validated_outcomes_it.next();
+            }
+        }
 
         outcomes
-            .into_iter()
-            .map(|outcome| self.validate_gas_fee(self.validate_transaction_type(outcome)))
-            .collect()
     }
 
-    fn validate_transaction_type(
-        &self,
-        outcome: TransactionValidationOutcome<Tx>,
-    ) -> TransactionValidationOutcome<Tx> {
-        match outcome {
-            TransactionValidationOutcome::Valid {
-                balance: _,
-                state_nonce: _,
-                transaction,
-                propagate: _,
-            } if transaction.transaction().is_eip4844() => TransactionValidationOutcome::Invalid(
-                transaction.into_transaction(),
+    fn validate_transaction_type(tx: Tx) -> Result<Tx, TransactionValidationOutcome<Tx>> {
+        if tx.is_eip4844() {
+            Err(TransactionValidationOutcome::Invalid(
+                tx,
                 InvalidTransactionError::TxTypeNotSupported.into(),
-            ),
-            TransactionValidationOutcome::Invalid(tx, _) if tx.is_eip4844() => {
-                TransactionValidationOutcome::Invalid(
-                    tx,
-                    InvalidTransactionError::TxTypeNotSupported.into(),
-                )
-            }
-            _ => outcome,
+            ))
+        } else {
+            Ok(tx)
         }
     }
 
@@ -367,7 +384,7 @@ where
     ) -> TransactionValidationOutcome<Tx> {
         if !self.requires_l1_data_gas_fee() {
             // no need to check L1 gas fee
-            return outcome;
+            return outcome
         }
 
         // ensure that the account has enough balance to cover the L1 gas cost
@@ -405,7 +422,7 @@ where
                         GotExpected { got: balance, expected: cost }.into(),
                     )
                     .into(),
-                );
+                )
             }
 
             return TransactionValidationOutcome::Valid {
@@ -413,7 +430,7 @@ where
                 state_nonce,
                 transaction: valid_tx,
                 propagate,
-            };
+            }
         }
 
         outcome
@@ -430,13 +447,10 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        if transaction.is_eip4844() {
-            return TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::TxTypeNotSupported.into(),
-            );
-        }
-
+        let transaction = match Self::validate_transaction_type(transaction) {
+            Ok(tx) => tx,
+            Err(outcome) => return outcome,
+        };
         let outcome = self.inner.validate_one(origin, transaction);
         self.validate_gas_fee(outcome)
     }
