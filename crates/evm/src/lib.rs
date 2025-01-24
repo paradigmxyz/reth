@@ -289,6 +289,12 @@ pub trait TransactionEnv:
     /// Set the gas limit.
     fn set_gas_limit(&mut self, gas_limit: u64);
 
+    /// Set the gas limit.
+    fn with_gas_limit(mut self, gas_limit: u64) -> Self {
+        self.set_gas_limit(gas_limit);
+        self
+    }
+
     /// Returns configured gas price.
     fn gas_price(&self) -> U256;
 
@@ -300,6 +306,12 @@ pub trait TransactionEnv:
 
     /// Set access list.
     fn set_access_list(&mut self, access_list: AccessList);
+
+    /// Set access list.
+    fn with_access_list(mut self, access_list: AccessList) -> Self {
+        self.set_access_list(access_list);
+        self
+    }
 
     /// Returns calldata for the transaction.
     fn input(&self) -> &Bytes;
