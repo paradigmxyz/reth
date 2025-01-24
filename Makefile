@@ -405,12 +405,18 @@ lint-other-targets:
 lint-codespell: ensure-codespell
 	codespell --skip "*.json"
 
-lint-cargo-toml:
-	dprint fmt
-
 ensure-codespell:
 	@if ! command -v codespell &> /dev/null; then \
 		echo "codespell not found. Please install it by running the command `pip install codespell` or refer to the following link for more information: https://github.com/codespell-project/codespell" \
+		exit 1; \
+    fi
+
+lint-cargo-toml: ensure-dprint
+	dprint fmt
+
+ensure-dprint:
+	@if ! command -v dprint &> /dev/null; then \
+		echo "dprint not found. Please install it by running the command `cargo install --locked dprint` or refer to the following link for more information: https://github.com/dprint/dprint" \
 		exit 1; \
     fi
 
