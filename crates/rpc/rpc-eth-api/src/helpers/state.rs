@@ -210,10 +210,13 @@ pub trait LoadState:
     /// for.
     /// If the [`BlockId`] is pending, this will return the "Pending" tag, otherwise this returns
     /// the hash of the exact block.
+    #[expect(clippy::type_complexity)]
     fn evm_env_at(
         &self,
         at: BlockId,
-    ) -> impl Future<Output = Result<(EvmEnv, BlockId), Self::Error>> + Send
+    ) -> impl Future<
+        Output = Result<(EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>, BlockId), Self::Error>,
+    > + Send
     where
         Self: LoadPendingBlock + SpawnBlocking,
     {

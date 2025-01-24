@@ -30,7 +30,7 @@ use reth::{
 };
 use reth_evm::EvmEnv;
 use reth_node_ethereum::node::EthereumNode;
-use revm_primitives::CfgEnvWithHandlerCfg;
+use revm_primitives::HandlerCfg;
 
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
@@ -65,13 +65,9 @@ fn main() {
                                     BlockNumberOrTag::Latest.into(),
                                     EvmOverrides::default(),
                                     move |db, evm_env, tx_env| {
-                                        let EvmEnv {
-                                            cfg_env_with_handler_cfg:
-                                                CfgEnvWithHandlerCfg { handler_cfg, cfg_env },
-                                            block_env,
-                                        } = evm_env;
+                                        let EvmEnv { cfg_env, block_env, spec } = evm_env;
                                         let env = EnvWithHandlerCfg {
-                                            handler_cfg,
+                                            handler_cfg: HandlerCfg::new(spec),
                                             env: Env::boxed(cfg_env, block_env, tx_env),
                                         };
                                         let mut dummy_inspector = DummyInspector::default();

@@ -95,7 +95,7 @@ where
     async fn trace_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<<Eth::Evm as ConfigureEvmEnv>::Spec>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         // replay all transactions of the block
@@ -446,7 +446,7 @@ where
                                 &mut inspector,
                             )?;
                             let env = revm_primitives::Env::boxed(
-                                evm_env.cfg_env_with_handler_cfg.cfg_env,
+                                evm_env.cfg_env,
                                 evm_env.block_env,
                                 tx_env.into(),
                             );
@@ -650,7 +650,7 @@ where
     fn trace_transaction(
         &self,
         opts: &GethDebugTracingOptions,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<<Eth::Evm as ConfigureEvmEnv>::Spec>,
         tx_env: <Eth::Evm as ConfigureEvmEnv>::TxEnv,
         db: &mut StateCacheDb<'_>,
         transaction_context: Option<TransactionContext>,
@@ -781,7 +781,7 @@ where
 
                     let state = res.state.clone();
                     let env = revm_primitives::Env::boxed(
-                        evm_env.cfg_env_with_handler_cfg.cfg_env,
+                        evm_env.cfg_env,
                         evm_env.block_env,
                         tx_env.into(),
                     );
