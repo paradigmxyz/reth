@@ -105,6 +105,19 @@ impl<Types> EngineValidator<Types> for OpEngineValidator
 where
     Types: EngineTypes<PayloadAttributes = OpPayloadAttributes>,
 {
+    fn validate_execution_requests(
+        &self,
+        requests: &alloy_eips::eip7685::Requests,
+    ) -> Result<(), EngineObjectValidationError> {
+        // according to op spec, execution requests must be empty
+        if !requests.is_empty() {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "NonEmptyExecutionRequests".to_string().into(),
+            ))
+        }
+        Ok(())
+    }
+
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
