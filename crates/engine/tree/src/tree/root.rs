@@ -314,6 +314,7 @@ struct MultiproofInput<Factory> {
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<StateRootMessage>,
+    source: ProofFetchSource,
 }
 
 /// Manages concurrent multiproof calculations.
@@ -382,6 +383,7 @@ where
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
+            source,
         } = input;
         let thread_pool = self.thread_pool.clone();
 
@@ -411,6 +413,7 @@ where
                                 targets: proof_targets,
                                 multiproof: proof,
                             },
+                            source,
                         }),
                     ));
                 }
@@ -538,7 +541,7 @@ where
             proof_targets: targets,
             proof_sequence_number: self.proof_sequencer.next_sequence(),
             state_root_message_sender: self.tx.clone(),
-            proof_fetch_source: ProofFetchSource::Prefetch,
+            source: ProofFetchSource::Prefetch,
         });
     }
 
@@ -556,7 +559,7 @@ where
             proof_targets,
             proof_sequence_number,
             state_root_message_sender: self.tx.clone(),
-            proof_fetch_source: ProofFetchSource::StateUpdate,
+            source: ProofFetchSource::StateUpdate,
         });
     }
 
