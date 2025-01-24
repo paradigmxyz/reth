@@ -485,7 +485,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                             // part of pending block) and already. We don't need to
                             // check for pre EIP-2 because this transaction could be pre-EIP-2.
                             let transaction = tx
-                                .into_ecrecovered_unchecked()
+                                .into_recovered_unchecked()
                                 .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
                             let tx = TransactionSource::Block {
