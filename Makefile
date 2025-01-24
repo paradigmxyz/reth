@@ -411,6 +411,16 @@ ensure-codespell:
 		exit 1; \
     fi
 
+# Lint and format all TOML files in the project using dprint.
+# This target ensures that TOML files follow consistent formatting rules,
+# such as using spaces instead of tabs, and enforces other style guidelines
+# defined in the dprint configuration file (e.g., dprint.json).
+#
+# Usage:
+#   make lint-toml
+#
+# Dependencies:
+#   - ensure-dprint: Ensures that dprint is installed and available in the system.
 lint-toml: ensure-dprint
 	dprint fmt
 
