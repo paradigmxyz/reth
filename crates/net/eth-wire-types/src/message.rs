@@ -254,6 +254,30 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::Receipts(_) => EthMessageID::Receipts,
         }
     }
+
+    /// Returns true if the message variant is a request.
+    pub const fn is_request(&self) -> bool {
+        matches!(
+            self,
+            Self::GetBlockBodies(_) |
+                Self::GetBlockHeaders(_) |
+                Self::GetReceipts(_) |
+                Self::GetPooledTransactions(_) |
+                Self::GetNodeData(_)
+        )
+    }
+
+    /// Returns true if the message variant is a response to a request.
+    pub const fn is_response(&self) -> bool {
+        matches!(
+            self,
+            Self::PooledTransactions(_) |
+                Self::Receipts(_) |
+                Self::BlockHeaders(_) |
+                Self::BlockBodies(_) |
+                Self::NodeData(_)
+        )
+    }
 }
 
 impl<N: NetworkPrimitives> Encodable for EthMessage<N> {

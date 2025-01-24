@@ -54,6 +54,19 @@ const SAMPLE_IMPACT: f64 = 0.1;
 /// Amount of RTTs before timeout
 const TIMEOUT_SCALING: u32 = 3;
 
+/// Restricts the number of queued outgoing messages for larger responses:
+///  - Block Bodies
+///  - Receipts
+///  - Headers
+///  - `PooledTransactions`
+///
+/// With proper softlimits in place (2MB) this targets 10MB (4+1 * 2MB) of outgoing response data.
+///
+/// This parameter serves as backpressure for reading additional requests from the remote.
+/// Once we've queued up more responses than this, the session should priorotize message flushing
+/// before reading any more messages from the remote peer, throttling the peer.
+const MAX_QUEUED_OUTGOING_RESPONSES: usize = 4;
+
 /// The type that advances an established session by listening for incoming messages (from local
 /// node or read from connection) and emitting events back to the
 /// [`SessionManager`](super::SessionManager).
@@ -120,6 +133,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     pub fn shrink_to_fit(&mut self) {
         self.received_requests_from_remote.shrink_to_fit();
         self.queued_outgoing.shrink_to_fit();
+    }
+
+    /// Returns how many responses we've currently queued up.
+    fn queued_response_count(&self) -> usize {
+        self.queued_outgoing.messages.iter().filter(|m| m.is_response()).count()
     }
 
     /// Handle a message read from the connection.
@@ -596,6 +614,29 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                     };
                 }
 
+                // check whether we should throttle incoming messages
+                if this.received_requests_from_remote.len() > MAX_QUEUED_OUTGOING_RESPONSES {
+                    // we're currently waiting for the responses to the peer's requests which aren't
+                    // queued as outgoing yet
+                    //
+                    // Note: we don't need to register the waker here because we polled the requests
+                    // above
+                    break 'receive
+                }
+
+                // we also need to check if we have multiple responses queued up
+                if this.queued_outgoing.messages.len() > MAX_QUEUED_OUTGOING_RESPONSES &&
+                    this.queued_response_count() > MAX_QUEUED_OUTGOING_RESPONSES
+                {
+                    // if we've queued up more responses than allowed, we don't poll for new
+                    // messages and break the receive loop early
+                    //
+                    // Note: we don't need to register the waker here because we still have
+                    // queued messages and the sink impl registered the waker because we've
+                    // already advanced it to `Pending` earlier
+                    break 'receive
+                }
+
                 match this.conn.poll_next_unpin(cx) {
                     Poll::Pending => break,
                     Poll::Ready(None) => {
@@ -738,6 +779,16 @@ pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
     Broadcast(EthBroadcastMessage<N>),
     /// A raw capability message
     Raw(RawCapabilityMessage),
+}
+
+impl<N: NetworkPrimitives> OutgoingMessage<N> {
+    /// Returns true if this is a response.
+    const fn is_response(&self) -> bool {
+        match self {
+            Self::Eth(msg) => msg.is_response(),
+            _ => false,
+        }
+    }
 }
 
 impl<N: NetworkPrimitives> From<EthMessage<N>> for OutgoingMessage<N> {
