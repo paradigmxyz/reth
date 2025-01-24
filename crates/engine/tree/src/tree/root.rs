@@ -346,6 +346,7 @@ where
     fn new(thread_pool: Arc<rayon::ThreadPool>, thread_pool_size: usize) -> Self {
         // we keep 2 threads to be used internally by [`StateRootTask`]
         let max_concurrent = thread_pool_size.saturating_sub(2);
+        debug_assert!(max_concurrent != 0);
         Self {
             thread_pool,
             max_concurrent,
