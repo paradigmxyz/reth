@@ -26,6 +26,7 @@ reth-provider.workspace = true
 reth-ethereum-forks.workspace = true
 revm-primitives.workspace = true
 reth-trie.workspace = true
+reth-payload-primitives.workspace = true
 
 # alloy
 alloy-eips.workspace = true

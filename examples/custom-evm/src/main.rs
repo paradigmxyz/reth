@@ -109,17 +109,11 @@ impl ConfigureEvmEnv for MyEvmConfig {
 impl ConfigureEvm for MyEvmConfig {
     type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
 
-    fn evm_with_env<DB: Database>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        tx: TxEnv,
-    ) -> Self::Evm<'_, DB, ()> {
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
         EvmBuilder::default()
             .with_db(db)
             .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
             .with_block_env(evm_env.block_env)
-            .with_tx_env(tx)
             // add additional precompiles
             .append_handler_register(MyEvmConfig::set_precompiles)
             .build()
@@ -130,7 +124,6 @@ impl ConfigureEvm for MyEvmConfig {
         &self,
         db: DB,
         evm_env: EvmEnv,
-        tx: TxEnv,
         inspector: I,
     ) -> Self::Evm<'_, DB, I>
     where
@@ -142,7 +135,6 @@ impl ConfigureEvm for MyEvmConfig {
             .with_external_context(inspector)
             .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
             .with_block_env(evm_env.block_env)
-            .with_tx_env(tx)
             // add additional precompiles
             .append_handler_register(MyEvmConfig::set_precompiles)
             .append_handler_register(inspector_handle_register)

@@ -263,9 +263,9 @@ pub(crate) struct EthStateCacheService<
 {
     /// The type used to lookup data from disk
     provider: Provider,
-    /// The LRU cache for full blocks grouped by their hash.
+    /// The LRU cache for full blocks grouped by their block hash.
     full_block_cache: BlockLruCache<Provider::Block, LimitBlocks>,
-    /// The LRU cache for full blocks grouped by their hash.
+    /// The LRU cache for block receipts grouped by the block hash.
     receipts_cache: ReceiptsLruCache<Provider::Receipt, LimitReceipts>,
     /// The LRU cache for headers.
     ///
@@ -278,7 +278,9 @@ pub(crate) struct EthStateCacheService<
     action_rx: UnboundedReceiverStream<CacheAction<Provider::Block, Provider::Receipt>>,
     /// The type that's used to spawn tasks that do the actual work
     action_task_spawner: Tasks,
-    /// Rate limiter
+    /// Rate limiter for spawned fetch tasks.
+    ///
+    /// This restricts the max concurrent fetch tasks at the same time.
     rate_limiter: Arc<Semaphore>,
 }
 
@@ -449,6 +451,12 @@ where
                             // check if the header is cached
                             if let Some(header) = this.headers_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(header));
+                                continue
+                            }
+
+                            // it's possible we have the entire block cached
+                            if let Some(block) = this.full_block_cache.get(&block_hash) {
+                                let _ = response_tx.send(Ok(block.clone_header()));
                                 continue
                             }
 

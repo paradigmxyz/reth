@@ -1065,7 +1065,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
             );
 
             if let Some(tx_index) =
-                block.body().transactions().iter().position(|tx| tx.trie_hash() == hash)
+                block.body().transactions_iter().position(|tx| tx.trie_hash() == hash)
             {
                 // safe to use tx_index for receipts due to 1:1 correspondence
                 return Ok(receipts.get(tx_index).cloned());

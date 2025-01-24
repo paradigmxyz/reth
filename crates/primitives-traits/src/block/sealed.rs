@@ -2,6 +2,7 @@
 
 use crate::{
     block::{error::BlockRecoveryError, RecoveredBlock},
+    transaction::signed::RecoveryError,
     Block, BlockBody, GotExpected, InMemorySize, SealedHeader,
 };
 use alloc::vec::Vec;
@@ -179,7 +180,7 @@ impl<B: Block> SealedBlock<B> {
     /// Recovers all senders from the transactions in the block.
     ///
     /// Returns `None` if any of the transactions fail to recover the sender.
-    pub fn senders(&self) -> Option<Vec<Address>> {
+    pub fn senders(&self) -> Result<Vec<Address>, RecoveryError> {
         self.body().recover_signers()
     }
 

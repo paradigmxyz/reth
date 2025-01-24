@@ -131,7 +131,7 @@ where
         DB::Error: Display,
     {
         let evm_config = self.evm_config.clone();
-        let mut evm = evm_config.evm_with_env(db, evm_env.clone(), Default::default());
+        let mut evm = evm_config.evm_with_env(db, evm_env.clone());
 
         self.apply_blockhashes_contract_call(
             evm_env.block_env.timestamp.to(),
@@ -181,7 +181,7 @@ where
         DB::Error: Display,
     {
         let evm_config = self.evm_config.clone();
-        let mut evm = evm_config.evm_with_env(db, evm_env.clone(), Default::default());
+        let mut evm = evm_config.evm_with_env(db, evm_env.clone());
 
         self.apply_beacon_root_contract_call(
             evm_env.block_env.timestamp.to(),
@@ -230,7 +230,7 @@ where
         DB::Error: Display,
     {
         let evm_config = self.evm_config.clone();
-        let mut evm = evm_config.evm_with_env(db, evm_env.clone(), Default::default());
+        let mut evm = evm_config.evm_with_env(db, evm_env.clone());
 
         let result = self.apply_withdrawal_requests_contract_call(&mut evm)?;
 
@@ -263,7 +263,7 @@ where
         DB::Error: Display,
     {
         let evm_config = self.evm_config.clone();
-        let mut evm = evm_config.evm_with_env(db, evm_env.clone(), Default::default());
+        let mut evm = evm_config.evm_with_env(db, evm_env.clone());
 
         let res = self.apply_consolidation_requests_contract_call(&mut evm)?;
 
