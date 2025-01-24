@@ -783,7 +783,7 @@ pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
 
 impl<N: NetworkPrimitives> OutgoingMessage<N> {
     /// Returns true if this is a response.
-    fn is_response(&self) -> bool {
+    const fn is_response(&self) -> bool {
         match self {
             Self::Eth(msg) => msg.is_response(),
             _ => false,
