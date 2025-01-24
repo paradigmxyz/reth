@@ -112,7 +112,7 @@ where
         // according to op spec, execution requests must be empty
         if !requests.is_empty() {
             return Err(EngineObjectValidationError::InvalidParams(
-                "non-empty execution requests".to_string().into(),
+                "NonEmptyExecutionRequests".to_string().into(),
             ))
         }
         Ok(())
