@@ -9157,6 +9157,7 @@ dependencies = [
  "alloy-consensus",
  "clap",
  "eyre",
+ "proptest",
  "reth-cli",
  "reth-cli-commands",
  "reth-cli-runner",
@@ -9171,6 +9172,7 @@ dependencies = [
  "reth-scroll-node",
  "reth-scroll-primitives",
  "reth-tracing",
+ "scroll-alloy-consensus",
  "tracing",
 ]
 

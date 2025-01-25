@@ -32,10 +32,12 @@ reth-scroll-chainspec.workspace = true
 reth-scroll-evm.workspace = true
 reth-scroll-node.workspace = true
 reth-scroll-primitives.workspace = true
+scroll-alloy-consensus = { workspace = true, optional = true }
 
 # misc
 eyre.workspace = true
 clap.workspace = true
+proptest = { workspace = true, optional = true }
 tracing.workspace = true
 
 [features]
@@ -51,4 +53,9 @@ scroll = [
 	"reth-node-core/scroll",
 	"reth-scroll-evm/scroll",
 	"reth-scroll-node/scroll"
+]
+dev = [
+	"dep:proptest",
+	"dep:scroll-alloy-consensus",
+	"reth-cli-commands/arbitrary"
 ]

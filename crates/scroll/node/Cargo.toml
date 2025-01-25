@@ -77,7 +77,8 @@ scroll = [
 	"reth-scroll-rpc/scroll",
 	"reth-scroll-primitives/scroll",
 	"reth-primitives-traits/scroll",
-	"reth-engine-local/scroll-alloy-traits"
+	"reth-engine-local/scroll-alloy-traits",
+	"reth-scroll-engine-primitives/scroll"
 ]
 reth-codec = [
 	"reth-primitives/reth-codec",

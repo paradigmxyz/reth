@@ -245,7 +245,7 @@ mod op {
     impl_compression_for_compact!(OpTransactionSigned, OpReceipt);
 }
 
-#[cfg(feature = "op")]
+#[cfg(feature = "scroll-alloy-traits")]
 mod scroll {
     use super::*;
     use reth_scroll_primitives::{ScrollReceipt, ScrollTransactionSigned};

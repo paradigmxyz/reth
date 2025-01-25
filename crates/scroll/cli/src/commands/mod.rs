@@ -1,3 +1,5 @@
+mod test_vectors;
+
 use crate::ScrollChainSpecParser;
 use clap::Subcommand;
 use reth_cli::chainspec::ChainSpecParser;
@@ -45,4 +47,8 @@ pub enum Commands<
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
     Prune(prune::PruneCommand<Spec>),
+    /// Generate Test Vectors
+    #[cfg(feature = "dev")]
+    #[command(name = "test-vectors")]
+    TestVectors(test_vectors::Command),
 }

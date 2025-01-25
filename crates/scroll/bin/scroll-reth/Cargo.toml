@@ -38,6 +38,7 @@ optimism = [
 	"reth-scroll-cli/optimism",
 	"reth-scroll-node/optimism"
 ]
+dev = ["reth-scroll-cli/dev"]
 
 [[bin]]
 name = "scroll-reth"
