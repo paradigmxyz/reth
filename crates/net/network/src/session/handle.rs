@@ -48,7 +48,7 @@ impl PendingSessionHandle {
 
 /// An established session with a remote peer.
 ///
-/// Within an active session that supports the `Ethereum Wire Protocol `, three high-level tasks can
+/// Within an active session that supports the `Ethereum Wire Protocol`, three high-level tasks can
 /// be performed: chain synchronization, block propagation and transaction exchange.
 #[derive(Debug)]
 pub struct ActiveSessionHandle<N: NetworkPrimitives> {
