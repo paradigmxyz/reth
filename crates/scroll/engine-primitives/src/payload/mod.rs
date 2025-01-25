@@ -7,6 +7,7 @@ mod built;
 pub use built::ScrollBuiltPayload;
 
 use alloc::sync::Arc;
+
 use alloy_consensus::Block;
 use alloy_eips::eip2718::Decodable2718;
 use alloy_rpc_types_engine::{

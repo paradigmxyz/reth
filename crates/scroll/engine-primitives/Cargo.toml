@@ -37,9 +37,21 @@ scroll-alloy-rpc-types-engine.workspace = true
 
 # misc
 serde.workspace = true
-sha2.workspace = true
+sha2 = { workspace = true, default-features = false}
 
 [features]
+std = [
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "alloy-rpc-types-engine/std",
+    "reth-chainspec/std",
+    "reth-primitives/std",
+    "reth-primitives-traits/std",
+    "serde/std",
+    "sha2/std"
+]
 scroll = [
     "reth-engine-primitives/scroll",
     "reth-primitives-traits/scroll",
