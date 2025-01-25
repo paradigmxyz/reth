@@ -1,5 +1,7 @@
 //! Payload related types
 
+use alloc::vec::Vec;
+
 use alloy_eips::{eip2718::Decodable2718, eip4895::Withdrawals};
 use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::Encodable;

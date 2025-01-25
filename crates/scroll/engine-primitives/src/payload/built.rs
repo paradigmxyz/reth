@@ -1,6 +1,7 @@
 //! Outcome of a Scroll block building task with payload attributes provided via the Engine API.
 
-use alloc::{iter, sync::Arc};
+use alloc::sync::Arc;
+use core::iter;
 
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::U256;

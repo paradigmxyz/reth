@@ -5,8 +5,6 @@
 #![cfg(all(feature = "scroll", not(feature = "optimism")))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-extern crate alloc;
-
 mod payload;
 pub use payload::{
     try_into_block, ScrollBuiltPayload, ScrollEngineTypes, ScrollPayloadBuilderAttributes,
