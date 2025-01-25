@@ -17,8 +17,8 @@ use std::{marker::PhantomData, sync::Arc};
 ///
 /// The intended staging is:
 ///  1. Configure the database: [`ProviderFactoryBuilder::db`]
-///  2. Configure the chainspec: [`TypesAnd1::chainspec`]
-///  3. Configure the [`StaticFileProvider`]: [`TypesAnd2::static_file`]
+///  2. Configure the chainspec: `chainspec`
+///  3. Configure the [`StaticFileProvider`]: `static_file`
 #[derive(Debug)]
 pub struct ProviderFactoryBuilder<N> {
     _types: PhantomData<N>,
