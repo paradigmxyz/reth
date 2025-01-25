@@ -246,7 +246,6 @@ impl<DB> ScrollEvmT for ScrollEvm<'_, (), DB>
 where
     DB: Database,
 {
-    /// Sets whether the evm should enable or disable the base fee checks.
     fn with_base_fee_check(&mut self, enabled: bool) {
         self.0.context.evm.inner.env.cfg.disable_base_fee = !enabled;
     }

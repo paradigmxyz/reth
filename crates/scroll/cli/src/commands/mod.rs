@@ -1,3 +1,4 @@
+#[cfg(feature = "dev")]
 mod test_vectors;
 
 use crate::ScrollChainSpecParser;

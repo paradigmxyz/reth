@@ -16,7 +16,7 @@ use tracing::*;
 
 #[cfg(not(feature = "skip-state-root-validation"))]
 use {
-    alloy_primitives::{BlockNumber, B256, Sealable},
+    alloy_primitives::{BlockNumber, Sealable, B256},
     reth_consensus::ConsensusError,
     reth_primitives::{GotExpected, SealedHeader},
     reth_stages_api::BlockErrorKind,
