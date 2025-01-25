@@ -1,7 +1,7 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::ExecutionOutcome;
-use alloc::{borrow::Cow, collections::BTreeMap};
+use alloc::{borrow::Cow, boxed::Box, collections::BTreeMap, vec::Vec};
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
@@ -345,7 +345,7 @@ impl<N: NodePrimitives> Chain<N> {
         let split_at = block_number + 1;
         let higher_number_blocks = self.blocks.split_off(&split_at);
 
-        let execution_outcome = std::mem::take(&mut self.execution_outcome);
+        let execution_outcome = core::mem::take(&mut self.execution_outcome);
         let (canonical_block_exec_outcome, pending_block_exec_outcome) =
             execution_outcome.split_at(split_at);
 
@@ -463,7 +463,7 @@ impl<B: Block<Body: BlockBody<Transaction: SignedTransaction>>> ChainBlocks<'_, 
 
 impl<B: Block> IntoIterator for ChainBlocks<'_, B> {
     type Item = (BlockNumber, RecoveredBlock<B>);
-    type IntoIter = std::collections::btree_map::IntoIter<BlockNumber, RecoveredBlock<B>>;
+    type IntoIter = alloc::collections::btree_map::IntoIter<BlockNumber, RecoveredBlock<B>>;
 
     fn into_iter(self) -> Self::IntoIter {
         #[allow(clippy::unnecessary_to_owned)]
