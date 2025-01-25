@@ -141,10 +141,10 @@ pub(crate) fn payload_id_scroll(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::str::FromStr;
     use alloy_primitives::{address, b256, bytes, FixedBytes};
     use alloy_rpc_types_engine::PayloadAttributes;
     use reth_payload_primitives::EngineApiMessageVersion;
-    use std::str::FromStr;
 
     #[test]
     fn test_payload_id() {
