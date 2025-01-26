@@ -1,6 +1,6 @@
-use reth_primitives_traits::NodePrimitives;
-use alloy_consensus::Block; 
 use crate::header::CustomHeader;
+use alloy_consensus::Block;
+use reth_primitives_traits::NodePrimitives;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CustomNodePrimitives;
