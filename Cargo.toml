@@ -141,6 +141,7 @@ members = [
     "examples/custom-node-components/",
     "examples/custom-payload-builder/",
     "examples/custom-rlpx-subprotocol",
+    "examples/custom-headers-and-txs-node",
     "examples/db-access",
     "examples/exex-hello-world",
     "examples/manual-p2p/",
