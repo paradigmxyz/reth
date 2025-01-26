@@ -920,7 +920,7 @@ async fn authenticate<N: NetworkPrimitives>(
     };
 
     let unauthed = UnauthedP2PStream::new(stream);
-
+    // TODO: make this configurable
     let auth = authenticate_stream(
         unauthed,
         session_id,
