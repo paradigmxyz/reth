@@ -14,17 +14,11 @@ use reth_chainspec::ChainSpec;
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig, primitives::SignedTransaction};
 use reth_node_ethereum::EthereumNode;
 
-#[derive(Debug, Clone)]
-struct CustomHeader {
-    eth_header: Header,
-    extra: String
-}
+mod header;
+mod block;
+mod primitives;
+pub use header::CustomHeader;
 
-impl CustomHeader {
-    pub fn new(eth_header: Header, extra: String) -> Self {
-        CustomHeader {eth_header, extra}
-    }
-}
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
