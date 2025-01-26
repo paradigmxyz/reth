@@ -27,22 +27,22 @@ impl CustomHeader {
     }
 }
 
-// impl Default for CustomHeader {
-//     fn default() -> Self {
-//         Self {
-//             eth_header: Default::default(),
-//             extra_data: "".to_string(),
-//         }
-//     }
-// }
-
-impl Deref for CustomHeader {
-    type Target = Header;
-
-    fn deref(&self) -> &Self::Target {
-        &self.eth_header
+impl Default for CustomHeader {
+    fn default() -> Self {
+        Self {
+            eth_header: Default::default(),
+            extra_data: "".to_string(),
+        }
     }
 }
+
+// impl Deref for CustomHeader {
+//     type Target = Header;
+
+//     fn deref(&self) -> &Self::Target {
+//         &self.eth_header
+//     }
+// }
 
 impl AsRef<Self> for CustomHeader {
     fn as_ref(&self) -> &Self {
