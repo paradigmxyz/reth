@@ -673,10 +673,8 @@ mod tests {
                             let transaction: TransactionSigned = provider
                                 .transaction_by_id_unhashed(tx_id)?
                                 .map(|tx| {
-                                    TransactionSigned::new_unhashed(
-                                        tx.transaction().clone(),
-                                        *tx.signature(),
-                                    )
+                                    let (transaction, signature) = tx.split();
+                                    TransactionSigned::new_unhashed(transaction, signature)
                                 })
                                 .expect("no transaction entry");
                             let signer =
