@@ -349,6 +349,7 @@ impl TransactionSigned {
     pub fn hash(&self) -> &B256 {
         self.hash.get_or_init(|| self.recalculate_hash())
     }
+
     /// Returns the transaction signature.
     #[inline]
     pub const fn signature(&self) -> &Signature {
