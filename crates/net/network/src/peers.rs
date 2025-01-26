@@ -856,11 +856,6 @@ impl PeersManager {
         }
 
         for maybe_better in unconnected {
-            // if the peer is trusted or static, return it immediately
-            if maybe_better.1.is_trusted() || maybe_better.1.is_static() {
-                return Some((*maybe_better.0, maybe_better.1))
-            }
-
             // otherwise we keep track of the best peer using the reputation
             if maybe_better.1.reputation > best_peer.1.reputation {
                 best_peer = maybe_better;
