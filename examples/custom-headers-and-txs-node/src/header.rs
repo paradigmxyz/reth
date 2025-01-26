@@ -1,10 +1,10 @@
 use alloy_consensus::Header;
-use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, B64, U256, Sealable};
+use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, Sealable, B256, B64, U256};
 
-use reth_primitives_traits::InMemorySize;
-use reth_codecs::Compact;
-use std::ops::Deref;
 use alloy_rlp::{BufMut, Decodable, Encodable};
+use reth_codecs::Compact;
+use reth_primitives_traits::InMemorySize;
+use std::ops::Deref;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -15,10 +15,7 @@ pub struct CustomHeader {
 
 impl CustomHeader {
     pub fn new(eth_header: Header, extra_data: String) -> Self {
-        Self {
-            eth_header,
-            extra_data,
-        }
+        Self { eth_header, extra_data }
     }
 
     pub fn eth_header(&self) -> &Header {
@@ -158,10 +155,7 @@ impl Encodable for CustomHeader {
 
 impl Decodable for CustomHeader {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(Self {
-            eth_header: Header::decode(buf)?,
-            extra_data: String::decode(buf)?,
-        })
+        Ok(Self { eth_header: Header::decode(buf)?, extra_data: String::decode(buf)? })
     }
 }
 
@@ -178,13 +172,7 @@ impl Compact for CustomHeader {
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
         let (eth_header, buf) = Header::from_compact(buf, len);
         let (extra_data, buf) = String::from_compact(buf, buf.len());
-        (
-            Self {
-                eth_header,
-                extra_data,
-            },
-            buf,
-        )
+        (Self { eth_header, extra_data }, buf)
     }
 }
 
