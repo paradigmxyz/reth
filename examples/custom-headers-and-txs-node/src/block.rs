@@ -9,7 +9,6 @@
 //     custom_header: CustomHeader,
 // }
 
-
 // impl BlockTrait for CustomBlock {
 //     type Header = CustomHeader;
 //     type Body = EthBlock;
