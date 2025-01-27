@@ -83,8 +83,8 @@ impl<N, Val1, Val2> TypesAnd2<N, Val1, Val2> {
     }
 
     /// Returns the second value.
-    pub const fn val_2(&self) -> &Val1 {
-        &self.val_1
+    pub const fn val_2(&self) -> &Val2 {
+        &self.val_2
     }
 
     /// Configures the [`StaticFileProvider`].
