@@ -20,7 +20,7 @@ struct EntryDiff<T> {
 struct TrieUpdatesDiff {
     account_nodes: HashMap<Nibbles, EntryDiff<Option<BranchNodeCompact>>>,
     removed_nodes: HashMap<Nibbles, EntryDiff<bool>>,
-    storage_tries: HashMap<B256, StorageTrieDiffEntry>,
+    storage_tries: HashMap<B256, StorageTrieUpdatesDiff>,
 }
 
 impl TrieUpdatesDiff {
@@ -55,47 +55,6 @@ impl TrieUpdatesDiff {
     }
 }
 
-#[derive(Debug)]
-enum StorageTrieDiffEntry {
-    /// Storage Trie entry exists for one of the task or regular trie updates, but not the other.
-    Existence(bool, bool),
-    /// Storage Trie entries exists for both task and regular trie updates, but their values
-    /// differ.
-    Value(StorageTrieUpdatesDiff),
-}
-
-impl StorageTrieDiffEntry {
-    fn log_differences(self, address: B256) {
-        match self {
-            Self::Existence(task, regular) => {
-                debug!(target: "engine::tree", ?address, ?task, ?regular, "Difference in storage trie existence");
-            }
-            Self::Value(mut storage_diff) => {
-                if let Some(EntryDiff { task, regular, database }) = storage_diff.is_deleted {
-                    debug!(target: "engine::tree", ?address, ?task, ?regular, ?database, "Difference in storage trie deletion");
-                }
-
-                for (path, EntryDiff { task, regular, database }) in &mut storage_diff.storage_nodes
-                {
-                    debug!(target: "engine::tree", ?address, ?path, ?task, ?regular, ?database, "Difference in storage trie updates");
-                }
-
-                for (
-                    path,
-                    EntryDiff {
-                        task: task_removed,
-                        regular: regular_removed,
-                        database: database_not_exists,
-                    },
-                ) in &storage_diff.removed_nodes
-                {
-                    debug!(target: "engine::tree", ?address, ?path, ?task_removed, ?regular_removed, ?database_not_exists, "Difference in removed storage trie nodes");
-                }
-            }
-        }
-    }
-}
-
 #[derive(Debug, Default)]
 struct StorageTrieUpdatesDiff {
     is_deleted: Option<EntryDiff<bool>>,
@@ -108,6 +67,28 @@ impl StorageTrieUpdatesDiff {
         self.is_deleted.is_some() ||
             !self.storage_nodes.is_empty() ||
             !self.removed_nodes.is_empty()
+    }
+
+    fn log_differences(&self, address: B256) {
+        if let Some(EntryDiff { task, regular, database }) = self.is_deleted {
+            debug!(target: "engine::tree", ?address, ?task, ?regular, ?database, "Difference in storage trie deletion");
+        }
+
+        for (path, EntryDiff { task, regular, database }) in &self.storage_nodes {
+            debug!(target: "engine::tree", ?address, ?path, ?task, ?regular, ?database, "Difference in storage trie updates");
+        }
+
+        for (
+            path,
+            EntryDiff {
+                task: task_removed,
+                regular: regular_removed,
+                database: database_not_exists,
+            },
+        ) in &self.removed_nodes
+        {
+            debug!(target: "engine::tree", ?address, ?path, ?task_removed, ?regular_removed, ?database_not_exists, "Difference in removed storage trie nodes");
+        }
     }
 }
 
@@ -168,20 +149,14 @@ pub(super) fn compare_trie_updates(
         let (mut task, mut regular) =
             (task.storage_tries.remove(&key), regular.storage_tries.remove(&key));
         if task != regular {
-            if let Some((task, regular)) = task.as_mut().zip(regular.as_mut()) {
-                let storage_diff = compare_storage_trie_updates(
-                    || trie_cursor_factory.storage_trie_cursor(key),
-                    task,
-                    regular,
-                )?;
-                if storage_diff.has_differences() {
-                    diff.storage_tries.insert(key, StorageTrieDiffEntry::Value(storage_diff));
-                }
-            } else {
-                diff.storage_tries.insert(
-                    key,
-                    StorageTrieDiffEntry::Existence(task.is_some(), regular.is_some()),
-                );
+            #[allow(clippy::or_fun_call)]
+            let storage_diff = compare_storage_trie_updates(
+                || trie_cursor_factory.storage_trie_cursor(key),
+                task.as_mut().unwrap_or(&mut Default::default()),
+                regular.as_mut().unwrap_or(&mut Default::default()),
+            )?;
+            if storage_diff.has_differences() {
+                diff.storage_tries.insert(key, storage_diff);
             }
         }
     }
