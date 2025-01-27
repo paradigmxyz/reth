@@ -50,7 +50,7 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
 
 /// Environment used when opening a MDBX environment. RO/RW.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DatabaseEnvKind {
     /// Read-only MDBX environment.
     RO,
