@@ -583,7 +583,8 @@ impl TransactionPtr {
     }
 
     fn lock(&self) -> MutexGuard<'_, ()> {
-        // Do not force capture the backtrace every time, as it can be expensive.
+        // Do not force capture the backtrace every time, as it can be expensive. Instead, it is
+        // captured only if `RUST_LIB_BACKTRACE` or `RUST_BACKTRACE` env variables are set.
         let backtrace = Backtrace::capture();
         if let Some(lock) = self.lock.try_lock() {
             *self.lock_backtrace.lock() = backtrace;
