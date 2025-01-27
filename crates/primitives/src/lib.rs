@@ -75,15 +75,5 @@ pub mod serde_bincode_compat {
     pub use reth_primitives_traits::serde_bincode_compat::*;
 }
 
-/// Temp helper struct for integrating [`NodePrimitives`].
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[non_exhaustive]
-pub struct EthPrimitives;
-
-impl reth_primitives_traits::NodePrimitives for EthPrimitives {
-    type Block = crate::Block;
-    type BlockHeader = alloy_consensus::Header;
-    type BlockBody = crate::BlockBody;
-    type SignedTx = crate::TransactionSigned;
-    type Receipt = crate::Receipt;
-}
+// Re-export of `EthPrimitives`
+pub use reth_ethereum_primitives::EthPrimitives;
