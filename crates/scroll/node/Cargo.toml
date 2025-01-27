@@ -87,4 +87,7 @@ reth-codec = [
 	"reth-primitives-traits/reth-codec",
 	"reth-scroll-primitives/reth-codec"
 ]
-skip-state-root-validation = []
+skip-state-root-validation = [
+	"reth-provider/skip-state-root-validation",
+	"reth-node-builder/skip-state-root-validation"
+]
