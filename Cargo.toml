@@ -139,6 +139,7 @@ members = [
     "examples/manual-p2p/",
     "examples/network-txpool/",
     "examples/network/",
+    "examples/network-proxy/",
     "examples/node-custom-rpc/",
     "examples/node-event-hooks/",
     "examples/polygon-p2p/",
