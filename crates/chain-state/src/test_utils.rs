@@ -1,7 +1,7 @@
 use core::marker::PhantomData;
 
 use crate::{
-    in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
+    in_memory::ExecutedBlockWithTrieUpdates, CanonStateNotification, CanonStateNotifications,
     CanonStateSubscriptions,
 };
 use alloy_consensus::{
@@ -204,17 +204,17 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         fork
     }
 
-    /// Gets an [`ExecutedBlock`] with [`BlockNumber`], [`Receipts`] and parent hash.
+    /// Gets an [`ExecutedBlockWithTrieUpdates`] with [`BlockNumber`], [`Receipts`] and parent hash.
     fn get_executed_block(
         &mut self,
         block_number: BlockNumber,
         receipts: Receipts,
         parent_hash: B256,
-    ) -> ExecutedBlock {
+    ) -> ExecutedBlockWithTrieUpdates {
         let block_with_senders = self.generate_random_block(block_number, parent_hash);
 
         let (block, senders) = block_with_senders.split_sealed();
-        ExecutedBlock::new(
+        ExecutedBlockWithTrieUpdates::new(
             Arc::new(RecoveredBlock::new_sealed(block, senders)),
             Arc::new(ExecutionOutcome::new(
                 BundleState::default(),
@@ -227,22 +227,22 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         )
     }
 
-    /// Generates an [`ExecutedBlock`] that includes the given [`Receipts`].
+    /// Generates an [`ExecutedBlockWithTrieUpdates`] that includes the given [`Receipts`].
     pub fn get_executed_block_with_receipts(
         &mut self,
         receipts: Receipts,
         parent_hash: B256,
-    ) -> ExecutedBlock {
+    ) -> ExecutedBlockWithTrieUpdates {
         let number = rand::thread_rng().gen::<u64>();
         self.get_executed_block(number, receipts, parent_hash)
     }
 
-    /// Generates an [`ExecutedBlock`] with the given [`BlockNumber`].
+    /// Generates an [`ExecutedBlockWithTrieUpdates`] with the given [`BlockNumber`].
     pub fn get_executed_block_with_number(
         &mut self,
         block_number: BlockNumber,
         parent_hash: B256,
-    ) -> ExecutedBlock {
+    ) -> ExecutedBlockWithTrieUpdates {
         self.get_executed_block(block_number, Receipts { receipt_vec: vec![vec![]] }, parent_hash)
     }
 
@@ -250,7 +250,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     pub fn get_executed_blocks(
         &mut self,
         range: Range<u64>,
-    ) -> impl Iterator<Item = ExecutedBlock> + '_ {
+    ) -> impl Iterator<Item = ExecutedBlockWithTrieUpdates> + '_ {
         let mut parent_hash = B256::default();
         range.map(move |number| {
             let current_parent_hash = parent_hash;

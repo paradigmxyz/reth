@@ -240,7 +240,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Updates the pending block with the given block.
     ///
     /// Note: This assumes that the parent block of the pending block is canonical.
-    pub fn set_pending_block(&self, pending: ExecutedBlock<N>) {
+    pub fn set_pending_block(&self, pending: ExecutedBlockWithTrieUpdates<N>) {
         // fetch the state of the pending block's parent block
         let parent = self.state_by_hash(pending.recovered_block().parent_hash());
         let pending = BlockState::with_parent(pending, parent);
@@ -254,9 +254,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     ///
     /// This removes all reorged blocks and appends the new blocks to the tracked chain and connects
     /// them to their parent blocks.
-    fn update_blocks<I>(&self, new_blocks: I, reorged: I)
+    fn update_blocks<I, R>(&self, new_blocks: I, reorged: R)
     where
-        I: IntoIterator<Item = ExecutedBlock<N>>,
+        I: IntoIterator<Item = ExecutedBlockWithTrieUpdates<N>>,
+        R: IntoIterator<Item = ExecutedBlock<N>>,
     {
         {
             // acquire locks, starting with the numbers lock
@@ -601,7 +602,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct BlockState<N: NodePrimitives = EthPrimitives> {
     /// The executed block that determines the state after this block has been executed.
-    block: ExecutedBlock<N>,
+    block: ExecutedBlockWithTrieUpdates<N>,
     /// The block's parent block if it exists.
     parent: Option<Arc<BlockState<N>>>,
 }
@@ -609,12 +610,15 @@ pub struct BlockState<N: NodePrimitives = EthPrimitives> {
 #[allow(dead_code)]
 impl<N: NodePrimitives> BlockState<N> {
     /// [`BlockState`] constructor.
-    pub const fn new(block: ExecutedBlock<N>) -> Self {
+    pub const fn new(block: ExecutedBlockWithTrieUpdates<N>) -> Self {
         Self { block, parent: None }
     }
 
     /// [`BlockState`] constructor with parent.
-    pub const fn with_parent(block: ExecutedBlock<N>, parent: Option<Arc<Self>>) -> Self {
+    pub const fn with_parent(
+        block: ExecutedBlockWithTrieUpdates<N>,
+        parent: Option<Arc<Self>>,
+    ) -> Self {
         Self { block, parent }
     }
 
@@ -628,12 +632,12 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Returns the executed block that determines the state.
-    pub fn block(&self) -> ExecutedBlock<N> {
+    pub fn block(&self) -> ExecutedBlockWithTrieUpdates<N> {
         self.block.clone()
     }
 
     /// Returns a reference to the executed block that determines the state.
-    pub const fn block_ref(&self) -> &ExecutedBlock<N> {
+    pub const fn block_ref(&self) -> &ExecutedBlockWithTrieUpdates<N> {
         &self.block
     }
 
@@ -787,7 +791,7 @@ impl<N: NodePrimitives> BlockState<N> {
 }
 
 /// Represents an executed block stored in-memory.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// Recovered Block
     pub recovered_block: Arc<RecoveredBlock<N::Block>>,
@@ -795,21 +799,19 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
     /// Block's hashed state.
     pub hashed_state: Arc<HashedPostState>,
-    /// Trie updates that result of applying the block.
-    pub trie: Arc<TrieUpdates>,
+}
+
+impl<N: NodePrimitives> Default for ExecutedBlock<N> {
+    fn default() -> Self {
+        Self {
+            recovered_block: Default::default(),
+            execution_output: Default::default(),
+            hashed_state: Default::default(),
+        }
+    }
 }
 
 impl<N: NodePrimitives> ExecutedBlock<N> {
-    /// [`ExecutedBlock`] constructor.
-    pub const fn new(
-        recovered_block: Arc<RecoveredBlock<N::Block>>,
-        execution_output: Arc<ExecutionOutcome<N::Receipt>>,
-        hashed_state: Arc<HashedPostState>,
-        trie: Arc<TrieUpdates>,
-    ) -> Self {
-        Self { recovered_block, execution_output, hashed_state, trie }
-    }
-
     /// Returns a reference to an inner [`SealedBlock`]
     #[inline]
     pub fn sealed_block(&self) -> &SealedBlock<N::Block> {
@@ -833,6 +835,42 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
     pub fn hashed_state(&self) -> &HashedPostState {
         &self.hashed_state
     }
+}
+
+/// An [`ExecutedBlock`] with its [`TrieUpdates`].
+///
+/// We store it as separate type because [`TrieUpdates`] are only available for blocks stored in
+/// memory and can't be obtained for canonical persisted blocks.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Default,
+    derive_more::Deref,
+    derive_more::DerefMut,
+    derive_more::Into,
+)]
+pub struct ExecutedBlockWithTrieUpdates<N: NodePrimitives = EthPrimitives> {
+    /// Inner [`ExecutedBlock`].
+    #[deref]
+    #[deref_mut]
+    #[into]
+    pub block: ExecutedBlock<N>,
+    /// Trie updates that result of applying the block.
+    pub trie: Arc<TrieUpdates>,
+}
+
+impl<N: NodePrimitives> ExecutedBlockWithTrieUpdates<N> {
+    /// [`ExecutedBlock`] constructor.
+    pub const fn new(
+        recovered_block: Arc<RecoveredBlock<N::Block>>,
+        execution_output: Arc<ExecutionOutcome<N::Receipt>>,
+        hashed_state: Arc<HashedPostState>,
+        trie: Arc<TrieUpdates>,
+    ) -> Self {
+        Self { block: ExecutedBlock { recovered_block, execution_output, hashed_state }, trie }
+    }
 
     /// Returns a reference to the trie updates for the block
     #[inline]
@@ -847,14 +885,18 @@ pub enum NewCanonicalChain<N: NodePrimitives = EthPrimitives> {
     /// A simple append to the current canonical head
     Commit {
         /// all blocks that lead back to the canonical head
-        new: Vec<ExecutedBlock<N>>,
+        new: Vec<ExecutedBlockWithTrieUpdates<N>>,
     },
     /// A reorged chain consists of two chains that trace back to a shared ancestor block at which
     /// point they diverge.
     Reorg {
         /// All blocks of the _new_ chain
-        new: Vec<ExecutedBlock<N>>,
+        new: Vec<ExecutedBlockWithTrieUpdates<N>>,
         /// All blocks of the _old_ chain
+        ///
+        /// These are not [`ExecutedBlockWithTrieUpdates`] because we don't always have the trie
+        /// updates for the old canonical chain. For example, in case of node being restarted right
+        /// before the reorg [`TrieUpdates`] can't be fetched from database.
         old: Vec<ExecutedBlock<N>>,
     },
 }
@@ -1257,7 +1299,7 @@ mod tests {
             block1.recovered_block().hash()
         );
 
-        let chain = NewCanonicalChain::Reorg { new: vec![block2.clone()], old: vec![block1] };
+        let chain = NewCanonicalChain::Reorg { new: vec![block2.clone()], old: vec![block1.block] };
         state.update_chain(chain);
         assert_eq!(
             state.head_state().unwrap().block_ref().recovered_block().hash(),
@@ -1540,7 +1582,7 @@ mod tests {
         // Test reorg notification
         let chain_reorg = NewCanonicalChain::Reorg {
             new: vec![block1a.clone(), block2a.clone()],
-            old: vec![block1.clone(), block2.clone()],
+            old: vec![block1.block.clone(), block2.block.clone()],
         };
 
         assert_eq!(

@@ -4,7 +4,7 @@ use crate::{
     StorageLocation, TrieWriter,
 };
 use alloy_consensus::BlockHeader;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_db::transaction::{DbTx, DbTxMut};
 use reth_errors::ProviderResult;
 use reth_primitives::{NodePrimitives, StaticFileSegment};
@@ -132,7 +132,7 @@ where
         + StaticFileProviderFactory,
 {
     /// Writes executed blocks and receipts to storage.
-    pub fn save_blocks<N>(&self, blocks: Vec<ExecutedBlock<N>>) -> ProviderResult<()>
+    pub fn save_blocks<N>(&self, blocks: Vec<ExecutedBlockWithTrieUpdates<N>>) -> ProviderResult<()>
     where
         N: NodePrimitives<SignedTx: SignedTransaction>,
         ProviderDB: BlockWriter<Block = N::Block> + StateWriter<Receipt = N::Receipt>,
@@ -160,7 +160,11 @@ where
         //  * trie updates (cannot naively extend, need helper)
         //  * indices (already done basically)
         // Insert the blocks
-        for ExecutedBlock { recovered_block, execution_output, hashed_state, trie } in blocks {
+        for ExecutedBlockWithTrieUpdates {
+            block: ExecutedBlock { recovered_block, execution_output, hashed_state },
+            trie,
+        } in blocks
+        {
             self.database()
                 .insert_block(Arc::unwrap_or_clone(recovered_block), StorageLocation::Both)?;
 

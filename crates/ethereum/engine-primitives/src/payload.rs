@@ -9,7 +9,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadV1, PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{EthPrimitives, SealedBlock};
 use reth_rpc_types_compat::engine::payload::{
@@ -28,7 +28,7 @@ pub struct EthBuiltPayload {
     /// The built block
     pub(crate) block: Arc<SealedBlock>,
     /// Block execution data for the payload, if any.
-    pub(crate) executed_block: Option<ExecutedBlock>,
+    pub(crate) executed_block: Option<ExecutedBlockWithTrieUpdates>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
@@ -48,7 +48,7 @@ impl EthBuiltPayload {
         id: PayloadId,
         block: Arc<SealedBlock>,
         fees: U256,
-        executed_block: Option<ExecutedBlock>,
+        executed_block: Option<ExecutedBlockWithTrieUpdates>,
         requests: Option<Requests>,
     ) -> Self {
         Self { id, block, executed_block, fees, sidecars: Vec::new(), requests }
@@ -100,7 +100,7 @@ impl BuiltPayload for EthBuiltPayload {
         self.fees
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlock> {
+    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates> {
         self.executed_block.clone()
     }
 
@@ -120,7 +120,7 @@ impl BuiltPayload for &EthBuiltPayload {
         (**self).fees()
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlock> {
+    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates> {
         self.executed_block.clone()
     }
 

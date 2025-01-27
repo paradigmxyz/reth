@@ -19,7 +19,7 @@ use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig,
 };
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_errors::RethError;
 use reth_evm::{
@@ -481,13 +481,15 @@ where
     debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
 
     // create the executed block data
-    let executed = ExecutedBlock {
-        recovered_block: Arc::new(RecoveredBlock::new_sealed(
-            sealed_block.as_ref().clone(),
-            executed_senders,
-        )),
-        execution_output: Arc::new(execution_outcome),
-        hashed_state: Arc::new(hashed_state),
+    let executed = ExecutedBlockWithTrieUpdates {
+        block: ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                sealed_block.as_ref().clone(),
+                executed_senders,
+            )),
+            execution_output: Arc::new(execution_outcome),
+            hashed_state: Arc::new(hashed_state),
+        },
         trie: Arc::new(trie_output),
     };
 
