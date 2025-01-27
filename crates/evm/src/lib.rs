@@ -241,6 +241,18 @@ pub trait TransactionEnv:
         self
     }
 
+    /// Returns the configured nonce.
+    fn nonce(&self) -> Option<u64>;
+
+    /// Sets the nonce.
+    fn set_nonce(&mut self, nonce: Option<u64>);
+
+    /// Sets the nonce.
+    fn with_nonce(mut self, nonce: Option<u64>) -> Self {
+        self.set_nonce(nonce);
+        self
+    }
+
     /// Returns configured gas price.
     fn gas_price(&self) -> U256;
 
@@ -277,6 +289,14 @@ impl TransactionEnv for TxEnv {
 
     fn gas_price(&self) -> U256 {
         self.gas_price.to()
+    }
+
+    fn nonce(&self) -> Option<u64> {
+        self.nonce
+    }
+
+    fn set_nonce(&mut self, nonce: Option<u64>) {
+        self.nonce = nonce;
     }
 
     fn value(&self) -> U256 {
