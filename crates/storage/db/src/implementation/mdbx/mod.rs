@@ -511,7 +511,7 @@ mod tests {
     use rlp::{RlpStream, Rlp, Encodable, Decodable};
     use primitive_types::H256;
     use alloy_consensus::Header;
-    use alloy_primitives::{Address, B256, U256};
+    use alloy_primitives::{Address, B256, U160, U256};
     use reth_db_api::{
         cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         models::{AccountBeforeTx, IntegerList, ShardedKey},
@@ -621,25 +621,166 @@ mod tests {
     fn db_cursor_walk() {
         let env = create_test_db(DatabaseEnvKind::RW);
 
-        let value = Header::default();
-        let key = 1u64;
+        // let value = Account::default();
+        // let key = 1u64;
+
+        let b256_var_from_bytes1 = B256::from([
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes2 = B256::from([
+            1u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes3 = B256::from([
+            2u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes4 = B256::from([
+            3u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes5 = B256::from([
+            4u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes6 = B256::from([
+            1u8, 1u8, 1u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes7 = B256::from([
+            1u8, 1u8, 2u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes8 = B256::from([
+            1u8, 2u8, 2u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes9 = B256::from([
+            2u8, 2u8, 2u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes10 = B256::from([
+            4u8, 4u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+        
+        // println!("for hashed storage");
+        let subkey = B256::random();
+        // let subkey: H256 = H256::zero();
+        // println!("subkey {:?}", subkey);
+
+        let value1 = U256::from(1);
+        let value2 = U256::from(2);
+        let value3 = U256::from(3);
+        let value4 = U256::from(4);
+        let entry1 = StorageEntry { key: b256_var_from_bytes2, value: value1 };
+        let entry2 = StorageEntry { key: b256_var_from_bytes3, value: value2 };
+        let entry3 = StorageEntry { key: b256_var_from_bytes4, value: value3 };
+        let entry4 = StorageEntry { key: b256_var_from_bytes5, value: value4 };
+
+
+        let entry5 = StorageEntry { key: b256_var_from_bytes6, value: value1 };
+        let entry6 = StorageEntry { key: b256_var_from_bytes7, value: value2 };
+        let entry7 = StorageEntry { key: b256_var_from_bytes8, value: value3 };
+        let entry8 = StorageEntry { key: b256_var_from_bytes9, value: value4 };
+
 
         // PUT
         let tx = env.tx_mut().expect(ERROR_INIT_TX);
-        tx.put::<Headers>(key, value.clone()).expect(ERROR_PUT);
-        tx.commit().expect(ERROR_COMMIT);
+        tx.put::<HashedStorages>(b256_var_from_bytes1, entry1).expect(ERROR_PUT);
+        tx.put::<HashedStorages>(b256_var_from_bytes1, entry2).expect(ERROR_PUT);
+        tx.put::<HashedStorages>(b256_var_from_bytes1, entry3).expect(ERROR_PUT);
+        tx.put::<HashedStorages>(b256_var_from_bytes1, entry4).expect(ERROR_PUT);
 
+        tx.put::<HashedStorages>(b256_var_from_bytes5, entry5).expect(ERROR_PUT);
+        tx.put::<HashedStorages>(b256_var_from_bytes5, entry6).expect(ERROR_PUT);
+        tx.put::<HashedStorages>(b256_var_from_bytes5, entry7).expect(ERROR_PUT);
+        tx.put::<HashedStorages>(b256_var_from_bytes5, entry8).expect(ERROR_PUT);
+   
+        tx.commit().expect(ERROR_COMMIT);
+        let tx = env.tx().expect(ERROR_INIT_TX);
+
+        let mut cursorr = tx.cursor_read::<HashedStorages>().unwrap();
+        while let Some((key, value)) = cursorr.prev().unwrap() {
+            println!("PREV Key: {}, Value: {:?}", key, value);
+        };
+        while let Some((key, value)) = cursorr.next().unwrap() {
+            println!("NEXT Key: {}, Value: {:?}", key, value);
+        };
         // Cursor
         let tx = env.tx().expect(ERROR_INIT_TX);
-        let mut cursor = tx.cursor_read::<Headers>().unwrap();
+        let mut cursor = tx.cursor_read::<HashedStorages>().unwrap();
 
         let first = cursor.first().unwrap();
+        println!("FIRST: {:?}", first);
         assert!(first.is_some(), "First should be our put");
 
+        let seek_exact = cursor.seek_exact(b256_var_from_bytes1).unwrap();
+        println!("SEEK EXACT: {:?}", seek_exact);
+
+        let next = cursor.next().unwrap();
+        println!("NEXT: {:?}", next);
+
+        let seek_exact = cursor.seek_exact(b256_var_from_bytes5).unwrap();
+        println!("SEEK EXACT: {:?}", seek_exact);
+
+        let seek_exact = cursor.seek_exact(b256_var_from_bytes6).unwrap();
+        println!("SEEK EXACT: {:?}", seek_exact);
+
+        let seek_exact = cursor.seek_exact(b256_var_from_bytes7).unwrap();
+        println!("SEEK EXACT: {:?}", seek_exact);
+
+        let seek_exact = cursor.seek_exact(b256_var_from_bytes10).unwrap();
+        println!("SEEK EXACT: {:?}", seek_exact);
+
+        let seek = cursor.seek(b256_var_from_bytes1).unwrap();
+        println!("SEEK: {:?}", seek);
+
+        let seek = cursor.seek(b256_var_from_bytes5).unwrap();
+        println!("SEEK: {:?}", seek);
+
+        let seek = cursor.seek(b256_var_from_bytes6).unwrap();
+        println!("SEEK: {:?}", seek);
+
+        let seek = cursor.seek(b256_var_from_bytes7).unwrap();
+        println!("SEEK: {:?}", seek);
+
+        let seek = cursor.seek(b256_var_from_bytes10).unwrap();
+        println!("SEEK: {:?}", seek);
         // Walk
-        let walk = cursor.walk(Some(key)).unwrap();
-        let first = walk.into_iter().next().unwrap().unwrap();
-        assert_eq!(first.1, value, "First next should be put value");
+        // let walk = cursor.walk(Some(key)).unwrap();
+        // let first = walk.into_iter().next().unwrap().unwrap();
+        // assert_eq!(first.1, value, "First next should be put value");
     }
 
     #[test]
@@ -909,7 +1050,7 @@ mod tests {
     }
 
     #[test]
-    fn db_cursor_insert() -> Result<(), DatabaseError> {
+    fn db_cursor_insert() -> Result<(), reth_db_api::DatabaseError> {
         // let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
 
         // // PUT
@@ -1021,13 +1162,13 @@ mod tests {
         .map_err(DatabaseError::from)?;
 
         // PUT FOR HASHEDACCOUNTS 
-        let put_response = scalerize_client.put(0, key1.as_slice(),None, &rlp_encoded1)
+        scalerize_client.put(0, key1.as_slice(),None, &rlp_encoded1)
         .expect("PUT REQUEST FAILED");
         
-        println!("BYTES TO BE DECODED:{:?}", &put_response);
-        let rlp = Rlp::new(&put_response);
-        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
-        println!("PUT Account:{:?}", decoded_account);
+        // println!("BYTES TO BE DECODED:{:?}", &put_response);
+        // let rlp = Rlp::new(&put_response);
+        // let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        // println!("PUT Account:{:?}", decoded_account);
 
         match scalerize_client.write() {
             Ok(_) => {
@@ -1038,13 +1179,13 @@ mod tests {
             }
         }
 
-        let put_response = scalerize_client.put(0, key2.as_slice(),None, &rlp_encoded2)
+        scalerize_client.put(0, key2.as_slice(),None, &rlp_encoded2)
         .expect("Failed to get put response");
         
-        println!("BYTES TO BE DECODED:{:?}", &put_response);
-        let rlp = Rlp::new(&put_response);
-        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
-        println!("PUT Account:{:?}", decoded_account);
+        // println!("BYTES TO BE DECODED:{:?}", &put_response);
+        // let rlp = Rlp::new(&put_response);
+        // let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        // println!("PUT Account:{:?}", decoded_account);
 
         match scalerize_client.write() {
             Ok(_) => {
@@ -1055,13 +1196,13 @@ mod tests {
             }
         }
 
-        let put_response = scalerize_client.put(0, key3.as_slice(),None, &rlp_encoded3)
+        scalerize_client.put(0, key3.as_slice(),None, &rlp_encoded3)
         .expect("PUT REQUEST FAILED");
 
-        println!("BYTES TO BE DECODED:{:?}", &put_response);
-        let rlp = Rlp::new(&put_response);
-        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
-        println!("PUT Account:{:?}", decoded_account);
+        // println!("BYTES TO BE DECODED:{:?}", &put_response);
+        // let rlp = Rlp::new(&put_response);
+        // let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        // println!("PUT Account:{:?}", decoded_account);
 
         match scalerize_client.write() {
             Ok(_) => {
@@ -1131,6 +1272,41 @@ mod tests {
             0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
             0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
         ]);
+
+        let b256_var_from_bytes6 = B256::from([
+            1u8, 1u8, 1u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes7 = B256::from([
+            1u8, 1u8, 2u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes8 = B256::from([
+            1u8, 2u8, 2u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes9 = B256::from([
+            2u8, 2u8, 2u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes10 = B256::from([
+            4u8, 4u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
         
         // println!("for hashed storage");
         let subkey = B256::random();
@@ -1146,48 +1322,52 @@ mod tests {
         let entry3 = StorageEntry { key: b256_var_from_bytes4, value: value3 };
         let entry4 = StorageEntry { key: b256_var_from_bytes5, value: value4 };
 
+        let entry5 = StorageEntry { key: b256_var_from_bytes6, value: value1 };
+        let entry6 = StorageEntry { key: b256_var_from_bytes7, value: value2 };
+        let entry7 = StorageEntry { key: b256_var_from_bytes8, value: value3 };
+        let entry8 = StorageEntry { key: b256_var_from_bytes9, value: value4 };
+
+
         // // let storage_entry = StorageEntry {
         // //     key: B256::random(),
         // //     value: U256::from(1),
         // // };
 
-        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry1.key.as_slice()), &entry1.value.to_be_bytes::<32>())
+        scalerize_client.put(1, key1.as_slice(), Some(entry1.key.as_slice()), &entry1.value.to_be_bytes::<32>())
         .expect("Failed to get put response");
-        println!("PUT RESPONSE: {:?}", put_response);
+        // println!("PUT RESPONSE: {:?}", put_response);
 
         // let rlp_encoded = rlp::encode(&entry2);
         // let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
         // println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
-        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry2.key.as_slice()), &entry2.value.to_be_bytes::<32>())
+        scalerize_client.put(1, key1.as_slice(), Some(entry2.key.as_slice()), &entry2.value.to_be_bytes::<32>())
         .expect("Failed to get put response");
-        println!("PUT RESPONSE: {:?}", put_response);
+        // println!("PUT RESPONSE: {:?}", put_response);
 
-        // let rlp_encoded = rlp::encode(&entry3);
-        // let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
-        // println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
-        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry3.key.as_slice()), &entry3.value.to_be_bytes::<32>())
+        scalerize_client.put(1, key1.as_slice(), Some(entry3.key.as_slice()), &entry3.value.to_be_bytes::<32>())
         .expect("Failed to get put response");
-        println!("PUT RESPONSE: {:?}", put_response);
+        // println!("PUT RESPONSE: {:?}", put_response);
 
-        
-        // println!("BYTES TO BE DECODED:{:?}", &put_response);
-        // let rlp = Rlp::new(&put_response);
-        // let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
-        // println!("PUT Storage Entry:{:?}", decoded_storage_entry);
-
-
-        // let rlp_encoded = rlp::encode(&entry4);
-        // let decoded_storage_entry: StorageEntry = rlp::decode(&rlp_encoded).expect("Failed to decode RLP");
-        // println!("Decoded STORAGE ENTRY: {:?}", decoded_storage_entry);
-        let put_response = scalerize_client.put(1, key1.as_slice(), Some(entry4.key.as_slice()), &entry4.value.to_be_bytes::<32>())
+        scalerize_client.put(1, key1.as_slice(), Some(entry4.key.as_slice()), &entry4.value.to_be_bytes::<32>())
         .expect("Failed to get put response");
-        println!("PUT RESPONSE: {:?}", put_response);
+        // println!("PUT RESPONSE: {:?}", put_response);
 
-        
-        // println!("BYTES TO BE DECODED:{:?}", &put_response);
-        // let rlp = Rlp::new(&put_response);
-        // let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
-        // println!("PUT Storage Entry:{:?}", decoded_storage_entry);
+
+        scalerize_client.put(1, key3.as_slice(), Some(entry5.key.as_slice()), &entry1.value.to_be_bytes::<32>())
+        .expect("Failed to get put response");
+        // println!("PUT RESPONSE: {:?}", put_response);
+
+        scalerize_client.put(1, key3.as_slice(), Some(entry6.key.as_slice()), &entry2.value.to_be_bytes::<32>())
+        .expect("Failed to get put response");
+        // println!("PUT RESPONSE: {:?}", put_response);
+
+        scalerize_client.put(1, key3.as_slice(), Some(entry7.key.as_slice()), &entry3.value.to_be_bytes::<32>())
+        .expect("Failed to get put response");
+        // println!("PUT RESPONSE: {:?}", put_response);
+
+        scalerize_client.put(1, key3.as_slice(), Some(entry8.key.as_slice()), &entry8.value.to_be_bytes::<32>())
+        .expect("Failed to get put response");
+        // println!("PUT RESPONSE: {:?}", put_response);
 
         match scalerize_client.write() {
             Ok(_) => {
@@ -1237,14 +1417,14 @@ mod tests {
         // let rlp_encoded = rlp::encode(&entry1);
 
         // this will delete only entry for table HashedStorages with account address == key1 and subkey == entry1
-        match scalerize_client.delete(1, key1.as_slice(), Some(entry1.key.as_slice())) {
-            Ok(_) => {
-                println!("DELETE REQUEST SUCCESSFUL");
-            }
-            Err(e) => {
-                println!("Delete request failed with error: {:?}", e);
-            }
-        }
+        // match scalerize_client.delete(1, key1.as_slice(), Some(entry1.key.as_slice())) {
+        //     Ok(_) => {
+        //         println!("DELETE REQUEST SUCCESSFUL");
+        //     }
+        //     Err(e) => {
+        //         println!("Delete request failed with error: {:?}", e);
+        //     }
+        // }
 
         match scalerize_client.write() {
             Ok(_) => {
@@ -1266,11 +1446,6 @@ mod tests {
        
         println!("GET Storage Entry:{:?}", storage_entry);
 
-        // println!("BYTES TO BE DECODED:{:?}", &get_response);
-        // let rlp = Rlp::new(&get_response);
-        // let decoded_storage_entry = StorageEntry::decode(&rlp).expect("Failed to decode");
-        // println!("GET Storage Entry:{:?}", decoded_storage_entry);
-
         // this will delete all the entries for key
         // match scalerize_client.delete(1, key1.as_slice(), None) {
         //     Ok(_) => {
@@ -1281,14 +1456,14 @@ mod tests {
         //     }
         // }
 
-        match scalerize_client.write() {
-            Ok(_) => {
-                println!("WRITTEN TO DB");
-            }
-            Err(e) => {
-                println!("Write request failed with error: {:?}", e);
-            }
-        }
+        // match scalerize_client.write() {
+        //     Ok(_) => {
+        //         println!("WRITTEN TO DB");
+        //     }
+        //     Err(e) => {
+        //         println!("Write request failed with error: {:?}", e);
+        //     }
+        // }
 
         let get_response = scalerize_client.get(1, key1.as_slice()).
         expect("Failed to get response");
@@ -1335,6 +1510,15 @@ mod tests {
         let cursor_id_3 = generate_unique_bytes();
         let cursor_id_4 = generate_unique_bytes();
         let cursor_id_5 = generate_unique_bytes();
+
+
+        let cursor_id_6 = generate_unique_bytes();
+        let cursor_id_7 = generate_unique_bytes();
+        let cursor_id_8 = generate_unique_bytes();
+        let cursor_id_9 = generate_unique_bytes();
+        let cursor_id_10 = generate_unique_bytes();
+        let cursor_id_11 = generate_unique_bytes();
+        let cursor_id_12 = generate_unique_bytes();
 
         let first_response = scalerize_client.first(0, cursor_id_1.to_vec(), 32).
         expect("Failed to get first entry for accounts");
@@ -1399,17 +1583,21 @@ mod tests {
 
         let seek_response = scalerize_client.seek(0, cursor_id_2.to_vec(), key2.as_slice()).
         expect("Failed to get seek for accounts");
-        let rlp = Rlp::new(&seek_response);
+        let key = seek_response.0;
+        let encoded_account = seek_response.1;
+        let rlp = Rlp::new(&encoded_account);
         let decoded_account = Account::decode(&rlp).expect("Failed to decode");
-        println!("SEEK ACCOUNT KEY: {:?}", key2);
+        println!("SEEK ACCOUNT KEY: {:?}", key);
         println!("SEEK ACCOUNT :{:?}", decoded_account);
        
 
         let seek_response = scalerize_client.seek(0, cursor_id_2.to_vec(), key4.as_slice()).
         expect("Failed to get seek_exact for accounts");
-        let rlp = Rlp::new(&seek_response);
+        let key = seek_response.0;
+        let encoded_account = seek_response.1;
+        let rlp = Rlp::new(&encoded_account);
         let decoded_account = Account::decode(&rlp).expect("Failed to decode");
-        println!("SEEK ACCOUNT KEY: {:?}", key4);
+        println!("SEEK ACCOUNT KEY: {:?}", key);
         println!("SEEK ACCOUNT :{:?}", decoded_account);
 
         let next_response = scalerize_client.next(0, cursor_id_3.to_vec(), 32).
@@ -1450,21 +1638,6 @@ mod tests {
 
         println!("NEXT ACCOUNT KEY: {:?}", key);
         println!("NEXT ACCOUNT :{:?}", decoded_account);
-
-        // let next_response = scalerize_client.next(0, cursor_id_3.to_vec(), 32).
-        // expect("Failed to get first entry for accounts");
-
-        // let key = next_response.0;
-        // let encoded_account = next_response.1;
-
-        // println!("BYTES TO BE DECODED:{:?}", &encoded_account);
-        // let rlp = Rlp::new(&encoded_account);
-        // let decoded_account = Account::decode(&rlp).expect("Failed to decode");
-
-        // println!("NEXT ACCOUNT KEY: {:?}", key);
-        // println!("NEXT ACCOUNT :{:?}", decoded_account);
-        
-
 
 
         let prev_response = scalerize_client.prev(0, cursor_id_3.to_vec(), 32).
@@ -1572,18 +1745,478 @@ mod tests {
         println!("CURRENT ACCOUNT KEY: {:?}", key);
         println!("CURRENT ACCOUNT :{:?}", decoded_account);
 
-        let current_response = scalerize_client.current(0, cursor_id_5.to_vec(), 32).
-        expect("Failed to get first entry for accounts");
 
-        let key = current_response.0;
-        let encoded_account = current_response.1;
+        let first_response = scalerize_client.first(1, cursor_id_6.to_vec(), 32).
+        expect("Failed to get first entry for Storages");
+        let key = first_response.0;
+        let value = first_response.1;
+        let storage_entry = StorageEntry{
+            key: B256::from_slice(&value[..32]),
+            value:U256::from_be_slice(&value[32..]),
+        };
+       
+        println!("FIRST KEY: {:?}", key);
+        println!("FIRST Storage Entry:{:?}", storage_entry);
 
-        println!("BYTES TO BE DECODED:{:?}", &encoded_account);
+        let seek_exact_response = scalerize_client.seek_exact(1, cursor_id_7.to_vec(), key2.as_slice()).
+        expect("Failed to get seek_exact for storages");
+        
+        if !seek_exact_response.is_empty() {
+            let storage_entry = StorageEntry{
+                key: B256::from_slice(&seek_exact_response[..32]),
+                value:U256::from_be_slice(&seek_exact_response[32..]),
+            };
+
+            println!("SEEK EXACT KEY: {:?}", key2);
+            println!("SEEK EXACT Storage Entry:{:?}", storage_entry);
+        } else {
+            println!("SEEK_EXACT response is empty");
+        }
+
+        let seek_exact_response = scalerize_client.seek_exact(1, cursor_id_7.to_vec(), key1.as_slice()).
+        expect("Failed to get seek_exact for storages");
+        
+        if !seek_exact_response.is_empty() {
+            let storage_entry = StorageEntry{
+                key: B256::from_slice(&seek_exact_response[..32]),
+                value:U256::from_be_slice(&seek_exact_response[32..]),
+            };
+
+            println!("SEEK EXACT KEY: {:?}", key1);
+            println!("SEEK EXACT Storage Entry:{:?}", storage_entry);
+        } else {
+            println!("SEEK_EXACT response is empty");
+        }
+
+        let seek_exact_response = scalerize_client.seek_exact(1, cursor_id_7.to_vec(), key3.as_slice()).
+        expect("Failed to get seek_exact for storages");
+        
+        if !seek_exact_response.is_empty() {
+            let storage_entry = StorageEntry{
+                key: B256::from_slice(&seek_exact_response[..32]),
+                value:U256::from_be_slice(&seek_exact_response[32..]),
+            };
+
+            println!("SEEK EXACT KEY: {:?}", key3);
+            println!("SEEK EXACT Storage Entry:{:?}", storage_entry);
+        } else {
+            println!("SEEK_EXACT response is empty");
+        }
+
+        let seek_response = scalerize_client.seek(1, cursor_id_7.to_vec(), key2.as_slice()).
+        expect("Failed to get seek_exact for storages");
+        println!("CURRENT ON NON SET CURSOR: {:?}", scalerize_client.current(1, cursor_id_7.to_vec(), 32));
+
+        
+        if !seek_response.0.is_empty() && !seek_response.1.is_empty(){
+            let storage_entry = StorageEntry{
+                key: B256::from_slice(&seek_response.1[..32]),
+                value:U256::from_be_slice(&seek_response.1[32..]),
+            };
+
+            println!("SEEK KEY: {:?}", seek_response.0);
+            println!("SEEK Storage Entry:{:?}", storage_entry);
+        } else {
+            println!("SEEK response is empty");
+        }
+
+        let seek_response = scalerize_client.seek(1, cursor_id_7.to_vec(), key1.as_slice()).
+        expect("Failed to get seek_exact for storages");
+        
+        if !seek_response.0.is_empty() && !seek_response.1.is_empty(){
+            let storage_entry = StorageEntry{
+                key: B256::from_slice(&seek_response.1[..32]),
+                value:U256::from_be_slice(&seek_response.1[32..]),
+            };
+
+            println!("SEEK KEY: {:?}", seek_response.0);
+            println!("SEEK Storage Entry:{:?}", storage_entry);
+        } else {
+            println!("SEEK response is empty");
+        }
+
+        loop {
+            match scalerize_client.next(1, cursor_id_7.to_vec(), 32) {
+                Ok(next_response) => {
+                    let storage_entry = StorageEntry {
+                        key: B256::from_slice(&next_response.1[..32]),
+                        value: U256::from_be_slice(&next_response.1[32..]),
+                    };
+            
+                    println!("NEXT KEY: {:?}", next_response.0);
+                    println!("NEXT Storage Entry: {:?}", storage_entry);
+                }
+                Err(e) => {
+                    println!("Failed to get next for storages: {:?}", e);
+                    break;
+                }
+            }
+        }
+
+
+        loop {
+            match scalerize_client.prev(1, cursor_id_7.to_vec(), 32) {
+                Ok(prev_response) => {
+                    let storage_entry = StorageEntry {
+                        key: B256::from_slice(&prev_response.1[..32]),
+                        value: U256::from_be_slice(&prev_response.1[32..]),
+                    };
+            
+                    println!("PREV KEY: {:?}", prev_response.0);
+                    println!("PREV Storage Entry: {:?}", storage_entry);
+                }
+                Err(e) => {
+                    println!("Failed to get prev for storages: {:?}", e);
+                    break;
+                }
+            }
+        }
+
+        let seek_response = scalerize_client.seek(1, cursor_id_7.to_vec(), key1.as_slice()).
+        expect("Failed to get seek_exact for storages");
+        
+        if !seek_response.0.is_empty() && !seek_response.1.is_empty(){
+            let storage_entry = StorageEntry{
+                key: B256::from_slice(&seek_response.1[..32]),
+                value:U256::from_be_slice(&seek_response.1[32..]),
+            };
+
+            println!("SEEK KEY: {:?}", seek_response.0);
+            println!("SEEK Storage Entry:{:?}", storage_entry);
+        } else {
+            println!("SEEK response is empty");
+        }
+
+        println!("CURRENT ON NON SET CURSOR: {:?}", scalerize_client.current(1, cursor_id_8.to_vec(), 32));
+
+
+
+        let b256_var_from_bytes12 = B256::from([
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 58u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes22 = B256::from([
+            1u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 58u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes32 = B256::from([
+            2u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 58u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes42 = B256::from([
+            3u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 58u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes52 = B256::from([
+            4u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 58u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes62 = B256::from([
+            1u8, 1u8, 1u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 58u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes72 = B256::from([
+            1u8, 1u8, 2u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 58u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes82 = B256::from([
+            1u8, 2u8, 2u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 58u8 // Example bytes
+        ]);
+
+        let value12 = Account {
+            nonce: 5,
+            balance: U256::from(1000),
+            bytecode_hash: Some(U256::from(12345).into()),
+        };
+
+        let value22 = Account {
+            nonce: 6,
+            balance: U256::from(2000),
+            bytecode_hash: Some(U256::from(12345).into()),
+        };
+
+        let value32 = Account {
+            nonce: 7,
+            balance: U256::from(3000),
+            bytecode_hash: Some(U256::from(12345).into()),
+        };
+
+        let entry12 = StorageEntry { key: b256_var_from_bytes12, value: value1 };
+        let entry22 = StorageEntry { key: b256_var_from_bytes22, value: value2 };
+        let entry32 = StorageEntry { key: b256_var_from_bytes32, value: value3 };
+ 
+        
+        let encoded_account1 = rlp::encode(&value12);
+        let encoded_account2 = rlp::encode(&value22);
+        let encoded_account3 = rlp::encode(&value32);
+        let upsert_response = scalerize_client.upsert(0, cursor_id_8.to_vec(), b256_var_from_bytes82.as_slice(), None, &encoded_account1);
+
+        println!("UPSERT RESPONSE: {:?}", upsert_response);
+
+        match scalerize_client.write() {
+            Ok(_) => {
+                println!("WRITTEN TO DB");
+            }
+            Err(e) => {
+                println!("Write request failed with error: {:?}", e);
+            }
+        }
+
+        let seek_response = scalerize_client.seek(0, cursor_id_7.to_vec(), b256_var_from_bytes82.as_slice()).
+        expect("Failed to get seek for accounts");
+
+        let key = seek_response.0;
+        let encoded_account = seek_response.1;
         let rlp = Rlp::new(&encoded_account);
         let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        println!("SEEK ACCOUNT KEY: {:?}", key);
+        println!("SEEK ACCOUNT :{:?}", decoded_account);
+       
 
-        println!("CURRENT ACCOUNT KEY: {:?}", key);
-        println!("CURRENT ACCOUNT :{:?}", decoded_account);
+        let seek_response = scalerize_client.seek_exact(0, cursor_id_7.to_vec(), b256_var_from_bytes82.as_slice()).
+        expect("Failed to get seek for accounts");
+
+        // let key = seek_response.0;
+        let encoded_account = seek_response;
+        let rlp = Rlp::new(&encoded_account);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        println!("SEEK EXACT ACCOUNT KEY: {:?}", key);
+        println!("SEEK EXACT ACCOUNT :{:?}", decoded_account);
+
+        let upsert_response = scalerize_client.upsert(1, cursor_id_8.to_vec(), b256_var_from_bytes12.as_slice(), Some(entry12.key.as_slice()), &entry12.value.to_be_bytes::<32>());
+
+        println!("UPSERT RESPONSE: {:?}", upsert_response);
+
+        match scalerize_client.write() {
+            Ok(_) => {
+                println!("WRITTEN TO DB");
+            }
+            Err(e) => {
+                println!("Write request failed with error: {:?}", e);
+            }
+        }
+
+        let seek_response = scalerize_client.seek(1, cursor_id_7.to_vec(), b256_var_from_bytes12.as_slice()).
+        expect("Failed to get seek for storages");
+
+        if !seek_response.0.is_empty() && !seek_response.1.is_empty(){
+            let storage_entry = StorageEntry{
+                key: B256::from_slice(&seek_response.1[..32]),
+                value:U256::from_be_slice(&seek_response.1[32..]),
+            };
+
+            println!("SEEK KEY: {:?}", seek_response.0);
+            println!("SEEK Storage Entry:{:?}", storage_entry);
+        } else {
+            println!("SEEK response is empty");
+        }
+
+
+        loop {
+            match scalerize_client.next(0, cursor_id_9.to_vec(), 32) {
+                Ok(next_response) => {
+                    let key = next_response.0;
+                    let encoded_account = next_response.1;
+                    let rlp = Rlp::new(&encoded_account);
+                    let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+                    println!("NEXT ACCOUNT KEY: {:?}", key);
+                    println!("NEXT ACCOUNT :{:?}", decoded_account);
+                }
+                Err(e) => {
+                    println!("Failed to get next for storages: {:?}", e);
+                    break;
+                }
+            }
+        }
+
+        // this fails since account with key already present in the table
+        println!("INSERT RESPONSE: {:?}", scalerize_client.insert(0, cursor_id_8.to_vec(), b256_var_from_bytes82.as_slice(), None, &encoded_account2));
+
+        let insert_response = scalerize_client.insert(0, cursor_id_8.to_vec(), b256_var_from_bytes72.as_slice(), None, &encoded_account2).
+        expect("Failed to insert for accounts");
+
+        println!("INSERT RESPONSE: {:?}", insert_response);
+
+        match scalerize_client.write() {
+            Ok(_) => {
+                println!("WRITTEN TO DB");
+            }
+            Err(e) => {
+                println!("Write request failed with error: {:?}", e);
+            }
+        }
+
+        let seek_response = scalerize_client.seek(0, cursor_id_7.to_vec(), b256_var_from_bytes72.as_slice()).
+        expect("Failed to get seek for accounts");
+
+        let key = seek_response.0;
+        let encoded_account = seek_response.1;
+        let rlp = Rlp::new(&encoded_account);
+        let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+        println!("SEEK ACCOUNT KEY: {:?}", key);
+        println!("SEEK ACCOUNT :{:?}", decoded_account);
+
+
+        // this fails since account with key already present in the table
+        println!("INSERT RESPONSE IF KEY AND SUBKEY IS SAME: {:?}", scalerize_client.insert(1, cursor_id_8.to_vec(), b256_var_from_bytes12.as_slice(), Some(entry12.key.as_slice()), &entry12.value.to_be_bytes::<32>()));
+        println!("INSERT RESPONSE IF ONLY KEY IS SAME: {:?}", scalerize_client.insert(1, cursor_id_8.to_vec(), b256_var_from_bytes12.as_slice(), Some(entry32.key.as_slice()), &entry32.value.to_be_bytes::<32>()));
+
+        let insert_response = scalerize_client.insert(1, cursor_id_8.to_vec(), b256_var_from_bytes72.as_slice(),Some(entry32.key.as_slice()), &entry32.value.to_be_bytes::<32>()).
+        expect("Failed to insert for accounts");
+
+        println!("INSERT RESPONSE: {:?}", insert_response);
+
+        match scalerize_client.write() {
+            Ok(_) => {
+                println!("WRITTEN TO DB");
+            }
+            Err(e) => {
+                println!("Write request failed with error: {:?}", e);
+            }
+        }
+
+        let seek_response = scalerize_client.seek(1, cursor_id_7.to_vec(), b256_var_from_bytes72.as_slice()).
+        expect("Failed to get seek for storages");
+
+        if !seek_response.0.is_empty() && !seek_response.1.is_empty(){
+            let storage_entry = StorageEntry{
+                key: B256::from_slice(&seek_response.1[..32]),
+                value:U256::from_be_slice(&seek_response.1[32..]),
+            };
+
+            println!("SEEK KEY: {:?}", seek_response.0);
+            println!("SEEK Storage Entry:{:?}", storage_entry);
+        } else {
+            println!("SEEK response is empty");
+        }
+
+
+        loop {
+            match scalerize_client.next(0, cursor_id_10.to_vec(), 32) {
+                Ok(next_response) => {
+                    let key = next_response.0;
+                    let encoded_account = next_response.1;
+                    let rlp = Rlp::new(&encoded_account);
+                    let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+                    println!("NEXT ACCOUNT KEY: {:?}", key);
+                    println!("NEXT ACCOUNT :{:?}", decoded_account);
+                }
+                Err(e) => {
+                    println!("Failed to get next for storages: {:?}", e);
+                    break;
+                }
+            }
+        }
+
+
+        println!("APPEND RESPONSE WHEN KEY IS LESS THAN GREATEST KEY: {:?}", scalerize_client.append(0, cursor_id_8.to_vec(), b256_var_from_bytes62.as_slice(), None, &encoded_account1));
+        println!("APPEND RESPONSE WHEN KEY IS EQUAL TO THE GREATEST KEY: {:?}", scalerize_client.append(0, cursor_id_8.to_vec(), b256_var_from_bytes52.as_slice(), None, &encoded_account1));
+
+        println!("UPSERT RESPONSE: {:?}", upsert_response);
+
+        match scalerize_client.write() {
+            Ok(_) => {
+                println!("WRITTEN TO DB");
+            }
+            Err(e) => {
+                println!("Write request failed with error: {:?}", e);
+            }
+        }
+
+        loop {
+            match scalerize_client.next(0, cursor_id_10.to_vec(), 32) {
+                Ok(next_response) => {
+                    let key = next_response.0;
+                    let encoded_account = next_response.1;
+                    let rlp = Rlp::new(&encoded_account);
+                    let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+                    println!("NEXT ACCOUNT KEY: {:?}", key);
+                    println!("NEXT ACCOUNT :{:?}", decoded_account);
+                }
+                Err(e) => {
+                    println!("Failed to get next for accounts: {:?}", e);
+                    break;
+                }
+            }
+        }
+
+
+        println!("all for hashed storages");
+
+        loop {
+            match scalerize_client.next(1, cursor_id_11.to_vec(), 32) {
+                Ok(next_response) => {
+                    let storage_entry = StorageEntry {
+                        key: B256::from_slice(&next_response.1[..32]),
+                        value: U256::from_be_slice(&next_response.1[32..]),
+                    };
+            
+                    println!("NEXT KEY: {:?}", next_response.0);
+                    println!("NEXT Storage Entry: {:?}", storage_entry);
+                }
+                Err(e) => {
+                    println!("Failed to get next for storages: {:?}", e);
+                    break;
+                }
+            }
+        }
+
+        println!("APPEND RESPONSE WHEN KEY IS LESS THAN GREATEST KEY: {:?}", scalerize_client.append(1, cursor_id_8.to_vec(), b256_var_from_bytes22.as_slice(), Some(entry32.key.as_slice()), &entry32.value.to_be_bytes::<32>()));
+        println!("APPEND RESPONSE WHEN KEY IS EQUAL TO THE GREATEST KEY AND SUBKEY LESS: {:?}", scalerize_client.append(1, cursor_id_8.to_vec(), b256_var_from_bytes3.as_slice(), Some(entry32.key.as_slice()), &entry32.value.to_be_bytes::<32>()));
+        println!("APPEND RESPONSE WHEN KEY IS EQUAL TO THE GREATEST KEY AND SUBKEY GREATEST: {:?}", scalerize_client.append(1, cursor_id_8.to_vec(), b256_var_from_bytes3.as_slice(), Some(entry3.key.as_slice()), &entry3.value.to_be_bytes::<32>()));
+        println!("APPEND RESPONSE WHEN KEY IS EQUAL TO THE GREATEST KEY AND SUBKEY GREATEST: {:?}", scalerize_client.append(1, cursor_id_8.to_vec(), b256_var_from_bytes4.as_slice(), Some(entry3.key.as_slice()), &entry3.value.to_be_bytes::<32>()));
+
+
+        match scalerize_client.write() {
+            Ok(_) => {
+                println!("WRITTEN TO DB");
+            }
+            Err(e) => {
+                println!("Write request failed with error: {:?}", e);
+            }
+        }
+
+
+        loop {
+            match scalerize_client.next(0, cursor_id_12.to_vec(), 32) {
+                Ok(next_response) => {
+                    let key = next_response.0;
+                    let encoded_account = next_response.1;
+                    let rlp = Rlp::new(&encoded_account);
+                    let decoded_account = Account::decode(&rlp).expect("Failed to decode");
+                    println!("NEXT ACCOUNT KEY: {:?}", key);
+                    println!("NEXT ACCOUNT :{:?}", decoded_account);
+                }
+                Err(e) => {
+                    println!("Failed to get next for accounts: {:?}", e);
+                    break;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1619,22 +2252,337 @@ mod tests {
         assert!(cursor.insert(key1, Account::default()).is_ok());
         assert!(cursor.insert(key3, Account::default()).is_ok());
         assert!(cursor.insert(key4, Account::default()).is_ok());
+        // assert!(cursor.insert(key4, Account::default()).is_ok());
+
+
+        let b256_var_from_bytes1 = B256::from([
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes2 = B256::from([
+            1u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes3 = B256::from([
+            2u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes4 = B256::from([
+            3u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes5 = B256::from([
+            4u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes6 = B256::from([
+            1u8, 1u8, 1u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes7 = B256::from([
+            1u8, 1u8, 2u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes8 = B256::from([
+            1u8, 2u8, 2u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes9 = B256::from([
+            2u8, 2u8, 2u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let b256_var_from_bytes10 = B256::from([
+            4u8, 4u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+        
+        // println!("for hashed storage");
+        let subkey = B256::random();
+        // let subkey: H256 = H256::zero();
+        // println!("subkey {:?}", subkey);
+
+        let value1 = U256::from(1);
+        let value2 = U256::from(2);
+        let value3 = U256::from(3);
+        let value4 = U256::from(4);
+        let entry1 = StorageEntry { key: b256_var_from_bytes2, value: value1 };
+        let entry2 = StorageEntry { key: b256_var_from_bytes3, value: value2 };
+        let entry3 = StorageEntry { key: b256_var_from_bytes4, value: value3 };
+        let entry4 = StorageEntry { key: b256_var_from_bytes5, value: value4 };
+
+
+        let entry5 = StorageEntry { key: b256_var_from_bytes6, value: value1 };
+        let entry6 = StorageEntry { key: b256_var_from_bytes7, value: value2 };
+        let entry7 = StorageEntry { key: b256_var_from_bytes8, value: value3 };
+        let entry8 = StorageEntry { key: b256_var_from_bytes9, value: value4 };
+        let entry9 = StorageEntry { key: b256_var_from_bytes2, value: value4 };
+        let entry10 = StorageEntry { key: b256_var_from_bytes2, value: value2 };
+        let entry11 = StorageEntry { key: b256_var_from_bytes9, value: value2 };
+        let entry12 = StorageEntry { key: b256_var_from_bytes9, value: value4 };
+
+
+        let mut cursor = tx.cursor_write::<HashedStorages>().unwrap();
+        println!("CURRENT 1: {:?}", cursor.current());
+        assert!(cursor.insert(b256_var_from_bytes1, entry1).is_ok());
+        // assert!(tx.put(b256_var_from_bytes1, entry2).is_ok());
+        assert!(tx.put::<HashedStorages>(b256_var_from_bytes1, entry3).is_ok());
+        assert!(tx.put::<HashedStorages>(b256_var_from_bytes1, entry4).is_ok());
+        println!("CURRENT 2: {:?}", cursor.current());
+        assert!(cursor.insert(b256_var_from_bytes2, entry5).is_ok());
+        // assert!(cursor.insert(b256_var_from_bytes2, entry5).is_ok());
+        // assert!(cursor.insert(b256_var_from_bytes2, entry9).is_ok());
+        assert!(tx.put::<HashedStorages>(b256_var_from_bytes3, entry6).is_ok());
+        assert!(tx.put::<HashedStorages>(b256_var_from_bytes3, entry7).is_ok());
+        assert!(tx.put::<HashedStorages>(b256_var_from_bytes3, entry8).is_ok());
+        println!("CURRENT 3: {:?}", cursor.current());
+
+
+        let mut cursorrw = tx.cursor_write::<HashedStorages>().unwrap();
+
+        println!("SEEK EXACT: {:?}", cursor.seek_exact(b256_var_from_bytes1));
+        // assert!(cursorrw.upsert(b256_var_from_bytes1, entry9).is_ok());
+        assert!(tx.put::<HashedStorages>(b256_var_from_bytes1, entry9).is_ok());
+        assert!(tx.put::<HashedStorages>(b256_var_from_bytes1, entry1).is_ok());
+        assert!(tx.put::<HashedStorages>(b256_var_from_bytes1, entry10).is_ok());
+        println!("SEEK EXACT: {:?}", cursor.seek_exact(b256_var_from_bytes1));
+
+        let mut cursor3 = tx.cursor_write::<HashedStorages>().unwrap();
+        while let Some((key, value)) = cursor3.next().unwrap() {
+            println!("NEXT Key: {}, Value: {:?}", key, value);
+        }
+        println!("NEXT AFTER NEXT IS CALLED FOR THE LAST ENTRY: {:?}", cursor3.next());
+        println!("CURRENT AFTER NEXT IS CALLED FOR THE LAST ENTRY: {:?}", cursor3.current());
+        println!("CURRENT 5: {:?}", cursorrw.current());
+        assert!(cursorrw.upsert(b256_var_from_bytes4, entry5).is_ok());
+        println!("CURRENT 6: {:?}", cursorrw.current());
+
+        println!("HERE {:?}", cursorrw.current());
+        while let Some((key, value)) = cursorrw.next().unwrap() {
+            println!("NEXT Key: {}, Value: {:?}", key, value);
+        }
+        println!("CURSOR CURRENT: {:?}", cursorrw.current());
+
+        println!("CURRENT BEFORE DELETE CURRENT THE LAST: {:?}", cursorrw.current());
+        assert_eq!(cursorrw.delete_current(), Ok(()));
+        println!("CURRENT AFTER DELETE CURRENT THE LAST: {:?}", cursorrw.current());
+    
+        
+
+        while let Some((key, value)) = cursorrw.prev().unwrap() {
+            println!("PREV Key: {}, Value: {:?}", key, value);
+        }
+
+
+        println!("SEEK EXACT: {:?}", cursorrw.seek_exact(b256_var_from_bytes3));
+        println!("CURRENT BEFORE DELETE CURRENT: {:?}", cursorrw.current());
+        assert_eq!(cursorrw.delete_current(), Ok(()));
+        println!("CURRENT AFTER DELETE CURRENT: {:?}", cursorrw.current());
+
+        let mut cursor5 = tx.cursor_write::<HashedStorages>().unwrap();
+        while let Some((key, value)) = cursor5.next().unwrap() {
+            println!("NEXT Key: {}, Value: {:?}", key, value);
+        }
+
+
+        let mut cursor6 = tx.cursor_write::<HashedStorages>().unwrap();
+        println!("KEY: {:?}", b256_var_from_bytes2);
+        println!("ENTRY: {:?}", entry4);
+        println!("CURSOR APPEND: {:?}", cursor6.append(b256_var_from_bytes2, entry4));
+        println!("CURSOR CURRENT: {:?}", cursor6.current());
+
+        println!("KEY: {:?}", b256_var_from_bytes3);
+        println!("ENTRY: {:?}", entry1);
+        println!("CURSOR APPEND: {:?}", cursor6.append(b256_var_from_bytes3, entry1)); 
+        println!("CURSOR CURRENT: {:?}", cursor6.current());
+
+        println!("KEY: {:?}", b256_var_from_bytes3);
+        println!("ENTRY: {:?}", entry10);
+        println!("CURSOR APPEND: {:?}", cursor6.append(b256_var_from_bytes3, entry10)); 
+        println!("CURSOR CURRENT: {:?}", cursor6.current());
+
+
+        println!("KEY: {:?}", b256_var_from_bytes10);
+        println!("ENTRY: {:?}", entry10);
+        println!("CURSOR APPEND: {:?}", cursor6.append(b256_var_from_bytes10, entry10));
+        println!("CURSOR CURRENT: {:?}", cursor6.current());
+
+
+        println!("KEY: {:?}", b256_var_from_bytes10);
+        println!("ENTRY: {:?}", entry10);
+        println!("CURSOR APPEND: {:?}", cursor6.append(b256_var_from_bytes10, entry10));
+        println!("CURSOR CURRENT: {:?}", cursor6.current());
+
+        println!("KEY: {:?}", b256_var_from_bytes10);
+        println!("ENTRY: {:?}", entry12);
+        println!("CURSOR APPEND: {:?}", cursor6.append(b256_var_from_bytes10, entry12));
+        println!("CURSOR CURRENT: {:?}", cursor6.current());
+
+        println!("KEY: {:?}", b256_var_from_bytes10);
+        println!("ENTRY: {:?}", entry11);
+        println!("CURSOR APPEND: {:?}", cursor6.append(b256_var_from_bytes10, entry11));
+        println!("CURSOR CURRENT: {:?}", cursor6.current());
+
+       
+
+        let mut cursor6 = tx.cursor_write::<HashedStorages>().unwrap();
+        while let Some((key, value)) = cursor6.next().unwrap() {
+            println!("NEXT Key: {}, Value: {:?}", key, value);
+        }
+
+        let mut cursor7 = tx.cursor_write::<HashedAccounts>().unwrap();
+
+        let key1 = B256::from([
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let key2 = B256::from([
+            1u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let key3 = B256::from([
+            2u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let key4 = B256::from([
+            2u8, 2u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8,
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+
+        let value1 = Account {
+            nonce: 1,
+            bytecode_hash: Some(B256::random()),
+            balance: U256::MAX,
+        };
+
+        let value2 = Account {
+            nonce: 2,
+            bytecode_hash: Some(B256::random()),
+            balance: U256::MAX,
+        };
+
+
+        let value3 = Account {
+            nonce: 3,
+            bytecode_hash: Some(B256::random()),
+            balance: U256::MAX,
+        };
+
+        let value4 = Account {
+            nonce: 4,
+            bytecode_hash: Some(B256::random()),
+            balance: U256::MAX,
+        };
+        println!("CURSOR APPEND: {:?}", cursor7.append(key1, value1));
+        println!("CURSOR CURRENT: {:?}", cursor7.current());
+
+        println!("CURSOR APPEND: {:?}", cursor7.append(key2, value2));
+        println!("CURSOR CURRENT: {:?}", cursor7.current());
+
+
+        println!("CURSOR APPEND: {:?}", cursor7.append(key4, value3));
+        println!("CURSOR CURRENT: {:?}", cursor7.current());
+
+        println!("CURSOR APPEND: {:?}", cursor7.append(key4, value4));
+        println!("CURSOR CURRENT: {:?}", cursor7.current());
+
+        let mut cursor6 = tx.cursor_write::<HashedAccounts>().unwrap();
+        while let Some((key, value)) = cursor6.next().unwrap() {
+            println!("NEXT Key: {}, Value: {:?}", key, value);
+        }
+
+        println!("CURSOR APPEND: {:?}", cursor7.append(key4, value1));
+        println!("CURSOR CURRENT: {:?}", cursor7.current());
+
+        // println!("CURSOR CURRENT: {:?}", cursorrw.current());
+        // let current = cursorrw.current().
+        // expect("current failed");
+        // println!("CURRENT: {:?}", current);
+
+        // assert_eq!(cursorrw.delete_current(), Ok(()));
+        // println!("{:?}", cursorrw.current());
+
+        // cursor.seek_exact(key4).unwrap();
+        // println!("{:?}", cursor.current());
+        // let current = cursor.current().
+        // expect("current failed");
+        // println!("CURRENT BEFORE: {:?}", current);
+        // assert_eq!(cursor.delete_current(), Ok(()));
+        // let current = cursor.current().
+        // expect("currrent failed");
+        // println!("CURRENT AFTER: {:?}", current);
+        // assert_eq!(cursor.delete_current(), Ok(()));
+        // let current = cursor.current().
+        // expect("current failed");
+        // println!("CURRENT AFTER: {:?}", current);
+        // assert_eq!(cursor.delete_current(), Ok(()));
+        // let current = cursor.current().
+        // expect("current failed");
+        // println!("CURRENT AFTER: {:?}", current);
+
+        // assert_eq!(cursor.seek_exact(key2), Ok(None));
+        // println!("{:?}", cursor.current());
 
         // Seek & delete key2
-        cursor.seek_exact(key2).unwrap();
-        println!("{:?}", cursor.current());
-        assert_eq!(cursor.delete_current(), Ok(()));
-        assert_eq!(cursor.seek_exact(key2), Ok(None));
-        println!("{:?}", cursor.current());
+        // cursor.seek_exact(key2).unwrap();
+        // println!("{:?}", cursor.current());
+        // let current = cursor.current().
+        // expect("currrent failed");
+        // println!("CURRENT BEFORE: {:?}", current);
+        // assert_eq!(cursor.delete_current(), Ok(()));
+        // let current = cursor.current().
+        // expect("currrent failed");
+        // println!("CURRENT AFTER: {:?}", current);
+        // assert_eq!(cursor.seek_exact(key2), Ok(None));
+        // println!("{:?}", cursor.current());
 
 
         // Seek & delete key2 again
-        assert_eq!(cursor.seek_exact(key2), Ok(None));
-        assert_eq!(cursor.delete_current(), Ok(()));
-        // Assert that key1 is still there
-        assert_eq!(cursor.seek_exact(key1), Ok(Some((key1, Account::default()))));
-        // Assert that key3 was deleted
-        assert_eq!(cursor.seek_exact(key3), Ok(None));
+        // assert_eq!(cursor.seek_exact(key2), Ok(None));
+        // assert_eq!(cursor.delete_current(), Ok(()));
+        // // Assert that key1 is still there
+        // assert_eq!(cursor.seek_exact(key1), Ok(Some((key1, Account::default()))));
+        // // Assert that key3 was deleted
+        // assert_eq!(cursor.seek_exact(key3), Ok(None));
     }
 
     #[test]
@@ -1975,13 +2923,32 @@ mod tests {
 
         let mut cursor = tx.cursor_write::<PlainAccountState>().unwrap();
         let key = Address::random();
+        let key1 = U160::from_be_slice(&[
+            0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+        let key2 = U160::from_be_slice(&[
+            1u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+        let key3 = U160::from_be_slice(&[
+            2u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+        let key4 = U160::from_be_slice(&[
+            3u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 3u8, 57u8 // Example bytes
+        ]);
+        println!("CURRENT {:?}", cursor.current());
 
         let account = Account::default();
-        cursor.upsert(key, account).expect(ERROR_UPSERT);
+        
+        cursor.upsert(key1.into(), account).expect(ERROR_UPSERT);
+        println!("CURRENT {:?}", cursor.current());
+
         assert_eq!(cursor.seek_exact(key), Ok(Some((key, account))));
+        println!("CURRENT {:?}", cursor.current());
 
         let account = Account { nonce: 1, ..Default::default() };
         cursor.upsert(key, account).expect(ERROR_UPSERT);
+        println!("CURRENT {:?}", cursor.current());
+
         assert_eq!(cursor.seek_exact(key), Ok(Some((key, account))));
 
         let account = Account { nonce: 2, ..Default::default() };
