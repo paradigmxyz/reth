@@ -1229,7 +1229,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
                     // Note: we're using unchecked here because we know the block contains valid txs
                     // wrt to its height and can ignore the s value check so pre
                     // EIP-2 txs are allowed
-                    .try_with_senders_unchecked(senders)
+                    .try_into_recovered_unchecked(senders)
                     .map(Some)
                     .map_err(|_| ProviderError::SenderRecoveryError)
             },
@@ -1274,7 +1274,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             |range| self.headers_range(range),
             |header, body, senders| {
                 Self::Block::new(header, body)
-                    .try_with_senders_unchecked(senders)
+                    .try_into_recovered_unchecked(senders)
                     .map_err(|_| ProviderError::SenderRecoveryError)
             },
         )

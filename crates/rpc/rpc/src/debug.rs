@@ -18,7 +18,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_evm::{
     env::EvmEnv,
     execute::{BlockExecutorProvider, Executor},
-    ConfigureEvmEnv,
+    ConfigureEvmEnv, TransactionEnv,
 };
 use reth_primitives::{NodePrimitives, ReceiptWithBloom, RecoveredBlock};
 use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
@@ -42,7 +42,6 @@ use revm::{
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
 };
-use revm_primitives::TxEnv;
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -96,7 +95,7 @@ where
     async fn trace_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<<Eth::Evm as ConfigureEvmEnv>::Spec>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         // replay all transactions of the block
@@ -157,7 +156,7 @@ where
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
 
-        let evm_env = self.eth_api().evm_config().cfg_and_block_env(block.header());
+        let evm_env = self.eth_api().evm_config().evm_env(block.header());
 
         // Depending on EIP-2 we need to recover the transactions differently
         let senders =
@@ -181,7 +180,7 @@ where
                     .collect()
             };
 
-        self.trace_block(Arc::new(block.with_senders_unchecked(senders)), evm_env, opts).await
+        self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts).await
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -311,7 +310,7 @@ where
                                 let (res, (_, tx_env)) =
                                     this.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
                                 let frame = inspector
-                                    .with_transaction_gas_limit(tx_env.gas_limit)
+                                    .with_transaction_gas_limit(tx_env.gas_limit())
                                     .into_geth_builder()
                                     .geth_call_traces(call_config, res.result.gas_used());
                                 Ok(frame.into())
@@ -341,7 +340,7 @@ where
                                     &mut inspector,
                                 )?;
                                 let frame = inspector
-                                    .with_transaction_gas_limit(tx_env.gas_limit)
+                                    .with_transaction_gas_limit(tx_env.gas_limit())
                                     .into_geth_builder()
                                     .geth_prestate_traces(&res, &prestate_config, db)
                                     .map_err(Eth::Error::from_eth_err)?;
@@ -410,7 +409,7 @@ where
                                     this.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
                                 let tx_info = TransactionInfo::default();
                                 let frame: FlatCallFrame = inspector
-                                    .with_transaction_gas_limit(tx_env.gas_limit)
+                                    .with_transaction_gas_limit(tx_env.gas_limit())
                                     .into_parity_builder()
                                     .into_localized_transaction_traces(tx_info);
                                 Ok(frame)
@@ -447,9 +446,9 @@ where
                                 &mut inspector,
                             )?;
                             let env = revm_primitives::Env::boxed(
-                                evm_env.cfg_env_with_handler_cfg.cfg_env,
+                                evm_env.cfg_env,
                                 evm_env.block_env,
-                                tx_env,
+                                tx_env.into(),
                             );
                             inspector.json_result(res, &env, db).map_err(Eth::Error::from_eth_err)
                         })
@@ -470,7 +469,7 @@ where
             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
                 let (res, (_, tx_env)) =
                     this.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
-                Ok((res, tx_env.gas_limit, inspector))
+                Ok((res, tx_env.gas_limit(), inspector))
             })
             .await?;
         let gas_used = res.result.gas_used();
@@ -651,8 +650,8 @@ where
     fn trace_transaction(
         &self,
         opts: &GethDebugTracingOptions,
-        evm_env: EvmEnv,
-        tx_env: TxEnv,
+        evm_env: EvmEnv<<Eth::Evm as ConfigureEvmEnv>::Spec>,
+        tx_env: <Eth::Evm as ConfigureEvmEnv>::TxEnv,
         db: &mut StateCacheDb<'_>,
         transaction_context: Option<TransactionContext>,
         fused_inspector: &mut Option<TracingInspector>,
@@ -694,7 +693,7 @@ where
                         let (res, (_, tx_env)) =
                             self.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
 
-                        inspector.set_transaction_gas_limit(tx_env.gas_limit);
+                        inspector.set_transaction_gas_limit(tx_env.gas_limit());
 
                         let frame = inspector
                             .geth_builder()
@@ -716,7 +715,7 @@ where
                         let (res, (_, tx_env)) =
                             self.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
 
-                        inspector.set_transaction_gas_limit(tx_env.gas_limit);
+                        inspector.set_transaction_gas_limit(tx_env.gas_limit());
                         let frame = inspector
                             .geth_builder()
                             .geth_prestate_traces(&res, &prestate_config, db)
@@ -756,7 +755,7 @@ where
                         let (res, (_, tx_env)) =
                             self.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
                         let frame: FlatCallFrame = inspector
-                            .with_transaction_gas_limit(tx_env.gas_limit)
+                            .with_transaction_gas_limit(tx_env.gas_limit())
                             .into_parity_builder()
                             .into_localized_transaction_traces(tx_info);
 
@@ -782,9 +781,9 @@ where
 
                     let state = res.state.clone();
                     let env = revm_primitives::Env::boxed(
-                        evm_env.cfg_env_with_handler_cfg.cfg_env,
+                        evm_env.cfg_env,
                         evm_env.block_env,
-                        tx_env,
+                        tx_env.into(),
                     );
                     let result =
                         inspector.json_result(res, &env, db).map_err(Eth::Error::from_eth_err)?;
@@ -801,7 +800,7 @@ where
         let (res, (_, tx_env)) = self.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
         let gas_used = res.result.gas_used();
         let return_value = res.result.into_output().unwrap_or_default();
-        inspector.set_transaction_gas_limit(tx_env.gas_limit);
+        inspector.set_transaction_gas_limit(tx_env.gas_limit());
         let frame = inspector.geth_builder().geth_traces(gas_used, return_value, *config);
 
         Ok((frame.into(), res.state))

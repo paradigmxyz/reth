@@ -289,13 +289,6 @@ codegen-units = 1
 inherits = "release"
 lto = "fat"
 
-[profile.reproducible]
-inherits = "release"
-debug = false
-panic = "abort"
-codegen-units = 1
-overflow-checks = true
-
 [workspace.dependencies]
 # reth
 op-reth = { path = "crates/optimism/bin" }
@@ -614,6 +607,8 @@ snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 
 # TODO: When we build for a windows target on an ubuntu runner, crunchy tries to
 # get the wrong path, update this when the workflow has been updated
+#
+# See: https://github.com/eira-fransham/crunchy/issues/13
 crunchy = "=0.2.2"
 
 # [patch.crates-io]

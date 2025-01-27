@@ -3,8 +3,8 @@
 
 use super::{LoadBlock, LoadPendingBlock, LoadState, LoadTransaction, SpawnBlocking, Trace};
 use crate::{
-    helpers::estimate::EstimateCall, FromEthApiError, FromEvmError, FullEthApiTypes,
-    IntoEthApiError, RpcBlock, RpcNodeCore,
+    helpers::estimate::EstimateCall, FromEthApiError, FromEvmError, FullEthApiTypes, RpcBlock,
+    RpcNodeCore,
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1559::calc_next_block_base_fee, eip2930::AccessListResult};
@@ -17,14 +17,14 @@ use alloy_rpc_types_eth::{
 };
 use futures::Future;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm, TransactionEnv};
 use reth_node_api::BlockBody;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockIdReader, ChainSpecProvider, ProviderHeader};
 use reth_revm::{
     database::StateProviderDatabase,
     db::CacheDB,
-    primitives::{BlockEnv, ExecutionResult, ResultAndState, TxEnv},
+    primitives::{BlockEnv, ExecutionResult, ResultAndState},
     DatabaseRef,
 };
 use reth_rpc_eth_types::{
@@ -32,7 +32,6 @@ use reth_rpc_eth_types::{
     error::ensure_success,
     revm_utils::{
         apply_block_overrides, apply_state_overrides, caller_gas_allowance, get_precompiles,
-        CallFees,
     },
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
@@ -94,9 +93,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             let mut parent_hash = base_block.hash();
 
             // Only enforce base fee if validation is enabled
-            evm_env.cfg_env_with_handler_cfg.disable_base_fee = !validation;
+            evm_env.cfg_env.disable_base_fee = !validation;
             // Always disable EIP-3607
-            evm_env.cfg_env_with_handler_cfg.disable_eip3607 = true;
+            evm_env.cfg_env.disable_eip3607 = true;
 
             let this = self.clone();
             self.spawn_with_state_at_block(block, move |state| {
@@ -179,7 +178,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             call,
                             validation,
                             default_gas_limit,
-                            evm_env.cfg_env_with_handler_cfg.chain_id,
+                            evm_env.cfg_env.chain_id,
                             &mut db,
                             this.tx_resp_builder(),
                         )?;
@@ -206,7 +205,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         }
 
                         transactions.push(tx);
-                        senders.push(tx_env.caller);
+                        senders.push(tx_env.caller());
                         results.push(res.result);
                     }
 
@@ -388,7 +387,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// [`BlockId`].
     fn create_access_list_with(
         &self,
-        mut evm_env: EvmEnv,
+        mut evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
         at: BlockId,
         mut request: TransactionRequest,
     ) -> Result<AccessListResult, Self::Error>
@@ -401,19 +400,19 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
         // we want to disable this in eth_createAccessList, since this is common practice used by
         // other node impls and providers <https://github.com/foundry-rs/foundry/issues/4388>
-        evm_env.cfg_env_with_handler_cfg.disable_block_gas_limit = true;
+        evm_env.cfg_env.disable_block_gas_limit = true;
 
         // The basefee should be ignored for eth_createAccessList
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/8990c92aea01ca07801597b00c0d83d4e2d9b811/internal/ethapi/api.go#L1476-L1476>
-        evm_env.cfg_env_with_handler_cfg.disable_base_fee = true;
+        evm_env.cfg_env.disable_base_fee = true;
 
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
-        if request.gas.is_none() && tx_env.gas_price > U256::ZERO {
+        if request.gas.is_none() && tx_env.gas_price() > U256::ZERO {
             let cap = caller_gas_allowance(&mut db, &tx_env)?;
             // no gas limit was provided in the request, so we need to cap the request's gas limit
-            tx_env.gas_limit = cap.min(evm_env.block_env.gas_limit).saturating_to();
+            tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit).saturating_to());
         }
 
         let from = request.from.unwrap_or_default();
@@ -428,17 +427,17 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         // can consume the list since we're not using the request anymore
         let initial = request.access_list.take().unwrap_or_default();
 
-        let precompiles = get_precompiles(evm_env.cfg_env_with_handler_cfg.handler_cfg.spec_id);
+        let precompiles = get_precompiles(evm_env.spec.into());
         let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
 
         let (result, (evm_env, mut tx_env)) =
             self.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
         let access_list = inspector.into_access_list();
-        tx_env.access_list = access_list.to_vec();
+        tx_env.set_access_list(access_list.clone());
         match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
-                    Some(RpcInvalidTransactionError::halt(reason, tx_env.gas_limit).to_string());
+                    Some(RpcInvalidTransactionError::halt(reason, tx_env.gas_limit()).to_string());
                 return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Revert { output, gas_used } => {
@@ -453,7 +452,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         let res = match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
-                    Some(RpcInvalidTransactionError::halt(reason, tx_env.gas_limit).to_string());
+                    Some(RpcInvalidTransactionError::halt(reason, tx_env.gas_limit()).to_string());
                 AccessListResult { access_list, gas_used: U256::from(gas_used), error }
             }
             ExecutionResult::Revert { output, gas_used } => {
@@ -490,52 +489,76 @@ pub trait Call:
         f(StateProviderTraitObjWrapper(&state))
     }
 
-    /// Executes the [`TxEnv`] against the given [Database] without committing state
+    /// Executes the `TxEnv` against the given [Database] without committing state
     /// changes.
+    #[expect(clippy::type_complexity)]
     fn transact<DB>(
         &self,
         db: DB,
-        evm_env: EvmEnv,
-        tx_env: TxEnv,
-    ) -> Result<(ResultAndState, (EvmEnv, TxEnv)), Self::Error>
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
+    ) -> Result<
+        (
+            ResultAndState,
+            (EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>, <Self::Evm as ConfigureEvmEnv>::TxEnv),
+        ),
+        Self::Error,
+    >
     where
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        let mut evm = self.evm_config().evm_with_env(db, evm_env.clone());
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
-        let evm_env = evm.into_env();
 
         Ok((res, (evm_env, tx_env)))
     }
 
     /// Executes the [`EvmEnv`] against the given [Database] without committing state
     /// changes.
+    #[expect(clippy::type_complexity)]
     fn transact_with_inspector<DB>(
         &self,
         db: DB,
-        evm_env: EvmEnv,
-        tx_env: TxEnv,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         inspector: impl GetInspector<DB>,
-    ) -> Result<(ResultAndState, (EvmEnv, TxEnv)), Self::Error>
+    ) -> Result<
+        (
+            ResultAndState,
+            (EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>, <Self::Evm as ConfigureEvmEnv>::TxEnv),
+        ),
+        Self::Error,
+    >
     where
         DB: Database,
         EthApiError: From<DB::Error>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env.clone(), inspector);
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
-        let evm_env = evm.into_env();
 
         Ok((res, (evm_env, tx_env)))
     }
 
     /// Executes the call request at the given [`BlockId`].
+    #[expect(clippy::type_complexity)]
     fn transact_call_at(
         &self,
         request: TransactionRequest,
         at: BlockId,
         overrides: EvmOverrides,
-    ) -> impl Future<Output = Result<(ResultAndState, (EvmEnv, TxEnv)), Self::Error>> + Send
+    ) -> impl Future<
+        Output = Result<
+            (
+                ResultAndState,
+                (
+                    EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+                    <Self::Evm as ConfigureEvmEnv>::TxEnv,
+                ),
+            ),
+            Self::Error,
+        >,
+    > + Send
     where
         Self: LoadPendingBlock,
     {
@@ -585,7 +608,11 @@ pub trait Call:
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
         Self: LoadPendingBlock,
-        F: FnOnce(StateCacheDbRefMutWrapper<'_, '_>, EvmEnv, TxEnv) -> Result<R, Self::Error>
+        F: FnOnce(
+                StateCacheDbRefMutWrapper<'_, '_>,
+                EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+                <Self::Evm as ConfigureEvmEnv>::TxEnv,
+            ) -> Result<R, Self::Error>
             + Send
             + 'static,
         R: Send + 'static,
@@ -669,7 +696,7 @@ pub trait Call:
     fn replay_transactions_until<'a, DB, I>(
         &self,
         db: &mut DB,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
         transactions: I,
         target_tx_hash: B256,
     ) -> Result<usize, Self::Error>
@@ -694,84 +721,15 @@ pub trait Call:
         Ok(index)
     }
 
-    /// Configures a new [`TxEnv`]  for the [`TransactionRequest`]
+    /// Configures a new `TxEnv`  for the [`TransactionRequest`]
     ///
-    /// All [`TxEnv`] fields are derived from the given [`TransactionRequest`], if fields are
+    /// All `TxEnv` fields are derived from the given [`TransactionRequest`], if fields are
     /// `None`, they fall back to the [`BlockEnv`]'s settings.
     fn create_txn_env(
         &self,
         block_env: &BlockEnv,
         request: TransactionRequest,
-    ) -> Result<TxEnv, Self::Error> {
-        // Ensure that if versioned hashes are set, they're not empty
-        if request.blob_versioned_hashes.as_ref().is_some_and(|hashes| hashes.is_empty()) {
-            return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err())
-        }
-
-        let TransactionRequest {
-            from,
-            to,
-            gas_price,
-            max_fee_per_gas,
-            max_priority_fee_per_gas,
-            gas,
-            value,
-            input,
-            nonce,
-            access_list,
-            chain_id,
-            blob_versioned_hashes,
-            max_fee_per_blob_gas,
-            authorization_list,
-            transaction_type: _,
-            sidecar: _,
-        } = request;
-
-        let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
-            CallFees::ensure_fees(
-                gas_price.map(U256::from),
-                max_fee_per_gas.map(U256::from),
-                max_priority_fee_per_gas.map(U256::from),
-                block_env.basefee,
-                blob_versioned_hashes.as_deref(),
-                max_fee_per_blob_gas.map(U256::from),
-                block_env.get_blob_gasprice().map(U256::from),
-            )?;
-
-        let gas_limit = gas.unwrap_or_else(|| {
-            // Use maximum allowed gas limit. The reason for this
-            // is that both Erigon and Geth use pre-configured gas cap even if
-            // it's possible to derive the gas limit from the block:
-            // <https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/cmd/rpcdaemon/commands/trace_adhoc.go#L956
-            // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/eth/ethconfig/config.go#L94>
-            block_env.gas_limit.saturating_to()
-        });
-
-        #[allow(clippy::needless_update)]
-        let env = TxEnv {
-            gas_limit,
-            nonce,
-            caller: from.unwrap_or_default(),
-            gas_price,
-            gas_priority_fee: max_priority_fee_per_gas,
-            transact_to: to.unwrap_or(TxKind::Create),
-            value: value.unwrap_or_default(),
-            data: input
-                .try_into_unique_input()
-                .map_err(Self::Error::from_eth_err)?
-                .unwrap_or_default(),
-            chain_id,
-            access_list: access_list.unwrap_or_default().into(),
-            // EIP-4844 fields
-            blob_hashes: blob_versioned_hashes.unwrap_or_default(),
-            max_fee_per_blob_gas,
-            // EIP-7702 fields
-            authorization_list: authorization_list.map(Into::into),
-            ..Default::default()
-        };
-
-        Ok(env)
-    }
+    ) -> Result<<Self::Evm as ConfigureEvmEnv>::TxEnv, Self::Error>;
 
     /// Prepares the [`EvmEnv`] for execution of calls.
     ///
@@ -786,13 +744,17 @@ pub trait Call:
     ///  - `nonce` is set to `None`
     ///
     /// In addition, this changes the block's gas limit to the configured [`Self::call_gas_limit`].
+    #[expect(clippy::type_complexity)]
     fn prepare_call_env<DB>(
         &self,
-        mut evm_env: EvmEnv,
+        mut evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
         mut request: TransactionRequest,
         db: &mut CacheDB<DB>,
         overrides: EvmOverrides,
-    ) -> Result<(EvmEnv, TxEnv), Self::Error>
+    ) -> Result<
+        (EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>, <Self::Evm as ConfigureEvmEnv>::TxEnv),
+        Self::Error,
+    >
     where
         DB: DatabaseRef,
         EthApiError: From<<DB as DatabaseRef>::Error>,
@@ -809,12 +771,12 @@ pub trait Call:
 
         // Disabled because eth_call is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>
-        evm_env.cfg_env_with_handler_cfg.disable_eip3607 = true;
+        evm_env.cfg_env.disable_eip3607 = true;
 
         // The basefee should be ignored for eth_call
         // See:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
-        evm_env.cfg_env_with_handler_cfg.disable_base_fee = true;
+        evm_env.cfg_env.disable_base_fee = true;
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.nonce = None;
@@ -831,12 +793,12 @@ pub trait Call:
 
         if request_gas.is_none() {
             // No gas limit was provided in the request, so we need to cap the transaction gas limit
-            if tx_env.gas_price > U256::ZERO {
+            if tx_env.gas_price() > U256::ZERO {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?tx_env, "Applying gas limit cap with caller allowance");
                 let cap = caller_gas_allowance(db, &tx_env)?;
                 // ensure we cap gas_limit to the block's
-                tx_env.gas_limit = cap.min(evm_env.block_env.gas_limit).saturating_to();
+                tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit).saturating_to());
             }
         }
 
