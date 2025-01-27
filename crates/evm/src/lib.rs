@@ -19,21 +19,17 @@ extern crate alloc;
 
 use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip2930::AccessList;
+use alloy_evm::EvmFactory;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
-use revm::{DatabaseCommit, GetInspector};
-use revm_primitives::{BlockEnv, ResultAndState, TxEnv, TxKind};
+use revm::GetInspector;
+use revm_primitives::{TxEnv, TxKind};
 
 pub mod batch;
 pub mod either;
 /// EVM environment configuration.
-pub mod env;
-/// EVM error types.
-mod error;
-pub use error::*;
 pub mod execute;
-pub use env::EvmEnv;
 
 mod aliases;
 pub use aliases::*;
@@ -47,73 +43,15 @@ pub mod system_calls;
 /// test helpers for mocking executor
 pub mod test_utils;
 
-/// An abstraction over EVM.
-///
-/// At this point, assumed to be implemented on wrappers around [`revm::Evm`].
-pub trait Evm {
-    /// Database type held by the EVM.
-    type DB;
-    /// Transaction environment
-    type Tx;
-    /// Error type returned by EVM. Contains either errors related to invalid transactions or
-    /// internal irrecoverable execution errors.
-    type Error;
-    /// Halt reason. Enum over all possible reasons for halting the execution. When execution halts,
-    /// it means that transaction is valid, however, it's execution was interrupted (e.g because of
-    /// running out of gas or overflowing stack).
-    type HaltReason;
-
-    /// Reference to [`BlockEnv`].
-    fn block(&self) -> &BlockEnv;
-
-    /// Executes the given transaction.
-    fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error>;
-
-    /// Executes a system call.
-    fn transact_system_call(
-        &mut self,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    ) -> Result<ResultAndState, Self::Error>;
-
-    /// Returns a mutable reference to the underlying database.
-    fn db_mut(&mut self) -> &mut Self::DB;
-
-    /// Executes a transaction and commits the state changes to the underlying database.
-    fn transact_commit(&mut self, tx_env: Self::Tx) -> Result<ResultAndState, Self::Error>
-    where
-        Self::DB: DatabaseCommit,
-    {
-        let result = self.transact(tx_env)?;
-        self.db_mut().commit(result.state.clone());
-
-        Ok(result)
-    }
-}
-/// Helper trait to bound [`revm::Database::Error`] with common requirements.
-pub trait Database: revm::Database<Error: core::error::Error + Send + Sync + 'static> {}
-impl<T> Database for T where T: revm::Database<Error: core::error::Error + Send + Sync + 'static> {}
+pub use alloy_evm::{Database, Evm, EvmEnv, EvmError, InvalidTxError};
 
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
-    /// The EVM implementation.
-    type Evm<'a, DB: Database + 'a, I: 'a>: Evm<
-        Tx = Self::TxEnv,
-        DB = DB,
-        Error = Self::EvmError<DB::Error>,
-        HaltReason = Self::HaltReason,
-    >;
+    /// The EVM factory.
+    type EvmFactory: EvmFactory<EvmEnv<Self::Spec>, Tx = Self::TxEnv>;
 
-    /// The error type returned by the EVM. See [`Evm::Error`].
-    type EvmError<DBError: core::error::Error + Send + Sync + 'static>: EvmError;
-
-<<<<<<< HEAD
-    /// Halt reason type returned by the EVM. See [`Evm::HaltReason`].
-=======
-    /// Halt reason type returned by the EVM.
->>>>>>> 5c5521fab (wip)
-    type HaltReason;
+    /// Provides a reference to [`EvmFactory`] implementation.
+    fn evm_factory(&self) -> &Self::EvmFactory;
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id and transaction environment.
@@ -123,7 +61,9 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         &self,
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
-    ) -> Self::Evm<'_, DB, ()>;
+    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<'_, DB, ()> {
+        self.evm_factory().create_evm(db, evm_env)
+    }
 
     /// Returns a new EVM with the given database configured with `cfg` and `block_env`
     /// configuration derived from the given header. Relies on
@@ -132,7 +72,11 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// # Caution
     ///
     /// This does not initialize the tx environment.
-    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Self::Evm<'_, DB, ()> {
+    fn evm_for_block<DB: Database>(
+        &self,
+        db: DB,
+        header: &Self::Header,
+    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<'_, DB, ()> {
         let evm_env = self.evm_env(header);
         self.evm_with_env(db, evm_env)
     }
@@ -148,10 +92,13 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
         inspector: I,
-    ) -> Self::Evm<'_, DB, I>
+    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<'_, DB, I>
     where
         DB: Database,
-        I: GetInspector<DB>;
+        I: GetInspector<DB>,
+    {
+        self.evm_factory().create_evm_with_inspector(db, evm_env, inspector)
+    }
 }
 
 impl<'b, T> ConfigureEvm for &'b T
@@ -159,11 +106,17 @@ where
     T: ConfigureEvm,
     &'b T: ConfigureEvmEnv<Header = T::Header, TxEnv = T::TxEnv, Spec = T::Spec>,
 {
-    type Evm<'a, DB: Database + 'a, I: 'a> = T::Evm<'a, DB, I>;
-    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = T::EvmError<DBError>;
-    type HaltReason = T::HaltReason;
+    type EvmFactory = T::EvmFactory;
 
-    fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Self::Evm<'_, DB, ()> {
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        (*self).evm_factory()
+    }
+
+    fn evm_for_block<DB: Database>(
+        &self,
+        db: DB,
+        header: &Self::Header,
+    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<'_, DB, ()> {
         (*self).evm_for_block(db, header)
     }
 
@@ -171,7 +124,7 @@ where
         &self,
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
-    ) -> Self::Evm<'_, DB, ()> {
+    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<'_, DB, ()> {
         (*self).evm_with_env(db, evm_env)
     }
 
@@ -180,7 +133,7 @@ where
         db: DB,
         evm_env: EvmEnv<Self::Spec>,
         inspector: I,
-    ) -> Self::Evm<'_, DB, I>
+    ) -> <Self::EvmFactory as EvmFactory<EvmEnv<Self::Spec>>>::Evm<'_, DB, I>
     where
         DB: Database,
         I: GetInspector<DB>,

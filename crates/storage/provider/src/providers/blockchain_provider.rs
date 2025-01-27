@@ -23,7 +23,7 @@ use reth_chain_state::{
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_db::{models::BlockNumberAddress, transaction::DbTx, Database};
 use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
-use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
+use reth_evm::{ConfigureEvmEnv, EvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives::{
