@@ -12,7 +12,7 @@ use metrics::{gauge, Label};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
+    database_metrics::DatabaseMetrics,
     models::ClientVersion,
     transaction::{DbTx, DbTxMut},
 };
@@ -273,12 +273,6 @@ impl DatabaseMetrics for DatabaseEnv {
         ));
 
         metrics
-    }
-}
-
-impl DatabaseMetadata for DatabaseEnv {
-    fn metadata(&self) -> DatabaseMetadataValue {
-        DatabaseMetadataValue::new(self.freelist().ok())
     }
 }
 
