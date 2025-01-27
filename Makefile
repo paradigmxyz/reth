@@ -354,6 +354,10 @@ update-book-cli: build-debug ## Update book cli documentation.
 	@echo "Updating book cli doc..."
 	@./book/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth
 
+.PHONY: profiling
+profiling: ## Builds `reth` with optimisations, but also symbols.
+	RUSTFLAGS="-C target-cpu=native" cargo build --profile profiling --features jemalloc,asm-keccak
+
 .PHONY: maxperf
 maxperf: ## Builds `reth` with the most aggressive optimisations.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc,asm-keccak
