@@ -175,6 +175,7 @@ where
                         "Created cursors"
                     );
 
+                    let target_slots_len = target_slots.len();
                     let proof_start = Instant::now();
                     let proof_result = StorageProof::new_hashed(
                         trie_cursor_factory,
@@ -189,6 +190,8 @@ where
                     trace!(
                         target: "trie::parallel",
                         ?hashed_address,
+                        prefix_set = ?prefix_set.len(),
+                        target_slots = ?target_slots_len,
                         proof_time = ?proof_start.elapsed(),
                         "Completed proof calculation"
                     );
