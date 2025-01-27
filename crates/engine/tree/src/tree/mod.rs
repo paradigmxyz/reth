@@ -31,6 +31,7 @@ use reth_engine_primitives::{
     EngineValidator, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::BlockExecutorProvider,
     system_calls::{NoopHook, OnStateHook},
@@ -38,10 +39,9 @@ use reth_evm::{
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
-use reth_primitives::{
-    EthPrimitives, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+use reth_primitives_traits::{
+    Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
-use reth_primitives_traits::Block;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
@@ -2817,8 +2817,8 @@ mod tests {
     use reth_engine_primitives::ForkchoiceStatus;
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
+    use reth_ethereum_primitives::{Block, EthPrimitives};
     use reth_evm::test_utils::MockExecutorProvider;
-    use reth_primitives::{Block, EthPrimitives};
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
@@ -3021,7 +3021,7 @@ mod tests {
 
         fn insert_block(
             &mut self,
-            block: RecoveredBlock<reth_primitives::Block>,
+            block: RecoveredBlock<reth_ethereum_primitives::Block>,
         ) -> Result<InsertPayloadOk, InsertBlockError<Block>> {
             let execution_outcome = self.block_builder.get_execution_outcome(block.clone());
             self.extend_execution_outcome([execution_outcome]);
@@ -3086,7 +3086,10 @@ mod tests {
             }
         }
 
-        async fn send_new_payload(&mut self, block: RecoveredBlock<reth_primitives::Block>) {
+        async fn send_new_payload(
+            &mut self,
+            block: RecoveredBlock<reth_ethereum_primitives::Block>,
+        ) {
             let payload = block_to_payload_v3(block.clone_sealed_block());
             self.tree
                 .on_new_payload(
@@ -3101,7 +3104,7 @@ mod tests {
 
         async fn insert_chain(
             &mut self,
-            chain: impl IntoIterator<Item = RecoveredBlock<reth_primitives::Block>> + Clone,
+            chain: impl IntoIterator<Item = RecoveredBlock<reth_ethereum_primitives::Block>> + Clone,
         ) {
             for block in chain.clone() {
                 self.insert_block(block.clone()).unwrap();
@@ -3123,7 +3126,7 @@ mod tests {
 
         async fn check_fork_chain_insertion(
             &mut self,
-            chain: impl IntoIterator<Item = RecoveredBlock<reth_primitives::Block>> + Clone,
+            chain: impl IntoIterator<Item = RecoveredBlock<reth_ethereum_primitives::Block>> + Clone,
         ) {
             for block in chain {
                 self.check_fork_block_added(block.hash()).await;
@@ -3132,7 +3135,7 @@ mod tests {
 
         async fn check_canon_chain_insertion(
             &mut self,
-            chain: impl IntoIterator<Item = RecoveredBlock<reth_primitives::Block>> + Clone,
+            chain: impl IntoIterator<Item = RecoveredBlock<reth_ethereum_primitives::Block>> + Clone,
         ) {
             for block in chain.clone() {
                 self.check_canon_block_added(block.hash()).await;
@@ -3164,7 +3167,7 @@ mod tests {
             }
         }
 
-        fn persist_blocks(&self, blocks: Vec<RecoveredBlock<reth_primitives::Block>>) {
+        fn persist_blocks(&self, blocks: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>) {
             let mut block_data: Vec<(B256, Block)> = Vec::with_capacity(blocks.len());
             let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
 
@@ -3179,14 +3182,14 @@ mod tests {
 
         fn setup_range_insertion_for_valid_chain(
             &mut self,
-            chain: Vec<RecoveredBlock<reth_primitives::Block>>,
+            chain: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>,
         ) {
             self.setup_range_insertion_for_chain(chain, None)
         }
 
         fn setup_range_insertion_for_invalid_chain(
             &mut self,
-            chain: Vec<RecoveredBlock<reth_primitives::Block>>,
+            chain: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>,
             index: usize,
         ) {
             self.setup_range_insertion_for_chain(chain, Some(index))
@@ -3194,7 +3197,7 @@ mod tests {
 
         fn setup_range_insertion_for_chain(
             &mut self,
-            chain: Vec<RecoveredBlock<reth_primitives::Block>>,
+            chain: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>,
             invalid_index: Option<usize>,
         ) {
             // setting up execution outcomes for the chain, the blocks will be

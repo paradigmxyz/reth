@@ -925,7 +925,7 @@ fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &Multi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Account as RethAccount, StorageEntry};
+    use reth_primitives_traits::{Account as RethAccount, StorageEntry};
     use reth_provider::{
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
     };
