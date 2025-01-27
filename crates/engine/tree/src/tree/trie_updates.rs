@@ -7,7 +7,7 @@ use reth_trie::{
     updates::{StorageTrieUpdates, TrieUpdates},
     BranchNodeCompact, Nibbles,
 };
-use tracing::debug;
+use tracing::warn;
 
 #[derive(Debug)]
 struct EntryDiff<T> {
@@ -33,7 +33,7 @@ impl TrieUpdatesDiff {
     pub(super) fn log_differences(mut self) {
         if self.has_differences() {
             for (path, EntryDiff { task, regular, database }) in &mut self.account_nodes {
-                debug!(target: "engine::tree", ?path, ?task, ?regular, ?database, "Difference in account trie updates");
+                warn!(target: "engine::tree", ?path, ?task, ?regular, ?database, "Difference in account trie updates");
             }
 
             for (
@@ -45,7 +45,7 @@ impl TrieUpdatesDiff {
                 },
             ) in &self.removed_nodes
             {
-                debug!(target: "engine::tree", ?path, ?task_removed, ?regular_removed, ?database_not_exists, "Difference in removed account trie nodes");
+                warn!(target: "engine::tree", ?path, ?task_removed, ?regular_removed, ?database_not_exists, "Difference in removed account trie nodes");
             }
 
             for (address, storage_diff) in self.storage_tries {
@@ -76,11 +76,11 @@ impl StorageTrieUpdatesDiff {
             database: database_not_exists,
         }) = self.is_deleted
         {
-            debug!(target: "engine::tree", ?address, ?task_deleted, ?regular_deleted, ?database_not_exists, "Difference in storage trie deletion");
+            warn!(target: "engine::tree", ?address, ?task_deleted, ?regular_deleted, ?database_not_exists, "Difference in storage trie deletion");
         }
 
         for (path, EntryDiff { task, regular, database }) in &self.storage_nodes {
-            debug!(target: "engine::tree", ?address, ?path, ?task, ?regular, ?database, "Difference in storage trie updates");
+            warn!(target: "engine::tree", ?address, ?path, ?task, ?regular, ?database, "Difference in storage trie updates");
         }
 
         for (
@@ -92,7 +92,7 @@ impl StorageTrieUpdatesDiff {
             },
         ) in &self.removed_nodes
         {
-            debug!(target: "engine::tree", ?address, ?path, ?task_removed, ?regular_removed, ?database_not_exists, "Difference in removed storage trie nodes");
+            warn!(target: "engine::tree", ?address, ?path, ?task_removed, ?regular_removed, ?database_not_exists, "Difference in removed storage trie nodes");
         }
     }
 }
@@ -138,6 +138,8 @@ pub(super) fn compare_trie_updates(
         let (task_removed, regular_removed) =
             (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
         let database_not_exists = account_trie_cursor.seek_exact(key.clone())?.is_none();
+        // If the deletion is a no-op, meaning that the entry is not in the
+        // database, do not add it to the diff.
         if task_removed != regular_removed && !database_not_exists {
             diff.removed_nodes.insert(
                 key,
@@ -164,6 +166,7 @@ pub(super) fn compare_trie_updates(
             #[allow(clippy::or_fun_call)]
             let storage_diff = compare_storage_trie_updates(
                 || trie_cursor_factory.storage_trie_cursor(key),
+                // Compare non-existent storage tries as empty.
                 task.as_mut().unwrap_or(&mut Default::default()),
                 regular.as_mut().unwrap_or(&mut Default::default()),
             )?;
@@ -186,6 +189,8 @@ fn compare_storage_trie_updates<C: TrieCursor>(
 ) -> Result<StorageTrieUpdatesDiff, DatabaseError> {
     let database_not_exists = trie_cursor()?.next()?.is_none();
     let mut diff = StorageTrieUpdatesDiff {
+        // If the deletion is a no-op, meaning that the entry is not in the
+        // database, do not add it to the diff.
         is_deleted: (task.is_deleted != regular.is_deleted && !database_not_exists).then_some(
             EntryDiff {
                 task: task.is_deleted,
@@ -225,6 +230,8 @@ fn compare_storage_trie_updates<C: TrieCursor>(
             (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
         let database_not_exists =
             storage_trie_cursor.seek_exact(key.clone())?.map(|x| x.1).is_none();
+        // If the deletion is a no-op, meaning that the entry is not in the
+        // database, do not add it to the diff.
         if task_removed != regular_removed && !database_not_exists {
             diff.removed_nodes.insert(
                 key,
