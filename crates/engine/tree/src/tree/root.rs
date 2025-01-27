@@ -696,7 +696,7 @@ where
                             continue
                         };
 
-                        if !proof_calculated.update.state.is_empty() {
+                        if !proof_calculated.is_from_state_update() {
                             proofs_processed += 1;
                         }
 

@@ -38,7 +38,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::BlockExecutorProvider,
     system_calls::{NoopHook, OnStateHook},
-    ConfigureEvm, Evm,
+    ConfigureEvm, Evm, TransactionEnv,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
