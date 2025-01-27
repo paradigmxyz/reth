@@ -675,13 +675,7 @@ impl<N: NodePrimitives> BlockState<N> {
             receipts.receipt_vec.len()
         );
 
-        receipts
-            .receipt_vec
-            .first()
-            .map(|block_receipts| {
-                block_receipts.iter().filter_map(|opt_receipt| opt_receipt.clone()).collect()
-            })
-            .unwrap_or_default()
+        receipts.receipt_vec.first().cloned().unwrap_or_default()
     }
 
     /// Returns a vector of __parent__ `BlockStates`.
@@ -1272,7 +1266,7 @@ mod tests {
 
     #[test]
     fn test_state_receipts() {
-        let receipts = Receipts { receipt_vec: vec![vec![Some(Receipt::default())]] };
+        let receipts = Receipts { receipt_vec: vec![vec![Receipt::default()]] };
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let block =
             test_block_builder.get_executed_block_with_receipts(receipts.clone(), B256::random());
