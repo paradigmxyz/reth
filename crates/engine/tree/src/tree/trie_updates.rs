@@ -70,8 +70,13 @@ impl StorageTrieUpdatesDiff {
     }
 
     fn log_differences(&self, address: B256) {
-        if let Some(EntryDiff { task, regular, database }) = self.is_deleted {
-            debug!(target: "engine::tree", ?address, ?task, ?regular, ?database, "Difference in storage trie deletion");
+        if let Some(EntryDiff {
+            task: task_deleted,
+            regular: regular_deleted,
+            database: database_not_exists,
+        }) = self.is_deleted
+        {
+            debug!(target: "engine::tree", ?address, ?task_deleted, ?regular_deleted, ?database_not_exists, "Difference in storage trie deletion");
         }
 
         for (path, EntryDiff { task, regular, database }) in &self.storage_nodes {
@@ -130,11 +135,18 @@ pub(super) fn compare_trie_updates(
         .cloned()
         .collect::<BTreeSet<_>>()
     {
-        let (task, regular) =
+        let (task_removed, regular_removed) =
             (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
-        let database = account_trie_cursor.seek_exact(key.clone())?.is_none();
-        if task != regular {
-            diff.removed_nodes.insert(key, EntryDiff { task, regular, database });
+        let database_not_exists = account_trie_cursor.seek_exact(key.clone())?.is_none();
+        if task_removed != regular_removed && !database_not_exists {
+            diff.removed_nodes.insert(
+                key,
+                EntryDiff {
+                    task: task_removed,
+                    regular: regular_removed,
+                    database: database_not_exists,
+                },
+            );
         }
     }
 
@@ -172,13 +184,15 @@ fn compare_storage_trie_updates<C: TrieCursor>(
     task: &mut StorageTrieUpdates,
     regular: &mut StorageTrieUpdates,
 ) -> Result<StorageTrieUpdatesDiff, DatabaseError> {
-    let database_deleted = trie_cursor()?.next()?.is_none();
+    let database_not_exists = trie_cursor()?.next()?.is_none();
     let mut diff = StorageTrieUpdatesDiff {
-        is_deleted: (task.is_deleted != regular.is_deleted).then_some(EntryDiff {
-            task: task.is_deleted,
-            regular: regular.is_deleted,
-            database: database_deleted,
-        }),
+        is_deleted: (task.is_deleted != regular.is_deleted && !database_not_exists).then_some(
+            EntryDiff {
+                task: task.is_deleted,
+                regular: regular.is_deleted,
+                database: database_not_exists,
+            },
+        ),
         ..Default::default()
     };
 
@@ -207,11 +221,19 @@ fn compare_storage_trie_updates<C: TrieCursor>(
         .cloned()
         .collect::<BTreeSet<_>>()
     {
-        let (task, regular) =
+        let (task_removed, regular_removed) =
             (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
-        let database = storage_trie_cursor.seek_exact(key.clone())?.map(|x| x.1).is_none();
-        if task != regular {
-            diff.removed_nodes.insert(key, EntryDiff { task, regular, database });
+        let database_not_exists =
+            storage_trie_cursor.seek_exact(key.clone())?.map(|x| x.1).is_none();
+        if task_removed != regular_removed && !database_not_exists {
+            diff.removed_nodes.insert(
+                key,
+                EntryDiff {
+                    task: task_removed,
+                    regular: regular_removed,
+                    database: database_not_exists,
+                },
+            );
         }
     }
 
