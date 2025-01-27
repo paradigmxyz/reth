@@ -545,17 +545,10 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     }
 
     /// Returns [`SignedTransaction`] type for the given `TxHash` if found.
-    pub fn transaction_by_hash(&self, hash: TxHash) -> Option<N::SignedTx>
-    where
-        N::SignedTx: Encodable2718,
-    {
+    pub fn transaction_by_hash(&self, hash: TxHash) -> Option<N::SignedTx> {
         for block_state in self.canonical_chain() {
-            if let Some(tx) = block_state
-                .block_ref()
-                .recovered_block()
-                .body()
-                .transactions_iter()
-                .find(|tx| tx.trie_hash() == hash)
+            if let Some(tx) =
+                block_state.block_ref().recovered_block().body().find_transaction_by_hash(&hash)
             {
                 return Some(tx.clone())
             }
@@ -568,10 +561,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     pub fn transaction_by_hash_with_meta(
         &self,
         tx_hash: TxHash,
-    ) -> Option<(N::SignedTx, TransactionMeta)>
-    where
-        N::SignedTx: Encodable2718,
-    {
+    ) -> Option<(N::SignedTx, TransactionMeta)> {
         for block_state in self.canonical_chain() {
             if let Some((index, tx)) = block_state
                 .block_ref()
@@ -740,17 +730,13 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Tries to find a transaction by [`TxHash`] in the chain ending at this block.
-    pub fn transaction_on_chain(&self, hash: TxHash) -> Option<N::SignedTx>
-    where
-        N::SignedTx: Encodable2718,
-    {
+    pub fn transaction_on_chain(&self, hash: TxHash) -> Option<N::SignedTx> {
         self.chain().find_map(|block_state| {
             block_state
                 .block_ref()
                 .recovered_block()
                 .body()
-                .transactions_iter()
-                .find(|tx| tx.trie_hash() == hash)
+                .find_transaction_by_hash(&hash)
                 .cloned()
         })
     }
@@ -759,10 +745,7 @@ impl<N: NodePrimitives> BlockState<N> {
     pub fn transaction_meta_on_chain(
         &self,
         tx_hash: TxHash,
-    ) -> Option<(N::SignedTx, TransactionMeta)>
-    where
-        N::SignedTx: Encodable2718,
-    {
+    ) -> Option<(N::SignedTx, TransactionMeta)> {
         self.chain().find_map(|block_state| {
             block_state
                 .block_ref()
