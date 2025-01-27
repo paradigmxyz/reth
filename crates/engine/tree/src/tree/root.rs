@@ -630,6 +630,19 @@ where
                     StateRootMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
                         updates_finished = true;
+
+                        let all_proofs_received = proofs_processed >= updates_received;
+                        let no_pending = !self.proof_sequencer.has_pending();
+                        if all_proofs_received && no_pending {
+                            // drop the sender
+                            sparse_trie_tx.take();
+                            debug!(
+                                target: "engine::root",
+                                total_updates = updates_received,
+                                total_proofs = proofs_processed,
+                                "State updates finished and all proofs processed, ending calculation"
+                            );
+                        }
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
                         trace!(target: "engine::root", "processing StateRootMessage::ProofCalculated");
@@ -660,7 +673,12 @@ where
                         if all_proofs_received && no_pending && updates_finished {
                             // drop the sender
                             sparse_trie_tx.take();
-                            debug!(target: "engine::root", total_updates = updates_received, total_proofs = proofs_processed, "All proofs processed, ending calculation");
+                            debug!(
+                                target: "engine::root",
+                                total_updates = updates_received,
+                                total_proofs = proofs_processed,
+                                "All proofs processed, ending calculation"
+                            );
                         }
                     }
                     StateRootMessage::RootCalculated { state_root, trie_updates, iterations } => {
