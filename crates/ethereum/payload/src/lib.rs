@@ -19,7 +19,6 @@ use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig,
 };
-use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_errors::RethError;
 use reth_evm::{
@@ -31,8 +30,7 @@ use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_primitives::{
-    Block, BlockBody, EthereumHardforks, InvalidTransactionError, Receipt, RecoveredBlock,
-    TransactionSigned,
+    Block, BlockBody, EthereumHardforks, InvalidTransactionError, Receipt, TransactionSigned,
 };
 use reth_primitives_traits::{
     proofs::{self},
@@ -192,7 +190,6 @@ where
     let base_fee = evm_env.block_env.basefee.to::<u64>();
 
     let mut executed_txs = Vec::new();
-    let mut executed_senders = Vec::new();
 
     let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
@@ -340,8 +337,7 @@ where
             tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
 
-        // append sender and transaction to the respective lists
-        executed_senders.push(tx.signer());
+        // append transaction to the block body
         executed_txs.push(tx.into_tx());
     }
 
@@ -399,8 +395,8 @@ where
 
     // calculate the state root
     let hashed_state = db.database.db.hashed_post_state(execution_outcome.state());
-    let (state_root, trie_output) = {
-        db.database.inner().state_root_with_updates(hashed_state.clone()).inspect_err(|err| {
+    let (state_root, _) = {
+        db.database.inner().state_root_with_updates(hashed_state).inspect_err(|err| {
             warn!(target: "payload_builder",
                 parent_hash=%parent_header.hash(),
                 %err,
@@ -480,21 +476,7 @@ where
     let sealed_block = Arc::new(block.seal_slow());
     debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
 
-    // create the executed block data
-    let executed = ExecutedBlockWithTrieUpdates {
-        block: ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                sealed_block.as_ref().clone(),
-                executed_senders,
-            )),
-            execution_output: Arc::new(execution_outcome),
-            hashed_state: Arc::new(hashed_state),
-        },
-        trie: Arc::new(trie_output),
-    };
-
-    let mut payload =
-        EthBuiltPayload::new(attributes.id, sealed_block, total_fees, Some(executed), requests);
+    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests);
 
     // extend the payload with the blob sidecars from the executed txs
     payload.extend_sidecars(blob_sidecars.into_iter().map(Arc::unwrap_or_clone));
