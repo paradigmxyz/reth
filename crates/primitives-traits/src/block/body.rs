@@ -50,7 +50,7 @@ pub trait BlockBody:
     /// Returns the transaction with the matching hash.
     ///
     /// This is a convenience function for `transactions_iter().find()`
-    fn find_transaction_by_hash(&self, hash: &B256) -> Option<&Self::Transaction> {
+    fn transaction_by_hash(&self, hash: &B256) -> Option<&Self::Transaction> {
         self.transactions_iter().find(|tx| tx.tx_hash() == hash)
     }
 

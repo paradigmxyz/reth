@@ -548,7 +548,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     pub fn transaction_by_hash(&self, hash: TxHash) -> Option<N::SignedTx> {
         for block_state in self.canonical_chain() {
             if let Some(tx) =
-                block_state.block_ref().recovered_block().body().find_transaction_by_hash(&hash)
+                block_state.block_ref().recovered_block().body().transaction_by_hash(&hash)
             {
                 return Some(tx.clone())
             }
@@ -732,12 +732,7 @@ impl<N: NodePrimitives> BlockState<N> {
     /// Tries to find a transaction by [`TxHash`] in the chain ending at this block.
     pub fn transaction_on_chain(&self, hash: TxHash) -> Option<N::SignedTx> {
         self.chain().find_map(|block_state| {
-            block_state
-                .block_ref()
-                .recovered_block()
-                .body()
-                .find_transaction_by_hash(&hash)
-                .cloned()
+            block_state.block_ref().recovered_block().body().transaction_by_hash(&hash).cloned()
         })
     }
 
