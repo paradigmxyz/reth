@@ -40,6 +40,7 @@ serde.workspace = true
 sha2 = { workspace = true, default-features = false}
 
 [features]
+default = ["std"]
 std = [
     "alloy-consensus/std",
     "alloy-eips/std",

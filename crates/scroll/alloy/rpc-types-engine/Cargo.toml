@@ -23,6 +23,13 @@ serde = { workspace = true, optional = true }
 serde_json.workspace = true
 
 [features]
+default = ["std"]
+std = [
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "serde?/std",
+    "serde_json/std"
+]
 serde = [
     "dep:serde",
     "alloy-primitives/serde",
