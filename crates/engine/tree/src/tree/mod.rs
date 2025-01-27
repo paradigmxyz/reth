@@ -2388,7 +2388,7 @@ where
                     sealed_block.as_ref().clone(),
                     block.senders().to_vec(),
                 )),
-                execution_output: Arc::new(ExecutionOutcome::from((output, block_number))),
+                execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
                 hashed_state: Arc::new(hashed_state),
             },
             trie: Arc::new(trie_output),
