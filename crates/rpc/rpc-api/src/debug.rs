@@ -141,14 +141,17 @@ pub trait DebugApi {
     async fn debug_execution_witness(&self, block: BlockNumberOrTag)
         -> RpcResult<ExecutionWitness>;
 
-    /// The `debug_executionWitness` method allows for re-execution of a block with the purpose of
-    /// generating an execution witness. The witness comprises of a map of all hashed trie nodes
-    /// to their preimages that were required during the execution of the block, including during
-    /// state root recomputation.
+    /// The `debug_executionWitnessByBlockHash` method allows for re-execution of a block with the
+    /// purpose of generating an execution witness. The witness comprises of a map of all hashed
+    /// trie nodes to their preimages that were required during the execution of the block,
+    /// including during state root recomputation.
     ///
     /// The first argument is the block hash.
-    #[method(name = "executionWitnessByHash")]
-    async fn debug_execution_witness_by_hash(&self, hash: B256) -> RpcResult<ExecutionWitness>;
+    #[method(name = "executionWitnessByBlockHash")]
+    async fn debug_execution_witness_by_block_hash(
+        &self,
+        hash: B256,
+    ) -> RpcResult<ExecutionWitness>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is
     /// emitted at that location, the stack of the goroutine executing the log statement will

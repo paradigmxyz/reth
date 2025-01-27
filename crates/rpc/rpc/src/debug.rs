@@ -598,7 +598,7 @@ where
 
     /// Generates an execution witness for the given block hash. see
     /// [`Self::debug_execution_witness`] for more info.
-    pub async fn debug_execution_witness_by_hash(
+    pub async fn debug_execution_witness_by_block_hash(
         &self,
         hash: B256,
     ) -> Result<ExecutionWitness, Eth::Error> {
@@ -1001,10 +1001,13 @@ where
         Self::debug_execution_witness(self, block).await.map_err(Into::into)
     }
 
-    /// Handler for `debug_executionWitnessByHash`
-    async fn debug_execution_witness_by_hash(&self, hash: B256) -> RpcResult<ExecutionWitness> {
+    /// Handler for `debug_executionWitnessByBlockHash`
+    async fn debug_execution_witness_by_block_hash(
+        &self,
+        hash: B256,
+    ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
-        Self::debug_execution_witness_by_hash(self, hash).await.map_err(Into::into)
+        Self::debug_execution_witness_by_block_hash(self, hash).await.map_err(Into::into)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
