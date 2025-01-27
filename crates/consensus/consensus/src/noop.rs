@@ -1,6 +1,7 @@
-use crate::{Consensus, ConsensusError, HeaderValidator, PostExecutionInput};
+use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput};
 use alloy_primitives::U256;
-use reth_primitives::{BlockWithSenders, SealedBlock, SealedHeader};
+use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::Block;
 
 /// A Consensus implementation that does nothing.
 #[derive(Debug, Copy, Clone, Default)]
@@ -29,27 +30,28 @@ impl<H> HeaderValidator<H> for NoopConsensus {
     }
 }
 
-impl<H, B> Consensus<H, B> for NoopConsensus {
+impl<B: Block> Consensus<B> for NoopConsensus {
+    type Error = ConsensusError;
+
     fn validate_body_against_header(
         &self,
-        _body: &B,
-        _header: &SealedHeader<H>,
-    ) -> Result<(), ConsensusError> {
+        _body: &B::Body,
+        _header: &SealedHeader<B::Header>,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 
-    fn validate_block_pre_execution(
-        &self,
-        _block: &SealedBlock<H, B>,
-    ) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(&self, _block: &SealedBlock<B>) -> Result<(), Self::Error> {
         Ok(())
     }
+}
 
+impl<N: NodePrimitives> FullConsensus<N> for NoopConsensus {
     fn validate_block_post_execution(
         &self,
-        _block: &BlockWithSenders,
-        _input: PostExecutionInput<'_>,
-    ) -> Result<(), ConsensusError> {
+        _block: &RecoveredBlock<N::Block>,
+        _input: PostExecutionInput<'_, N::Receipt>,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 }

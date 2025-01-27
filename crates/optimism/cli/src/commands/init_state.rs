@@ -5,13 +5,16 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment};
 use reth_db_common::init::init_from_state_dump;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_primitives::bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD};
+use reth_optimism_primitives::{
+    bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD},
+    OpPrimitives,
+};
 use reth_primitives::SealedHeader;
 use reth_provider::{
     BlockNumReader, ChainSpecProvider, DatabaseProviderFactory, StaticFileProviderFactory,
     StaticFileWriter,
 };
-use std::{fs::File, io::BufReader};
+use std::io::BufReader;
 use tracing::info;
 
 /// Initializes the database with the genesis block.
@@ -35,7 +38,9 @@ pub struct InitStateCommandOp<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
     /// Execute the `init` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = OpPrimitives>>(
+        self,
+    ) -> eyre::Result<()> {
         info!(target: "reth::cli", "Reth init-state starting");
 
         let Environment { config, provider_factory, .. } =
@@ -70,7 +75,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
 
         info!(target: "reth::cli", "Initiating state dump");
 
-        let reader = BufReader::new(File::open(self.init_state.state)?);
+        let reader = BufReader::new(reth_fs_util::open(self.init_state.state)?);
         let hash = init_from_state_dump(reader, &provider_rw, config.stages.etl)?;
 
         provider_rw.commit()?;

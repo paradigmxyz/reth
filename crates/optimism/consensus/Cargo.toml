@@ -17,13 +17,16 @@ reth-chainspec.workspace = true
 reth-consensus-common.workspace = true
 reth-consensus.workspace = true
 reth-primitives.workspace = true
-reth-trie-common.workspace = true
+reth-primitives-traits.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true
 reth-optimism-chainspec.workspace = true
+# TODO: remove this after feature cleanup
+reth-optimism-primitives = { workspace = true, features = ["serde"] }
 
 # ethereum
+alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-trie.workspace = true
@@ -32,7 +35,24 @@ tracing.workspace = true
 
 [dev-dependencies]
 alloy-primitives.workspace = true
+op-alloy-consensus.workspace = true
 reth-optimism-chainspec.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism"]
+default = ["std"]
+std = [
+    "reth-chainspec/std",
+    "reth-consensus/std",
+    "reth-consensus-common/std",
+    "reth-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-optimism-forks/std",
+    "reth-optimism-chainspec/std",
+    "reth-optimism-primitives/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-consensus/std",
+    "alloy-trie/std",
+    "op-alloy-consensus/std",
+]
+optimism = ["reth-optimism-primitives/optimism"]

@@ -150,18 +150,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use crate::{identifier::TransactionId, pool::PoolInner};
-use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
-use alloy_primitives::{Address, TxHash, B256, U256};
-use aquamarine as _;
-use reth_eth_wire_types::HandleMempoolData;
-use reth_execution_types::ChangedAccount;
-use reth_primitives::PooledTransactionsElement;
-use reth_storage_api::StateProviderFactory;
-use std::{collections::HashSet, sync::Arc};
-use tokio::sync::mpsc::Receiver;
-use tracing::{instrument, trace};
-
 pub use crate::{
     blobstore::{BlobStore, BlobStoreError},
     config::{
@@ -182,6 +170,18 @@ pub use crate::{
         TransactionValidator, ValidPoolTransaction,
     },
 };
+use crate::{identifier::TransactionId, pool::PoolInner};
+use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
+use alloy_primitives::{Address, TxHash, B256, U256};
+use aquamarine as _;
+use reth_eth_wire_types::HandleMempoolData;
+use reth_execution_types::ChangedAccount;
+use reth_primitives::Recovered;
+use reth_primitives_traits::Block;
+use reth_storage_api::StateProviderFactory;
+use std::{collections::HashSet, sync::Arc};
+use tokio::sync::mpsc::Receiver;
+use tracing::{instrument, trace};
 
 pub mod error;
 pub mod maintain;
@@ -409,18 +409,22 @@ where
         &self,
         max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.pooled_transactions().into_iter().take(max).collect()
+        self.pool.pooled_transactions_max(max)
     }
 
     fn get_pooled_transaction_elements(
         &self,
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
-    ) -> Vec<PooledTransactionsElement> {
+    ) -> Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled> {
         self.pool.get_pooled_transaction_elements(tx_hashes, limit)
     }
 
-    fn get_pooled_transaction_element(&self, tx_hash: TxHash) -> Option<PooledTransactionsElement> {
+    fn get_pooled_transaction_element(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<Recovered<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>>
+    {
         self.pool.get_pooled_transaction_element(tx_hash)
     }
 
@@ -439,6 +443,13 @@ where
 
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.pool.pending_transactions()
+    }
+
+    fn pending_transactions_max(
+        &self,
+        max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.pool.pending_transactions_max(max)
     }
 
     fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
@@ -603,7 +614,10 @@ where
         self.pool.set_block_info(info)
     }
 
-    fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_>) {
+    fn on_canonical_state_change<B>(&self, update: CanonicalStateUpdate<'_, B>)
+    where
+        B: Block,
+    {
         self.pool.on_canonical_state_change(update);
     }
 

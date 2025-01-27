@@ -26,13 +26,13 @@ use reth_db_api::{
         accounts::BlockNumberAddress,
         blocks::{HeaderHash, StoredBlockOmmers},
         storage_sharded_key::StorageShardedKey,
-        AccountBeforeTx, ClientVersion, CompactU256, ShardedKey, StoredBlockBodyIndices,
-        StoredBlockWithdrawals,
+        AccountBeforeTx, ClientVersion, CompactU256, IntegerList, ShardedKey,
+        StoredBlockBodyIndices, StoredBlockWithdrawals,
     },
-    table::{Decode, DupSort, Encode, Table},
+    table::{Decode, DupSort, Encode, Table, TableInfo},
 };
-use reth_primitives::{Account, Bytecode, Receipt, StorageEntry, TransactionSignedNoHash};
-use reth_primitives_traits::IntegerList;
+use reth_primitives::{Receipt, StorageEntry, TransactionSigned};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{BranchNodeCompact, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey};
@@ -98,6 +98,13 @@ pub trait TableViewer<R> {
     }
 }
 
+/// General trait for defining the set of tables
+/// Used to initialize database
+pub trait TableSet {
+    /// Returns an iterator over the tables
+    fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>>;
+}
+
 /// Defines all the tables in the database.
 #[macro_export]
 macro_rules! tables {
@@ -139,6 +146,7 @@ macro_rules! tables {
             impl$(<$($generic),*>)? reth_db_api::table::Table for $name$(<$($generic),*>)?
             where
                 $value: reth_db_api::table::Value + 'static
+                $($(,$generic: Send + Sync)*)?
             {
                 const NAME: &'static str = table_names::$name;
                 const DUPSORT: bool = tables!(@bool $($subkey)?);
@@ -242,6 +250,22 @@ macro_rules! tables {
             }
         }
 
+        impl TableInfo for Tables {
+            fn name(&self) -> &'static str {
+                self.name()
+            }
+
+            fn is_dupsort(&self) -> bool {
+                self.is_dupsort()
+            }
+        }
+
+        impl TableSet for Tables {
+            fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>> {
+                Box::new(Self::ALL.iter().map(|table| Box::new(*table) as Box<dyn TableInfo>))
+            }
+        }
+
         // Need constants to match on in the `FromStr` implementation.
         #[allow(non_upper_case_globals)]
         mod table_names {
@@ -314,9 +338,9 @@ tables! {
     }
 
     /// Stores the uncles/ommers of the block.
-    table BlockOmmers {
+    table BlockOmmers<H = Header> {
         type Key = BlockNumber;
-        type Value = StoredBlockOmmers;
+        type Value = StoredBlockOmmers<H>;
     }
 
     /// Stores the block withdrawals.
@@ -326,7 +350,7 @@ tables! {
     }
 
     /// Canonical only Stores the transaction body for canonical transactions.
-    table Transactions<T = TransactionSignedNoHash> {
+    table Transactions<T = TransactionSigned> {
         type Key = TxNumber;
         type Value = T;
     }
@@ -346,9 +370,9 @@ tables! {
     }
 
     /// Canonical only Stores transaction receipts.
-    table Receipts {
+    table Receipts<R = Receipt> {
         type Key = TxNumber;
-        type Value = Receipt;
+        type Value = R;
     }
 
     /// Stores all smart contract bytecodes.

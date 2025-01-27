@@ -1,16 +1,17 @@
 //! Contains the implementation of the mining mode for the local engine.
 
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{TxHash, B256};
-use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar, ForkchoiceState};
+use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
-use reth_chainspec::EthereumHardforks;
-use reth_engine_primitives::{BeaconEngineMessage, EngineApiMessageVersion, EngineTypes};
+use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
-use reth_payload_primitives::{BuiltPayload, PayloadAttributesBuilder, PayloadKind, PayloadTypes};
-use reth_provider::{BlockReader, ChainSpecProvider};
-use reth_rpc_types_compat::engine::payload::block_to_payload;
+use reth_payload_primitives::{
+    BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
+};
+use reth_provider::BlockReader;
 use reth_transaction_pool::TransactionPool;
 use std::{
     future::Future,
@@ -74,9 +75,7 @@ impl Future for MiningMode {
 
 /// Local miner advancing the chain/
 #[derive(Debug)]
-pub struct LocalMiner<EngineT: EngineTypes, Provider, B> {
-    /// Provider to read the current tip of the chain.
-    provider: Provider,
+pub struct LocalMiner<EngineT: EngineTypes, B> {
     /// The payload attribute builder for the engine
     payload_attributes_builder: B,
     /// Sender for events to engine.
@@ -91,15 +90,14 @@ pub struct LocalMiner<EngineT: EngineTypes, Provider, B> {
     last_block_hashes: Vec<B256>,
 }
 
-impl<EngineT, Provider, B> LocalMiner<EngineT, Provider, B>
+impl<EngineT, B> LocalMiner<EngineT, B>
 where
     EngineT: EngineTypes,
-    Provider: BlockReader + ChainSpecProvider<ChainSpec: EthereumHardforks> + 'static,
     B: PayloadAttributesBuilder<<EngineT as PayloadTypes>::PayloadAttributes>,
 {
     /// Spawns a new [`LocalMiner`] with the given parameters.
     pub fn spawn_new(
-        provider: Provider,
+        provider: impl BlockReader,
         payload_attributes_builder: B,
         to_engine: UnboundedSender<BeaconEngineMessage<EngineT>>,
         mode: MiningMode,
@@ -109,12 +107,11 @@ where
             provider.sealed_header(provider.best_block_number().unwrap()).unwrap().unwrap();
 
         let miner = Self {
-            provider,
             payload_attributes_builder,
             to_engine,
             mode,
             payload_builder,
-            last_timestamp: latest_header.timestamp,
+            last_timestamp: latest_header.timestamp(),
             last_block_hashes: vec![latest_header.hash()],
         };
 
@@ -210,21 +207,12 @@ where
 
         let block = payload.block();
 
-        let cancun_fields =
-            self.provider.chain_spec().is_cancun_active_at_timestamp(block.timestamp).then(|| {
-                CancunPayloadFields {
-                    parent_beacon_block_root: block.parent_beacon_block_root.unwrap(),
-                    versioned_hashes: block.blob_versioned_hashes().into_iter().copied().collect(),
-                }
-            });
-
         let (tx, rx) = oneshot::channel();
+        let (payload, sidecar) = EngineT::block_to_payload(payload.block().clone());
         self.to_engine.send(BeaconEngineMessage::NewPayload {
-            payload: block_to_payload(payload.block().clone()),
+            payload,
             // todo: prague support
-            sidecar: cancun_fields
-                .map(ExecutionPayloadSidecar::v3)
-                .unwrap_or_else(ExecutionPayloadSidecar::none),
+            sidecar,
             tx,
         })?;
 

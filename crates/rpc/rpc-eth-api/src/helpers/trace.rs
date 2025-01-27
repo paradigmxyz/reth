@@ -1,15 +1,16 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
-use std::{fmt::Display, sync::Arc};
-
-use crate::{FromEvmError, RpcNodeCore};
-use alloy_consensus::Header;
+use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
+use crate::FromEvmError;
+use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
-use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::SealedBlockWithSenders;
+use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Evm};
+use reth_primitives::RecoveredBlock;
+use reth_primitives_traits::{BlockBody, SignedTransaction};
+use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
@@ -17,63 +18,56 @@ use reth_rpc_eth_types::{
 };
 use revm::{db::CacheDB, Database, DatabaseCommit, GetInspector, Inspector};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
-use revm_primitives::{
-    BlockEnv, CfgEnvWithHandlerCfg, EnvWithHandlerCfg, EvmState, ExecutionResult, ResultAndState,
-};
-
-use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
+use revm_primitives::{EvmState, ExecutionResult, ResultAndState};
+use std::{fmt::Display, sync::Arc};
 
 /// Executes CPU heavy tasks.
-pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
-    /// Executes the [`EnvWithHandlerCfg`] against the given [Database] without committing state
+pub trait Trace:
+    LoadState<
+    Provider: BlockReader,
+    Evm: ConfigureEvm<
+        Header = ProviderHeader<Self::Provider>,
+        Transaction = ProviderTx<Self::Provider>,
+    >,
+>
+{
+    /// Executes the [`EvmEnv`] against the given [Database] without committing state
     /// changes.
+    #[expect(clippy::type_complexity)]
     fn inspect<DB, I>(
         &self,
         db: DB,
-        env: EnvWithHandlerCfg,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         inspector: I,
-    ) -> Result<(ResultAndState, EnvWithHandlerCfg), Self::Error>
+    ) -> Result<
+        (
+            ResultAndState,
+            (EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>, <Self::Evm as ConfigureEvmEnv>::TxEnv),
+        ),
+        Self::Error,
+    >
     where
         DB: Database,
         EthApiError: From<DB::Error>,
         I: GetInspector<DB>,
     {
-        self.inspect_and_return_db(db, env, inspector).map(|(res, env, _)| (res, env))
-    }
-
-    /// Same as [`inspect`](Self::inspect) but also returns the database again.
-    ///
-    /// Even though [Database] is also implemented on `&mut`
-    /// this is still useful if there are certain trait bounds on the Inspector's database generic
-    /// type
-    fn inspect_and_return_db<DB, I>(
-        &self,
-        db: DB,
-        env: EnvWithHandlerCfg,
-        inspector: I,
-    ) -> Result<(ResultAndState, EnvWithHandlerCfg, DB), Self::Error>
-    where
-        DB: Database,
-        EthApiError: From<DB::Error>,
-
-        I: GetInspector<DB>,
-    {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, env, inspector);
-        let res = evm.transact().map_err(Self::Error::from_evm_err)?;
-        let (db, env) = evm.into_db_and_env_with_handler_cfg();
-        Ok((res, env, db))
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env.clone(), inspector);
+        let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
+        Ok((res, (evm_env, tx_env)))
     }
 
     /// Executes the transaction on top of the given [`BlockId`] with a tracer configured by the
     /// config.
     ///
     /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
-    /// the configured [`EnvWithHandlerCfg`] was inspected.
+    /// the configured [`EvmEnv`] was inspected.
     ///
     /// Caution: this is blocking
     fn trace_at<F, R>(
         &self,
-        env: EnvWithHandlerCfg,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
@@ -85,7 +79,7 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
         self.with_state_at_block(at, |state| {
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = self.inspect(&mut db, env, &mut inspector)?;
+            let (res, _) = self.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
             f(inspector, res)
         })
     }
@@ -96,10 +90,11 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
     /// config.
     ///
     /// The callback is then called with the [`TracingInspector`] and the [`ResultAndState`] after
-    /// the configured [`EnvWithHandlerCfg`] was inspected.
+    /// the configured [`EvmEnv`] was inspected.
     fn spawn_trace_at_with_state<F, R>(
         &self,
-        env: EnvWithHandlerCfg,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
@@ -115,7 +110,7 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
         self.spawn_with_state_at_block(at, move |state| {
             let mut db = CacheDB::new(StateProviderDatabase::new(state));
             let mut inspector = TracingInspector::new(config);
-            let (res, _) = this.inspect(&mut db, env, &mut inspector)?;
+            let (res, _) = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
             f(inspector, res, db)
         })
     }
@@ -185,35 +180,29 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
             };
             let (tx, tx_info) = transaction.split();
 
-            let (cfg, block_env, _) = self.evm_env_at(block.hash().into()).await?;
+            let (evm_env, _) = self.evm_env_at(block.hash().into()).await?;
 
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
-            let parent_block = block.parent_hash;
+            let parent_block = block.parent_hash();
 
             let this = self.clone();
             self.spawn_with_state_at_block(parent_block.into(), move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
                 let block_txs = block.transactions_with_sender();
 
-                this.apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
+                this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 // replay all transactions prior to the targeted transaction
-                this.replay_transactions_until(
-                    &mut db,
-                    cfg.clone(),
-                    block_env.clone(),
-                    block_txs,
-                    tx.hash,
-                )?;
+                this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
 
-                let env = EnvWithHandlerCfg::new_with_cfg_env(
-                    cfg,
-                    block_env,
-                    RpcNodeCore::evm_config(&this).tx_env(tx.as_signed(), tx.signer()),
-                );
-                let (res, _) =
-                    this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
+                let tx_env = this.evm_config().tx_env(tx.tx(), tx.signer());
+                let (res, _) = this.inspect(
+                    StateCacheDbRefMutWrapper(&mut db),
+                    evm_env,
+                    tx_env,
+                    &mut inspector,
+                )?;
                 f(tx_info, inspector, res, db)
             })
             .await
@@ -230,7 +219,7 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
     fn trace_block_until<F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<SealedBlockWithSenders>>,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
         highest_index: Option<u64>,
         config: TracingInspectorConfig,
         f: F,
@@ -270,7 +259,7 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
     fn trace_block_until_with_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<SealedBlockWithSenders>>,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
         highest_index: Option<u64>,
         mut inspector_setup: Setup,
         f: F,
@@ -298,12 +287,11 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
                 self.block_with_senders(block_id).await
             };
 
-            let ((cfg, block_env, _), block) =
-                futures::try_join!(self.evm_env_at(block_id), block)?;
+            let ((evm_env, _), block) = futures::try_join!(self.evm_env_at(block_id), block)?;
 
             let Some(block) = block else { return Ok(None) };
 
-            if block.body.transactions.is_empty() {
+            if block.body().transactions().is_empty() {
                 // nothing to trace
                 return Ok(Some(Vec::new()))
             }
@@ -312,23 +300,23 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
             self.spawn_tracing(move |this| {
                 // we need to get the state of the parent block because we're replaying this block
                 // on top of its parent block's state
-                let state_at = block.parent_hash;
+                let state_at = block.parent_hash();
                 let block_hash = block.hash();
 
-                let block_number = block_env.number.saturating_to::<u64>();
-                let base_fee = block_env.basefee.saturating_to::<u128>();
+                let block_number = evm_env.block_env.number.saturating_to::<u64>();
+                let base_fee = evm_env.block_env.basefee.saturating_to::<u128>();
 
                 // now get the state
                 let state = this.state_at_block_id(state_at.into())?;
                 let mut db =
                     CacheDB::new(StateProviderDatabase::new(StateProviderTraitObjWrapper(&state)));
 
-                this.apply_pre_execution_changes(&block, &mut db, &cfg, &block_env)?;
+                this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 // prepare transactions, we do everything upfront to reduce time spent with open
                 // state
                 let max_transactions =
-                    highest_index.map_or(block.body.transactions.len(), |highest| {
+                    highest_index.map_or(block.body().transaction_count(), |highest| {
                         // we need + 1 because the index is 0-based
                         highest as usize + 1
                     });
@@ -340,7 +328,7 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
                     .enumerate()
                     .map(|(idx, (signer, tx))| {
                         let tx_info = TransactionInfo {
-                            hash: Some(tx.hash()),
+                            hash: Some(*tx.tx_hash()),
                             index: Some(idx as u64),
                             block_hash: Some(block_hash),
                             block_number: Some(block_number),
@@ -352,12 +340,13 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
                     .peekable();
 
                 while let Some((tx_info, tx)) = transactions.next() {
-                    let env =
-                        EnvWithHandlerCfg::new_with_cfg_env(cfg.clone(), block_env.clone(), tx);
-
                     let mut inspector = inspector_setup();
-                    let (res, _) =
-                        this.inspect(StateCacheDbRefMutWrapper(&mut db), env, &mut inspector)?;
+                    let (res, _) = this.inspect(
+                        StateCacheDbRefMutWrapper(&mut db),
+                        evm_env.clone(),
+                        tx,
+                        &mut inspector,
+                    )?;
                     let ResultAndState { result, state } = res;
                     results.push(f(tx_info, inspector, result, &state, &db)?);
 
@@ -388,7 +377,7 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
     fn trace_block_with<F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<SealedBlockWithSenders>>,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
         config: TracingInspectorConfig,
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
@@ -427,7 +416,7 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
     fn trace_block_inspector<Setup, Insp, F, R>(
         &self,
         block_id: BlockId,
-        block: Option<Arc<SealedBlockWithSenders>>,
+        block: Option<Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>>,
         insp_setup: Setup,
         f: F,
     ) -> impl Future<Output = Result<Option<Vec<R>>, Self::Error>> + Send
@@ -458,25 +447,19 @@ pub trait Trace: LoadState<Evm: ConfigureEvm<Header = Header>> {
     /// already applied.
     fn apply_pre_execution_changes<DB: Send + Database<Error: Display> + DatabaseCommit>(
         &self,
-        block: &SealedBlockWithSenders,
+        block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
         db: &mut DB,
-        cfg: &CfgEnvWithHandlerCfg,
-        block_env: &BlockEnv,
+        evm_env: &EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
     ) -> Result<(), Self::Error> {
         let mut system_caller =
             SystemCaller::new(self.evm_config().clone(), self.provider().chain_spec());
         // apply relevant system calls
         system_caller
-            .pre_block_beacon_root_contract_call(
-                db,
-                cfg,
-                block_env,
-                block.header.parent_beacon_block_root,
-            )
+            .pre_block_beacon_root_contract_call(db, evm_env, block.parent_beacon_block_root())
             .map_err(|_| EthApiError::EvmCustom("failed to apply 4788 system call".to_string()))?;
 
         system_caller
-            .pre_block_blockhashes_contract_call(db, cfg, block_env, block.header.parent_hash)
+            .pre_block_blockhashes_contract_call(db, evm_env, block.parent_hash())
             .map_err(|_| {
                 EthApiError::EvmCustom("failed to apply blockhashes system call".to_string())
             })?;

@@ -10,8 +10,6 @@ use reth_cli_commands::{
 };
 use std::fmt;
 
-/// Helper function to build an import pipeline.
-mod build_pipeline;
 pub mod import;
 pub mod import_receipts;
 pub mod init_state;

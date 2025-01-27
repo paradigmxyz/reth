@@ -15,11 +15,9 @@ pub use reth_primitives_traits::{
 };
 
 use reth_chainspec::EthChainSpec;
-use reth_db_api::{
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-    Database,
-};
+use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::EngineTypes;
+use reth_payload_primitives::BuiltPayload;
 use reth_trie_db::StateCommitment;
 
 /// The type that configures the essential types of an Ethereum-like node.
@@ -31,7 +29,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
     /// The node's primitive types, defining basic operations and structures.
     type Primitives: NodePrimitives;
     /// The type used for configuration of the EVM.
-    type ChainSpec: EthChainSpec;
+    type ChainSpec: EthChainSpec<Header = <Self::Primitives as NodePrimitives>::BlockHeader>;
     /// The type used to perform state commitment operations.
     type StateCommitment: StateCommitment;
     /// The type responsible for writing chain primitives to storage.
@@ -41,7 +39,7 @@ pub trait NodeTypes: Send + Sync + Unpin + 'static {
 /// The type that configures an Ethereum-like node with an engine for consensus.
 pub trait NodeTypesWithEngine: NodeTypes {
     /// The node's engine types, defining the interaction with the consensus engine.
-    type Engine: EngineTypes;
+    type Engine: EngineTypes<BuiltPayload: BuiltPayload<Primitives = Self::Primitives>>;
 }
 
 /// A helper trait that is downstream of the [`NodeTypesWithEngine`] trait and adds database to the
@@ -50,7 +48,7 @@ pub trait NodeTypesWithEngine: NodeTypes {
 /// Its types are configured by node internally and are not intended to be user configurable.
 pub trait NodeTypesWithDB: NodeTypes {
     /// Underlying database type used by the node to store and retrieve data.
-    type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
+    type DB: Database + DatabaseMetrics + Clone + Unpin + 'static;
 }
 
 /// An adapter type combining [`NodeTypes`] and db into [`NodeTypesWithDB`].
@@ -101,7 +99,7 @@ where
 impl<Types, DB> NodeTypesWithDB for NodeTypesWithDBAdapter<Types, DB>
 where
     Types: NodeTypes,
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
     type DB = DB;
 }
@@ -151,7 +149,7 @@ impl<P, C, SC, S> AnyNodeTypes<P, C, SC, S> {
 impl<P, C, SC, S> NodeTypes for AnyNodeTypes<P, C, SC, S>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
-    C: EthChainSpec + 'static,
+    C: EthChainSpec<Header = P::BlockHeader> + 'static,
     SC: StateCommitment,
     S: Default + Send + Sync + Unpin + Debug + 'static,
 {
@@ -212,7 +210,7 @@ impl<P, E, C, SC, S> NodeTypes for AnyNodeTypesWithEngine<P, E, C, SC, S>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
     E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec + 'static,
+    C: EthChainSpec<Header = P::BlockHeader> + 'static,
     SC: StateCommitment,
     S: Default + Send + Sync + Unpin + Debug + 'static,
 {
@@ -225,10 +223,28 @@ where
 impl<P, E, C, SC, S> NodeTypesWithEngine for AnyNodeTypesWithEngine<P, E, C, SC, S>
 where
     P: NodePrimitives + Send + Sync + Unpin + 'static,
-    E: EngineTypes + Send + Sync + Unpin,
-    C: EthChainSpec + 'static,
+    E: EngineTypes<BuiltPayload: BuiltPayload<Primitives = P>> + Send + Sync + Unpin,
+    C: EthChainSpec<Header = P::BlockHeader> + 'static,
     SC: StateCommitment,
     S: Default + Send + Sync + Unpin + Debug + 'static,
 {
     type Engine = E;
 }
+
+/// Helper adapter type for accessing [`NodePrimitives::Block`] on [`NodeTypes`].
+pub type BlockTy<N> = <PrimitivesTy<N> as NodePrimitives>::Block;
+
+/// Helper adapter type for accessing [`NodePrimitives::BlockHeader`] on [`NodeTypes`].
+pub type HeaderTy<N> = <PrimitivesTy<N> as NodePrimitives>::BlockHeader;
+
+/// Helper adapter type for accessing [`NodePrimitives::BlockBody`] on [`NodeTypes`].
+pub type BodyTy<N> = <PrimitivesTy<N> as NodePrimitives>::BlockBody;
+
+/// Helper adapter type for accessing [`NodePrimitives::SignedTx`] on [`NodeTypes`].
+pub type TxTy<N> = <PrimitivesTy<N> as NodePrimitives>::SignedTx;
+
+/// Helper adapter type for accessing [`NodePrimitives::Receipt`] on [`NodeTypes`].
+pub type ReceiptTy<N> = <PrimitivesTy<N> as NodePrimitives>::Receipt;
+
+/// Helper type for getting the `Primitives` associated type from a [`NodeTypes`].
+pub type PrimitivesTy<N> = <N as NodeTypes>::Primitives;

@@ -24,13 +24,16 @@ use reth_stages::{
 };
 use tracing::info;
 
-pub(crate) async fn dump_merkle_stage<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>>(
+pub(crate) async fn dump_merkle_stage<N>(
     db_tool: &DbTool<N>,
     from: BlockNumber,
     to: BlockNumber,
     output_datadir: ChainPath<DataDirPath>,
     should_run: bool,
-) -> Result<()> {
+) -> Result<()>
+where
+    N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
+{
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
     output_db.update(|tx| {
@@ -93,7 +96,7 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 
     // Bring Plainstate to TO (hashing stage execution requires it)
     let mut exec_stage = ExecutionStage::new(
-        NoopBlockExecutorProvider::default(), // Not necessary for unwinding.
+        NoopBlockExecutorProvider::<N::Primitives>::default(), // Not necessary for unwinding.
         ExecutionStageThresholds {
             max_blocks: Some(u64::MAX),
             max_changes: None,
@@ -145,11 +148,10 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 }
 
 /// Try to re-execute the stage straight away
-fn dry_run<N: ProviderNodeTypes>(
-    output_provider_factory: ProviderFactory<N>,
-    to: u64,
-    from: u64,
-) -> eyre::Result<()> {
+fn dry_run<N>(output_provider_factory: ProviderFactory<N>, to: u64, from: u64) -> eyre::Result<()>
+where
+    N: ProviderNodeTypes,
+{
     info!(target: "reth::cli", "Executing stage.");
     let provider = output_provider_factory.database_provider_rw()?;
 

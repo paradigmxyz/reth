@@ -10,6 +10,7 @@ use reth_chain_state::{CanonStateNotification, ExecutedBlock};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{PayloadKind, PayloadTypes};
 use reth_primitives::Block;
+use reth_primitives_traits::Block as _;
 use std::{
     future::Future,
     pin::Pin,

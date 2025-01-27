@@ -14,6 +14,6 @@ workspace = true
 [dependencies]
 
 # misc
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["std"] }
 serde.workspace = true
 thiserror.workspace = true

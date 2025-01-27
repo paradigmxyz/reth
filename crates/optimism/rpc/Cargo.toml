@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-evm.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-rpc-eth-types.workspace = true
@@ -33,6 +34,7 @@ reth-optimism-chainspec.workspace = true
 reth-optimism-consensus.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-payload-builder.workspace = true
+reth-optimism-primitives.workspace = true
 reth-optimism-forks.workspace = true
 
 # ethereum
@@ -44,6 +46,7 @@ alloy-consensus.workspace = true
 op-alloy-network.workspace = true
 op-alloy-rpc-types.workspace = true
 op-alloy-rpc-types-engine.workspace = true
+op-alloy-rpc-jsonrpsee.workspace = true
 op-alloy-consensus.workspace = true
 revm.workspace = true
 
@@ -60,7 +63,6 @@ serde_json.workspace = true
 # misc
 thiserror.workspace = true
 tracing.workspace = true
-derive_more = { workspace = true, features = ["constructor", "deref"] }
 
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true
@@ -68,9 +70,9 @@ reth-optimism-chainspec.workspace = true
 [features]
 optimism = [
 	"reth-optimism-evm/optimism",
-	"reth-primitives/optimism",
 	"reth-provider/optimism",
 	"revm/optimism",
 	"reth-optimism-consensus/optimism",
-	"reth-optimism-payload-builder/optimism"
+	"reth-optimism-payload-builder/optimism",
+	"reth-optimism-primitives/optimism",
 ]

@@ -4,17 +4,20 @@
 
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::Sealable;
 use clap::Parser;
-use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
+use reth_db_api::database_metrics::DatabaseMetrics;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_eth_wire::NetPrimitivesFor;
+use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
@@ -42,8 +45,7 @@ use reth_stages::{
         IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
         TransactionLookupStage,
     },
-    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageError, StageExt, UnwindInput,
-    UnwindOutput,
+    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
 use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::watch;
@@ -101,13 +103,14 @@ pub struct Command<C: ChainSpecParser> {
     network: NetworkArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
     /// Execute `stage` command
-    pub async fn execute<N, E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
+    pub async fn execute<N, E, F, P>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
-        E: BlockExecutorProvider,
+        E: BlockExecutorProvider<Primitives = N::Primitives>,
         F: FnOnce(Arc<C::ChainSpec>) -> E,
+        P: NetPrimitivesFor<N::Primitives>,
     {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
@@ -132,10 +135,20 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 },
                 ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
                 ctx.task_executor,
-                Hooks::new(
-                    provider_factory.db_ref().clone(),
-                    provider_factory.static_file_provider(),
-                ),
+                Hooks::builder()
+                    .with_hook({
+                        let db = provider_factory.db_ref().clone();
+                        move || db.report_metrics()
+                    })
+                    .with_hook({
+                        let sfp = provider_factory.static_file_provider();
+                        move || {
+                            if let Err(error) = sfp.report_metrics() {
+                                error!(%error, "Failed to report metrics from static file provider");
+                            }
+                        }
+                    })
+                    .build(),
             );
 
             MetricServer::new(config).serve().await?;
@@ -163,7 +176,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
                     let network = self
                         .network
-                        .network_config(
+                        .network_config::<P>(
                             &config,
                             provider_factory.chain_spec(),
                             p2p_secret_key,
@@ -175,13 +188,20 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     let fetch_client = Arc::new(network.fetch_client().await?);
 
                     // Use `to` as the tip for the stage
-                    let tip = fetch_client
-                        .get_header(BlockHashOrNumber::Number(self.to))
-                        .await?
-                        .into_data()
-                        .ok_or(StageError::MissingSyncGap)?;
+                    let tip: P::BlockHeader = loop {
+                        match fetch_client.get_header(BlockHashOrNumber::Number(self.to)).await {
+                            Ok(header) => {
+                                if let Some(header) = header.into_data() {
+                                    break header
+                                }
+                            }
+                            Err(error) if error.is_retryable() => {
+                                warn!(target: "reth::cli", "Error requesting header: {error}. Retrying...")
+                            }
+                            Err(error) => return Err(error.into()),
+                        }
+                    };
                     let (_, rx) = watch::channel(tip.hash_slow());
-
                     (
                         Box::new(HeaderStage::new(
                             provider_factory.clone(),
@@ -213,7 +233,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
                     let network = self
                         .network
-                        .network_config(
+                        .network_config::<P>(
                             &config,
                             provider_factory.chain_spec(),
                             p2p_secret_key,

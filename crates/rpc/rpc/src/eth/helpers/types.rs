@@ -2,8 +2,11 @@
 
 use alloy_consensus::{Signed, Transaction as _, TxEip4844Variant, TxEnvelope};
 use alloy_network::{Ethereum, Network};
+use alloy_primitives::PrimitiveSignature as Signature;
+use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
-use reth_primitives::{TransactionSigned, TransactionSignedEcRecovered};
+use reth_primitives::{Recovered, TransactionSigned};
+use reth_primitives_traits::SignedTransaction;
 use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::TransactionCompat;
@@ -37,11 +40,12 @@ where
 
     fn fill(
         &self,
-        tx: TransactionSignedEcRecovered,
+        tx: Recovered<TransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
-        let TransactionSigned { transaction, signature, hash } = tx.into_signed();
+        let hash = *tx.tx_hash();
+        let TransactionSigned { transaction, signature, .. } = tx.into_tx();
 
         let inner: TxEnvelope = match transaction {
             reth_primitives::Transaction::Legacy(tx) => {
@@ -83,6 +87,19 @@ where
         })
     }
 
+    fn build_simulate_v1_transaction(
+        &self,
+        request: TransactionRequest,
+    ) -> Result<TransactionSigned, Self::Error> {
+        let Ok(tx) = request.build_typed_tx() else {
+            return Err(EthApiError::TransactionConversionError)
+        };
+
+        // Create an empty signature for the transaction.
+        let signature = Signature::new(Default::default(), Default::default(), false);
+        Ok(TransactionSigned::new_unhashed(tx.into(), signature))
+    }
+
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
         let input = match &mut tx.inner {
             TxEnvelope::Eip1559(tx) => &mut tx.tx_mut().input,
@@ -93,7 +110,6 @@ where
                 TxEip4844Variant::TxEip4844WithSidecar(tx) => &mut tx.tx.input,
             },
             TxEnvelope::Eip7702(tx) => &mut tx.tx_mut().input,
-            _ => return,
         };
         *input = input.slice(..4);
     }

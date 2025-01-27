@@ -1,21 +1,17 @@
-use std::sync::Arc;
-
+use crate::utils::eth_payload_attributes;
 use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 use alloy_genesis::Genesis;
-use reth::{
-    args::RpcServerArgs,
-    builder::{NodeBuilder, NodeConfig, NodeHandle},
-    rpc::types::engine::PayloadStatusEnum,
-    tasks::TaskManager,
-};
+use alloy_rpc_types_engine::PayloadStatusEnum;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::{
     node::NodeTestContext, transaction::TransactionTestContext, wallet::Wallet,
 };
+use reth_node_builder::{NodeBuilder, NodeHandle};
+use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
+use reth_tasks::TaskManager;
 use reth_transaction_pool::TransactionPool;
-
-use crate::utils::eth_payload_attributes;
+use std::sync::Arc;
 
 #[tokio::test]
 async fn can_handle_blobs() -> eyre::Result<()> {

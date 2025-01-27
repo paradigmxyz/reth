@@ -33,9 +33,9 @@ use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
-    capability::CapabilityMessage, errors::EthStreamError, multiplex::RlpxProtocolMultiplexer,
-    Capabilities, DisconnectReason, EthVersion, HelloMessageWithProtocols, NetworkPrimitives,
-    Status, UnauthedEthStream, UnauthedP2PStream,
+    errors::EthStreamError, multiplex::RlpxProtocolMultiplexer, Capabilities, DisconnectReason,
+    EthVersion, HelloMessageWithProtocols, NetworkPrimitives, Status, UnauthedEthStream,
+    UnauthedP2PStream,
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -444,9 +444,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     ActiveSessionMessage::ValidMessage { peer_id, message } => {
                         Poll::Ready(SessionEvent::ValidMessage { peer_id, message })
                     }
-                    ActiveSessionMessage::InvalidMessage { peer_id, capabilities, message } => {
-                        Poll::Ready(SessionEvent::InvalidMessage { peer_id, message, capabilities })
-                    }
                     ActiveSessionMessage::BadMessage { peer_id } => {
                         Poll::Ready(SessionEvent::BadMessage { peer_id })
                     }
@@ -703,15 +700,6 @@ pub enum SessionEvent<N: NetworkPrimitives> {
         /// Message received from the peer.
         message: PeerMessage<N>,
     },
-    /// Received a message that does not match the announced capabilities of the peer.
-    InvalidMessage {
-        /// The remote node's public key
-        peer_id: PeerId,
-        /// Announced capabilities of the remote peer.
-        capabilities: Arc<Capabilities>,
-        /// Message received from the peer.
-        message: CapabilityMessage,
-    },
     /// Received a bad message from the peer.
     BadMessage {
         /// Identifier of the remote peer.
@@ -807,7 +795,7 @@ pub(crate) async fn pending_session_with_timeout<F, N: NetworkPrimitives>(
     F: Future<Output = ()>,
 {
     if tokio::time::timeout(timeout, f).await.is_err() {
-        debug!(target: "net::session", ?remote_addr, ?direction, "pending session timed out");
+        trace!(target: "net::session", ?remote_addr, ?direction, "pending session timed out");
         let event = PendingSessionEvent::Disconnected {
             remote_addr,
             session_id,

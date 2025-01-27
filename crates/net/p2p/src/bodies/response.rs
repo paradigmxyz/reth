@@ -1,48 +1,46 @@
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, U256};
-use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
-use reth_primitives_traits::InMemorySize;
-
+use reth_primitives::{SealedBlock, SealedHeader};
+use reth_primitives_traits::{Block, InMemorySize};
 /// The block response
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum BlockResponse<B = BlockBody> {
+pub enum BlockResponse<B: Block> {
     /// Full block response (with transactions or ommers)
-    Full(SealedBlock<alloy_consensus::Header, B>),
+    Full(SealedBlock<B>),
     /// The empty block response
-    Empty(SealedHeader),
+    Empty(SealedHeader<B::Header>),
 }
 
-impl<B> BlockResponse<B> {
-    /// Return the reference to the response header
-    pub const fn header(&self) -> &SealedHeader {
-        match self {
-            Self::Full(block) => &block.header,
-            Self::Empty(header) => header,
-        }
-    }
-
+impl<B> BlockResponse<B>
+where
+    B: Block,
+{
     /// Return the block number
     pub fn block_number(&self) -> BlockNumber {
-        self.header().number
+        match self {
+            Self::Full(block) => block.number(),
+            Self::Empty(header) => header.number(),
+        }
     }
 
     /// Return the reference to the response header
     pub fn difficulty(&self) -> U256 {
         match self {
-            Self::Full(block) => block.difficulty,
-            Self::Empty(header) => header.difficulty,
+            Self::Full(block) => block.difficulty(),
+            Self::Empty(header) => header.difficulty(),
         }
     }
 
     /// Return the reference to the response body
-    pub fn into_body(self) -> Option<B> {
+    pub fn into_body(self) -> Option<B::Body> {
         match self {
-            Self::Full(block) => Some(block.body),
+            Self::Full(block) => Some(block.into_body()),
             Self::Empty(_) => None,
         }
     }
 }
 
-impl<B: InMemorySize> InMemorySize for BlockResponse<B> {
+impl<B: Block> InMemorySize for BlockResponse<B> {
     #[inline]
     fn size(&self) -> usize {
         match self {

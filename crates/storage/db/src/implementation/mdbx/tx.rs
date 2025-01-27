@@ -283,8 +283,15 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     type DupCursor<T: DupSort> = Cursor<K, T>;
 
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<<T as Table>::Value>, DatabaseError> {
+        self.get_by_encoded_key::<T>(&key.encode())
+    }
+
+    fn get_by_encoded_key<T: Table>(
+        &self,
+        key: &<T::Key as Encode>::Encoded,
+    ) -> Result<Option<T::Value>, DatabaseError> {
         self.execute_with_operation_metric::<T, _>(Operation::Get, None, |tx| {
-            tx.get(self.get_dbi::<T>()?, key.encode().as_ref())
+            tx.get(self.get_dbi::<T>()?, key.as_ref())
                 .map_err(|e| DatabaseError::Read(e.into()))?
                 .map(decode_one::<T>)
                 .transpose()

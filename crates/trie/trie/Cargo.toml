@@ -17,11 +17,13 @@ reth-execution-errors.workspace = true
 reth-primitives.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
+reth-trie-sparse.workspace = true
 reth-trie-common.workspace = true
 
 revm.workspace = true
 
 # alloy
+alloy-eips.workspace = true
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
@@ -42,12 +44,6 @@ metrics = { workspace = true, optional = true }
 # `test-utils` feature
 triehash = { version = "0.8", optional = true }
 
-# `serde` feature
-serde = { workspace = true, optional = true }
-
-# `serde-bincode-compat` feature
-serde_with = { workspace = true, optional = true }
-
 [dev-dependencies]
 # reth
 reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
@@ -61,33 +57,25 @@ proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 serde_json.workspace = true
 criterion.workspace = true
-bincode.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
-	"dep:serde",
-	"alloy-consensus/serde",
-	"alloy-primitives/serde",
-	"revm/serde",
-	"alloy-trie/serde"
-]
-serde-bincode-compat = [
-	"serde_with",
-	"reth-primitives/serde-bincode-compat",
-	"alloy-consensus/serde-bincode-compat"
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-trie/serde",
+    "alloy-eips/serde",
+    "revm/serde",
+    "reth-trie-common/serde",
 ]
 test-utils = [
-	"triehash",
-	"reth-trie-common/test-utils",
-	"reth-primitives/test-utils",
-	"revm/test-utils",
-	"reth-stages-types/test-utils"
+    "triehash",
+    "revm/test-utils",
+    "reth-primitives/test-utils",
+    "reth-trie-common/test-utils",
+    "reth-trie-sparse/test-utils",
+    "reth-stages-types/test-utils",
 ]
-
-[[bench]]
-name = "prefix_set"
-harness = false
 
 [[bench]]
 name = "hash_post_state"

@@ -1,9 +1,10 @@
 //! Canonical chain state notification trait and types.
 
-use auto_impl::auto_impl;
+use alloy_eips::eip2718::Encodable2718;
 use derive_more::{Deref, DerefMut};
 use reth_execution_types::{BlockReceipts, Chain};
-use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
+use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_storage_api::NodePrimitivesProvider;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -25,18 +26,27 @@ pub type CanonStateNotificationSender<N = reth_primitives::EthPrimitives> =
     broadcast::Sender<CanonStateNotification<N>>;
 
 /// A type that allows to register chain related event subscriptions.
-#[auto_impl(&, Arc)]
-pub trait CanonStateSubscriptions: Send + Sync {
+pub trait CanonStateSubscriptions: NodePrimitivesProvider + Send + Sync {
     /// Get notified when a new canonical chain was imported.
     ///
     /// A canonical chain be one or more blocks, a reorg or a revert.
-    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications;
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives>;
 
     /// Convenience method to get a stream of [`CanonStateNotification`].
-    fn canonical_state_stream(&self) -> CanonStateNotificationStream {
+    fn canonical_state_stream(&self) -> CanonStateNotificationStream<Self::Primitives> {
         CanonStateNotificationStream {
             st: BroadcastStream::new(self.subscribe_to_canonical_state()),
         }
+    }
+}
+
+impl<T: CanonStateSubscriptions> CanonStateSubscriptions for &T {
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<Self::Primitives> {
+        (*self).subscribe_to_canonical_state()
+    }
+
+    fn canonical_state_stream(&self) -> CanonStateNotificationStream<Self::Primitives> {
+        (*self).canonical_state_stream()
     }
 }
 
@@ -113,7 +123,7 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
     ///
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
-    pub fn tip(&self) -> &SealedBlockWithSenders {
+    pub fn tip(&self) -> &RecoveredBlock<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.tip(),
         }
@@ -124,7 +134,10 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
     ///
     /// The boolean in the tuple (2nd element) denotes whether the receipt was from the reverted
     /// chain segment.
-    pub fn block_receipts(&self) -> Vec<(BlockReceipts<N::Receipt>, bool)> {
+    pub fn block_receipts(&self) -> Vec<(BlockReceipts<N::Receipt>, bool)>
+    where
+        N::SignedTx: Encodable2718,
+    {
         let mut receipts = Vec::new();
 
         // get old receipts
@@ -142,24 +155,29 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
 
 /// Wrapper around a broadcast receiver that receives fork choice notifications.
 #[derive(Debug, Deref, DerefMut)]
-pub struct ForkChoiceNotifications(pub watch::Receiver<Option<SealedHeader>>);
+pub struct ForkChoiceNotifications<T = alloy_consensus::Header>(
+    pub watch::Receiver<Option<SealedHeader<T>>>,
+);
 
 /// A trait that allows to register to fork choice related events
 /// and get notified when a new fork choice is available.
 pub trait ForkChoiceSubscriptions: Send + Sync {
+    /// Block Header type.
+    type Header: Clone + Send + Sync + 'static;
+
     /// Get notified when a new safe block of the chain is selected.
-    fn subscribe_safe_block(&self) -> ForkChoiceNotifications;
+    fn subscribe_safe_block(&self) -> ForkChoiceNotifications<Self::Header>;
 
     /// Get notified when a new finalized block of the chain is selected.
-    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications;
+    fn subscribe_finalized_block(&self) -> ForkChoiceNotifications<Self::Header>;
 
     /// Convenience method to get a stream of the new safe blocks of the chain.
-    fn safe_block_stream(&self) -> ForkChoiceStream<SealedHeader> {
+    fn safe_block_stream(&self) -> ForkChoiceStream<SealedHeader<Self::Header>> {
         ForkChoiceStream::new(self.subscribe_safe_block().0)
     }
 
     /// Convenience method to get a stream of the new finalized blocks of the chain.
-    fn finalized_block_stream(&self) -> ForkChoiceStream<SealedHeader> {
+    fn finalized_block_stream(&self) -> ForkChoiceStream<SealedHeader<Self::Header>> {
         ForkChoiceStream::new(self.subscribe_finalized_block().0)
     }
 }
@@ -186,7 +204,7 @@ impl<T: Clone + Sync + Send + 'static> Stream for ForkChoiceStream<T> {
         loop {
             match ready!(self.as_mut().project().st.poll_next(cx)) {
                 Some(Some(notification)) => return Poll::Ready(Some(notification)),
-                Some(None) => continue,
+                Some(None) => {}
                 None => return Poll::Ready(None),
             }
         }
@@ -196,13 +214,14 @@ impl<T: Clone + Sync + Send + 'static> Stream for ForkChoiceStream<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::B256;
+    use alloy_consensus::BlockBody;
+    use alloy_primitives::{b256, B256};
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{Receipt, Receipts, TransactionSigned, TxType};
+    use reth_primitives::{Receipt, Receipts, SealedBlock, TransactionSigned, TxType};
 
     #[test]
     fn test_commit_notification() {
-        let block: SealedBlockWithSenders = Default::default();
+        let block: RecoveredBlock<reth_primitives::Block> = Default::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
 
@@ -235,7 +254,7 @@ mod tests {
 
     #[test]
     fn test_reorg_notification() {
-        let block: SealedBlockWithSenders = Default::default();
+        let block: RecoveredBlock<reth_primitives::Block> = Default::default();
         let block1_hash = B256::new([0x01; 32]);
         let block2_hash = B256::new([0x02; 32]);
         let block3_hash = B256::new([0x03; 32]);
@@ -277,7 +296,7 @@ mod tests {
     #[test]
     fn test_block_receipts_commit() {
         // Create a default block instance for use in block definitions.
-        let block: SealedBlockWithSenders = Default::default();
+        let mut body = BlockBody::<TransactionSigned>::default();
 
         // Define unique hashes for two blocks to differentiate them in the chain.
         let block1_hash = B256::new([0x01; 32]);
@@ -285,13 +304,19 @@ mod tests {
 
         // Create a default transaction to include in block1's transactions.
         let tx = TransactionSigned::default();
+        body.transactions.push(tx);
+
+        let block = SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
+            SealedHeader::seal_slow(alloy_consensus::Header::default()),
+            body,
+        )
+        .try_recover()
+        .unwrap();
 
         // Create a clone of the default block and customize it to act as block1.
         let mut block1 = block.clone();
         block1.set_block_number(1);
         block1.set_hash(block1_hash);
-        // Add the transaction to block1's transactions.
-        block1.block.body.transactions.push(tx);
 
         // Clone the default block and customize it to act as block2.
         let mut block2 = block;
@@ -332,7 +357,11 @@ mod tests {
             block_receipts[0].0,
             BlockReceipts {
                 block: block1.num_hash(),
-                tx_receipts: vec![(B256::default(), receipt1)]
+                tx_receipts: vec![(
+                    // Transaction hash of a Transaction::default()
+                    b256!("20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
+                    receipt1
+                )]
             }
         );
 
@@ -343,10 +372,17 @@ mod tests {
     #[test]
     fn test_block_receipts_reorg() {
         // Define block1 for the old chain segment, which will be reverted.
-        let mut old_block1: SealedBlockWithSenders = Default::default();
+        let mut body = BlockBody::<TransactionSigned>::default();
+        body.transactions.push(TransactionSigned::default());
+        let mut old_block1 =
+            SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
+                SealedHeader::seal_slow(alloy_consensus::Header::default()),
+                body,
+            )
+            .try_recover()
+            .unwrap();
         old_block1.set_block_number(1);
         old_block1.set_hash(B256::new([0x01; 32]));
-        old_block1.block.body.transactions.push(TransactionSigned::default());
 
         // Create a receipt for a transaction in the reverted block.
         #[allow(clippy::needless_update)]
@@ -367,10 +403,17 @@ mod tests {
             Arc::new(Chain::new(vec![old_block1.clone()], old_execution_outcome, None));
 
         // Define block2 for the new chain segment, which will be committed.
-        let mut new_block1: SealedBlockWithSenders = Default::default();
+        let mut body = BlockBody::<TransactionSigned>::default();
+        body.transactions.push(TransactionSigned::default());
+        let mut new_block1 =
+            SealedBlock::<alloy_consensus::Block<TransactionSigned>>::from_sealed_parts(
+                SealedHeader::seal_slow(alloy_consensus::Header::default()),
+                body,
+            )
+            .try_recover()
+            .unwrap();
         new_block1.set_block_number(2);
         new_block1.set_hash(B256::new([0x02; 32]));
-        new_block1.block.body.transactions.push(TransactionSigned::default());
 
         // Create a receipt for a transaction in the new committed block.
         #[allow(clippy::needless_update)]
@@ -403,7 +446,11 @@ mod tests {
             block_receipts[0].0,
             BlockReceipts {
                 block: old_block1.num_hash(),
-                tx_receipts: vec![(B256::default(), old_receipt)]
+                tx_receipts: vec![(
+                    // Transaction hash of a Transaction::default()
+                    b256!("20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
+                    old_receipt
+                )]
             }
         );
         // Confirm this is from the reverted segment.
@@ -415,7 +462,11 @@ mod tests {
             block_receipts[1].0,
             BlockReceipts {
                 block: new_block1.num_hash(),
-                tx_receipts: vec![(B256::default(), new_receipt)]
+                tx_receipts: vec![(
+                    // Transaction hash of a Transaction::default()
+                    b256!("20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
+                    new_receipt
+                )]
             }
         );
         // Confirm this is from the committed segment.

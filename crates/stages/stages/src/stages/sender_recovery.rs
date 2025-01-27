@@ -1,13 +1,14 @@
 use alloy_primitives::{Address, TxNumber};
 use reth_config::config::SenderRecoveryConfig;
 use reth_consensus::ConsensusError;
-use reth_db::{static_file::TransactionMask, tables, RawValue};
+use reth_db::{static_file::TransactionMask, table::Value, tables, RawValue};
 use reth_db_api::{
     cursor::DbCursorRW,
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use reth_primitives::{GotExpected, StaticFileSegment, TransactionSignedNoHash};
+use reth_primitives::{GotExpected, NodePrimitives, StaticFileSegment};
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::{
     BlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
     StaticFileProviderFactory, StatsReader,
@@ -59,7 +60,7 @@ impl<Provider> Stage<Provider> for SenderRecoveryStage
 where
     Provider: DBProvider<Tx: DbTxMut>
         + BlockReader
-        + StaticFileProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + StatsReader
         + PruneCheckpointReader,
 {
@@ -190,7 +191,7 @@ where
                                 })?;
 
                             Err(StageError::Block {
-                                block: Box::new(sealed_header),
+                                block: Box::new(sealed_header.block_with_parent()),
                                 error: BlockErrorKind::Validation(
                                     ConsensusError::TransactionSignerRecoveryError,
                                 ),
@@ -206,7 +207,7 @@ where
                     }
                 }
             };
-            senders_cursor.append(tx_id, sender)?;
+            senders_cursor.append(tx_id, &sender)?;
             processed_transactions += 1;
         }
     }
@@ -233,7 +234,9 @@ fn setup_range_recovery<Provider>(
     provider: &Provider,
 ) -> mpsc::Sender<Vec<(Range<u64>, RecoveryResultSender)>>
 where
-    Provider: DBProvider + HeaderProvider + StaticFileProviderFactory,
+    Provider: DBProvider
+        + HeaderProvider
+        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>,
 {
     let (tx_sender, tx_receiver) = mpsc::channel::<Vec<(Range<u64>, RecoveryResultSender)>>();
     let static_file_provider = provider.static_file_provider();
@@ -254,9 +257,9 @@ where
                     chunk_range.clone(),
                     |cursor, number| {
                         Ok(cursor
-                            .get_one::<TransactionMask<RawValue<TransactionSignedNoHash>>>(
-                                number.into(),
-                            )?
+                            .get_one::<TransactionMask<
+                                RawValue<<Provider::Primitives as NodePrimitives>::SignedTx>,
+                            >>(number.into())?
                             .map(|tx| (number, tx)))
                     },
                     |_| true,
@@ -300,18 +303,19 @@ where
 }
 
 #[inline]
-fn recover_sender(
-    (tx_id, tx): (TxNumber, TransactionSignedNoHash),
+fn recover_sender<T: SignedTransaction>(
+    (tx_id, tx): (TxNumber, T),
     rlp_buf: &mut Vec<u8>,
 ) -> Result<(u64, Address), Box<SenderRecoveryStageError>> {
+    rlp_buf.clear();
     // We call [Signature::encode_and_recover_unchecked] because transactions run in the pipeline
     // are known to be valid - this means that we do not need to check whether or not the `s`
     // value is greater than `secp256k1n / 2` if past EIP-2. There are transactions
     // pre-homestead which have large `s` values, so using [Signature::recover_signer] here
     // would not be backwards-compatible.
-    let sender = tx
-        .encode_and_recover_unchecked(rlp_buf)
-        .ok_or(SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError { tx: tx_id }))?;
+    let sender = tx.recover_signer_unchecked_with_buf(rlp_buf).map_err(|_| {
+        SenderRecoveryStageError::FailedRecovery(FailedSenderRecoveryError { tx: tx_id })
+    })?;
 
     Ok((tx_id, sender))
 }
@@ -361,24 +365,24 @@ struct FailedSenderRecoveryError {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::test_utils::{
+        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
+        TestRunnerError, TestStageDB, UnwindStageTestRunner,
+    };
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::DbCursorRO;
     use reth_primitives::{SealedBlock, TransactionSigned};
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::{
-        providers::StaticFileWriter, DatabaseProviderFactory, PruneCheckpointWriter,
-        StaticFileProviderFactory, TransactionsProvider,
+        providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
+        PruneCheckpointWriter, StaticFileProviderFactory, TransactionsProvider,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, BlockParams, BlockRangeParams,
-    };
-
-    use super::*;
-    use crate::test_utils::{
-        stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
-        TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
 
     stage_test_suite_ext!(SenderRecoveryTestRunner, sender_recovery);
@@ -473,7 +477,7 @@ mod tests {
         let expected_progress = seed
             .iter()
             .find(|x| {
-                tx_count += x.body.transactions.len();
+                tx_count += x.transaction_count();
                 tx_count as u64 > threshold
             })
             .map(|x| x.number)
@@ -532,7 +536,7 @@ mod tests {
         let mut tx_senders = Vec::new();
         let mut tx_number = 0;
         for block in &blocks[..=max_processed_block] {
-            for transaction in &block.body.transactions {
+            for transaction in &block.body().transactions {
                 if block.number > max_pruned_block {
                     tx_senders
                         .push((tx_number, transaction.recover_signer().expect("recover signer")));
@@ -551,7 +555,7 @@ mod tests {
                     tx_number: Some(
                         blocks[..=max_pruned_block as usize]
                             .iter()
-                            .map(|block| block.body.transactions.len() as u64)
+                            .map(|block| block.transaction_count() as u64)
                             .sum(),
                     ),
                     prune_mode: PruneMode::Full,
@@ -566,9 +570,9 @@ mod tests {
             EntitiesCheckpoint {
                 processed: blocks[..=max_processed_block]
                     .iter()
-                    .map(|block| block.body.transactions.len() as u64)
+                    .map(|block| block.transaction_count() as u64)
                     .sum(),
-                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum()
+                total: blocks.iter().map(|block| block.transaction_count() as u64).sum()
             }
         );
     }
@@ -667,11 +671,9 @@ mod tests {
                     while let Some((_, body)) = body_cursor.next()? {
                         for tx_id in body.tx_num_range() {
                             let transaction: TransactionSigned = provider
-                                .transaction_by_id_no_hash(tx_id)?
-                                .map(|tx| TransactionSigned {
-                                    hash: Default::default(), // we don't require the hash
-                                    signature: tx.signature,
-                                    transaction: tx.transaction,
+                                .transaction_by_id_unhashed(tx_id)?
+                                .map(|tx| {
+                                    TransactionSigned::new_unhashed(tx.transaction, tx.signature)
                                 })
                                 .expect("no transaction entry");
                             let signer =

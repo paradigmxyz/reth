@@ -6,22 +6,35 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
 
 pub mod bedrock;
-pub mod tx_type;
+pub mod transaction;
 
-pub use tx_type::OpTxType;
+use reth_primitives_traits::Block;
+pub use transaction::{signed::OpTransactionSigned, tx_type::OpTxType};
 
-use reth_node_types::NodePrimitives;
-use reth_primitives::{Block, Receipt, TransactionSigned};
+mod receipt;
+pub use receipt::{DepositReceipt, OpReceipt};
 
-/// Optimism primitive types.
+/// Optimism-specific block type.
+pub type OpBlock = alloy_consensus::Block<OpTransactionSigned>;
+
+/// Optimism-specific block body type.
+pub type OpBlockBody = <OpBlock as Block>::Body;
+
+/// Primitive types for Optimism Node.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct OpPrimitives;
 
-impl NodePrimitives for OpPrimitives {
-    type Block = Block;
-    type SignedTx = TransactionSigned;
-    type TxType = OpTxType;
-    type Receipt = Receipt;
+#[cfg(feature = "optimism")]
+impl reth_primitives_traits::NodePrimitives for OpPrimitives {
+    type Block = OpBlock;
+    type BlockHeader = alloy_consensus::Header;
+    type BlockBody = OpBlockBody;
+    type SignedTx = OpTransactionSigned;
+    type Receipt = OpReceipt;
 }

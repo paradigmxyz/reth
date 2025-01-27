@@ -1,11 +1,10 @@
 //! Command for debugging execution.
 
-use crate::{args::NetworkArgs, utils::get_single_header};
+use crate::{api::BlockTy, args::NetworkArgs, utils::get_single_header};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use clap::Parser;
-use futures::{stream::select as stream_select, StreamExt};
-use reth_beacon_consensus::EthBeaconConsensus;
+use futures::StreamExt;
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
@@ -18,15 +17,17 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_errors::ConsensusError;
 use reth_exex::ExExManagerHandle;
-use reth_network::{BlockDownloaderProvider, NetworkEventListenerProvider, NetworkHandle};
+use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
 use reth_node_api::NodeTypesWithDBAdapter;
-use reth_node_ethereum::EthExecutorProvider;
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
+use reth_node_events::node::NodeEvent;
+use reth_primitives::EthPrimitives;
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionWriter, ChainSpecProvider, ProviderFactory,
-    StageCheckpointReader,
+    providers::ProviderNodeTypes, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
@@ -59,16 +60,17 @@ pub struct Command<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    fn build_pipeline<N: ProviderNodeTypes<ChainSpec = C::ChainSpec> + CliNodeTypes, Client>(
+    fn build_pipeline<N, Client>(
         &self,
         config: &Config,
         client: Client,
-        consensus: Arc<dyn Consensus>,
+        consensus: Arc<dyn Consensus<BlockTy<N>, Error = ConsensusError>>,
         provider_factory: ProviderFactory<N>,
         task_executor: &TaskExecutor,
         static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     ) -> eyre::Result<Pipeline<N>>
     where
+        N: ProviderNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives> + CliNodeTypes,
         Client: EthBlockClient + 'static,
     {
         // building network downloaders using the fetch client
@@ -117,7 +119,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         Ok(pipeline)
     }
 
-    async fn build_network<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    async fn build_network<
+        N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>,
+    >(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
@@ -161,14 +165,14 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `execution-debug` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>>(
         self,
         ctx: CliContext,
     ) -> eyre::Result<()> {
         let Environment { provider_factory, config, data_dir } =
             self.env.init::<N>(AccessRights::RW)?;
 
-        let consensus: Arc<dyn Consensus> =
+        let consensus: Arc<dyn Consensus<BlockTy<N>, Error = ConsensusError>> =
             Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
 
         // Configure and build network
@@ -207,17 +211,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             return Ok(())
         }
 
-        let pipeline_events = pipeline.events();
-        let events = stream_select(
-            network.event_listener().map(Into::into),
-            pipeline_events.map(Into::into),
-        );
         ctx.task_executor.spawn_critical(
             "events task",
             reth_node_events::node::handle_events(
                 Some(Box::new(network)),
                 latest_block_number,
-                events,
+                pipeline.events().map(Into::<NodeEvent<N::Primitives>>::into),
             ),
         );
 
@@ -235,11 +234,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             trace!(target: "reth::cli", from = next_block, to = target_block, tip = ?target_block_hash, ?result, "Pipeline finished");
 
             // Unwind the pipeline without committing.
-            {
-                provider_factory
-                    .provider_rw()?
-                    .take_block_and_execution_range(next_block..=target_block)?;
-            }
+            provider_factory.provider_rw()?.unwind_trie_state_range(next_block..=target_block)?;
 
             // Update latest block
             current_max_block = target_block;

@@ -32,7 +32,7 @@ pub trait Compress: Send + Sync + Sized + Debug {
     }
 
     /// Compresses data to a given buffer.
-    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(self, buf: &mut B);
+    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B);
 }
 
 /// Trait that will transform the data to be read from the DB.
@@ -100,6 +100,15 @@ pub trait Table: Send + Sync + Debug + 'static {
     type Value: Value;
 }
 
+/// Trait that provides object-safe access to the table's metadata.
+pub trait TableInfo: Send + Sync + Debug + 'static {
+    /// The table's name.
+    fn name(&self) -> &'static str;
+
+    /// Whether the table is a `DUPSORT` table.
+    fn is_dupsort(&self) -> bool;
+}
+
 /// Tuple with `T::Key` and `T::Value`.
 pub type TableRow<T> = (<T as Table>::Key, <T as Table>::Value);
 
@@ -123,7 +132,7 @@ pub trait TableImporter: DbTxMut {
 
         for kv in source_tx.cursor_read::<T>()?.walk(None)? {
             let (k, v) = kv?;
-            destination_cursor.append(k, v)?;
+            destination_cursor.append(k, &v)?;
         }
 
         Ok(())
@@ -148,7 +157,7 @@ pub trait TableImporter: DbTxMut {
         };
         for row in source_range? {
             let (key, value) = row?;
-            destination_cursor.append(key, value)?;
+            destination_cursor.append(key, &value)?;
         }
 
         Ok(())

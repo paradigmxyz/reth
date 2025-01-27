@@ -1,8 +1,8 @@
-use alloy_consensus::Transaction;
+use alloy_consensus::{BlockHeader, Transaction, Typed2718};
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
-use alloy_rpc_types_eth::{BlockTransactions, Header, TransactionReceipt};
+use alloy_rpc_types_eth::{BlockTransactions, TransactionReceipt};
 use alloy_rpc_types_trace::{
     otterscan::{
         BlockDetails, ContractCreator, InternalOperation, OperationType, OtsBlockTransactions,
@@ -15,7 +15,7 @@ use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FullEthApiTypes, RpcBlock, RpcReceipt, RpcTransaction, TransactionCompat,
+    FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction, TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
@@ -49,11 +49,13 @@ where
         &self,
         block: RpcBlock<Eth::NetworkTypes>,
         receipts: Vec<RpcReceipt<Eth::NetworkTypes>>,
-    ) -> RpcResult<BlockDetails> {
+    ) -> RpcResult<BlockDetails<RpcHeader<Eth::NetworkTypes>>> {
         // blob fee is burnt, so we don't need to calculate it
         let total_fees = receipts
             .iter()
-            .map(|receipt| receipt.gas_used().saturating_mul(receipt.effective_gas_price()))
+            .map(|receipt| {
+                (receipt.gas_used() as u128).saturating_mul(receipt.effective_gas_price())
+            })
             .sum::<u128>();
 
         Ok(BlockDetails::new(block, Default::default(), U256::from(total_fees)))
@@ -61,18 +63,23 @@ where
 }
 
 #[async_trait]
-impl<Eth> OtterscanServer<RpcTransaction<Eth::NetworkTypes>> for OtterscanApi<Eth>
+impl<Eth> OtterscanServer<RpcTransaction<Eth::NetworkTypes>, RpcHeader<Eth::NetworkTypes>>
+    for OtterscanApi<Eth>
 where
     Eth: EthApiServer<
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
+            RpcHeader<Eth::NetworkTypes>,
         > + EthTransactions
         + TraceExt
         + 'static,
 {
-    /// Handler for `{ots,erigon}_getHeaderByNumber`
-    async fn get_header_by_number(&self, block_number: u64) -> RpcResult<Option<Header>> {
+    /// Handler for `ots_getHeaderByNumber` and `erigon_getHeaderByNumber`
+    async fn get_header_by_number(
+        &self,
+        block_number: u64,
+    ) -> RpcResult<Option<RpcHeader<Eth::NetworkTypes>>> {
         self.eth.header_by_number(BlockNumberOrTag::Number(block_number)).await
     }
 
@@ -165,7 +172,10 @@ where
     }
 
     /// Handler for `ots_getBlockDetails`
-    async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails<Header>> {
+    async fn get_block_details(
+        &self,
+        block_number: u64,
+    ) -> RpcResult<BlockDetails<RpcHeader<Eth::NetworkTypes>>> {
         let block_id = block_number.into();
         let block = self.eth.block_by_number(block_id, true);
         let block_id = block_id.into();
@@ -177,8 +187,11 @@ where
         )
     }
 
-    /// Handler for `getBlockDetailsByHash`
-    async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails<Header>> {
+    /// Handler for `ots_getBlockDetailsByHash`
+    async fn get_block_details_by_hash(
+        &self,
+        block_hash: B256,
+    ) -> RpcResult<BlockDetails<RpcHeader<Eth::NetworkTypes>>> {
         let block = self.eth.block_by_hash(block_hash, true);
         let block_id = block_hash.into();
         let receipts = self.eth.block_receipts(block_id);
@@ -189,13 +202,15 @@ where
         )
     }
 
-    /// Handler for `getBlockTransactions`
+    /// Handler for `ots_getBlockTransactions`
     async fn get_block_transactions(
         &self,
         block_number: u64,
         page_number: usize,
         page_size: usize,
-    ) -> RpcResult<OtsBlockTransactions<RpcTransaction<Eth::NetworkTypes>, Header>> {
+    ) -> RpcResult<
+        OtsBlockTransactions<RpcTransaction<Eth::NetworkTypes>, RpcHeader<Eth::NetworkTypes>>,
+    > {
         let block_id = block_number.into();
         // retrieve full block and its receipts
         let block = self.eth.block_by_number(block_id, true);
@@ -236,14 +251,14 @@ where
         }
 
         // Crop receipts and transform them into OtsTransactionReceipt
-        let timestamp = Some(block.header.timestamp);
+        let timestamp = Some(block.header.timestamp());
         let receipts = receipts
             .drain(page_start..page_end)
-            .zip(transactions.iter().map(Transaction::ty))
+            .zip(transactions.iter().map(Typed2718::ty))
             .map(|(receipt, tx_ty)| {
                 let inner = OtsReceipt {
                     status: receipt.status(),
-                    cumulative_gas_used: receipt.cumulative_gas_used() as u64,
+                    cumulative_gas_used: receipt.cumulative_gas_used(),
                     logs: None,
                     logs_bloom: None,
                     r#type: tx_ty,
@@ -277,7 +292,7 @@ where
         Ok(block)
     }
 
-    /// Handler for `searchTransactionsBefore`
+    /// Handler for `ots_searchTransactionsBefore`
     async fn search_transactions_before(
         &self,
         _address: Address,
@@ -287,7 +302,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    /// Handler for `searchTransactionsAfter`
+    /// Handler for `ots_searchTransactionsAfter`
     async fn search_transactions_after(
         &self,
         _address: Address,
@@ -297,7 +312,7 @@ where
         Err(internal_rpc_err("unimplemented"))
     }
 
-    /// Handler for `getTransactionBySenderAndNonce`
+    /// Handler for `ots_getTransactionBySenderAndNonce`
     async fn get_transaction_by_sender_and_nonce(
         &self,
         sender: Address,
@@ -311,7 +326,7 @@ where
             .map(|tx| tx.tx_hash()))
     }
 
-    /// Handler for `getContractCreator`
+    /// Handler for `ots_getContractCreator`
     async fn get_contract_creator(&self, address: Address) -> RpcResult<Option<ContractCreator>> {
         if !self.has_code(address, None).await? {
             return Ok(None);

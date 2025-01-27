@@ -11,13 +11,13 @@ repository.workspace = true
 
 [dependencies]
 # reth
-reth-beacon-consensus.workspace = true
+reth-ethereum-consensus.workspace = true
 reth-chainspec.workspace = true
 reth-cli.workspace = true
 reth-ethereum-cli.workspace = true
 reth-cli-runner.workspace = true
 reth-cli-util.workspace = true
-reth-codecs = { workspace = true, optional = true }
+reth-codecs.workspace = true
 reth-config.workspace = true
 reth-consensus.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
@@ -110,7 +110,7 @@ arbitrary = [
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
     "reth-trie-common/test-utils",
-    "reth-codecs?/arbitrary",
+    "reth-codecs/arbitrary",
     "reth-prune-types?/arbitrary",
     "reth-stages-types?/arbitrary",
     "reth-trie-common?/arbitrary",

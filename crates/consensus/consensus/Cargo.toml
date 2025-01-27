@@ -32,7 +32,8 @@ std = [
 	"alloy-primitives/std",
 	"alloy-eips/std",
 	"alloy-consensus/std",
-	"reth-primitives-traits/std"
+	"reth-primitives-traits/std",
+	"derive_more/std"
 ]
 test-utils = [
 	"reth-primitives/test-utils",

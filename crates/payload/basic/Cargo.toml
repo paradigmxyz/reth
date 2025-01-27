@@ -25,10 +25,11 @@ reth-tasks.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace=true
 
-# ethereum
-alloy-rlp.workspace = true
-alloy-primitives.workspace = true
+# revm
 revm.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 

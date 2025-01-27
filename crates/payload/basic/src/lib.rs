@@ -11,7 +11,7 @@
 use crate::metrics::PayloadBuilderMetrics;
 use alloy_consensus::constants::EMPTY_WITHDRAWALS;
 use alloy_eips::{eip4895::Withdrawals, merge::SLOT_DURATION};
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_primitives::{B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
 use reth_chainspec::EthereumHardforks;
@@ -19,8 +19,8 @@ use reth_evm::state_change::post_block_withdrawals_balance_increments;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
-use reth_primitives::{proofs, SealedHeader};
-use reth_primitives_traits::constants::RETH_CLIENT_VERSION;
+use reth_primitives::{NodePrimitives, SealedHeader};
+use reth_primitives_traits::proofs;
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
@@ -132,7 +132,11 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
 impl<Client, Pool, Tasks, Builder> PayloadJobGenerator
     for BasicPayloadJobGenerator<Client, Pool, Tasks, Builder>
 where
-    Client: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Header = alloy_consensus::Header>
+        + Clone
+        + Unpin
+        + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
@@ -159,11 +163,7 @@ where
                 .ok_or_else(|| PayloadBuilderError::MissingParentHeader(attributes.parent()))?
         };
 
-        let config = PayloadConfig::new(
-            Arc::new(parent_header.clone()),
-            self.config.extradata.clone(),
-            attributes,
-        );
+        let config = PayloadConfig::new(Arc::new(parent_header.clone()), attributes);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
@@ -192,7 +192,7 @@ where
         Ok(job)
     }
 
-    fn on_new_state(&mut self, new_state: CanonStateNotification) {
+    fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
         let mut cached = CachedReads::default();
 
         // extract the state from the notification and put it into the cache
@@ -247,8 +247,6 @@ impl PayloadTaskGuard {
 /// Settings for the [`BasicPayloadJobGenerator`].
 #[derive(Debug, Clone)]
 pub struct BasicPayloadJobGeneratorConfig {
-    /// Data to include in the block's extra data field.
-    extradata: Bytes,
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
     /// The deadline for when the payload builder job should resolve.
@@ -284,20 +282,11 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_payload_tasks = max_payload_tasks;
         self
     }
-
-    /// Sets the data to include in the block's extra data field.
-    ///
-    /// Defaults to the current client version: `rlp(RETH_CLIENT_VERSION)`.
-    pub fn extradata(mut self, extradata: Bytes) -> Self {
-        self.extradata = extradata;
-        self
-    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
         Self {
-            extradata: alloy_rlp::encode(RETH_CLIENT_VERSION.as_bytes()).into(),
             interval: Duration::from_secs(1),
             // 12s slot time
             deadline: SLOT_DURATION,
@@ -307,6 +296,15 @@ impl Default for BasicPayloadJobGeneratorConfig {
 }
 
 /// A basic payload job that continuously builds a payload with the best transactions from the pool.
+///
+/// This type is a [`PayloadJob`] and [`Future`] that terminates when the deadline is reached or
+/// when the job is resolved: [`PayloadJob::resolve`].
+///
+/// This basic job implementation will trigger new payload build task continuously until the job is
+/// resolved or the deadline is reached, or until the built payload is marked as frozen:
+/// [`BuildOutcome::Freeze`]. Once a frozen payload is returned, no additional payloads will be
+/// built and this future will wait to be resolved: [`PayloadJob::resolve`] or terminated if the
+/// deadline is reached..
 #[derive(Debug)]
 pub struct BasicPayloadJob<Client, Pool, Tasks, Builder>
 where
@@ -709,17 +707,8 @@ impl Drop for Cancelled {
 pub struct PayloadConfig<Attributes> {
     /// The parent header.
     pub parent_header: Arc<SealedHeader>,
-    /// Block extra data.
-    pub extra_data: Bytes,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
-}
-
-impl<Attributes> PayloadConfig<Attributes> {
-    /// Returns an owned instance of the [`PayloadConfig`]'s `extra_data` bytes.
-    pub fn extra_data(&self) -> Bytes {
-        self.extra_data.clone()
-    }
 }
 
 impl<Attributes> PayloadConfig<Attributes>
@@ -727,12 +716,8 @@ where
     Attributes: PayloadBuilderAttributes,
 {
     /// Create new payload config.
-    pub const fn new(
-        parent_header: Arc<SealedHeader>,
-        extra_data: Bytes,
-        attributes: Attributes,
-    ) -> Self {
-        Self { parent_header, extra_data, attributes }
+    pub const fn new(parent_header: Arc<SealedHeader>, attributes: Attributes) -> Self {
+        Self { parent_header, attributes }
     }
 
     /// Returns the payload id.
@@ -979,31 +964,6 @@ impl<Payload> Default for MissingPayloadBehaviour<Payload> {
     }
 }
 
-/// Represents the outcome of committing withdrawals to the runtime database and post state.
-/// Pre-shanghai these are `None` values.
-#[derive(Default, Debug)]
-pub struct WithdrawalsOutcome {
-    /// committed withdrawals, if any.
-    pub withdrawals: Option<Withdrawals>,
-    /// withdrawals root if any.
-    pub withdrawals_root: Option<B256>,
-}
-
-impl WithdrawalsOutcome {
-    /// No withdrawals pre shanghai
-    pub const fn pre_shanghai() -> Self {
-        Self { withdrawals: None, withdrawals_root: None }
-    }
-
-    /// No withdrawals
-    pub fn empty() -> Self {
-        Self {
-            withdrawals: Some(Withdrawals::default()),
-            withdrawals_root: Some(EMPTY_WITHDRAWALS),
-        }
-    }
-}
-
 /// Executes the withdrawals and commits them to the _runtime_ Database and `BundleState`.
 ///
 /// Returns the withdrawals root.
@@ -1013,32 +973,26 @@ pub fn commit_withdrawals<DB, ChainSpec>(
     db: &mut State<DB>,
     chain_spec: &ChainSpec,
     timestamp: u64,
-    withdrawals: Withdrawals,
-) -> Result<WithdrawalsOutcome, DB::Error>
+    withdrawals: &Withdrawals,
+) -> Result<Option<B256>, DB::Error>
 where
     DB: Database,
     ChainSpec: EthereumHardforks,
 {
     if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
-        return Ok(WithdrawalsOutcome::pre_shanghai())
+        return Ok(None)
     }
 
     if withdrawals.is_empty() {
-        return Ok(WithdrawalsOutcome::empty())
+        return Ok(Some(EMPTY_WITHDRAWALS))
     }
 
     let balance_increments =
-        post_block_withdrawals_balance_increments(chain_spec, timestamp, &withdrawals);
+        post_block_withdrawals_balance_increments(chain_spec, timestamp, withdrawals);
 
     db.increment_balances(balance_increments)?;
 
-    let withdrawals_root = proofs::calculate_withdrawals_root(&withdrawals);
-
-    // calculate withdrawals root
-    Ok(WithdrawalsOutcome {
-        withdrawals: Some(withdrawals),
-        withdrawals_root: Some(withdrawals_root),
-    })
+    Ok(Some(proofs::calculate_withdrawals_root(withdrawals)))
 }
 
 /// Checks if the new payload is better than the current best.

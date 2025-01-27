@@ -15,7 +15,7 @@ use reth::{
     tasks::TaskManager,
 };
 use reth_chainspec::ChainSpec;
-use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
+use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig, primitives::SignedTransaction};
 use reth_node_ethereum::EthereumNode;
 
 #[tokio::main]
@@ -50,8 +50,8 @@ async fn main() -> eyre::Result<()> {
 
     let head = notifications.next().await.unwrap();
 
-    let tx = head.tip().transactions().next().unwrap();
-    assert_eq!(tx.hash(), hash);
+    let tx = &head.tip().body().transactions().next().unwrap();
+    assert_eq!(*tx.tx_hash(), hash);
     println!("mined transaction: {hash}");
     Ok(())
 }

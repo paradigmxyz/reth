@@ -8,21 +8,20 @@ use alloy_rpc_types_mev::{
     SimBundleOverrides, SimBundleResponse, Validity,
 };
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_primitives::TransactionSigned;
-use reth_provider::{ChainSpecProvider, HeaderProvider};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
+use reth_provider::ProviderTx;
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
-    FromEthApiError, RpcNodeCore,
+    FromEthApiError,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_tasks::pool::BlockingTaskGuard;
+use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::{
     db::CacheDB,
-    primitives::{Address, EnvWithHandlerCfg, ResultAndState, SpecId, TxEnv},
+    primitives::{Address, ResultAndState},
     DatabaseCommit, DatabaseRef,
 };
 use std::{sync::Arc, time::Duration};
@@ -45,9 +44,9 @@ const SBUNDLE_PAYOUT_MAX_COST: u64 = 30_000;
 
 /// A flattened representation of a bundle item containing transaction and associated metadata.
 #[derive(Clone, Debug)]
-pub struct FlattenedBundleItem {
+pub struct FlattenedBundleItem<T> {
     /// The signed transaction
-    pub tx: TransactionSigned,
+    pub tx: T,
     /// The address that signed the transaction
     pub signer: Address,
     /// Whether the transaction is allowed to revert
@@ -93,7 +92,7 @@ where
     fn parse_and_flatten_bundle(
         &self,
         request: &SendBundleRequest,
-    ) -> Result<Vec<FlattenedBundleItem>, EthApiError> {
+    ) -> Result<Vec<FlattenedBundleItem<ProviderTx<Eth::Provider>>>, EthApiError> {
         let mut items = Vec::new();
 
         // Stack for processing bundles
@@ -170,10 +169,10 @@ where
             while idx < body.len() {
                 match &body[idx] {
                     BundleItem::Tx { tx, can_revert } => {
-                        let recovered_tx =
-                            recover_raw_transaction(tx.clone()).map_err(EthApiError::from)?;
-                        let (tx, signer) = recovered_tx.into_components();
-                        let tx = tx.into_transaction();
+                        let recovered_tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?;
+                        let (tx, signer) = recovered_tx.into_parts();
+                        let tx: PoolConsensusTx<Eth::Pool> =
+                            <Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus(tx);
 
                         let refund_percent =
                             validity.as_ref().and_then(|v| v.refund.as_ref()).and_then(|refunds| {
@@ -243,42 +242,27 @@ where
         let flattened_bundle = self.parse_and_flatten_bundle(&request)?;
 
         let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
-        let (cfg, mut block_env, current_block) = self.eth_api().evm_env_at(block_id).await?;
-
-        let parent_header = RpcNodeCore::provider(&self.inner.eth_api)
-            .header_by_number(block_env.number.saturating_to::<u64>())
-            .map_err(EthApiError::from_eth_err)? // Explicitly map the error
-            .ok_or_else(|| {
-                EthApiError::HeaderNotFound((block_env.number.saturating_to::<u64>()).into())
-            })?;
+        let (mut evm_env, current_block) = self.eth_api().evm_env_at(block_id).await?;
 
         // apply overrides
         if let Some(block_number) = block_number {
-            block_env.number = U256::from(block_number);
+            evm_env.block_env.number = U256::from(block_number);
         }
 
         if let Some(coinbase) = coinbase {
-            block_env.coinbase = coinbase;
+            evm_env.block_env.coinbase = coinbase;
         }
 
         if let Some(timestamp) = timestamp {
-            block_env.timestamp = U256::from(timestamp);
+            evm_env.block_env.timestamp = U256::from(timestamp);
         }
 
         if let Some(gas_limit) = gas_limit {
-            block_env.gas_limit = U256::from(gas_limit);
+            evm_env.block_env.gas_limit = U256::from(gas_limit);
         }
 
         if let Some(base_fee) = base_fee {
-            block_env.basefee = U256::from(base_fee);
-        } else if cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON) {
-            if let Some(base_fee) = parent_header.next_block_base_fee(
-                RpcNodeCore::provider(&self.inner.eth_api)
-                    .chain_spec()
-                    .base_fee_params_at_block(block_env.number.saturating_to::<u64>()),
-            ) {
-                block_env.basefee = U256::from(base_fee);
-            }
+            evm_env.block_env.basefee = U256::from(base_fee);
         }
 
         let eth_api = self.inner.eth_api.clone();
@@ -289,9 +273,8 @@ where
             .spawn_with_state_at_block(current_block, move |state| {
                 // Setup environment
                 let current_block_number = current_block.as_u64().unwrap();
-                let coinbase = block_env.coinbase;
-                let basefee = block_env.basefee;
-                let env = EnvWithHandlerCfg::new_with_cfg_env(cfg, block_env, TxEnv::default());
+                let coinbase = evm_env.block_env.coinbase;
+                let basefee = evm_env.block_env.basefee;
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
                 let initial_coinbase_balance = DatabaseRef::basic_ref(&db, coinbase)
@@ -305,7 +288,7 @@ where
                 let mut refundable_value = U256::ZERO;
                 let mut body_logs: Vec<SimBundleLogs> = Vec::new();
 
-                let mut evm = eth_api.evm_config().evm_with_env(db, env);
+                let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
 
                 for item in &flattened_bundle {
                     // Check inclusion constraints
@@ -321,10 +304,10 @@ where
                         )
                         .into());
                     }
-                    eth_api.evm_config().fill_tx_env(evm.tx_mut(), &item.tx, item.signer);
 
-                    let ResultAndState { result, state } =
-                        evm.transact().map_err(EthApiError::from_eth_err)?;
+                    let ResultAndState { result, state } = evm
+                        .transact(eth_api.evm_config().tx_env(&item.tx, item.signer))
+                        .map_err(EthApiError::from_eth_err)?;
 
                     if !result.is_success() && !item.can_revert {
                         return Err(EthApiError::InvalidParams(
@@ -363,7 +346,7 @@ where
                     }
 
                     // Apply state changes
-                    evm.context.evm.db.commit(state);
+                    evm.db_mut().commit(state);
                 }
 
                 // After processing all transactions, process refunds

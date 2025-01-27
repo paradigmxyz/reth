@@ -162,7 +162,6 @@ pub fn block_id_to_str(id: BlockId) -> String {
                 format!("hash {}", h.block_hash)
             }
         }
-        BlockId::Number(n) if n.is_number() => format!("number {n}"),
         BlockId::Number(n) => format!("{n}"),
     }
 }

@@ -67,7 +67,7 @@ pub fn maybe_generate_tests(
                     use rand::RngCore;
 
                     // get random instance of type
-                    let mut raw = [0u8; 1024];
+                    let mut raw = vec![0u8; 1024];
                     rand::thread_rng().fill_bytes(&mut raw);
                     let mut unstructured = arbitrary::Unstructured::new(&raw[..]);
                     let val: Result<super::#type_ident, _> = arbitrary::Arbitrary::arbitrary(&mut unstructured);

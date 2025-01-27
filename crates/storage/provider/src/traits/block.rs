@@ -1,73 +1,93 @@
-use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use reth_db_api::models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
-use reth_primitives::SealedBlockWithSenders;
+use reth_node_types::NodePrimitives;
+use reth_primitives::RecoveredBlock;
+use reth_primitives_traits::Block;
+use reth_storage_api::{NodePrimitivesProvider, StorageLocation};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
-use std::ops::RangeInclusive;
 
-/// An enum that represents the storage location for a piece of data.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum StorageLocation {
-    /// Write only to static files.
-    StaticFiles,
-    /// Write only to the database.
-    Database,
-    /// Write to both the database and static files.
-    Both,
-}
-
-impl StorageLocation {
-    /// Returns true if the storage location includes static files.
-    pub const fn static_files(&self) -> bool {
-        matches!(self, Self::StaticFiles | Self::Both)
-    }
-
-    /// Returns true if the storage location includes the database.
-    pub const fn database(&self) -> bool {
-        matches!(self, Self::Database | Self::Both)
-    }
-}
-
-/// BlockExecution Writer
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait BlockExecutionWriter: BlockWriter + Send + Sync {
-    /// Take range of blocks and its execution result
-    fn take_block_and_execution_range(
+/// `BlockExecution` Writer
+pub trait BlockExecutionWriter:
+    NodePrimitivesProvider<Primitives: NodePrimitives<Block = Self::Block>> + BlockWriter + Send + Sync
+{
+    /// Take all of the blocks above the provided number and their execution result
+    ///
+    /// The passed block number will stay in the database.
+    ///
+    /// Accepts [`StorageLocation`] specifying from where should transactions and receipts be
+    /// removed.
+    fn take_block_and_execution_above(
         &self,
-        range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Chain>;
+        block: BlockNumber,
+        remove_from: StorageLocation,
+    ) -> ProviderResult<Chain<Self::Primitives>>;
 
-    /// Remove range of blocks and its execution result
-    fn remove_block_and_execution_range(
+    /// Remove all of the blocks above the provided number and their execution result
+    ///
+    /// The passed block number will stay in the database.
+    ///
+    /// Accepts [`StorageLocation`] specifying from where should transactions and receipts be
+    /// removed.
+    fn remove_block_and_execution_above(
         &self,
-        range: RangeInclusive<BlockNumber>,
+        block: BlockNumber,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()>;
+}
+
+impl<T: BlockExecutionWriter> BlockExecutionWriter for &T {
+    fn take_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+        remove_from: StorageLocation,
+    ) -> ProviderResult<Chain<Self::Primitives>> {
+        (*self).take_block_and_execution_above(block, remove_from)
+    }
+
+    fn remove_block_and_execution_above(
+        &self,
+        block: BlockNumber,
+        remove_from: StorageLocation,
+    ) -> ProviderResult<()> {
+        (*self).remove_block_and_execution_above(block, remove_from)
+    }
 }
 
 /// This just receives state, or [`ExecutionOutcome`], from the provider
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StateReader: Send + Sync {
+    /// Receipt type in [`ExecutionOutcome`].
+    type Receipt: Send + Sync;
+
     /// Get the [`ExecutionOutcome`] for the given block
-    fn get_state(&self, block: BlockNumber) -> ProviderResult<Option<ExecutionOutcome>>;
+    fn get_state(
+        &self,
+        block: BlockNumber,
+    ) -> ProviderResult<Option<ExecutionOutcome<Self::Receipt>>>;
 }
 
 /// Block Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockWriter: Send + Sync {
     /// The body this writer can write.
-    type Body: Send + Sync;
+    type Block: Block;
+    /// The receipt type for [`ExecutionOutcome`].
+    type Receipt: Send + Sync;
 
     /// Insert full block and make it canonical. Parent tx num and transition id is taken from
     /// parent block in database.
     ///
     /// Return [StoredBlockBodyIndices] that contains indices of the first and last transactions and
     /// transition in the block.
+    ///
+    /// Accepts [`StorageLocation`] value which specifies where transactions and headers should be
+    /// written.
     fn insert_block(
         &self,
-        block: SealedBlockWithSenders<Header, Self::Body>,
-        write_transactions_to: StorageLocation,
+        block: RecoveredBlock<Self::Block>,
+        write_to: StorageLocation,
     ) -> ProviderResult<StoredBlockBodyIndices>;
 
     /// Appends a batch of block bodies extending the canonical chain. This is invoked during
@@ -77,8 +97,24 @@ pub trait BlockWriter: Send + Sync {
     /// Bodies are passed as [`Option`]s, if body is `None` the corresponding block is empty.
     fn append_block_bodies(
         &self,
-        bodies: Vec<(BlockNumber, Option<Self::Body>)>,
-        write_transactions_to: StorageLocation,
+        bodies: Vec<(BlockNumber, Option<<Self::Block as Block>::Body>)>,
+        write_to: StorageLocation,
+    ) -> ProviderResult<()>;
+
+    /// Removes all blocks above the given block number from the database.
+    ///
+    /// Note: This does not remove state or execution data.
+    fn remove_blocks_above(
+        &self,
+        block: BlockNumber,
+        remove_from: StorageLocation,
+    ) -> ProviderResult<()>;
+
+    /// Removes all block bodies above the given block number from the database.
+    fn remove_bodies_above(
+        &self,
+        block: BlockNumber,
+        remove_from: StorageLocation,
     ) -> ProviderResult<()>;
 
     /// Appends a batch of sealed blocks to the blockchain, including sender information, and
@@ -89,7 +125,7 @@ pub trait BlockWriter: Send + Sync {
     ///
     /// # Parameters
     ///
-    /// - `blocks`: Vector of `SealedBlockWithSenders` instances to append.
+    /// - `blocks`: Vector of `RecoveredBlock` instances to append.
     /// - `state`: Post-state information to update after appending.
     ///
     /// # Returns
@@ -97,8 +133,8 @@ pub trait BlockWriter: Send + Sync {
     /// Returns `Ok(())` on success, or an error if any operation fails.
     fn append_blocks_with_state(
         &self,
-        blocks: Vec<SealedBlockWithSenders<Header, Self::Body>>,
-        execution_outcome: ExecutionOutcome,
+        blocks: Vec<RecoveredBlock<Self::Block>>,
+        execution_outcome: &ExecutionOutcome<Self::Receipt>,
         hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,
     ) -> ProviderResult<()>;

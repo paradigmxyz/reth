@@ -7,7 +7,7 @@
 //! cargo run --release -p network-txpool -- node
 //! ```
 
-use reth_network::{config::rng_secret_key, NetworkConfig, NetworkManager};
+use reth_network::{config::rng_secret_key, EthNetworkPrimitives, NetworkConfig, NetworkManager};
 use reth_provider::test_utils::NoopProvider;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, validate::ValidTransaction, CoinbaseTipOrdering,
@@ -34,7 +34,9 @@ async fn main() -> eyre::Result<()> {
     let local_key = rng_secret_key();
 
     // Configure the network
-    let config = NetworkConfig::builder(local_key).mainnet_boot_nodes().build(client);
+    let config = NetworkConfig::<_, EthNetworkPrimitives>::builder(local_key)
+        .mainnet_boot_nodes()
+        .build(client);
     let transactions_manager_config = config.transactions_manager_config.clone();
     // create the network instance
     let (_handle, network, txpool, _) = NetworkManager::builder(config)

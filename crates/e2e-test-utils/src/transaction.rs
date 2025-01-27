@@ -56,7 +56,8 @@ impl TransactionTestContext {
         delegate_to: Address,
         wallet: PrivateKeySigner,
     ) -> TxEnvelope {
-        let authorization = Authorization { chain_id, address: delegate_to, nonce: 0 };
+        let authorization =
+            Authorization { chain_id: U256::from(chain_id), address: delegate_to, nonce: 0 };
         let signature = wallet
             .sign_hash_sync(&authorization.signature_hash())
             .expect("could not sign authorization");

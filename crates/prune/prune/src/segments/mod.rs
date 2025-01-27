@@ -3,12 +3,10 @@ mod set;
 mod static_file;
 mod user;
 
-use crate::PrunerError;
+use crate::{PruneLimiter, PrunerError};
 use alloy_primitives::{BlockNumber, TxNumber};
 use reth_provider::{errors::provider::ProviderResult, BlockReader, PruneCheckpointWriter};
-use reth_prune_types::{
-    PruneCheckpoint, PruneLimiter, PruneMode, PrunePurpose, PruneSegment, SegmentOutput,
-};
+use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput};
 pub use set::SegmentSet;
 pub use static_file::{
     Headers as StaticFileHeaders, Receipts as StaticFileReceipts,
@@ -149,7 +147,7 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
     use reth_provider::{
-        providers::BlockchainProvider2,
+        providers::BlockchainProvider,
         test_utils::{create_test_provider_factory, MockEthProvider},
     };
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
@@ -193,14 +191,14 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_historical_block(
-                    block.clone().seal_with_senders().expect("failed to seal block with senders"),
+                    block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
         provider_rw.commit().expect("failed to commit");
 
         // Create a new provider
-        let provider = BlockchainProvider2::new(factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
 
         // Since there are no transactions, expected None
         let range = input.get_next_tx_num_range(&provider).expect("Expected range");
@@ -231,21 +229,20 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_historical_block(
-                    block.clone().seal_with_senders().expect("failed to seal block with senders"),
+                    block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
         provider_rw.commit().expect("failed to commit");
 
         // Create a new provider
-        let provider = BlockchainProvider2::new(factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
 
         // Get the next tx number range
         let range = input.get_next_tx_num_range(&provider).expect("Expected range").unwrap();
 
         // Calculate the total number of transactions
-        let num_txs =
-            blocks.iter().map(|block| block.body.transactions().count() as u64).sum::<u64>();
+        let num_txs = blocks.iter().map(|block| block.transaction_count() as u64).sum::<u64>();
 
         assert_eq!(range, 0..=num_txs - 1);
     }
@@ -278,21 +275,20 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_historical_block(
-                    block.clone().seal_with_senders().expect("failed to seal block with senders"),
+                    block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
         provider_rw.commit().expect("failed to commit");
 
         // Create a new provider
-        let provider = BlockchainProvider2::new(factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
 
         // Fetch the range and check if it is correct
         let range = input.get_next_tx_num_range(&provider).expect("Expected range").unwrap();
 
         // Calculate the total number of transactions
-        let num_txs =
-            blocks.iter().map(|block| block.body.transactions().count() as u64).sum::<u64>();
+        let num_txs = blocks.iter().map(|block| block.transaction_count() as u64).sum::<u64>();
 
         assert_eq!(range, 0..=num_txs - 1,);
     }
@@ -315,19 +311,18 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_historical_block(
-                    block.clone().seal_with_senders().expect("failed to seal block with senders"),
+                    block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
         provider_rw.commit().expect("failed to commit");
 
         // Create a new provider
-        let provider = BlockchainProvider2::new(factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
 
         // Get the last tx number
         // Calculate the total number of transactions
-        let num_txs =
-            blocks.iter().map(|block| block.body.transactions().count() as u64).sum::<u64>();
+        let num_txs = blocks.iter().map(|block| block.transaction_count() as u64).sum::<u64>();
         let max_range = num_txs - 1;
 
         // Create a prune input with a previous checkpoint that is the last tx number

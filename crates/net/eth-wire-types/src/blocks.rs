@@ -2,6 +2,7 @@
 //! types.
 
 use crate::HeadersDirection;
+use alloc::vec::Vec;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
@@ -75,12 +76,12 @@ impl From<Vec<B256>> for GetBlockBodies {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct BlockBodies<B = reth_primitives::BlockBody>(
+pub struct BlockBodies<B = reth_ethereum_primitives::BlockBody>(
     /// The requested block bodies, each of which should correspond to a hash in the request.
     pub Vec<B>,
 );
 
-generate_tests!(#[rlp, 16] BlockBodies<reth_primitives::BlockBody>, EthBlockBodiesTests);
+generate_tests!(#[rlp, 16] BlockBodies<reth_ethereum_primitives::BlockBody>, EthBlockBodiesTests);
 
 impl<B> From<Vec<B>> for BlockBodies<B> {
     fn from(bodies: Vec<B>) -> Self {
@@ -98,7 +99,7 @@ mod tests {
     use alloy_eips::BlockHashOrNumber;
     use alloy_primitives::{hex, PrimitiveSignature as Signature, TxKind, U256};
     use alloy_rlp::{Decodable, Encodable};
-    use reth_primitives::{BlockBody, Transaction, TransactionSigned};
+    use reth_ethereum_primitives::{BlockBody, Transaction, TransactionSigned};
     use std::str::FromStr;
 
     #[test]
@@ -258,7 +259,7 @@ mod tests {
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
-                    requests_hash: None
+                    requests_hash: None,
                 },
             ]),
         }.encode(&mut data);
@@ -293,7 +294,7 @@ mod tests {
                     blob_gas_used: None,
                     excess_blob_gas: None,
                     parent_beacon_block_root: None,
-                    requests_hash: None
+                    requests_hash: None,
                 },
             ]),
         };
@@ -342,7 +343,7 @@ mod tests {
             message: BlockBodies(vec![
                 BlockBody {
                     transactions: vec![
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
+                        TransactionSigned::new_unhashed(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
                             nonce: 0x8u64,
                             gas_price: 0x4a817c808,
@@ -356,7 +357,7 @@ mod tests {
                                 false,
                             ),
                         ),
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(TxLegacy {
+                        TransactionSigned::new_unhashed(Transaction::Legacy(TxLegacy {
                             chain_id: Some(1),
                             nonce: 0x9u64,
                             gas_price: 0x4a817c809,
@@ -393,7 +394,7 @@ mod tests {
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
-                            requests_hash: None
+                            requests_hash: None,
                         },
                     ],
                     withdrawals: None,
@@ -413,7 +414,7 @@ mod tests {
             message: BlockBodies(vec![
                 BlockBody {
                     transactions: vec![
-                        TransactionSigned::from_transaction_and_signature(Transaction::Legacy(
+                        TransactionSigned::new_unhashed(Transaction::Legacy(
                             TxLegacy {
                                 chain_id: Some(1),
                                 nonce: 0x8u64,
@@ -423,13 +424,13 @@ mod tests {
                                 value: U256::from(0x200u64),
                                 input: Default::default(),
                             }),
-                            Signature::new(
+                                                        Signature::new(
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c12").unwrap(),
                                 U256::from_str("0x64b1702d9298fee62dfeccc57d322a463ad55ca201256d01f62b45b2e1c21c10").unwrap(),
                                 false,
                             ),
                         ),
-                        TransactionSigned::from_transaction_and_signature(
+                        TransactionSigned::new_unhashed(
                             Transaction::Legacy(TxLegacy {
                                 chain_id: Some(1),
                                 nonce: 0x9u64,
@@ -468,7 +469,7 @@ mod tests {
                             blob_gas_used: None,
                             excess_blob_gas: None,
                             parent_beacon_block_root: None,
-                            requests_hash: None
+                            requests_hash: None,
                         },
                     ],
                     withdrawals: None,

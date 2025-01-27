@@ -1,12 +1,12 @@
 //! Contains RPC handler implementations specific to state.
 
 use reth_chainspec::EthereumHardforks;
-use reth_provider::{ChainSpecProvider, StateProviderFactory};
+use reth_provider::{BlockReader, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
 use reth_rpc_eth_api::{
     helpers::{EthState, LoadState, SpawnBlocking},
-    RpcNodeCore,
+    RpcNodeCoreExt,
 };
 
 use crate::EthApi;
@@ -14,17 +14,22 @@ use crate::EthApi;
 impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadState + SpawnBlocking,
+    Provider: BlockReader,
 {
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_proof_window()
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig> where
-    Self: RpcNodeCore<
-        Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Self: RpcNodeCoreExt<
+        Provider: BlockReader
+                      + StateProviderFactory
+                      + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool,
-    >
+    >,
+    Provider: BlockReader,
 {
 }
 
@@ -52,19 +57,18 @@ mod tests {
         let pool = testing_pool();
         let evm_config = EthEvmConfig::new(MAINNET.clone());
 
-        let cache =
-            EthStateCache::spawn(NoopProvider::default(), Default::default(), evm_config.clone());
+        let cache = EthStateCache::spawn(NoopProvider::default(), Default::default());
         EthApi::new(
             NoopProvider::default(),
             pool,
             NoopNetwork::default(),
             cache.clone(),
-            GasPriceOracle::new(NoopProvider::default(), Default::default(), cache.clone()),
+            GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
             DEFAULT_MAX_SIMULATE_BLOCKS,
             DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
-            FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
+            FeeHistoryCache::new(FeeHistoryCacheConfig::default()),
             evm_config,
             DEFAULT_PROOF_PERMITS,
         )
@@ -79,19 +83,18 @@ mod tests {
         let evm_config = EthEvmConfig::new(mock_provider.chain_spec());
         mock_provider.extend_accounts(accounts);
 
-        let cache =
-            EthStateCache::spawn(mock_provider.clone(), Default::default(), evm_config.clone());
+        let cache = EthStateCache::spawn(mock_provider.clone(), Default::default());
         EthApi::new(
             mock_provider.clone(),
             pool,
             (),
             cache.clone(),
-            GasPriceOracle::new(mock_provider, Default::default(), cache.clone()),
+            GasPriceOracle::new(mock_provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
             DEFAULT_MAX_SIMULATE_BLOCKS,
             DEFAULT_ETH_PROOF_WINDOW + 1,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
-            FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
+            FeeHistoryCache::new(FeeHistoryCacheConfig::default()),
             evm_config,
             DEFAULT_PROOF_PERMITS,
         )

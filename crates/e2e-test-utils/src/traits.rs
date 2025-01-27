@@ -1,6 +1,7 @@
-use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV4;
+use alloy_rpc_types_engine::{
+    ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4, ExecutionPayloadV3,
+};
 use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
-use reth::rpc::types::engine::{ExecutionPayloadEnvelopeV3, ExecutionPayloadV3};
 
 /// The execution payload envelope type.
 pub trait PayloadEnvelopeExt: Send + Sync + std::fmt::Debug {

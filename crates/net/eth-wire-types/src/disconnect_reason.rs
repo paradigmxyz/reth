@@ -1,5 +1,6 @@
 //! `RLPx` disconnect reason sent to/received from peer
 
+use alloc::vec;
 use alloy_primitives::bytes::{Buf, BufMut};
 use alloy_rlp::{Decodable, Encodable, Header};
 use derive_more::Display;

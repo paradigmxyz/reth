@@ -1,7 +1,5 @@
 //! Connection tests
 
-use std::{net::SocketAddr, time::Duration};
-
 use alloy_node_bindings::Geth;
 use alloy_primitives::map::HashSet;
 use alloy_provider::{ext::AdminApi, ProviderBuilder};
@@ -15,15 +13,19 @@ use reth_network::{
     BlockDownloaderProvider, NetworkConfigBuilder, NetworkEvent, NetworkEventListenerProvider,
     NetworkManager, PeersConfig,
 };
-use reth_network_api::{NetworkInfo, Peers, PeersInfo};
+use reth_network_api::{
+    events::{PeerEvent, SessionInfo},
+    NetworkInfo, Peers, PeersInfo,
+};
 use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     sync::{NetworkSyncUpdater, SyncState},
 };
 use reth_network_peers::{mainnet_nodes, NodeRecord, TrustedPeer};
-use reth_provider::test_utils::NoopProvider;
+use reth_storage_api::noop::NoopProvider;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
+use std::{net::SocketAddr, time::Duration};
 use tokio::task;
 use url::Host;
 
@@ -59,13 +61,15 @@ async fn test_establish_connections() {
         let mut established = listener0.take(4);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionClosed { .. } | NetworkEvent::PeerRemoved(_) => {
+                NetworkEvent::Peer(PeerEvent::SessionClosed { .. } | PeerEvent::PeerRemoved(_)) => {
                     panic!("unexpected event")
                 }
-                NetworkEvent::SessionEstablished { peer_id, .. } => {
-                    assert!(expected_connections.remove(&peer_id))
+                NetworkEvent::ActivePeerSession { info, .. } |
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+                    let SessionInfo { peer_id, .. } = info;
+                    assert!(expected_connections.remove(&peer_id));
                 }
-                NetworkEvent::PeerAdded(peer_id) => {
+                NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id)) => {
                     assert!(expected_peers.remove(&peer_id))
                 }
             }
@@ -94,7 +98,7 @@ async fn test_already_connected() {
     let p1 = PeerConfig::default();
 
     // initialize two peers with the same identifier
-    let p2 = PeerConfig::with_secret_key(client, secret_key);
+    let p2 = PeerConfig::with_secret_key(client.clone(), secret_key);
     let p3 = PeerConfig::with_secret_key(client, secret_key);
 
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
@@ -138,7 +142,7 @@ async fn test_get_peer() {
     let client = NoopProvider::default();
 
     let p1 = PeerConfig::default();
-    let p2 = PeerConfig::with_secret_key(client, secret_key);
+    let p2 = PeerConfig::with_secret_key(client.clone(), secret_key);
     let p3 = PeerConfig::with_secret_key(client, secret_key_1);
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
 
@@ -171,7 +175,7 @@ async fn test_get_peer_by_id() {
     let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
     let client = NoopProvider::default();
     let p1 = PeerConfig::default();
-    let p2 = PeerConfig::with_secret_key(client, secret_key);
+    let p2 = PeerConfig::with_secret_key(client.clone(), secret_key);
     let p3 = PeerConfig::with_secret_key(client, secret_key_1);
 
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
@@ -227,7 +231,9 @@ async fn test_connect_with_builder() {
     discv4.add_boot_nodes(mainnet_nodes());
 
     let client = NoopProvider::default();
-    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
+    let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
+        .discovery(discv4)
+        .build(client.clone());
     let (handle, network, _, requests) = NetworkManager::new(config)
         .await
         .unwrap()
@@ -263,7 +269,9 @@ async fn test_connect_to_trusted_peer() {
     let discv4 = Discv4Config::builder();
 
     let client = NoopProvider::default();
-    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
+    let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
+        .discovery(discv4)
+        .build(client.clone());
     let transactions_manager_config = config.transactions_manager_config.clone();
     let (handle, network, transactions, requests) = NetworkManager::new(config)
         .await
@@ -465,7 +473,7 @@ async fn test_geth_disconnect() {
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-        let config = NetworkConfigBuilder::new(secret_key)
+        let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
             .listener_port(0)
             .disable_discovery()
             .build(NoopProvider::default());
@@ -496,11 +504,16 @@ async fn test_geth_disconnect() {
         handle.add_peer(geth_peer_id, geth_socket);
 
         match events.next().await {
-            Some(NetworkEvent::PeerAdded(peer_id)) => assert_eq!(peer_id, geth_peer_id),
+            Some(NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id))) => {
+                assert_eq!(peer_id, geth_peer_id)
+            }
             _ => panic!("Expected a peer added event"),
         }
 
-        if let Some(NetworkEvent::SessionEstablished { peer_id, .. }) = events.next().await {
+        if let Some(NetworkEvent::Peer(PeerEvent::SessionEstablished(session_info))) =
+            events.next().await
+        {
+            let SessionInfo { peer_id, .. } = session_info;
             assert_eq!(peer_id, geth_peer_id);
         } else {
             panic!("Expected a session established event");
@@ -510,7 +523,9 @@ async fn test_geth_disconnect() {
         handle.disconnect_peer(geth_peer_id);
 
         // wait for a disconnect from geth
-        if let Some(NetworkEvent::SessionClosed { peer_id, .. }) = events.next().await {
+        if let Some(NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. })) =
+            events.next().await
+        {
             assert_eq!(peer_id, geth_peer_id);
         } else {
             panic!("Expected a session closed event");
@@ -682,7 +697,10 @@ async fn test_rejected_by_already_connect() {
     assert_eq!(handle.num_connected_peers(), 2);
 }
 
-async fn new_random_peer(max_in_bound: usize, trusted_nodes: Vec<TrustedPeer>) -> NetworkManager {
+async fn new_random_peer(
+    max_in_bound: usize,
+    trusted_nodes: Vec<TrustedPeer>,
+) -> NetworkManager<EthNetworkPrimitives> {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let peers_config =
         PeersConfig::default().with_max_inbound(max_in_bound).with_trusted_nodes(trusted_nodes);

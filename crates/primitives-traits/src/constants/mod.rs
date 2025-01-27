@@ -10,6 +10,9 @@ pub const RETH_CLIENT_VERSION: &str = concat!("reth/v", env!("CARGO_PKG_VERSION"
 /// Minimum gas limit allowed for transactions.
 pub const MINIMUM_GAS_LIMIT: u64 = 5000;
 
+/// The bound divisor of the gas limit, used in update calculations.
+pub const GAS_LIMIT_BOUND_DIVISOR: u64 = 1024;
+
 /// The number of blocks to unwind during a reorg that already became a part of canonical chain.
 ///
 /// In reality, the node can end up in this particular situation very rarely. It would happen only

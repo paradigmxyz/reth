@@ -477,7 +477,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_poll_fetcher() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher: StateFetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
 
         poll_fn(move |cx| {
             assert!(fetcher.poll(cx).is_pending());
@@ -497,7 +498,8 @@ mod tests {
     #[tokio::test]
     async fn test_peer_rotation() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher: StateFetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         // Add a few random peers
         let peer1 = B512::random();
         let peer2 = B512::random();
@@ -520,7 +522,8 @@ mod tests {
     #[tokio::test]
     async fn test_peer_prioritization() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher: StateFetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         // Add a few random peers
         let peer1 = B512::random();
         let peer2 = B512::random();
@@ -545,7 +548,8 @@ mod tests {
     #[tokio::test]
     async fn test_on_block_headers_response() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher: StateFetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         let peer_id = B512::random();
 
         assert_eq!(fetcher.on_block_headers_response(peer_id, Ok(vec![Header::default()])), None);
@@ -575,7 +579,8 @@ mod tests {
     #[tokio::test]
     async fn test_header_response_outcome() {
         let manager = PeersManager::new(PeersConfig::default());
-        let mut fetcher: StateFetcher = StateFetcher::new(manager.handle(), Default::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
         let peer_id = B512::random();
 
         let request_pair = || {

@@ -7,6 +7,7 @@ use crate::{
     metrics::PayloadBuilderServiceMetrics, traits::PayloadJobGenerator, KeepPayloadJobAlive,
     PayloadJob,
 };
+use alloy_consensus::BlockHeader;
 use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
@@ -14,6 +15,7 @@ use reth_payload_builder_primitives::{
     Events, PayloadBuilder, PayloadBuilderError, PayloadEvents, PayloadStoreExt,
 };
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind, PayloadTypes};
+use reth_primitives_traits::NodePrimitives;
 use std::{
     fmt,
     future::Future,
@@ -283,7 +285,7 @@ where
             .find(|(_, job_id)| *job_id == id)
             .map(|(j, _)| j.best_payload().map(|p| p.into()));
         if let Some(Ok(ref best)) = res {
-            self.metrics.set_best_revenue(best.block().number, f64::from(best.fees()));
+            self.metrics.set_best_revenue(best.block().number(), f64::from(best.fees()));
         }
 
         res
@@ -317,7 +319,7 @@ where
                 payload_events.send(Events::BuiltPayload(payload.clone().into())).ok();
 
                 resolved_metrics
-                    .set_resolved_revenue(payload.block().number, f64::from(payload.fees()));
+                    .set_resolved_revenue(payload.block().number(), f64::from(payload.fees()));
             }
             res.map(|p| p.into())
         };
@@ -352,12 +354,13 @@ where
     }
 }
 
-impl<Gen, St, T> Future for PayloadBuilderService<Gen, St, T>
+impl<Gen, St, T, N> Future for PayloadBuilderService<Gen, St, T>
 where
     T: PayloadTypes,
+    N: NodePrimitives,
     Gen: PayloadJobGenerator + Unpin + 'static,
     <Gen as PayloadJobGenerator>::Job: Unpin + 'static,
-    St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
+    St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Gen::Job: PayloadJob<PayloadAttributes = T::PayloadBuilderAttributes>,
     <Gen::Job as PayloadJob>::BuiltPayload: Into<T::BuiltPayload>,
 {

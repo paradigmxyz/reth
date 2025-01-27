@@ -9,37 +9,35 @@ use crate::{
 };
 use alloy_primitives::bytes::Bytes;
 use derive_more::{Deref, DerefMut};
-use reth_eth_wire_types::{EthMessage, EthNetworkPrimitives, NetworkPrimitives};
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,
     collections::{BTreeSet, HashMap},
 };
 
-/// A Capability message consisting of the message-id and the payload
+/// A Capability message consisting of the message-id and the payload.
 #[derive(Debug, Clone, Eq, PartialEq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RawCapabilityMessage {
     /// Identifier of the message.
     pub id: usize,
-    /// Actual payload
+    /// Actual __encoded__ payload
     pub payload: Bytes,
 }
 
-/// Various protocol related event types bubbled up from a session that need to be handled by the
-/// network.
-#[derive(Debug)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CapabilityMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
-    /// Eth sub-protocol message.
-    #[cfg_attr(
-        feature = "serde",
-        serde(bound = "EthMessage<N>: Serialize + serde::de::DeserializeOwned")
-    )]
-    Eth(EthMessage<N>),
-    /// Any other capability message.
-    Other(RawCapabilityMessage),
+impl RawCapabilityMessage {
+    /// Creates a new capability message with the given id and payload.
+    pub const fn new(id: usize, payload: Bytes) -> Self {
+        Self { id, payload }
+    }
+
+    /// Creates a raw message for the eth sub-protocol.
+    ///
+    /// Caller must ensure that the rlp encoded `payload` matches the given `id`.
+    ///
+    /// See also  [`EthMessage`](crate::EthMessage)
+    pub const fn eth(id: EthMessageID, payload: Bytes) -> Self {
+        Self::new(id as usize, payload)
+    }
 }
 
 /// This represents a shared capability, its version, and its message id offset.
@@ -319,7 +317,7 @@ pub fn shared_capability_offsets(
             // highest wins, others are ignored
             if shared_capabilities
                 .get(&peer_capability.name)
-                .map_or(true, |v| peer_capability.version > v.version)
+                .is_none_or(|v| peer_capability.version > v.version)
             {
                 shared_capabilities.insert(
                     peer_capability.name.clone(),

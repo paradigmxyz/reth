@@ -1,10 +1,10 @@
 #![allow(missing_docs)]
 mod utils;
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use pprof::criterion::{Output, PProfProfiler};
 use reth_libmdbx::{ffi::*, *};
-use std::ptr;
+use std::{hint::black_box, ptr};
 use utils::*;
 
 /// Benchmark of iterator sequential read performance.

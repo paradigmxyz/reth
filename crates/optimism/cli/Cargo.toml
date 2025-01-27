@@ -14,7 +14,7 @@ workspace = true
 reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-cli-commands.workspace = true
 reth-consensus.workspace = true
-reth-db = { workspace = true, features = ["mdbx"] }
+reth-db = { workspace = true, features = ["mdbx", "op"] }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-downloaders.workspace = true
@@ -26,6 +26,7 @@ reth-execution-types.workspace = true
 reth-node-core.workspace = true
 reth-optimism-node.workspace = true
 reth-primitives.workspace = true
+reth-fs-util.workspace = true
 
 # so jemalloc metrics can be included
 reth-node-metrics.workspace = true
@@ -35,11 +36,7 @@ reth-optimism-primitives.workspace = true
 reth-optimism-chainspec.workspace = true
 
 reth-chainspec.workspace = true
-reth-stages-types.workspace = true
 reth-node-events.workspace = true
-reth-network-p2p.workspace = true
-reth-errors.workspace = true
-reth-config.workspace = true
 reth-optimism-evm.workspace = true
 reth-cli.workspace = true
 reth-cli-runner.workspace = true
@@ -86,7 +83,6 @@ optimism = [
 	"alloy-consensus",
 	"dep:derive_more",
 	"dep:serde",
-	"reth-primitives/optimism",
 	"reth-optimism-evm/optimism",
 	"reth-provider/optimism",
 	"reth-node-core/optimism",
@@ -94,6 +90,7 @@ optimism = [
 	"reth-execution-types/optimism",
 	"reth-db/optimism",
 	"reth-db-api/optimism",
+    "reth-optimism-primitives/optimism",
 	"reth-downloaders/optimism"
 ]
 asm-keccak = [

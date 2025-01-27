@@ -15,7 +15,7 @@ workspace = true
 reth-mdbx-sys.workspace = true
 
 bitflags.workspace = true
-byteorder = "1"
+byteorder.workspace = true
 derive_more.workspace = true
 indexmap = "2"
 parking_lot.workspace = true

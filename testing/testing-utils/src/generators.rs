@@ -1,21 +1,26 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
-use alloy_consensus::{Header, Transaction as _, TxLegacy};
-use alloy_eips::eip4895::{Withdrawal, Withdrawals};
+use alloy_consensus::{Block, Header, SignableTransaction, Transaction as _, TxLegacy};
+use alloy_eips::{
+    eip1898::BlockWithParent,
+    eip4895::{Withdrawal, Withdrawals},
+    NumHash,
+};
 use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, U256};
 pub use rand::Rng;
 use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
-    proofs, sign_message, Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader,
-    StorageEntry, Transaction, TransactionSigned,
+    Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
+    TransactionSigned,
 };
+
+use reth_primitives_traits::{crypto::secp256k1::sign_message, proofs, Block as _};
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
-    collections::{hash_map::DefaultHasher, BTreeMap},
-    hash::Hasher,
+    collections::BTreeMap,
     ops::{Range, RangeInclusive},
 };
 
@@ -65,12 +70,17 @@ impl Default for BlockRangeParams {
 /// If `SEED` is not set, a random seed is used.
 pub fn rng() -> StdRng {
     if let Ok(seed) = std::env::var("SEED") {
-        let mut hasher = DefaultHasher::new();
-        hasher.write(seed.as_bytes());
-        StdRng::seed_from_u64(hasher.finish())
+        rng_with_seed(seed.as_bytes())
     } else {
         StdRng::from_rng(thread_rng()).expect("could not build rng")
     }
+}
+
+/// Returns a random number generator from a specific seed, as bytes.
+pub fn rng_with_seed(seed: &[u8]) -> StdRng {
+    let mut seed_bytes = [0u8; 32];
+    seed_bytes[..seed.len().min(32)].copy_from_slice(seed);
+    StdRng::from_seed(seed_bytes)
 }
 
 /// Generates a range of random [`SealedHeader`]s.
@@ -95,6 +105,15 @@ pub fn random_header_range<R: Rng>(
     headers
 }
 
+/// Generate a random [`BlockWithParent`].
+pub fn random_block_with_parent<R: Rng>(
+    rng: &mut R,
+    number: u64,
+    parent: Option<B256>,
+) -> BlockWithParent {
+    BlockWithParent { parent: parent.unwrap_or_default(), block: NumHash::new(number, rng.gen()) }
+}
+
 /// Generate a random [`SealedHeader`].
 ///
 /// The header is assumed to not be correct if validated.
@@ -106,7 +125,7 @@ pub fn random_header<R: Rng>(rng: &mut R, number: u64, parent: Option<B256>) -> 
         parent_hash: parent.unwrap_or_default(),
         ..Default::default()
     };
-    SealedHeader::seal(header)
+    SealedHeader::seal_slow(header)
 }
 
 /// Generates a random legacy [Transaction].
@@ -149,7 +168,7 @@ pub fn sign_tx_with_key_pair(key_pair: Keypair, tx: Transaction) -> TransactionS
     let signature =
         sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), tx.signature_hash()).unwrap();
 
-    TransactionSigned::from_transaction_and_signature(tx, signature)
+    TransactionSigned::new_unhashed(tx, signature)
 }
 
 /// Generates a set of [Keypair]s based on the desired count.
@@ -215,10 +234,11 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
         ..Default::default()
     };
 
-    SealedBlock {
-        header: SealedHeader::seal(header),
+    Block {
+        header,
         body: BlockBody { transactions, ommers, withdrawals: withdrawals.map(Withdrawals::new) },
     }
+    .seal_slow()
 }
 
 /// Generate a range of random blocks.
@@ -246,7 +266,7 @@ pub fn random_block_range<R: Rng>(
             idx,
             BlockParams {
                 parent: Some(
-                    blocks.last().map(|block: &SealedBlock| block.header.hash()).unwrap_or(parent),
+                    blocks.last().map(|block: &SealedBlock| block.hash()).unwrap_or(parent),
                 ),
                 tx_count: Some(tx_count),
                 ommers_count: None,
@@ -452,7 +472,10 @@ mod tests {
     use alloy_consensus::TxEip1559;
     use alloy_eips::eip2930::AccessList;
     use alloy_primitives::{hex, PrimitiveSignature as Signature};
-    use reth_primitives::public_key_to_address;
+    use reth_primitives_traits::{
+        crypto::secp256k1::{public_key_to_address, sign_message},
+        SignedTransaction,
+    };
     use std::str::FromStr;
 
     #[test]
@@ -479,7 +502,7 @@ mod tests {
                 sign_message(B256::from_slice(&key_pair.secret_bytes()[..]), signature_hash)
                     .unwrap();
 
-            let signed = TransactionSigned::from_transaction_and_signature(tx.clone(), signature);
+            let signed = TransactionSigned::new_unhashed(tx.clone(), signature);
             let recovered = signed.recover_signer().unwrap();
 
             let expected = public_key_to_address(key_pair.public_key());

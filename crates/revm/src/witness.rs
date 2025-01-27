@@ -45,7 +45,7 @@ impl ExecutionWitnessRecord {
             let hashed_address = keccak256(address);
             self.hashed_state
                 .accounts
-                .insert(hashed_address, account.account.as_ref().map(|a| a.info.clone().into()));
+                .insert(hashed_address, account.account.as_ref().map(|a| (&a.info).into()));
 
             let storage = self
                 .hashed_state

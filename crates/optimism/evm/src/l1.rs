@@ -2,12 +2,13 @@
 
 use crate::OpBlockExecutionError;
 use alloc::{string::ToString, sync::Arc};
+use alloy_consensus::Transaction;
 use alloy_primitives::{address, b256, hex, Address, Bytes, B256, U256};
 use reth_chainspec::ChainSpec;
 use reth_execution_errors::BlockExecutionError;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardfork;
-use reth_primitives::BlockBody;
+use reth_primitives_traits::BlockBody;
 use revm::{
     primitives::{Bytecode, HashMap, SpecId},
     DatabaseCommit, L1BlockInfo,
@@ -31,15 +32,22 @@ const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 /// transaction in the L2 block.
 ///
 /// Returns an error if the L1 info transaction is not found, if the block is empty.
-pub fn extract_l1_info(body: &BlockBody) -> Result<L1BlockInfo, OpBlockExecutionError> {
-    let l1_info_tx_data = body
-        .transactions
-        .first()
-        .ok_or_else(|| OpBlockExecutionError::L1BlockInfoError {
+pub fn extract_l1_info<B: BlockBody>(body: &B) -> Result<L1BlockInfo, OpBlockExecutionError> {
+    let l1_info_tx =
+        body.transactions().first().ok_or_else(|| OpBlockExecutionError::L1BlockInfoError {
             message: "could not find l1 block info tx in the L2 block".to_string(),
-        })
-        .map(|tx| tx.input())?;
+        })?;
+    extract_l1_info_from_tx(l1_info_tx)
+}
 
+/// Extracts the [`L1BlockInfo`] from the the L1 info transaction (first transaction) in the L2
+/// block.
+///
+/// Returns an error if the calldata is shorter than 4 bytes.
+pub fn extract_l1_info_from_tx<T: Transaction>(
+    tx: &T,
+) -> Result<L1BlockInfo, OpBlockExecutionError> {
+    let l1_info_tx_data = tx.input();
     if l1_info_tx_data.len() < 4 {
         return Err(OpBlockExecutionError::L1BlockInfoError {
             message: "invalid l1 block info transaction calldata in the L2 block".to_string(),
@@ -52,6 +60,12 @@ pub fn extract_l1_info(body: &BlockBody) -> Result<L1BlockInfo, OpBlockExecution
 /// Parses the input of the first transaction in the L2 block, into [`L1BlockInfo`].
 ///
 /// Returns an error if data is incorrect length.
+///
+/// Caution this expects that the input is the calldata of the [`L1BlockInfo`] transaction (first
+/// transaction) in the L2 block.
+///
+/// # Panics
+/// If the input is shorter than 4 bytes.
 pub fn parse_l1_info(input: &[u8]) -> Result<L1BlockInfo, OpBlockExecutionError> {
     // If the first 4 bytes of the calldata are the L1BlockInfoEcotone selector, then we parse the
     // calldata as an Ecotone hardfork L1BlockInfo transaction. Otherwise, we parse it as a
@@ -182,7 +196,7 @@ pub trait RethL1BlockInfo {
     /// - `input`: The calldata of the transaction.
     /// - `is_deposit`: Whether or not the transaction is a deposit.
     fn l1_tx_data_fee(
-        &self,
+        &mut self,
         chain_spec: &ChainSpec,
         timestamp: u64,
         input: &[u8],
@@ -205,7 +219,7 @@ pub trait RethL1BlockInfo {
 
 impl RethL1BlockInfo for L1BlockInfo {
     fn l1_tx_data_fee(
-        &self,
+        &mut self,
         chain_spec: &ChainSpec,
         timestamp: u64,
         input: &[u8],
@@ -298,7 +312,8 @@ mod tests {
     use alloy_eips::eip2718::Decodable2718;
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_optimism_forks::OpHardforks;
-    use reth_primitives::{Block, BlockBody, TransactionSigned};
+    use reth_optimism_primitives::OpTransactionSigned;
+    use reth_primitives::{Block, BlockBody};
 
     use super::*;
 
@@ -306,10 +321,9 @@ mod tests {
     fn sanity_l1_block() {
         use alloy_consensus::Header;
         use alloy_primitives::{hex_literal::hex, Bytes};
-        use reth_primitives::TransactionSigned;
 
         let bytes = Bytes::from_static(&hex!("7ef9015aa044bae9d41b8380d781187b426c6fe43df5fb2fb57bd4466ef6a701e1f01e015694deaddeaddeaddeaddeaddeaddeaddeaddead000194420000000000000000000000000000000000001580808408f0d18001b90104015d8eb900000000000000000000000000000000000000000000000000000000008057650000000000000000000000000000000000000000000000000000000063d96d10000000000000000000000000000000000000000000000000000000000009f35273d89754a1e0387b89520d989d3be9c37c1f32495a88faf1ea05c61121ab0d1900000000000000000000000000000000000000000000000000000000000000010000000000000000000000002d679b567db6187c0c8323fa982cfb88b74dbcc7000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240"));
-        let l1_info_tx = TransactionSigned::decode_2718(&mut bytes.as_ref()).unwrap();
+        let l1_info_tx = OpTransactionSigned::decode_2718(&mut bytes.as_ref()).unwrap();
         let mock_block = Block {
             header: Header::default(),
             body: BlockBody { transactions: vec![l1_info_tx], ..Default::default() },
@@ -337,7 +351,7 @@ mod tests {
         // https://optimistic.etherscan.io/getRawTx?tx=0x88501da5d5ca990347c2193be90a07037af1e3820bb40774c8154871c7669150
         const TX: [u8; 251] = hex!("7ef8f8a0a539eb753df3b13b7e386e147d45822b67cb908c9ddc5618e3dbaa22ed00850b94deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e2000000558000c5fc50000000000000000000000006605a89f00000000012a10d90000000000000000000000000000000000000000000000000000000af39ac3270000000000000000000000000000000000000000000000000000000d5ea528d24e582fa68786f080069bdbfe06a43f8e67bfd31b8e4d8a8837ba41da9a82a54a0000000000000000000000006887246668a3b87f54deb3b94ba47a6f63f32985");
 
-        let tx = TransactionSigned::decode_2718(&mut TX.as_slice()).unwrap();
+        let tx = OpTransactionSigned::decode_2718(&mut TX.as_slice()).unwrap();
         let block = Block {
             body: BlockBody { transactions: vec![tx], ..Default::default() },
             ..Default::default()

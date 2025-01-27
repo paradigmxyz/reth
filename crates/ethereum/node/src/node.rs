@@ -1,41 +1,36 @@
 //! Ethereum Node types config.
 
-use std::sync::Arc;
-
-use alloy_consensus::Header;
-use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_beacon_consensus::EthBeaconConsensus;
+pub use crate::payload::EthereumPayloadBuilder;
+use crate::{EthEngineTypes, EthEvmConfig};
 use reth_chainspec::ChainSpec;
+use reth_consensus::{ConsensusError, FullConsensus};
+use reth_ethereum_consensus::EthBeaconConsensus;
+pub use reth_ethereum_engine_primitives::EthereumEngineValidator;
 use reth_ethereum_engine_primitives::{
-    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes, EthereumEngineValidator,
+    EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
-use reth_network::{NetworkHandle, PeersInfo};
-use reth_node_api::{
-    AddOnsContext, ConfigureEvm, EngineValidator, FullNodeComponents, NodeTypesWithDB,
-};
+use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
+use reth_node_api::{AddOnsContext, FullNodeComponents, TxTy};
 use reth_node_builder::{
     components::{
-        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
-        PayloadServiceBuilder, PoolBuilder,
+        ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, PoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     rpc::{EngineValidatorBuilder, RpcAddOns},
-    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
+    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
 };
-use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::EthPrimitives;
+use reth_primitives::{EthPrimitives, PooledTransaction};
 use reth_provider::{CanonStateSubscriptions, EthStorage};
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, TransactionPool,
+    blobstore::DiskFileBlobStore, EthTransactionPool, PoolTransaction, TransactionPool,
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
-
-use crate::{EthEngineTypes, EthEvmConfig};
+use std::sync::Arc;
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -53,7 +48,7 @@ impl EthereumNode {
         EthereumConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
         <Node::Types as NodeTypesWithEngine>::Engine: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
@@ -93,16 +88,9 @@ pub type EthereumAddOns<N> = RpcAddOns<
     EthereumEngineValidatorBuilder,
 >;
 
-impl<Types, N> Node<N> for EthereumNode
+impl<N> Node<N> for EthereumNode
 where
-    Types: NodeTypesWithDB
-        + NodeTypesWithEngine<
-            Engine = EthEngineTypes,
-            ChainSpec = ChainSpec,
-            Primitives = EthPrimitives,
-            Storage = EthStorage,
-        >,
-    N: FullNodeTypes<Types = Types>,
+    N: FullNodeTypes<Types = Self>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -133,7 +121,7 @@ pub struct EthereumExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type EVM = EthEvmConfig;
@@ -164,7 +152,7 @@ pub struct EthereumPoolBuilder {
 
 impl<Types, Node> PoolBuilder<Node> for EthereumPoolBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
 {
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
@@ -227,76 +215,6 @@ where
 }
 
 /// A basic ethereum payload service.
-#[derive(Debug, Default, Clone)]
-#[non_exhaustive]
-pub struct EthereumPayloadBuilder;
-
-impl EthereumPayloadBuilder {
-    /// A helper method initializing [`PayloadBuilderService`] with the given EVM config.
-    pub fn spawn<Types, Node, Evm, Pool>(
-        self,
-        evm_config: Evm,
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<Types::Engine>>
-    where
-        Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
-        Node: FullNodeTypes<Types = Types>,
-        Evm: ConfigureEvm<Header = Header>,
-        Pool: TransactionPool + Unpin + 'static,
-        Types::Engine: PayloadTypes<
-            BuiltPayload = EthBuiltPayload,
-            PayloadAttributes = EthPayloadAttributes,
-            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-        >,
-    {
-        let payload_builder =
-            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(evm_config);
-        let conf = ctx.payload_builder_config();
-
-        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
-            .interval(conf.interval())
-            .deadline(conf.deadline())
-            .max_payload_tasks(conf.max_payload_tasks())
-            .extradata(conf.extradata_bytes());
-
-        let payload_generator = BasicPayloadJobGenerator::with_builder(
-            ctx.provider().clone(),
-            pool,
-            ctx.task_executor().clone(),
-            payload_job_config,
-            payload_builder,
-        );
-        let (payload_service, payload_builder) =
-            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
-
-        ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
-
-        Ok(payload_builder)
-    }
-}
-
-impl<Types, Node, Pool> PayloadServiceBuilder<Node, Pool> for EthereumPayloadBuilder
-where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
-    Node: FullNodeTypes<Types = Types>,
-    Pool: TransactionPool + Unpin + 'static,
-    Types::Engine: PayloadTypes<
-        BuiltPayload = EthBuiltPayload,
-        PayloadAttributes = EthPayloadAttributes,
-        PayloadBuilderAttributes = EthPayloadBuilderAttributes,
-    >,
-{
-    async fn spawn_payload_service(
-        self,
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<Types::Engine>> {
-        self.spawn(EthEvmConfig::new(ctx.chain_spec()), ctx, pool)
-    }
-}
-
-/// A basic ethereum payload service.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct EthereumNetworkBuilder {
     // TODO add closure to modify network
@@ -304,9 +222,14 @@ pub struct EthereumNetworkBuilder {
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetworkBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
-    Pool: TransactionPool + Unpin + 'static,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
+    Pool: TransactionPool<
+            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTransaction>,
+        > + Unpin
+        + 'static,
 {
+    type Primitives = EthNetworkPrimitives;
+
     async fn build_network(
         self,
         ctx: &BuilderContext<Node>,
@@ -327,9 +250,9 @@ pub struct EthereumConsensusBuilder {
 
 impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type Consensus = Arc<dyn reth_consensus::Consensus>;
+    type Consensus = Arc<dyn FullConsensus<Error = ConsensusError>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
         Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
@@ -343,9 +266,12 @@ pub struct EthereumEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for EthereumEngineValidatorBuilder
 where
-    Types: NodeTypesWithEngine<ChainSpec = ChainSpec>,
+    Types: NodeTypesWithEngine<
+        ChainSpec = ChainSpec,
+        Engine = EthEngineTypes,
+        Primitives = EthPrimitives,
+    >,
     Node: FullNodeComponents<Types = Types>,
-    EthereumEngineValidator: EngineValidator<Types::Engine>,
 {
     type Validator = EthereumEngineValidator;
 

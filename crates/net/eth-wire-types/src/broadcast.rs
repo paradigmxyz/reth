@@ -1,25 +1,19 @@
 //! Types for broadcasting new data.
 
 use crate::{EthMessage, EthVersion, NetworkPrimitives};
+use alloc::{sync::Arc, vec::Vec};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    Bytes, TxHash, B256, U128,
+};
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
-
-use alloy_primitives::{Bytes, TxHash, B256, U128};
+use core::mem;
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
-use reth_primitives::{PooledTransactionsElement, TransactionSigned};
-
-use std::{
-    collections::{HashMap, HashSet},
-    mem,
-    sync::Arc,
-};
-
-#[cfg(feature = "arbitrary")]
-use proptest::{collection::vec, prelude::*};
-#[cfg(feature = "arbitrary")]
-use proptest_arbitrary_interop::arb;
+use reth_ethereum_primitives::TransactionSigned;
+use reth_primitives_traits::SignedTransaction;
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -75,14 +69,14 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct NewBlock<B = reth_primitives::Block> {
+pub struct NewBlock<B = reth_ethereum_primitives::Block> {
     /// A new block.
     pub block: B,
     /// The current total difficulty.
     pub td: U128,
 }
 
-generate_tests!(#[rlp, 25] NewBlock<reth_primitives::Block>, EthNewBlockTests);
+generate_tests!(#[rlp, 25] NewBlock<reth_ethereum_primitives::Block>, EthNewBlockTests);
 
 /// This informs peers of transactions that have appeared on the network and are not yet included
 /// in a block.
@@ -95,7 +89,7 @@ pub struct Transactions<T = TransactionSigned>(
     pub Vec<T>,
 );
 
-impl Transactions {
+impl<T: SignedTransaction> Transactions<T> {
     /// Returns `true` if the list of transactions contains any blob transactions.
     pub fn has_eip4844(&self) -> bool {
         self.0.iter().any(|tx| tx.is_eip4844())
@@ -310,7 +304,7 @@ impl From<Vec<B256>> for NewPooledTransactionHashes66 {
     }
 }
 
-/// Same as [`NewPooledTransactionHashes66`] but extends that that beside the transaction hashes,
+/// Same as [`NewPooledTransactionHashes66`] but extends that beside the transaction hashes,
 /// the node sends the transaction types and their sizes (as defined in EIP-2718) as well.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -346,17 +340,21 @@ pub struct NewPooledTransactionHashes68 {
 }
 
 #[cfg(feature = "arbitrary")]
-impl Arbitrary for NewPooledTransactionHashes68 {
+impl proptest::prelude::Arbitrary for NewPooledTransactionHashes68 {
     type Parameters = ();
     fn arbitrary_with(_args: ()) -> Self::Strategy {
+        use proptest::{collection::vec, prelude::*};
         // Generate a single random length for all vectors
         let vec_length = any::<usize>().prop_map(|x| x % 100 + 1); // Lengths between 1 and 100
 
         vec_length
             .prop_flat_map(|len| {
                 // Use the generated length to create vectors of TxType, usize, and B256
-                let types_vec =
-                    vec(arb::<reth_primitives::TxType>().prop_map(|ty| ty as u8), len..=len);
+                let types_vec = vec(
+                    proptest_arbitrary_interop::arb::<reth_ethereum_primitives::TxType>()
+                        .prop_map(|ty| ty as u8),
+                    len..=len,
+                );
 
                 // Map the usize values to the range 0..131072(0x20000)
                 let sizes_vec = vec(proptest::num::usize::ANY.prop_map(|x| x % 131072), len..=len);
@@ -368,7 +366,7 @@ impl Arbitrary for NewPooledTransactionHashes68 {
             .boxed()
     }
 
-    type Strategy = BoxedStrategy<Self>;
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
 }
 
 impl NewPooledTransactionHashes68 {
@@ -497,7 +495,7 @@ impl DedupPayload for NewPooledTransactionHashes68 {
     fn dedup(self) -> PartiallyValidData<Self::Value> {
         let Self { hashes, mut sizes, mut types } = self;
 
-        let mut deduped_data = HashMap::with_capacity(hashes.len());
+        let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
 
         for hash in hashes.into_iter().rev() {
             if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
@@ -523,7 +521,7 @@ impl DedupPayload for NewPooledTransactionHashes66 {
     fn dedup(self) -> PartiallyValidData<Self::Value> {
         let Self(hashes) = self;
 
-        let mut deduped_data = HashMap::with_capacity(hashes.len());
+        let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
 
         let noop_value: Eth68TxMetadata = None;
 
@@ -555,7 +553,7 @@ pub trait HandleVersionedMempoolData {
     fn msg_version(&self) -> EthVersion;
 }
 
-impl HandleMempoolData for Vec<PooledTransactionsElement> {
+impl<T: SignedTransaction> HandleMempoolData for Vec<T> {
     fn is_empty(&self) -> bool {
         self.is_empty()
     }
@@ -565,7 +563,7 @@ impl HandleMempoolData for Vec<PooledTransactionsElement> {
     }
 
     fn retain_by_hash(&mut self, mut f: impl FnMut(&TxHash) -> bool) {
-        self.retain(|tx| f(tx.hash()))
+        self.retain(|tx| f(tx.tx_hash()))
     }
 }
 
@@ -700,7 +698,7 @@ impl RequestTxHashes {
     /// be stored in its entirety like in the future waiting for a
     /// [`GetPooledTransactions`](crate::GetPooledTransactions) request to resolve.
     pub fn with_capacity(capacity: usize) -> Self {
-        Self::new(HashSet::with_capacity(capacity))
+        Self::new(HashSet::with_capacity_and_hasher(capacity, Default::default()))
     }
 
     /// Returns an new empty instance.
@@ -745,7 +743,7 @@ mod tests {
 
     /// Takes as input a struct / encoded hex message pair, ensuring that we encode to the exact hex
     /// message, and decode to the exact struct.
-    fn test_encoding_vector<T: Encodable + Decodable + PartialEq + std::fmt::Debug>(
+    fn test_encoding_vector<T: Encodable + Decodable + PartialEq + core::fmt::Debug>(
         input: (T, &[u8]),
     ) {
         let (expected_decoded, expected_encoded) = input;

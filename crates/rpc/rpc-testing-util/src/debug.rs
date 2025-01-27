@@ -8,7 +8,7 @@ use std::{
 
 use alloy_eips::BlockId;
 use alloy_primitives::{TxHash, B256};
-use alloy_rpc_types_eth::{transaction::TransactionRequest, Block, Transaction};
+use alloy_rpc_types_eth::{transaction::TransactionRequest, Block, Header, Transaction};
 use alloy_rpc_types_trace::{
     common::TraceResult,
     geth::{GethDebugTracerType, GethDebugTracingOptions, GethTrace},
@@ -77,7 +77,7 @@ pub trait DebugApiExt {
 
 impl<T> DebugApiExt for T
 where
-    T: EthApiClient<Transaction, Block, Receipt> + DebugApiClient + Sync,
+    T: EthApiClient<Transaction, Block, Receipt, Header> + DebugApiClient + Sync,
 {
     type Provider = T;
 
@@ -297,7 +297,7 @@ impl DebugTraceTransactionsStream<'_> {
     pub async fn next_err(&mut self) -> Option<(RpcError, TxHash)> {
         loop {
             match self.next().await? {
-                Ok(_) => continue,
+                Ok(_) => {}
                 Err(err) => return Some(err),
             }
         }
@@ -329,7 +329,7 @@ impl DebugTraceBlockStream<'_> {
     pub async fn next_err(&mut self) -> Option<(RpcError, BlockId)> {
         loop {
             match self.next().await? {
-                Ok(_) => continue,
+                Ok(_) => {}
                 Err(err) => return Some(err),
             }
         }

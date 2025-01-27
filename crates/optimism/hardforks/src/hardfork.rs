@@ -1,6 +1,6 @@
 //! Hard forks of optimism protocol.
 
-use alloc::{boxed::Box, format, string::String, vec};
+use alloc::{format, string::String, vec};
 use core::{
     any::Any,
     fmt::{self, Display, Formatter},
@@ -33,6 +33,8 @@ hardfork!(
         Granite,
         /// Holocene: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/superchain-upgrades.md#holocene>
         Holocene,
+        /// Isthmus: <https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/isthmus/overview.md>
+        Isthmus,
     }
 );
 
@@ -159,6 +161,7 @@ impl OpHardfork {
                 Self::Fjord => Some(1716998400),
                 Self::Granite => Some(1723478400),
                 Self::Holocene => Some(1732633200),
+                Self::Isthmus => todo!(),
             },
         )
     }
@@ -193,7 +196,8 @@ impl OpHardfork {
                 Self::Ecotone => Some(1710374401),
                 Self::Fjord => Some(1720627201),
                 Self::Granite => Some(1726070401),
-                Self::Holocene => None,
+                Self::Holocene => Some(1736445601),
+                Self::Isthmus => todo!(),
             },
         )
     }
@@ -216,7 +220,11 @@ impl OpHardfork {
             (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(105235063)),
             (
                 EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD { fork_block: Some(105235063), total_difficulty: U256::ZERO },
+                ForkCondition::TTD {
+                    activation_block_number: 105235063,
+                    fork_block: Some(105235063),
+                    total_difficulty: U256::ZERO,
+                },
             ),
             (Self::Bedrock.boxed(), ForkCondition::Block(105235063)),
             (Self::Regolith.boxed(), ForkCondition::Timestamp(0)),
@@ -226,6 +234,7 @@ impl OpHardfork {
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
             (Self::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
+            (Self::Holocene.boxed(), ForkCondition::Timestamp(1736445601)),
         ])
     }
 
@@ -247,7 +256,11 @@ impl OpHardfork {
             (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
             (
                 EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+                ForkCondition::TTD {
+                    activation_block_number: 0,
+                    fork_block: Some(0),
+                    total_difficulty: U256::ZERO,
+                },
             ),
             (Self::Bedrock.boxed(), ForkCondition::Block(0)),
             (Self::Regolith.boxed(), ForkCondition::Timestamp(0)),
@@ -279,7 +292,11 @@ impl OpHardfork {
             (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
             (
                 EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+                ForkCondition::TTD {
+                    activation_block_number: 0,
+                    fork_block: Some(0),
+                    total_difficulty: U256::ZERO,
+                },
             ),
             (Self::Bedrock.boxed(), ForkCondition::Block(0)),
             (Self::Regolith.boxed(), ForkCondition::Timestamp(0)),
@@ -311,7 +328,11 @@ impl OpHardfork {
             (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
             (
                 EthereumHardfork::Paris.boxed(),
-                ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO },
+                ForkCondition::TTD {
+                    activation_block_number: 0,
+                    fork_block: Some(0),
+                    total_difficulty: U256::ZERO,
+                },
             ),
             (Self::Bedrock.boxed(), ForkCondition::Block(0)),
             (Self::Regolith.boxed(), ForkCondition::Timestamp(0)),
@@ -321,6 +342,7 @@ impl OpHardfork {
             (Self::Ecotone.boxed(), ForkCondition::Timestamp(1710374401)),
             (Self::Fjord.boxed(), ForkCondition::Timestamp(1720627201)),
             (Self::Granite.boxed(), ForkCondition::Timestamp(1726070401)),
+            (Self::Holocene.boxed(), ForkCondition::Timestamp(1736445601)),
         ])
     }
 }
@@ -357,7 +379,7 @@ mod tests {
     #[test]
     fn check_op_hardfork_from_str() {
         let hardfork_str =
-            ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe", "hOlOcEnE"];
+            ["beDrOck", "rEgOlITH", "cAnYoN", "eCoToNe", "FJorD", "GRaNiTe", "hOlOcEnE", "isthMUS"];
         let expected_hardforks = [
             OpHardfork::Bedrock,
             OpHardfork::Regolith,
@@ -366,6 +388,7 @@ mod tests {
             OpHardfork::Fjord,
             OpHardfork::Granite,
             OpHardfork::Holocene,
+            OpHardfork::Isthmus,
         ];
 
         let hardforks: Vec<OpHardfork> =

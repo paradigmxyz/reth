@@ -26,7 +26,7 @@ pub(crate) async fn dump_execution_stage<N, E>(
 ) -> eyre::Result<()>
 where
     N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
@@ -139,7 +139,8 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 ) -> eyre::Result<()> {
     let provider = db_tool.provider_factory.database_provider_rw()?;
 
-    let mut exec_stage = ExecutionStage::new_with_executor(NoopBlockExecutorProvider::default());
+    let mut exec_stage =
+        ExecutionStage::new_with_executor(NoopBlockExecutorProvider::<N::Primitives>::default());
 
     exec_stage.unwind(
         &provider,
@@ -169,7 +170,7 @@ fn dry_run<N, E>(
 ) -> eyre::Result<()>
 where
     N: ProviderNodeTypes,
-    E: BlockExecutorProvider,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     info!(target: "reth::cli", "Executing stage. [dry-run]");
 

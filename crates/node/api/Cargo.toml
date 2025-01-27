@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-beacon-consensus.workspace = true
+reth-db-api.workspace = true
 reth-consensus.workspace = true
 reth-evm.workspace = true
 reth-provider.workspace = true
@@ -26,6 +26,5 @@ reth-node-types.workspace = true
 reth-node-core.workspace = true
 
 alloy-rpc-types-engine.workspace = true
-alloy-consensus.workspace = true
 
 eyre.workspace = true

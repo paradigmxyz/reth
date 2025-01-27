@@ -15,7 +15,7 @@ workspace = true
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
 reth-primitives.workspace = true
-reth-primitives-traits.workspace = true
+reth-primitives-traits = { workspace = true, features = ["rayon"] }
 reth-cli-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-storage-errors.workspace = true
@@ -34,6 +34,7 @@ reth-net-nat.workspace = true
 reth-network-peers.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
+reth-ethereum-forks.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
@@ -45,7 +46,6 @@ alloy-eips.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }
 humantime.workspace = true
-const_format.workspace = true
 rand.workspace = true
 derive_more.workspace = true
 toml.workspace = true
@@ -76,7 +76,7 @@ proptest.workspace = true
 tokio.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism", "reth-db/optimism"]
+optimism = ["reth-db/optimism"]
 # Features for vergen to generate correct env vars
 jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = ["reth-primitives/asm-keccak", "alloy-primitives/asm-keccak"]

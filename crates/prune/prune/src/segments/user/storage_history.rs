@@ -7,10 +7,7 @@ use itertools::Itertools;
 use reth_db::{tables, transaction::DbTxMut};
 use reth_db_api::models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress};
 use reth_provider::DBProvider;
-use reth_prune_types::{
-    PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
-    SegmentOutputCheckpoint,
-};
+use reth_prune_types::{PruneMode, PrunePurpose, PruneSegment, SegmentOutputCheckpoint};
 use rustc_hash::FxHashMap;
 use tracing::{instrument, trace};
 
@@ -65,7 +62,7 @@ where
         };
         if limiter.is_limit_reached() {
             return Ok(SegmentOutput::not_done(
-                PruneInterruptReason::new(&limiter),
+                limiter.interrupt_reason(),
                 input.previous_checkpoint.map(SegmentOutputCheckpoint::from_prune_checkpoint),
             ))
         }
@@ -118,7 +115,7 @@ where
         )?;
         trace!(target: "pruner", ?outcomes, %done, "Pruned storage history (indices)");
 
-        let progress = PruneProgress::new(done, &limiter);
+        let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
             progress,
@@ -134,14 +131,14 @@ where
 #[cfg(test)]
 mod tests {
     use crate::segments::{
-        user::storage_history::STORAGE_HISTORY_TABLES_TO_PRUNE, PruneInput, Segment, SegmentOutput,
-        StorageHistory,
+        user::storage_history::STORAGE_HISTORY_TABLES_TO_PRUNE, PruneInput, PruneLimiter, Segment,
+        SegmentOutput, StorageHistory,
     };
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
     use reth_db::{tables, BlockNumberList};
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
-    use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneMode, PruneProgress, PruneSegment};
+    use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,

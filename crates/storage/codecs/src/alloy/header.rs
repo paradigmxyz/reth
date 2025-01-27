@@ -128,7 +128,7 @@ impl Compact for AlloyHeader {
             blob_gas_used: header.blob_gas_used,
             excess_blob_gas: header.excess_blob_gas,
             parent_beacon_block_root: header.parent_beacon_block_root,
-            requests_hash: header.extra_fields.and_then(|h| h.requests_hash),
+            requests_hash: header.extra_fields.as_ref().and_then(|h| h.requests_hash),
             extra_data: header.extra_data,
         };
         (alloy_header, buf)
@@ -188,7 +188,7 @@ mod tests {
     #[test]
     fn test_extra_fields() {
         let mut header = HOLESKY_BLOCK;
-        header.extra_fields = Some(HeaderExt { requests_hash: Some(B256::random()) });
+        header.extra_fields = Some(HeaderExt { requests_hash: Some(B256::random())});
 
         let mut encoded_header = vec![];
         let len = header.to_compact(&mut encoded_header);

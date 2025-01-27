@@ -1,7 +1,7 @@
 use crate::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
 
 /// Inputs for trie-related computations.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct TrieInput {
     /// The collection of cached in-memory intermediate trie nodes that
     /// can be reused for computation.

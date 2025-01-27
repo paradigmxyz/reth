@@ -3,6 +3,7 @@
 use futures::{Sink, Stream};
 use reth_ecies::stream::ECIESStream;
 use reth_eth_wire::{
+    capability::RawCapabilityMessage,
     errors::EthStreamError,
     message::EthBroadcastMessage,
     multiplex::{ProtocolProxy, RlpxSatelliteStream},
@@ -84,6 +85,14 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
             Self::Satellite(conn) => conn.primary_mut().start_send_broadcast(item),
         }
     }
+
+    /// Sends a raw capability message over the connection
+    pub fn start_send_raw(&mut self, msg: RawCapabilityMessage) -> Result<(), EthStreamError> {
+        match self {
+            Self::EthOnly(conn) => conn.start_send_raw(msg),
+            Self::Satellite(conn) => conn.primary_mut().start_send_raw(msg),
+        }
+    }
 }
 
 impl<N: NetworkPrimitives> From<EthPeerConnection<N>> for EthRlpxConnection<N> {
@@ -143,15 +152,16 @@ impl<N: NetworkPrimitives> Sink<EthMessage<N>> for EthRlpxConnection<N> {
 mod tests {
     use super::*;
 
-    const fn assert_eth_stream<St>()
+    const fn assert_eth_stream<N, St>()
     where
-        St: Stream<Item = Result<EthMessage, EthStreamError>> + Sink<EthMessage>,
+        N: NetworkPrimitives,
+        St: Stream<Item = Result<EthMessage<N>, EthStreamError>> + Sink<EthMessage<N>>,
     {
     }
 
     #[test]
     const fn test_eth_stream_variants() {
-        assert_eth_stream::<EthSatelliteConnection>();
-        assert_eth_stream::<EthRlpxConnection>();
+        assert_eth_stream::<EthNetworkPrimitives, EthSatelliteConnection<EthNetworkPrimitives>>();
+        assert_eth_stream::<EthNetworkPrimitives, EthRlpxConnection<EthNetworkPrimitives>>();
     }
 }

@@ -44,13 +44,13 @@ As of April 2024 at block number 19.6M:
 * Archive Node: At least 2.14TB is required
 * Full Node: At least 1.13TB is required
 
-NVMe drives are recommended for the best performance, with SSDs being a cheaper alternative. HDDs are the cheapest option, but they will take the longest to sync, and are not recommended.
+NVMe based SSD drives are recommended for the best performance, with SATA SSDs being a cheaper alternative. HDDs are the cheapest option, but they will take the longest to sync, and are not recommended.
 
 As of February 2024, syncing an Ethereum mainnet node to block 19.3M on NVMe drives takes about 50 hours, while on a GCP "Persistent SSD" it takes around 5 days.
 
 > **Note**
 >
-> It is highly recommended to choose a TLC drive when using NVMe, and not a QLC drive. See [the note](#qlc-and-tlc) above. A list of recommended drives can be found [here]( https://gist.github.com/yorickdowne/f3a3e79a573bf35767cd002cc977b038).
+> It is highly recommended to choose a TLC drive when using an NVMe drive, and not a QLC drive. See [the note](#qlc-and-tlc) above. A list of recommended drives can be found [here]( https://gist.github.com/yorickdowne/f3a3e79a573bf35767cd002cc977b038).
 
 ### CPU
 

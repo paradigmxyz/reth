@@ -1,6 +1,6 @@
 use crate::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
-    table::{DupSort, Table},
+    table::{DupSort, Encode, Table},
     DatabaseError,
 };
 
@@ -11,8 +11,15 @@ pub trait DbTx: Send + Sync {
     /// `DupCursor` type for this read-only transaction
     type DupCursor<T: DupSort>: DbDupCursorRO<T> + DbCursorRO<T> + Send + Sync;
 
-    /// Get value
+    /// Get value by an owned key
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, DatabaseError>;
+    /// Get value by a reference to the encoded key, especially useful for "raw" keys
+    /// that encode to themselves like Address and B256. Doesn't need to clone a
+    /// reference key like `get`.
+    fn get_by_encoded_key<T: Table>(
+        &self,
+        key: &<T::Key as Encode>::Encoded,
+    ) -> Result<Option<T::Value>, DatabaseError>;
     /// Commit for read only transaction will consume and free transaction and allows
     /// freeing of memory pages
     fn commit(self) -> Result<bool, DatabaseError>;

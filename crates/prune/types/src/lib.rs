@@ -9,14 +9,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod checkpoint;
-mod limiter;
+mod event;
 mod mode;
 mod pruner;
 mod segment;
 mod target;
 
 pub use checkpoint::PruneCheckpoint;
-pub use limiter::PruneLimiter;
+pub use event::PrunerEvent;
 pub use mode::PruneMode;
 pub use pruner::{
     PruneInterruptReason, PruneProgress, PrunedSegmentInfo, PrunerOutput, SegmentOutput,

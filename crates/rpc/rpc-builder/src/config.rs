@@ -106,14 +106,17 @@ impl RethRpcServerConfig for RpcServerArgs {
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
-        ValidationApiConfig { disallow: self.builder_disallow.clone().unwrap_or_default() }
+        ValidationApiConfig {
+            disallow: self.builder_disallow.clone().unwrap_or_default(),
+            validation_window: self.rpc_eth_proof_window,
+        }
     }
 
     fn state_cache_config(&self) -> EthStateCacheConfig {
         EthStateCacheConfig {
             max_blocks: self.rpc_state_cache.max_blocks,
             max_receipts: self.rpc_state_cache.max_receipts,
-            max_envs: self.rpc_state_cache.max_envs,
+            max_headers: self.rpc_state_cache.max_headers,
             max_concurrent_db_requests: self.rpc_state_cache.max_concurrent_db_requests,
         }
     }
@@ -253,7 +256,7 @@ mod tests {
     fn test_rpc_gas_cap() {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
         let config = args.eth_config();
-        assert_eq!(config.rpc_gas_cap, Into::<u64>::into(RPC_DEFAULT_GAS_CAP));
+        assert_eq!(config.rpc_gas_cap, u64::from(RPC_DEFAULT_GAS_CAP));
 
         let args =
             CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.gascap", "1000"]).args;

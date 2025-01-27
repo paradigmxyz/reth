@@ -5,9 +5,9 @@ use reth_db::tables;
 use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
 use reth_provider::test_utils::create_test_provider_factory;
 use reth_trie::{
-    prefix_set::PrefixSetMut, trie_cursor::TrieCursor, walker::TrieWalker, StorageTrieEntry,
+    prefix_set::PrefixSetMut, trie_cursor::TrieCursor, walker::TrieWalker, BranchNodeCompact,
+    Nibbles, StorageTrieEntry,
 };
-use reth_trie_common::{BranchNodeCompact, Nibbles};
 use reth_trie_db::{DatabaseAccountTrieCursor, DatabaseStorageTrieCursor};
 
 #[test]
@@ -38,7 +38,7 @@ fn walk_nodes_with_common_prefix() {
 
     let mut account_cursor = tx.tx_ref().cursor_write::<tables::AccountsTrie>().unwrap();
     for (k, v) in &inputs {
-        account_cursor.upsert(k.clone().into(), v.clone()).unwrap();
+        account_cursor.upsert(k.clone().into(), &v.clone()).unwrap();
     }
     let account_trie = DatabaseAccountTrieCursor::new(account_cursor);
     test_cursor(account_trie, &expected);
@@ -47,7 +47,10 @@ fn walk_nodes_with_common_prefix() {
     let mut storage_cursor = tx.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
     for (k, v) in &inputs {
         storage_cursor
-            .upsert(hashed_address, StorageTrieEntry { nibbles: k.clone().into(), node: v.clone() })
+            .upsert(
+                hashed_address,
+                &StorageTrieEntry { nibbles: k.clone().into(), node: v.clone() },
+            )
             .unwrap();
     }
     let storage_trie = DatabaseStorageTrieCursor::new(storage_cursor, hashed_address);
@@ -63,13 +66,14 @@ where
 
     // We're traversing the path in lexicographical order.
     for expected in expected {
-        let got = walker.advance().unwrap();
+        walker.advance().unwrap();
+        let got = walker.key().cloned();
         assert_eq!(got.unwrap(), Nibbles::from_nibbles_unchecked(expected.clone()));
     }
 
     // There should be 8 paths traversed in total from 3 branches.
-    let got = walker.advance().unwrap();
-    assert!(got.is_none());
+    walker.advance().unwrap();
+    assert!(walker.key().is_none());
 }
 
 #[test]
@@ -105,7 +109,7 @@ fn cursor_rootnode_with_changesets() {
 
     let hashed_address = B256::random();
     for (k, v) in nodes {
-        cursor.upsert(hashed_address, StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
+        cursor.upsert(hashed_address, &StorageTrieEntry { nibbles: k.into(), node: v }).unwrap();
     }
 
     let mut trie = DatabaseStorageTrieCursor::new(cursor, hashed_address);

@@ -4,7 +4,7 @@ use alloc::{sync::Arc, vec};
 
 use alloy_chains::Chain;
 use alloy_primitives::{b256, U256};
-use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
+use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
 use reth_ethereum_forks::EthereumHardfork;
 use reth_optimism_forks::OpHardfork;
 
@@ -29,7 +29,6 @@ pub static BASE_SEPOLIA: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
                 ]
                 .into(),
             ),
-            max_gas_limit: crate::constants::BASE_SEPOLIA_MAX_GAS_LIMIT,
             prune_delete_limit: 10000,
             ..Default::default()
         },

@@ -4,6 +4,9 @@ use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
+use reth_codecs::Compact;
+use reth_db::table::Value;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileWriter, BlockReader, ChainStateBlockReader, DBProvider,
     DatabaseProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
@@ -86,7 +89,14 @@ impl<Provider> StaticFileProducerInner<Provider>
 where
     Provider: StaticFileProviderFactory
         + DatabaseProviderFactory<
-            Provider: StaticFileProviderFactory + StageCheckpointReader + BlockReader,
+            Provider: StaticFileProviderFactory<
+                Primitives: NodePrimitives<
+                    SignedTx: Value + Compact,
+                    BlockHeader: Value + Compact,
+                    Receipt: Value + Compact,
+                >,
+            > + StageCheckpointReader
+                          + BlockReader,
         >,
 {
     /// Listen for events on the `static_file_producer`.
@@ -177,6 +187,7 @@ where
             headers: stages_checkpoints[0],
             receipts: stages_checkpoints[1],
             transactions: stages_checkpoints[2],
+            block_meta: stages_checkpoints[2],
         };
         let targets = self.get_static_file_targets(highest_static_files)?;
         self.run(targets)?;
@@ -215,6 +226,9 @@ where
                     highest_static_files.transactions,
                     finalized_block_number,
                 )
+            }),
+            block_meta: finalized_block_numbers.block_meta.and_then(|finalized_block_number| {
+                self.get_static_file_target(highest_static_files.block_meta, finalized_block_number)
             }),
         };
 
@@ -282,14 +296,14 @@ mod tests {
 
         let tx = db.factory.db_ref().tx_mut().expect("init tx");
         for block in &blocks {
-            TestStageDB::insert_header(None, &tx, &block.header, U256::ZERO)
+            TestStageDB::insert_header(None, &tx, block.sealed_header(), U256::ZERO)
                 .expect("insert block header");
         }
         tx.commit().expect("commit tx");
 
         let mut receipts = Vec::new();
         for block in &blocks {
-            for transaction in &block.body.transactions {
+            for transaction in &block.body().transactions {
                 receipts
                     .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
             }
@@ -312,6 +326,7 @@ mod tests {
                 headers: Some(1),
                 receipts: Some(1),
                 transactions: Some(1),
+                block_meta: None,
             })
             .expect("get static file targets");
         assert_eq!(
@@ -319,13 +334,19 @@ mod tests {
             StaticFileTargets {
                 headers: Some(0..=1),
                 receipts: Some(0..=1),
-                transactions: Some(0..=1)
+                transactions: Some(0..=1),
+                block_meta: None
             }
         );
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(1), receipts: Some(1), transactions: Some(1) }
+            HighestStaticFiles {
+                headers: Some(1),
+                receipts: Some(1),
+                transactions: Some(1),
+                block_meta: None
+            }
         );
 
         let targets = static_file_producer
@@ -333,6 +354,7 @@ mod tests {
                 headers: Some(3),
                 receipts: Some(3),
                 transactions: Some(3),
+                block_meta: None,
             })
             .expect("get static file targets");
         assert_eq!(
@@ -340,13 +362,19 @@ mod tests {
             StaticFileTargets {
                 headers: Some(2..=3),
                 receipts: Some(2..=3),
-                transactions: Some(2..=3)
+                transactions: Some(2..=3),
+                block_meta: None
             }
         );
         assert_matches!(static_file_producer.run(targets), Ok(_));
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
+            HighestStaticFiles {
+                headers: Some(3),
+                receipts: Some(3),
+                transactions: Some(3),
+                block_meta: None
+            }
         );
 
         let targets = static_file_producer
@@ -354,6 +382,7 @@ mod tests {
                 headers: Some(4),
                 receipts: Some(4),
                 transactions: Some(4),
+                block_meta: None,
             })
             .expect("get static file targets");
         assert_eq!(
@@ -361,7 +390,8 @@ mod tests {
             StaticFileTargets {
                 headers: Some(4..=4),
                 receipts: Some(4..=4),
-                transactions: Some(4..=4)
+                transactions: Some(4..=4),
+                block_meta: None
             }
         );
         assert_matches!(
@@ -370,7 +400,12 @@ mod tests {
         );
         assert_eq!(
             provider_factory.static_file_provider().get_highest_static_files(),
-            HighestStaticFiles { headers: Some(3), receipts: Some(3), transactions: Some(3) }
+            HighestStaticFiles {
+                headers: Some(3),
+                receipts: Some(3),
+                transactions: Some(3),
+                block_meta: None
+            }
         );
     }
 
@@ -398,6 +433,7 @@ mod tests {
                         headers: Some(1),
                         receipts: Some(1),
                         transactions: Some(1),
+                        block_meta: None,
                     })
                     .expect("get static file targets");
                 assert_matches!(locked_producer.run(targets.clone()), Ok(_));

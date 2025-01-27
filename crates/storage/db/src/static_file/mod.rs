@@ -17,6 +17,7 @@ use reth_primitives::{
 };
 
 mod masks;
+pub use masks::*;
 
 /// Alias type for a map of [`StaticFileSegment`] and sorted lists of existing static file ranges.
 type SortedStaticFiles =

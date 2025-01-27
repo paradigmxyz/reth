@@ -2,7 +2,7 @@
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
 use itertools::Itertools;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db::{mdbx::tx::Tx, static_file::iter_static_files, tables, DatabaseError};
 use reth_db_api::transaction::{DbTx, DbTxMut};
@@ -27,9 +27,12 @@ pub struct Command<C: ChainSpecParser> {
     stage: StageEnum,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
+impl<C: ChainSpecParser> Command<C> {
     /// Execute `db` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
+    pub async fn execute<N: CliNodeTypes>(self) -> eyre::Result<()>
+    where
+        C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+    {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
         let tool = DbTool::new(provider_factory)?;

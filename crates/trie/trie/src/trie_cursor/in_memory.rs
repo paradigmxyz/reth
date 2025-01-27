@@ -3,10 +3,9 @@ use crate::{
     forward_cursor::ForwardInMemoryCursor,
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
 };
-use alloy_primitives::B256;
+use alloy_primitives::{map::HashSet, B256};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
-use std::collections::HashSet;
 
 /// The trie cursor factory for the trie updates.
 #[derive(Debug, Clone)]
@@ -79,7 +78,7 @@ impl<'a, C: TrieCursor> InMemoryAccountTrieCursor<'a, C> {
         exact: bool,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let in_memory = self.in_memory_cursor.seek(&key);
-        if exact && in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
+        if in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
             return Ok(in_memory)
         }
 
@@ -203,9 +202,7 @@ impl<C: TrieCursor> InMemoryStorageTrieCursor<'_, C> {
         exact: bool,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let in_memory = self.in_memory_cursor.as_mut().and_then(|c| c.seek(&key));
-        if self.storage_trie_cleared ||
-            (exact && in_memory.as_ref().is_some_and(|entry| entry.0 == key))
-        {
+        if self.storage_trie_cleared || in_memory.as_ref().is_some_and(|entry| entry.0 == key) {
             return Ok(in_memory.filter(|(nibbles, _)| !exact || nibbles == &key))
         }
 

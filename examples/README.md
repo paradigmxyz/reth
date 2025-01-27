@@ -30,7 +30,7 @@ See examples in a [dedicated repository](https://github.com/paradigmxyz/reth-exe
 
 | Example                 | Description                                                                 |
 | ----------------------- | --------------------------------------------------------------------------- |
-| [DB over RPC](./rpc-db) | Illustrates how to run a standalone RPC server over a Rethdatabase instance |
+| [DB over RPC](./rpc-db) | Illustrates how to run a standalone RPC server over a Reth database instance |
 
 ## Database
 

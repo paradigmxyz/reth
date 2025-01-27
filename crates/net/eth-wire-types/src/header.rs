@@ -142,7 +142,7 @@ mod tests {
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
-            requests_hash: None
+            requests_hash: None,
         };
         assert_eq!(header.hash_slow(), expected_hash);
     }

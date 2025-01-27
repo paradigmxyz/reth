@@ -44,8 +44,7 @@ fn main() {
                     if let Some(recipient) = tx.to() {
                         if args.is_match(&recipient) {
                             // trace the transaction with `trace_call`
-                            let callrequest =
-                                transaction_to_call_request(tx.to_recovered_transaction());
+                            let callrequest = transaction_to_call_request(tx.to_consensus());
                             let tracerequest = TraceCallRequest::new(callrequest)
                                 .with_trace_type(TraceType::Trace);
                             if let Ok(trace_result) = traceapi.trace_call(tracerequest).await {

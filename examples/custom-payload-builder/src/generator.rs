@@ -1,7 +1,7 @@
 use crate::job::EmptyBlockPayloadJob;
 use alloy_eips::BlockNumberOrTag;
-use alloy_primitives::Bytes;
 use reth::{
+    api::Block,
     providers::{BlockReaderIdExt, BlockSource, StateProviderFactory},
     tasks::TaskSpawner,
     transaction_pool::TransactionPool,
@@ -48,7 +48,11 @@ impl<Client, Pool, Tasks, Builder> EmptyBlockPayloadJobGenerator<Client, Pool, T
 impl<Client, Pool, Tasks, Builder> PayloadJobGenerator
     for EmptyBlockPayloadJobGenerator<Client, Pool, Tasks, Builder>
 where
-    Client: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Block = reth_primitives::Block>
+        + Clone
+        + Unpin
+        + 'static,
     Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
     Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
@@ -76,12 +80,12 @@ where
                 .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?;
 
             // we already know the hash, so we can seal it
-            block.seal(attributes.parent())
+            block.seal_unchecked(attributes.parent())
         };
         let hash = parent_block.hash();
         let header = SealedHeader::new(parent_block.header().clone(), hash);
 
-        let config = PayloadConfig::new(Arc::new(header), Bytes::default(), attributes);
+        let config = PayloadConfig::new(Arc::new(header), attributes);
         Ok(EmptyBlockPayloadJob {
             client: self.client.clone(),
             _pool: self.pool.clone(),

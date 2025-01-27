@@ -1,7 +1,8 @@
-use crate::{Consensus, ConsensusError, HeaderValidator, PostExecutionInput};
+use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput};
 use alloy_primitives::U256;
 use core::sync::atomic::{AtomicBool, Ordering};
-use reth_primitives::{BlockWithSenders, SealedBlock, SealedHeader};
+use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::Block;
 
 /// Consensus engine implementation for testing
 #[derive(Debug)]
@@ -46,22 +47,11 @@ impl TestConsensus {
     }
 }
 
-impl<H, B> Consensus<H, B> for TestConsensus {
-    fn validate_body_against_header(
+impl<N: NodePrimitives> FullConsensus<N> for TestConsensus {
+    fn validate_block_post_execution(
         &self,
-        _body: &B,
-        _header: &SealedHeader<H>,
-    ) -> Result<(), ConsensusError> {
-        if self.fail_body_against_header() {
-            Err(ConsensusError::BaseFeeMissing)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn validate_block_pre_execution(
-        &self,
-        _block: &SealedBlock<H, B>,
+        _block: &RecoveredBlock<N::Block>,
+        _input: PostExecutionInput<'_, N::Receipt>,
     ) -> Result<(), ConsensusError> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)
@@ -69,12 +59,24 @@ impl<H, B> Consensus<H, B> for TestConsensus {
             Ok(())
         }
     }
+}
 
-    fn validate_block_post_execution(
+impl<B: Block> Consensus<B> for TestConsensus {
+    type Error = ConsensusError;
+
+    fn validate_body_against_header(
         &self,
-        _block: &BlockWithSenders,
-        _input: PostExecutionInput<'_>,
-    ) -> Result<(), ConsensusError> {
+        _body: &B::Body,
+        _header: &SealedHeader<B::Header>,
+    ) -> Result<(), Self::Error> {
+        if self.fail_body_against_header() {
+            Err(ConsensusError::BaseFeeMissing)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_block_pre_execution(&self, _block: &SealedBlock<B>) -> Result<(), Self::Error> {
         if self.fail_validation() {
             Err(ConsensusError::BaseFeeMissing)
         } else {

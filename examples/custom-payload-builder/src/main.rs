@@ -17,13 +17,15 @@ use reth::{
     cli::{config::PayloadBuilderConfig, Cli},
     payload::PayloadBuilderHandle,
     providers::CanonStateSubscriptions,
-    transaction_pool::TransactionPool,
+    transaction_pool::{PoolTransaction, TransactionPool},
 };
 use reth_basic_payload_builder::BasicPayloadJobGeneratorConfig;
 use reth_chainspec::ChainSpec;
+use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_node_api::NodeTypesWithEngine;
 use reth_node_ethereum::{node::EthereumAddOns, EthEngineTypes, EthEvmConfig, EthereumNode};
 use reth_payload_builder::PayloadBuilderService;
+use reth_primitives::{EthPrimitives, TransactionSigned};
 
 pub mod generator;
 pub mod job;
@@ -34,8 +36,16 @@ pub struct CustomPayloadBuilder;
 
 impl<Node, Pool> PayloadServiceBuilder<Node, Pool> for CustomPayloadBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypesWithEngine<Engine = EthEngineTypes, ChainSpec = ChainSpec>>,
-    Pool: TransactionPool + Unpin + 'static,
+    Node: FullNodeTypes<
+        Types: NodeTypesWithEngine<
+            Engine = EthEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = EthPrimitives,
+        >,
+    >,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+        + Unpin
+        + 'static,
 {
     async fn spawn_payload_service(
         self,
@@ -48,17 +58,17 @@ where
         let payload_job_config = BasicPayloadJobGeneratorConfig::default()
             .interval(conf.interval())
             .deadline(conf.deadline())
-            .max_payload_tasks(conf.max_payload_tasks())
-            .extradata(conf.extradata_bytes());
+            .max_payload_tasks(conf.max_payload_tasks());
 
         let payload_generator = EmptyBlockPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
             pool,
             ctx.task_executor().clone(),
             payload_job_config,
-            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(EthEvmConfig::new(
-                ctx.chain_spec(),
-            )),
+            reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+                EthEvmConfig::new(ctx.chain_spec()),
+                EthereumBuilderConfig::new(conf.extra_data_bytes()),
+            ),
         );
 
         let (payload_service, payload_builder) =

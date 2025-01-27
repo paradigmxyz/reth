@@ -1,20 +1,59 @@
 use metrics_process::Collector;
-use reth_db_api::database_metrics::DatabaseMetrics;
-use reth_primitives_traits::NodePrimitives;
-use reth_provider::providers::StaticFileProvider;
-use std::{
-    fmt::{self},
-    sync::Arc,
-};
+use std::{fmt, sync::Arc};
 
-pub(crate) trait Hook: Fn() + Send + Sync {}
-impl<T: Fn() + Send + Sync> Hook for T {}
+/// The simple alias for function types that are `'static`, `Send`, and `Sync`.
+pub trait Hook: Fn() + Send + Sync + 'static {}
+impl<T: 'static + Fn() + Send + Sync> Hook for T {}
 
-impl fmt::Debug for Hooks {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let hooks_len = self.inner.len();
-        f.debug_struct("Hooks")
-            .field("inner", &format!("Arc<Vec<Box<dyn Hook>>>, len: {}", hooks_len))
+/// A builder-like type to create a new [`Hooks`] instance.
+pub struct HooksBuilder {
+    hooks: Vec<Box<dyn Hook<Output = ()>>>,
+}
+
+impl HooksBuilder {
+    /// Registers a [`Hook`].
+    pub fn with_hook(self, hook: impl Hook) -> Self {
+        self.with_boxed_hook(Box::new(hook))
+    }
+
+    /// Registers a [`Hook`] by calling the provided closure.
+    pub fn install_hook<F, H>(self, f: F) -> Self
+    where
+        F: FnOnce() -> H,
+        H: Hook,
+    {
+        self.with_hook(f())
+    }
+
+    /// Registers a [`Hook`].
+    #[inline]
+    pub fn with_boxed_hook(mut self, hook: Box<dyn Hook<Output = ()>>) -> Self {
+        self.hooks.push(hook);
+        self
+    }
+
+    /// Builds the [`Hooks`] collection from the registered hooks.
+    pub fn build(self) -> Hooks {
+        Hooks { inner: Arc::new(self.hooks) }
+    }
+}
+
+impl Default for HooksBuilder {
+    fn default() -> Self {
+        Self {
+            hooks: vec![
+                Box::new(|| Collector::default().collect()),
+                Box::new(collect_memory_stats),
+                Box::new(collect_io_stats),
+            ],
+        }
+    }
+}
+
+impl std::fmt::Debug for HooksBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HooksBuilder")
+            .field("hooks", &format_args!("Vec<Box<dyn Hook>>, len: {}", self.hooks.len()))
             .finish()
     }
 }
@@ -26,28 +65,23 @@ pub struct Hooks {
 }
 
 impl Hooks {
-    /// Create a new set of hooks
-    pub fn new<Metrics, N>(db: Metrics, static_file_provider: StaticFileProvider<N>) -> Self
-    where
-        Metrics: DatabaseMetrics + 'static + Send + Sync,
-        N: NodePrimitives,
-    {
-        let hooks: Vec<Box<dyn Hook<Output = ()>>> = vec![
-            Box::new(move || db.report_metrics()),
-            Box::new(move || {
-                let _ = static_file_provider.report_metrics().map_err(
-                    |error| tracing::error!(%error, "Failed to report static file provider metrics"),
-                );
-            }),
-            Box::new(move || Collector::default().collect()),
-            Box::new(collect_memory_stats),
-            Box::new(collect_io_stats),
-        ];
-        Self { inner: Arc::new(hooks) }
+    /// Creates a new [`HooksBuilder`] instance.
+    #[inline]
+    pub fn builder() -> HooksBuilder {
+        HooksBuilder::default()
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Box<dyn Hook<Output = ()>>> {
         self.inner.iter()
+    }
+}
+
+impl fmt::Debug for Hooks {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let hooks_len = self.inner.len();
+        f.debug_struct("Hooks")
+            .field("inner", &format_args!("Arc<Vec<Box<dyn Hook>>>, len: {}", hooks_len))
+            .finish()
     }
 }
 

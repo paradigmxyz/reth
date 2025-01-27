@@ -1,8 +1,9 @@
 use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
 use reth_exex_types::ExExHead;
-use reth_node_api::{FullNodeComponents, NodeTypes};
+use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::Head;
+use reth_provider::BlockReader;
 use reth_tasks::TaskExecutor;
 use std::fmt::Debug;
 use tokio::sync::mpsc::UnboundedSender;
@@ -20,7 +21,7 @@ pub struct ExExContext<Node: FullNodeComponents> {
     /// # Important
     ///
     /// The exex should emit a `FinishedHeight` whenever a processed block is safe to prune.
-    /// Additionally, the exex can pre-emptively emit a `FinishedHeight` event to specify what
+    /// Additionally, the exex can preemptively emit a `FinishedHeight` event to specify what
     /// blocks to receive notifications for.
     pub events: UnboundedSender<ExExEvent>,
     /// Channel to receive [`ExExNotification`](crate::ExExNotification)s.
@@ -56,11 +57,12 @@ where
 impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
-    Node::Provider: Debug,
+    Node::Provider: Debug + BlockReader,
     Node::Executor: Debug,
+    Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
     /// Returns dynamic version of the context
-    pub fn into_dyn(self) -> ExExContextDyn {
+    pub fn into_dyn(self) -> ExExContextDyn<PrimitivesTy<Node::Types>> {
         ExExContextDyn::from(self)
     }
 }
@@ -68,6 +70,7 @@ where
 impl<Node> ExExContext<Node>
 where
     Node: FullNodeComponents,
+    Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
     /// Returns the transaction pool of the node.
     pub fn pool(&self) -> &Node::Pool {
@@ -121,6 +124,7 @@ where
 mod tests {
     use reth_exex_types::ExExHead;
     use reth_node_api::FullNodeComponents;
+    use reth_provider::BlockReader;
 
     use crate::ExExContext;
 
@@ -132,7 +136,10 @@ mod tests {
             ctx: ExExContext<Node>,
         }
 
-        impl<Node: FullNodeComponents> ExEx<Node> {
+        impl<Node: FullNodeComponents> ExEx<Node>
+        where
+            Node::Provider: BlockReader,
+        {
             async fn _test_bounds(mut self) -> eyre::Result<()> {
                 self.ctx.pool();
                 self.ctx.block_executor();
