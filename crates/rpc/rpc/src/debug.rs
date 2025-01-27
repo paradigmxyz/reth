@@ -16,9 +16,8 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::EthereumHardforks;
 use reth_evm::{
-    env::EvmEnv,
     execute::{BlockExecutorProvider, Executor},
-    ConfigureEvmEnv, TransactionEnv,
+    ConfigureEvmEnv, EvmEnv, TransactionEnv,
 };
 use reth_primitives::{NodePrimitives, ReceiptWithBloom, RecoveredBlock};
 use reth_primitives_traits::{Block as _, BlockBody, SignedTransaction};
