@@ -170,7 +170,7 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Returns an iterator over all the receipts of the blocks in the chain.
-    pub fn block_receipts_iter(&self) -> impl Iterator<Item = &Vec<Option<N::Receipt>>> + '_ {
+    pub fn block_receipts_iter(&self) -> impl Iterator<Item = &Vec<N::Receipt>> + '_ {
         self.execution_outcome.receipts().iter()
     }
 
@@ -182,7 +182,7 @@ impl<N: NodePrimitives> Chain<N> {
     /// Returns an iterator over all blocks and their receipts in the chain.
     pub fn blocks_and_receipts(
         &self,
-    ) -> impl Iterator<Item = (&RecoveredBlock<N::Block>, &Vec<Option<N::Receipt>>)> + '_ {
+    ) -> impl Iterator<Item = (&RecoveredBlock<N::Block>, &Vec<N::Receipt>)> + '_ {
         self.blocks_iter().zip(self.block_receipts_iter())
     }
 
@@ -233,7 +233,7 @@ impl<N: NodePrimitives> Chain<N> {
     /// Get all receipts for the given block.
     pub fn receipts_by_block_hash(&self, block_hash: BlockHash) -> Option<Vec<&N::Receipt>> {
         let num = self.block_number(block_hash)?;
-        self.execution_outcome.receipts_by_block(num).iter().map(Option::as_ref).collect()
+        Some(self.execution_outcome.receipts_by_block(num).iter().collect())
     }
 
     /// Get all receipts with attachment.
@@ -248,11 +248,8 @@ impl<N: NodePrimitives> Chain<N> {
             self.blocks().iter().zip(self.execution_outcome.receipts().iter())
         {
             let mut tx_receipts = Vec::with_capacity(receipts.len());
-            for (tx, receipt) in block.body().transactions_iter().zip(receipts.iter()) {
-                tx_receipts.push((
-                    tx.trie_hash(),
-                    receipt.as_ref().expect("receipts have not been pruned").clone(),
-                ));
+            for (tx, receipt) in block.body().transactions().iter().zip(receipts.iter()) {
+                tx_receipts.push((tx.trie_hash(), receipt.clone()));
             }
             let block_num_hash = BlockNumHash::new(*block_num, block.hash());
             receipt_attach.push(BlockReceipts { block: block_num_hash, tx_receipts });
@@ -887,8 +884,7 @@ mod tests {
         };
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts =
-            Receipts { receipt_vec: vec![vec![Some(receipt1.clone())], vec![Some(receipt2)]] };
+        let receipts = Receipts { receipt_vec: vec![vec![receipt1.clone()], vec![receipt2]] };
 
         // Create an ExecutionOutcome object with the created bundle, receipts, an empty requests
         // vector, and first_block set to 10
@@ -913,7 +909,7 @@ mod tests {
         // Create an ExecutionOutcome object with a single receipt vector containing receipt1
         let execution_outcome1 = ExecutionOutcome {
             bundle: Default::default(),
-            receipts: Receipts { receipt_vec: vec![vec![Some(receipt1)]] },
+            receipts: Receipts { receipt_vec: vec![vec![receipt1]] },
             requests: vec![],
             first_block: 10,
         };

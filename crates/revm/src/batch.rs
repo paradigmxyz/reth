@@ -3,10 +3,8 @@
 use alloc::vec::Vec;
 
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{BlockNumber, Log};
-use reth_execution_errors::BlockExecutionError;
+use alloy_primitives::BlockNumber;
 use reth_primitives::Receipts;
-use reth_primitives_traits::Receipt;
 use reth_prune_types::PruneModes;
 use revm::db::states::bundle_state::BundleRetention;
 
@@ -120,14 +118,8 @@ impl<T> BlockBatchRecord<T> {
     }
 
     /// Save receipts to the executor.
-    pub fn save_receipts(&mut self, receipts: Vec<T>) -> Result<(), BlockExecutionError>
-    where
-        T: Receipt<Log = Log>,
-    {
-        let receipts = receipts.into_iter().map(Some).collect();
-        // Save receipts.
+    pub fn save_receipts(&mut self, receipts: Vec<T>) {
         self.receipts.push(receipts);
-        Ok(())
     }
 
     /// Save EIP-7685 requests to the executor.
@@ -146,8 +138,7 @@ mod tests {
         // Create an empty vector of receipts
         let receipts = vec![];
 
-        // Verify that saving receipts completes without error
-        assert!(recorder.save_receipts(receipts).is_ok());
+        recorder.save_receipts(receipts);
         // Verify that the saved receipts are equal to a nested empty vector
         assert_eq!(*recorder.receipts(), vec![vec![]].into());
     }
