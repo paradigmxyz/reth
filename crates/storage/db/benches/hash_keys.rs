@@ -184,7 +184,7 @@ where
         let mut crsr = tx.cursor_write::<T>().expect("cursor");
         black_box({
             for (k, v) in input {
-                crsr.append(k, v).expect("submit");
+                crsr.append(k, &v).expect("submit");
             }
 
             tx.inner.commit().unwrap()
@@ -202,7 +202,7 @@ where
         let mut crsr = tx.cursor_write::<T>().expect("cursor");
         black_box({
             for (k, v) in input {
-                crsr.insert(k, v).expect("submit");
+                crsr.insert(k, &v).expect("submit");
             }
 
             tx.inner.commit().unwrap()

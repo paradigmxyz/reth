@@ -220,6 +220,7 @@ mod tests {
         models::StoredBlockBodyIndices,
     };
     use reth_primitives::SealedBlock;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::providers::StaticFileWriter;
     use reth_testing_utils::generators::{
         self, random_block_range, random_contract_account_range, BlockRangeParams,
@@ -344,7 +345,7 @@ mod tests {
                 BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..3, ..Default::default() },
             );
 
-            self.db.insert_headers(blocks.iter().map(|block| &block.header))?;
+            self.db.insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
 
             let iter = blocks.iter();
             let mut next_tx_num = 0;
@@ -356,7 +357,7 @@ mod tests {
                     progress.body().transactions.iter().try_for_each(
                         |transaction| -> Result<(), reth_db::DatabaseError> {
                             tx.put::<tables::TransactionHashNumbers>(
-                                transaction.hash(),
+                                *transaction.tx_hash(),
                                 next_tx_num,
                             )?;
                             tx.put::<tables::Transactions>(next_tx_num, transaction.clone())?;
@@ -373,7 +374,7 @@ mod tests {
                                     tx,
                                     (block_number, *addr).into(),
                                     new_entry,
-                                    progress.header.number == stage_progress,
+                                    progress.number == stage_progress,
                                 )?;
                             }
 
@@ -392,7 +393,7 @@ mod tests {
                                 key: keccak256("mining"),
                                 value: U256::from(rng.gen::<u32>()),
                             },
-                            progress.header.number == stage_progress,
+                            progress.number == stage_progress,
                         )?;
                     }
 
@@ -533,7 +534,7 @@ mod tests {
                     }
 
                     if !entry.value.is_zero() {
-                        storage_cursor.upsert(bn_address.address(), entry)?;
+                        storage_cursor.upsert(bn_address.address(), &entry)?;
                     }
                 }
                 Ok(())

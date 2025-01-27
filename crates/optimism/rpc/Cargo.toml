@@ -70,7 +70,6 @@ reth-optimism-chainspec.workspace = true
 [features]
 optimism = [
 	"reth-optimism-evm/optimism",
-	"reth-primitives/optimism",
 	"reth-provider/optimism",
 	"revm/optimism",
 	"reth-optimism-consensus/optimism",

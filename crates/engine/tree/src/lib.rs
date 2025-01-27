@@ -92,9 +92,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-/// Re-export of the blockchain tree API.
-pub use reth_blockchain_tree_api::*;
-
 /// Support for backfill sync mode.
 pub mod backfill;
 /// The type that drives the chain forward.

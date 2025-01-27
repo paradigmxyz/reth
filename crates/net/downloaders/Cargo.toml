@@ -73,7 +73,6 @@ tempfile.workspace = true
 
 [features]
 optimism = [
-	"reth-primitives/optimism",
 	"reth-db?/optimism",
 	"reth-db-api?/optimism",
 	"reth-provider/optimism"

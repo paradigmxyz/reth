@@ -1,10 +1,11 @@
 //! Block body abstraction.
 
 use crate::{
-    BlockHeader, FullSignedTx, InMemorySize, MaybeSerde, MaybeSerdeBincodeCompat, SignedTransaction,
+    transaction::signed::RecoveryError, BlockHeader, FullSignedTx, InMemorySize, MaybeSerde,
+    MaybeSerdeBincodeCompat, SignedTransaction,
 };
 use alloc::{fmt, vec::Vec};
-use alloy_consensus::{Header, Transaction};
+use alloy_consensus::{Header, Transaction, Typed2718};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, B256};
 
@@ -13,10 +14,10 @@ pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincod
 
 impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
 
-#[cfg(feature = "rayon")]
-use rayon::prelude::*;
-
 /// Abstraction for block's body.
+///
+/// This type is a container for everything that is included in a block except the header.
+/// For ethereum this includes transactions, ommers, and withdrawals.
 pub trait BlockBody:
     Send
     + Sync
@@ -32,26 +33,44 @@ pub trait BlockBody:
     + MaybeSerde
     + 'static
 {
-    /// Ordered list of signed transactions as committed in block.
+    /// Ordered list of signed transactions as committed in the block.
     type Transaction: SignedTransaction;
 
     /// Ommer header type.
     type OmmerHeader: BlockHeader;
 
-    /// Returns reference to transactions in block.
+    /// Returns reference to transactions in the block.
     fn transactions(&self) -> &[Self::Transaction];
+
+    /// Returns an iterator over the transactions in the block.
+    fn transactions_iter(&self) -> impl Iterator<Item = &Self::Transaction> {
+        self.transactions().iter()
+    }
+
+    /// Clones the transactions in the block.
+    ///
+    /// This is a convenience function for `transactions().to_vec()`
+    fn clone_transactions(&self) -> Vec<Self::Transaction> {
+        self.transactions().to_vec()
+    }
 
     /// Returns an iterator over all transaction hashes in the block body.
     fn transaction_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
-        self.transactions().iter().map(|tx| tx.tx_hash())
+        self.transactions_iter().map(|tx| tx.tx_hash())
     }
 
     /// Returns the number of the transactions in the block.
     fn transaction_count(&self) -> usize {
         self.transactions().len()
     }
+
     /// Consume the block body and return a [`Vec`] of transactions.
     fn into_transactions(self) -> Vec<Self::Transaction>;
+
+    /// Returns `true` if the block body contains a transaction of the given type.
+    fn contains_transaction_type(&self, tx_type: u8) -> bool {
+        self.transactions_iter().any(|tx| tx.is_type(tx_type))
+    }
 
     /// Calculate the transaction root for the block body.
     fn calculate_tx_root(&self) -> B256 {
@@ -82,12 +101,12 @@ pub trait BlockBody:
 
     /// Calculates the total blob gas used by _all_ EIP-4844 transactions in the block.
     fn blob_gas_used(&self) -> u64 {
-        self.transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
+        self.transactions_iter().filter_map(|tx| tx.blob_gas_used()).sum()
     }
 
     /// Returns an iterator over all blob versioned hashes in the block body.
     fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
-        self.transactions().iter().filter_map(|tx| tx.blob_versioned_hashes()).flatten()
+        self.transactions_iter().filter_map(|tx| tx.blob_versioned_hashes()).flatten()
     }
 
     /// Returns an iterator over the encoded 2718 transactions.
@@ -97,7 +116,7 @@ pub trait BlockBody:
     /// See also [`Encodable2718`].
     #[doc(alias = "raw_transactions_iter")]
     fn encoded_2718_transactions_iter(&self) -> impl Iterator<Item = Vec<u8>> + '_ {
-        self.transactions().iter().map(|tx| tx.encoded_2718())
+        self.transactions_iter().map(|tx| tx.encoded_2718())
     }
 
     /// Returns a vector of encoded 2718 transactions.
@@ -111,36 +130,43 @@ pub trait BlockBody:
     }
 
     /// Recover signer addresses for all transactions in the block body.
-    fn recover_signers(&self) -> Option<Vec<Address>>
+    fn recover_signers(&self) -> Result<Vec<Address>, RecoveryError>
     where
         Self::Transaction: SignedTransaction,
     {
-        #[cfg(feature = "rayon")]
-        {
-            self.transactions().into_par_iter().map(|tx| tx.recover_signer()).collect()
-        }
-        #[cfg(not(feature = "rayon"))]
-        {
-            self.transactions().iter().map(|tx| tx.recover_signer()).collect()
-        }
+        crate::transaction::recover::recover_signers(self.transactions()).map_err(|_| RecoveryError)
+    }
+
+    /// Recover signer addresses for all transactions in the block body.
+    ///
+    /// Returns an error if some transaction's signature is invalid.
+    fn try_recover_signers(&self) -> Result<Vec<Address>, RecoveryError>
+    where
+        Self::Transaction: SignedTransaction,
+    {
+        self.recover_signers()
     }
 
     /// Recover signer addresses for all transactions in the block body _without ensuring that the
     /// signature has a low `s` value_.
     ///
     /// Returns `None`, if some transaction's signature is invalid.
-    fn recover_signers_unchecked(&self) -> Option<Vec<Address>>
+    fn recover_signers_unchecked(&self) -> Result<Vec<Address>, RecoveryError>
     where
         Self::Transaction: SignedTransaction,
     {
-        #[cfg(feature = "rayon")]
-        {
-            self.transactions().into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
-        }
-        #[cfg(not(feature = "rayon"))]
-        {
-            self.transactions().iter().map(|tx| tx.recover_signer_unchecked()).collect()
-        }
+        crate::transaction::recover::recover_signers_unchecked(self.transactions())
+    }
+
+    /// Recover signer addresses for all transactions in the block body _without ensuring that the
+    /// signature has a low `s` value_.
+    ///
+    /// Returns an error if some transaction's signature is invalid.
+    fn try_recover_signers_unchecked(&self) -> Result<Vec<Address>, RecoveryError>
+    where
+        Self::Transaction: SignedTransaction,
+    {
+        self.recover_signers_unchecked()
     }
 }
 

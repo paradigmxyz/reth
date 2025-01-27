@@ -8,20 +8,25 @@ use alloy_rpc_types_engine::{
     PayloadError,
 };
 use assert_matches::assert_matches;
-use reth_primitives::{proofs, Block, SealedBlock, SealedHeader, TransactionSigned};
+use reth_primitives::{Block, SealedBlock, SealedHeader, TransactionSigned};
+use reth_primitives_traits::proofs;
 use reth_rpc_types_compat::engine::payload::{block_to_payload, block_to_payload_v1};
 use reth_testing_utils::generators::{
     self, random_block, random_block_range, BlockParams, BlockRangeParams, Rng,
 };
 
 fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> ExecutionPayload {
-    let unsealed = src.unseal();
+    let unsealed = src.into_block();
     let mut transformed: Block = f(unsealed);
     // Recalculate roots
     transformed.header.transactions_root =
         proofs::calculate_transaction_root(&transformed.body.transactions);
     transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.body.ommers);
-    block_to_payload(SealedBlock::new(SealedHeader::seal(transformed.header), transformed.body)).0
+    block_to_payload(SealedBlock::from_sealed_parts(
+        SealedHeader::seal_slow(transformed.header),
+        transformed.body,
+    ))
+    .0
 }
 
 #[test]
@@ -33,7 +38,7 @@ fn payload_body_roundtrip() {
         BlockRangeParams { tx_count: 0..2, ..Default::default() },
     ) {
         let payload_body: ExecutionPayloadBodyV1 =
-            ExecutionPayloadBodyV1::from_block(block.clone().unseal::<Block>());
+            ExecutionPayloadBodyV1::from_block(block.clone().into_block());
 
         assert_eq!(
             Ok(block.body().transactions.clone()),

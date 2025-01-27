@@ -1,4 +1,5 @@
 use crate::BlockExecutionOutput;
+use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives::Receipts;
@@ -232,6 +233,11 @@ impl<T> ExecutionOutcome<T> {
         self.first_block
     }
 
+    /// Return last block of the execution outcome
+    pub fn last_block(&self) -> BlockNumber {
+        (self.first_block + self.len() as u64).saturating_sub(1)
+    }
+
     /// Revert the state to the given block number.
     ///
     /// Returns false if the block number is not in the bundle state.
@@ -309,13 +315,13 @@ impl<T> ExecutionOutcome<T> {
     pub fn prepend_state(&mut self, mut other: BundleState) {
         let other_len = other.reverts.len();
         // take this bundle
-        let this_bundle = std::mem::take(&mut self.bundle);
+        let this_bundle = core::mem::take(&mut self.bundle);
         // extend other bundle with this
         other.extend(this_bundle);
         // discard other reverts
         other.take_n_reverts(other_len);
         // swap bundles
-        std::mem::swap(&mut self.bundle, &mut other)
+        core::mem::swap(&mut self.bundle, &mut other)
     }
 
     /// Create a new instance with updated receipts.
@@ -362,7 +368,7 @@ impl ExecutionOutcome {
     /// of receipt. This is a expensive operation.
     pub fn ethereum_receipts_root(&self, _block_number: BlockNumber) -> Option<B256> {
         self.receipts.root_slow(self.block_number_to_index(_block_number)?, |receipts| {
-            reth_primitives::proofs::calculate_receipt_root_no_memo(receipts)
+            reth_primitives::Receipt::calculate_receipt_root_no_memo(receipts)
         })
     }
 }

@@ -137,7 +137,7 @@ where
                 let tx = db.tx_mut().expect("tx");
                 let mut crsr = tx.cursor_write::<T>().expect("cursor");
                 for (k, _, v, _) in input {
-                    crsr.append(k, v).expect("submit");
+                    crsr.append(k, &v).expect("submit");
                 }
                 tx.inner.commit().unwrap()
             },
@@ -157,7 +157,7 @@ where
                 let mut crsr = tx.cursor_write::<T>().expect("cursor");
                 for index in RANDOM_INDEXES {
                     let (k, _, v, _) = input.get(index).unwrap().clone();
-                    crsr.insert(k, v).expect("submit");
+                    crsr.insert(k, &v).expect("submit");
                 }
 
                 tx.inner.commit().unwrap()

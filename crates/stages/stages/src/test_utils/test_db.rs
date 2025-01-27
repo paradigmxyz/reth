@@ -153,7 +153,7 @@ impl TestStageDB {
             let segment_header = writer.user_header();
             if segment_header.block_end().is_none() && segment_header.expected_block_start() == 0 {
                 for block_number in 0..header.number {
-                    let mut prev = header.clone().unseal();
+                    let mut prev = header.clone_header();
                     prev.number = block_number;
                     writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
                 }
@@ -235,7 +235,7 @@ impl TestStageDB {
                 .then(|| provider.latest_writer(StaticFileSegment::Headers).unwrap());
 
             blocks.iter().try_for_each(|block| {
-                Self::insert_header(headers_writer.as_mut(), &tx, &block.header, U256::ZERO)
+                Self::insert_header(headers_writer.as_mut(), &tx, block.sealed_header(), U256::ZERO)
             })?;
 
             if let Some(mut writer) = headers_writer {
@@ -396,7 +396,7 @@ impl TestStageDB {
                     {
                         cursor.delete_current()?;
                     }
-                    cursor.upsert(address, entry)?;
+                    cursor.upsert(address, &entry)?;
 
                     let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
                     if cursor
@@ -406,7 +406,7 @@ impl TestStageDB {
                     {
                         cursor.delete_current()?;
                     }
-                    cursor.upsert(hashed_address, hashed_entry)?;
+                    cursor.upsert(hashed_address, &hashed_entry)?;
 
                     Ok(())
                 })

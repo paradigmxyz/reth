@@ -1,11 +1,14 @@
 //! Collection of methods for block validation.
 
-use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{
+    constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader as _, EMPTY_OMMER_ROOT_HASH,
+};
 use alloy_eips::{calc_next_block_base_fee, eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::ConsensusError;
-use reth_primitives::SealedBlock;
-use reth_primitives_traits::{BlockBody, GotExpected, SealedHeader};
+use reth_primitives_traits::{
+    Block, BlockBody, BlockHeader, GotExpected, SealedBlock, SealedHeader,
+};
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
@@ -25,8 +28,7 @@ pub fn validate_header_base_fee<H: BlockHeader, ChainSpec: EthereumHardforks>(
     header: &H,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
-    if chain_spec.is_fork_active_at_block(EthereumHardfork::London, header.number()) &&
-        header.base_fee_per_gas().is_none()
+    if chain_spec.is_london_active_at_block(header.number()) && header.base_fee_per_gas().is_none()
     {
         return Err(ConsensusError::BaseFeeMissing)
     }
@@ -39,8 +41,8 @@ pub fn validate_header_base_fee<H: BlockHeader, ChainSpec: EthereumHardforks>(
 ///
 /// [EIP-4895]: https://eips.ethereum.org/EIPS/eip-4895
 #[inline]
-pub fn validate_shanghai_withdrawals<H: BlockHeader, B: BlockBody>(
-    block: &SealedBlock<H, B>,
+pub fn validate_shanghai_withdrawals<B: Block>(
+    block: &SealedBlock<B>,
 ) -> Result<(), ConsensusError> {
     let withdrawals = block.body().withdrawals().ok_or(ConsensusError::BodyWithdrawalsMissing)?;
     let withdrawals_root = alloy_consensus::proofs::calculate_withdrawals_root(withdrawals);
@@ -60,13 +62,10 @@ pub fn validate_shanghai_withdrawals<H: BlockHeader, B: BlockBody>(
 ///
 /// [EIP-4844]: https://eips.ethereum.org/EIPS/eip-4844
 #[inline]
-pub fn validate_cancun_gas<H: BlockHeader, B: BlockBody>(
-    block: &SealedBlock<H, B>,
-) -> Result<(), ConsensusError> {
+pub fn validate_cancun_gas<B: Block>(block: &SealedBlock<B>) -> Result<(), ConsensusError> {
     // Check that the blob gas used in the header matches the sum of the blob gas used by each
     // blob tx
-    let header_blob_gas_used =
-        block.header().blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
+    let header_blob_gas_used = block.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
     let total_blob_gas = block.body().blob_gas_used();
     if total_blob_gas != header_blob_gas_used {
         return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
@@ -129,13 +128,12 @@ where
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
 /// - (Optionally) Compares the receipts root in the block header to the block body
-pub fn validate_block_pre_execution<H, B, ChainSpec>(
-    block: &SealedBlock<H, B>,
+pub fn validate_block_pre_execution<B, ChainSpec>(
+    block: &SealedBlock<B>,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError>
 where
-    H: BlockHeader,
-    B: BlockBody,
+    B: Block,
     ChainSpec: EthereumHardforks,
 {
     // Check ommers hash
@@ -253,23 +251,25 @@ pub fn validate_against_parent_eip1559_base_fee<
     parent: &H,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
-    if chain_spec.fork(EthereumHardfork::London).active_at_block(header.number()) {
+    if chain_spec.is_london_active_at_block(header.number()) {
         let base_fee = header.base_fee_per_gas().ok_or(ConsensusError::BaseFeeMissing)?;
 
-        let expected_base_fee =
-            if chain_spec.fork(EthereumHardfork::London).transitions_at_block(header.number()) {
-                alloy_eips::eip1559::INITIAL_BASE_FEE
-            } else {
-                // This BaseFeeMissing will not happen as previous blocks are checked to have
-                // them.
-                let base_fee = parent.base_fee_per_gas().ok_or(ConsensusError::BaseFeeMissing)?;
-                calc_next_block_base_fee(
-                    parent.gas_used(),
-                    parent.gas_limit(),
-                    base_fee,
-                    chain_spec.base_fee_params_at_timestamp(header.timestamp()),
-                )
-            };
+        let expected_base_fee = if chain_spec
+            .ethereum_fork_activation(EthereumHardfork::London)
+            .transitions_at_block(header.number())
+        {
+            alloy_eips::eip1559::INITIAL_BASE_FEE
+        } else {
+            // This BaseFeeMissing will not happen as previous blocks are checked to have
+            // them.
+            let base_fee = parent.base_fee_per_gas().ok_or(ConsensusError::BaseFeeMissing)?;
+            calc_next_block_base_fee(
+                parent.gas_used(),
+                parent.gas_limit(),
+                base_fee,
+                chain_spec.base_fee_params_at_timestamp(header.timestamp()),
+            )
+        };
         if expected_base_fee != base_fee {
             return Err(ConsensusError::BaseFeeDiff(GotExpected {
                 expected: expected_base_fee,
@@ -340,7 +340,8 @@ mod tests {
     use alloy_primitives::{Address, Bytes, PrimitiveSignature as Signature, U256};
     use rand::Rng;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_primitives::{proofs, BlockBody, Transaction, TransactionSigned};
+    use reth_primitives::{BlockBody, Transaction, TransactionSigned};
+    use reth_primitives_traits::proofs;
 
     fn mock_blob_tx(nonce: u64, num_blobs: usize) -> TransactionSigned {
         let mut rng = rand::thread_rng();
@@ -377,15 +378,13 @@ mod tests {
             transactions_root: proofs::calculate_transaction_root(&[transaction.clone()]),
             ..Default::default()
         };
-        let header = SealedHeader::seal(header);
-
         let body = BlockBody {
             transactions: vec![transaction],
             ommers: vec![],
             withdrawals: Some(Withdrawals::default()),
         };
 
-        let block = SealedBlock::new(header, body);
+        let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
 
         // 10 blobs times the blob gas per blob.
         let expected_blob_gas_used = 10 * DATA_GAS_PER_BLOB;

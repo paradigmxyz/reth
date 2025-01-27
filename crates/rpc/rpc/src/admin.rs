@@ -114,7 +114,10 @@ where
                 .chain_spec
                 .get_final_paris_total_difficulty()
                 .is_some(),
-            terminal_total_difficulty: self.chain_spec.fork(EthereumHardfork::Paris).ttd(),
+            terminal_total_difficulty: self
+                .chain_spec
+                .ethereum_fork_activation(EthereumHardfork::Paris)
+                .ttd(),
             deposit_contract_address: self.chain_spec.deposit_contract().map(|dc| dc.address),
             ..self.chain_spec.genesis().config.clone()
         };
@@ -125,7 +128,7 @@ where
                 $(
                     // don't overwrite if already set
                     if $config.$field.is_none() {
-                        $config.$field = match self.chain_spec.fork(EthereumHardfork::$fork) {
+                        $config.$field = match self.chain_spec.ethereum_fork_activation(EthereumHardfork::$fork) {
                             ForkCondition::Block(block) => Some(block),
                             ForkCondition::TTD { fork_block, .. } => fork_block,
                             ForkCondition::Timestamp(ts) => Some(ts),

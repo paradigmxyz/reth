@@ -6,6 +6,7 @@ pub use ethereum::EthereumHardfork;
 mod dev;
 pub use dev::DEV_HARDFORKS;
 
+use alloc::boxed::Box;
 use core::{
     any::Any,
     hash::{Hash, Hasher},
@@ -17,6 +18,11 @@ use dyn_clone::DynClone;
 pub trait Hardfork: Any + DynClone + Send + Sync + 'static {
     /// Fork name.
     fn name(&self) -> &'static str;
+
+    /// Returns boxed value.
+    fn boxed(&self) -> Box<dyn Hardfork + '_> {
+        Box::new(self)
+    }
 }
 
 dyn_clone::clone_trait_object!(Hardfork);

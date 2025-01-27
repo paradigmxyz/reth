@@ -1,5 +1,7 @@
 //! Loads fee history from database. Helper trait for `eth_` fee and transaction RPC methods.
 
+use super::LoadBlock;
+use crate::FromEthApiError;
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::U256;
@@ -13,10 +15,6 @@ use reth_rpc_eth_types::{
     FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
 use tracing::debug;
-
-use crate::FromEthApiError;
-
-use super::LoadBlock;
 
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.

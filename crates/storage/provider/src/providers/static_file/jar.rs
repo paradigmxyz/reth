@@ -7,23 +7,25 @@ use crate::{
     TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
-use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
 use reth_db::{
+    models::StoredBlockBodyIndices,
     static_file::{
-        BlockHashMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor,
-        TDWithHashMask, TotalDifficultyMask, TransactionMask,
+        BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask, OmmersMask, ReceiptMask,
+        StaticFileCursor, TDWithHashMask, TotalDifficultyMask, TransactionMask, WithdrawalsMask,
     },
     table::{Decompress, Value},
 };
-use reth_node_types::NodePrimitives;
-use reth_primitives::{transaction::recover_signers, SealedHeader};
+use reth_node_types::{FullNodePrimitives, NodePrimitives};
+use reth_primitives::SealedHeader;
 use reth_primitives_traits::SignedTransaction;
+use reth_storage_api::{BlockBodyIndicesProvider, OmmersProvider, WithdrawalsProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     fmt::Debug,
-    ops::{Deref, RangeBounds},
+    ops::{Deref, RangeBounds, RangeInclusive},
     sync::Arc,
 };
 
@@ -297,14 +299,14 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction>> TransactionsPr
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
         let txs = self.transactions_by_tx_range(range)?;
-        recover_signers(&txs, txs.len()).ok_or(ProviderError::SenderRecoveryError)
+        Ok(reth_primitives_traits::transaction::recover::recover_signers(&txs)?)
     }
 
     fn transaction_sender(&self, num: TxNumber) -> ProviderResult<Option<Address>> {
         Ok(self
             .cursor()?
             .get_one::<TransactionMask<Self::Transaction>>(num.into())?
-            .and_then(|tx| tx.recover_signer()))
+            .and_then(|tx| tx.recover_signer().ok()))
     }
 }
 
@@ -349,5 +351,56 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction, Receipt: Decomp
             }
         }
         Ok(receipts)
+    }
+}
+
+impl<N: NodePrimitives> WithdrawalsProvider for StaticFileJarProvider<'_, N> {
+    fn withdrawals_by_block(
+        &self,
+        id: BlockHashOrNumber,
+        _: u64,
+    ) -> ProviderResult<Option<Withdrawals>> {
+        if let Some(num) = id.as_number() {
+            return Ok(self
+                .cursor()?
+                .get_one::<WithdrawalsMask>(num.into())?
+                .and_then(|s| s.withdrawals))
+        }
+        // Only accepts block number queries
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileJarProvider<'_, N> {
+    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+        if let Some(num) = id.as_number() {
+            return Ok(self
+                .cursor()?
+                .get_one::<OmmersMask<Self::Header>>(num.into())?
+                .map(|s| s.ommers))
+        }
+        // Only accepts block number queries
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileJarProvider<'_, N> {
+    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        self.cursor()?.get_one::<BodyIndicesMask>(num.into())
+    }
+
+    fn block_body_indices_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        let mut cursor = self.cursor()?;
+        let mut indices = Vec::with_capacity((range.end() - range.start() + 1) as usize);
+
+        for num in range {
+            if let Some(block) = cursor.get_one::<BodyIndicesMask>(num.into())? {
+                indices.push(block)
+            }
+        }
+        Ok(indices)
     }
 }

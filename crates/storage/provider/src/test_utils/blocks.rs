@@ -12,7 +12,7 @@ use reth_db::tables;
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_node_types::NodeTypes;
 use reth_primitives::{
-    Account, BlockBody, Receipt, SealedBlock, SealedBlockWithSenders, SealedHeader, Transaction,
+    Account, BlockBody, Receipt, RecoveredBlock, SealedBlock, SealedHeader, Transaction,
     TransactionSigned, TxType,
 };
 use reth_trie::root::{state_root_unhashed, storage_root_unhashed};
@@ -29,7 +29,7 @@ pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
     let tx = provider;
 
     // check if all tables are empty
-    assert_eq!(tx.table::<tables::Headers>().unwrap(), vec![(g.number, g.header.clone().unseal())]);
+    assert_eq!(tx.table::<tables::Headers>().unwrap(), vec![(g.number, g.header().clone())]);
 
     assert_eq!(tx.table::<tables::HeaderNumbers>().unwrap(), vec![(h, n)]);
     assert_eq!(tx.table::<tables::CanonicalHeaders>().unwrap(), vec![(n, h)]);
@@ -64,7 +64,7 @@ pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
 }
 
 pub(crate) static TEST_BLOCK: LazyLock<SealedBlock> = LazyLock::new(|| {
-    SealedBlock::new(
+    SealedBlock::from_sealed_parts(
         SealedHeader::new(
             Header {
                 parent_hash: hex!(
@@ -127,7 +127,7 @@ pub struct BlockchainTestData {
     /// Genesis
     pub genesis: SealedBlock,
     /// Blocks with its execution result
-    pub blocks: Vec<(SealedBlockWithSenders, ExecutionOutcome)>,
+    pub blocks: Vec<(RecoveredBlock<reth_primitives::Block>, ExecutionOutcome)>,
 }
 
 impl BlockchainTestData {
@@ -163,7 +163,7 @@ impl Default for BlockchainTestData {
 
 /// Genesis block
 pub fn genesis() -> SealedBlock {
-    SealedBlock::new(
+    SealedBlock::from_sealed_parts(
         SealedHeader::new(
             Header { number: 0, difficulty: U256::from(1), ..Default::default() },
             B256::ZERO,
@@ -192,7 +192,7 @@ fn bundle_state_root(execution_outcome: &ExecutionOutcome) -> B256 {
 }
 
 /// Block one that points to genesis
-fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
+fn block1(number: BlockNumber) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
     // block changes
     let account1: Address = [0x60; 20].into();
     let account2: Address = [0x61; 20].into();
@@ -232,15 +232,14 @@ fn block1(number: BlockNumber) -> (SealedBlockWithSenders, ExecutionOutcome) {
         b256!("5d035ccb3e75a9057452ff060b773b213ec1fc353426174068edfc3971a0b6bd")
     );
 
-    let (header, mut body) = TEST_BLOCK.clone().split_header_body();
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
-    let mut header = header.unseal();
     header.number = number;
     header.state_root = state_root;
     header.parent_hash = B256::ZERO;
-    let block = SealedBlock::new(SealedHeader::seal(header), body);
+    let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders { block, senders: vec![Address::new([0x30; 20])] }, execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::new([0x30; 20])]), execution_outcome)
 }
 
 /// Block two that points to block 1
@@ -248,7 +247,7 @@ fn block2(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (SealedBlockWithSenders, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
     // block changes
     let account: Address = [0x60; 20].into();
     let slot = U256::from(5);
@@ -294,17 +293,16 @@ fn block2(
         b256!("90101a13dd059fa5cca99ed93d1dc23657f63626c5b8f993a2ccbdf7446b64f8")
     );
 
-    let (header, mut body) = TEST_BLOCK.clone().split_header_body();
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
 
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
-    let mut header = header.unseal();
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    let block = SealedBlock::new(SealedHeader::seal(header), body);
+    let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
 }
 
 /// Block three that points to block 2
@@ -312,7 +310,7 @@ fn block3(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (SealedBlockWithSenders, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -359,16 +357,15 @@ fn block3(
     extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
-    let (header, mut body) = TEST_BLOCK.clone().split_header_body();
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
-    let mut header = header.unseal();
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    let block = SealedBlock::new(SealedHeader::seal(header), body);
+    let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
 }
 
 /// Block four that points to block 3
@@ -376,7 +373,7 @@ fn block4(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (SealedBlockWithSenders, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -448,16 +445,15 @@ fn block4(
     extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
-    let (header, mut body) = TEST_BLOCK.clone().split_header_body();
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
-    let mut header = header.unseal();
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    let block = SealedBlock::new(SealedHeader::seal(header), body);
+    let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
 }
 
 /// Block five that points to block 4
@@ -465,7 +461,7 @@ fn block5(
     number: BlockNumber,
     parent_hash: B256,
     prev_execution_outcome: &ExecutionOutcome,
-) -> (SealedBlockWithSenders, ExecutionOutcome) {
+) -> (RecoveredBlock<reth_primitives::Block>, ExecutionOutcome) {
     let address_range = 1..=20;
     let slot_range = 1..=100;
 
@@ -534,14 +530,13 @@ fn block5(
     extended.extend(execution_outcome.clone());
     let state_root = bundle_state_root(&extended);
 
-    let (header, mut body) = TEST_BLOCK.clone().split_header_body();
+    let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
-    let mut header = header.unseal();
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
     header.parent_hash = parent_hash;
-    let block = SealedBlock::new(SealedHeader::seal(header), body);
+    let block = SealedBlock::seal_parts(header, body);
 
-    (SealedBlockWithSenders { block, senders: vec![Address::new([0x31; 20])] }, execution_outcome)
+    (RecoveredBlock::new_sealed(block, vec![Address::new([0x31; 20])]), execution_outcome)
 }

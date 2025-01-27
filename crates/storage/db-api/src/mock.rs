@@ -220,7 +220,7 @@ impl<T: Table> DbCursorRW<T> for CursorMock {
     fn upsert(
         &mut self,
         _key: <T as Table>::Key,
-        _value: <T as Table>::Value,
+        _value: &<T as Table>::Value,
     ) -> Result<(), DatabaseError> {
         Ok(())
     }
@@ -228,7 +228,7 @@ impl<T: Table> DbCursorRW<T> for CursorMock {
     fn insert(
         &mut self,
         _key: <T as Table>::Key,
-        _value: <T as Table>::Value,
+        _value: &<T as Table>::Value,
     ) -> Result<(), DatabaseError> {
         Ok(())
     }
@@ -236,7 +236,7 @@ impl<T: Table> DbCursorRW<T> for CursorMock {
     fn append(
         &mut self,
         _key: <T as Table>::Key,
-        _value: <T as Table>::Value,
+        _value: &<T as Table>::Value,
     ) -> Result<(), DatabaseError> {
         Ok(())
     }

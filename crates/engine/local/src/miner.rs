@@ -5,10 +5,12 @@ use alloy_primitives::{TxHash, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
-use reth_engine_primitives::{BeaconEngineMessage, EngineApiMessageVersion, EngineTypes};
+use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
-use reth_payload_primitives::{BuiltPayload, PayloadAttributesBuilder, PayloadKind, PayloadTypes};
+use reth_payload_primitives::{
+    BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
+};
 use reth_provider::BlockReader;
 use reth_transaction_pool::TransactionPool;
 use std::{

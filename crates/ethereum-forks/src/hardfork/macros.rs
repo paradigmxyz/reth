@@ -17,11 +17,6 @@ macro_rules! hardfork {
                     $( $enum::$variant => stringify!($variant), )*
                 }
             }
-
-            /// Boxes `self` and returns it as `Box<dyn Hardfork>`.
-            pub fn boxed(self) -> Box<dyn Hardfork> {
-                Box::new(self)
-            }
         }
 
         impl FromStr for $enum {

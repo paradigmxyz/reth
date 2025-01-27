@@ -6,8 +6,7 @@ use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::Sealable;
 use clap::Parser;
-use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
@@ -18,6 +17,7 @@ use reth_downloaders::{
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
 use reth_eth_wire::NetPrimitivesFor;
+use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
@@ -45,8 +45,7 @@ use reth_stages::{
         IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
         TransactionLookupStage,
     },
-    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageError, StageExt, UnwindInput,
-    UnwindOutput,
+    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
 use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::watch;
@@ -104,7 +103,7 @@ pub struct Command<C: ChainSpecParser> {
     network: NetworkArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
     /// Execute `stage` command
     pub async fn execute<N, E, F, P>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
     where
@@ -189,11 +188,19 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     let fetch_client = Arc::new(network.fetch_client().await?);
 
                     // Use `to` as the tip for the stage
-                    let tip: P::BlockHeader = fetch_client
-                        .get_header(BlockHashOrNumber::Number(self.to))
-                        .await?
-                        .into_data()
-                        .ok_or(StageError::MissingSyncGap)?;
+                    let tip: P::BlockHeader = loop {
+                        match fetch_client.get_header(BlockHashOrNumber::Number(self.to)).await {
+                            Ok(header) => {
+                                if let Some(header) = header.into_data() {
+                                    break header
+                                }
+                            }
+                            Err(error) if error.is_retryable() => {
+                                warn!(target: "reth::cli", "Error requesting header: {error}. Retrying...")
+                            }
+                            Err(error) => return Err(error.into()),
+                        }
+                    };
                     let (_, rx) = watch::channel(tip.hash_slow());
                     (
                         Box::new(HeaderStage::new(

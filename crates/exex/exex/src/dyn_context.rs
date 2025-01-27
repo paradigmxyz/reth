@@ -4,7 +4,7 @@
 use std::fmt::Debug;
 
 use reth_chainspec::{EthChainSpec, Head};
-use reth_node_api::{FullNodeComponents, HeaderTy, NodePrimitives, NodeTypes};
+use reth_node_api::{FullNodeComponents, HeaderTy, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::EthPrimitives;
 use reth_provider::BlockReader;
@@ -26,7 +26,7 @@ pub struct ExExContextDyn<N: NodePrimitives = EthPrimitives> {
     /// # Important
     ///
     /// The exex should emit a `FinishedHeight` whenever a processed block is safe to prune.
-    /// Additionally, the exex can pre-emptively emit a `FinishedHeight` event to specify what
+    /// Additionally, the exex can preemptively emit a `FinishedHeight` event to specify what
     /// blocks to receive notifications for.
     pub events: mpsc::UnboundedSender<ExExEvent>,
     /// Channel to receive [`ExExNotification`](crate::ExExNotification)s.
@@ -50,7 +50,7 @@ impl<N: NodePrimitives> Debug for ExExContextDyn<N> {
     }
 }
 
-impl<Node> From<ExExContext<Node>> for ExExContextDyn<<Node::Types as NodeTypes>::Primitives>
+impl<Node> From<ExExContext<Node>> for ExExContextDyn<PrimitivesTy<Node::Types>>
 where
     Node: FullNodeComponents<Types: NodeTypes<Primitives: NodePrimitives>>,
     Node::Provider: Debug + BlockReader,

@@ -2,6 +2,7 @@ use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue}
 use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
 use reth_primitives::Account;
+use reth_storage_api::{AccountReader, BlockHashReader, StateProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{
     db::DatabaseRef,
@@ -37,20 +38,20 @@ pub trait EvmStateProvider: Send + Sync {
 }
 
 // Blanket implementation of EvmStateProvider for any type that implements StateProvider.
-impl<T: reth_storage_api::StateProvider> EvmStateProvider for T {
+impl<T: StateProvider> EvmStateProvider for T {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        <T as reth_storage_api::AccountReader>::basic_account(self, address)
+        <T as AccountReader>::basic_account(self, address)
     }
 
     fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
-        <T as reth_storage_api::BlockHashReader>::block_hash(self, number)
+        <T as BlockHashReader>::block_hash(self, number)
     }
 
     fn bytecode_by_hash(
         &self,
         code_hash: &B256,
     ) -> ProviderResult<Option<reth_primitives::Bytecode>> {
-        <T as reth_storage_api::StateProvider>::bytecode_by_hash(self, code_hash)
+        <T as StateProvider>::bytecode_by_hash(self, code_hash)
     }
 
     fn storage(
@@ -58,7 +59,7 @@ impl<T: reth_storage_api::StateProvider> EvmStateProvider for T {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        <T as reth_storage_api::StateProvider>::storage(self, account, storage_key)
+        <T as StateProvider>::storage(self, account, storage_key)
     }
 }
 

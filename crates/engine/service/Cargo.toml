@@ -12,7 +12,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-beacon-consensus.workspace = true
 reth-consensus.workspace = true
 reth-engine-tree.workspace = true
 reth-evm.workspace = true
@@ -36,6 +35,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 reth-engine-tree = { workspace = true, features = ["test-utils"] }
+reth-ethereum-consensus.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-evm-ethereum.workspace = true
 reth-exex-types.workspace = true
