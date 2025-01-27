@@ -550,19 +550,7 @@ pub(crate) struct TransactionPtr {
     #[cfg(feature = "read-tx-timeouts")]
     timed_out: Arc<AtomicBool>,
     lock: Arc<Mutex<()>>,
-    lock_backtrace: Arc<Mutex<Option<Backtrace>>>,
-}
-
-struct TransactionPtrLockGuard<'a> {
-    #[allow(dead_code)]
-    lock: MutexGuard<'a, ()>,
-    lock_backtrace: Arc<Mutex<Option<Backtrace>>>,
-}
-
-impl<'a> Drop for TransactionPtrLockGuard<'a> {
-    fn drop(&mut self) {
-        self.lock_backtrace.try_lock().unwrap().take();
-    }
+    lock_backtrace: Arc<Mutex<Backtrace>>,
 }
 
 impl TransactionPtr {
@@ -572,7 +560,7 @@ impl TransactionPtr {
             #[cfg(feature = "read-tx-timeouts")]
             timed_out: Arc::new(AtomicBool::new(false)),
             lock: Arc::new(Mutex::new(())),
-            lock_backtrace: Arc::new(Mutex::new(None)),
+            lock_backtrace: Arc::new(Mutex::new(Backtrace::disabled())),
         }
     }
 
@@ -594,10 +582,12 @@ impl TransactionPtr {
         self.timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
-    fn lock(&self) -> TransactionPtrLockGuard<'_> {
+    fn lock(&self) -> MutexGuard<'_, ()> {
+        // Do not force capture the backtrace every time, as it can be expensive.
+        let backtrace = Backtrace::capture();
         if let Some(lock) = self.lock.try_lock() {
-            *self.lock_backtrace.lock() = Some(Backtrace::force_capture());
-            TransactionPtrLockGuard { lock, lock_backtrace: self.lock_backtrace.clone() }
+            *self.lock_backtrace.lock() = backtrace;
+            lock
         } else {
             tracing::debug!(
                 target: "libmdbx",
@@ -607,8 +597,8 @@ impl TransactionPtr {
                 "Transaction lock is already acquired, blocking..."
             );
             let lock = self.lock.lock();
-            *self.lock_backtrace.lock() = Some(Backtrace::force_capture());
-            TransactionPtrLockGuard { lock, lock_backtrace: self.lock_backtrace.clone() }
+            *self.lock_backtrace.lock() = backtrace;
+            lock
         }
     }
 
