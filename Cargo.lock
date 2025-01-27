@@ -6778,7 +6778,6 @@ dependencies = [
  "metrics",
  "page_size",
  "parking_lot",
- "paste",
  "pprof",
  "proptest",
  "reth-db-api",
