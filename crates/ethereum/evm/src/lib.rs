@@ -17,18 +17,18 @@
 
 extern crate alloc;
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
+pub use alloy_evm::EthEvm;
+use alloy_evm::EthEvmFactory;
 use alloy_primitives::{Address, U256};
 use core::{convert::Infallible, fmt::Debug};
-use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Database, Evm, NextBlockEnvAttributes};
+use reth_chainspec::ChainSpec;
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, EvmEnv, NextBlockEnvAttributes};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::transaction::execute::FillTxEnv;
-use revm::{inspector_handle_register, EvmBuilder};
 use revm_primitives::{
-    AnalysisKind, BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, CfgEnvWithHandlerCfg, EVMError,
-    HaltReason, HandlerCfg, ResultAndState, SpecId, TxEnv, TxKind,
+    AnalysisKind, BlobExcessGasAndPrice, BlockEnv, CfgEnv, CfgEnvWithHandlerCfg, SpecId, TxEnv,
 };
 
 mod config;
@@ -44,90 +44,17 @@ pub mod dao_fork;
 /// [EIP-6110](https://eips.ethereum.org/EIPS/eip-6110) handling.
 pub mod eip6110;
 
-/// Ethereum EVM implementation.
-#[derive(derive_more::Debug, derive_more::Deref, derive_more::DerefMut, derive_more::From)]
-#[debug(bound(DB::Error: Debug))]
-pub struct EthEvm<'a, EXT, DB: Database>(revm::Evm<'a, EXT, DB>);
-
-impl<EXT, DB: Database> Evm for EthEvm<'_, EXT, DB> {
-    type DB = DB;
-    type Tx = TxEnv;
-    type Error = EVMError<DB::Error>;
-    type HaltReason = HaltReason;
-
-    fn block(&self) -> &BlockEnv {
-        self.0.block()
-    }
-
-    fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error> {
-        *self.tx_mut() = tx;
-        self.0.transact()
-    }
-
-    fn transact_system_call(
-        &mut self,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    ) -> Result<ResultAndState, Self::Error> {
-        #[allow(clippy::needless_update)] // side-effect of optimism fields
-        let tx_env = TxEnv {
-            caller,
-            transact_to: TxKind::Call(contract),
-            // Explicitly set nonce to None so revm does not do any nonce checks
-            nonce: None,
-            gas_limit: 30_000_000,
-            value: U256::ZERO,
-            data,
-            // Setting the gas price to zero enforces that no value is transferred as part of the
-            // call, and that the call will not count against the block's gas limit
-            gas_price: U256::ZERO,
-            // The chain ID check is not relevant here and is disabled if set to None
-            chain_id: None,
-            // Setting the gas priority fee to None ensures the effective gas price is derived from
-            // the `gas_price` field, which we need to be zero
-            gas_priority_fee: None,
-            access_list: Vec::new(),
-            // blob fields can be None for this tx
-            blob_hashes: Vec::new(),
-            max_fee_per_blob_gas: None,
-            // TODO remove this once this crate is no longer built with optimism
-            ..Default::default()
-        };
-
-        *self.tx_mut() = tx_env;
-
-        let prev_block_env = self.block().clone();
-
-        // ensure the block gas limit is >= the tx
-        self.block_mut().gas_limit = U256::from(self.tx().gas_limit);
-
-        // disable the base fee check for this call by setting the base fee to zero
-        self.block_mut().basefee = U256::ZERO;
-
-        let res = self.0.transact();
-
-        // re-set the block env
-        *self.block_mut() = prev_block_env;
-
-        res
-    }
-
-    fn db_mut(&mut self) -> &mut Self::DB {
-        &mut self.context.evm.db
-    }
-}
-
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
 pub struct EthEvmConfig {
     chain_spec: Arc<ChainSpec>,
+    evm_factory: EthEvmFactory,
 }
 
 impl EthEvmConfig {
     /// Creates a new Ethereum EVM configuration with the given chain spec.
-    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec }
+    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { chain_spec, evm_factory: Default::default() }
     }
 
     /// Creates a new Ethereum EVM configuration for the ethereum mainnet.
@@ -241,47 +168,10 @@ impl ConfigureEvmEnv for EthEvmConfig {
 }
 
 impl ConfigureEvm for EthEvmConfig {
-    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
-    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
-    type HaltReason = HaltReason;
+    type EvmFactory = EthEvmFactory;
 
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
-        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
-            cfg_env: evm_env.cfg_env,
-            handler_cfg: HandlerCfg::new(evm_env.spec),
-        };
-        EthEvm(
-            EvmBuilder::default()
-                .with_db(db)
-                .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
-                .with_block_env(evm_env.block_env)
-                .build(),
-        )
-    }
-
-    fn evm_with_env_and_inspector<DB, I>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        inspector: I,
-    ) -> Self::Evm<'_, DB, I>
-    where
-        DB: Database,
-        I: revm::GetInspector<DB>,
-    {
-        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
-            cfg_env: evm_env.cfg_env,
-            handler_cfg: HandlerCfg::new(evm_env.spec),
-        };
-        EthEvm(
-            EvmBuilder::default()
-                .with_db(db)
-                .with_external_context(inspector)
-                .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
-                .with_block_env(evm_env.block_env)
-                .append_handler_register(inspector_handle_register)
-                .build(),
-        )
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        &self.evm_factory
     }
 }
 
@@ -292,8 +182,8 @@ mod tests {
     use alloy_genesis::Genesis;
     use alloy_primitives::U256;
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
-    use reth_evm::{env::EvmEnv, execute::ProviderError};
-    use revm::{
+    use reth_evm::{execute::ProviderError, EvmEnv};
+    use reth_revm::{
         db::{CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
         primitives::{BlockEnv, CfgEnv, SpecId},

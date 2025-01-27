@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest,
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
-use reth_evm::{env::EvmEnv, ConfigureEvmEnv, Database, TransactionEnv};
+use reth_evm::{ConfigureEvmEnv, Database, EvmEnv, TransactionEnv};
 use reth_provider::StateProvider;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB, primitives::ExecutionResult};
 use reth_rpc_eth_types::{

@@ -21,8 +21,8 @@ use reth_basic_payload_builder::*;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::{
-    env::EvmEnv, system_calls::SystemCaller, ConfigureEvmEnv, ConfigureEvmFor, Database, Evm,
-    EvmError, InvalidTxError, NextBlockEnvAttributes,
+    system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Database, Evm, EvmEnv, EvmError,
+    InvalidTxError, NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;

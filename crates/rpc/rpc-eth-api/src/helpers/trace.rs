@@ -8,9 +8,7 @@ use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_errors::ProviderError;
-use reth_evm::{
-    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Database, Evm,
-};
+use reth_evm::{system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Database, Evm, EvmEnv};
 use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};

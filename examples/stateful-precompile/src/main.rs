@@ -3,6 +3,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_consensus::Header;
+use alloy_evm::EvmFactory;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes};
 use parking_lot::RwLock;
@@ -22,7 +23,7 @@ use reth::{
     tasks::TaskManager,
 };
 use reth_chainspec::{Chain, ChainSpec};
-use reth_evm::{env::EvmEnv, Database};
+use reth_evm::{Database, EvmEnv};
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
@@ -53,18 +54,76 @@ pub struct PrecompileCache {
     cache: HashMap<(Address, SpecId), CachedPrecompileResult>,
 }
 
+/// Custom EVM factory.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct MyEvmFactory {
+    precompile_cache: Arc<RwLock<PrecompileCache>>,
+}
+
+impl EvmFactory<EvmEnv> for MyEvmFactory {
+    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
+    type Tx = TxEnv;
+    type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type HaltReason = HaltReason;
+
+    fn create_evm<'a, DB: Database + 'a>(&self, db: DB, input: EvmEnv) -> Self::Evm<'a, DB, ()> {
+        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env: input.cfg_env,
+            handler_cfg: HandlerCfg::new(input.spec),
+        };
+
+        let new_cache = self.precompile_cache.clone();
+        EvmBuilder::default()
+            .with_db(db)
+            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
+            .with_block_env(input.block_env)
+            // add additional precompiles
+            .append_handler_register_box(Box::new(move |handler| {
+                MyEvmConfig::set_precompiles(handler, new_cache.clone())
+            }))
+            .build()
+            .into()
+    }
+
+    fn create_evm_with_inspector<'a, DB: Database + 'a, I: GetInspector<DB> + 'a>(
+        &self,
+        db: DB,
+        input: EvmEnv,
+        inspector: I,
+    ) -> Self::Evm<'a, DB, I> {
+        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env: input.cfg_env,
+            handler_cfg: HandlerCfg::new(input.spec),
+        };
+        let new_cache = self.precompile_cache.clone();
+        EvmBuilder::default()
+            .with_db(db)
+            .with_external_context(inspector)
+            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
+            .with_block_env(input.block_env)
+            // add additional precompiles
+            .append_handler_register_box(Box::new(move |handler| {
+                MyEvmConfig::set_precompiles(handler, new_cache.clone())
+            }))
+            .append_handler_register(inspector_handle_register)
+            .build()
+            .into()
+    }
+}
+
 /// Custom EVM configuration
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct MyEvmConfig {
     inner: EthEvmConfig,
-    precompile_cache: Arc<RwLock<PrecompileCache>>,
+    evm_factory: MyEvmFactory,
 }
 
 impl MyEvmConfig {
     /// Creates a new instance.
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { inner: EthEvmConfig::new(chain_spec), precompile_cache: Default::default() }
+        Self { inner: EthEvmConfig::new(chain_spec), evm_factory: MyEvmFactory::default() }
     }
 
     /// Sets the precompiles to the EVM handler
@@ -172,56 +231,10 @@ impl ConfigureEvmEnv for MyEvmConfig {
 }
 
 impl ConfigureEvm for MyEvmConfig {
-    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
-    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
-    type HaltReason = HaltReason;
+    type EvmFactory = MyEvmFactory;
 
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
-        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
-            cfg_env: evm_env.cfg_env,
-            handler_cfg: HandlerCfg::new(evm_env.spec),
-        };
-
-        let new_cache = self.precompile_cache.clone();
-        EvmBuilder::default()
-            .with_db(db)
-            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
-            .with_block_env(evm_env.block_env)
-            // add additional precompiles
-            .append_handler_register_box(Box::new(move |handler| {
-                MyEvmConfig::set_precompiles(handler, new_cache.clone())
-            }))
-            .build()
-            .into()
-    }
-
-    fn evm_with_env_and_inspector<DB, I>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        inspector: I,
-    ) -> Self::Evm<'_, DB, I>
-    where
-        DB: Database,
-        I: GetInspector<DB>,
-    {
-        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
-            cfg_env: evm_env.cfg_env,
-            handler_cfg: HandlerCfg::new(evm_env.spec),
-        };
-        let new_cache = self.precompile_cache.clone();
-        EvmBuilder::default()
-            .with_db(db)
-            .with_external_context(inspector)
-            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
-            .with_block_env(evm_env.block_env)
-            // add additional precompiles
-            .append_handler_register_box(Box::new(move |handler| {
-                MyEvmConfig::set_precompiles(handler, new_cache.clone())
-            }))
-            .append_handler_register(inspector_handle_register)
-            .build()
-            .into()
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        &self.evm_factory
     }
 }
 
@@ -246,7 +259,7 @@ where
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let evm_config = MyEvmConfig {
             inner: EthEvmConfig::new(ctx.chain_spec()),
-            precompile_cache: self.precompile_cache.clone(),
+            evm_factory: MyEvmFactory { precompile_cache: self.precompile_cache.clone() },
         };
         Ok((
             evm_config.clone(),
