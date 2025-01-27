@@ -368,7 +368,7 @@ impl ExecutionOutcome {
     /// of receipt. This is a expensive operation.
     pub fn ethereum_receipts_root(&self, _block_number: BlockNumber) -> Option<B256> {
         Some(self.receipts.root_slow(self.block_number_to_index(_block_number)?, |receipts| {
-            reth_primitives::proofs::calculate_receipt_root_no_memo(receipts)
+            reth_primitives::Receipt::calculate_receipt_root_no_memo(receipts)
         }))
     }
 }
