@@ -9441,10 +9441,13 @@ dependencies = [
  "rand 0.8.5",
  "reth-execution-errors",
  "reth-primitives-traits",
+ "reth-provider",
+ "reth-storage-api",
  "reth-testing-utils",
  "reth-tracing",
  "reth-trie",
  "reth-trie-common",
+ "reth-trie-db",
  "smallvec",
  "thiserror 2.0.11",
 ]
