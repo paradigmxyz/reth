@@ -10,7 +10,7 @@ use reth_trie_sparse::blinded::{
     pad_path_to_key, BlindedProvider, BlindedProviderFactory, RevealedNode,
 };
 use std::{sync::Arc, time::Instant};
-use tracing::trace;
+use tracing::{enabled, trace, Level};
 
 /// Factory for instantiating providers capable of retrieving blinded trie nodes via proofs.
 #[derive(Debug)]
@@ -88,7 +88,7 @@ where
     H: HashedCursorFactory + Clone + Send + Sync,
 {
     fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
-        let start = Instant::now();
+        let start = enabled!(target: "trie::proof::blinded", Level::TRACE).then(Instant::now);
 
         let targets = HashMap::from_iter([(pad_path_to_key(path), HashSet::default())]);
         let mut proof =
@@ -103,7 +103,7 @@ where
 
         trace!(
             target: "trie::proof::blinded",
-            elapsed = ?start.elapsed(),
+            elapsed = ?start.unwrap().elapsed(),
             ?path,
             ?node,
             ?tree_mask,
@@ -145,7 +145,7 @@ where
     H: HashedCursorFactory + Clone + Send + Sync,
 {
     fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
-        let start = Instant::now();
+        let start = enabled!(target: "trie::proof::blinded", Level::TRACE).then(Instant::now);
 
         let targets = HashSet::from_iter([pad_path_to_key(path)]);
         let storage_prefix_set =
@@ -166,7 +166,7 @@ where
         trace!(
             target: "trie::proof::blinded",
             account = ?self.account,
-            elapsed = ?start.elapsed(),
+            elapsed = ?start.unwrap().elapsed(),
             ?path,
             ?node,
             ?tree_mask,
