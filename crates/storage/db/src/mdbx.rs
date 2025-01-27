@@ -62,7 +62,7 @@ pub fn open_db_read_only(
 pub fn open_db(path: impl AsRef<Path>, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
     fn open(path: &Path, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
         let client_version = args.client_version().clone();
-        let db = DatabaseEnv::open(path.as_ref(), DatabaseEnvKind::RW, args)
+        let db = DatabaseEnv::open(path, DatabaseEnvKind::RW, args)
             .with_context(|| format!("Could not open database at path: {}", path.display()))?;
         db.record_client_version(client_version)?;
         Ok(db)
