@@ -583,6 +583,47 @@ async fn test_shutdown() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_exceed_outgoing_connections() {
+    let net = Testnet::create(2).await;
+    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let peers_config = PeersConfig::default().with_max_outbound(1);
+
+    let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
+        .listener_port(0)
+        .disable_discovery()
+        .peer_config(peers_config)
+        .build(NoopProvider::default());
+
+    let network = NetworkManager::new(config).await.unwrap();
+
+    let handle = network.handle().clone();
+    tokio::task::spawn(network);
+
+    // create networkeventstream to get the next session event easily.
+    let events = handle.event_listener();
+    let mut event_stream = NetworkEventStream::new(events);
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+    let handle1 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    handle.add_peer(*handle0.peer_id(), handle0.local_addr());
+
+    let outgoing_peer_id = event_stream.next_session_established().await.unwrap();
+    assert_eq!(outgoing_peer_id, *handle0.peer_id());
+
+    handle.add_peer(*handle1.peer_id(), handle1.local_addr());
+
+    // wait 2 seconds, the number of connections is still 1, indicating tha max outbound is in
+    // effect.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(handle.num_connected_peers(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     let net = Testnet::create(1).await;
     let secret_key = SecretKey::new(&mut rand::thread_rng());
