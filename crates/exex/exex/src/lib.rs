@@ -1,10 +1,11 @@
 //! Execution extensions (`ExEx`).
 //!
-//! An execution extension is a task that derives its state from Reth's state.
+//! An execution extension is a task that listens to state changes of the node.
 //!
 //! Some examples of such state derives are rollups, bridges, and indexers.
 //!
-//! An `ExEx` is a [`Future`] resolving to a `Result<()>` that is run indefinitely alongside Reth.
+//! An `ExEx` is a [`Future`] resolving to a `Result<()>` that is run indefinitely alongside the
+//! node.
 //!
 //! `ExEx`'s are initialized using an async closure that resolves to the `ExEx`; this closure gets
 //! passed an [`ExExContext`] where it is possible to spawn additional tasks and modify Reth.
@@ -28,44 +29,49 @@
 //!
 //! ### Simple Indexer ExEx
 //! ```no_run
-//! use reth_exex::ExEx;
+//! use alloy_consensus::BlockHeader;
+//! use futures::StreamExt;
+//! use reth_exex::ExExContext;
+//! use reth_node_api::FullNodeComponents;
 //! use reth_provider::CanonStateNotification;
 //!
-//! async fn my_indexer(ctx: ExExContext) -> Result<(), Box<dyn std::error::Error>> {
+//! async fn my_indexer<N: FullNodeComponents>(
+//!     mut ctx: ExExContext<N>,
+//! ) -> Result<(), Box<dyn std::error::Error>> {
 //!     // Subscribe to canonical state notifications
-//!     let mut notifications = ctx.canonical_state_notifications();
-//!     
-//!     while let Some(notification) = notifications.recv().await {
-//!         // Process new blocks
-//!         for block in notification.blocks() {
-//!             // Index or process block data
-//!             println!("Processed block: {}", block.number());
+//!
+//!     while let Some(Ok(notification)) = ctx.notifications.next().await {
+//!         if let Some(committed) = notification.committed_chain() {
+//!             for block in committed.blocks_iter() {
+//!                 // Index or process block data
+//!                 println!("Processed block: {}", block.number());
+//!             }
+//!
+//!             // Signal completion for pruning
+//!             ctx.send_finished_height(committed.tip().num_hash());
 //!         }
-//!         
-//!         // Signal completion for pruning
-//!         ctx.events().send(ExExEvent::FinishedHeight(block.number())).unwrap();
 //!     }
-//!     
+//!
 //!     Ok(())
 //! }
 //! ```
 //!
 //! ## Assumptions
-//! 
+//!
 //! - ExExs run indefinitely alongside Reth
 //! - ExExs receive canonical state notifications for block execution
 //! - ExExs should handle potential network or database errors gracefully
 //! - ExExs must emit `FinishedHeight` events for proper state pruning
 //!
 //! ## Invariants
-//! 
+//!
 //! - An ExEx must not block the main Reth execution
 //! - Notifications are processed in canonical order
 //! - ExExs should be able to recover from temporary failures
 //! - Memory and resource usage must be controlled
-//! 
+//!
 //! ## Performance Considerations
-//! 
+//!
 //! - Minimize blocking operations
 //! - Use efficient data structures for state tracking
 //! - Implement proper error handling and logging
