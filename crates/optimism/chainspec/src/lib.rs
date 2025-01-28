@@ -346,6 +346,7 @@ impl From<Genesis> for OpChainSpec {
 
         // Block-based hardforks
         let hardfork_opts = [
+            (EthereumHardfork::Frontier.boxed(), Some(0)),
             (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
             (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
             (EthereumHardfork::SpuriousDragon.boxed(), genesis.config.eip155_block),
@@ -987,6 +988,7 @@ mod tests {
 
         let hardforks: Vec<_> = chain_spec.hardforks.forks_iter().map(|(h, _)| h).collect();
         let expected_hardforks = vec![
+            EthereumHardfork::Frontier.boxed(),
             EthereumHardfork::Homestead.boxed(),
             EthereumHardfork::Tangerine.boxed(),
             EthereumHardfork::SpuriousDragon.boxed(),

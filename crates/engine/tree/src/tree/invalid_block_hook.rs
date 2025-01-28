@@ -1,6 +1,6 @@
 use alloy_primitives::B256;
 use reth_engine_primitives::InvalidBlockHook;
-use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_provider::BlockExecutionOutput;
 use reth_trie::updates::TrieUpdates;
 

@@ -11,7 +11,7 @@ use itertools::Itertools;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives::Account;
 use reth_trie_common::KeyHasher;
-use revm::db::{states::CacheAccount, AccountStatus, BundleAccount};
+use revm::db::{AccountStatus, BundleAccount};
 use std::borrow::Cow;
 
 /// Representation of in-memory hashed state.
@@ -27,6 +27,7 @@ impl HashedPostState {
     /// Initialize [`HashedPostState`] from bundle state.
     /// Hashes all changed accounts and storage entries that are currently stored in the bundle
     /// state.
+    #[inline]
     pub fn from_bundle_state<'a, KH: KeyHasher>(
         state: impl IntoParallelIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
@@ -47,34 +48,9 @@ impl HashedPostState {
         let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         for (address, (account, storage)) in hashed {
             accounts.insert(address, account);
-            storages.insert(address, storage);
-        }
-        Self { accounts, storages }
-    }
-
-    /// Initialize [`HashedPostState`] from cached state.
-    /// Hashes all changed accounts and storage entries that are currently stored in cache.
-    pub fn from_cache_state<'a, KH: KeyHasher>(
-        state: impl IntoParallelIterator<Item = (&'a Address, &'a CacheAccount)>,
-    ) -> Self {
-        let hashed = state
-            .into_par_iter()
-            .map(|(address, account)| {
-                let hashed_address = KH::hash_key(address);
-                let hashed_account = account.account.as_ref().map(|a| (&a.info).into());
-                let hashed_storage = HashedStorage::from_plain_storage(
-                    account.status,
-                    account.account.as_ref().map(|a| a.storage.iter()).into_iter().flatten(),
-                );
-                (hashed_address, (hashed_account, hashed_storage))
-            })
-            .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
-
-        let mut accounts = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        for (address, (account, storage)) in hashed {
-            accounts.insert(address, account);
-            storages.insert(address, storage);
+            if !storage.is_empty() {
+                storages.insert(address, storage);
+            }
         }
         Self { accounts, storages }
     }
@@ -219,6 +195,11 @@ impl HashedStorage {
         Self { wiped, storage: HashMap::default() }
     }
 
+    /// Check if self is empty.
+    pub fn is_empty(&self) -> bool {
+        !self.wiped && self.storage.is_empty()
+    }
+
     /// Create new hashed storage from iterator.
     pub fn from_iter(wiped: bool, iter: impl IntoIterator<Item = (B256, U256)>) -> Self {
         Self { wiped, storage: HashMap::from_iter(iter) }
@@ -357,10 +338,7 @@ mod tests {
     use alloy_primitives::Bytes;
     use reth_trie_common::KeccakKeyHasher;
     use revm::{
-        db::{
-            states::{plain_account::PlainStorage, StorageSlot},
-            PlainAccount, StorageWithOriginalValues,
-        },
+        db::{states::StorageSlot, StorageWithOriginalValues},
         primitives::{AccountInfo, Bytecode},
     };
 
@@ -470,45 +448,6 @@ mod tests {
 
         // Convert the bundle state into a hashed post state.
         let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(state);
-
-        // Validate the hashed post state.
-        assert_eq!(hashed_state.accounts.len(), 1);
-        assert_eq!(hashed_state.storages.len(), 1);
-
-        // Validate the account info.
-        assert_eq!(
-            *hashed_state.accounts.get(&keccak256(address)).unwrap(),
-            Some(account_info.into())
-        );
-    }
-
-    #[test]
-    fn test_hashed_post_state_from_cache_state() {
-        // Prepare a random Ethereum address.
-        let address = Address::random();
-
-        // Create mock account info.
-        let account_info = AccountInfo {
-            balance: U256::from(500),
-            nonce: 5,
-            code_hash: B256::random(),
-            code: None,
-        };
-
-        let mut storage = PlainStorage::default();
-        storage.insert(U256::from(1), U256::from(35636));
-
-        // Create a `CacheAccount` with the mock account info.
-        let account = CacheAccount {
-            account: Some(PlainAccount { info: account_info.clone(), storage }),
-            status: AccountStatus::Changed,
-        };
-
-        // Create a vector of tuples representing the cache state.
-        let state = vec![(&address, &account)];
-
-        // Convert the cache state into a hashed post state.
-        let hashed_state = HashedPostState::from_cache_state::<KeccakKeyHasher>(state);
 
         // Validate the hashed post state.
         assert_eq!(hashed_state.accounts.len(), 1);

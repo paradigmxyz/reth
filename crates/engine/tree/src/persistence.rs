@@ -3,7 +3,8 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_errors::ProviderError;
-use reth_primitives::{EthPrimitives, NodePrimitives};
+use reth_ethereum_primitives::EthPrimitives;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
     ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StaticFileProviderFactory,

@@ -9,8 +9,7 @@ use reth_network_p2p::{
     full_block::{FetchFullBlockFuture, FetchFullBlockRangeFuture, FullBlockClient},
     BlockClient,
 };
-use reth_primitives::{RecoveredBlock, SealedBlock};
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
 use std::{
     cmp::{Ordering, Reverse},
     collections::{binary_heap::PeekMut, BinaryHeap, HashSet, VecDeque},
@@ -319,11 +318,12 @@ mod tests {
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::SealedHeader;
+    use reth_primitives_traits::SealedHeader;
     use std::{future::poll_fn, sync::Arc};
 
     struct TestHarness {
-        block_downloader: BasicBlockDownloader<TestFullBlockClient, reth_primitives::Block>,
+        block_downloader:
+            BasicBlockDownloader<TestFullBlockClient, reth_ethereum_primitives::Block>,
         client: TestFullBlockClient,
     }
 

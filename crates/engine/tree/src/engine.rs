@@ -9,8 +9,8 @@ use alloy_primitives::B256;
 use futures::{Stream, StreamExt};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineTypes};
-use reth_primitives::{NodePrimitives, RecoveredBlock};
-use reth_primitives_traits::Block;
+use reth_ethereum_primitives::EthPrimitives;
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
 use std::{
     collections::HashSet,
     fmt::Display,
@@ -275,7 +275,7 @@ impl<T: EngineTypes, N: NodePrimitives> From<EngineApiRequest<T, N>>
 
 /// Events emitted by the engine API handler.
 #[derive(Debug)]
-pub enum EngineApiEvent<N: NodePrimitives = reth_primitives::EthPrimitives> {
+pub enum EngineApiEvent<N: NodePrimitives = EthPrimitives> {
     /// Event from the consensus engine.
     // TODO(mattsse): find a more appropriate name for this variant, consider phasing it out.
     BeaconConsensus(BeaconConsensusEngineEvent<N>),
