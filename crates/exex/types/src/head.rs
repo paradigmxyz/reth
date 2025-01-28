@@ -12,6 +12,6 @@ pub struct ExExHead {
 impl ExExHead {
     /// Creates a new instance for the given head block.
     pub const fn new(block: BlockNumHash) -> Self {
-        ExExHead { block }
+        Self { block }
     }
 }
