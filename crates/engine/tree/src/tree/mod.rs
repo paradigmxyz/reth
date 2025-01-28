@@ -156,6 +156,16 @@ impl<N: NodePrimitives> TreeState<N> {
         self.blocks_by_hash.get(&hash).map(|b| Arc::new(b.recovered_block().sealed_block().clone()))
     }
 
+    /// Returns the last N blocks.
+    fn last_blocks(&self, n: usize) -> Vec<RecoveredBlock<N::Block>> {
+        self.blocks_by_number
+            .iter()
+            .rev()
+            .take(n)
+            .flat_map(|(_, blocks)| blocks.iter().map(|b| b.recovered_block().clone()))
+            .collect()
+    }
+
     /// Returns all available blocks for the given hash that lead back to the canonical chain, from
     /// newest to oldest. And the parent hash of the oldest block that is missing from the buffer.
     ///
@@ -2422,6 +2432,28 @@ where
         );
 
         info!(target: "engine::tree", "Spawning prewarm threads");
+
+        // Get the last N blocks
+        let blocks = self.state.tree_state.last_blocks(25);
+
+        // Prewarm last N blocks
+        for (tx, sender) in blocks
+            .iter()
+            .flat_map(|block| {
+                block.body().transactions().iter().zip(block.senders())
+            }) {
+            let state_root_sender = state_root_sender.clone();
+
+            self.prewarm_transaction(
+                block.header().clone(),
+                tx.clone(),
+                *sender,
+                caches.clone(),
+                cache_metrics.clone(),
+                state_root_sender,
+                execution_finished.clone(),
+            )?;
+        }
 
         // Prewarm transactions
         for (tx, sender) in block.body().transactions().iter().zip(block.senders()) {
