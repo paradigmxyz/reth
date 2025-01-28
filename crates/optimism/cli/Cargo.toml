@@ -77,7 +77,6 @@ optimism = [
     "dep:derive_more",
     "dep:serde",
     "reth-optimism-evm/optimism",
-    "reth-provider/optimism",
     "reth-node-core/optimism",
     "reth-optimism-node/optimism",
     "reth-execution-types/optimism",

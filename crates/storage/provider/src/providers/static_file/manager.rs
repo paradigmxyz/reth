@@ -659,14 +659,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             reth_chainspec::Chain::optimism_mainnet() == provider.chain_spec().chain_id()
         {
             // check whether we have the first OVM block
-                if provider
-                    .block(1u64.into())?
-                    .is_some() {
-                    info!(target: "reth::cli",
-                        "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
-                    );
-                    return Ok(None)
-                }
+            if provider.block(1u64.into())?.is_some() {
+                info!(target: "reth::cli",
+                    "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
+                );
+                return Ok(None)
+            }
         }
 
         info!(target: "reth::cli", "Verifying storage consistency.");
