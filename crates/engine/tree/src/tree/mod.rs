@@ -1209,27 +1209,27 @@ where
                 Err(TryRecvError::Closed) => return Err(TryRecvError::Closed.into()),
                 Err(TryRecvError::Empty) => self.persistence_state.rx = Some((rx, start_time)),
             }
+            return Ok(())
         }
 
-        if !self.persistence_state.in_progress() {
-            if let Some(new_tip_num) = self.persistence_state.remove_above_state.pop_front() {
-                debug!(target: "engine::tree", ?new_tip_num, remove_state=?self.persistence_state.remove_above_state, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
-                if new_tip_num < self.persistence_state.last_persisted_block.number {
-                    debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
-                    let (tx, rx) = oneshot::channel();
-                    let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
-                    self.persistence_state.start(rx);
-                }
-            } else if self.should_persist() {
-                let blocks_to_persist = self.get_canonical_blocks_to_persist();
-                if blocks_to_persist.is_empty() {
-                    debug!(target: "engine::tree", "Returned empty set of blocks to persist");
-                } else {
-                    debug!(target: "engine::tree", blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
-                    let (tx, rx) = oneshot::channel();
-                    let _ = self.persistence.save_blocks(blocks_to_persist, tx);
-                    self.persistence_state.start(rx);
-                }
+        // persistence is not in progress, so we should attempt to advance
+        if let Some(new_tip_num) = self.persistence_state.remove_above_state.pop_front() {
+            debug!(target: "engine::tree", ?new_tip_num, remove_state=?self.persistence_state.remove_above_state, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
+            if new_tip_num < self.persistence_state.last_persisted_block.number {
+                debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
+                let (tx, rx) = oneshot::channel();
+                let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
+                self.persistence_state.start(rx);
+            }
+        } else if self.should_persist() {
+            let blocks_to_persist = self.get_canonical_blocks_to_persist();
+            if blocks_to_persist.is_empty() {
+                debug!(target: "engine::tree", "Returned empty set of blocks to persist");
+            } else {
+                debug!(target: "engine::tree", blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
+                let (tx, rx) = oneshot::channel();
+                let _ = self.persistence.save_blocks(blocks_to_persist, tx);
+                self.persistence_state.start(rx);
             }
         }
 
