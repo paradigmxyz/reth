@@ -17,6 +17,7 @@
 //! - `secp256k1`: Adds secp256k1 support for transaction signing/recovery. (By default the no-std
 //!   friendly `k256` is used)
 //! - `rayon`: Uses `rayon` for parallel transaction sender recovery in [`BlockBody`] by default.
+//! - `serde-bincode-compat` provides helpers for dealing with the `bincode` crate.
 //!
 //! ## Overview
 //!
@@ -51,6 +52,15 @@
 //! Hence this function is necessary when dealing with pre EIP-2 transactions on the ethereum
 //! mainnet. Newer transactions must always be recovered with the regular `recover` functions, see
 //! also [`recover_signer`](crypto::secp256k1::recover_signer).
+//!
+//! ## Bincode serde compatibility
+//!
+//! The [bincode-crate](https://github.com/bincode-org/bincode) is often used by additional tools when sending data over the network.
+//! `bincode` crate doesn't work well with optionally serializable serde fields, but some of the consensus types require optional serialization for RPC compatibility. Read more: <https://github.com/bincode-org/bincode/issues/326>
+//!
+//! As a workaround this crate introduces the
+//! [`SerdeBincodeCompat`](serde_bincode_compat::SerdeBincodeCompat) trait used to a bincode
+//! compatible serde representation.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
