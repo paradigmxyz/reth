@@ -19,6 +19,7 @@ reth-db.workspace = true
 reth-db-api.workspace = true
 reth-storage-errors.workspace = true
 reth-trie.workspace = true
+reth-trie-sparse.workspace = true # TODO: temp
 
 revm.workspace = true
 

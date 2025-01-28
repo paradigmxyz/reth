@@ -442,7 +442,8 @@ impl<P> RevealedSparseTrie<P> {
         Ok(())
     }
 
-    fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<()> {
+    /// TODO: temp pub
+    pub fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<()> {
         if child.len() == B256::len_bytes() + 1 {
             let hash = B256::from_slice(&child[1..]);
             match self.nodes.entry(path) {
@@ -465,6 +466,17 @@ impl<P> RevealedSparseTrie<P> {
         }
 
         self.reveal_node(path, TrieNode::decode(&mut &child[..])?, None, None)
+    }
+
+    /// TODO: docs
+    pub fn insert_node_unchecked(&mut self, path: Nibbles, node: SparseNode) {
+        println!("inserting at {path:?} node {node:?}");
+        self.nodes.insert(path, node);
+    }
+
+    /// TODO: docs
+    pub fn insert_value_unchecked(&mut self, path: Nibbles, value: Vec<u8>) {
+        self.values.insert(path, value);
     }
 
     /// Traverse trie nodes down to the leaf node and collect all nodes along the path.
