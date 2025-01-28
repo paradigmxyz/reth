@@ -5,7 +5,7 @@
 
 use crate::{providers::StaticFileProvider, ProviderFactory};
 use reth_db_api::{
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
+    database_metrics::{DatabaseMetrics},
     Database,
 };
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
@@ -120,7 +120,7 @@ impl<N, Val1, Val2, Val3> TypesAnd3<N, Val1, Val2, Val3> {
 impl<N, DB> TypesAnd3<N, DB, Arc<N::ChainSpec>, StaticFileProvider<N::Primitives>>
 where
     N: NodeTypes,
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
     /// Creates the [`ProviderFactory`].
     pub fn build_provider_factory(self) -> ProviderFactory<NodeTypesWithDBAdapter<N, DB>> {
