@@ -9,7 +9,9 @@ use crate::{
 };
 use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
-use alloy_primitives::{keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{
+    b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
+};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
@@ -658,8 +660,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         if provider.chain_spec().is_optimism() &&
             reth_chainspec::Chain::optimism_mainnet() == provider.chain_spec().chain_id()
         {
-            // check whether we have the first OVM block
-            if provider.block(1u64.into())?.is_some() {
+            // check whether we have the first OVM block: <https://optimistic.etherscan.io/block/0xbee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453>
+            const OVM_HEADER_1_HASH: B256 =
+                b256!("bee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453");
+            if provider.block_number(OVM_HEADER_1_HASH)?.is_some() {
                 info!(target: "reth::cli",
                     "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
                 );
