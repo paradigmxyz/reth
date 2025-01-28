@@ -24,6 +24,13 @@ const OP_INSERT: u8 = 13;
 const OP_APPEND: u8 = 14;
 const OP_DELETE_CURRENT: u8 = 15;
 
+const OP_NEXT_DUP: u8 = 16;
+const OP_NEXT_NO_DUP: u8 = 17;
+const OP_NEXT_DUP_VAL: u8 = 18;
+const OP_SEEK_BY_KEY_SUBKEY: u8 = 19;
+
+const OP_DELETE_CURRENT_DUPLICATE: u8 = 20;
+const OP_APPEND_DUP: u8 = 21;
 
 const STATUS_SUCCESS: u8 = 1;
 const STATUS_ERROR: u8 = 0;
@@ -441,11 +448,11 @@ impl ScalerizeClient {
     }
 
     pub fn delete_current(&mut self, table_code: u8, cursor_id: Vec<u8>) -> Result<(), ClientError> {
-        let mut request = vec![OP_FIRST];
+        let mut request = vec![OP_DELETE_CURRENT];
         request.extend_from_slice(&table_code.to_be_bytes());
         request.extend_from_slice(&cursor_id);
         
-        println!("FIRST REQUEST: {:?}", request);
+        println!("DELETE CURRENT REQUEST: {:?}", request);
         self.stream.write_all(&request)?;
         self.stream.flush()?;
 
@@ -457,6 +464,148 @@ impl ScalerizeClient {
             STATUS_SUCCESS => Ok(()),
             STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
             _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
+        }
+    }
+
+    pub fn next_dup(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<Option<(Vec<u8>, Vec<u8>)>, ClientError> {
+        let mut request = vec![OP_NEXT_DUP];
+        request.extend_from_slice(&table_code.to_be_bytes());
+        request.extend_from_slice(&cursor_id);
+        
+        println!("NEXT DUP REQUEST: {:?}", request);
+        self.stream.write_all(&request)?;
+        self.stream.flush()?;
+
+        let response = self.read_full_response()?;
+        let status = response[0];
+        let data = &response[1..];
+
+        if data.is_empty() {
+            return Ok(None);
+        }
+        match status {
+            STATUS_SUCCESS => self.parse_key_value_response(data, key_len).map(Some),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
+            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
+        }
+    }
+
+    pub fn next_no_dup(&mut self, table_code: u8, cursor_id: Vec<u8>, key_len: u32) -> Result<Option<(Vec<u8>, Vec<u8>)>, ClientError> {
+        let mut request = vec![OP_NEXT_NO_DUP];
+        request.extend_from_slice(&table_code.to_be_bytes());
+        request.extend_from_slice(&cursor_id);
+        
+        println!("NEXT DUP REQUEST: {:?}", request);
+        self.stream.write_all(&request)?;
+        self.stream.flush()?;
+
+        let response = self.read_full_response()?;
+        let status = response[0];
+        let data = &response[1..];
+
+        if data.is_empty() {
+            return Ok(None);
+        }
+
+        match status {
+            STATUS_SUCCESS => self.parse_key_value_response(data, key_len).map(Some),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
+            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
+        }
+    }
+
+    pub fn next_dup_val(&mut self, table_code: u8, cursor_id: Vec<u8>) -> Result<Option<Vec<u8>>, ClientError> {
+        let mut request = vec![OP_NEXT_DUP_VAL];
+        request.extend_from_slice(&table_code.to_be_bytes());
+        request.extend_from_slice(&cursor_id);
+        
+        println!("NEXT DUP VAL REQUEST: {:?}", request);
+        self.stream.write_all(&request)?;
+        self.stream.flush()?;
+
+        let response = self.read_full_response()?;
+        let status = response[0];
+        let data = &response[1..];
+
+        if data.is_empty() {
+            return Ok(None);
+        }
+
+        match status {
+            STATUS_SUCCESS => Ok(Some(data.to_vec())),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
+            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
+        }
+    }
+
+    pub fn seek_by_key_subkey(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8], subkey: &[u8]) -> Result<Option<Vec<u8>>, ClientError> {
+        let mut request = vec![OP_SEEK_BY_KEY_SUBKEY];
+        request.extend_from_slice(&table_code.to_be_bytes());
+        request.extend_from_slice(&cursor_id);
+        request.extend_from_slice(key);
+        request.extend_from_slice(subkey);
+        
+        println!("SEEK BY KEY SUBKEY REQUEST: {:?}", request);
+        self.stream.write_all(&request)?;
+        self.stream.flush()?;
+
+        let response = self.read_full_response()?;
+        let status = response[0];
+        let data = &response[1..];
+
+        if data.is_empty() {
+            return Ok(None);
+        }
+
+        match status {
+            STATUS_SUCCESS => Ok(Some(data.to_vec())),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
+            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
+        }
+    }
+
+    pub fn delete_current_duplicates(&mut self, table_code: u8, cursor_id: Vec<u8>) -> Result<(), ClientError> {
+        let mut request = vec![OP_DELETE_CURRENT_DUPLICATE];
+        request.extend_from_slice(&table_code.to_be_bytes());
+        request.extend_from_slice(&cursor_id);
+        
+        println!("DELETE CURRENT DUPLICATES REQUEST: {:?}", request);
+        self.stream.write_all(&request)?;
+        self.stream.flush()?;
+
+        let response = self.read_full_response()?;
+        let status = response[0];
+        let data: &[u8] = &response[1..];
+
+        match status {
+            STATUS_SUCCESS => Ok(()),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(data).into_owned())),
+            _ => Err(ClientError::InvalidResponse(format!("Unexpected status: {}", status)))
+        }
+    }
+
+    pub fn append_dup(&mut self, table_code: u8, cursor_id: Vec<u8>, key: &[u8], subkey: &[u8], value: &[u8]) -> Result<(), ClientError> {
+        let mut request = vec![OP_APPEND_DUP, table_code];
+        request.extend_from_slice(&cursor_id);
+        
+        request.extend_from_slice(key);
+        request.extend_from_slice(subkey);
+        request.extend_from_slice(value);
+        
+        println!("APPEND DUP REQUEST: {:?}", request);
+        self.stream.write_all(&request)?;
+        self.stream.flush()?;
+    
+        let response = self.read_full_response()?;
+        println!("RESPONSE FOR APPEND DUP: {:?}", response);
+
+        let status = response[0];
+        let data = response[1..].to_vec();
+
+        match status {
+            STATUS_SUCCESS => Ok(()),
+            STATUS_ERROR => Err(ClientError::OperationFailed(String::from_utf8_lossy(&data).into_owned())),
+            _ => Err(ClientError::OperationFailed(format!("Error: {:?}", data)))
         }
     }
 
