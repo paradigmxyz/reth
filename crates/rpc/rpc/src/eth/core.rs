@@ -505,7 +505,7 @@ where
         }
     }
 
-    /// Sets eth_cache instance
+    /// Sets `eth_cache` instance
     pub fn eth_cache(
         mut self,
         eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
@@ -514,26 +514,26 @@ where
         self
     }
 
-    /// Sets gas_oracle instance
+    /// Sets `gas_oracle` instance
     pub fn gas_oracle(mut self, gas_oracle: GasPriceOracle<Provider>) -> Self {
         self.gas_oracle = gas_oracle;
         self
     }
 
     /// Sets the gas cap.
-    pub fn gas_cap(mut self, gas_cap: GasCap) -> Self {
+    pub const fn gas_cap(mut self, gas_cap: GasCap) -> Self {
         self.gas_cap = gas_cap;
         self
     }
 
     /// Sets the maximum number of blocks for `eth_simulateV1`.
-    pub fn max_simulate_blocks(mut self, max_simulate_blocks: u64) -> Self {
+    pub const fn max_simulate_blocks(mut self, max_simulate_blocks: u64) -> Self {
         self.max_simulate_blocks = max_simulate_blocks;
         self
     }
 
     /// Sets the maximum number of blocks into the past for generating state proofs.
-    pub fn eth_proof_window(mut self, eth_proof_window: u64) -> Self {
+    pub const fn eth_proof_window(mut self, eth_proof_window: u64) -> Self {
         self.eth_proof_window = eth_proof_window;
         self
     }
@@ -551,7 +551,7 @@ where
     }
 
     /// Sets the proof permits.
-    pub fn proof_permits(mut self, proof_permits: usize) -> Self {
+    pub const fn proof_permits(mut self, proof_permits: usize) -> Self {
         self.proof_permits = proof_permits;
         self
     }
