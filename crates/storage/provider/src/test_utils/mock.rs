@@ -303,7 +303,7 @@ impl<T: SignedTransaction> TransactionsProvider for MockEthProvider<T> {
                         excess_blob_gas: block.header.excess_blob_gas,
                         timestamp: block.header.timestamp,
                     };
-                    return Ok(Some((tx.clone(), meta)));
+                    return Ok(Some((tx.clone(), meta)))
                 }
             }
         }
@@ -315,7 +315,7 @@ impl<T: SignedTransaction> TransactionsProvider for MockEthProvider<T> {
         let mut current_tx_number: TxNumber = 0;
         for block in lock.values() {
             if current_tx_number + (block.body.transactions.len() as TxNumber) > id {
-                return Ok(Some(block.header.number));
+                return Ok(Some(block.header.number))
             }
             current_tx_number += block.body.transactions.len() as TxNumber;
         }
