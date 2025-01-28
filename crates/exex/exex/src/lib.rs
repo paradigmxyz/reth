@@ -58,16 +58,16 @@
 //!
 //! ## Assumptions
 //!
-//! - ExExs run indefinitely alongside Reth
-//! - ExExs receive canonical state notifications for block execution
-//! - ExExs should handle potential network or database errors gracefully
-//! - ExExs must emit `FinishedHeight` events for proper state pruning
+//! - `ExExs` run indefinitely alongside Reth
+//! - `ExExs` receive canonical state notifications for block execution
+//! - `ExExs` should handle potential network or database errors gracefully
+//! - `ExExs` must emit `FinishedHeight` events for proper state pruning
 //!
 //! ## Invariants
 //!
 //! - An ExEx must not block the main Reth execution
 //! - Notifications are processed in canonical order
-//! - ExExs should be able to recover from temporary failures
+//! - `ExExs` should be able to recover from temporary failures
 //! - Memory and resource usage must be controlled
 //!
 //! ## Performance Considerations
