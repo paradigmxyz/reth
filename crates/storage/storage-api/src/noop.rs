@@ -538,6 +538,14 @@ impl<C: Send + Sync, N: NodePrimitives> WithdrawalsProvider for NoopProvider<C, 
     ) -> ProviderResult<Option<Withdrawals>> {
         Ok(None)
     }
+
+    fn withdrawals_by_block_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+        _timestamps: &[(BlockNumber, u64)],
+    ) -> ProviderResult<Vec<Option<Withdrawals>>> {
+        Ok(vec![])
+    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> OmmersProvider for NoopProvider<C, N> {

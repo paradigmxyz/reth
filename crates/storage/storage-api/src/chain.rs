@@ -1,12 +1,12 @@
-use crate::{DBProvider, OmmersProvider, StorageLocation};
-use alloy_consensus::Header;
+use crate::{DBProvider, OmmersProvider, StorageLocation, WithdrawalsProvider};
+use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::BlockNumber;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_db::{
-    cursor::{DbCursorRO, DbCursorRW},
+    cursor::DbCursorRW,
     models::{StoredBlockOmmers, StoredBlockWithdrawals},
     tables,
-    transaction::{DbTx, DbTxMut},
+    transaction::DbTxMut,
     DbTxUnwindExt,
 };
 use reth_primitives::TransactionSigned;
@@ -141,7 +141,8 @@ impl<Provider, T> BlockBodyReader<Provider> for EthStorage<T>
 where
     Provider: DBProvider
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
-        + OmmersProvider<Header = Header>,
+        + OmmersProvider<Header = Header>
+        + WithdrawalsProvider,
     T: SignedTransaction,
 {
     type Block = reth_primitives::Block<T>;
@@ -151,25 +152,24 @@ where
         provider: &Provider,
         inputs: Vec<ReadBodyInput<'_, Self::Block>>,
     ) -> ProviderResult<Vec<<Self::Block as Block>::Body>> {
+        if inputs.is_empty() {
+            return Ok(vec![])
+        }
         // TODO: Ideally storage should hold its own copy of chain spec
         let chain_spec = provider.chain_spec();
 
-        let mut withdrawals_cursor = provider.tx_ref().cursor_read::<tables::BlockWithdrawals>()?;
+        let block_range = inputs
+            .first()
+            .and_then(|(first, _)| inputs.last().map(|(last, _)| first.number()..=last.number()))
+            .expect("qed");
+        let timestamps =
+            inputs.iter().map(|(h, _)| (h.number(), h.timestamp())).collect::<Vec<_>>();
 
         let mut bodies = Vec::with_capacity(inputs.len());
 
-        for (header, transactions) in inputs {
-            // If we are past shanghai, then all blocks should have a withdrawal list,
-            // even if empty
-            let withdrawals = if chain_spec.is_shanghai_active_at_timestamp(header.timestamp) {
-                withdrawals_cursor
-                    .seek_exact(header.number)?
-                    .map(|(_, w)| w.withdrawals)
-                    .unwrap_or_default()
-                    .into()
-            } else {
-                None
-            };
+        for ((header, transactions), withdrawals) in
+            inputs.into_iter().zip(provider.withdrawals_by_block_range(block_range, &timestamps)?)
+        {
             let ommers = if chain_spec.final_paris_total_difficulty(header.number).is_some() {
                 Vec::new()
             } else {

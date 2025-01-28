@@ -369,6 +369,27 @@ impl<N: NodePrimitives> WithdrawalsProvider for StaticFileJarProvider<'_, N> {
         // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn withdrawals_by_block_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+        _timestamps: &[(BlockNumber, u64)],
+    ) -> ProviderResult<Vec<Option<Withdrawals>>> {
+        // Empty withdrawals post shangai are stored as Some([]), while pre shangai are stored as
+        // None
+        let mut cursor = self.cursor()?;
+        let mut withdrawals_by_block =
+            Vec::with_capacity((range.end() - range.start() + 1) as usize);
+
+        for num in range {
+            if let Some(withdrawals) =
+                cursor.get_one::<WithdrawalsMask>(num.into())?.map(|w| w.withdrawals)
+            {
+                withdrawals_by_block.push(withdrawals)
+            }
+        }
+        Ok(withdrawals_by_block)
+    }
 }
 
 impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileJarProvider<'_, N> {

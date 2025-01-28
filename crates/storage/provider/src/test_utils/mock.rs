@@ -769,6 +769,14 @@ impl WithdrawalsProvider for MockEthProvider {
     ) -> ProviderResult<Option<Withdrawals>> {
         Ok(None)
     }
+
+    fn withdrawals_by_block_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+        _timestamps: &[(BlockNumber, u64)],
+    ) -> ProviderResult<Vec<Option<Withdrawals>>> {
+        Ok(vec![])
+    }
 }
 
 impl OmmersProvider for MockEthProvider {

@@ -1151,6 +1151,21 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ConsistentProvider<N> {
             },
         )
     }
+
+    fn withdrawals_by_block_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+        timestamps: &[(BlockNumber, u64)],
+    ) -> ProviderResult<Vec<Option<Withdrawals>>> {
+        self.get_in_memory_or_storage_by_block_range_while(
+            range,
+            |db_provider, range, _| db_provider.withdrawals_by_block_range(range, timestamps),
+            |block_state, _| {
+                Some(block_state.block_ref().recovered_block().body().withdrawals().cloned())
+            },
+            |_| true,
+        )
+    }
 }
 
 impl<N: ProviderNodeTypes> OmmersProvider for ConsistentProvider<N> {
