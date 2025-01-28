@@ -75,7 +75,6 @@ tempfile.workspace = true
 optimism = [
     "reth-db?/optimism",
     "reth-db-api?/optimism",
-    "reth-provider/optimism",
 ]
 
 test-utils = [
