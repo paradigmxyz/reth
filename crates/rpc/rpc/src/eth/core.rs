@@ -11,7 +11,7 @@ use derive_more::Deref;
 use reth_primitives::NodePrimitives;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ProviderBlock,
-    ProviderReceipt,
+    ProviderReceipt, StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
@@ -21,6 +21,9 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{
     EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
     PendingBlock,
+};
+use reth_rpc_server_types::constants::{
+    DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -450,9 +453,131 @@ where
     }
 }
 
+/// A helper to build the `EthApi` instance.
+#[derive(Debug)]
+pub struct EthApiBuilder<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReaderIdExt,
+{
+    provider: Provider,
+    pool: Pool,
+    network: Network,
+    evm_config: EvmConfig,
+    eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
+    gas_oracle: GasPriceOracle<Provider>,
+    gas_cap: GasCap,
+    max_simulate_blocks: u64,
+    eth_proof_window: u64,
+    blocking_task_pool: BlockingTaskPool,
+    fee_history_cache: FeeHistoryCache,
+    proof_permits: usize,
+}
+
+impl<Provider, Pool, Network, EvmConfig> EthApiBuilder<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReaderIdExt,
+{
+    /// Creates a new `EthApiBuilder` instance.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the blocking task pool cannot be built.
+    pub fn new(provider: Provider, pool: Pool, network: Network, evm_config: EvmConfig) -> Self
+    where
+        Provider: BlockReaderIdExt + StateProviderFactory + Clone + Unpin + 'static,
+    {
+        let cache = EthStateCache::spawn(provider.clone(), Default::default());
+
+        Self {
+            provider: provider.clone(),
+            pool,
+            network,
+            evm_config,
+            eth_cache: cache.clone(),
+            gas_oracle: GasPriceOracle::new(provider, Default::default(), cache),
+            gas_cap: GasCap::default(),
+            max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
+            eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
+            blocking_task_pool: BlockingTaskPool::build()
+                .expect("failed to build blocking task pool"),
+            fee_history_cache: FeeHistoryCache::new(Default::default()),
+            proof_permits: DEFAULT_PROOF_PERMITS,
+        }
+    }
+
+    /// Sets eth_cache instance
+    pub fn eth_cache(
+        mut self,
+        eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
+    ) -> Self {
+        self.eth_cache = eth_cache;
+        self
+    }
+
+    /// Sets gas_oracle instance
+    pub fn gas_oracle(mut self, gas_oracle: GasPriceOracle<Provider>) -> Self {
+        self.gas_oracle = gas_oracle;
+        self
+    }
+
+    /// Sets the gas cap.
+    pub fn gas_cap(mut self, gas_cap: GasCap) -> Self {
+        self.gas_cap = gas_cap;
+        self
+    }
+
+    /// Sets the maximum number of blocks for `eth_simulateV1`.
+    pub fn max_simulate_blocks(mut self, max_simulate_blocks: u64) -> Self {
+        self.max_simulate_blocks = max_simulate_blocks;
+        self
+    }
+
+    /// Sets the maximum number of blocks into the past for generating state proofs.
+    pub fn eth_proof_window(mut self, eth_proof_window: u64) -> Self {
+        self.eth_proof_window = eth_proof_window;
+        self
+    }
+
+    /// Sets the blocking task pool.
+    pub fn blocking_task_pool(mut self, blocking_task_pool: BlockingTaskPool) -> Self {
+        self.blocking_task_pool = blocking_task_pool;
+        self
+    }
+
+    /// Sets the fee history cache.
+    pub fn fee_history_cache(mut self, fee_history_cache: FeeHistoryCache) -> Self {
+        self.fee_history_cache = fee_history_cache;
+        self
+    }
+
+    /// Sets the proof permits.
+    pub fn proof_permits(mut self, proof_permits: usize) -> Self {
+        self.proof_permits = proof_permits;
+        self
+    }
+
+    /// Builds the `EthApi` instance.
+    pub fn build(self) -> EthApi<Provider, Pool, Network, EvmConfig> {
+        EthApi::new(
+            self.provider,
+            self.pool,
+            self.network,
+            self.eth_cache,
+            self.gas_oracle,
+            self.gas_cap,
+            self.max_simulate_blocks,
+            self.eth_proof_window,
+            self.blocking_task_pool,
+            self.fee_history_cache,
+            self.evm_config,
+            self.proof_permits,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::EthApi;
+    use crate::{EthApi, EthApiBuilder};
     use alloy_consensus::Header;
     use alloy_eips::BlockNumberOrTag;
     use alloy_primitives::{PrimitiveSignature as Signature, B256, U64};
@@ -467,13 +592,6 @@ mod tests {
         BlockReader, BlockReaderIdExt, ChainSpecProvider, StateProviderFactory,
     };
     use reth_rpc_eth_api::EthApiServer;
-    use reth_rpc_eth_types::{
-        EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle,
-    };
-    use reth_rpc_server_types::constants::{
-        DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
-    };
-    use reth_tasks::pool::BlockingTaskPool;
     use reth_testing_utils::{generators, generators::Rng};
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
@@ -491,24 +609,13 @@ mod tests {
     >(
         provider: P,
     ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig> {
-        let evm_config = EthEvmConfig::new(provider.chain_spec());
-        let cache = EthStateCache::spawn(provider.clone(), Default::default());
-        let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
-
-        EthApi::new(
+        EthApiBuilder::new(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
-            cache.clone(),
-            GasPriceOracle::new(provider, Default::default(), cache),
-            GasCap::default(),
-            DEFAULT_MAX_SIMULATE_BLOCKS,
-            DEFAULT_ETH_PROOF_WINDOW,
-            BlockingTaskPool::build().expect("failed to build tracing pool"),
-            fee_history_cache,
-            evm_config,
-            DEFAULT_PROOF_PERMITS,
+            EthEvmConfig::new(provider.chain_spec()),
         )
+        .build()
     }
 
     // Function to prepare the EthApi with mock data
