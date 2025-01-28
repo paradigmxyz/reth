@@ -13,12 +13,11 @@ use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     map::{DefaultHashBuilder, HashMap},
-    Address, BlockNumber,
+    Address,
 };
 use core::fmt::Display;
 use reth_consensus::ConsensusError;
 use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
-use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
@@ -112,16 +111,6 @@ pub trait BatchExecutor<DB> {
 
     /// Finishes the batch and return the final state.
     fn finalize(self) -> Self::Output;
-
-    /// Set the expected tip of the batch.
-    ///
-    /// This can be used to optimize state pruning during execution.
-    fn set_tip(&mut self, tip: BlockNumber);
-
-    /// Set the prune modes.
-    ///
-    /// They are used to determine which parts of the state should be kept during execution.
-    fn set_prune_modes(&mut self, prune_modes: PruneModes);
 
     /// The size hint of the batch's tracked state size.
     ///
@@ -429,9 +418,7 @@ where
 
         self.strategy.validate_block_post_execution(block, &receipts, &requests)?;
 
-        // prepare the state according to the prune mode
-        let retention = self.batch_record.bundle_retention(block.header().number());
-        self.strategy.state_mut().merge_transitions(retention);
+        self.strategy.state_mut().merge_transitions(BundleRetention::Reverts);
 
         // store receipts in the set
         self.batch_record.save_receipts(receipts);
@@ -449,14 +436,6 @@ where
             self.batch_record.first_block().unwrap_or_default(),
             self.batch_record.take_requests(),
         )
-    }
-
-    fn set_tip(&mut self, tip: BlockNumber) {
-        self.batch_record.set_tip(tip);
-    }
-
-    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
-        self.batch_record.set_prune_modes(prune_modes);
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -578,14 +557,6 @@ mod tests {
         }
 
         fn finalize(self) -> Self::Output {
-            todo!()
-        }
-
-        fn set_tip(&mut self, _tip: BlockNumber) {
-            todo!()
-        }
-
-        fn set_prune_modes(&mut self, _prune_modes: PruneModes) {
             todo!()
         }
 
