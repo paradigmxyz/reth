@@ -641,8 +641,8 @@ mod tests {
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::transaction::DbTx;
     use reth_db_api::{models::AccountBeforeTx, transaction::DbTxMut};
+    use reth_ethereum_evm::execute::EthExecutionStrategyFactory;
     use reth_evm::execute::BasicBlockExecutorProvider;
-    use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
     use reth_execution_errors::BlockValidationError;
     use reth_primitives::{Account, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
