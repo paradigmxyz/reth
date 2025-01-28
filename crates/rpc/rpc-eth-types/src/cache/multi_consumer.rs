@@ -7,7 +7,10 @@ use std::{
     hash::Hash,
 };
 
+use reth_primitives_traits::InMemorySize;
+// use reth_primitives_traits::InMemorySize;
 use schnellru::{ByLength, Limiter, LruMap};
+use serde::de::value;
 
 use super::metrics::CacheMetrics;
 
@@ -23,6 +26,8 @@ where
     queued: HashMap<K, Vec<S>>,
     /// Cache metrics
     metrics: CacheMetrics,
+    // Heap usage
+    memory_usage: usize,
 }
 
 impl<K, V, L, S> Debug for MultiConsumerLruCache<K, V, L, S>
@@ -62,8 +67,14 @@ where
     }
 
     /// Remove consumers for a given key, this will also remove the key from the cache.
-    pub fn remove(&mut self, key: &K) -> Option<Vec<S>> {
+    pub fn remove(&mut self, key: &K) -> Option<Vec<S>>
+    where
+        V: InMemorySize,
+    {
         let _ = self.cache.remove(key);
+        if let Some(value) = self.cache.remove(key) {
+            self.memory_usage -= value.size();
+        }
         self.queued
             .remove(key)
             .inspect(|removed| self.metrics.queued_consumers_count.decrement(removed.len() as f64))
@@ -89,8 +100,15 @@ where
     pub fn insert<'a>(&mut self, key: L::KeyToInsert<'a>, value: V) -> bool
     where
         L::KeyToInsert<'a>: Hash + PartialEq<K>,
+        V: InMemorySize,
     {
-        self.cache.insert(key, value)
+        let size = value.size();
+        if self.cache.insert(key, value) {
+            self.memory_usage += size;
+            true
+        } else {
+            false
+        }
     }
 
     /// Update metrics for the inner cache.
@@ -110,6 +128,7 @@ where
             cache: LruMap::new(ByLength::new(max_len)),
             queued: Default::default(),
             metrics: CacheMetrics::new_with_labels(&[("cache", cache_id.to_string())]),
+            memory_usage: CacheMetrics::new_with_labels(&[("cache", cache_id.to_string())]),
         }
     }
 }
