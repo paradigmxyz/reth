@@ -227,20 +227,16 @@ mod test {
 
     fn get_chainspec() -> Arc<OpChainSpec> {
         let hardforks = OpHardfork::base_sepolia();
-        Arc::new(OpChainSpec {
-            inner: ChainSpec {
-                chain: BASE_SEPOLIA.inner.chain,
-                genesis: BASE_SEPOLIA.inner.genesis.clone(),
-                genesis_hash: BASE_SEPOLIA.inner.genesis_hash.clone(),
-                paris_block_and_final_difficulty: BASE_SEPOLIA
-                    .inner
-                    .paris_block_and_final_difficulty,
-                hardforks,
-                base_fee_params: BASE_SEPOLIA.inner.base_fee_params.clone(),
-                prune_delete_limit: 10000,
-                ..Default::default()
-            },
-        })
+        Arc::new(OpChainSpec::from(ChainSpec {
+            chain: BASE_SEPOLIA.chain,
+            genesis: BASE_SEPOLIA.genesis.clone(),
+            genesis_hash: BASE_SEPOLIA.genesis_hash.clone(),
+            paris_block_and_final_difficulty: BASE_SEPOLIA.paris_block_and_final_difficulty,
+            hardforks,
+            base_fee_params: BASE_SEPOLIA.base_fee_params.clone(),
+            prune_delete_limit: 10000,
+            ..Default::default()
+        }))
     }
 
     const fn get_attributes(eip_1559_params: Option<B64>, timestamp: u64) -> OpPayloadAttributes {

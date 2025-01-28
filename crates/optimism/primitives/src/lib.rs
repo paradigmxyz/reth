@@ -26,7 +26,7 @@ pub use receipt::{DepositReceipt, OpReceipt};
 pub type OpBlock = alloy_consensus::Block<OpTransactionSigned>;
 
 /// Optimism-specific block body type.
-pub type OpBlockBody = <OpBlock as Block>::Body;
+pub type OpBlockBody = <OpBlock as reth_primitives_traits::Block>::Body;
 
 /// Primitive types for Optimism Node.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
