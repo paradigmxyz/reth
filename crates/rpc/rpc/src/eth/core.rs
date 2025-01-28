@@ -99,25 +99,24 @@ where
     }
 }
 
-impl<Provider, Pool, EvmConfig, Network> EthApi<Provider, Pool, Network, EvmConfig>
+impl<N, Provider, Pool, EvmConfig, Network> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: ChainSpecProvider + BlockReaderIdExt + Clone + 'static,
+    N: NodePrimitives,
+    Provider: ChainSpecProvider
+        + BlockReaderIdExt<Block = N::Block, Receipt = N::Receipt>
+        + CanonStateSubscriptions<Primitives = N>
+        + Clone
+        + 'static,
     Pool: Clone,
     EvmConfig: Clone,
     Network: Clone,
 {
     /// Creates a new, shareable instance.
-    pub fn with_spawner<Tasks, Events>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    pub fn with_spawner<Tasks>(
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks>,
     ) -> Self
     where
         Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions<
-            Primitives: NodePrimitives<
-                Block = ProviderBlock<Provider>,
-                Receipt = ProviderReceipt<Provider>,
-            >,
-        >,
     {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");
