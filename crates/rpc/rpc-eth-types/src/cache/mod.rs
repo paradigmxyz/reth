@@ -607,9 +607,9 @@ impl<R: Send + Sync, B: Block> Drop for ActionSender<B, R> {
                     block_hash: self.blockhash,
                     res: Err(ProviderError::CacheServiceUnavailable),
                 },
-                CacheKind::Header => CacheAction::BlockWithSendersResult {
+                CacheKind::Header => CacheAction::HeaderResult {
                     block_hash: self.blockhash,
-                    res: Err(ProviderError::CacheServiceUnavailable),
+                    res: Box::new(Err(ProviderError::CacheServiceUnavailable)),
                 },
             };
             let _ = tx.send(msg);
