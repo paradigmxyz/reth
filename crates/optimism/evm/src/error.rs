@@ -1,12 +1,13 @@
 //! Error types for the Optimism EVM module.
 
+use alloc::string::String;
 use reth_evm::execute::BlockExecutionError;
 
 /// Optimism Block Executor Errors
-#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
-pub enum OptimismBlockExecutionError {
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum OpBlockExecutionError {
     /// Error when trying to parse L1 block info
-    #[error("could not get L1 block info from L2 block: {message:?}")]
+    #[error("could not get L1 block info from L2 block: {message}")]
     L1BlockInfoError {
         /// The inner error message
         message: String,
@@ -18,12 +19,12 @@ pub enum OptimismBlockExecutionError {
     #[error("blob transaction included in sequencer block")]
     BlobTransactionRejected,
     /// Thrown when a database account could not be loaded.
-    #[error("failed to load account {0}")]
+    #[error("failed to load account {_0}")]
     AccountLoadFailed(alloy_primitives::Address),
 }
 
-impl From<OptimismBlockExecutionError> for BlockExecutionError {
-    fn from(err: OptimismBlockExecutionError) -> Self {
+impl From<OpBlockExecutionError> for BlockExecutionError {
+    fn from(err: OpBlockExecutionError) -> Self {
         Self::other(err)
     }
 }

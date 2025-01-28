@@ -1,8 +1,7 @@
-use alloy_eips::BlockHashOrNumber;
-use reth_primitives::{Withdrawal, Withdrawals};
+use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber};
 use reth_storage_errors::provider::ProviderResult;
 
-///  Client trait for fetching [Withdrawal] related data.
+///  Client trait for fetching [`alloy_eips::eip4895::Withdrawal`] related data.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait WithdrawalsProvider: Send + Sync {
     /// Get withdrawals by block id.
@@ -11,7 +10,4 @@ pub trait WithdrawalsProvider: Send + Sync {
         id: BlockHashOrNumber,
         timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>>;
-
-    /// Get latest withdrawal from this block or earlier .
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>>;
 }

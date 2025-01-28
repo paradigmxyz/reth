@@ -1,8 +1,11 @@
 use crate::{BackfillJobFactory, ExExNotification, StreamBackfillJob, WalHandle};
+use alloy_consensus::BlockHeader;
+use alloy_eips::BlockNumHash;
 use futures::{Stream, StreamExt};
-use reth_chainspec::Head;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex_types::ExExHead;
+use reth_node_api::NodePrimitives;
+use reth_primitives::EthPrimitives;
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
 use reth_tracing::tracing::debug;
 use std::{
@@ -17,12 +20,54 @@ use tokio::sync::mpsc::Receiver;
 /// stream is configured with a head via [`ExExNotifications::set_with_head`] or
 /// [`ExExNotifications::with_head`], it will run backfill jobs to catch up to the node head.
 #[derive(Debug)]
-pub struct ExExNotifications<P, E> {
+pub struct ExExNotifications<P, E>
+where
+    E: BlockExecutorProvider,
+{
     inner: ExExNotificationsInner<P, E>,
 }
 
+/// A trait, that represents a stream of [`ExExNotification`]s. The stream will emit notifications
+/// for all blocks. If the stream is configured with a head via [`ExExNotifications::set_with_head`]
+/// or [`ExExNotifications::with_head`], it will run backfill jobs to catch up to the node head.
+pub trait ExExNotificationsStream<N: NodePrimitives = EthPrimitives>:
+    Stream<Item = eyre::Result<ExExNotification<N>>> + Unpin
+{
+    /// Sets [`ExExNotificationsStream`] to a stream of [`ExExNotification`]s without a head.
+    ///
+    /// It's a no-op if the stream has already been configured without a head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
+    fn set_without_head(&mut self);
+
+    /// Sets [`ExExNotificationsStream`] to a stream of [`ExExNotification`]s with the provided
+    /// head.
+    ///
+    /// It's a no-op if the stream has already been configured with a head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithHead`] for more details.
+    fn set_with_head(&mut self, exex_head: ExExHead);
+
+    /// Returns a new [`ExExNotificationsStream`] without a head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
+    fn without_head(self) -> Self
+    where
+        Self: Sized;
+
+    /// Returns a new [`ExExNotificationsStream`] with the provided head.
+    ///
+    /// See the documentation of [`ExExNotificationsWithHead`] for more details.
+    fn with_head(self, exex_head: ExExHead) -> Self
+    where
+        Self: Sized;
+}
+
 #[derive(Debug)]
-enum ExExNotificationsInner<P, E> {
+enum ExExNotificationsInner<P, E>
+where
+    E: BlockExecutorProvider,
+{
     /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
     WithoutHead(ExExNotificationsWithoutHead<P, E>),
     /// A stream of [`ExExNotification`]s. The stream will only emit notifications for blocks that
@@ -33,14 +78,17 @@ enum ExExNotificationsInner<P, E> {
     Invalid,
 }
 
-impl<P, E> ExExNotifications<P, E> {
+impl<P, E> ExExNotifications<P, E>
+where
+    E: BlockExecutorProvider,
+{
     /// Creates a new stream of [`ExExNotifications`] without a head.
     pub const fn new(
-        node_head: Head,
+        node_head: BlockNumHash,
         provider: P,
         executor: E,
-        notifications: Receiver<ExExNotification>,
-        wal_handle: WalHandle,
+        notifications: Receiver<ExExNotification<E::Primitives>>,
+        wal_handle: WalHandle<E::Primitives>,
     ) -> Self {
         Self {
             inner: ExExNotificationsInner::WithoutHead(ExExNotificationsWithoutHead::new(
@@ -52,13 +100,17 @@ impl<P, E> ExExNotifications<P, E> {
             )),
         }
     }
+}
 
-    /// Sets [`ExExNotifications`] to a stream of [`ExExNotification`]s without a head.
-    ///
-    /// It's a no-op if the stream has already been configured without a head.
-    ///
-    /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
-    pub fn set_without_head(&mut self) {
+impl<P, E> ExExNotificationsStream<E::Primitives> for ExExNotifications<P, E>
+where
+    P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
+        + Clone
+        + Unpin
+        + 'static,
+{
+    fn set_without_head(&mut self) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
         self.inner = ExExNotificationsInner::WithoutHead(match current {
             ExExNotificationsInner::WithoutHead(notifications) => notifications,
@@ -73,20 +125,7 @@ impl<P, E> ExExNotifications<P, E> {
         });
     }
 
-    /// Returns a new [`ExExNotifications`] without a head.
-    ///
-    /// See the documentation of [`ExExNotificationsWithoutHead`] for more details.
-    pub fn without_head(mut self) -> Self {
-        self.set_without_head();
-        self
-    }
-
-    /// Sets [`ExExNotifications`] to a stream of [`ExExNotification`]s with the provided head.
-    ///
-    /// It's a no-op if the stream has already been configured with a head.
-    ///
-    /// See the documentation of [`ExExNotificationsWithHead`] for more details.
-    pub fn set_with_head(&mut self, exex_head: ExExHead) {
+    fn set_with_head(&mut self, exex_head: ExExHead) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
         self.inner = ExExNotificationsInner::WithHead(match current {
             ExExNotificationsInner::WithoutHead(notifications) => {
@@ -104,10 +143,12 @@ impl<P, E> ExExNotifications<P, E> {
         });
     }
 
-    /// Returns a new [`ExExNotifications`] with the provided head.
-    ///
-    /// See the documentation of [`ExExNotificationsWithHead`] for more details.
-    pub fn with_head(mut self, exex_head: ExExHead) -> Self {
+    fn without_head(mut self) -> Self {
+        self.set_without_head();
+        self
+    }
+
+    fn with_head(mut self, exex_head: ExExHead) -> Self {
         self.set_with_head(exex_head);
         self
     }
@@ -116,9 +157,12 @@ impl<P, E> ExExNotifications<P, E> {
 impl<P, E> Stream for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Unpin + 'static,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
+        + Clone
+        + Unpin
+        + 'static,
 {
-    type Item = eyre::Result<ExExNotification>;
+    type Item = eyre::Result<ExExNotification<E::Primitives>>;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
@@ -135,15 +179,21 @@ where
 }
 
 /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
-pub struct ExExNotificationsWithoutHead<P, E> {
-    node_head: Head,
+pub struct ExExNotificationsWithoutHead<P, E>
+where
+    E: BlockExecutorProvider,
+{
+    node_head: BlockNumHash,
     provider: P,
     executor: E,
-    notifications: Receiver<ExExNotification>,
-    wal_handle: WalHandle,
+    notifications: Receiver<ExExNotification<E::Primitives>>,
+    wal_handle: WalHandle<E::Primitives>,
 }
 
-impl<P: Debug, E: Debug> Debug for ExExNotificationsWithoutHead<P, E> {
+impl<P: Debug, E> Debug for ExExNotificationsWithoutHead<P, E>
+where
+    E: Debug + BlockExecutorProvider,
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExExNotifications")
             .field("provider", &self.provider)
@@ -153,14 +203,17 @@ impl<P: Debug, E: Debug> Debug for ExExNotificationsWithoutHead<P, E> {
     }
 }
 
-impl<P, E> ExExNotificationsWithoutHead<P, E> {
+impl<P, E> ExExNotificationsWithoutHead<P, E>
+where
+    E: BlockExecutorProvider,
+{
     /// Creates a new instance of [`ExExNotificationsWithoutHead`].
     const fn new(
-        node_head: Head,
+        node_head: BlockNumHash,
         provider: P,
         executor: E,
-        notifications: Receiver<ExExNotification>,
-        wal_handle: WalHandle,
+        notifications: Receiver<ExExNotification<E::Primitives>>,
+        wal_handle: WalHandle<E::Primitives>,
     ) -> Self {
         Self { node_head, provider, executor, notifications, wal_handle }
     }
@@ -178,8 +231,11 @@ impl<P, E> ExExNotificationsWithoutHead<P, E> {
     }
 }
 
-impl<P: Unpin, E: Unpin> Stream for ExExNotificationsWithoutHead<P, E> {
-    type Item = ExExNotification;
+impl<P: Unpin, E> Stream for ExExNotificationsWithoutHead<P, E>
+where
+    E: Unpin + BlockExecutorProvider,
+{
+    type Item = ExExNotification<E::Primitives>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.get_mut().notifications.poll_recv(cx)
@@ -195,12 +251,15 @@ impl<P: Unpin, E: Unpin> Stream for ExExNotificationsWithoutHead<P, E> {
 /// `exex_head.number` of 10 indicates that the ExEx has processed up to block 10, and is ready to
 /// process block 11.
 #[derive(Debug)]
-pub struct ExExNotificationsWithHead<P, E> {
-    node_head: Head,
+pub struct ExExNotificationsWithHead<P, E>
+where
+    E: BlockExecutorProvider,
+{
+    node_head: BlockNumHash,
     provider: P,
     executor: E,
-    notifications: Receiver<ExExNotification>,
-    wal_handle: WalHandle,
+    notifications: Receiver<ExExNotification<E::Primitives>>,
+    wal_handle: WalHandle<E::Primitives>,
     exex_head: ExExHead,
     /// If true, then we need to check if the ExEx head is on the canonical chain and if not,
     /// revert its head.
@@ -209,17 +268,20 @@ pub struct ExExNotificationsWithHead<P, E> {
     /// the missing blocks.
     pending_check_backfill: bool,
     /// The backfill job to run before consuming any notifications.
-    backfill_job: Option<StreamBackfillJob<E, P, Chain>>,
+    backfill_job: Option<StreamBackfillJob<E, P, Chain<E::Primitives>>>,
 }
 
-impl<P, E> ExExNotificationsWithHead<P, E> {
+impl<P, E> ExExNotificationsWithHead<P, E>
+where
+    E: BlockExecutorProvider,
+{
     /// Creates a new [`ExExNotificationsWithHead`].
     const fn new(
-        node_head: Head,
+        node_head: BlockNumHash,
         provider: P,
         executor: E,
-        notifications: Receiver<ExExNotification>,
-        wal_handle: WalHandle,
+        notifications: Receiver<ExExNotification<E::Primitives>>,
+        wal_handle: WalHandle<E::Primitives>,
         exex_head: ExExHead,
     ) -> Self {
         Self {
@@ -239,14 +301,17 @@ impl<P, E> ExExNotificationsWithHead<P, E> {
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Unpin + 'static,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
+        + Clone
+        + Unpin
+        + 'static,
 {
     /// Checks if the ExEx head is on the canonical chain.
     ///
     /// If the head block is not found in the database or it's ahead of the node head, it means
     /// we're not on the canonical chain and we need to revert the notification with the ExEx
     /// head block.
-    fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification>> {
+    fn check_canonical(&mut self) -> eyre::Result<Option<ExExNotification<E::Primitives>>> {
         if self.provider.is_known(&self.exex_head.block.hash)? &&
             self.exex_head.block.number <= self.node_head.number
         {
@@ -270,7 +335,7 @@ where
         // Update the head block hash to the parent hash of the first committed block.
         let committed_chain = notification.committed_chain().unwrap();
         let new_exex_head =
-            (committed_chain.first().parent_hash, committed_chain.first().number - 1).into();
+            (committed_chain.first().parent_hash(), committed_chain.first().number() - 1).into();
         debug!(target: "exex::notifications", old_exex_head = ?self.exex_head.block, new_exex_head = ?new_exex_head, "ExEx head updated");
         self.exex_head.block = new_exex_head;
 
@@ -316,9 +381,12 @@ where
 impl<P, E> Stream for ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider + Clone + Unpin + 'static,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
+        + Clone
+        + Unpin
+        + 'static,
 {
-    type Item = eyre::Result<ExExNotification>;
+    type Item = eyre::Result<ExExNotification<E::Primitives>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -358,7 +426,7 @@ where
             this.exex_head.block = committed_chain.tip().num_hash();
         } else if let Some(reverted_chain) = notification.reverted_chain() {
             let first_block = reverted_chain.first();
-            this.exex_head.block = (first_block.parent_hash, first_block.number - 1).into();
+            this.exex_head.block = (first_block.parent_hash(), first_block.number() - 1).into();
         }
 
         Poll::Ready(Some(Ok(notification)))
@@ -367,9 +435,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::Wal;
-
     use super::*;
+    use crate::Wal;
     use alloy_consensus::Header;
     use alloy_eips::BlockNumHash;
     use eyre::OptionExt;
@@ -377,9 +444,10 @@ mod tests {
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
     use reth_primitives::Block;
+    use reth_primitives_traits::Block as _;
     use reth_provider::{
-        providers::BlockchainProvider2, test_utils::create_test_provider_factory, BlockWriter,
-        Chain, DatabaseProviderFactory,
+        providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,
+        Chain, DatabaseProviderFactory, StorageLocation,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use tokio::sync::mpsc;
@@ -397,7 +465,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider2::new(provider_factory.clone())?;
+        let provider = BlockchainProvider::new(provider_factory.clone())?;
 
         let node_head_block = random_block(
             &mut rng,
@@ -405,16 +473,11 @@ mod tests {
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         );
         let provider_rw = provider_factory.provider_rw()?;
-        provider_rw.insert_block(
-            node_head_block.clone().seal_with_senders().ok_or_eyre("failed to recover senders")?,
-        )?;
+        provider_rw
+            .insert_block(node_head_block.clone().try_recover()?, StorageLocation::Database)?;
         provider_rw.commit()?;
 
-        let node_head = Head {
-            number: node_head_block.number,
-            hash: node_head_block.hash(),
-            ..Default::default()
-        };
+        let node_head = node_head_block.num_hash();
         let exex_head =
             ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
 
@@ -425,8 +488,7 @@ mod tests {
                     node_head.number + 1,
                     BlockParams { parent: Some(node_head.hash), ..Default::default() },
                 )
-                .seal_with_senders()
-                .ok_or_eyre("failed to recover senders")?],
+                .try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -478,12 +540,10 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider2::new(provider_factory)?;
+        let provider = BlockchainProvider::new(provider_factory)?;
 
-        let node_head =
-            Head { number: genesis_block.number, hash: genesis_hash, ..Default::default() };
-        let exex_head =
-            ExExHead { block: BlockNumHash { number: node_head.number, hash: node_head.hash } };
+        let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
+        let exex_head = ExExHead { block: node_head };
 
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
@@ -496,8 +556,7 @@ mod tests {
                     ..Default::default()
                 }
                 .seal_slow()
-                .seal_with_senders()
-                .ok_or_eyre("failed to recover senders")?],
+                .try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -535,22 +594,17 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider2::new(provider_factory)?;
+        let provider = BlockchainProvider::new(provider_factory)?;
 
         let node_head_block = random_block(
             &mut rng,
             genesis_block.number + 1,
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         )
-        .seal_with_senders()
-        .ok_or_eyre("failed to recover senders")?;
-        let node_head = Head {
-            number: node_head_block.number,
-            hash: node_head_block.hash(),
-            ..Default::default()
-        };
+        .try_recover()?;
+        let node_head = node_head_block.num_hash();
         let provider_rw = provider.database_provider_rw()?;
-        provider_rw.insert_block(node_head_block)?;
+        provider_rw.insert_block(node_head_block, StorageLocation::Database)?;
         provider_rw.commit()?;
         let node_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(
@@ -569,10 +623,7 @@ mod tests {
         let exex_head = ExExHead { block: exex_head_block.num_hash() };
         let exex_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![exex_head_block
-                    .clone()
-                    .seal_with_senders()
-                    .ok_or_eyre("failed to recover senders")?],
+                vec![exex_head_block.clone().try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -586,8 +637,7 @@ mod tests {
                     node_head.number + 1,
                     BlockParams { parent: Some(node_head.hash), ..Default::default() },
                 )
-                .seal_with_senders()
-                .ok_or_eyre("failed to recover senders")?],
+                .try_recover()?],
                 Default::default(),
                 None,
             )),
@@ -635,7 +685,7 @@ mod tests {
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
 
-        let provider = BlockchainProvider2::new(provider_factory)?;
+        let provider = BlockchainProvider::new(provider_factory)?;
 
         let exex_head_block = random_block(
             &mut rng,
@@ -644,18 +694,14 @@ mod tests {
         );
         let exex_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![exex_head_block
-                    .clone()
-                    .seal_with_senders()
-                    .ok_or_eyre("failed to recover senders")?],
+                vec![exex_head_block.clone().try_recover()?],
                 Default::default(),
                 None,
             )),
         };
         wal.commit(&exex_head_notification)?;
 
-        let node_head =
-            Head { number: genesis_block.number, hash: genesis_hash, ..Default::default() };
+        let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
         let exex_head = ExExHead {
             block: BlockNumHash { number: exex_head_block.number, hash: exex_head_block.hash() },
         };
@@ -667,8 +713,7 @@ mod tests {
                     genesis_block.number + 1,
                     BlockParams { parent: Some(genesis_hash), ..Default::default() },
                 )
-                .seal_with_senders()
-                .ok_or_eyre("failed to recover senders")?],
+                .try_recover()?],
                 Default::default(),
                 None,
             )),

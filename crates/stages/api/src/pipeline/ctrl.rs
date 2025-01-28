@@ -1,5 +1,5 @@
+use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::BlockNumber;
-use reth_primitives_traits::SealedHeader;
 
 /// Determines the control flow during pipeline execution.
 ///
@@ -11,7 +11,7 @@ pub enum ControlFlow {
         /// The block to unwind to.
         target: BlockNumber,
         /// The block that caused the unwind.
-        bad_block: Box<SealedHeader>,
+        bad_block: Box<BlockWithParent>,
     },
     /// The pipeline made progress.
     Continue {

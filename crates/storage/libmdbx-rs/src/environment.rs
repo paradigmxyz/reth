@@ -4,7 +4,7 @@ use crate::{
     flags::EnvironmentFlags,
     transaction::{RO, RW},
     txn_manager::{TxnManager, TxnManagerMessage, TxnPtr},
-    Transaction, TransactionKind,
+    Mode, SyncMode, Transaction, TransactionKind,
 };
 use byteorder::{ByteOrder, NativeEndian};
 use mem::size_of;
@@ -72,14 +72,14 @@ impl Environment {
 
     /// Returns true if the environment was opened in [`crate::Mode::ReadWrite`] mode.
     #[inline]
-    pub fn is_read_write(&self) -> bool {
-        self.inner.env_kind.is_write_map()
+    pub fn is_read_write(&self) -> Result<bool> {
+        Ok(!self.is_read_only()?)
     }
 
     /// Returns true if the environment was opened in [`crate::Mode::ReadOnly`] mode.
     #[inline]
-    pub fn is_read_only(&self) -> bool {
-        !self.inner.env_kind.is_write_map()
+    pub fn is_read_only(&self) -> Result<bool> {
+        Ok(matches!(self.info()?.mode(), Mode::ReadOnly))
     }
 
     /// Returns the transaction manager.
@@ -425,6 +425,23 @@ impl Info {
             fsync: self.0.mi_pgop_stat.fsync,
         }
     }
+
+    /// Return the mode of the database
+    #[inline]
+    pub const fn mode(&self) -> Mode {
+        let mode = self.0.mi_mode;
+        if (mode & ffi::MDBX_RDONLY) != 0 {
+            Mode::ReadOnly
+        } else if (mode & ffi::MDBX_UTTERLY_NOSYNC) != 0 {
+            Mode::ReadWrite { sync_mode: SyncMode::UtterlyNoSync }
+        } else if (mode & ffi::MDBX_NOMETASYNC) != 0 {
+            Mode::ReadWrite { sync_mode: SyncMode::NoMetaSync }
+        } else if (mode & ffi::MDBX_SAFE_NOSYNC) != 0 {
+            Mode::ReadWrite { sync_mode: SyncMode::SafeNoSync }
+        } else {
+            Mode::ReadWrite { sync_mode: SyncMode::Durable }
+        }
+    }
 }
 
 impl fmt::Debug for Environment {
@@ -472,8 +489,10 @@ pub struct PageOps {
     pub mincore: u64,
 }
 
+/// Represents the geometry settings for the database environment
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Geometry<R> {
+    /// The size range in bytes.
     pub size: Option<R>,
     pub growth_step: Option<isize>,
     pub shrink_threshold: Option<isize>,
@@ -781,15 +800,14 @@ impl EnvironmentBuilder {
     }
 
     /// Sets the interprocess/shared threshold to force flush the data buffers to disk, if
-    /// [`SyncMode::SafeNoSync`](crate::flags::SyncMode::SafeNoSync) is used.
+    /// [`SyncMode::SafeNoSync`] is used.
     pub fn set_sync_bytes(&mut self, v: usize) -> &mut Self {
         self.sync_bytes = Some(v as u64);
         self
     }
 
     /// Sets the interprocess/shared relative period since the last unsteady commit to force flush
-    /// the data buffers to disk, if [`SyncMode::SafeNoSync`](crate::flags::SyncMode::SafeNoSync) is
-    /// used.
+    /// the data buffers to disk, if [`SyncMode::SafeNoSync`] is used.
     pub fn set_sync_period(&mut self, v: Duration) -> &mut Self {
         // For this option, mdbx uses units of 1/65536 of a second.
         let as_mdbx_units = (v.as_secs_f64() * 65536f64) as u64;
@@ -968,7 +986,7 @@ mod tests {
             let db = tx.open_db(None).unwrap();
             for i in 1_000usize..1_000_000 {
                 match tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()) {
-                    Ok(_) => continue,
+                    Ok(_) => {}
                     Err(Error::MapFull) => break,
                     result @ Err(_) => result.unwrap(),
                 }

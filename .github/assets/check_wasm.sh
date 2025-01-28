@@ -3,17 +3,14 @@ set +e  # Disable immediate exit on error
 
 # Array of crates to compile
 crates=($(cargo metadata --format-version=1 --no-deps | jq -r '.packages[].name' | grep '^reth' | sort))
+
 # Array of crates to exclude
+# Used with the `contains` function.
+# shellcheck disable=SC2034
 exclude_crates=(
-  # The following are not working yet, but known to be fixable
-  reth-exex-types # https://github.com/paradigmxyz/reth/issues/9946
   # The following require investigation if they can be fixed
-  reth-auto-seal-consensus
   reth-basic-payload-builder
-  reth-beacon-consensus
   reth-bench
-  reth-blockchain-tree
-  reth-chain-state
   reth-cli
   reth-cli-commands
   reth-cli-runner
@@ -24,23 +21,19 @@ exclude_crates=(
   reth-dns-discovery
   reth-downloaders
   reth-e2e-test-utils
-  reth-engine-primitives
   reth-engine-service
   reth-engine-tree
   reth-engine-util
   reth-eth-wire
   reth-ethereum-cli
-  reth-ethereum-engine-primitives
   reth-ethereum-payload-builder
   reth-etl
-  reth-evm-ethereum
   reth-exex
   reth-exex-test-utils
   reth-ipc
   reth-net-nat
   reth-network
   reth-node-api
-  reth-node-types
   reth-node-builder
   reth-node-core
   reth-node-ethereum
@@ -50,8 +43,6 @@ exclude_crates=(
   reth-optimism-node
   reth-optimism-payload-builder
   reth-optimism-rpc
-  reth-payload-builder
-  reth-payload-primitives
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util
@@ -67,12 +58,14 @@ exclude_crates=(
   reth-invalid-block-hooks # reth-provider
   reth-libmdbx # mdbx
   reth-mdbx-sys # mdbx
+  reth-payload-builder # reth-metrics 
   reth-provider # tokio
   reth-prune # tokio
   reth-stages-api # reth-provider, reth-prune
   reth-static-file # tokio
   reth-transaction-pool # c-kzg
   reth-trie-parallel # tokio
+  reth-testing-utils
 )
 
 # Array to hold the results

@@ -2,13 +2,45 @@
 
 This page tries to answer how to deal with the most popular issues.
 
+- [Troubleshooting](#troubleshooting)
+  - [Database](#database)
+    - [Docker](#docker)
+    - [Error code 13](#error-code-13)
+    - [Slow database inserts and updates](#slow-database-inserts-and-updates)
+      - [Compact the database](#compact-the-database)
+      - [Re-sync from scratch](#re-sync-from-scratch)
+    - [Database write error](#database-write-error)
+    - [Concurrent database access error (using containers/Docker)](#concurrent-database-access-error-using-containersdocker)
+  - [Hardware Performance Testing](#hardware-performance-testing)
+    - [Disk Speed Testing with IOzone](#disk-speed-testing-with-iozone)
+
+
 ## Database
+
+### Docker 
+
+Externally accessing a `datadir` inside a named docker volume will usually come with folder/file ownership/permissions issues.
+
+**It is not recommended** to use the path to the named volume as it will trigger an error code 13. `RETH_DB_PATH: /var/lib/docker/volumes/named_volume/_data/eth/db cargo r --examples db-access --path ` is **DISCOURAGED** and a mounted volume with the right permissions should be used instead.
+
+### Error code 13 
+
+`the environment opened in read-only code: 13`
+
+Externally accessing a database in a read-only folder is not supported, **UNLESS** there's no `mdbx.lck` present, and it's called with `exclusive` on calling `open_db_read_only`. Meaning that there's no node syncing concurrently.
+
+If the error persists, ensure that you have the right `rx`  permissions on the `datadir` **and its parent** folders. Eg. the following command should succeed:
+
+```bash,ignore
+stat /full/path/datadir
+```
+
 
 ### Slow database inserts and updates
 
 If you're:
 1. Running behind the tip
-2. Have slow canonical commit time according to the `Canonical Commit Latency time` chart on [Grafana dashboard](./observability.md#prometheus--grafana) (more than 2-3 seconds)
+2. Have slow canonical commit time according to the `Canonical Commit Latency Time` chart on [Grafana dashboard](./observability.md#prometheus--grafana) (more than 2-3 seconds)
 3. Seeing warnings in your logs such as 
    ```console
    2023-11-08T15:17:24.789731Z  WARN providers::db: Transaction insertion took too long block_number=18528075 tx_num=2150227643 hash=0xb7de1d6620efbdd3aa8547c47a0ff09a7fd3e48ba3fd2c53ce94c6683ed66e7c elapsed=6.793759034s
@@ -48,7 +80,7 @@ equal to the [freshly synced node](../installation/installation.md#hardware-requ
    mv reth_compact.dat $(reth db path)/mdbx.dat
    ```
 7. Start Reth
-8. Confirm that the values on the `Freelist` chart is near zero and the values on the `Canonical Commit Latency time` chart
+8. Confirm that the values on the `Freelist` chart are near zero and the values on the `Canonical Commit Latency Time` chart
 is less than 1 second.
 9. Delete original database
    ```bash

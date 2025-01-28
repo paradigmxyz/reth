@@ -2,32 +2,37 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use alloy_consensus::Header;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes};
 use parking_lot::RwLock;
 use reth::{
     api::NextBlockEnvAttributes,
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
-    primitives::revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
     revm::{
         handler::register::EvmHandler,
         inspector_handle_register,
         precompile::{Precompile, PrecompileSpecId},
-        ContextPrecompile, ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
+        primitives::{
+            CfgEnvWithHandlerCfg, Env, HandlerCfg, PrecompileResult, SpecId, StatefulPrecompileMut,
+            TxEnv,
+        },
+        ContextPrecompile, ContextPrecompiles, Database, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
 };
 use reth_chainspec::{Chain, ChainSpec};
+use reth_evm::env::EvmEnv;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::{node::EthereumAddOns, EthEvmConfig, EthExecutorProvider, EthereumNode};
-use reth_primitives::{
-    revm_primitives::{SpecId, StatefulPrecompileMut},
-    Header, TransactionSigned,
+use reth_node_ethereum::{
+    evm::EthEvm, node::EthereumAddOns, BasicBlockExecutorProvider, EthEvmConfig,
+    EthExecutionStrategyFactory, EthereumNode,
 };
+use reth_primitives::{EthPrimitives, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
 use schnellru::{ByLength, LruMap};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, convert::Infallible, sync::Arc};
 
 /// Type alias for the LRU cache used within the [`PrecompileCache`].
 type PrecompileLRUCache = LruMap<(Bytes, u64), PrecompileResult>;
@@ -64,8 +69,8 @@ impl MyEvmConfig {
 
     /// Sets the precompiles to the EVM handler
     ///
-    /// This will be invoked when the EVM is created via [ConfigureEvm::evm] or
-    /// [ConfigureEvm::evm_with_inspector]
+    /// This will be invoked when the EVM is created via [ConfigureEvm::evm_with_env] or
+    /// [ConfigureEvm::evm_with_env_and_inspector]
     ///
     /// This will use the default mainnet precompiles and wrap them with a cache.
     pub fn set_precompiles<EXT, DB>(
@@ -144,71 +149,78 @@ impl StatefulPrecompileMut for WrappedPrecompile {
 
 impl ConfigureEvmEnv for MyEvmConfig {
     type Header = Header;
+    type Transaction = TransactionSigned;
+    type Error = Infallible;
+    type TxEnv = TxEnv;
+    type Spec = SpecId;
 
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        self.inner.fill_tx_env(tx_env, transaction, sender)
+    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv {
+        self.inner.tx_env(transaction, signer)
     }
 
-    fn fill_tx_env_system_contract_call(
-        &self,
-        env: &mut Env,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    ) {
-        self.inner.fill_tx_env_system_contract_call(env, caller, contract, data)
+    fn evm_env(&self, header: &Self::Header) -> EvmEnv {
+        self.inner.evm_env(header)
     }
 
-    fn fill_cfg_env(
-        &self,
-        cfg_env: &mut CfgEnvWithHandlerCfg,
-        header: &Self::Header,
-        total_difficulty: U256,
-    ) {
-        self.inner.fill_cfg_env(cfg_env, header, total_difficulty)
-    }
-
-    fn next_cfg_and_block_env(
+    fn next_evm_env(
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> (CfgEnvWithHandlerCfg, BlockEnv) {
-        self.inner.next_cfg_and_block_env(parent, attributes)
+    ) -> Result<EvmEnv, Self::Error> {
+        self.inner.next_evm_env(parent, attributes)
     }
 }
 
 impl ConfigureEvm for MyEvmConfig {
-    type DefaultExternalContext<'a> = ();
+    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
 
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
+        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env: evm_env.cfg_env,
+            handler_cfg: HandlerCfg::new(evm_env.spec),
+        };
+
         let new_cache = self.precompile_cache.clone();
         EvmBuilder::default()
             .with_db(db)
+            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
+            .with_block_env(evm_env.block_env)
             // add additional precompiles
             .append_handler_register_box(Box::new(move |handler| {
                 MyEvmConfig::set_precompiles(handler, new_cache.clone())
             }))
             .build()
+            .into()
     }
 
-    fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
+    fn evm_with_env_and_inspector<DB, I>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv,
+        inspector: I,
+    ) -> Self::Evm<'_, DB, I>
     where
         DB: Database,
         I: GetInspector<DB>,
     {
+        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env: evm_env.cfg_env,
+            handler_cfg: HandlerCfg::new(evm_env.spec),
+        };
         let new_cache = self.precompile_cache.clone();
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
+            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
+            .with_block_env(evm_env.block_env)
             // add additional precompiles
             .append_handler_register_box(Box::new(move |handler| {
                 MyEvmConfig::set_precompiles(handler, new_cache.clone())
             }))
             .append_handler_register(inspector_handle_register)
             .build()
+            .into()
     }
-
-    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
 }
 
 /// Builds a regular ethereum block executor that uses the custom EVM.
@@ -221,10 +233,10 @@ pub struct MyExecutorBuilder {
 
 impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
     type EVM = MyEvmConfig;
-    type Executor = EthExecutorProvider<Self::EVM>;
+    type Executor = BasicBlockExecutorProvider<EthExecutionStrategyFactory<Self::EVM>>;
 
     async fn build_evm(
         self,
@@ -234,7 +246,13 @@ where
             inner: EthEvmConfig::new(ctx.chain_spec()),
             precompile_cache: self.precompile_cache.clone(),
         };
-        Ok((evm_config.clone(), EthExecutorProvider::new(ctx.chain_spec(), evm_config)))
+        Ok((
+            evm_config.clone(),
+            BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::new(
+                ctx.chain_spec(),
+                evm_config,
+            )),
+        ))
     }
 }
 

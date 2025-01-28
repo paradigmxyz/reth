@@ -6,7 +6,7 @@ use crate::{
 use reth_db::{tables, transaction::DbTxMut};
 use reth_provider::{BlockReader, DBProvider, TransactionsProvider};
 use reth_prune_types::{
-    PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
+    PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
 use tracing::{instrument, trace};
 
@@ -67,7 +67,7 @@ where
             // previous, so we could finish pruning its transaction senders on the next run.
             .checked_sub(if done { 0 } else { 1 });
 
-        let progress = PruneProgress::new(done, &limiter);
+        let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
             progress,
@@ -82,7 +82,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, Segment, SegmentOutput, SenderRecovery};
+    use crate::segments::{PruneInput, PruneLimiter, Segment, SegmentOutput, SenderRecovery};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -90,8 +90,9 @@ mod tests {
         Itertools,
     };
     use reth_db::tables;
+    use reth_primitives_traits::SignedTransaction;
     use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
-    use reth_prune_types::{PruneCheckpoint, PruneLimiter, PruneMode, PruneProgress, PruneSegment};
+    use reth_prune_types::{PruneCheckpoint, PruneMode, PruneProgress, PruneSegment};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
     use std::ops::Sub;
@@ -110,19 +111,20 @@ mod tests {
 
         let mut transaction_senders = Vec::new();
         for block in &blocks {
-            for transaction in &block.body.transactions {
+            transaction_senders.reserve_exact(block.transaction_count());
+            for transaction in &block.body().transactions {
                 transaction_senders.push((
                     transaction_senders.len() as u64,
                     transaction.recover_signer().expect("recover signer"),
                 ));
             }
         }
-        db.insert_transaction_senders(transaction_senders.clone())
-            .expect("insert transaction senders");
+        let transaction_senders_len = transaction_senders.len();
+        db.insert_transaction_senders(transaction_senders).expect("insert transaction senders");
 
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
-            blocks.iter().map(|block| block.body.transactions.len()).sum::<usize>()
+            blocks.iter().map(|block| block.transaction_count()).sum::<usize>()
         );
         assert_eq!(
             db.table::<tables::Transactions>().unwrap().len(),
@@ -157,7 +159,7 @@ mod tests {
             let last_pruned_tx_number = blocks
                 .iter()
                 .take(to_block as usize)
-                .map(|block| block.body.transactions.len())
+                .map(|block| block.transaction_count())
                 .sum::<usize>()
                 .min(
                     next_tx_number_to_prune as usize +
@@ -168,7 +170,7 @@ mod tests {
             let last_pruned_block_number = blocks
                 .iter()
                 .fold_while((0, 0), |(_, mut tx_count), block| {
-                    tx_count += block.body.transactions.len();
+                    tx_count += block.transaction_count();
 
                     if tx_count > last_pruned_tx_number {
                         Done((block.number, tx_count))
@@ -202,7 +204,7 @@ mod tests {
 
             assert_eq!(
                 db.table::<tables::TransactionSenders>().unwrap().len(),
-                transaction_senders.len() - (last_pruned_tx_number + 1)
+                transaction_senders_len - (last_pruned_tx_number + 1)
             );
             assert_eq!(
                 db.factory

@@ -1,14 +1,14 @@
 //! [EIP-2935](https://eips.ethereum.org/EIPS/eip-2935) system call implementation.
 
-use alloc::{boxed::Box, string::ToString};
+use core::fmt::Display;
+
+use alloc::string::ToString;
 use alloy_eips::eip2935::HISTORY_STORAGE_ADDRESS;
 
-use crate::ConfigureEvm;
+use crate::Evm;
 use alloy_primitives::B256;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use reth_primitives::Header;
-use revm::{interpreter::Host, Database, Evm};
 use revm_primitives::ResultAndState;
 
 /// Applies the pre-block call to the [EIP-2935] blockhashes contract, using the given block,
@@ -24,19 +24,13 @@ use revm_primitives::ResultAndState;
 ///
 /// [EIP-2935]: https://eips.ethereum.org/EIPS/eip-2935
 #[inline]
-pub(crate) fn transact_blockhashes_contract_call<EvmConfig, EXT, DB>(
-    evm_config: &EvmConfig,
+pub(crate) fn transact_blockhashes_contract_call(
     chain_spec: impl EthereumHardforks,
     block_timestamp: u64,
     block_number: u64,
     parent_block_hash: B256,
-    evm: &mut Evm<'_, EXT, DB>,
-) -> Result<Option<ResultAndState>, BlockExecutionError>
-where
-    DB: Database,
-    DB::Error: core::fmt::Display,
-    EvmConfig: ConfigureEvm<Header = Header>,
-{
+    evm: &mut impl Evm<Error: Display>,
+) -> Result<Option<ResultAndState>, BlockExecutionError> {
     if !chain_spec.is_prague_active_at_timestamp(block_timestamp) {
         return Ok(None)
     }
@@ -47,30 +41,24 @@ where
         return Ok(None)
     }
 
-    // get previous env
-    let previous_env = Box::new(evm.context.env().clone());
-
-    // modify env for pre block call
-    evm_config.fill_tx_env_system_contract_call(
-        &mut evm.context.evm.env,
+    let mut res = match evm.transact_system_call(
         alloy_eips::eip4788::SYSTEM_ADDRESS,
         HISTORY_STORAGE_ADDRESS,
         parent_block_hash.0.into(),
-    );
-
-    let mut res = match evm.transact() {
+    ) {
         Ok(res) => res,
         Err(e) => {
-            evm.context.evm.env = previous_env;
             return Err(BlockValidationError::BlockHashContractCall { message: e.to_string() }.into())
         }
     };
 
+    // NOTE: Revm currently marks these accounts as "touched" when we do the above transact calls,
+    // and includes them in the result.
+    //
+    // There should be no state changes to these addresses anyways as a result of this system call,
+    // so we can just remove them from the state returned.
     res.state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
     res.state.remove(&evm.block().coinbase);
-
-    // re-set the previous env
-    evm.context.evm.env = previous_env;
 
     Ok(Some(res))
 }

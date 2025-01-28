@@ -2,16 +2,17 @@
 
 use crate::{
     execute::{
-        BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionInput,
-        BlockExecutionOutput, BlockExecutionStrategy, BlockExecutorProvider, Executor,
+        BasicBatchExecutor, BasicBlockExecutor, BatchExecutor, BlockExecutionOutput,
+        BlockExecutionStrategy, BlockExecutorProvider, Executor,
     },
     system_calls::OnStateHook,
 };
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{BlockWithSenders, Receipt, Receipts};
+use reth_primitives::{EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredBlock};
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm::State;
@@ -32,6 +33,8 @@ impl MockExecutorProvider {
 }
 
 impl BlockExecutorProvider for MockExecutorProvider {
+    type Primitives = EthPrimitives;
+
     type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
 
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
@@ -52,7 +55,7 @@ impl BlockExecutorProvider for MockExecutorProvider {
 }
 
 impl<DB> Executor<DB> for MockExecutorProvider {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Input<'a> = &'a RecoveredBlock<reth_primitives::Block>;
     type Output = BlockExecutionOutput<Receipt>;
     type Error = BlockExecutionError;
 
@@ -61,8 +64,11 @@ impl<DB> Executor<DB> for MockExecutorProvider {
             self.exec_results.lock().pop().unwrap();
         Ok(BlockExecutionOutput {
             state: bundle,
-            receipts: receipts.into_iter().flatten().flatten().collect(),
-            requests: requests.into_iter().flatten().collect(),
+            receipts: receipts.into_iter().flatten().collect(),
+            requests: requests.into_iter().fold(Requests::default(), |mut reqs, req| {
+                reqs.extend(req);
+                reqs
+            }),
             gas_used: 0,
         })
     }
@@ -91,7 +97,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
 }
 
 impl<DB> BatchExecutor<DB> for MockExecutorProvider {
-    type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+    type Input<'a> = &'a RecoveredBlock<reth_primitives::Block>;
     type Output = ExecutionOutcome;
     type Error = BlockExecutionError;
 
@@ -112,14 +118,14 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
     }
 }
 
-impl<S, DB> BasicBlockExecutor<S, DB>
+impl<S> BasicBlockExecutor<S>
 where
-    S: BlockExecutionStrategy<DB>,
+    S: BlockExecutionStrategy,
 {
     /// Provides safe read access to the state
     pub fn with_state<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&State<DB>) -> R,
+        F: FnOnce(&State<S::DB>) -> R,
     {
         f(self.strategy.state_ref())
     }
@@ -127,20 +133,20 @@ where
     /// Provides safe write access to the state
     pub fn with_state_mut<F, R>(&mut self, f: F) -> R
     where
-        F: FnOnce(&mut State<DB>) -> R,
+        F: FnOnce(&mut State<S::DB>) -> R,
     {
         f(self.strategy.state_mut())
     }
 }
 
-impl<S, DB> BasicBatchExecutor<S, DB>
+impl<S> BasicBatchExecutor<S>
 where
-    S: BlockExecutionStrategy<DB>,
+    S: BlockExecutionStrategy,
 {
     /// Provides safe read access to the state
     pub fn with_state<F, R>(&self, f: F) -> R
     where
-        F: FnOnce(&State<DB>) -> R,
+        F: FnOnce(&State<S::DB>) -> R,
     {
         f(self.strategy.state_ref())
     }
@@ -148,13 +154,13 @@ where
     /// Provides safe write access to the state
     pub fn with_state_mut<F, R>(&mut self, f: F) -> R
     where
-        F: FnOnce(&mut State<DB>) -> R,
+        F: FnOnce(&mut State<S::DB>) -> R,
     {
         f(self.strategy.state_mut())
     }
 
     /// Accessor for batch executor receipts.
-    pub const fn receipts(&self) -> &Receipts {
+    pub const fn receipts(&self) -> &Receipts<<S::Primitives as NodePrimitives>::Receipt> {
         self.batch_record.receipts()
     }
 }

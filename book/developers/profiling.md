@@ -25,7 +25,7 @@ In this tutorial, we will be reviewing:
 
 [Jemalloc](https://jemalloc.net/) is a general-purpose allocator that is used [across the industry in production](https://engineering.fb.com/2011/01/03/core-data/scalable-memory-allocation-using-jemalloc/), well known for its performance benefits, predictability, and profiling capabilities.
 We've seen significant performance benefits in reth when using jemalloc, but will be primarily focusing on its profiling capabilities.
-Jemalloc also provides tools for analyzing and visualizing its the allocation profiles it generates, notably `jeprof`.
+Jemalloc also provides tools for analyzing and visualizing its allocation profiles it generates, notably `jeprof`.
 
 
 #### Enabling jemalloc in reth
@@ -126,6 +126,6 @@ If reth is not built properly, you will see this when you try to run reth:
 If this happens, jemalloc likely needs to be rebuilt with the `jemalloc-prof` feature enabled.
 
 If everything is working, this will output `jeprof.*.heap` files while reth is running.
-[The jemalloc website](http://jemalloc.net/jemalloc.3.html#opt.abort) has a helpful overview of the options available, for example `lg_prof_interval`, `lg_prof_sample`, `prof_leak`, and `prof_final`.
+[The jemalloc website](https://jemalloc.net/jemalloc.3.html#opt.abort) has a helpful overview of the options available, for example `lg_prof_interval`, `lg_prof_sample`, `prof_leak`, and `prof_final`.
 
 Now that we have the heap snapshots, we can analyze them using `jeprof`. An example of jeprof usage and output can be seen on the jemalloc github repository: https://github.com/jemalloc/jemalloc/wiki/Use-Case:-Leak-Checking

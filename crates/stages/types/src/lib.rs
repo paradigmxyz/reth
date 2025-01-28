@@ -8,6 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+extern crate alloc;
+
 mod id;
 use alloy_primitives::{BlockHash, BlockNumber};
 pub use id::StageId;
@@ -65,7 +67,7 @@ impl From<BlockHash> for PipelineTarget {
     }
 }
 
-impl std::fmt::Display for PipelineTarget {
+impl core::fmt::Display for PipelineTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Sync(block) => {

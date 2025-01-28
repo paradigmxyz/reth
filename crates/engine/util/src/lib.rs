@@ -1,8 +1,7 @@
 //! Collection of various stream utilities for consensus engine.
 
 use futures::Stream;
-use reth_beacon_consensus::BeaconEngineMessage;
-use reth_engine_primitives::EngineTypes;
+use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
 use reth_payload_validator::ExecutionPayloadValidator;
 use std::path::PathBuf;
 use tokio_util::either::Either;

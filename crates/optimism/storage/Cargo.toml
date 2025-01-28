@@ -20,4 +20,7 @@ reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism"]
+optimism = [
+    "reth-codecs/op",
+    "reth-db-api/optimism",
+]

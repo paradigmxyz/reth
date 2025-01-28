@@ -1,152 +1,58 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
-use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
-use alloy_eips::eip2718::{Decodable2718, Encodable2718};
-use alloy_primitives::{B256, U256};
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, eip7685::RequestsOrHash};
+use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
-    payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2, ExecutionPayloadInputV2},
-    ExecutionPayload, ExecutionPayloadBodyV2, ExecutionPayloadV1, ExecutionPayloadV2,
-    ExecutionPayloadV3, ExecutionPayloadV4, PayloadError,
+    payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2},
+    CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV2, ExecutionPayloadV3, PraguePayloadFields,
 };
-use reth_primitives::{
-    constants::MAXIMUM_EXTRA_DATA_SIZE,
-    proofs::{self},
-    Block, BlockBody, Header, Request, SealedBlock, TransactionSigned, Withdrawals,
-};
+use reth_primitives::{Block, SealedBlock};
+use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 
-/// Converts [`ExecutionPayloadV1`] to [`Block`]
-pub fn try_payload_v1_to_block(payload: ExecutionPayloadV1) -> Result<Block, PayloadError> {
-    if payload.extra_data.len() > MAXIMUM_EXTRA_DATA_SIZE {
-        return Err(PayloadError::ExtraData(payload.extra_data))
-    }
+/// Converts [`SealedBlock`] to [`ExecutionPayload`].
+///
+/// TODO(mattsse): remove after next alloy bump
+pub fn block_to_payload<T: SignedTransaction>(
+    value: SealedBlock<Block<T>>,
+) -> (ExecutionPayload, ExecutionPayloadSidecar) {
+    let cancun =
+        value.parent_beacon_block_root.map(|parent_beacon_block_root| CancunPayloadFields {
+            parent_beacon_block_root,
+            versioned_hashes: value.body().blob_versioned_hashes_iter().copied().collect(),
+        });
 
-    if payload.base_fee_per_gas.is_zero() {
-        return Err(PayloadError::BaseFee(payload.base_fee_per_gas))
-    }
+    let prague = value
+        .requests_hash
+        .map(|requests_hash| PraguePayloadFields { requests: RequestsOrHash::Hash(requests_hash) });
 
-    let transactions = payload
-        .transactions
-        .iter()
-        .map(|tx| {
-            let mut buf = tx.as_ref();
-
-            let tx = TransactionSigned::decode_2718(&mut buf).map_err(alloy_rlp::Error::from)?;
-
-            if !buf.is_empty() {
-                return Err(alloy_rlp::Error::UnexpectedLength);
-            }
-
-            Ok(tx)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let transactions_root = proofs::calculate_transaction_root(&transactions);
-
-    let header = Header {
-        parent_hash: payload.parent_hash,
-        beneficiary: payload.fee_recipient,
-        state_root: payload.state_root,
-        transactions_root,
-        receipts_root: payload.receipts_root,
-        withdrawals_root: None,
-        logs_bloom: payload.logs_bloom,
-        number: payload.block_number,
-        gas_limit: payload.gas_limit,
-        gas_used: payload.gas_used,
-        timestamp: payload.timestamp,
-        mix_hash: payload.prev_randao,
-        // WARNING: It’s allowed for a base fee in EIP1559 to increase unbounded. We assume that
-        // it will fit in an u64. This is not always necessarily true, although it is extremely
-        // unlikely not to be the case, a u64 maximum would have 2^64 which equates to 18 ETH per
-        // gas.
-        base_fee_per_gas: Some(
-            payload
-                .base_fee_per_gas
-                .try_into()
-                .map_err(|_| PayloadError::BaseFee(payload.base_fee_per_gas))?,
-        ),
-        blob_gas_used: None,
-        excess_blob_gas: None,
-        parent_beacon_block_root: None,
-        requests_root: None,
-        extra_data: payload.extra_data,
-        // Defaults
-        ommers_hash: EMPTY_OMMER_ROOT_HASH,
-        difficulty: Default::default(),
-        nonce: Default::default(),
+    let sidecar = match (cancun, prague) {
+        (Some(cancun), Some(prague)) => ExecutionPayloadSidecar::v4(cancun, prague),
+        (Some(cancun), None) => ExecutionPayloadSidecar::v3(cancun),
+        _ => ExecutionPayloadSidecar::none(),
     };
 
-    Ok(Block { header, body: BlockBody { transactions, ..Default::default() } })
-}
-
-/// Converts [`ExecutionPayloadV2`] to [`Block`]
-pub fn try_payload_v2_to_block(payload: ExecutionPayloadV2) -> Result<Block, PayloadError> {
-    // this performs the same conversion as the underlying V1 payload, but calculates the
-    // withdrawals root and adds withdrawals
-    let mut base_sealed_block = try_payload_v1_to_block(payload.payload_inner)?;
-    let withdrawals_root = proofs::calculate_withdrawals_root(&payload.withdrawals);
-    base_sealed_block.body.withdrawals = Some(payload.withdrawals.into());
-    base_sealed_block.header.withdrawals_root = Some(withdrawals_root);
-    Ok(base_sealed_block)
-}
-
-/// Converts [`ExecutionPayloadV3`] to [`Block`]
-pub fn try_payload_v3_to_block(payload: ExecutionPayloadV3) -> Result<Block, PayloadError> {
-    // this performs the same conversion as the underlying V2 payload, but inserts the blob gas
-    // used and excess blob gas
-    let mut base_block = try_payload_v2_to_block(payload.payload_inner)?;
-
-    base_block.header.blob_gas_used = Some(payload.blob_gas_used);
-    base_block.header.excess_blob_gas = Some(payload.excess_blob_gas);
-
-    Ok(base_block)
-}
-
-/// Converts [`ExecutionPayloadV4`] to [`Block`]
-pub fn try_payload_v4_to_block(payload: ExecutionPayloadV4) -> Result<Block, PayloadError> {
-    let ExecutionPayloadV4 {
-        payload_inner,
-        deposit_requests,
-        withdrawal_requests,
-        consolidation_requests,
-    } = payload;
-    let mut block = try_payload_v3_to_block(payload_inner)?;
-
-    // attach requests with asc type identifiers
-    let requests = deposit_requests
-        .into_iter()
-        .map(Request::DepositRequest)
-        .chain(withdrawal_requests.into_iter().map(Request::WithdrawalRequest))
-        .chain(consolidation_requests.into_iter().map(Request::ConsolidationRequest))
-        .collect::<Vec<_>>();
-
-    let requests_root = proofs::calculate_requests_root(&requests);
-    block.header.requests_root = Some(requests_root);
-    block.body.requests = Some(requests.into());
-
-    Ok(block)
-}
-
-/// Converts [`SealedBlock`] to [`ExecutionPayload`]
-pub fn block_to_payload(value: SealedBlock) -> ExecutionPayload {
-    if value.header.requests_root.is_some() {
-        // block with requests root: V3
-        ExecutionPayload::V4(block_to_payload_v4(value))
-    } else if value.header.parent_beacon_block_root.is_some() {
+    let execution_payload = if value.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
         ExecutionPayload::V3(block_to_payload_v3(value))
-    } else if value.body.withdrawals.is_some() {
+    } else if value.body().withdrawals.is_some() {
         // block with withdrawals: V2
         ExecutionPayload::V2(block_to_payload_v2(value))
     } else {
         // otherwise V1
         ExecutionPayload::V1(block_to_payload_v1(value))
-    }
+    };
+
+    (execution_payload, sidecar)
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV1`]
-pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
-    let transactions = value.raw_transactions();
+pub fn block_to_payload_v1<T: SignedTransaction>(
+    value: SealedBlock<Block<T>>,
+) -> ExecutionPayloadV1 {
+    let transactions =
+        value.body().transactions.iter().map(|tx| tx.encoded_2718().into()).collect::<Vec<_>>();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,
         fee_recipient: value.beneficiary,
@@ -166,299 +72,59 @@ pub fn block_to_payload_v1(value: SealedBlock) -> ExecutionPayloadV1 {
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV2`]
-pub fn block_to_payload_v2(value: SealedBlock) -> ExecutionPayloadV2 {
-    let transactions = value.raw_transactions();
-
+pub fn block_to_payload_v2<T: SignedTransaction>(
+    value: SealedBlock<Block<T>>,
+) -> ExecutionPayloadV2 {
     ExecutionPayloadV2 {
-        payload_inner: ExecutionPayloadV1 {
-            parent_hash: value.parent_hash,
-            fee_recipient: value.beneficiary,
-            state_root: value.state_root,
-            receipts_root: value.receipts_root,
-            logs_bloom: value.logs_bloom,
-            prev_randao: value.mix_hash,
-            block_number: value.number,
-            gas_limit: value.gas_limit,
-            gas_used: value.gas_used,
-            timestamp: value.timestamp,
-            extra_data: value.extra_data.clone(),
-            base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-            block_hash: value.hash(),
-            transactions,
-        },
-        withdrawals: value.body.withdrawals.unwrap_or_default().into_inner(),
+        withdrawals: value.body().withdrawals.clone().unwrap_or_default().into_inner(),
+        payload_inner: block_to_payload_v1(value),
     }
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV3`], and returns the parent beacon block root.
-pub fn block_to_payload_v3(value: SealedBlock) -> ExecutionPayloadV3 {
-    let transactions = value.raw_transactions();
+pub fn block_to_payload_v3<T: SignedTransaction>(
+    value: SealedBlock<Block<T>>,
+) -> ExecutionPayloadV3 {
     ExecutionPayloadV3 {
         blob_gas_used: value.blob_gas_used.unwrap_or_default(),
         excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
-        payload_inner: ExecutionPayloadV2 {
-            payload_inner: ExecutionPayloadV1 {
-                parent_hash: value.parent_hash,
-                fee_recipient: value.beneficiary,
-                state_root: value.state_root,
-                receipts_root: value.receipts_root,
-                logs_bloom: value.logs_bloom,
-                prev_randao: value.mix_hash,
-                block_number: value.number,
-                gas_limit: value.gas_limit,
-                gas_used: value.gas_used,
-                timestamp: value.timestamp,
-                extra_data: value.extra_data.clone(),
-                base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-                block_hash: value.hash(),
-                transactions,
-            },
-            withdrawals: value.body.withdrawals.unwrap_or_default().into_inner(),
-        },
-    }
-}
-
-/// Converts [`SealedBlock`] to [`ExecutionPayloadV4`]
-pub fn block_to_payload_v4(mut value: SealedBlock) -> ExecutionPayloadV4 {
-    let (deposit_requests, withdrawal_requests, consolidation_requests) =
-        value.body.requests.take().unwrap_or_default().into_iter().fold(
-            (Vec::new(), Vec::new(), Vec::new()),
-            |(mut deposits, mut withdrawals, mut consolidation_requests), request| {
-                match request {
-                    Request::DepositRequest(r) => {
-                        deposits.push(r);
-                    }
-                    Request::WithdrawalRequest(r) => {
-                        withdrawals.push(r);
-                    }
-                    Request::ConsolidationRequest(r) => {
-                        consolidation_requests.push(r);
-                    }
-                    _ => {}
-                };
-
-                (deposits, withdrawals, consolidation_requests)
-            },
-        );
-
-    ExecutionPayloadV4 {
-        deposit_requests,
-        withdrawal_requests,
-        consolidation_requests,
-        payload_inner: block_to_payload_v3(value),
+        payload_inner: block_to_payload_v2(value),
     }
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadFieldV2`]
-pub fn convert_block_to_payload_field_v2(value: SealedBlock) -> ExecutionPayloadFieldV2 {
+pub fn convert_block_to_payload_field_v2<T: SignedTransaction>(
+    value: SealedBlock<Block<T>>,
+) -> ExecutionPayloadFieldV2 {
     // if there are withdrawals, return V2
-    if value.body.withdrawals.is_some() {
+    if value.body().withdrawals.is_some() {
         ExecutionPayloadFieldV2::V2(block_to_payload_v2(value))
     } else {
         ExecutionPayloadFieldV2::V1(block_to_payload_v1(value))
     }
 }
 
-/// Converts [`ExecutionPayloadFieldV2`] to [`ExecutionPayload`]
-pub fn convert_payload_field_v2_to_payload(value: ExecutionPayloadFieldV2) -> ExecutionPayload {
-    match value {
-        ExecutionPayloadFieldV2::V1(payload) => ExecutionPayload::V1(payload),
-        ExecutionPayloadFieldV2::V2(payload) => ExecutionPayload::V2(payload),
-    }
-}
-
-/// Converts [`ExecutionPayloadV2`] to [`ExecutionPayloadInputV2`].
-///
-/// An [`ExecutionPayloadInputV2`] should have a [`Some`] withdrawals field if shanghai is active,
-/// otherwise the withdrawals field should be [`None`], so the `is_shanghai_active` argument is
-/// provided which will either:
-/// - include the withdrawals field as [`Some`] if true
-/// - set the withdrawals field to [`None`] if false
-pub fn convert_payload_v2_to_payload_input_v2(
-    value: ExecutionPayloadV2,
-    is_shanghai_active: bool,
-) -> ExecutionPayloadInputV2 {
-    ExecutionPayloadInputV2 {
-        execution_payload: value.payload_inner,
-        withdrawals: is_shanghai_active.then_some(value.withdrawals),
-    }
-}
-
-/// Converts [`ExecutionPayloadInputV2`] to [`ExecutionPayload`]
-pub fn convert_payload_input_v2_to_payload(value: ExecutionPayloadInputV2) -> ExecutionPayload {
-    match value.withdrawals {
-        Some(withdrawals) => ExecutionPayload::V2(ExecutionPayloadV2 {
-            payload_inner: value.execution_payload,
-            withdrawals,
-        }),
-        None => ExecutionPayload::V1(value.execution_payload),
-    }
-}
-
-/// Converts [`SealedBlock`] to [`ExecutionPayloadInputV2`]
-pub fn convert_block_to_payload_input_v2(value: SealedBlock) -> ExecutionPayloadInputV2 {
-    ExecutionPayloadInputV2 {
-        withdrawals: value.body.withdrawals.clone().map(Withdrawals::into_inner),
-        execution_payload: block_to_payload_v1(value),
-    }
-}
-
-/// Tries to create a new block (without a block hash) from the given payload and optional parent
-/// beacon block root.
-/// Performs additional validation of `extra_data` and `base_fee_per_gas` fields.
-///
-/// NOTE: The log bloom is assumed to be validated during serialization.
-///
-/// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
-pub fn try_into_block(
-    value: ExecutionPayload,
-    parent_beacon_block_root: Option<B256>,
-) -> Result<Block, PayloadError> {
-    let mut base_payload = match value {
-        ExecutionPayload::V1(payload) => try_payload_v1_to_block(payload)?,
-        ExecutionPayload::V2(payload) => try_payload_v2_to_block(payload)?,
-        ExecutionPayload::V3(payload) => try_payload_v3_to_block(payload)?,
-        ExecutionPayload::V4(payload) => try_payload_v4_to_block(payload)?,
-    };
-
-    base_payload.header.parent_beacon_block_root = parent_beacon_block_root;
-
-    Ok(base_payload)
-}
-
-/// Tries to create a new block from the given payload and optional parent beacon block root.
-///
-/// NOTE: Empty ommers, nonce and difficulty values are validated upon computing block hash and
-/// comparing the value with `payload.block_hash`.
-///
-/// Uses [`try_into_block`] to convert from the [`ExecutionPayload`] to [`Block`] and seals the
-/// block with its hash.
-///
-/// Uses [`validate_block_hash`] to validate the payload block hash and ultimately return the
-/// [`SealedBlock`].
-pub fn try_into_sealed_block(
-    payload: ExecutionPayload,
-    parent_beacon_block_root: Option<B256>,
-) -> Result<SealedBlock, PayloadError> {
-    let block_hash = payload.block_hash();
-    let base_payload = try_into_block(payload, parent_beacon_block_root)?;
-
-    // validate block hash and return
-    validate_block_hash(block_hash, base_payload)
-}
-
-/// Takes the expected block hash and [`Block`], validating the block and converting it into a
-/// [`SealedBlock`].
-///
-/// If the provided block hash does not match the block hash computed from the provided block, this
-/// returns [`PayloadError::BlockHash`].
-#[inline]
-pub fn validate_block_hash(
-    expected_block_hash: B256,
-    block: Block,
-) -> Result<SealedBlock, PayloadError> {
-    let sealed_block = block.seal_slow();
-    if expected_block_hash != sealed_block.hash() {
-        return Err(PayloadError::BlockHash {
-            execution: sealed_block.hash(),
-            consensus: expected_block_hash,
-        })
-    }
-
-    Ok(sealed_block)
-}
-
-/// Converts [`Block`] to [`ExecutionPayloadBodyV1`]
-pub fn convert_to_payload_body_v1(value: Block) -> ExecutionPayloadBodyV1 {
-    let transactions = value.body.transactions.into_iter().map(|tx| {
-        let mut out = Vec::new();
-        tx.encode_2718(&mut out);
-        out.into()
-    });
+/// Converts a [`reth_primitives_traits::Block`] to [`ExecutionPayloadBodyV1`]
+pub fn convert_to_payload_body_v1(
+    value: impl reth_primitives_traits::Block,
+) -> ExecutionPayloadBodyV1 {
+    let transactions = value.body().transactions_iter().map(|tx| tx.encoded_2718().into());
     ExecutionPayloadBodyV1 {
         transactions: transactions.collect(),
-        withdrawals: value.body.withdrawals.map(Withdrawals::into_inner),
-    }
-}
-
-/// Converts [`Block`] to [`ExecutionPayloadBodyV2`]
-pub fn convert_to_payload_body_v2(value: Block) -> ExecutionPayloadBodyV2 {
-    let transactions = value.body.transactions.into_iter().map(|tx| {
-        let mut out = Vec::new();
-        tx.encode_2718(&mut out);
-        out.into()
-    });
-
-    let mut payload = ExecutionPayloadBodyV2 {
-        transactions: transactions.collect(),
-        withdrawals: value.body.withdrawals.map(Withdrawals::into_inner),
-        deposit_requests: None,
-        withdrawal_requests: None,
-        consolidation_requests: None,
-    };
-
-    if let Some(requests) = value.body.requests {
-        let (deposit_requests, withdrawal_requests, consolidation_requests) =
-            requests.into_iter().fold(
-                (Vec::new(), Vec::new(), Vec::new()),
-                |(mut deposits, mut withdrawals, mut consolidation_requests), request| {
-                    match request {
-                        Request::DepositRequest(r) => {
-                            deposits.push(r);
-                        }
-                        Request::WithdrawalRequest(r) => {
-                            withdrawals.push(r);
-                        }
-                        Request::ConsolidationRequest(r) => {
-                            consolidation_requests.push(r);
-                        }
-                        _ => {}
-                    };
-
-                    (deposits, withdrawals, consolidation_requests)
-                },
-            );
-
-        payload.deposit_requests = Some(deposit_requests);
-        payload.withdrawal_requests = Some(withdrawal_requests);
-        payload.consolidation_requests = Some(consolidation_requests);
-    }
-
-    payload
-}
-
-/// Transforms a [`SealedBlock`] into a [`ExecutionPayloadV1`]
-pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPayloadV1 {
-    let transactions = value.raw_transactions();
-    ExecutionPayloadV1 {
-        parent_hash: value.parent_hash,
-        fee_recipient: value.beneficiary,
-        state_root: value.state_root,
-        receipts_root: value.receipts_root,
-        logs_bloom: value.logs_bloom,
-        prev_randao: value.mix_hash,
-        block_number: value.number,
-        gas_limit: value.gas_limit,
-        gas_used: value.gas_used,
-        timestamp: value.timestamp,
-        extra_data: value.extra_data.clone(),
-        base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-        block_hash: value.hash(),
-        transactions,
+        withdrawals: value.body().withdrawals().cloned().map(Withdrawals::into_inner),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        block_to_payload_v3, try_into_block, try_payload_v3_to_block, try_payload_v4_to_block,
-        validate_block_hash,
-    };
+    use super::block_to_payload_v3;
     use alloy_primitives::{b256, hex, Bytes, U256};
     use alloy_rpc_types_engine::{
-        CancunPayloadFields, ExecutionPayload, ExecutionPayloadV1, ExecutionPayloadV2,
-        ExecutionPayloadV3, ExecutionPayloadV4,
+        CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
+        ExecutionPayloadV2, ExecutionPayloadV3,
     };
+    use reth_primitives::{Block, TransactionSigned};
+    use reth_primitives_traits::Block as _;
 
     #[test]
     fn roundtrip_payload_to_block() {
@@ -489,7 +155,7 @@ mod tests {
             excess_blob_gas: 0x580000,
         };
 
-        let mut block = try_payload_v3_to_block(new_payload.clone()).unwrap();
+        let mut block: Block = new_payload.clone().try_into_block().unwrap();
 
         // this newPayload came with a parent beacon block root, we need to manually insert it
         // before hashing
@@ -532,7 +198,8 @@ mod tests {
             excess_blob_gas: 0x580000,
         };
 
-        let _block = try_payload_v3_to_block(new_payload)
+        let _block = new_payload
+            .try_into_block::<TransactionSigned>()
             .expect_err("execution payload conversion requires typed txs without a rlp header");
     }
 
@@ -675,60 +342,13 @@ mod tests {
         let cancun_fields = CancunPayloadFields { parent_beacon_block_root, versioned_hashes };
 
         // convert into block
-        let block = try_into_block(payload, Some(cancun_fields.parent_beacon_block_root)).unwrap();
+        let block = payload
+            .try_into_block_with_sidecar::<TransactionSigned>(&ExecutionPayloadSidecar::v3(
+                cancun_fields,
+            ))
+            .unwrap();
 
         // Ensure the actual hash is calculated if we set the fields to what they should be
-        validate_block_hash(block_hash_with_blob_fee_fields, block).unwrap();
-    }
-
-    #[test]
-    fn parse_payload_v4() {
-        let s = r#"{
-      "baseFeePerGas": "0x2ada43",
-      "blobGasUsed": "0x0",
-      "blockHash": "0x86eeb2a4b656499f313b601e1dcaedfeacccab27131b6d4ea99bc69a57607f7d",
-      "blockNumber": "0x2c",
-      "depositRequests": [
-        {
-          "amount": "0xe8d4a51000",
-          "index": "0x0",
-          "pubkey": "0xaab5f2b3aad5c2075faf0c1d8937c7de51a53b765a21b4173eb2975878cea05d9ed3428b77f16a981716aa32af74c464",
-          "signature": "0xa889cd238be2dae44f2a3c24c04d686c548f6f82eb44d4604e1bc455b6960efb72b117e878068a8f2cfb91ad84b7ebce05b9254207aa51a1e8a3383d75b5a5bd2439f707636ea5b17b2b594b989c93b000b33e5dff6e4bed9d53a6d2d6889b0c",
-          "withdrawalCredentials": "0x00ab9364f8bf7561862ea0fc3b69c424c94ace406c4dc36ddfbf8a9d72051c80"
-        },
-        {
-          "amount": "0xe8d4a51000",
-          "index": "0x1",
-          "pubkey": "0xb0b1b3b51cf688ead965a954c5cc206ba4e76f3f8efac60656ae708a9aad63487a2ca1fb30ccaf2ebe1028a2b2886b1b",
-          "signature": "0xb9759766e9bb191b1c457ae1da6cdf71a23fb9d8bc9f845eaa49ee4af280b3b9720ac4d81e64b1b50a65db7b8b4e76f1176a12e19d293d75574600e99fbdfecc1ab48edaeeffb3226cd47691d24473821dad0c6ff3973f03e4aa89f418933a56",
-          "withdrawalCredentials": "0x002d2b75f4a27f78e585a4735a40ab2437eceb12ec39938a94dc785a54d62513"
-        }
-      ],
-      "excessBlobGas": "0x0",
-      "extraData": "0x726574682f76302e322e302d626574612e372f6c696e7578",
-      "feeRecipient": "0x8943545177806ed17b9f23f0a21ee5948ecaa776",
-      "gasLimit": "0x1855e85",
-      "gasUsed": "0x25f98",
-      "logsBloom": "0x10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000400000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008000000000000000000000000",
-      "parentHash": "0xd753194ef19b5c566b7eca6e9ebcca03895b548e1e93a20a23d922ba0bc210d4",
-      "prevRandao": "0x8c52256fd491776dc32f531ad4c0dc1444684741bca15f54c9cd40c60142df90",
-      "receiptsRoot": "0x510e7fb94279897e5dcd6c1795f6137d8fe02e49e871bfea7999fd21a89f66aa",
-      "stateRoot": "0x59ae0706a2b47162666fc7af3e30ff7aa34154954b68cc6aed58c3af3d58c9c2",
-      "timestamp": "0x6643c5a9",
-      "transactions": [
-        "0x02f9021e8330182480843b9aca0085174876e80083030d40944242424242424242424242424242424242424242893635c9adc5dea00000b901a422895118000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000000000000000000000000000000000000000012049f42823819771c6bbbd9cb6649850083fd3b6e5d0beb1069342c32d65a3b0990000000000000000000000000000000000000000000000000000000000000030aab5f2b3aad5c2075faf0c1d8937c7de51a53b765a21b4173eb2975878cea05d9ed3428b77f16a981716aa32af74c46400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000ab9364f8bf7561862ea0fc3b69c424c94ace406c4dc36ddfbf8a9d72051c800000000000000000000000000000000000000000000000000000000000000060a889cd238be2dae44f2a3c24c04d686c548f6f82eb44d4604e1bc455b6960efb72b117e878068a8f2cfb91ad84b7ebce05b9254207aa51a1e8a3383d75b5a5bd2439f707636ea5b17b2b594b989c93b000b33e5dff6e4bed9d53a6d2d6889b0cc080a0db786f0d89923949e533680524f003cebd66f32fbd30429a6b6bfbd3258dcf60a05241c54e05574765f7ddc1a742ae06b044edfe02bffb202bf172be97397eeca9",
-        "0x02f9021e8330182401843b9aca0085174876e80083030d40944242424242424242424242424242424242424242893635c9adc5dea00000b901a422895118000000000000000000000000000000000000000000000000000000000000008000000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000120d694d6a0b0103651aafd87db6c88297175d7317c6e6da53ccf706c3c991c91fd0000000000000000000000000000000000000000000000000000000000000030b0b1b3b51cf688ead965a954c5cc206ba4e76f3f8efac60656ae708a9aad63487a2ca1fb30ccaf2ebe1028a2b2886b1b000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020002d2b75f4a27f78e585a4735a40ab2437eceb12ec39938a94dc785a54d625130000000000000000000000000000000000000000000000000000000000000060b9759766e9bb191b1c457ae1da6cdf71a23fb9d8bc9f845eaa49ee4af280b3b9720ac4d81e64b1b50a65db7b8b4e76f1176a12e19d293d75574600e99fbdfecc1ab48edaeeffb3226cd47691d24473821dad0c6ff3973f03e4aa89f418933a56c080a099dc5b94a51e9b91a6425b1fed9792863006496ab71a4178524819d7db0c5e88a0119748e62700234079d91ae80f4676f9e0f71b260e9b46ef9b4aff331d3c2318"
-      ],
-      "withdrawalRequests": [],
-      "withdrawals": [],
-      "consolidationRequests": []
-    }"#;
-
-        let payload = serde_json::from_str::<ExecutionPayloadV4>(s).unwrap();
-        let mut block = try_payload_v4_to_block(payload).unwrap();
-        block.header.parent_beacon_block_root =
-            Some(b256!("d9851db05fa63593f75e2b12c4bba9f47740613ca57da3b523a381b8c27f3297"));
-        let hash = block.seal_slow().hash();
-        assert_eq!(hash, b256!("86eeb2a4b656499f313b601e1dcaedfeacccab27131b6d4ea99bc69a57607f7d"))
+        assert_eq!(block_hash_with_blob_fee_fields, block.header.hash_slow());
     }
 }

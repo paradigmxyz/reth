@@ -117,7 +117,6 @@ where
                         HandlerEvent::BackfillAction(action) => {
                             // forward action to backfill_sync
                             this.backfill_sync.on_action(action);
-                            continue 'outer
                         }
                         HandlerEvent::Event(ev) => {
                             // bubble up the event

@@ -22,6 +22,9 @@ pub use block_id::*;
 mod block_hash;
 pub use block_hash::*;
 
+mod chain;
+pub use chain::*;
+
 mod header;
 pub use header::*;
 
@@ -30,9 +33,6 @@ pub use prune_checkpoint::*;
 
 mod receipts;
 pub use receipts::*;
-
-mod requests;
-pub use requests::*;
 
 mod stage_checkpoint;
 pub use stage_checkpoint::*;
@@ -49,10 +49,33 @@ pub use transactions::*;
 mod trie;
 pub use trie::*;
 
+mod chain_info;
+pub use chain_info::*;
+
 mod withdrawals;
 pub use withdrawals::*;
+
+mod ommers;
+pub use ommers::*;
 
 mod database_provider;
 pub use database_provider::*;
 
 pub mod noop;
+
+mod history;
+pub use history::*;
+
+mod hashing;
+pub use hashing::*;
+mod stats;
+pub use stats::*;
+
+mod legacy;
+pub use legacy::*;
+
+mod primitives;
+pub use primitives::*;
+
+mod block_indices;
+pub use block_indices::*;

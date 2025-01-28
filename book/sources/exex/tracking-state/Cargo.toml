@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 reth = { git = "https://github.com/paradigmxyz/reth.git" }
 reth-exex = { git = "https://github.com/paradigmxyz/reth.git", features = ["serde"] }
-reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git"}
+reth-node-ethereum = { git = "https://github.com/paradigmxyz/reth.git" }
 reth-tracing = { git = "https://github.com/paradigmxyz/reth.git" }
 
 eyre = "0.6" # Easy error handling

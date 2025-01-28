@@ -1,17 +1,20 @@
 //! Contains RPC handler implementations specific to state.
 
 use reth_chainspec::EthereumHardforks;
-use reth_provider::{ChainSpecProvider, StateProviderFactory};
+use reth_provider::{BlockReader, ChainSpecProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
-use reth_rpc_eth_api::helpers::{EthState, LoadState, SpawnBlocking};
-use reth_rpc_eth_types::EthStateCache;
+use reth_rpc_eth_api::{
+    helpers::{EthState, LoadState, SpawnBlocking},
+    RpcNodeCoreExt,
+};
 
 use crate::EthApi;
 
 impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadState + SpawnBlocking,
+    Provider: BlockReader,
 {
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_proof_window()
@@ -20,36 +23,24 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: Send + Sync,
-    Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
-    Pool: TransactionPool,
+    Self: RpcNodeCoreExt<
+        Provider: BlockReader
+                      + StateProviderFactory
+                      + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+        Pool: TransactionPool,
+    >,
+    Provider: BlockReader,
 {
-    #[inline]
-    fn provider(
-        &self,
-    ) -> impl StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> {
-        self.inner.provider()
-    }
-
-    #[inline]
-    fn cache(&self) -> &EthStateCache {
-        self.inner.cache()
-    }
-
-    #[inline]
-    fn pool(&self) -> impl TransactionPool {
-        self.inner.pool()
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT;
     use alloy_primitives::{Address, StorageKey, StorageValue, U256};
     use reth_chainspec::MAINNET;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_primitives::constants::ETHEREUM_BLOCK_GAS_LIMIT;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_rpc_eth_api::helpers::EthState;
     use reth_rpc_eth_types::{
@@ -66,19 +57,18 @@ mod tests {
         let pool = testing_pool();
         let evm_config = EthEvmConfig::new(MAINNET.clone());
 
-        let cache =
-            EthStateCache::spawn(NoopProvider::default(), Default::default(), evm_config.clone());
+        let cache = EthStateCache::spawn(NoopProvider::default(), Default::default());
         EthApi::new(
             NoopProvider::default(),
             pool,
             NoopNetwork::default(),
             cache.clone(),
-            GasPriceOracle::new(NoopProvider::default(), Default::default(), cache.clone()),
+            GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
             DEFAULT_MAX_SIMULATE_BLOCKS,
             DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
-            FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
+            FeeHistoryCache::new(FeeHistoryCacheConfig::default()),
             evm_config,
             DEFAULT_PROOF_PERMITS,
         )
@@ -93,19 +83,18 @@ mod tests {
         let evm_config = EthEvmConfig::new(mock_provider.chain_spec());
         mock_provider.extend_accounts(accounts);
 
-        let cache =
-            EthStateCache::spawn(mock_provider.clone(), Default::default(), evm_config.clone());
+        let cache = EthStateCache::spawn(mock_provider.clone(), Default::default());
         EthApi::new(
             mock_provider.clone(),
             pool,
             (),
             cache.clone(),
-            GasPriceOracle::new(mock_provider, Default::default(), cache.clone()),
+            GasPriceOracle::new(mock_provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT,
             DEFAULT_MAX_SIMULATE_BLOCKS,
             DEFAULT_ETH_PROOF_WINDOW + 1,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
-            FeeHistoryCache::new(cache, FeeHistoryCacheConfig::default()),
+            FeeHistoryCache::new(FeeHistoryCacheConfig::default()),
             evm_config,
             DEFAULT_PROOF_PERMITS,
         )

@@ -3,12 +3,13 @@
 use std::sync::Arc;
 
 use alloy_consensus::TxLegacy;
-use alloy_primitives::U256;
+use alloy_primitives::{PrimitiveSignature as Signature, U256};
 use futures::StreamExt;
 use rand::thread_rng;
 use reth_network::{test_utils::Testnet, NetworkEvent, NetworkEventListenerProvider};
-use reth_network_api::PeersInfo;
-use reth_primitives::{Signature, TransactionSigned};
+use reth_network_api::{events::PeerEvent, PeersInfo};
+use reth_primitives::TransactionSigned;
+use reth_primitives_traits::SignedTransaction;
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
 
@@ -80,7 +81,7 @@ async fn test_4844_tx_gossip_penalization() {
     }
 
     let signed_txs: Vec<Arc<TransactionSigned>> =
-        txs.iter().map(|tx| Arc::new(tx.transaction().clone().into_signed())).collect();
+        txs.iter().map(|tx| Arc::new(tx.transaction().clone().into_tx())).collect();
 
     let network_handle = peer0.network();
 
@@ -95,7 +96,7 @@ async fn test_4844_tx_gossip_penalization() {
     let peer0_reputation_after =
         peer1.peer_handle().peer_by_id(*peer0.peer_id()).await.unwrap().reputation();
     assert_ne!(peer0_reputation_before, peer0_reputation_after);
-    assert_eq!(received, txs[1].transaction().hash);
+    assert_eq!(received, *txs[1].transaction().tx_hash());
 
     // this will return an [`Empty`] error because blob txs are disallowed to be broadcasted
     assert!(peer1_tx_listener.try_recv().is_err());
@@ -132,26 +133,24 @@ async fn test_sending_invalid_transactions() {
             value: Default::default(),
             input: Default::default(),
         };
-        let tx = TransactionSigned::from_transaction_and_signature(
-            tx.into(),
-            Signature::test_signature(),
-        );
+        let tx = TransactionSigned::new_unhashed(tx.into(), Signature::test_signature());
         peer0.network().send_transactions(*peer1.peer_id(), vec![Arc::new(tx)]);
     }
 
     // await disconnect for bad tx spam
     if let Some(ev) = peer1_events.next().await {
         match ev {
-            NetworkEvent::SessionClosed { peer_id, .. } => {
+            NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. }) => {
                 assert_eq!(peer_id, *peer0.peer_id());
             }
-            NetworkEvent::SessionEstablished { .. } => {
+            NetworkEvent::ActivePeerSession { .. } |
+            NetworkEvent::Peer(PeerEvent::SessionEstablished { .. }) => {
                 panic!("unexpected SessionEstablished event")
             }
-            NetworkEvent::PeerAdded(_) => {
+            NetworkEvent::Peer(PeerEvent::PeerAdded(_)) => {
                 panic!("unexpected PeerAdded event")
             }
-            NetworkEvent::PeerRemoved(_) => {
+            NetworkEvent::Peer(PeerEvent::PeerRemoved(_)) => {
                 panic!("unexpected PeerRemoved event")
             }
         }

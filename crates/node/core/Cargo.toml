@@ -13,7 +13,9 @@ workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
+reth-consensus.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits = { workspace = true, features = ["rayon"] }
 reth-cli-util.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-storage-errors.workspace = true
@@ -23,8 +25,6 @@ reth-network-p2p.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-rpc-types-compat.workspace = true
-reth-rpc-api = { workspace = true, features = ["client"] }
-reth-rpc-eth-api = { workspace = true, features = ["client"] }
 reth-transaction-pool.workspace = true
 reth-tracing.workspace = true
 reth-config.workspace = true
@@ -32,19 +32,20 @@ reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-net-nat.workspace = true
 reth-network-peers.workspace = true
-reth-consensus-common.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
+reth-ethereum-forks.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
-alloy-rpc-types-engine = { workspace = true, features = ["jwt"] }
+alloy-rpc-types-engine = { workspace = true, features = ["std", "jwt"] }
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
 
 # misc
 eyre.workspace = true
 clap = { workspace = true, features = ["derive"] }
 humantime.workspace = true
-const_format.workspace = true
 rand.workspace = true
 derive_more.workspace = true
 toml.workspace = true
@@ -60,11 +61,7 @@ shellexpand.workspace = true
 tracing.workspace = true
 
 # crypto
-secp256k1 = { workspace = true, features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 # async
 futures.workspace = true
@@ -73,15 +70,12 @@ futures.workspace = true
 # test vectors generation
 proptest.workspace = true
 tokio.workspace = true
-tempfile.workspace = true
 
 [features]
-optimism = [
-    "reth-primitives/optimism"
-]
+optimism = ["reth-db/optimism"]
 # Features for vergen to generate correct env vars
-jemalloc = []
-asm-keccak = []
+jemalloc = ["reth-cli-util/jemalloc"]
+asm-keccak = ["reth-primitives/asm-keccak", "alloy-primitives/asm-keccak"]
 
 [build-dependencies]
 vergen = { version = "8.0.0", features = ["build", "cargo", "git", "gitcl"] }

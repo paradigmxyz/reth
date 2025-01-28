@@ -12,10 +12,9 @@ description = "Task management"
 workspace = true
 
 [dependencies]
-
 # async
 tokio = { workspace = true, features = ["sync", "rt"] }
-tracing-futures = "0.2"
+tracing-futures.workspace = true
 futures-util.workspace = true
 
 # metrics
@@ -26,7 +25,7 @@ metrics.workspace = true
 auto_impl.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
-dyn-clone.workspace = true 
+dyn-clone.workspace = true
 
 # feature `rayon`
 rayon = { workspace = true, optional = true }

@@ -47,8 +47,20 @@ pub mod test_utils;
 
 pub use bodies::client::BodiesClient;
 pub use headers::client::HeadersClient;
+use reth_primitives_traits::Block;
 
-/// Helper trait that unifies network behaviour needed for fetching blocks.
-pub trait BlockClient: HeadersClient + BodiesClient + Unpin + Clone {}
+/// Helper trait that unifies network behaviour needed for fetching entire blocks.
+pub trait BlockClient:
+    HeadersClient<Header = <Self::Block as Block>::Header>
+    + BodiesClient<Body = <Self::Block as Block>::Body>
+    + Unpin
+    + Clone
+{
+    /// The Block type that this client fetches.
+    type Block: Block;
+}
 
-impl<T> BlockClient for T where T: HeadersClient + BodiesClient + Unpin + Clone {}
+/// The [`BlockClient`] providing Ethereum block parts.
+pub trait EthBlockClient: BlockClient<Block = reth_primitives::Block> {}
+
+impl<T> EthBlockClient for T where T: BlockClient<Block = reth_primitives::Block> {}

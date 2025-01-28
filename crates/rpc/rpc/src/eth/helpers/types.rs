@@ -1,88 +1,116 @@
 //! L1 `eth` API types.
 
-use alloy_consensus::Transaction as _;
-use alloy_network::{AnyNetwork, Network};
-use alloy_primitives::{Address, TxKind};
-use alloy_rpc_types::{Transaction, TransactionInfo};
-use alloy_serde::WithOtherFields;
-use reth_primitives::TransactionSignedEcRecovered;
-use reth_rpc_types_compat::{
-    transaction::{from_primitive_signature, GasPrice},
-    TransactionCompat,
-};
+use alloy_consensus::{Signed, Transaction as _, TxEip4844Variant, TxEnvelope};
+use alloy_network::{Ethereum, Network};
+use alloy_primitives::PrimitiveSignature as Signature;
+use alloy_rpc_types::TransactionRequest;
+use alloy_rpc_types_eth::{Transaction, TransactionInfo};
+use reth_primitives::{Recovered, TransactionSigned};
+use reth_primitives_traits::SignedTransaction;
+use reth_rpc_eth_api::EthApiTypes;
+use reth_rpc_eth_types::EthApiError;
+use reth_rpc_types_compat::TransactionCompat;
+
+/// A standalone [`EthApiTypes`] implementation for Ethereum.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EthereumEthApiTypes(EthTxBuilder);
+
+impl EthApiTypes for EthereumEthApiTypes {
+    type Error = EthApiError;
+    type NetworkTypes = Ethereum;
+    type TransactionCompat = EthTxBuilder;
+
+    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
+        &self.0
+    }
+}
 
 /// Builds RPC transaction response for l1.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct EthTxBuilder;
 
 impl TransactionCompat for EthTxBuilder
 where
     Self: Send + Sync,
 {
-    type Transaction = <AnyNetwork as Network>::TransactionResponse;
+    type Transaction = <Ethereum as Network>::TransactionResponse;
 
-    fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Self::Transaction {
-        let signer = tx.signer();
-        let signed_tx = tx.into_signed();
+    type Error = EthApiError;
 
-        let to: Option<Address> = match signed_tx.kind() {
-            TxKind::Create => None,
-            TxKind::Call(to) => Some(Address(*to)),
+    fn fill(
+        &self,
+        tx: Recovered<TransactionSigned>,
+        tx_info: TransactionInfo,
+    ) -> Result<Self::Transaction, Self::Error> {
+        let from = tx.signer();
+        let hash = *tx.tx_hash();
+        let TransactionSigned { transaction, signature, .. } = tx.into_tx();
+
+        let inner: TxEnvelope = match transaction {
+            reth_primitives::Transaction::Legacy(tx) => {
+                Signed::new_unchecked(tx, signature, hash).into()
+            }
+            reth_primitives::Transaction::Eip2930(tx) => {
+                Signed::new_unchecked(tx, signature, hash).into()
+            }
+            reth_primitives::Transaction::Eip1559(tx) => {
+                Signed::new_unchecked(tx, signature, hash).into()
+            }
+            reth_primitives::Transaction::Eip4844(tx) => {
+                Signed::new_unchecked(tx, signature, hash).into()
+            }
+            reth_primitives::Transaction::Eip7702(tx) => {
+                Signed::new_unchecked(tx, signature, hash).into()
+            }
+            #[allow(unreachable_patterns)]
+            _ => unreachable!(),
         };
 
         let TransactionInfo {
-            base_fee, block_hash, block_number, index: transaction_index, ..
+            block_hash, block_number, index: transaction_index, base_fee, ..
         } = tx_info;
 
-        let GasPrice { gas_price, max_fee_per_gas } =
-            Self::gas_price(&signed_tx, base_fee.map(|fee| fee as u64));
+        let effective_gas_price = base_fee
+            .map(|base_fee| {
+                inner.effective_tip_per_gas(base_fee as u64).unwrap_or_default() + base_fee
+            })
+            .unwrap_or_else(|| inner.max_fee_per_gas());
 
-        let chain_id = signed_tx.chain_id();
-        let blob_versioned_hashes = signed_tx.blob_versioned_hashes();
-        let access_list = signed_tx.access_list().cloned();
-        let authorization_list = signed_tx.authorization_list().map(|l| l.to_vec());
+        Ok(Transaction {
+            inner,
+            block_hash,
+            block_number,
+            transaction_index,
+            from,
+            effective_gas_price: Some(effective_gas_price),
+        })
+    }
 
-        let signature = from_primitive_signature(
-            *signed_tx.signature(),
-            signed_tx.tx_type(),
-            signed_tx.chain_id(),
-        );
+    fn build_simulate_v1_transaction(
+        &self,
+        request: TransactionRequest,
+    ) -> Result<TransactionSigned, Self::Error> {
+        let Ok(tx) = request.build_typed_tx() else {
+            return Err(EthApiError::TransactionConversionError)
+        };
 
-        WithOtherFields {
-            inner: Transaction {
-                hash: signed_tx.hash(),
-                nonce: signed_tx.nonce(),
-                from: signer,
-                to,
-                value: signed_tx.value(),
-                gas_price,
-                max_fee_per_gas,
-                max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas(),
-                signature: Some(signature),
-                gas: signed_tx.gas_limit(),
-                input: signed_tx.input().clone(),
-                chain_id,
-                access_list,
-                transaction_type: Some(signed_tx.tx_type() as u8),
-                // These fields are set to None because they are not stored as part of the
-                // transaction
-                block_hash,
-                block_number,
-                transaction_index,
-                // EIP-4844 fields
-                max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas(),
-                blob_versioned_hashes,
-                authorization_list,
-            },
-            ..Default::default()
-        }
+        // Create an empty signature for the transaction.
+        let signature = Signature::new(Default::default(), Default::default(), false);
+        Ok(TransactionSigned::new_unhashed(tx.into(), signature))
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        tx.inner.input = tx.inner.input.slice(..4);
-    }
-
-    fn tx_type(tx: &Self::Transaction) -> u8 {
-        tx.inner.transaction_type.unwrap_or(0)
+        let input = match &mut tx.inner {
+            TxEnvelope::Eip1559(tx) => &mut tx.tx_mut().input,
+            TxEnvelope::Eip2930(tx) => &mut tx.tx_mut().input,
+            TxEnvelope::Legacy(tx) => &mut tx.tx_mut().input,
+            TxEnvelope::Eip4844(tx) => match tx.tx_mut() {
+                TxEip4844Variant::TxEip4844(tx) => &mut tx.input,
+                TxEip4844Variant::TxEip4844WithSidecar(tx) => &mut tx.tx.input,
+            },
+            TxEnvelope::Eip7702(tx) => &mut tx.tx_mut().input,
+        };
+        *input = input.slice(..4);
     }
 }

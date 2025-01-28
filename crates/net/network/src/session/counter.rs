@@ -1,7 +1,6 @@
+use super::ExceedsSessionLimit;
 use reth_network_api::Direction;
 use reth_network_types::SessionLimits;
-
-use super::ExceedsSessionLimit;
 
 /// Keeps track of all sessions.
 #[derive(Debug, Clone)]

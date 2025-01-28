@@ -38,7 +38,7 @@ Alongside the `accessList` parameter and legacy parameters (except `gasPrice`), 
 
 The base fee is burned, while the priority fee is paid to the miner who includes the transaction, incentivizing miners to include transactions with higher priority fees per gas.
 
-## EIP-4844 Transaction
+## EIP-4844 Transactions
 
 [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844) transactions (type `0x3`) was introduced in Ethereum's Dencun fork. This provides a temporary but significant scaling relief for rollups by allowing them to initially scale to 0.375 MB per slot, with a separate fee market allowing fees to be very low while usage of this system is limited.
 

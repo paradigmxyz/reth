@@ -11,12 +11,15 @@
 
 extern crate alloc;
 
-use alloc::{fmt::Debug, vec::Vec};
+use alloc::{fmt::Debug, sync::Arc, vec::Vec};
+use alloy_consensus::Header;
+use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
 use reth_primitives::{
-    constants::MINIMUM_GAS_LIMIT, BlockWithSenders, GotExpected, GotExpectedBoxed, Header,
-    InvalidTransactionError, Receipt, Request, SealedBlock, SealedHeader,
+    EthPrimitives, GotExpected, GotExpectedBoxed, InvalidTransactionError, NodePrimitives, Receipt,
+    RecoveredBlock, SealedBlock, SealedHeader,
 };
+use reth_primitives_traits::{constants::MINIMUM_GAS_LIMIT, Block};
 
 /// A consensus implementation that does nothing.
 pub mod noop;
@@ -25,29 +28,71 @@ pub mod noop;
 /// test helpers for mocking consensus
 pub mod test_utils;
 
-/// Post execution input passed to [`Consensus::validate_block_post_execution`].
+/// Post execution input passed to [`FullConsensus::validate_block_post_execution`].
 #[derive(Debug)]
-pub struct PostExecutionInput<'a> {
+pub struct PostExecutionInput<'a, R = Receipt> {
     /// Receipts of the block.
-    pub receipts: &'a [Receipt],
+    pub receipts: &'a [R],
     /// EIP-7685 requests of the block.
-    pub requests: &'a [Request],
+    pub requests: &'a Requests,
 }
 
-impl<'a> PostExecutionInput<'a> {
+impl<'a, R> PostExecutionInput<'a, R> {
     /// Creates a new instance of `PostExecutionInput`.
-    pub const fn new(receipts: &'a [Receipt], requests: &'a [Request]) -> Self {
+    pub const fn new(receipts: &'a [R], requests: &'a Requests) -> Self {
         Self { receipts, requests }
     }
 }
 
+/// [`Consensus`] implementation which knows full node primitives and is able to validation block's
+/// execution outcome.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait FullConsensus<N: NodePrimitives = EthPrimitives>: AsConsensus<N::Block> {
+    /// Validate a block considering world state, i.e. things that can not be checked before
+    /// execution.
+    ///
+    /// See the Yellow Paper sections 4.3.2 "Holistic Validity".
+    ///
+    /// Note: validating blocks does not include other validations of the Consensus
+    fn validate_block_post_execution(
+        &self,
+        block: &RecoveredBlock<N::Block>,
+        input: PostExecutionInput<'_, N::Receipt>,
+    ) -> Result<(), ConsensusError>;
+}
+
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait Consensus: Debug + Send + Sync {
+pub trait Consensus<B: Block>: AsHeaderValidator<B::Header> {
+    /// The error type related to consensus.
+    type Error;
+
+    /// Ensures that body field values match the header.
+    fn validate_body_against_header(
+        &self,
+        body: &B::Body,
+        header: &SealedHeader<B::Header>,
+    ) -> Result<(), Self::Error>;
+
+    /// Validate a block disregarding world state, i.e. things that can be checked before sender
+    /// recovery and execution.
+    ///
+    /// See the Yellow Paper sections 4.3.2 "Holistic Validity", 4.3.4 "Block Header Validity", and
+    /// 11.1 "Ommer Validation".
+    ///
+    /// **This should not be called for the genesis block**.
+    ///
+    /// Note: validating blocks does not include other validations of the Consensus
+    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), Self::Error>;
+}
+
+/// HeaderValidator is a protocol that validates headers and their relationships.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
     /// Validate if header is correct and follows consensus specification.
     ///
     /// This is called on standalone header to check if all hashes are correct.
-    fn validate_header(&self, header: &SealedHeader) -> Result<(), ConsensusError>;
+    fn validate_header(&self, header: &SealedHeader<H>) -> Result<(), ConsensusError>;
 
     /// Validate that the header information regarding parent are correct.
     /// This checks the block number, timestamp, basefee and gas limit increment.
@@ -57,11 +102,12 @@ pub trait Consensus: Debug + Send + Sync {
     ///
     /// **This should not be called for the genesis block**.
     ///
-    /// Note: Validating header against its parent does not include other Consensus validations.
+    /// Note: Validating header against its parent does not include other HeaderValidator
+    /// validations.
     fn validate_header_against_parent(
         &self,
-        header: &SealedHeader,
-        parent: &SealedHeader,
+        header: &SealedHeader<H>,
+        parent: &SealedHeader<H>,
     ) -> Result<(), ConsensusError>;
 
     /// Validates the given headers
@@ -70,7 +116,13 @@ pub trait Consensus: Debug + Send + Sync {
     /// on its own and valid against its parent.
     ///
     /// Note: this expects that the headers are in natural order (ascending block number)
-    fn validate_header_range(&self, headers: &[SealedHeader]) -> Result<(), HeaderConsensusError> {
+    fn validate_header_range(
+        &self,
+        headers: &[SealedHeader<H>],
+    ) -> Result<(), HeaderConsensusError<H>>
+    where
+        H: Clone,
+    {
         if let Some((initial_header, remaining_headers)) = headers.split_first() {
             self.validate_header(initial_header)
                 .map_err(|e| HeaderConsensusError(e, initial_header.clone()))?;
@@ -90,35 +142,46 @@ pub trait Consensus: Debug + Send + Sync {
     ///
     /// Some consensus engines may want to do additional checks here.
     ///
-    /// Note: validating headers with TD does not include other Consensus validation.
+    /// Note: validating headers with TD does not include other HeaderValidator validation.
     fn validate_header_with_total_difficulty(
         &self,
-        header: &Header,
+        header: &H,
         total_difficulty: U256,
     ) -> Result<(), ConsensusError>;
+}
 
-    /// Validate a block disregarding world state, i.e. things that can be checked before sender
-    /// recovery and execution.
-    ///
-    /// See the Yellow Paper sections 4.3.2 "Holistic Validity", 4.3.4 "Block Header Validity", and
-    /// 11.1 "Ommer Validation".
-    ///
-    /// **This should not be called for the genesis block**.
-    ///
-    /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block_pre_execution(&self, block: &SealedBlock) -> Result<(), ConsensusError>;
+/// Helper trait to cast `Arc<dyn Consensus>` to `Arc<dyn HeaderValidator>`
+pub trait AsHeaderValidator<H>: HeaderValidator<H> {
+    /// Converts the [`Arc`] of self to [`Arc`] of [`HeaderValidator`]
+    fn as_header_validator<'a>(self: Arc<Self>) -> Arc<dyn HeaderValidator<H> + 'a>
+    where
+        Self: 'a;
+}
 
-    /// Validate a block considering world state, i.e. things that can not be checked before
-    /// execution.
-    ///
-    /// See the Yellow Paper sections 4.3.2 "Holistic Validity".
-    ///
-    /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block_post_execution(
-        &self,
-        block: &BlockWithSenders,
-        input: PostExecutionInput<'_>,
-    ) -> Result<(), ConsensusError>;
+impl<T: HeaderValidator<H>, H> AsHeaderValidator<H> for T {
+    fn as_header_validator<'a>(self: Arc<Self>) -> Arc<dyn HeaderValidator<H> + 'a>
+    where
+        Self: 'a,
+    {
+        self
+    }
+}
+
+/// Helper trait to cast `Arc<dyn FullConsensus>` to `Arc<dyn Consensus>`
+pub trait AsConsensus<B: Block>: Consensus<B> {
+    /// Converts the [`Arc`] of self to [`Arc`] of [`HeaderValidator`]
+    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<B, Error = Self::Error> + 'a>
+    where
+        Self: 'a;
+}
+
+impl<T: Consensus<B>, B: Block> AsConsensus<B> for T {
+    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<B, Error = Self::Error> + 'a>
+    where
+        Self: 'a,
+    {
+        self
+    }
 }
 
 /// Consensus Errors
@@ -170,10 +233,10 @@ pub enum ConsensusError {
     #[display("mismatched block withdrawals root: {_0}")]
     BodyWithdrawalsRootDiff(GotExpectedBoxed<B256>),
 
-    /// Error when the requests root in the block is different from the expected requests
-    /// root.
-    #[display("mismatched block requests root: {_0}")]
-    BodyRequestsRootDiff(GotExpectedBoxed<B256>),
+    /// Error when the requests hash in the block is different from the expected requests
+    /// hash.
+    #[display("mismatched block requests hash: {_0}")]
+    BodyRequestsHashDiff(GotExpectedBoxed<B256>),
 
     /// Error when a block with a specific hash and number is already known.
     #[display("block with [hash={hash}, number={number}] is already known")]
@@ -248,17 +311,17 @@ pub enum ConsensusError {
     #[display("missing withdrawals root")]
     WithdrawalsRootMissing,
 
-    /// Error when the requests root is missing.
-    #[display("missing requests root")]
-    RequestsRootMissing,
+    /// Error when the requests hash is missing.
+    #[display("missing requests hash")]
+    RequestsHashMissing,
 
     /// Error when an unexpected withdrawals root is encountered.
     #[display("unexpected withdrawals root")]
     WithdrawalsRootUnexpected,
 
-    /// Error when an unexpected requests root is encountered.
-    #[display("unexpected requests root")]
-    RequestsRootUnexpected,
+    /// Error when an unexpected requests hash is encountered.
+    #[display("unexpected requests hash")]
+    RequestsHashUnexpected,
 
     /// Error when withdrawals are missing.
     #[display("missing withdrawals")]
@@ -406,4 +469,4 @@ impl From<InvalidTransactionError> for ConsensusError {
 /// `HeaderConsensusError` combines a `ConsensusError` with the `SealedHeader` it relates to.
 #[derive(derive_more::Display, derive_more::Error, Debug)]
 #[display("Consensus error: {_0}, Invalid header: {_1:?}")]
-pub struct HeaderConsensusError(ConsensusError, SealedHeader);
+pub struct HeaderConsensusError<H>(ConsensusError, SealedHeader<H>);

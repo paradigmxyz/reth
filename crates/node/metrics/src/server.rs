@@ -103,7 +103,7 @@ impl MetricServer {
                 let hook = hook.clone();
                 let service = tower::service_fn(move |_| {
                     (hook)();
-                    let metrics = handle.render();
+                    let metrics = handle.handle().render();
                     let mut response = Response::new(metrics);
                     response
                         .headers_mut()
@@ -113,12 +113,12 @@ impl MetricServer {
 
                 let mut shutdown = signal.clone().ignore_guard();
                 tokio::task::spawn(async move {
-                    if let Err(error) =
-                        jsonrpsee::server::serve_with_graceful_shutdown(io, service, &mut shutdown)
+                    let _ =
+                        jsonrpsee_server::serve_with_graceful_shutdown(io, service, &mut shutdown)
                             .await
-                    {
-                        tracing::debug!(%error, "failed to serve request")
-                    }
+                            .inspect_err(
+                                |error| tracing::debug!(%error, "failed to serve request"),
+                            );
                 });
             }
         });
@@ -206,7 +206,6 @@ const fn describe_io_stats() {}
 mod tests {
     use super::*;
     use reqwest::Client;
-    use reth_provider::{test_utils::create_test_provider_factory, StaticFileProviderFactory};
     use reth_tasks::TaskManager;
     use socket2::{Domain, Socket, Type};
     use std::net::{SocketAddr, TcpListener};
@@ -236,8 +235,7 @@ mod tests {
         let tasks = TaskManager::current();
         let executor = tasks.executor();
 
-        let factory = create_test_provider_factory();
-        let hooks = Hooks::new(factory.db_ref().clone(), factory.static_file_provider());
+        let hooks = Hooks::builder().build();
 
         let listen_addr = get_random_available_addr();
         let config =
@@ -252,7 +250,7 @@ mod tests {
 
         // Check the response body
         let body = response.text().await.unwrap();
-        assert!(body.contains("reth_db_table_size"));
-        assert!(body.contains("reth_jemalloc_metadata"));
+        assert!(body.contains("reth_process_cpu_seconds_total"));
+        assert!(body.contains("reth_process_start_time_seconds"));
     }
 }

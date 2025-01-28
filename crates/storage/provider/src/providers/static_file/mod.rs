@@ -55,8 +55,10 @@ impl Deref for LoadedJar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{test_utils::create_test_provider_factory, HeaderProvider};
-    use alloy_consensus::Transaction;
+    use crate::{
+        test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
+    };
+    use alloy_consensus::{Header, Transaction};
     use alloy_primitives::{BlockHash, TxNumber, B256, U256};
     use rand::seq::SliceRandom;
     use reth_db::{
@@ -66,7 +68,7 @@ mod tests {
     use reth_db_api::transaction::DbTxMut;
     use reth_primitives::{
         static_file::{find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE},
-        Header, Receipt, TransactionSignedNoHash,
+        EthPrimitives, Receipt, TransactionSigned,
     };
     use reth_storage_api::{ReceiptProvider, TransactionsProvider};
     use reth_testing_utils::generators::{self, random_header_range};
@@ -108,7 +110,7 @@ mod tests {
             let hash = header.hash();
 
             tx.put::<CanonicalHeaders>(header.number, hash).unwrap();
-            tx.put::<Headers>(header.number, header.clone().unseal()).unwrap();
+            tx.put::<Headers>(header.number, header.clone_header()).unwrap();
             tx.put::<HeaderTerminalDifficulties>(header.number, td.into()).unwrap();
             tx.put::<HeaderNumbers>(hash, header.number).unwrap();
         }
@@ -116,7 +118,7 @@ mod tests {
 
         // Create StaticFile
         {
-            let manager = StaticFileProvider::read_write(static_files_path.path()).unwrap();
+            let manager = factory.static_file_provider();
             let mut writer = manager.latest_writer(StaticFileSegment::Headers).unwrap();
             let mut td = U256::ZERO;
 
@@ -131,7 +133,7 @@ mod tests {
         // Use providers to query Header data and compare if it matches
         {
             let db_provider = factory.provider().unwrap();
-            let manager = StaticFileProvider::read_write(static_files_path.path()).unwrap();
+            let manager = db_provider.static_file_provider();
             let jar_provider = manager
                 .get_segment_provider_from_block(StaticFileSegment::Headers, 0, Some(&static_file))
                 .unwrap();
@@ -165,12 +167,12 @@ mod tests {
         let blocks_per_file = 10; // Number of headers per file
         let files_per_range = 3; // Number of files per range (data/conf/offset files)
         let file_set_count = 3; // Number of sets of files to create
-        let initial_file_count = files_per_range * file_set_count + 1; // Includes lockfile
+        let initial_file_count = files_per_range * file_set_count;
         let tip = blocks_per_file * file_set_count - 1; // Initial highest block (29 in this case)
 
         // [ Headers Creation and Commit ]
         {
-            let sf_rw = StaticFileProvider::read_write(&static_dir)
+            let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
                 .expect("Failed to create static file provider")
                 .with_custom_blocks_per_file(blocks_per_file);
 
@@ -189,8 +191,8 @@ mod tests {
 
         // Helper function to prune headers and validate truncation results
         fn prune_and_validate(
-            writer: &mut StaticFileProviderRWRefMut<'_>,
-            sf_rw: &StaticFileProvider,
+            writer: &mut StaticFileProviderRWRefMut<'_, EthPrimitives>,
+            sf_rw: &StaticFileProvider<EthPrimitives>,
             static_dir: impl AsRef<Path>,
             prune_count: u64,
             expected_tip: Option<u64>,
@@ -216,7 +218,7 @@ mod tests {
 
             // Validate the number of files remaining in the directory
             assert_eyre(
-                fs::read_dir(static_dir)?.count(),
+                count_files_without_lockfile(static_dir)?,
                 expected_file_count as usize,
                 "file count mismatch",
             )?;
@@ -250,16 +252,16 @@ mod tests {
             {
                 (
                     tmp_tip,
-                    Some(0),             // Only genesis block remains
-                    files_per_range + 1, // The file set with block 0 should remain
+                    Some(0),         // Only genesis block remains
+                    files_per_range, // The file set with block 0 should remain
                 )
             },
             // Case 4: Pruning the genesis header (should not delete the file set with block 0)
             {
                 (
                     1,
-                    None,                // No blocks left
-                    files_per_range + 1, // The file set with block 0 remains
+                    None,            // No blocks left
+                    files_per_range, // The file set with block 0 remains
                 )
             },
         ];
@@ -272,7 +274,7 @@ mod tests {
 
             assert_eq!(sf_rw.get_highest_static_file_block(StaticFileSegment::Headers), Some(tip));
             assert_eq!(
-                fs::read_dir(static_dir.as_ref()).unwrap().count(),
+                count_files_without_lockfile(static_dir.as_ref()).unwrap(),
                 initial_file_count as usize
             );
 
@@ -302,20 +304,20 @@ mod tests {
     /// * `10..=19`: no txs/receipts
     /// * `20..=29`: only one tx/receipt
     fn setup_tx_based_scenario(
-        sf_rw: &StaticFileProvider,
+        sf_rw: &StaticFileProvider<EthPrimitives>,
         segment: StaticFileSegment,
         blocks_per_file: u64,
     ) {
         fn setup_block_ranges(
-            writer: &mut StaticFileProviderRWRefMut<'_>,
-            sf_rw: &StaticFileProvider,
+            writer: &mut StaticFileProviderRWRefMut<'_, EthPrimitives>,
+            sf_rw: &StaticFileProvider<EthPrimitives>,
             segment: StaticFileSegment,
             block_range: &Range<u64>,
             mut tx_count: u64,
             next_tx_num: &mut u64,
         ) {
             let mut receipt = Receipt::default();
-            let mut tx = TransactionSignedNoHash::default();
+            let mut tx = TransactionSigned::default();
 
             for block in block_range.clone() {
                 writer.increment_block(block).unwrap();
@@ -409,11 +411,11 @@ mod tests {
         let blocks_per_file = 10; // Number of blocks per file
         let files_per_range = 3; // Number of files per range (data/conf/offset files)
         let file_set_count = 3; // Number of sets of files to create
-        let initial_file_count = files_per_range * file_set_count + 1; // Includes lockfile
+        let initial_file_count = files_per_range * file_set_count;
 
         #[allow(clippy::too_many_arguments)]
         fn prune_and_validate(
-            sf_rw: &StaticFileProvider,
+            sf_rw: &StaticFileProvider<EthPrimitives>,
             static_dir: impl AsRef<Path>,
             segment: StaticFileSegment,
             prune_count: u64,
@@ -460,7 +462,7 @@ mod tests {
 
             // Ensure the file count has reduced as expected
             assert_eyre(
-                fs::read_dir(static_dir)?.count(),
+                count_files_without_lockfile(static_dir)?,
                 expected_file_count as usize,
                 "file count mismatch",
             )?;
@@ -511,7 +513,7 @@ mod tests {
                     0,
                     blocks_per_file - 1,
                     Some(highest_tx - 1),
-                    files_per_range + 1, // includes lockfile
+                    files_per_range,
                     vec![(highest_tx - 1, SegmentRangeInclusive::new(0, 9))],
                 ),
                 // Case 2: Prune most txs up to block 1.
@@ -519,11 +521,11 @@ mod tests {
                     highest_tx - 1,
                     1,
                     Some(0),
-                    files_per_range + 1,
+                    files_per_range,
                     vec![(0, SegmentRangeInclusive::new(0, 1))],
                 ),
                 // Case 3: Prune remaining tx and ensure that file is not deleted.
-                (1, 0, None, files_per_range + 1, vec![]),
+                (1, 0, None, files_per_range, vec![]),
             ];
 
             // Loop through test cases
@@ -546,5 +548,18 @@ mod tests {
                 .unwrap();
             }
         }
+    }
+
+    /// Returns the number of files in the provided path, excluding ".lock" files.
+    fn count_files_without_lockfile(path: impl AsRef<Path>) -> eyre::Result<usize> {
+        let is_lockfile = |entry: &fs::DirEntry| {
+            entry.path().file_name().map(|name| name == "lock").unwrap_or(false)
+        };
+        let count = fs::read_dir(path)?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| !is_lockfile(entry))
+            .count();
+
+        Ok(count)
     }
 }

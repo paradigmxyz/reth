@@ -1,15 +1,12 @@
 //! Chain specification for the Optimism Mainnet network.
 
+use crate::{LazyLock, OpChainSpec};
 use alloc::{sync::Arc, vec};
-
 use alloy_chains::Chain;
 use alloy_primitives::{b256, U256};
-use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec};
+use reth_chainspec::{once_cell_set, BaseFeeParams, BaseFeeParamsKind, ChainSpec, Hardfork};
 use reth_ethereum_forks::EthereumHardfork;
-use reth_optimism_forks::OptimismHardfork;
-use reth_primitives_traits::constants::ETHEREUM_BLOCK_GAS_LIMIT;
-
-use crate::{LazyLock, OpChainSpec};
+use reth_optimism_forks::OpHardfork;
 
 /// The Optimism Mainnet spec
 pub static OP_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
@@ -24,15 +21,14 @@ pub static OP_MAINNET: LazyLock<Arc<OpChainSpec>> = LazyLock::new(|| {
                 "7ca38a1916c42007829c55e69d3e9a73265554b586a499015373241b8a3fa48b"
             )),
             paris_block_and_final_difficulty: Some((0, U256::from(0))),
-            hardforks: OptimismHardfork::op_mainnet(),
+            hardforks: OpHardfork::op_mainnet(),
             base_fee_params: BaseFeeParamsKind::Variable(
                 vec![
                     (EthereumHardfork::London.boxed(), BaseFeeParams::optimism()),
-                    (OptimismHardfork::Canyon.boxed(), BaseFeeParams::optimism_canyon()),
+                    (OpHardfork::Canyon.boxed(), BaseFeeParams::optimism_canyon()),
                 ]
                 .into(),
             ),
-            max_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             prune_delete_limit: 10000,
             ..Default::default()
         },

@@ -4,46 +4,47 @@
 
 use std::time::Instant;
 
+use alloy_consensus::BlockHeader;
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::B256;
 use derive_more::Constructor;
-use reth_primitives::{BlockId, BlockNumberOrTag, Receipt, SealedBlockWithSenders, SealedHeader};
-use revm_primitives::{BlockEnv, CfgEnvWithHandlerCfg};
+use reth_evm::EvmEnv;
+use reth_primitives::{Receipt, RecoveredBlock};
+use reth_primitives_traits::Block;
 
-/// Configured [`BlockEnv`] and [`CfgEnvWithHandlerCfg`] for a pending block.
+/// Configured [`EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
-pub struct PendingBlockEnv {
-    /// Configured [`CfgEnvWithHandlerCfg`] for the pending block.
-    pub cfg: CfgEnvWithHandlerCfg,
-    /// Configured [`BlockEnv`] for the pending block.
-    pub block_env: BlockEnv,
+pub struct PendingBlockEnv<B: Block, R, Spec> {
+    /// Configured [`EvmEnv`] for the pending block.
+    pub evm_env: EvmEnv<Spec>,
     /// Origin block for the config
-    pub origin: PendingBlockEnvOrigin,
+    pub origin: PendingBlockEnvOrigin<B, R>,
 }
 
 /// The origin for a configured [`PendingBlockEnv`]
 #[derive(Clone, Debug)]
-pub enum PendingBlockEnvOrigin {
+pub enum PendingBlockEnvOrigin<B: Block = reth_primitives::Block, R = Receipt> {
     /// The pending block as received from the CL.
-    ActualPending(SealedBlockWithSenders),
+    ActualPending(RecoveredBlock<B>, Vec<R>),
     /// The _modified_ header of the latest block.
     ///
     /// This derives the pending state based on the latest header by modifying:
     ///  - the timestamp
     ///  - the block number
     ///  - fees
-    DerivedFromLatest(SealedHeader),
+    DerivedFromLatest(B256),
 }
 
-impl PendingBlockEnvOrigin {
+impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
     /// Returns true if the origin is the actual pending block as received from the CL.
     pub const fn is_actual_pending(&self) -> bool {
-        matches!(self, Self::ActualPending(_))
+        matches!(self, Self::ActualPending(_, _))
     }
 
     /// Consumes the type and returns the actual pending block.
-    pub fn into_actual_pending(self) -> Option<SealedBlockWithSenders> {
+    pub fn into_actual_pending(self) -> Option<RecoveredBlock<B>> {
         match self {
-            Self::ActualPending(block) => Some(block),
+            Self::ActualPending(block, _) => Some(block),
             _ => None,
         }
     }
@@ -54,8 +55,8 @@ impl PendingBlockEnvOrigin {
     /// identify the block by its hash (latest block).
     pub fn state_block_id(&self) -> BlockId {
         match self {
-            Self::ActualPending(_) => BlockNumberOrTag::Pending.into(),
-            Self::DerivedFromLatest(header) => BlockId::Hash(header.hash().into()),
+            Self::ActualPending(_, _) => BlockNumberOrTag::Pending.into(),
+            Self::DerivedFromLatest(hash) => BlockId::Hash((*hash).into()),
         }
     }
 
@@ -66,27 +67,19 @@ impl PendingBlockEnvOrigin {
     /// header.
     pub fn build_target_hash(&self) -> B256 {
         match self {
-            Self::ActualPending(block) => block.parent_hash,
-            Self::DerivedFromLatest(header) => header.hash(),
-        }
-    }
-
-    /// Returns the header this pending block is based on.
-    pub fn header(&self) -> &SealedHeader {
-        match self {
-            Self::ActualPending(block) => &block.header,
-            Self::DerivedFromLatest(header) => header,
+            Self::ActualPending(block, _) => block.header().parent_hash(),
+            Self::DerivedFromLatest(hash) => *hash,
         }
     }
 }
 
 /// Locally built pending block for `pending` tag.
 #[derive(Debug, Constructor)]
-pub struct PendingBlock {
+pub struct PendingBlock<B: Block, R> {
     /// Timestamp when the pending block is considered outdated.
     pub expires_at: Instant,
     /// The locally built pending block.
-    pub block: SealedBlockWithSenders,
+    pub block: RecoveredBlock<B>,
     /// The receipts for the pending block
-    pub receipts: Vec<Receipt>,
+    pub receipts: Vec<R>,
 }

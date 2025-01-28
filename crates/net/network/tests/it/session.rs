@@ -6,8 +6,11 @@ use reth_network::{
     test_utils::{PeerConfig, Testnet},
     NetworkEvent, NetworkEventListenerProvider,
 };
-use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::test_utils::NoopProvider;
+use reth_network_api::{
+    events::{PeerEvent, SessionInfo},
+    NetworkInfo, Peers,
+};
+use reth_storage_api::noop::NoopProvider;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_session_established_with_highest_version() {
@@ -28,12 +31,13 @@ async fn test_session_established_with_highest_version() {
 
     while let Some(event) = events.next().await {
         match event {
-            NetworkEvent::PeerAdded(peer_id) => {
+            NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id)) => {
                 assert_eq!(handle1.peer_id(), &peer_id);
             }
-            NetworkEvent::SessionEstablished { peer_id, status, .. } => {
+            NetworkEvent::ActivePeerSession { info, .. } => {
+                let SessionInfo { peer_id, status, .. } = info;
                 assert_eq!(handle1.peer_id(), &peer_id);
-                assert_eq!(status.version, EthVersion::Eth68 as u8);
+                assert_eq!(status.version, EthVersion::Eth68);
             }
             ev => {
                 panic!("unexpected event {ev:?}")
@@ -66,12 +70,13 @@ async fn test_session_established_with_different_capability() {
 
     while let Some(event) = events.next().await {
         match event {
-            NetworkEvent::PeerAdded(peer_id) => {
+            NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id)) => {
                 assert_eq!(handle1.peer_id(), &peer_id);
             }
-            NetworkEvent::SessionEstablished { peer_id, status, .. } => {
+            NetworkEvent::ActivePeerSession { info, .. } => {
+                let SessionInfo { peer_id, status, .. } = info;
                 assert_eq!(handle1.peer_id(), &peer_id);
-                assert_eq!(status.version, EthVersion::Eth66 as u8);
+                assert_eq!(status.version, EthVersion::Eth66);
             }
             ev => {
                 panic!("unexpected event: {ev:?}")

@@ -1,5 +1,5 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use alloy_primitives::{map::HashMap, Bytes, B256};
+use alloy_primitives::{map::B256HashMap, Bytes};
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::TrieWitnessError;
 use reth_trie::{
@@ -17,7 +17,7 @@ pub trait DatabaseTrieWitness<'a, TX> {
         tx: &'a TX,
         input: TrieInput,
         target: HashedPostState,
-    ) -> Result<HashMap<B256, Bytes>, TrieWitnessError>;
+    ) -> Result<B256HashMap<Bytes>, TrieWitnessError>;
 }
 
 impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
@@ -31,7 +31,7 @@ impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
         tx: &'a TX,
         input: TrieInput,
         target: HashedPostState,
-    ) -> Result<HashMap<B256, Bytes>, TrieWitnessError> {
+    ) -> Result<B256HashMap<Bytes>, TrieWitnessError> {
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();
         Self::from_tx(tx)

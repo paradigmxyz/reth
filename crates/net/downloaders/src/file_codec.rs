@@ -3,7 +3,6 @@
 use crate::file_client::FileClientError;
 use alloy_primitives::bytes::{Buf, BytesMut};
 use alloy_rlp::{Decodable, Encodable};
-use reth_primitives::Block;
 use tokio_util::codec::{Decoder, Encoder};
 
 /// Codec for reading raw block bodies from a file.
@@ -19,10 +18,16 @@ use tokio_util::codec::{Decoder, Encoder};
 ///
 /// It's recommended to use [`with_capacity`](tokio_util::codec::FramedRead::with_capacity) to set
 /// the capacity of the framed reader to the size of the file.
-pub(crate) struct BlockFileCodec;
+pub(crate) struct BlockFileCodec<B>(std::marker::PhantomData<B>);
 
-impl Decoder for BlockFileCodec {
-    type Item = Block;
+impl<B> Default for BlockFileCodec<B> {
+    fn default() -> Self {
+        Self(std::marker::PhantomData)
+    }
+}
+
+impl<B: Decodable> Decoder for BlockFileCodec<B> {
+    type Item = B;
     type Error = FileClientError;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
@@ -31,18 +36,17 @@ impl Decoder for BlockFileCodec {
         }
 
         let buf_slice = &mut src.as_ref();
-        let body =
-            Block::decode(buf_slice).map_err(|err| FileClientError::Rlp(err, src.to_vec()))?;
+        let body = B::decode(buf_slice).map_err(|err| FileClientError::Rlp(err, src.to_vec()))?;
         src.advance(src.len() - buf_slice.len());
 
         Ok(Some(body))
     }
 }
 
-impl Encoder<Block> for BlockFileCodec {
+impl<B: Encodable> Encoder<B> for BlockFileCodec<B> {
     type Error = FileClientError;
 
-    fn encode(&mut self, item: Block, dst: &mut BytesMut) -> Result<(), Self::Error> {
+    fn encode(&mut self, item: B, dst: &mut BytesMut) -> Result<(), Self::Error> {
         item.encode(dst);
         Ok(())
     }

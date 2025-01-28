@@ -6,16 +6,18 @@ use crate::EthApi;
 use alloy_dyn_abi::TypedData;
 use alloy_eips::eip2718::Decodable2718;
 use alloy_network::{eip2718::Encodable2718, EthereumWallet, TransactionBuilder};
-use alloy_primitives::{eip191_hash_message, Address, B256};
+use alloy_primitives::{eip191_hash_message, Address, PrimitiveSignature as Signature, B256};
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
-use reth_primitives::{Signature, TransactionSigned};
+use reth_provider::BlockReader;
 use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
 use reth_rpc_eth_types::SignError;
 
 impl<Provider, Pool, Network, EvmConfig> AddDevSigners
     for EthApi<Provider, Pool, Network, EvmConfig>
+where
+    Provider: BlockReader,
 {
     fn with_dev_accounts(&self) {
         *self.inner.signers().write() = DevSigner::random_signers(20)
@@ -32,15 +34,15 @@ pub struct DevSigner {
 #[allow(dead_code)]
 impl DevSigner {
     /// Generates a random dev signer which satisfies [`EthSigner`] trait
-    pub fn random() -> Box<dyn EthSigner> {
+    pub fn random<T: Decodable2718>() -> Box<dyn EthSigner<T>> {
         let mut signers = Self::random_signers(1);
         signers.pop().expect("expect to generate at least one signer")
     }
 
     /// Generates provided number of random dev signers
     /// which satisfy [`EthSigner`] trait
-    pub fn random_signers(num: u32) -> Vec<Box<dyn EthSigner + 'static>> {
-        let mut signers = Vec::new();
+    pub fn random_signers<T: Decodable2718>(num: u32) -> Vec<Box<dyn EthSigner<T> + 'static>> {
+        let mut signers = Vec::with_capacity(num as usize);
         for _ in 0..num {
             let sk = PrivateKeySigner::random_with(&mut rand::thread_rng());
 
@@ -48,7 +50,7 @@ impl DevSigner {
             let addresses = vec![address];
 
             let accounts = HashMap::from([(address, sk)]);
-            signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner>);
+            signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner<T>>);
         }
         signers
     }
@@ -64,7 +66,7 @@ impl DevSigner {
 }
 
 #[async_trait::async_trait]
-impl EthSigner for DevSigner {
+impl<T: Decodable2718> EthSigner<T> for DevSigner {
     fn accounts(&self) -> Vec<Address> {
         self.addresses.clone()
     }
@@ -80,11 +82,7 @@ impl EthSigner for DevSigner {
         self.sign_hash(hash, address)
     }
 
-    async fn sign_transaction(
-        &self,
-        request: TransactionRequest,
-        address: &Address,
-    ) -> Result<TransactionSigned> {
+    async fn sign_transaction(&self, request: TransactionRequest, address: &Address) -> Result<T> {
         // create local signer wallet from signing key
         let signer = self.accounts.get(address).ok_or(SignError::NoAccount)?.clone();
         let wallet = EthereumWallet::from(signer);
@@ -95,7 +93,7 @@ impl EthSigner for DevSigner {
 
         // decode transaction into signed transaction type
         let encoded = txn_envelope.encoded_2718();
-        let txn_signed = TransactionSigned::decode_2718(&mut encoded.as_ref())
+        let txn_signed = T::decode_2718(&mut encoded.as_ref())
             .map_err(|_| SignError::InvalidTransactionRequest)?;
 
         Ok(txn_signed)
@@ -109,8 +107,10 @@ impl EthSigner for DevSigner {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{Bytes, Parity, U256};
+    use alloy_consensus::Transaction;
+    use alloy_primitives::{Bytes, U256};
     use alloy_rpc_types_eth::TransactionInput;
+    use reth_primitives::TransactionSigned;
     use revm_primitives::TxKind;
 
     use super::*;
@@ -193,7 +193,9 @@ mod tests {
         let data: TypedData = serde_json::from_str(eip_712_example).unwrap();
         let signer = build_signer();
         let from = *signer.addresses.first().unwrap();
-        let sig = signer.sign_typed_data(from, &data).unwrap();
+        let sig =
+            EthSigner::<reth_primitives::TransactionSigned>::sign_typed_data(&signer, from, &data)
+                .unwrap();
         let expected = Signature::new(
             U256::from_str_radix(
                 "5318aee9942b84885761bb20e768372b76e7ee454fc4d39b59ce07338d15a06c",
@@ -205,7 +207,7 @@ mod tests {
                 16,
             )
             .unwrap(),
-            Parity::Parity(false),
+            false,
         );
         assert_eq!(sig, expected)
     }
@@ -215,7 +217,9 @@ mod tests {
         let message = b"Test message";
         let signer = build_signer();
         let from = *signer.addresses.first().unwrap();
-        let sig = signer.sign(from, message).await.unwrap();
+        let sig = EthSigner::<reth_primitives::TransactionSigned>::sign(&signer, from, message)
+            .await
+            .unwrap();
         let expected = Signature::new(
             U256::from_str_radix(
                 "54313da7432e4058b8d22491b2e7dbb19c7186c35c24155bec0820a8a2bfe0c1",
@@ -227,7 +231,7 @@ mod tests {
                 16,
             )
             .unwrap(),
-            Parity::Parity(true),
+            true,
         );
         assert_eq!(sig, expected)
     }
@@ -251,7 +255,8 @@ mod tests {
             nonce: Some(0u64),
             ..Default::default()
         };
-        let txn_signed = signer.sign_transaction(request, &from).await;
+        let txn_signed: std::result::Result<TransactionSigned, SignError> =
+            signer.sign_transaction(request, &from).await;
         assert!(txn_signed.is_ok());
 
         assert_eq!(Bytes::from(message.to_vec()), txn_signed.unwrap().input().0);

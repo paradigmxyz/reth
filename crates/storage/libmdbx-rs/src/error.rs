@@ -97,7 +97,7 @@ pub enum Error {
     #[error("invalid parameter specified")]
     DecodeError,
     /// The environment opened in read-only.
-    #[error("the environment opened in read-only")]
+    #[error("the environment opened in read-only, check <https://reth.rs/run/troubleshooting.html> for more")]
     Access,
     /// Database is too large for the current system.
     #[error("database is too large for the current system")]
@@ -238,7 +238,10 @@ mod tests {
 
     #[test]
     fn test_description() {
-        assert_eq!("the environment opened in read-only", Error::from_err_code(13).to_string());
+        assert_eq!(
+            "the environment opened in read-only, check <https://reth.rs/run/troubleshooting.html> for more",
+            Error::from_err_code(13).to_string()
+        );
 
         assert_eq!("file is not an MDBX file", Error::Invalid.to_string());
     }

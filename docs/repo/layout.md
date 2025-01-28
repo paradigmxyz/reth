@@ -82,8 +82,6 @@ The networking component mainly lives in [`net/network`](../../crates/net/networ
 Different consensus mechanisms.
 
 - [`consensus/common`](../../crates/consensus/common): Common consensus functions and traits (e.g. fee calculation)
-- [`consensus/auto-seal`](../../crates/consensus/auto-seal): A consensus mechanism that auto-seals blocks for local development (also commonly known as "auto-mine")
-- [`consensus/beacon`](../../crates/consensus/beacon): Consensus mechanism that handles messages from a beacon node ("eth2")
 
 ### Execution
 
@@ -98,7 +96,6 @@ Crates related to transaction execution.
 
 These crates implement the main syncing drivers of reth.
 
-- [`blockchain-tree`](../../crates/blockchain-tree): A tree-like structure for handling multiple chains of unfinalized blocks. This is the main component during live sync (i.e. syncing at the tip)
 - [`stages`](../../crates/stages): A pipelined sync, including implementation of various stages. This is used during initial sync and is faster than the tree-like structure for longer sync ranges.
 
 ### RPC
@@ -133,7 +130,7 @@ The IPC transport lives in [`rpc/ipc`](../../crates/rpc/ipc).
   - Supported transports: HTTP, WS, IPC
   - Supported namespaces: `eth_`, `engine_`, `debug_`
 - [`rpc/rpc-eth-api`](../../crates/rpc/rpc-eth-api/): Reth RPC 'eth' namespace API (including interface and implementation), this crate is re-exported by `rpc/rpc-api`
-- [`rpc/rpc-eth-types`](../../crates/rpc/rpc-eth-types/): Types `supporting implementation` of 'eth' namespace RPC server API
+- [`rpc/rpc-eth-types`](../../crates/rpc/rpc-eth-types/): Types `supporting the implementation` of 'eth' namespace RPC server API
 - [`rpc/rpc-server-types`](../../crates/rpc/rpc-server-types/): RPC server types and constants
 
 #### Utilities Crates
@@ -160,7 +157,7 @@ These crates define primitive types or algorithms.
 
 ### Optimism
 
-Crates related to the Optimism rollup are lives in [optimism](../../crates/optimism/).
+Crates related to the Optimism rollup live in [optimism](../../crates/optimism/).
 
 ### Misc
 

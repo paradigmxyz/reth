@@ -1,6 +1,6 @@
 use crate::BlockProvider;
 use alloy_eips::BlockNumberOrTag;
-use alloy_rpc_types::Block;
+use alloy_rpc_types_eth::Block;
 use reqwest::Client;
 use reth_tracing::tracing::warn;
 use serde::Deserialize;
@@ -32,13 +32,17 @@ impl EtherscanBlockProvider {
     /// `BlockNumberOrTag::Earliest`, `BlockNumberOrTag::Pending`, `BlockNumberOrTag::Number(u64)`
     /// are supported.
     pub async fn load_block(&self, block_number_or_tag: BlockNumberOrTag) -> eyre::Result<Block> {
+        let tag = match block_number_or_tag {
+            BlockNumberOrTag::Number(num) => format!("{num:#02x}"),
+            tag => tag.to_string(),
+        };
         let block: EtherscanBlockResponse = self
             .http_client
             .get(&self.base_url)
             .query(&[
                 ("module", "proxy"),
                 ("action", "eth_getBlockByNumber"),
-                ("tag", &block_number_or_tag.to_string()),
+                ("tag", &tag),
                 ("boolean", "true"),
                 ("apikey", &self.api_key),
             ])

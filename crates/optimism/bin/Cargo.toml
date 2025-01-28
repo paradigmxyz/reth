@@ -9,7 +9,7 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
-reth-node-builder.workspace = true
+reth-node-builder = { workspace = true, features = ["js-tracer"] }
 reth-cli-util.workspace = true
 reth-optimism-cli.workspace = true
 reth-provider.workspace = true
@@ -37,7 +37,21 @@ tracy-allocator = ["reth-cli-util/tracy-allocator"]
 
 asm-keccak = ["reth-optimism-cli/asm-keccak", "reth-optimism-node/asm-keccak"]
 
-optimism = ["reth-optimism-cli/optimism", "reth-optimism-node/optimism"]
+optimism = [
+    "reth-optimism-cli/optimism",
+    "reth-optimism-node/optimism",
+    "reth-optimism-consensus/optimism",
+    "reth-optimism-evm/optimism",
+    "reth-optimism-payload-builder/optimism",
+    "reth-optimism-rpc/optimism",
+    "reth-provider/optimism",
+    "reth-optimism-primitives/optimism",
+]
+
+dev = [
+    "reth-optimism-cli/dev",
+    "reth-optimism-primitives/arbitrary",
+]
 
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]

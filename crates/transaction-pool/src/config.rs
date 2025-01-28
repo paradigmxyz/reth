@@ -2,11 +2,9 @@ use crate::{
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     PoolSize, TransactionOrigin,
 };
+use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
-use reth_primitives::{
-    constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
-    EIP4844_TX_TYPE_ID,
-};
 use std::{collections::HashSet, ops::Mul};
 
 /// Guarantees max transactions for one sender, compatible with geth/erigon
@@ -28,6 +26,9 @@ pub const DEFAULT_PRICE_BUMP: u128 = 10;
 ///
 /// This enforces that a blob transaction requires a 100% price bump to be replaced
 pub const REPLACE_BLOB_PRICE_BUMP: u128 = 100;
+
+/// Default maximum new transactions for broadcasting.
+pub const MAX_NEW_PENDING_TXS_NOTIFICATIONS: usize = 200;
 
 /// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
@@ -55,6 +56,8 @@ pub struct PoolConfig {
     pub pending_tx_listener_buffer_size: usize,
     /// Bound on number of new transactions from `reth_network::TransactionsManager` to buffer.
     pub new_tx_listener_buffer_size: usize,
+    /// How many new pending transactions to buffer and send iterators in progress.
+    pub max_new_pending_txs_notifications: usize,
 }
 
 impl PoolConfig {
@@ -82,6 +85,7 @@ impl Default for PoolConfig {
             local_transactions_config: Default::default(),
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
+            max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
         }
     }
 }
@@ -192,15 +196,15 @@ impl LocalTransactionConfig {
 
     /// Returns whether the local addresses vector contains the given address.
     #[inline]
-    pub fn contains_local_address(&self, address: Address) -> bool {
-        self.local_addresses.contains(&address)
+    pub fn contains_local_address(&self, address: &Address) -> bool {
+        self.local_addresses.contains(address)
     }
 
     /// Returns whether the particular transaction should be considered local.
     ///
     /// This always returns false if the local exemptions are disabled.
     #[inline]
-    pub fn is_local(&self, origin: TransactionOrigin, sender: Address) -> bool {
+    pub fn is_local(&self, origin: TransactionOrigin, sender: &Address) -> bool {
         if self.no_local_exemptions() {
             return false
         }
@@ -282,10 +286,10 @@ mod tests {
         let config = LocalTransactionConfig { local_addresses, ..Default::default() };
 
         // Should contain the inserted address
-        assert!(config.contains_local_address(address));
+        assert!(config.contains_local_address(&address));
 
         // Should not contain another random address
-        assert!(!config.contains_local_address(Address::new([2; 20])));
+        assert!(!config.contains_local_address(&Address::new([2; 20])));
     }
 
     #[test]
@@ -298,7 +302,7 @@ mod tests {
         };
 
         // Should return false as no exemptions is set to true
-        assert!(!config.is_local(TransactionOrigin::Local, address));
+        assert!(!config.is_local(TransactionOrigin::Local, &address));
     }
 
     #[test]
@@ -311,13 +315,13 @@ mod tests {
             LocalTransactionConfig { no_exemptions: false, local_addresses, ..Default::default() };
 
         // Should return true as the transaction origin is local
-        assert!(config.is_local(TransactionOrigin::Local, Address::new([2; 20])));
-        assert!(config.is_local(TransactionOrigin::Local, address));
+        assert!(config.is_local(TransactionOrigin::Local, &Address::new([2; 20])));
+        assert!(config.is_local(TransactionOrigin::Local, &address));
 
         // Should return true as the address is in the local_addresses set
-        assert!(config.is_local(TransactionOrigin::External, address));
+        assert!(config.is_local(TransactionOrigin::External, &address));
         // Should return false as the address is not in the local_addresses set
-        assert!(!config.is_local(TransactionOrigin::External, Address::new([2; 20])));
+        assert!(!config.is_local(TransactionOrigin::External, &Address::new([2; 20])));
     }
 
     #[test]

@@ -1,11 +1,16 @@
 use crate::BeaconSidecarConfig;
+use alloy_consensus::{
+    transaction::PooledTransaction, BlockHeader, Signed, Transaction as _, TxEip4844WithSidecar,
+    Typed2718,
+};
 use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
 use futures_util::{stream::FuturesUnordered, Future, Stream, StreamExt};
 use reqwest::{Error, StatusCode};
 use reth::{
-    primitives::{BlobTransaction, SealedBlockWithSenders},
+    core::primitives::SignedTransaction,
+    primitives::RecoveredBlock,
     providers::CanonStateNotification,
     transaction_pool::{BlobStoreError, TransactionPoolExt},
 };
@@ -13,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use thiserror::Error;
@@ -26,7 +32,7 @@ pub struct BlockMetadata {
 
 #[derive(Debug, Clone)]
 pub struct MinedBlob {
-    pub transaction: BlobTransaction,
+    pub transaction: Signed<TxEip4844WithSidecar>,
     pub block_metadata: BlockMetadata,
 }
 
@@ -93,8 +99,9 @@ where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     P: TransactionPoolExt + Unpin + 'static,
 {
-    fn process_block(&mut self, block: &SealedBlockWithSenders) {
+    fn process_block(&mut self, block: &RecoveredBlock<reth::primitives::Block>) {
         let txs: Vec<_> = block
+            .body()
             .transactions()
             .filter(|tx| tx.is_eip4844())
             .map(|tx| (tx.clone(), tx.blob_versioned_hashes().unwrap().len()))
@@ -107,21 +114,25 @@ where
             return
         }
 
-        match self.pool.get_all_blobs_exact(txs.iter().map(|(tx, _)| tx.hash()).collect()) {
+        match self.pool.get_all_blobs_exact(txs.iter().map(|(tx, _)| *tx.tx_hash()).collect()) {
             Ok(blobs) => {
-                for ((tx, _), sidecar) in txs.iter().zip(blobs.iter()) {
-                    let transaction = BlobTransaction::try_from_signed(tx.clone(), sidecar.clone())
-                        .expect("should not fail to convert blob tx if it is already eip4844");
-
-                    let block_metadata = BlockMetadata {
-                        block_hash: block.hash(),
-                        block_number: block.number,
-                        gas_used: block.gas_used,
-                    };
-                    actions_to_queue.push(BlobTransactionEvent::Mined(MinedBlob {
-                        transaction,
-                        block_metadata,
-                    }));
+                actions_to_queue.reserve_exact(txs.len());
+                for ((tx, _), sidecar) in txs.iter().zip(blobs.into_iter()) {
+                    if let PooledTransaction::Eip4844(transaction) = tx
+                        .clone()
+                        .try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
+                        .expect("should not fail to convert blob tx if it is already eip4844")
+                    {
+                        let block_metadata = BlockMetadata {
+                            block_hash: block.hash(),
+                            block_number: block.number,
+                            gas_used: block.gas_used,
+                        };
+                        actions_to_queue.push(BlobTransactionEvent::Mined(MinedBlob {
+                            transaction,
+                            block_metadata,
+                        }));
+                    }
                 }
             }
             Err(_err) => {
@@ -186,16 +197,15 @@ where
                             // handle reorged blocks
                             for (_, block) in old.blocks().iter() {
                                 let txs: Vec<BlobTransactionEvent> = block
+                                    .body()
                                     .transactions()
-                                    .filter(|tx: &&reth::primitives::TransactionSigned| {
-                                        tx.is_eip4844()
-                                    })
+                                    .filter(|tx| tx.is_eip4844())
                                     .map(|tx| {
-                                        let transaction_hash = tx.hash();
+                                        let transaction_hash = *tx.tx_hash();
                                         let block_metadata = BlockMetadata {
-                                            block_hash: new.tip().block.hash(),
-                                            block_number: new.tip().block.number,
-                                            gas_used: new.tip().block.gas_used,
+                                            block_hash: new.tip().hash(),
+                                            block_number: new.tip().number(),
+                                            gas_used: new.tip().gas_used(),
                                         };
                                         BlobTransactionEvent::Reorged(ReorgedBlob {
                                             transaction_hash,
@@ -221,7 +231,7 @@ where
 async fn fetch_blobs_for_block(
     client: reqwest::Client,
     url: String,
-    block: SealedBlockWithSenders,
+    block: RecoveredBlock<reth::primitives::Block>,
     txs: Vec<(reth::primitives::TransactionSigned, usize)>,
 ) -> Result<Vec<BlobTransactionEvent>, SideCarError> {
     let response = match client.get(url).header("Accept", "application/json").send().await {
@@ -262,15 +272,21 @@ async fn fetch_blobs_for_block(
     let sidecars: Vec<BlobTransactionEvent> = txs
         .iter()
         .filter_map(|(tx, blob_len)| {
-            sidecar_iterator.next_sidecar(*blob_len).map(|sidecar| {
-                let transaction = BlobTransaction::try_from_signed(tx.clone(), sidecar)
-                    .expect("should not fail to convert blob tx if it is already eip4844");
-                let block_metadata = BlockMetadata {
-                    block_hash: block.hash(),
-                    block_number: block.number,
-                    gas_used: block.gas_used,
-                };
-                BlobTransactionEvent::Mined(MinedBlob { transaction, block_metadata })
+            sidecar_iterator.next_sidecar(*blob_len).and_then(|sidecar| {
+                if let PooledTransaction::Eip4844(transaction) = tx
+                    .clone()
+                    .try_into_pooled_eip4844(sidecar)
+                    .expect("should not fail to convert blob tx if it is already eip4844")
+                {
+                    let block_metadata = BlockMetadata {
+                        block_hash: block.hash(),
+                        block_number: block.number,
+                        gas_used: block.gas_used,
+                    };
+                    Some(BlobTransactionEvent::Mined(MinedBlob { transaction, block_metadata }))
+                } else {
+                    None
+                }
             })
         })
         .collect();

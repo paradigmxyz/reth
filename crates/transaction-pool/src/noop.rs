@@ -13,13 +13,16 @@ use crate::{
     validate::ValidTransaction,
     AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPoolTransaction,
     EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
-    PooledTransactionsElement, PropagatedTransactions, TransactionEvents, TransactionOrigin,
-    TransactionPool, TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
+    PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
+    TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
-use alloy_eips::eip4844::BlobAndProofV1;
+use alloy_eips::{
+    eip1559::ETHEREUM_BLOCK_GAS_LIMIT,
+    eip4844::{BlobAndProofV1, BlobTransactionSidecar},
+};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
-use reth_primitives::{constants::ETHEREUM_BLOCK_GAS_LIMIT, BlobTransactionSidecar};
+use reth_primitives::Recovered;
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
 use tokio::sync::{mpsc, mpsc::Receiver};
 
@@ -133,26 +136,19 @@ impl TransactionPool for NoopTransactionPool {
         &self,
         _tx_hashes: Vec<TxHash>,
         _limit: GetPooledTransactionLimit,
-    ) -> Vec<PooledTransactionsElement> {
+    ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled> {
         vec![]
     }
 
     fn get_pooled_transaction_element(
         &self,
         _tx_hash: TxHash,
-    ) -> Option<PooledTransactionsElement> {
+    ) -> Option<Recovered<<Self::Transaction as PoolTransaction>::Pooled>> {
         None
     }
 
     fn best_transactions(
         &self,
-    ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
-        Box::new(std::iter::empty())
-    }
-
-    fn best_transactions_with_base_fee(
-        &self,
-        _: u64,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         Box::new(std::iter::empty())
     }
@@ -165,6 +161,13 @@ impl TransactionPool for NoopTransactionPool {
     }
 
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn pending_transactions_max(
+        &self,
+        _max: usize,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         vec![]
     }
 
@@ -220,6 +223,27 @@ impl TransactionPool for NoopTransactionPool {
         vec![]
     }
 
+    fn get_pending_transactions_with_predicate(
+        &self,
+        _predicate: impl FnMut(&ValidPoolTransaction<Self::Transaction>) -> bool,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn get_pending_transactions_by_sender(
+        &self,
+        _sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
+    fn get_queued_transactions_by_sender(
+        &self,
+        _sender: Address,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        vec![]
+    }
+
     fn get_highest_transaction_by_sender(
         &self,
         _sender: Address,
@@ -261,21 +285,24 @@ impl TransactionPool for NoopTransactionPool {
         Default::default()
     }
 
-    fn get_blob(&self, _tx_hash: TxHash) -> Result<Option<BlobTransactionSidecar>, BlobStoreError> {
+    fn get_blob(
+        &self,
+        _tx_hash: TxHash,
+    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         Ok(None)
     }
 
     fn get_all_blobs(
         &self,
         _tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, BlobTransactionSidecar)>, BlobStoreError> {
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError> {
         Ok(vec![])
     }
 
     fn get_all_blobs_exact(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<BlobTransactionSidecar>, BlobStoreError> {
+    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
         if tx_hashes.is_empty() {
             return Ok(vec![])
         }

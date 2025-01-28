@@ -15,7 +15,7 @@ use reth_db_api::{
     DatabaseError as DbError,
 };
 use reth_primitives::{
-    Account, Receipt, SealedBlock, SealedHeader, StaticFileSegment, StorageEntry,
+    Account, EthPrimitives, Receipt, SealedBlock, SealedHeader, StaticFileSegment, StorageEntry,
 };
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
@@ -24,7 +24,7 @@ use reth_provider::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_testing_utils::generators::ChangeSet;
-use std::{collections::BTreeMap, path::Path};
+use std::{collections::BTreeMap, fmt::Debug, path::Path};
 use tempfile::TempDir;
 
 /// Test database that is used for testing stage implementations.
@@ -142,7 +142,7 @@ impl TestStageDB {
 
     /// Insert header to static file if `writer` exists, otherwise to DB.
     pub fn insert_header<TX: DbTx + DbTxMut>(
-        writer: Option<&mut StaticFileProviderRWRefMut<'_>>,
+        writer: Option<&mut StaticFileProviderRWRefMut<'_, EthPrimitives>>,
         tx: &TX,
         header: &SealedHeader,
         td: U256,
@@ -153,7 +153,7 @@ impl TestStageDB {
             let segment_header = writer.user_header();
             if segment_header.block_end().is_none() && segment_header.expected_block_start() == 0 {
                 for block_number in 0..header.number {
-                    let mut prev = header.clone().unseal();
+                    let mut prev = header.clone_header();
                     prev.number = block_number;
                     writer.append_header(&prev, U256::ZERO, &B256::ZERO)?;
                 }
@@ -235,7 +235,7 @@ impl TestStageDB {
                 .then(|| provider.latest_writer(StaticFileSegment::Headers).unwrap());
 
             blocks.iter().try_for_each(|block| {
-                Self::insert_header(headers_writer.as_mut(), &tx, &block.header, U256::ZERO)
+                Self::insert_header(headers_writer.as_mut(), &tx, block.sealed_header(), U256::ZERO)
             })?;
 
             if let Some(mut writer) = headers_writer {
@@ -252,10 +252,10 @@ impl TestStageDB {
                 // Insert into body tables.
                 let block_body_indices = StoredBlockBodyIndices {
                     first_tx_num: next_tx_num,
-                    tx_count: block.body.transactions.len() as u64,
+                    tx_count: block.transaction_count() as u64,
                 };
 
-                if !block.body.transactions.is_empty() {
+                if !block.body().transactions.is_empty() {
                     tx.put::<tables::TransactionBlocks>(
                         block_body_indices.last_tx_num(),
                         block.number,
@@ -263,11 +263,11 @@ impl TestStageDB {
                 }
                 tx.put::<tables::BlockBodyIndices>(block.number, block_body_indices)?;
 
-                let res = block.body.transactions.iter().try_for_each(|body_tx| {
+                let res = block.body().transactions.iter().try_for_each(|body_tx| {
                     if let Some(txs_writer) = &mut txs_writer {
-                        txs_writer.append_transaction(next_tx_num, &body_tx.clone().into())?;
+                        txs_writer.append_transaction(next_tx_num, body_tx)?;
                     } else {
-                        tx.put::<tables::Transactions>(next_tx_num, body_tx.clone().into())?
+                        tx.put::<tables::Transactions>(next_tx_num, body_tx.clone())?
                     }
                     next_tx_num += 1;
                     Ok::<(), ProviderError>(())
@@ -396,7 +396,7 @@ impl TestStageDB {
                     {
                         cursor.delete_current()?;
                     }
-                    cursor.upsert(address, entry)?;
+                    cursor.upsert(address, &entry)?;
 
                     let mut cursor = tx.cursor_dup_write::<tables::HashedStorages>()?;
                     if cursor
@@ -406,7 +406,7 @@ impl TestStageDB {
                     {
                         cursor.delete_current()?;
                     }
-                    cursor.upsert(hashed_address, hashed_entry)?;
+                    cursor.upsert(hashed_address, &hashed_entry)?;
 
                     Ok(())
                 })
@@ -489,7 +489,7 @@ impl StorageKind {
 
     fn tx_offset(&self) -> u64 {
         if let Self::Database(offset) = self {
-            return offset.unwrap_or_default()
+            return offset.unwrap_or_default();
         }
         0
     }

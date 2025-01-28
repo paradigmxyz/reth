@@ -1,0 +1,28 @@
+[package]
+name = "reth-payload-builder-primitives"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-payload-primitives.workspace = true
+
+# alloy
+alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
+
+# async
+async-trait.workspace = true
+pin-project.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tokio-stream.workspace = true
+
+# misc
+tracing.workspace = true

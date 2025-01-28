@@ -10,7 +10,6 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![allow(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use memmap2::Mmap;
@@ -18,16 +17,13 @@ use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
     fs::File,
+    io::Read,
     ops::Range,
     path::{Path, PathBuf},
 };
-
-// Windows specific extension for std::fs
-#[cfg(windows)]
-use std::os::windows::prelude::OpenOptionsExt;
-
 use tracing::*;
 
+/// Compression algorithms supported by `NippyJar`.
 pub mod compression;
 #[cfg(test)]
 use compression::Compression;
@@ -55,10 +51,13 @@ pub use writer::NippyJarWriter;
 mod consistency;
 pub use consistency::NippyJarChecker;
 
+/// The version number of the Nippy Jar format.
 const NIPPY_JAR_VERSION: usize = 1;
-
+/// The file extension used for index files.
 const INDEX_FILE_EXTENSION: &str = "idx";
+/// The file extension used for offsets files.
 const OFFSETS_FILE_EXTENSION: &str = "off";
+/// The file extension used for configuration files.
 pub const CONFIG_FILE_EXTENSION: &str = "conf";
 
 /// A [`RefRow`] is a list of column value slices pointing to either an internal buffer or a
@@ -203,9 +202,14 @@ impl<H: NippyJarHeader> NippyJar<H> {
         let config_file = File::open(&config_path)
             .map_err(|err| reth_fs_util::FsPathError::open(err, config_path))?;
 
-        let mut obj: Self = bincode::deserialize_from(&config_file)?;
+        let mut obj = Self::load_from_reader(config_file)?;
         obj.path = path.to_path_buf();
         Ok(obj)
+    }
+
+    /// Deserializes an instance of [`Self`] from a [`Read`] type.
+    pub fn load_from_reader<R: Read>(reader: R) -> Result<Self, NippyJarError> {
+        Ok(bincode::deserialize_from(reader)?)
     }
 
     /// Returns the path for the data file

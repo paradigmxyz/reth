@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use reth_rpc_server_types::constants::cache::{
-    DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_CONCURRENT_DB_REQUESTS, DEFAULT_ENV_CACHE_MAX_LEN,
+    DEFAULT_BLOCK_CACHE_MAX_LEN, DEFAULT_CONCURRENT_DB_REQUESTS, DEFAULT_HEADER_CACHE_MAX_LEN,
     DEFAULT_RECEIPT_CACHE_MAX_LEN,
 };
 
@@ -19,10 +19,10 @@ pub struct EthStateCacheConfig {
     ///
     /// Default is 2000.
     pub max_receipts: u32,
-    /// Max number of bytes for cached env data.
+    /// Max number of headers in cache.
     ///
     /// Default is 1000.
-    pub max_envs: u32,
+    pub max_headers: u32,
     /// Max number of concurrent database requests.
     ///
     /// Default is 512.
@@ -34,7 +34,7 @@ impl Default for EthStateCacheConfig {
         Self {
             max_blocks: DEFAULT_BLOCK_CACHE_MAX_LEN,
             max_receipts: DEFAULT_RECEIPT_CACHE_MAX_LEN,
-            max_envs: DEFAULT_ENV_CACHE_MAX_LEN,
+            max_headers: DEFAULT_HEADER_CACHE_MAX_LEN,
             max_concurrent_db_requests: DEFAULT_CONCURRENT_DB_REQUESTS,
         }
     }

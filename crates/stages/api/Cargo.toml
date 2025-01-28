@@ -23,7 +23,9 @@ reth-errors.workspace = true
 reth-stages-types.workspace = true
 reth-static-file-types.workspace = true
 
+# alloy
 alloy-primitives.workspace = true
+alloy-eips.workspace = true
 
 # metrics
 reth-metrics.workspace = true
@@ -46,4 +48,10 @@ tokio-stream.workspace = true
 reth-testing-utils.workspace = true
 
 [features]
-test-utils = []
+test-utils = [
+    "reth-consensus/test-utils",
+    "reth-network-p2p/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-provider/test-utils",
+    "reth-stages-types/test-utils",
+]

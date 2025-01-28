@@ -2,18 +2,22 @@ use super::{
     manager::StaticFileProviderInner, metrics::StaticFileProviderMetrics, StaticFileProvider,
 };
 use crate::providers::static_file::metrics::StaticFileProviderOperation;
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, TxNumber, U256};
 use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
+use reth_db::models::{StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals};
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
+use reth_node_types::NodePrimitives;
 use reth_primitives::{
     static_file::{SegmentHeader, SegmentRangeInclusive},
-    Header, Receipt, StaticFileSegment, TransactionSignedNoHash,
+    StaticFileSegment,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     borrow::Borrow,
+    fmt::Debug,
     path::{Path, PathBuf},
     sync::{Arc, Weak},
     time::Instant,
@@ -24,23 +28,36 @@ use tracing::debug;
 ///
 /// WARNING: Trying to use more than one writer for the same segment type **will result in a
 /// deadlock**.
-#[derive(Debug, Default)]
-pub(crate) struct StaticFileWriters {
-    headers: RwLock<Option<StaticFileProviderRW>>,
-    transactions: RwLock<Option<StaticFileProviderRW>>,
-    receipts: RwLock<Option<StaticFileProviderRW>>,
+#[derive(Debug)]
+pub(crate) struct StaticFileWriters<N> {
+    headers: RwLock<Option<StaticFileProviderRW<N>>>,
+    transactions: RwLock<Option<StaticFileProviderRW<N>>>,
+    receipts: RwLock<Option<StaticFileProviderRW<N>>>,
+    block_meta: RwLock<Option<StaticFileProviderRW<N>>>,
 }
 
-impl StaticFileWriters {
+impl<N> Default for StaticFileWriters<N> {
+    fn default() -> Self {
+        Self {
+            headers: Default::default(),
+            transactions: Default::default(),
+            receipts: Default::default(),
+            block_meta: Default::default(),
+        }
+    }
+}
+
+impl<N: NodePrimitives> StaticFileWriters<N> {
     pub(crate) fn get_or_create(
         &self,
         segment: StaticFileSegment,
-        create_fn: impl FnOnce() -> ProviderResult<StaticFileProviderRW>,
-    ) -> ProviderResult<StaticFileProviderRWRefMut<'_>> {
+        create_fn: impl FnOnce() -> ProviderResult<StaticFileProviderRW<N>>,
+    ) -> ProviderResult<StaticFileProviderRWRefMut<'_, N>> {
         let mut write_guard = match segment {
             StaticFileSegment::Headers => self.headers.write(),
             StaticFileSegment::Transactions => self.transactions.write(),
             StaticFileSegment::Receipts => self.receipts.write(),
+            StaticFileSegment::BlockMeta => self.block_meta.write(),
         };
 
         if write_guard.is_none() {
@@ -63,19 +80,19 @@ impl StaticFileWriters {
 
 /// Mutable reference to a [`StaticFileProviderRW`] behind a [`RwLockWriteGuard`].
 #[derive(Debug)]
-pub struct StaticFileProviderRWRefMut<'a>(
-    pub(crate) RwLockWriteGuard<'a, RawRwLock, Option<StaticFileProviderRW>>,
+pub struct StaticFileProviderRWRefMut<'a, N>(
+    pub(crate) RwLockWriteGuard<'a, RawRwLock, Option<StaticFileProviderRW<N>>>,
 );
 
-impl std::ops::DerefMut for StaticFileProviderRWRefMut<'_> {
+impl<N> std::ops::DerefMut for StaticFileProviderRWRefMut<'_, N> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         // This is always created by [`StaticFileWriters::get_or_create`]
         self.0.as_mut().expect("static file writer provider should be init")
     }
 }
 
-impl std::ops::Deref for StaticFileProviderRWRefMut<'_> {
-    type Target = StaticFileProviderRW;
+impl<N> std::ops::Deref for StaticFileProviderRWRefMut<'_, N> {
+    type Target = StaticFileProviderRW<N>;
 
     fn deref(&self) -> &Self::Target {
         // This is always created by [`StaticFileWriters::get_or_create`]
@@ -85,11 +102,11 @@ impl std::ops::Deref for StaticFileProviderRWRefMut<'_> {
 
 #[derive(Debug)]
 /// Extends `StaticFileProvider` with writing capabilities
-pub struct StaticFileProviderRW {
+pub struct StaticFileProviderRW<N> {
     /// Reference back to the provider. We need [Weak] here because [`StaticFileProviderRW`] is
     /// stored in a [`dashmap::DashMap`] inside the parent [`StaticFileProvider`].which is an
     /// [Arc]. If we were to use an [Arc] here, we would create a reference cycle.
-    reader: Weak<StaticFileProviderInner>,
+    reader: Weak<StaticFileProviderInner<N>>,
     /// A [`NippyJarWriter`] instance.
     writer: NippyJarWriter<SegmentHeader>,
     /// Path to opened file.
@@ -103,7 +120,7 @@ pub struct StaticFileProviderRW {
     prune_on_commit: Option<(u64, Option<BlockNumber>)>,
 }
 
-impl StaticFileProviderRW {
+impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Creates a new [`StaticFileProviderRW`] for a [`StaticFileSegment`].
     ///
     /// Before use, transaction based segments should ensure the block end range is the expected
@@ -111,7 +128,7 @@ impl StaticFileProviderRW {
     pub fn new(
         segment: StaticFileSegment,
         block: BlockNumber,
-        reader: Weak<StaticFileProviderInner>,
+        reader: Weak<StaticFileProviderInner<N>>,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<Self> {
         let (writer, data_path) = Self::open(segment, block, reader.clone(), metrics.clone())?;
@@ -132,7 +149,7 @@ impl StaticFileProviderRW {
     fn open(
         segment: StaticFileSegment,
         block: u64,
-        reader: Weak<StaticFileProviderInner>,
+        reader: Weak<StaticFileProviderInner<N>>,
         metrics: Option<Arc<StaticFileProviderMetrics>>,
     ) -> ProviderResult<(NippyJarWriter<SegmentHeader>, PathBuf)> {
         let start = Instant::now();
@@ -217,6 +234,7 @@ impl StaticFileProviderRW {
                 StaticFileSegment::Receipts => {
                     self.prune_receipt_data(to_delete, last_block_number.expect("should exist"))?
                 }
+                StaticFileSegment::BlockMeta => todo!(),
             }
         }
 
@@ -307,10 +325,7 @@ impl StaticFileProviderRW {
     /// and create the next one if we are past the end range.
     ///
     /// Returns the current [`BlockNumber`] as seen in the static file.
-    pub fn increment_block(
-        &mut self,
-        expected_block_number: BlockNumber,
-    ) -> ProviderResult<BlockNumber> {
+    pub fn increment_block(&mut self, expected_block_number: BlockNumber) -> ProviderResult<()> {
         let segment = self.writer.user_header().segment();
 
         self.check_next_block_number(expected_block_number)?;
@@ -337,7 +352,7 @@ impl StaticFileProviderRW {
             }
         }
 
-        let block = self.writer.user_header_mut().increment_block();
+        self.writer.user_header_mut().increment_block();
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 segment,
@@ -346,7 +361,7 @@ impl StaticFileProviderRW {
             );
         }
 
-        Ok(block)
+        Ok(())
     }
 
     /// Verifies if the incoming block number matches the next expected block number
@@ -383,13 +398,10 @@ impl StaticFileProviderRW {
         let mut remaining_rows = num_rows;
         let segment = self.writer.user_header().segment();
         while remaining_rows > 0 {
-            let len = match segment {
-                StaticFileSegment::Headers => {
-                    self.writer.user_header().block_len().unwrap_or_default()
-                }
-                StaticFileSegment::Transactions | StaticFileSegment::Receipts => {
-                    self.writer.user_header().tx_len().unwrap_or_default()
-                }
+            let len = if segment.is_block_based() {
+                self.writer.user_header().block_len().unwrap_or_default()
+            } else {
+                self.writer.user_header().tx_len().unwrap_or_default()
             };
 
             if remaining_rows >= len {
@@ -488,16 +500,24 @@ impl StaticFileProviderRW {
         &mut self,
         tx_num: TxNumber,
         value: V,
-    ) -> ProviderResult<TxNumber> {
-        if self.writer.user_header().tx_range().is_none() {
-            self.writer.user_header_mut().set_tx_range(tx_num, tx_num);
-        } else {
+    ) -> ProviderResult<()> {
+        if let Some(range) = self.writer.user_header().tx_range() {
+            let next_tx = range.end() + 1;
+            if next_tx != tx_num {
+                return Err(ProviderError::UnexpectedStaticFileTxNumber(
+                    self.writer.user_header().segment(),
+                    tx_num,
+                    next_tx,
+                ))
+            }
             self.writer.user_header_mut().increment_tx();
+        } else {
+            self.writer.user_header_mut().set_tx_range(tx_num, tx_num);
         }
 
         self.append_column(value)?;
 
-        Ok(self.writer.user_header().tx_end().expect("qed"))
+        Ok(())
     }
 
     /// Appends header to static file.
@@ -508,16 +528,19 @@ impl StaticFileProviderRW {
     /// Returns the current [`BlockNumber`] as seen in the static file.
     pub fn append_header(
         &mut self,
-        header: &Header,
+        header: &N::BlockHeader,
         total_difficulty: U256,
         hash: &BlockHash,
-    ) -> ProviderResult<BlockNumber> {
+    ) -> ProviderResult<()>
+    where
+        N::BlockHeader: Compact,
+    {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
-        let block_number = self.increment_block(header.number)?;
+        self.increment_block(header.number())?;
 
         self.append_column(header)?;
         self.append_column(CompactU256::from(total_difficulty))?;
@@ -531,7 +554,62 @@ impl StaticFileProviderRW {
             );
         }
 
-        Ok(block_number)
+        Ok(())
+    }
+
+    /// Appends [`StoredBlockBodyIndices`], [`StoredBlockOmmers`] and [`StoredBlockWithdrawals`] to
+    /// static file.
+    ///
+    /// It **CALLS** `increment_block()` since it's a block based segment.
+    pub fn append_eth_block_meta(
+        &mut self,
+        body_indices: &StoredBlockBodyIndices,
+        ommers: &StoredBlockOmmers<N::BlockHeader>,
+        withdrawals: &StoredBlockWithdrawals,
+        expected_block_number: BlockNumber,
+    ) -> ProviderResult<()>
+    where
+        N::BlockHeader: Compact,
+    {
+        self.append_block_meta(body_indices, ommers, withdrawals, expected_block_number)
+    }
+
+    /// Appends [`StoredBlockBodyIndices`] and any other two arbitrary types belonging to the block
+    /// body to static file.
+    ///
+    /// It **CALLS** `increment_block()` since it's a block based segment.
+    pub fn append_block_meta<F1, F2>(
+        &mut self,
+        body_indices: &StoredBlockBodyIndices,
+        field1: &F1,
+        field2: &F2,
+        expected_block_number: BlockNumber,
+    ) -> ProviderResult<()>
+    where
+        N::BlockHeader: Compact,
+        F1: Compact,
+        F2: Compact,
+    {
+        let start = Instant::now();
+        self.ensure_no_queued_prune()?;
+
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::BlockMeta);
+
+        self.increment_block(expected_block_number)?;
+
+        self.append_column(body_indices)?;
+        self.append_column(field1)?;
+        self.append_column(field2)?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                StaticFileSegment::BlockMeta,
+                StaticFileProviderOperation::Append,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
     }
 
     /// Appends transaction to static file.
@@ -540,16 +618,15 @@ impl StaticFileProviderRW {
     /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
-    pub fn append_transaction(
-        &mut self,
-        tx_num: TxNumber,
-        tx: &TransactionSignedNoHash,
-    ) -> ProviderResult<TxNumber> {
+    pub fn append_transaction(&mut self, tx_num: TxNumber, tx: &N::SignedTx) -> ProviderResult<()>
+    where
+        N::SignedTx: Compact,
+    {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Transactions);
-        let result = self.append_with_tx_number(tx_num, tx)?;
+        self.append_with_tx_number(tx_num, tx)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -559,7 +636,7 @@ impl StaticFileProviderRW {
             );
         }
 
-        Ok(result)
+        Ok(())
     }
 
     /// Appends receipt to static file.
@@ -568,16 +645,15 @@ impl StaticFileProviderRW {
     /// empty blocks and this function wouldn't be called.
     ///
     /// Returns the current [`TxNumber`] as seen in the static file.
-    pub fn append_receipt(
-        &mut self,
-        tx_num: TxNumber,
-        receipt: &Receipt,
-    ) -> ProviderResult<TxNumber> {
+    pub fn append_receipt(&mut self, tx_num: TxNumber, receipt: &N::Receipt) -> ProviderResult<()>
+    where
+        N::Receipt: Compact,
+    {
         let start = Instant::now();
         self.ensure_no_queued_prune()?;
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
-        let result = self.append_with_tx_number(tx_num, receipt)?;
+        self.append_with_tx_number(tx_num, receipt)?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
@@ -587,7 +663,7 @@ impl StaticFileProviderRW {
             );
         }
 
-        Ok(result)
+        Ok(())
     }
 
     /// Appends multiple receipts to the static file.
@@ -596,7 +672,8 @@ impl StaticFileProviderRW {
     pub fn append_receipts<I, R>(&mut self, receipts: I) -> ProviderResult<Option<TxNumber>>
     where
         I: Iterator<Item = Result<(TxNumber, R), ProviderError>>,
-        R: Borrow<Receipt>,
+        R: Borrow<N::Receipt>,
+        N::Receipt: Compact,
     {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
 
@@ -615,7 +692,8 @@ impl StaticFileProviderRW {
 
         for receipt_result in receipts_iter {
             let (tx_num, receipt) = receipt_result?;
-            tx_number = self.append_with_tx_number(tx_num, receipt.borrow())?;
+            self.append_with_tx_number(tx_num, receipt.borrow())?;
+            tx_number = tx_num;
             count += 1;
         }
 
@@ -658,6 +736,12 @@ impl StaticFileProviderRW {
     /// Adds an instruction to prune `to_delete` headers during commit.
     pub fn prune_headers(&mut self, to_delete: u64) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::Headers);
+        self.queue_prune(to_delete, None)
+    }
+
+    /// Adds an instruction to prune `to_delete` bloc_ meta rows during commit.
+    pub fn prune_block_meta(&mut self, to_delete: u64) -> ProviderResult<()> {
+        debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::BlockMeta);
         self.queue_prune(to_delete, None)
     }
 
@@ -750,7 +834,7 @@ impl StaticFileProviderRW {
         Ok(())
     }
 
-    fn reader(&self) -> StaticFileProvider {
+    fn reader(&self) -> StaticFileProvider<N> {
         Self::upgrade_provider_to_strong_reference(&self.reader)
     }
 
@@ -763,8 +847,8 @@ impl StaticFileProviderRW {
     /// active. In reality, it's impossible to detach the [`StaticFileProviderRW`] from the
     /// [`StaticFileProvider`].
     fn upgrade_provider_to_strong_reference(
-        provider: &Weak<StaticFileProviderInner>,
-    ) -> StaticFileProvider {
+        provider: &Weak<StaticFileProviderInner<N>>,
+    ) -> StaticFileProvider<N> {
         provider.upgrade().map(StaticFileProvider).expect("StaticFileProvider is dropped")
     }
 

@@ -1,27 +1,20 @@
 #![allow(missing_docs)]
-use alloy_primitives::{hex_literal::hex, Address};
+use alloy_primitives::Address;
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
 use pprof::criterion::{Output, PProfProfiler};
-use proptest::{
-    prelude::*,
-    strategy::ValueTree,
-    test_runner::{RngAlgorithm, TestRng, TestRunner},
-};
+use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_transaction_pool::{
     pool::{BasefeeOrd, ParkedPool, PendingPool, QueuedOrd},
     test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
     SubPoolLimit,
 };
 
-// constant seed to use for the rng
-const SEED: [u8; 32] = hex!("1337133713371337133713371337133713371337133713371337133713371337");
-
 /// Generates a set of `depth` dependent transactions, with the specified sender. Its values are
 /// generated using [Arbitrary].
 fn create_transactions_for_sender(
-    mut runner: TestRunner,
+    runner: &mut TestRunner,
     sender: Address,
     depth: usize,
 ) -> Vec<MockTransaction> {
@@ -32,10 +25,8 @@ fn create_transactions_for_sender(
     assert!(depth > 0);
 
     // make sure these are all post-eip-1559 transactions
-    let mut txs = prop::collection::vec(any::<MockTransaction>(), depth)
-        .new_tree(&mut runner)
-        .unwrap()
-        .current();
+    let mut txs =
+        prop::collection::vec(any::<MockTransaction>(), depth).new_tree(runner).unwrap().current();
 
     for (nonce, tx) in txs.iter_mut().enumerate() {
         // reject pre-eip1559 tx types, if there is a legacy tx, replace it with an eip1559 tx
@@ -43,8 +34,8 @@ fn create_transactions_for_sender(
             *tx = MockTransaction::eip1559();
 
             // set fee values using arbitrary
-            tx.set_priority_fee(any::<u128>().new_tree(&mut runner).unwrap().current());
-            tx.set_max_fee(any::<u128>().new_tree(&mut runner).unwrap().current());
+            tx.set_priority_fee(any::<u128>().new_tree(runner).unwrap().current());
+            tx.set_max_fee(any::<u128>().new_tree(runner).unwrap().current());
         }
 
         tx.set_sender(sender);
@@ -62,11 +53,9 @@ fn create_transactions_for_sender(
 ///
 /// This uses [`create_transactions_for_sender`] to generate the transactions.
 fn generate_many_transactions(senders: usize, max_depth: usize) -> Vec<MockTransaction> {
-    let config = ProptestConfig::default();
-    let rng = TestRng::from_seed(RngAlgorithm::ChaCha, &SEED);
-    let mut runner = TestRunner::new_with_rng(config, rng);
+    let mut runner = TestRunner::deterministic();
 
-    let mut txs = Vec::new();
+    let mut txs = Vec::with_capacity(senders);
     for idx in 0..senders {
         // modulo max_depth so we know it is bounded, plus one so the minimum is always 1
         let depth = any::<usize>().new_tree(&mut runner).unwrap().current() % max_depth + 1;
@@ -79,7 +68,7 @@ fn generate_many_transactions(senders: usize, max_depth: usize) -> Vec<MockTrans
         let addr_slice = [0u8; 12].into_iter().chain(idx_slice.into_iter()).collect::<Vec<_>>();
 
         let sender = Address::from_slice(&addr_slice);
-        txs.extend(create_transactions_for_sender(runner.clone(), sender, depth));
+        txs.extend(create_transactions_for_sender(&mut runner, sender, depth));
     }
 
     txs
@@ -161,7 +150,7 @@ fn truncate_pending(
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |mut txpool| {
             txpool.truncate_pool(SubPoolLimit::default());
-            std::hint::black_box(());
+            txpool
         });
     });
 }
@@ -195,7 +184,7 @@ fn truncate_queued(
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |mut txpool| {
             txpool.truncate_pool(SubPoolLimit::default());
-            std::hint::black_box(());
+            txpool
         });
     });
 }
@@ -229,7 +218,7 @@ fn truncate_basefee(
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |mut txpool| {
             txpool.truncate_pool(SubPoolLimit::default());
-            std::hint::black_box(());
+            txpool
         });
     });
 }

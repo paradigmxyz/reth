@@ -16,9 +16,9 @@ use std::{
 
 use crate::miner::{LocalMiner, MiningMode};
 use futures_util::{Stream, StreamExt};
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
-use reth_consensus::Consensus;
+use reth_consensus::{ConsensusError, FullConsensus};
+use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineValidator};
 use reth_engine_service::service::EngineMessageStream;
 use reth_engine_tree::{
     chain::{ChainEvent, HandlerEvent},
@@ -30,10 +30,13 @@ use reth_engine_tree::{
     tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
 };
 use reth_evm::execute::BlockExecutorProvider;
+use reth_node_types::BlockTy;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributesBuilder, PayloadTypes};
-use reth_payload_validator::ExecutionPayloadValidator;
-use reth_provider::{providers::BlockchainProvider2, ChainSpecProvider, ProviderFactory};
+use reth_provider::{
+    providers::{BlockchainProvider, EngineNodeTypes},
+    ChainSpecProvider, ProviderFactory,
+};
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::MetricEventsSender;
 use tokio::sync::mpsc::UnboundedSender;
@@ -51,7 +54,7 @@ where
     /// Processes requests.
     ///
     /// This type is responsible for processing incoming requests.
-    handler: EngineApiRequestHandler<EngineApiRequest<N::Engine>>,
+    handler: EngineApiRequestHandler<EngineApiRequest<N::Engine, N::Primitives>, N::Primitives>,
     /// Receiver for incoming requests (from the engine API endpoint) that need to be processed.
     incoming_requests: EngineMessageStream<N::Engine>,
 }
@@ -62,15 +65,16 @@ where
 {
     /// Constructor for [`LocalEngineService`].
     #[allow(clippy::too_many_arguments)]
-    pub fn new<B>(
-        consensus: Arc<dyn Consensus>,
-        executor_factory: impl BlockExecutorProvider,
+    pub fn new<B, V>(
+        consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
+        executor_factory: impl BlockExecutorProvider<Primitives = N::Primitives>,
         provider: ProviderFactory<N>,
-        blockchain_db: BlockchainProvider2<N>,
+        blockchain_db: BlockchainProvider<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         payload_builder: PayloadBuilderHandle<N::Engine>,
+        payload_validator: V,
         tree_config: TreeConfig,
-        invalid_block_hook: Box<dyn InvalidBlockHook>,
+        invalid_block_hook: Box<dyn InvalidBlockHook<N::Primitives>>,
         sync_metrics_tx: MetricEventsSender,
         to_engine: UnboundedSender<BeaconEngineMessage<N::Engine>>,
         from_engine: EngineMessageStream<N::Engine>,
@@ -79,18 +83,17 @@ where
     ) -> Self
     where
         B: PayloadAttributesBuilder<<N::Engine as PayloadTypes>::PayloadAttributes>,
+        V: EngineValidator<N::Engine, Block = BlockTy<N>>,
     {
         let chain_spec = provider.chain_spec();
         let engine_kind =
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
 
         let persistence_handle =
-            PersistenceHandle::spawn_service(provider, pruner, sync_metrics_tx);
-        let payload_validator = ExecutionPayloadValidator::new(chain_spec);
-
+            PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
-        let (to_tree_tx, from_tree) = EngineApiTreeHandler::spawn_new(
+        let (to_tree_tx, from_tree) = EngineApiTreeHandler::<N::Primitives, _, _, _, _>::spawn_new(
             blockchain_db.clone(),
             executor_factory,
             consensus,
@@ -121,7 +124,7 @@ impl<N> Stream for LocalEngineService<N>
 where
     N: EngineNodeTypes,
 {
-    type Item = ChainEvent<BeaconConsensusEngineEvent>;
+    type Item = ChainEvent<BeaconConsensusEngineEvent<N::Primitives>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();

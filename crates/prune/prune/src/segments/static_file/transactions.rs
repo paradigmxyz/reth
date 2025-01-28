@@ -3,28 +3,35 @@ use crate::{
     segments::{PruneInput, Segment},
     PrunerError,
 };
-use reth_db::{tables, transaction::DbTxMut};
-use reth_provider::{providers::StaticFileProvider, BlockReader, DBProvider, TransactionsProvider};
+use reth_db::{table::Value, tables, transaction::DbTxMut};
+use reth_primitives_traits::NodePrimitives;
+use reth_provider::{
+    providers::StaticFileProvider, BlockReader, DBProvider, StaticFileProviderFactory,
+    TransactionsProvider,
+};
 use reth_prune_types::{
-    PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
+    PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
 use reth_static_file_types::StaticFileSegment;
 use tracing::trace;
 
 #[derive(Debug)]
-pub struct Transactions {
-    static_file_provider: StaticFileProvider,
+pub struct Transactions<N> {
+    static_file_provider: StaticFileProvider<N>,
 }
 
-impl Transactions {
-    pub const fn new(static_file_provider: StaticFileProvider) -> Self {
+impl<N> Transactions<N> {
+    pub const fn new(static_file_provider: StaticFileProvider<N>) -> Self {
         Self { static_file_provider }
     }
 }
 
-impl<Provider> Segment<Provider> for Transactions
+impl<Provider> Segment<Provider> for Transactions<Provider::Primitives>
 where
-    Provider: DBProvider<Tx: DbTxMut> + TransactionsProvider + BlockReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + TransactionsProvider
+        + BlockReader
+        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value>>,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::Transactions
@@ -52,7 +59,9 @@ where
         let mut limiter = input.limiter;
 
         let mut last_pruned_transaction = *tx_range.end();
-        let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Transactions>(
+        let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Transactions<
+            <Provider::Primitives as NodePrimitives>::SignedTx,
+        >>(
             tx_range,
             &mut limiter,
             |_| false,
@@ -67,7 +76,7 @@ where
             // so we could finish pruning its transactions on the next run.
             .checked_sub(if done { 0 } else { 1 });
 
-        let progress = PruneProgress::new(done, &limiter);
+        let progress = limiter.progress(done);
 
         Ok(SegmentOutput {
             progress,
@@ -82,7 +91,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, Segment};
+    use crate::segments::{PruneInput, PruneLimiter, Segment};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -95,8 +104,8 @@ mod tests {
         StaticFileProviderFactory,
     };
     use reth_prune_types::{
-        PruneCheckpoint, PruneInterruptReason, PruneLimiter, PruneMode, PruneProgress,
-        PruneSegment, SegmentOutput,
+        PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
+        SegmentOutput,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
@@ -115,7 +124,7 @@ mod tests {
         db.insert_blocks(blocks.iter(), StorageKind::Database(None)).expect("insert blocks");
 
         let transactions =
-            blocks.iter().flat_map(|block| &block.body.transactions).collect::<Vec<_>>();
+            blocks.iter().flat_map(|block| &block.body().transactions).collect::<Vec<_>>();
 
         assert_eq!(db.table::<tables::Transactions>().unwrap().len(), transactions.len());
 
@@ -165,7 +174,7 @@ mod tests {
             let last_pruned_tx_number = blocks
                 .iter()
                 .take(to_block as usize)
-                .map(|block| block.body.transactions.len())
+                .map(|block| block.transaction_count())
                 .sum::<usize>()
                 .min(
                     next_tx_number_to_prune as usize +
@@ -176,7 +185,7 @@ mod tests {
             let last_pruned_block_number = blocks
                 .iter()
                 .fold_while((0, 0), |(_, mut tx_count), block| {
-                    tx_count += block.body.transactions.len();
+                    tx_count += block.transaction_count();
 
                     if tx_count > last_pruned_tx_number {
                         Done((block.number, tx_count))

@@ -14,7 +14,7 @@
 | [Crate Docs](https://reth.rs/docs)
 
 [gh-ci]: https://github.com/paradigmxyz/reth/actions/workflows/unit.yml
-[gh-deny]: https://github.com/paradigmxyz/reth/actions/workflows/deny.yml
+[gh-deny]: https://github.com/paradigmxyz/reth/actions/workflows/lint.yml
 [tg-badge]: https://img.shields.io/endpoint?color=neon&logo=telegram&label=chat&url=https%3A%2F%2Ftg.sumanjay.workers.dev%2Fparadigm%5Freth
 
 ## What is Reth?
@@ -87,7 +87,7 @@ When updating this, also update:
 - .github/workflows/lint.yml
 -->
 
-The Minimum Supported Rust Version (MSRV) of this project is [1.81.0](https://blog.rust-lang.org/2024/09/05/Rust-1.81.0.html).
+The Minimum Supported Rust Version (MSRV) of this project is [1.82.0](https://blog.rust-lang.org/2024/10/17/Rust-1.82.0.html).
 
 See the book for detailed instructions on how to [build from source](https://paradigmxyz.github.io/reth/installation/source.html).
 

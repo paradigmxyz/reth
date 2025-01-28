@@ -2,7 +2,8 @@
 
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
-use reth_storage_api::BlockReaderIdExt;
+use reth_primitives::NodePrimitives;
+use reth_storage_api::{BlockReader, BlockReaderIdExt};
 use reth_tasks::TaskSpawner;
 
 use crate::{
@@ -12,7 +13,10 @@ use crate::{
 
 /// Context for building the `eth` namespace API.
 #[derive(Debug, Clone)]
-pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events> {
+pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>
+where
+    Provider: BlockReader,
+{
     /// Database handle.
     pub provider: Provider,
     /// Mempool handle.
@@ -28,7 +32,7 @@ pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events> {
     /// Events handle.
     pub events: Events,
     /// RPC cache handle.
-    pub cache: EthStateCache,
+    pub cache: EthStateCache<Provider::Block, Provider::Receipt>,
 }
 
 impl<Provider, Pool, EvmConfig, Network, Tasks, Events>
@@ -37,22 +41,24 @@ where
     Provider: BlockReaderIdExt + Clone,
 {
     /// Returns a new [`FeeHistoryCache`] for the context.
-    pub fn new_fee_history_cache(&self) -> FeeHistoryCache
+    pub fn new_fee_history_cache<N>(&self) -> FeeHistoryCache
     where
-        Provider: ChainSpecProvider + 'static,
+        N: NodePrimitives,
         Tasks: TaskSpawner,
-        Events: CanonStateSubscriptions,
+        Events: CanonStateSubscriptions<Primitives = N>,
+        Provider:
+            BlockReaderIdExt<Block = N::Block, Receipt = N::Receipt> + ChainSpecProvider + 'static,
     {
-        let fee_history_cache =
-            FeeHistoryCache::new(self.cache.clone(), self.config.fee_history_cache);
+        let fee_history_cache = FeeHistoryCache::new(self.config.fee_history_cache);
 
         let new_canonical_blocks = self.events.canonical_state_stream();
         let fhc = fee_history_cache.clone();
         let provider = self.provider.clone();
+        let cache = self.cache.clone();
         self.executor.spawn_critical(
             "cache canonical blocks for fee history task",
             Box::pin(async move {
-                fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider).await;
+                fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider, cache).await;
             }),
         );
 

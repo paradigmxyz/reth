@@ -26,10 +26,12 @@
 //! ```
 //! use std::future::Future;
 //! use std::pin::Pin;
+//! use std::sync::Arc;
 //! use std::task::{Context, Poll};
+//! use alloy_consensus::Header;
 //! use alloy_primitives::U256;
-//! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator};
-//! use reth_primitives::{Block, Header};
+//! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator, PayloadKind};
+//! use reth_primitives::{Block, SealedBlock};
 //!
 //! /// The generator type that creates new jobs that builds empty blocks.
 //! pub struct EmptyBlockPayloadJobGenerator;
@@ -56,7 +58,7 @@
 //!
 //! fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
 //!     // NOTE: some fields are omitted here for brevity
-//!     let payload = Block {
+//!     let block = Block {
 //!         header: Header {
 //!             parent_hash: self.attributes.parent,
 //!             timestamp: self.attributes.timestamp,
@@ -65,7 +67,7 @@
 //!         },
 //!         ..Default::default()
 //!     };
-//!     let payload = EthBuiltPayload::new(self.attributes.id, payload.seal_slow(), U256::ZERO, None);
+//!     let payload = EthBuiltPayload::new(self.attributes.id, Arc::new(SealedBlock::seal_slow(block)), U256::ZERO, None);
 //!     Ok(payload)
 //! }
 //!
@@ -73,7 +75,7 @@
 //!     Ok(self.attributes.clone())
 //! }
 //!
-//! fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+//! fn resolve_kind(&mut self, _kind: PayloadKind) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
 //!        let payload = self.best_payload();
 //!        (futures_util::future::ready(payload), KeepPayloadJobAlive::No)
 //!     }
@@ -101,7 +103,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub mod database;
 mod metrics;
 mod service;
 mod traits;
@@ -112,7 +113,8 @@ pub mod noop;
 pub mod test_utils;
 
 pub use alloy_rpc_types::engine::PayloadId;
-pub use reth_payload_primitives::PayloadBuilderError;
+pub use reth_payload_builder_primitives::PayloadBuilderError;
+pub use reth_payload_primitives::PayloadKind;
 pub use service::{
     PayloadBuilderHandle, PayloadBuilderService, PayloadServiceCommand, PayloadStore,
 };

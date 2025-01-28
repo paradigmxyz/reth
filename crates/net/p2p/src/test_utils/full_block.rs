@@ -4,13 +4,15 @@ use crate::{
     error::PeerRequestResult,
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
+    BlockClient,
 };
+use alloy_consensus::Header;
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
 use alloy_primitives::B256;
 use parking_lot::Mutex;
 use reth_eth_wire_types::HeadersDirection;
 use reth_network_peers::{PeerId, WithPeerId};
-use reth_primitives::{BlockBody, Header, SealedBlock, SealedHeader};
+use reth_primitives::{BlockBody, SealedBlock, SealedHeader};
 use std::{collections::HashMap, sync::Arc};
 
 /// A headers+bodies client implementation that does nothing.
@@ -40,6 +42,7 @@ impl DownloadClient for NoopFullBlockClient {
 
 /// Implements the `BodiesClient` trait for the `NoopFullBlockClient` struct.
 impl BodiesClient for NoopFullBlockClient {
+    type Body = BlockBody;
     /// Defines the output type of the function.
     type Output = futures::future::Ready<PeerRequestResult<Vec<BlockBody>>>;
 
@@ -65,6 +68,7 @@ impl BodiesClient for NoopFullBlockClient {
 }
 
 impl HeadersClient for NoopFullBlockClient {
+    type Header = Header;
     /// The output type representing a future containing a peer request result with a vector of
     /// headers.
     type Output = futures::future::Ready<PeerRequestResult<Vec<Header>>>;
@@ -131,7 +135,7 @@ impl TestFullBlockClient {
         self.headers.lock().iter().max_by_key(|(_, header)| header.number).and_then(
             |(hash, header)| {
                 self.bodies.lock().get(hash).map(|body| {
-                    SealedBlock::new(SealedHeader::new(header.clone(), *hash), body.clone())
+                    SealedBlock::from_parts_unchecked(header.clone(), body.clone(), *hash)
                 })
             },
         )
@@ -152,6 +156,7 @@ impl DownloadClient for TestFullBlockClient {
 
 /// Implements the `HeadersClient` trait for the `TestFullBlockClient` struct.
 impl HeadersClient for TestFullBlockClient {
+    type Header = Header;
     /// Specifies the associated output type.
     type Output = futures::future::Ready<PeerRequestResult<Vec<Header>>>;
 
@@ -205,6 +210,7 @@ impl HeadersClient for TestFullBlockClient {
 
 /// Implements the `BodiesClient` trait for the `TestFullBlockClient` struct.
 impl BodiesClient for TestFullBlockClient {
+    type Body = BlockBody;
     /// Defines the output type of the function.
     type Output = futures::future::Ready<PeerRequestResult<Vec<BlockBody>>>;
 
@@ -237,4 +243,8 @@ impl BodiesClient for TestFullBlockClient {
                 .collect(),
         )))
     }
+}
+
+impl BlockClient for TestFullBlockClient {
+    type Block = reth_primitives::Block;
 }

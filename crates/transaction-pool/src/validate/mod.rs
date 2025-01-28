@@ -4,10 +4,12 @@ use crate::{
     error::InvalidPoolTransactionError,
     identifier::{SenderId, TransactionId},
     traits::{PoolTransaction, TransactionOrigin},
+    PriceBumpConfig,
 };
+use alloy_eips::eip4844::BlobTransactionSidecar;
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives::{BlobTransactionSidecar, SealedBlock, TransactionSignedEcRecovered};
+use reth_primitives::{Recovered, SealedBlock};
 use std::{fmt, future::Future, time::Instant};
 
 mod constants;
@@ -24,6 +26,7 @@ pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 pub use constants::{
     DEFAULT_MAX_TX_INPUT_BYTES, MAX_CODE_BYTE_SIZE, MAX_INIT_CODE_BYTE_SIZE, TX_SLOT_BYTE_SIZE,
 };
+use reth_primitives_traits::Block;
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
@@ -204,7 +207,11 @@ pub trait TransactionValidator: Send + Sync {
     /// Invoked when the head block changes.
     ///
     /// This can be used to update fork specific values (timestamp).
-    fn on_new_head_block(&self, _new_tip_block: &SealedBlock) {}
+    fn on_new_head_block<B>(&self, _new_tip_block: &SealedBlock<B>)
+    where
+        B: Block,
+    {
+    }
 }
 
 impl<A, B> TransactionValidator for Either<A, B>
@@ -235,7 +242,10 @@ where
         }
     }
 
-    fn on_new_head_block(&self, new_tip_block: &SealedBlock) {
+    fn on_new_head_block<Bl>(&self, new_tip_block: &SealedBlock<Bl>)
+    where
+        Bl: Block,
+    {
         match self {
             Self::Left(v) => v.on_new_head_block(new_tip_block),
             Self::Right(v) => v.on_new_head_block(new_tip_block),
@@ -280,6 +290,11 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
         self.transaction.sender()
     }
 
+    /// Returns a reference to the address of the sender
+    pub fn sender_ref(&self) -> &Address {
+        self.transaction.sender_ref()
+    }
+
     /// Returns the recipient of the transaction if it is not a CREATE transaction.
     pub fn to(&self) -> Option<Address> {
         self.transaction.to()
@@ -310,7 +325,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     ///
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
     /// For legacy transactions: `gas_price * gas_limit + tx_value`.
-    pub fn cost(&self) -> U256 {
+    pub fn cost(&self) -> &U256 {
         self.transaction.cost()
     }
 
@@ -372,14 +387,63 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     pub(crate) fn tx_type_conflicts_with(&self, other: &Self) -> bool {
         self.is_eip4844() != other.is_eip4844()
     }
-}
 
-impl<T: PoolTransaction<Consensus: Into<TransactionSignedEcRecovered>>> ValidPoolTransaction<T> {
-    /// Converts to this type into a [`TransactionSignedEcRecovered`].
+    /// Converts to this type into the consensus transaction of the pooled transaction.
     ///
     /// Note: this takes `&self` since indented usage is via `Arc<Self>`.
-    pub fn to_recovered_transaction(&self) -> TransactionSignedEcRecovered {
-        self.transaction.clone().into_consensus().into()
+    pub fn to_consensus(&self) -> Recovered<T::Consensus> {
+        self.transaction.clone_into_consensus()
+    }
+
+    /// Determines whether a candidate transaction (`maybe_replacement`) is underpriced compared to
+    /// an existing transaction in the pool.
+    ///
+    /// A transaction is considered underpriced if it doesn't meet the required fee bump threshold.
+    /// This applies to both standard gas fees and, for blob-carrying transactions (EIP-4844),
+    /// the blob-specific fees.
+    #[inline]
+    pub(crate) fn is_underpriced(
+        &self,
+        maybe_replacement: &Self,
+        price_bumps: &PriceBumpConfig,
+    ) -> bool {
+        // Retrieve the required price bump percentage for this type of transaction.
+        //
+        // The bump is different for EIP-4844 and other transactions. See `PriceBumpConfig`.
+        let price_bump = price_bumps.price_bump(self.tx_type());
+
+        // Check if the max fee per gas is underpriced.
+        if maybe_replacement.max_fee_per_gas() < self.max_fee_per_gas() * (100 + price_bump) / 100 {
+            return true
+        }
+
+        let existing_max_priority_fee_per_gas =
+            self.transaction.max_priority_fee_per_gas().unwrap_or_default();
+        let replacement_max_priority_fee_per_gas =
+            maybe_replacement.transaction.max_priority_fee_per_gas().unwrap_or_default();
+
+        // Check max priority fee per gas (relevant for EIP-1559 transactions only)
+        if existing_max_priority_fee_per_gas != 0 &&
+            replacement_max_priority_fee_per_gas != 0 &&
+            replacement_max_priority_fee_per_gas <
+                existing_max_priority_fee_per_gas * (100 + price_bump) / 100
+        {
+            return true
+        }
+
+        // Check max blob fee per gas
+        if let Some(existing_max_blob_fee_per_gas) = self.transaction.max_fee_per_blob_gas() {
+            // This enforces that blob txs can only be replaced by blob txs
+            let replacement_max_blob_fee_per_gas =
+                maybe_replacement.transaction.max_fee_per_blob_gas().unwrap_or_default();
+            if replacement_max_blob_fee_per_gas <
+                existing_max_blob_fee_per_gas * (100 + price_bump) / 100
+            {
+                return true
+            }
+        }
+
+        false
     }
 }
 
@@ -399,9 +463,11 @@ impl<T: PoolTransaction> Clone for ValidPoolTransaction<T> {
 impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ValidPoolTransaction")
+            .field("id", &self.transaction_id)
+            .field("pragate", &self.propagate)
+            .field("origin", &self.origin)
             .field("hash", self.transaction.hash())
-            .field("provides", &self.transaction_id)
-            .field("raw_tx", &self.transaction)
+            .field("tx", &self.transaction)
             .finish()
     }
 }

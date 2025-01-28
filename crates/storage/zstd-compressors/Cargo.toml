@@ -1,0 +1,19 @@
+[package]
+name = "reth-zstd-compressors"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Commonly used zstd compressors."
+
+[lints]
+workspace = true
+
+[dependencies]
+zstd = { workspace = true, features = ["experimental"] }
+
+[features]
+default = ["std"]
+std = []

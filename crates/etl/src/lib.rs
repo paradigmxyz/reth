@@ -281,9 +281,8 @@ impl EtlFile {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{TxHash, TxNumber};
-
     use super::*;
+    use alloy_primitives::{TxHash, TxNumber};
 
     #[test]
     fn etl_hashes() {

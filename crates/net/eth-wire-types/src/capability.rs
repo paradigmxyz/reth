@@ -1,10 +1,11 @@
 //! All capability related types
 
 use crate::EthVersion;
+use alloc::{borrow::Cow, string::String, vec::Vec};
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use bytes::BufMut;
+use core::fmt;
 use reth_codecs_derive::add_arbitrary_tests;
-use std::{borrow::Cow, fmt};
 
 /// A message indicating a supported capability and capability version.
 #[add_arbitrary_tests(rlp)]
@@ -89,9 +90,9 @@ impl From<EthVersion> for Capability {
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a> arbitrary::Arbitrary<'a> for Capability {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let version = u.int_in_range(0..=32)?; // TODO: What's the max?
-        let name = String::arbitrary(u)?; // TODO: what possible values?
-        Ok(Self::new(name, version))
+        let version = u.int_in_range(66..=69)?; // Valid eth protocol versions are 66-69
+                                                // Only generate valid eth protocol name for now since it's the only supported protocol
+        Ok(Self::new_static("eth", version))
     }
 }
 

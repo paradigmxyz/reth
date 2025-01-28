@@ -2,13 +2,13 @@ use reth_codecs::{add_arbitrary_tests, Compact};
 use serde::Serialize;
 
 use alloy_primitives::{bytes::Buf, Address};
-use reth_primitives::Account;
+use reth_primitives_traits::Account;
 
 /// Account as it is saved in the database.
 ///
 /// [`Address`] is the subkey.
 #[derive(Debug, Default, Clone, Eq, PartialEq, Serialize)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary, serde::Deserialize))]
 #[add_arbitrary_tests(compact)]
 pub struct AccountBeforeTx {
     /// Address for the account. Acts as `DupSort::SubKey`.

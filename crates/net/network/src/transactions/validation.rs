@@ -2,16 +2,15 @@
 //! and [`NewPooledTransactionHashes68`](reth_eth_wire::NewPooledTransactionHashes68)
 //! announcements. Validation and filtering of announcements is network dependent.
 
-use std::{fmt, fmt::Display, mem};
-
 use crate::metrics::{AnnouncedTxTypesMetrics, TxTypesCounter};
-use alloy_primitives::{Signature, TxHash};
+use alloy_primitives::{PrimitiveSignature as Signature, TxHash};
 use derive_more::{Deref, DerefMut};
 use reth_eth_wire::{
     DedupPayload, Eth68TxMetadata, HandleMempoolData, PartiallyValidData, ValidAnnouncementData,
     MAX_MESSAGE_SIZE,
 };
 use reth_primitives::TxType;
+use std::{fmt, fmt::Display, mem};
 use tracing::trace;
 
 /// The size of a decoded signature in bytes.
@@ -43,7 +42,7 @@ pub trait ValidateTx68 {
 
     /// Returns the reasonable minimum encoded transaction length, if any. This property is not
     /// spec'ed out but can be inferred by looking at which
-    /// [`reth_primitives::PooledTransactionsElement`] will successfully pass decoding
+    /// [`reth_primitives::PooledTransaction`] will successfully pass decoding
     /// for any given transaction type.
     fn min_encoded_tx_length(&self, ty: TxType) -> Option<usize>;
 
@@ -332,11 +331,9 @@ impl FilterAnnouncement for EthMessageFilter {
     }
 }
 
-// TODO(eip7702): update tests as needed
 #[cfg(test)]
 mod test {
     use super::*;
-
     use alloy_primitives::B256;
     use reth_eth_wire::{NewPooledTransactionHashes66, NewPooledTransactionHashes68};
     use std::{collections::HashMap, str::FromStr};
@@ -359,7 +356,7 @@ mod test {
     #[test]
     fn eth68_announcement_unrecognized_tx_type() {
         let types = vec![
-            TxType::MAX_RESERVED_EIP as u8 + 1, // the first type isn't valid
+            TxType::Eip7702 as u8 + 1, // the first type isn't valid
             TxType::Legacy as u8,
         ];
         let sizes = vec![MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE];
@@ -394,8 +391,7 @@ mod test {
 
     #[test]
     fn eth68_announcement_too_small_tx() {
-        let types =
-            vec![TxType::MAX_RESERVED_EIP as u8, TxType::Legacy as u8, TxType::Eip2930 as u8];
+        let types = vec![TxType::Eip7702 as u8, TxType::Legacy as u8, TxType::Eip2930 as u8];
         let sizes = vec![
             0, // the first length isn't valid
             0, // neither is the second
@@ -514,6 +510,122 @@ mod test {
         expected_data.insert(hashes[0], None);
 
         assert_eq!(expected_data, partially_valid_data.into_data())
+    }
+
+    #[test]
+    fn eth68_announcement_eip7702_tx() {
+        let types = vec![TxType::Eip7702 as u8, TxType::Legacy as u8];
+        let sizes = vec![MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE];
+        let hashes = vec![
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb")
+                .unwrap(),
+        ];
+
+        let announcement = NewPooledTransactionHashes68 {
+            types: types.clone(),
+            sizes: sizes.clone(),
+            hashes: hashes.clone(),
+        };
+
+        let filter = EthMessageFilter::default();
+
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let (outcome, valid_data) = filter.filter_valid_entries_68(partially_valid_data);
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let mut expected_data = HashMap::default();
+        expected_data.insert(hashes[0], Some((types[0], sizes[0])));
+        expected_data.insert(hashes[1], Some((types[1], sizes[1])));
+
+        assert_eq!(expected_data, valid_data.into_data());
+    }
+
+    #[test]
+    fn eth68_announcement_eip7702_tx_size_validation() {
+        let types = vec![TxType::Eip7702 as u8, TxType::Eip7702 as u8, TxType::Eip7702 as u8];
+        // Test with different sizes: too small, reasonable, too large
+        let sizes = vec![
+            1,                    // too small
+            MAX_MESSAGE_SIZE / 2, // reasonable size
+            MAX_MESSAGE_SIZE + 1, // too large
+        ];
+        let hashes = vec![
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcccc")
+                .unwrap(),
+        ];
+
+        let announcement = NewPooledTransactionHashes68 {
+            types: types.clone(),
+            sizes: sizes.clone(),
+            hashes: hashes.clone(),
+        };
+
+        let filter = EthMessageFilter::default();
+
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let (outcome, valid_data) = filter.filter_valid_entries_68(partially_valid_data);
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let mut expected_data = HashMap::default();
+
+        for i in 0..3 {
+            expected_data.insert(hashes[i], Some((types[i], sizes[i])));
+        }
+
+        assert_eq!(expected_data, valid_data.into_data());
+    }
+
+    #[test]
+    fn eth68_announcement_mixed_tx_types() {
+        let types = vec![
+            TxType::Legacy as u8,
+            TxType::Eip7702 as u8,
+            TxType::Eip1559 as u8,
+            TxType::Eip4844 as u8,
+        ];
+        let sizes = vec![MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE];
+        let hashes = vec![
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafa")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefbbbb")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcccc")
+                .unwrap(),
+            B256::from_str("0xbeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefcafebeefdddd")
+                .unwrap(),
+        ];
+
+        let announcement = NewPooledTransactionHashes68 {
+            types: types.clone(),
+            sizes: sizes.clone(),
+            hashes: hashes.clone(),
+        };
+
+        let filter = EthMessageFilter::default();
+
+        let (outcome, partially_valid_data) = filter.partially_filter_valid_entries(announcement);
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let (outcome, valid_data) = filter.filter_valid_entries_68(partially_valid_data);
+        assert_eq!(outcome, FilterOutcome::Ok);
+
+        let mut expected_data = HashMap::default();
+        // All transaction types should be included as they are valid
+        for i in 0..4 {
+            expected_data.insert(hashes[i], Some((types[i], sizes[i])));
+        }
+
+        assert_eq!(expected_data, valid_data.into_data());
     }
 
     #[test]

@@ -24,7 +24,7 @@ async fn main() -> eyre::Result<()> {
     let config = NetworkConfig::builder(local_key).mainnet_boot_nodes().build(client);
 
     // create the network instance
-    let network = NetworkManager::new(config).await?;
+    let network = NetworkManager::eth(config).await?;
 
     // get a handle to the network to interact with it
     let handle = network.handle().clone();

@@ -1,33 +1,35 @@
 //! Loads chain metadata.
 
 use alloy_primitives::{Address, U256, U64};
-use alloy_rpc_types::{Stage, SyncInfo, SyncStatus};
+use alloy_rpc_types_eth::{Stage, SyncInfo, SyncStatus};
 use futures::Future;
 use reth_chainspec::{ChainInfo, EthereumHardforks};
 use reth_errors::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
 use reth_provider::{BlockNumReader, ChainSpecProvider, StageCheckpointReader};
 
-use super::EthSigner;
+use crate::{helpers::EthSigner, RpcNodeCore};
 
 /// `Eth` API trait.
 ///
 /// Defines core functionality of the `eth` API implementation.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait EthApiSpec: Send + Sync {
-    /// Returns a handle for reading data from disk.
-    fn provider(
-        &self,
-    ) -> impl ChainSpecProvider<ChainSpec: EthereumHardforks> + BlockNumReader + StageCheckpointReader;
-
-    /// Returns a handle for reading network data summary.
-    fn network(&self) -> impl NetworkInfo;
+pub trait EthApiSpec:
+    RpcNodeCore<
+    Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
+                  + BlockNumReader
+                  + StageCheckpointReader,
+    Network: NetworkInfo,
+>
+{
+    /// The transaction type signers are using.
+    type Transaction;
 
     /// Returns the block node is started on.
     fn starting_block(&self) -> U256;
 
     /// Returns a handle to the signers owned by provider.
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner>>>;
+    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<Self::Transaction>>>>;
 
     /// Returns the current ethereum protocol version.
     fn protocol_version(&self) -> impl Future<Output = RethResult<U64>> + Send {

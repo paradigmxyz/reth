@@ -28,20 +28,16 @@ impl Compact for ClientVersion {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        self.version.as_bytes().to_compact(buf);
-        self.git_sha.as_bytes().to_compact(buf);
-        self.build_timestamp.as_bytes().to_compact(buf)
+        self.version.to_compact(buf);
+        self.git_sha.to_compact(buf);
+        self.build_timestamp.to_compact(buf)
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (version, buf) = Vec::<u8>::from_compact(buf, len);
-        let (git_sha, buf) = Vec::<u8>::from_compact(buf, len);
-        let (build_timestamp, buf) = Vec::<u8>::from_compact(buf, len);
-        let client_version = Self {
-            version: unsafe { String::from_utf8_unchecked(version) },
-            git_sha: unsafe { String::from_utf8_unchecked(git_sha) },
-            build_timestamp: unsafe { String::from_utf8_unchecked(build_timestamp) },
-        };
+        let (version, buf) = String::from_compact(buf, len);
+        let (git_sha, buf) = String::from_compact(buf, len);
+        let (build_timestamp, buf) = String::from_compact(buf, len);
+        let client_version = Self { version, git_sha, build_timestamp };
         (client_version, buf)
     }
 }

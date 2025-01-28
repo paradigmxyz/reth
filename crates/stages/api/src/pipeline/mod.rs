@@ -9,7 +9,7 @@ use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, ChainStateBlockReader,
     ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StageCheckpointReader,
-    StageCheckpointWriter, StaticFileProviderFactory,
+    StageCheckpointWriter,
 };
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
@@ -78,6 +78,9 @@ pub struct Pipeline<N: ProviderNodeTypes> {
     /// A receiver for the current chain tip to sync to.
     tip_tx: Option<watch::Sender<B256>>,
     metrics_tx: Option<MetricEventsSender>,
+    /// Whether an unwind should fail the syncing process. Should only be set when downloading
+    /// blocks from trusted sources and expecting them to be valid.
+    fail_on_unwind: bool,
 }
 
 impl<N: ProviderNodeTypes> Pipeline<N> {
@@ -164,13 +167,17 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         loop {
             let next_action = self.run_loop().await?;
 
+            if next_action.is_unwind() && self.fail_on_unwind {
+                return Err(PipelineError::UnexpectedUnwind)
+            }
+
             // Terminate the loop early if it's reached the maximum user
             // configured block.
             if next_action.should_continue() &&
                 self.progress
                     .minimum_block_number
                     .zip(self.max_block)
-                    .map_or(false, |(progress, target)| progress >= target)
+                    .is_some_and(|(progress, target)| progress >= target)
             {
                 trace!(
                     target: "sync::pipeline",
@@ -216,7 +223,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 }
                 ControlFlow::Continue { block_number } => self.progress.update(block_number),
                 ControlFlow::Unwind { target, bad_block } => {
-                    self.unwind(target, Some(bad_block.number))?;
+                    self.unwind(target, Some(bad_block.block.number))?;
                     return Ok(ControlFlow::Unwind { target, bad_block })
                 }
             }
@@ -249,7 +256,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
     pub fn move_to_static_files(&self) -> RethResult<()> {
         // Copies data from database to static files
         let lowest_static_file_height =
-            self.static_file_producer.lock().copy_to_static_files()?.min();
+            self.static_file_producer.lock().copy_to_static_files()?.min_block_num();
 
         // Deletes data which has been copied to static files.
         if let Some(prune_tip) = lowest_static_file_height {
@@ -351,10 +358,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             ))?;
                         }
 
-                        UnifiedStorageWriter::commit_unwind(
-                            provider_rw,
-                            self.provider_factory.static_file_provider(),
-                        )?;
+                        UnifiedStorageWriter::commit_unwind(provider_rw)?;
 
                         stage.post_unwind_commit()?;
 
@@ -389,7 +393,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
             let stage_reached_max_block = prev_checkpoint
                 .zip(self.max_block)
-                .map_or(false, |(prev_progress, target)| prev_progress.block_number >= target);
+                .is_some_and(|(prev_progress, target)| prev_progress.block_number >= target);
             if stage_reached_max_block {
                 warn!(
                     target: "sync::pipeline",
@@ -462,10 +466,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                         result: out.clone(),
                     });
 
-                    UnifiedStorageWriter::commit(
-                        provider_rw,
-                        self.provider_factory.static_file_provider(),
-                    )?;
+                    UnifiedStorageWriter::commit(provider_rw)?;
 
                     stage.post_execute_commit()?;
 
@@ -504,7 +505,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
 
         // We unwind because of a detached head.
         let unwind_to =
-            local_head.number.saturating_sub(BEACON_CONSENSUS_REORG_UNWIND_DEPTH).max(1);
+            local_head.block.number.saturating_sub(BEACON_CONSENSUS_REORG_UNWIND_DEPTH).max(1);
         Ok(Some(ControlFlow::Unwind { target: unwind_to, bad_block: local_head }))
     } else if let StageError::Block { block, error } = err {
         match error {
@@ -512,7 +513,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
                 error!(
                     target: "sync::pipeline",
                     stage = %stage_id,
-                    bad_block = %block.number,
+                    bad_block = %block.block.number,
                     "Stage encountered a validation error: {validation_error}"
                 );
 
@@ -526,7 +527,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
                     prev_checkpoint.unwrap_or_default(),
                 )?;
 
-                UnifiedStorageWriter::commit(provider_rw, factory.static_file_provider())?;
+                UnifiedStorageWriter::commit(provider_rw)?;
 
                 // We unwind because of a validation error. If the unwind itself
                 // fails, we bail entirely,
@@ -541,7 +542,7 @@ fn on_stage_error<N: ProviderNodeTypes>(
                 error!(
                     target: "sync::pipeline",
                     stage = %stage_id,
-                    bad_block = %block.number,
+                    bad_block = %block.block.number,
                     "Stage encountered an execution error: {execution_error}"
                 );
 
@@ -559,12 +560,12 @@ fn on_stage_error<N: ProviderNodeTypes>(
         error!(
             target: "sync::pipeline",
             stage = %stage_id,
-            bad_block = %block.number,
+            bad_block = %block.block.number,
             segment = %segment,
             "Stage is missing static file data."
         );
 
-        Ok(Some(ControlFlow::Unwind { target: block.number - 1, bad_block: block }))
+        Ok(Some(ControlFlow::Unwind { target: block.block.number - 1, bad_block: block }))
     } else if err.is_fatal() {
         error!(target: "sync::pipeline", stage = %stage_id, "Stage encountered a fatal error: {err}");
         Err(err.into())
@@ -586,6 +587,7 @@ impl<N: ProviderNodeTypes> std::fmt::Debug for Pipeline<N> {
             .field("stages", &self.stages.iter().map(|stage| stage.id()).collect::<Vec<StageId>>())
             .field("max_block", &self.max_block)
             .field("event_sender", &self.event_sender)
+            .field("fail_on_unwind", &self.fail_on_unwind)
             .finish()
     }
 }
@@ -601,7 +603,7 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
     use reth_prune::PruneModes;
-    use reth_testing_utils::{generators, generators::random_header};
+    use reth_testing_utils::generators::{self, random_block_with_parent};
     use tokio_stream::StreamExt;
 
     #[test]
@@ -973,7 +975,7 @@ mod tests {
             .add_stage(
                 TestStage::new(StageId::Other("B"))
                     .add_exec(Err(StageError::Block {
-                        block: Box::new(random_header(
+                        block: Box::new(random_block_with_parent(
                             &mut generators::rng(),
                             5,
                             Default::default(),

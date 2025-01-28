@@ -16,16 +16,21 @@ pub mod chainspec;
 pub mod commands;
 /// Module with a codec for reading and encoding receipts in files.
 ///
-/// Enables decoding and encoding `HackReceipt` type. See <https://github.com/testinprod-io/op-geth/pull/1>.
+/// Enables decoding and encoding `OpGethReceipt` type. See <https://github.com/testinprod-io/op-geth/pull/1>.
 ///
-/// Currently configured to use codec [`HackReceipt`](receipt_file_codec::HackReceipt) based on
+/// Currently configured to use codec [`OpGethReceipt`](receipt_file_codec::OpGethReceipt) based on
 /// export of below Bedrock data using <https://github.com/testinprod-io/op-geth/pull/1>. Codec can
 /// be replaced with regular encoding of receipts for export.
 ///
 /// NOTE: receipts can be exported using regular op-geth encoding for `Receipt` type, to fit
-/// reth's needs for importing. However, this would require patching the diff in <https://github.com/testinprod-io/op-geth/pull/1> to export the `Receipt` and not `HackReceipt` type (originally
+/// reth's needs for importing. However, this would require patching the diff in <https://github.com/testinprod-io/op-geth/pull/1> to export the `Receipt` and not `OpGethReceipt` type (originally
 /// made for op-erigon's import needs).
 pub mod receipt_file_codec;
+
+/// OVM block, same as EVM block at bedrock, except for signature of deposit transaction
+/// not having a signature back then.
+/// Enables decoding and encoding `Block` types within file contexts.
+pub mod ovm_file_codec;
 
 pub use commands::{import::ImportOpCommand, import_receipts::ImportReceiptsOpCommand};
 use reth_optimism_chainspec::OpChainSpec;
@@ -47,13 +52,14 @@ use reth_node_core::{
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use reth_optimism_evm::OpExecutorProvider;
-use reth_optimism_node::OptimismNode;
+use reth_optimism_node::{OpNetworkPrimitives, OpNode};
 use reth_tracing::FileWorkerGuard;
 use tracing::info;
 
 // This allows us to manually enable node metrics features, required for proper jemalloc metric
 // reporting
 use reth_node_metrics as _;
+use reth_node_metrics::recorder::install_prometheus_recorder;
 
 /// The main op-reth cli interface.
 ///
@@ -63,7 +69,7 @@ use reth_node_metrics as _;
 pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
     #[command(subcommand)]
-    command: Commands<Spec, Ext>,
+    pub command: Commands<Spec, Ext>,
 
     /// The chain this node is running.
     ///
@@ -76,7 +82,7 @@ pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt:
         value_parser = Spec::parser(),
         global = true,
     )]
-    chain: Arc<Spec::ChainSpec>,
+    pub chain: Arc<Spec::ChainSpec>,
 
     /// Add a new instance of a node.
     ///
@@ -92,10 +98,11 @@ pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt:
     /// - `HTTP_RPC_PORT`: default - `instance` + 1
     /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
     #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
-    instance: u16,
+    pub instance: u16,
 
+    /// The logging configuration for the CLI.
     #[command(flatten)]
-    logs: LogArgs,
+    pub logs: LogArgs,
 }
 
 impl Cli {
@@ -135,36 +142,42 @@ where
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
 
+        // Install the prometheus recorder to be sure to record all metrics
+        let _ = install_prometheus_recorder();
+
         let runner = CliRunner::default();
         match self.command {
             Commands::Node(command) => {
                 runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
             }
             Commands::Init(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::InitState(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::ImportOp(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::ImportReceiptsOp(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Db(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<OptimismNode>())
-            }
+            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<OpNode>()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<OptimismNode, _, _>(ctx, OpExecutorProvider::optimism)
+                command
+                    .execute::<OpNode, _, _, OpNetworkPrimitives>(ctx, OpExecutorProvider::optimism)
             }),
-            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute()),
+            Commands::P2P(command) => {
+                runner.run_until_ctrl_c(command.execute::<OpNetworkPrimitives>())
+            }
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Recover(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<OptimismNode>(ctx))
+                runner.run_command_until_exit(|ctx| command.execute::<OpNode>(ctx))
             }
-            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<OptimismNode>()),
+            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<OpNode>()),
+            #[cfg(feature = "dev")]
+            Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         }
     }
 

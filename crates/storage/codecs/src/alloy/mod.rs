@@ -1,20 +1,34 @@
-mod access_list;
-mod authorization_list;
-mod genesis_account;
-mod header;
-mod log;
-mod request;
-mod signature;
-mod transaction;
-mod trie;
-mod txkind;
-mod withdrawal;
+//! Implements Compact for alloy types.
+
+/// Will make it a pub mod if test-utils is enabled
+macro_rules! cond_mod {
+    ($($mod_name:ident),*) => {
+        $(
+            #[cfg(feature = "test-utils")]
+            pub mod $mod_name;
+            #[cfg(not(feature = "test-utils"))]
+            pub(crate) mod $mod_name;
+        )*
+    };
+}
+
+cond_mod!(
+    access_list,
+    authorization_list,
+    genesis_account,
+    header,
+    log,
+    signature,
+    transaction,
+    trie,
+    txkind,
+    withdrawal
+);
 
 #[cfg(test)]
 mod tests {
     use crate::{
         alloy::{
-            authorization_list::Authorization,
             genesis_account::{GenesisAccount, GenesisAccountRef, StorageEntries, StorageEntry},
             header::{Header, HeaderExt},
             transaction::{
@@ -38,7 +52,6 @@ mod tests {
         validate_bitflag_backwards_compat!(StorageEntries, UnusedBits::Zero);
         validate_bitflag_backwards_compat!(StorageEntry, UnusedBits::Zero);
 
-        validate_bitflag_backwards_compat!(Authorization, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(GenesisAccountRef<'_>, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(GenesisAccount, UnusedBits::NotZero);
         validate_bitflag_backwards_compat!(TxEip1559, UnusedBits::NotZero);

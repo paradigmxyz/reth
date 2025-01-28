@@ -12,7 +12,7 @@ use reth_db_api::{
 };
 use reth_fs_util as fs;
 use reth_node_types::NodeTypesWithDB;
-use reth_provider::{providers::ProviderNodeTypes, ChainSpecProvider, ProviderFactory};
+use reth_provider::{providers::ProviderNodeTypes, ChainSpecProvider, DBProvider, ProviderFactory};
 use std::{path::Path, rc::Rc, sync::Arc};
 use tracing::info;
 

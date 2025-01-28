@@ -6,6 +6,7 @@ use crate::{
 };
 use alloy_rlp::Decodable;
 use rayon::iter::{ParallelBridge, ParallelIterator};
+use reth_chainspec::ChainSpec;
 use reth_primitives::{BlockBody, SealedBlock, StaticFileSegment};
 use reth_provider::{
     providers::StaticFileWriter, test_utils::create_test_provider_factory_with_chain_spec,
@@ -83,19 +84,18 @@ impl Case for BlockchainTestCase {
             .par_bridge()
             .try_for_each(|case| {
                 // Create a new test database and initialize a provider for the test case.
-                let provider = create_test_provider_factory_with_chain_spec(Arc::new(
-                    case.network.clone().into(),
-                ))
-                .database_provider_rw()
-                .unwrap();
+                let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
+                let provider = create_test_provider_factory_with_chain_spec(chain_spec.clone())
+                    .database_provider_rw()
+                    .unwrap();
 
                 // Insert initial test state into the provider.
                 provider.insert_historical_block(
-                    SealedBlock::new(
+                    SealedBlock::<reth_primitives::Block>::from_sealed_parts(
                         case.genesis_block_header.clone().into(),
                         BlockBody::default(),
                     )
-                    .try_seal_with_senders()
+                    .try_recover()
                     .unwrap(),
                 )?;
                 case.pre.write_to_db(provider.tx_ref())?;
@@ -111,10 +111,9 @@ impl Case for BlockchainTestCase {
 
                 // Decode and insert blocks, creating a chain of blocks for the test case.
                 let last_block = case.blocks.iter().try_fold(None, |_, block| {
-                    let decoded = SealedBlock::decode(&mut block.rlp.as_ref())?;
-                    provider.insert_historical_block(
-                        decoded.clone().try_seal_with_senders().unwrap(),
-                    )?;
+                    let decoded =
+                        SealedBlock::<reth_primitives::Block>::decode(&mut block.rlp.as_ref())?;
+                    provider.insert_historical_block(decoded.clone().try_recover().unwrap())?;
                     Ok::<Option<SealedBlock>, Error>(Some(decoded))
                 })?;
                 provider
@@ -127,9 +126,7 @@ impl Case for BlockchainTestCase {
                 // Execute the execution stage using the EVM processor factory for the test case
                 // network.
                 let _ = ExecutionStage::new_with_executor(
-                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(Arc::new(
-                        case.network.clone().into(),
-                    )),
+                    reth_evm_ethereum::execute::EthExecutorProvider::ethereum(chain_spec),
                 )
                 .execute(
                     &provider,
@@ -209,6 +206,18 @@ pub fn should_skip(path: &Path) -> bool {
         | "loopMul.json"
         | "CALLBlake2f_MaxRounds.json"
         | "shiftCombinations.json"
+
+        // Skipped by revm as well: <https://github.com/bluealloy/revm/blob/be92e1db21f1c47b34c5a58cfbf019f6b97d7e4b/bins/revme/src/cmd/statetest/runner.rs#L115-L125>
+        | "RevertInCreateInInit_Paris.json"
+        | "RevertInCreateInInit.json"
+        | "dynamicAccountOverwriteEmpty.json"
+        | "dynamicAccountOverwriteEmpty_Paris.json"
+        | "RevertInCreateInInitCreate2Paris.json"
+        | "create2collisionStorage.json"
+        | "RevertInCreateInInitCreate2.json"
+        | "create2collisionStorageParis.json"
+        | "InitCollision.json"
+        | "InitCollisionParis.json"
     )
     // Ignore outdated EOF tests that haven't been updated for Cancun yet.
     || path_contains(path_str, &["EIPTests", "stEOF"])

@@ -1,9 +1,8 @@
 use crate::PipelineEvent;
-use alloy_primitives::{BlockNumber, TxNumber};
+use alloy_eips::eip1898::BlockWithParent;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, DatabaseError, RethError};
 use reth_network_p2p::error::DownloadError;
-use reth_primitives_traits::SealedHeader;
 use reth_provider::ProviderError;
 use reth_prune::{PruneSegment, PruneSegmentError, PrunerError};
 use reth_static_file_types::StaticFileSegment;
@@ -35,10 +34,10 @@ impl BlockErrorKind {
 #[derive(Error, Debug)]
 pub enum StageError {
     /// The stage encountered an error related to a block.
-    #[error("stage encountered an error in block #{number}: {error}", number = block.number)]
+    #[error("stage encountered an error in block #{number}: {error}", number = block.block.number)]
     Block {
         /// The block that caused the error.
-        block: Box<SealedHeader>,
+        block: Box<BlockWithParent>,
         /// The specific error type, either consensus or execution error.
         #[source]
         error: BlockErrorKind,
@@ -49,16 +48,16 @@ pub enum StageError {
         "stage encountered inconsistent chain: \
          downloaded header #{header_number} ({header_hash}) is detached from \
          local head #{head_number} ({head_hash}): {error}",
-        header_number = header.number,
-        header_hash = header.hash(),
-        head_number = local_head.number,
-        head_hash = local_head.hash(),
+        header_number = header.block.number,
+        header_hash = header.block.hash,
+        head_number = local_head.block.number,
+        head_hash = local_head.block.hash,
     )]
     DetachedHead {
         /// The local head we attempted to attach to.
-        local_head: Box<SealedHeader>,
+        local_head: Box<BlockWithParent>,
         /// The header we attempted to attach.
-        header: Box<SealedHeader>,
+        header: Box<BlockWithParent>,
         /// The error that occurred when attempting to attach the header.
         #[source]
         error: Box<ConsensusError>,
@@ -93,34 +92,12 @@ pub enum StageError {
     #[error("invalid download response: {0}")]
     Download(#[from] DownloadError),
     /// Database is ahead of static file data.
-    #[error("missing static file data for block number: {number}", number = block.number)]
+    #[error("missing static file data for block number: {number}", number = block.block.number)]
     MissingStaticFileData {
         /// Starting block with  missing data.
-        block: Box<SealedHeader>,
+        block: Box<BlockWithParent>,
         /// Static File segment
         segment: StaticFileSegment,
-    },
-    /// Unrecoverable inconsistency error related to a transaction number in a static file segment.
-    #[error(
-        "inconsistent transaction number for {segment}. db: {database}, static_file: {static_file}"
-    )]
-    InconsistentTxNumber {
-        /// Static File segment where this error was encountered.
-        segment: StaticFileSegment,
-        /// Expected database transaction number.
-        database: TxNumber,
-        /// Expected static file transaction number.
-        static_file: TxNumber,
-    },
-    /// Unrecoverable inconsistency error related to a block number in a static file segment.
-    #[error("inconsistent block number for {segment}. db: {database}, static_file: {static_file}")]
-    InconsistentBlockNumber {
-        /// Static File segment where this error was encountered.
-        segment: StaticFileSegment,
-        /// Expected database block number.
-        database: BlockNumber,
-        /// Expected static file block number.
-        static_file: BlockNumber,
     },
     /// The prune checkpoint for the given segment is missing.
     #[error("missing prune checkpoint for {0}")]
@@ -156,8 +133,6 @@ impl StageError {
                 Self::MissingDownloadBuffer |
                 Self::MissingSyncGap |
                 Self::ChannelClosed |
-                Self::InconsistentBlockNumber { .. } |
-                Self::InconsistentTxNumber { .. } |
                 Self::Internal(_) |
                 Self::Fatal(_)
         )
@@ -188,4 +163,7 @@ pub enum PipelineError {
     /// Internal error
     #[error(transparent)]
     Internal(#[from] RethError),
+    /// The pipeline encountered an unwind when `fail_on_unwind` was set to `true`.
+    #[error("unexpected unwind")]
+    UnexpectedUnwind,
 }

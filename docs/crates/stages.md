@@ -43,7 +43,7 @@ pub trait Stage<DB: Database>: Send + Sync {
 }
 ```
 
-To get a better idea of what is happening at each part of the pipeline, lets walk through what is going on under the hood within the `execute()` function at each stage, starting with `HeaderStage`.
+To get a better idea of what is happening at each part of the pipeline, let's walk through what is going on under the hood within the `execute()` function at each stage, starting with `HeaderStage`.
 
 <br>
 

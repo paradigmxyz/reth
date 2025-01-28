@@ -2,8 +2,9 @@ use alloy_primitives::{B256, U256};
 use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
-use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
-use reth_payload_primitives::{EngineObjectValidationError, PayloadBuilderError};
+use reth_engine_primitives::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::EngineObjectValidationError;
 use thiserror::Error;
 
 /// The Engine API result type

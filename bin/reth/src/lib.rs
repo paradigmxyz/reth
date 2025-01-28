@@ -15,7 +15,7 @@
 //! - `min-error-logs`: Disables all logs below `error` level.
 //! - `min-warn-logs`: Disables all logs below `warn` level.
 //! - `min-info-logs`: Disables all logs below `info` level. This can speed up the node, since fewer
-//!   calls to the logging component is made.
+//!   calls to the logging component are made.
 //! - `min-debug-logs`: Disables all logs below `debug` level.
 //! - `min-trace-logs`: Disables all logs below `trace` level.
 
@@ -103,13 +103,9 @@ pub mod primitives {
     pub use reth_primitives::*;
 }
 
-/// Re-exported from `reth_beacon_consensus`.
+/// Re-exported from `reth_ethereum_consensus`.
 pub mod beacon_consensus {
-    pub use reth_beacon_consensus::*;
-}
-/// Re-exported from `reth_blockchain_tree`.
-pub mod blockchain_tree {
-    pub use reth_blockchain_tree::*;
+    pub use reth_node_ethereum::consensus::*;
 }
 
 /// Re-exported from `reth_consensus`.

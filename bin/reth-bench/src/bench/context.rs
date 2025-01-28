@@ -18,9 +18,9 @@ use tracing::info;
 /// queries, a [`BenchMode`] to determine whether the benchmark should run for a closed or open
 /// range of blocks, and the next block to fetch.
 pub(crate) struct BenchContext {
-    /// The auth provider used for engine API queries.
+    /// The auth provider is used for engine API queries.
     pub(crate) auth_provider: RootProvider<BoxTransport, AnyNetwork>,
-    /// The block provider used for block queries.
+    /// The block provider is used for block queries.
     pub(crate) block_provider: RootProvider<Http<Client>, AnyNetwork>,
     /// The benchmark mode, which defines whether the benchmark should run for a closed or open
     /// range of blocks.
@@ -74,14 +74,17 @@ impl BenchContext {
         let first_block = match benchmark_mode {
             BenchMode::Continuous => {
                 // fetch Latest block
-                block_provider.get_block_by_number(BlockNumberOrTag::Latest, true).await?.unwrap()
+                block_provider
+                    .get_block_by_number(BlockNumberOrTag::Latest, true.into())
+                    .await?
+                    .unwrap()
             }
             BenchMode::Range(ref mut range) => {
                 match range.next() {
                     Some(block_number) => {
                         // fetch first block in range
                         block_provider
-                            .get_block_by_number(block_number.into(), true)
+                            .get_block_by_number(block_number.into(), true.into())
                             .await?
                             .unwrap()
                     }

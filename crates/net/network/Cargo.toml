@@ -16,24 +16,27 @@ workspace = true
 reth-chainspec.workspace = true
 reth-fs-util.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
+reth-primitives-traits.workspace = true
 reth-net-banlist.workspace = true
 reth-network-api.workspace = true
 reth-network-p2p.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
 reth-dns-discovery.workspace = true
+reth-ethereum-forks.workspace = true
 reth-eth-wire.workspace = true
+reth-eth-wire-types.workspace = true
 reth-ecies.workspace = true
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-storage-api.workspace = true
-reth-provider = { workspace = true, optional = true }
 reth-tokio-util.workspace = true
 reth-consensus.workspace = true
 reth-network-peers = { workspace = true, features = ["net"] }
 reth-network-types.workspace = true
 
 # ethereum
+alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
@@ -86,7 +89,7 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 # alloy deps for testing against nodes
 alloy-node-bindings.workspace = true
-alloy-provider= { workspace = true, features = ["admin-api"] }
+alloy-provider = { workspace = true, features = ["admin-api"] }
 alloy-consensus.workspace = true
 
 # misc
@@ -101,10 +104,46 @@ criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 [features]
 default = ["serde"]
 geth-tests = []
-serde = ["dep:serde", "secp256k1/serde", "enr/serde", "reth-network-types/serde"]
-test-utils = ["dep:reth-provider", "reth-provider?/test-utils", "dep:tempfile", "reth-transaction-pool/test-utils", "reth-network-types/test-utils"]
+serde = [
+    "dep:serde",
+    "secp256k1/serde",
+    "enr/serde",
+    "reth-network-types/serde",
+    "reth-dns-discovery/serde",
+    "reth-eth-wire/serde",
+    "reth-eth-wire-types/serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "discv5/serde",
+    "parking_lot/serde",
+    "rand/serde",
+    "smallvec/serde",
+    "url/serde",
+    "reth-primitives-traits/serde",
+    "reth-ethereum-forks/serde",
+    "reth-provider/serde",
+]
+test-utils = [
+    "dep:tempfile",
+    "reth-transaction-pool/test-utils",
+    "reth-network-types/test-utils",
+    "reth-chainspec/test-utils",
+    "reth-consensus/test-utils",
+    "reth-discv4/test-utils",
+    "reth-network/test-utils",
+    "reth-network-p2p/test-utils",
+    "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-provider/test-utils",
+]
 
 [[bench]]
-name = "bench"
+name = "broadcast"
+required-features = ["test-utils"]
+harness = false
+
+[[bench]]
+name = "tx_manager_hash_fetching"
 required-features = ["test-utils"]
 harness = false

@@ -2,9 +2,10 @@
 
 use std::fmt;
 
+use alloy_eips::BlockId;
 use alloy_rpc_types_engine::PayloadError;
 use jsonrpsee_core::RpcResult;
-use reth_primitives::BlockId;
+use reth_errors::ConsensusError;
 
 /// Helper trait to easily convert various `Result` types into [`RpcResult`]
 pub trait ToRpcResult<Ok, Err>: Sized {
@@ -102,6 +103,7 @@ macro_rules! impl_to_rpc_result {
 }
 
 impl_to_rpc_result!(PayloadError);
+impl_to_rpc_result!(ConsensusError);
 impl_to_rpc_result!(reth_errors::RethError);
 impl_to_rpc_result!(reth_errors::ProviderError);
 impl_to_rpc_result!(reth_network_api::NetworkError);
@@ -160,7 +162,6 @@ pub fn block_id_to_str(id: BlockId) -> String {
                 format!("hash {}", h.block_hash)
             }
         }
-        BlockId::Number(n) if n.is_number() => format!("number {n}"),
         BlockId::Number(n) => format!("{n}"),
     }
 }

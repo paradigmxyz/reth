@@ -1,8 +1,8 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rpc_types::Block;
 use alloy_rpc_types_anvil::{Forking, Metadata, MineOptions, NodeInfo};
+use alloy_rpc_types_eth::Block;
 
 /// Anvil rpc interface.
 /// https://book.getfoundry.sh/reference/anvil/#custom-methods

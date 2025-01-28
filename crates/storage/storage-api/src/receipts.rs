@@ -1,33 +1,42 @@
 use crate::BlockIdReader;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
-use alloy_primitives::{BlockNumber, TxHash, TxNumber};
-use reth_primitives::Receipt;
+use alloy_primitives::{TxHash, TxNumber};
+use reth_primitives_traits::Receipt;
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeBounds;
 
-/// Client trait for fetching [Receipt] data .
+/// A helper type alias to access [`ReceiptProvider::Receipt`].
+pub type ProviderReceipt<P> = <P as ReceiptProvider>::Receipt;
+
+/// Client trait for fetching receipt data.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait ReceiptProvider: Send + Sync {
+    /// The receipt type.
+    type Receipt: Receipt;
+
     /// Get receipt by transaction number
     ///
     /// Returns `None` if the transaction is not found.
-    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Receipt>>;
+    fn receipt(&self, id: TxNumber) -> ProviderResult<Option<Self::Receipt>>;
 
     /// Get receipt by transaction hash.
     ///
     /// Returns `None` if the transaction is not found.
-    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Receipt>>;
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>>;
 
     /// Get receipts by block num or hash.
     ///
     /// Returns `None` if the block is not found.
-    fn receipts_by_block(&self, block: BlockHashOrNumber) -> ProviderResult<Option<Vec<Receipt>>>;
+    fn receipts_by_block(
+        &self,
+        block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Receipt>>>;
 
     /// Get receipts by tx range.
     fn receipts_by_tx_range(
         &self,
         range: impl RangeBounds<TxNumber>,
-    ) -> ProviderResult<Vec<Receipt>>;
+    ) -> ProviderResult<Vec<Self::Receipt>>;
 }
 
 /// Trait extension for `ReceiptProvider`, for types that implement `BlockId` conversion.
@@ -40,10 +49,9 @@ pub trait ReceiptProvider: Send + Sync {
 /// so this trait can only be implemented for types that implement `BlockIdReader`. The
 /// `BlockIdReader` methods should be used to resolve `BlockId`s to block numbers or hashes, and
 /// retrieving the receipts should be done using the type's `ReceiptProvider` methods.
-#[auto_impl::auto_impl(&, Arc)]
 pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdReader {
     /// Get receipt by block id
-    fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Receipt>>> {
+    fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         let id = match block {
             BlockId::Hash(hash) => BlockHashOrNumber::Hash(hash.block_hash),
             BlockId::Number(num_tag) => {
@@ -64,24 +72,7 @@ pub trait ReceiptProviderIdExt: ReceiptProvider + BlockIdReader {
     fn receipts_by_number_or_tag(
         &self,
         number_or_tag: BlockNumberOrTag,
-    ) -> ProviderResult<Option<Vec<Receipt>>> {
+    ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
         self.receipts_by_block_id(number_or_tag.into())
     }
-}
-
-/// Writer trait for writing [`Receipt`] data.
-pub trait ReceiptWriter {
-    /// Appends receipts for a block.
-    ///
-    /// # Parameters
-    /// - `first_tx_index`: The transaction number of the first receipt in the block.
-    /// - `block_number`: The block number to which the receipts belong.
-    /// - `receipts`: A vector of optional receipts in the block. If `None`, it means they were
-    ///   pruned.
-    fn append_block_receipts(
-        &mut self,
-        first_tx_index: TxNumber,
-        block_number: BlockNumber,
-        receipts: Vec<Option<Receipt>>,
-    ) -> ProviderResult<()>;
 }

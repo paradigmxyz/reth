@@ -1,13 +1,12 @@
 //! Command that initializes the node by importing a chain from a file.
-use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_primitives::B256;
 use clap::Parser;
 use futures::{Stream, StreamExt};
-use reth_beacon_consensus::EthBeaconConsensus;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::Config;
-use reth_consensus::Consensus;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_db::tables;
 use reth_db_api::transaction::DbTx;
 use reth_downloaders::{
@@ -15,12 +14,13 @@ use reth_downloaders::{
     file_client::{ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE},
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
+use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::{
     bodies::downloader::BodyDownloader,
     headers::downloader::{HeaderDownloader, SyncTarget},
 };
-use reth_node_builder::NodeTypesWithEngine;
+use reth_node_api::BlockTy;
 use reth_node_core::version::SHORT_VERSION;
 use reth_node_events::node::NodeEvent;
 use reth_provider::{
@@ -60,8 +60,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
     /// Execute `import` command
     pub async fn execute<N, E, F>(self, executor: F) -> eyre::Result<()>
     where
-        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
-        E: BlockExecutorProvider,
+        N: CliNodeTypes<ChainSpec = C::ChainSpec>,
+        E: BlockExecutorProvider<Primitives = N::Primitives>,
         F: FnOnce(Arc<N::ChainSpec>) -> E,
     {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
@@ -87,7 +87,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
         let mut total_decoded_blocks = 0;
         let mut total_decoded_txns = 0;
 
-        while let Some(file_client) = reader.next_chunk::<FileClient>().await? {
+        while let Some(file_client) = reader.next_chunk::<FileClient<_>>().await? {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"
@@ -162,15 +162,15 @@ pub fn build_import_pipeline<N, C, E>(
     config: &Config,
     provider_factory: ProviderFactory<N>,
     consensus: &Arc<C>,
-    file_client: Arc<FileClient>,
+    file_client: Arc<FileClient<BlockTy<N>>>,
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     disable_exec: bool,
     executor: E,
-) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent>)>
+) -> eyre::Result<(Pipeline<N>, impl Stream<Item = NodeEvent<N::Primitives>>)>
 where
-    N: ProviderNodeTypes,
-    C: Consensus + 'static,
-    E: BlockExecutorProvider,
+    N: ProviderNodeTypes + CliNodeTypes,
+    C: Consensus<BlockTy<N>, Error = ConsensusError> + 'static,
+    E: BlockExecutorProvider<Primitives = N::Primitives>,
 {
     if !file_client.has_canonical_blocks() {
         eyre::bail!("unable to import non canonical blocks");
@@ -203,10 +203,11 @@ where
 
     let max_block = file_client.max_block().unwrap_or(0);
 
-    let pipeline = Pipeline::<N>::builder()
+    let pipeline = Pipeline::builder()
         .with_tip_sender(tip_tx)
         // we want to sync all blocks the file client provides or 0 if empty
         .with_max_block(max_block)
+        .with_fail_on_unwind(true)
         .add_stages(
             DefaultStages::new(
                 provider_factory.clone(),

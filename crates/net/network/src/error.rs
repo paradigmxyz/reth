@@ -1,7 +1,6 @@
 //! Possible errors when interacting with the network.
 
-use std::{fmt, io, io::ErrorKind, net::SocketAddr};
-
+use crate::session::PendingSessionHandshakeError;
 use reth_dns_discovery::resolver::ResolveError;
 use reth_ecies::ECIESErrorImpl;
 use reth_eth_wire::{
@@ -9,8 +8,7 @@ use reth_eth_wire::{
     DisconnectReason,
 };
 use reth_network_types::BackoffKind;
-
-use crate::session::PendingSessionHandshakeError;
+use std::{fmt, io, io::ErrorKind, net::SocketAddr};
 
 /// Service kind.
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]

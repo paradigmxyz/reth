@@ -1,6 +1,7 @@
 //! Bootnodes for the network
 
 use crate::NodeRecord;
+use alloc::vec::Vec;
 
 mod ethereum;
 pub use ethereum::*;

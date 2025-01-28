@@ -13,10 +13,6 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-/// The implementation of a container for storing intermediate changes to a trie.
-/// The container indicates when the trie has been modified.
-pub mod prefix_set;
-
 /// The implementation of forward-only in-memory cursor.
 pub mod forward_cursor;
 
@@ -50,9 +46,6 @@ pub mod witness;
 mod trie;
 pub use trie::{StateRoot, StorageRoot};
 
-/// Buffer for trie updates.
-pub mod updates;
-
 /// Utilities for state root checkpoint progress.
 mod progress;
 pub use progress::{IntermediateStateRootState, StateRootProgress};
@@ -62,17 +55,6 @@ pub mod stats;
 
 // re-export for convenience
 pub use reth_trie_common::*;
-
-/// Bincode-compatible serde implementations for trie types.
-///
-/// `bincode` crate allows for more efficient serialization of trie types, because it allows
-/// non-string map keys.
-///
-/// Read more: <https://github.com/paradigmxyz/reth/issues/11370>
-#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
-pub mod serde_bincode_compat {
-    pub use super::updates::serde_bincode_compat as updates;
-}
 
 /// Trie calculation metrics.
 #[cfg(feature = "metrics")]

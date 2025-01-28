@@ -61,7 +61,6 @@ There are many tables within the node, all used to store different types of data
 - StageCheckpointProgresses
 - PruneCheckpoints
 - VersionHistory
-- BlockRequests
 - ChainState
 
 <br>
@@ -213,7 +212,7 @@ pub trait DbTxMut: Send + Sync {
 
 Let's take a look at the `DbTx` and `DbTxMut` traits in action.
 
-Revisiting the `DatabaseProvider<Tx>` struct as an exampl, the `DatabaseProvider<Tx>::header_by_number()` function uses the `DbTx::get()` function to get a header from the `Headers` table.
+Revisiting the `DatabaseProvider<Tx>` struct as an example, the `DatabaseProvider<Tx>::header_by_number()` function uses the `DbTx::get()` function to get a header from the `Headers` table.
 
 [File: crates/storage/provider/src/providers/database/provider.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/provider/src/providers/database/provider.rs#L1319-L1336)
 
@@ -268,7 +267,7 @@ let mut headers_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
 let headers_walker = headers_cursor.walk_range(block_range.clone())?;
 ```
 
-Lets look at an examples of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline.
+Let's look at an examples of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline.
 
 [File: crates/stages/stages/src/stages/bodies.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/stages/stages/src/stages/bodies.rs#L267-L345)
 
@@ -283,7 +282,6 @@ fn unwind(&mut self, provider: &DatabaseProviderRW<DB>, input: UnwindInput) {
     let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
     let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
     let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
-    let mut requests_cursor = tx.cursor_write::<tables::BlockRequests>()?;
     // Cursors to unwind transitions
     let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
 
@@ -322,7 +320,7 @@ fn unwind(&mut self, provider: &DatabaseProviderRW<DB>, input: UnwindInput) {
 }
 ```
 
-This function first grabs a mutable cursor for the `BlockBodyIndices`, `BlockOmmers`, `BlockWithdrawals`, `BlockRequests`, `TransactionBlocks` tables.
+This function first grabs a mutable cursor for the `BlockBodyIndices`, `BlockOmmers`, `BlockWithdrawals`, `TransactionBlocks` tables.
 
 Then it gets a walker of the block body cursor, and then walk backwards through the cursor to delete the block body entries from the last block number to the block number specified in the `UnwindInput` struct.
 
@@ -332,7 +330,7 @@ While this is a brief look at how cursors work in the context of database tables
 
 ## Summary
 
-This chapter was packed with information, so lets do a quick review. The database is comprised of tables, with each table being a collection of key-value pairs representing various pieces of data in the blockchain. Any struct that implements the `Database` trait can view, update or delete entries in the various tables. The database design leverages nested traits and generic associated types to provide methods to interact with each table in the database.
+This chapter was packed with information, so let's do a quick review. The database is comprised of tables, with each table being a collection of key-value pairs representing various pieces of data in the blockchain. Any struct that implements the `Database` trait can view, update or delete entries in the various tables. The database design leverages nested traits and generic associated types to provide methods to interact with each table in the database.
 
 <br>
 

@@ -2,34 +2,35 @@ use std::sync::Arc;
 
 use reth_chain_state::CanonStateNotification;
 use reth_execution_types::Chain;
+use reth_primitives_traits::NodePrimitives;
 
 /// Notifications sent to an `ExEx`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum ExExNotification {
+pub enum ExExNotification<N: NodePrimitives = reth_chain_state::EthPrimitives> {
     /// Chain got committed without a reorg, and only the new chain is returned.
     ChainCommitted {
         /// The new chain after commit.
-        new: Arc<Chain>,
+        new: Arc<Chain<N>>,
     },
     /// Chain got reorged, and both the old and the new chains are returned.
     ChainReorged {
         /// The old chain before reorg.
-        old: Arc<Chain>,
+        old: Arc<Chain<N>>,
         /// The new chain after reorg.
-        new: Arc<Chain>,
+        new: Arc<Chain<N>>,
     },
     /// Chain got reverted, and only the old chain is returned.
     ChainReverted {
         /// The old chain before reversion.
-        old: Arc<Chain>,
+        old: Arc<Chain<N>>,
     },
 }
 
-impl ExExNotification {
+impl<N: NodePrimitives> ExExNotification<N> {
     /// Returns the committed chain from the [`Self::ChainCommitted`] and [`Self::ChainReorged`]
     /// variants, if any.
-    pub fn committed_chain(&self) -> Option<Arc<Chain>> {
+    pub fn committed_chain(&self) -> Option<Arc<Chain<N>>> {
         match self {
             Self::ChainCommitted { new } | Self::ChainReorged { old: _, new } => Some(new.clone()),
             Self::ChainReverted { .. } => None,
@@ -38,7 +39,7 @@ impl ExExNotification {
 
     /// Returns the reverted chain from the [`Self::ChainReorged`] and [`Self::ChainReverted`]
     /// variants, if any.
-    pub fn reverted_chain(&self) -> Option<Arc<Chain>> {
+    pub fn reverted_chain(&self) -> Option<Arc<Chain<N>>> {
         match self {
             Self::ChainReorged { old, new: _ } | Self::ChainReverted { old } => Some(old.clone()),
             Self::ChainCommitted { .. } => None,
@@ -60,8 +61,8 @@ impl ExExNotification {
     }
 }
 
-impl From<CanonStateNotification> for ExExNotification {
-    fn from(notification: CanonStateNotification) -> Self {
+impl<P: NodePrimitives> From<CanonStateNotification<P>> for ExExNotification<P> {
+    fn from(notification: CanonStateNotification<P>) -> Self {
         match notification {
             CanonStateNotification::Commit { new } => Self::ChainCommitted { new },
             CanonStateNotification::Reorg { old, new } => Self::ChainReorged { old, new },
@@ -72,11 +73,11 @@ impl From<CanonStateNotification> for ExExNotification {
 /// Bincode-compatible [`ExExNotification`] serde implementation.
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
-    use std::sync::Arc;
-
     use reth_execution_types::serde_bincode_compat::Chain;
+    use reth_primitives::{EthPrimitives, NodePrimitives};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
+    use std::sync::Arc;
 
     /// Bincode-compatible [`super::ExExNotification`] serde implementation.
     ///
@@ -95,14 +96,21 @@ pub(super) mod serde_bincode_compat {
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     #[allow(missing_docs)]
-    pub enum ExExNotification<'a> {
-        ChainCommitted { new: Chain<'a> },
-        ChainReorged { old: Chain<'a>, new: Chain<'a> },
-        ChainReverted { old: Chain<'a> },
+    #[serde(bound = "")]
+    pub enum ExExNotification<'a, N = EthPrimitives>
+    where
+        N: NodePrimitives,
+    {
+        ChainCommitted { new: Chain<'a, N> },
+        ChainReorged { old: Chain<'a, N>, new: Chain<'a, N> },
+        ChainReverted { old: Chain<'a, N> },
     }
 
-    impl<'a> From<&'a super::ExExNotification> for ExExNotification<'a> {
-        fn from(value: &'a super::ExExNotification) -> Self {
+    impl<'a, N> From<&'a super::ExExNotification<N>> for ExExNotification<'a, N>
+    where
+        N: NodePrimitives,
+    {
+        fn from(value: &'a super::ExExNotification<N>) -> Self {
             match value {
                 super::ExExNotification::ChainCommitted { new } => {
                     ExExNotification::ChainCommitted { new: Chain::from(new.as_ref()) }
@@ -120,8 +128,11 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> From<ExExNotification<'a>> for super::ExExNotification {
-        fn from(value: ExExNotification<'a>) -> Self {
+    impl<'a, N> From<ExExNotification<'a, N>> for super::ExExNotification<N>
+    where
+        N: NodePrimitives,
+    {
+        fn from(value: ExExNotification<'a, N>) -> Self {
             match value {
                 ExExNotification::ChainCommitted { new } => {
                     Self::ChainCommitted { new: Arc::new(new.into()) }
@@ -159,16 +170,14 @@ pub(super) mod serde_bincode_compat {
 
     #[cfg(test)]
     mod tests {
-        use std::sync::Arc;
-
+        use super::super::{serde_bincode_compat, ExExNotification};
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_execution_types::Chain;
-        use reth_primitives::SealedBlockWithSenders;
+        use reth_primitives::RecoveredBlock;
         use serde::{Deserialize, Serialize};
         use serde_with::serde_as;
-
-        use super::super::{serde_bincode_compat, ExExNotification};
+        use std::sync::Arc;
 
         #[test]
         fn test_exex_notification_bincode_roundtrip() {
@@ -184,18 +193,14 @@ pub(super) mod serde_bincode_compat {
             let data = Data {
                 notification: ExExNotification::ChainReorged {
                     old: Arc::new(Chain::new(
-                        vec![SealedBlockWithSenders::arbitrary(&mut arbitrary::Unstructured::new(
-                            &bytes,
-                        ))
-                        .unwrap()],
+                        vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                            .unwrap()],
                         Default::default(),
                         None,
                     )),
                     new: Arc::new(Chain::new(
-                        vec![SealedBlockWithSenders::arbitrary(&mut arbitrary::Unstructured::new(
-                            &bytes,
-                        ))
-                        .unwrap()],
+                        vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
+                            .unwrap()],
                         Default::default(),
                         None,
                     )),

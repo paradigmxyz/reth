@@ -6,7 +6,7 @@ This guide uses [Kurtosis' ethereum-package](https://github.com/ethpandaops/ethe
 * Go [here](https://docs.kurtosis.com/install/) to install Kurtosis
 * Go [here](https://docs.docker.com/get-docker/) to install Docker
 
-The [`ethereum-package`](https://github.com/ethpandaops/ethereum-package) is a [package](https://docs.kurtosis.com/advanced-concepts/packages) for a general purpose Ethereum testnet definition used for instantiating private testnets at any scale over Docker or Kubernetes, locally or in the cloud. This guide will go through how to spin up a local private testnet with Reth various CL clients locally. Specifically, you will instantiate a 2-node network over Docker with Reth/Lighthouse and Reth/Teku client combinations.
+The [`ethereum-package`](https://github.com/ethpandaops/ethereum-package) is a [package](https://docs.kurtosis.com/advanced-concepts/packages) for a general purpose Ethereum testnet definition used for instantiating private testnets at any scale over Docker or Kubernetes, locally or in the cloud. This guide will go through how to spin up a local private testnet with Reth and various CL clients locally. Specifically, you will instantiate a 2-node network over Docker with Reth/Lighthouse and Reth/Teku client combinations.
 
 To see all possible configurations and flags you can use, including metrics and observability tools (e.g. Grafana, Prometheus, etc), go [here](https://github.com/ethpandaops/ethereum-package#configuration).
 

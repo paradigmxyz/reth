@@ -3,9 +3,11 @@ use crate::{
     trie_cursor::{CursorSubNode, TrieCursor},
     BranchNodeCompact, Nibbles,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{map::HashSet, B256};
 use reth_storage_errors::db::DatabaseError;
-use std::collections::HashSet;
+
+#[cfg(feature = "metrics")]
+use crate::metrics::WalkerMetrics;
 
 /// `TrieWalker` is a structure that enables traversal of a Merkle trie.
 /// It allows moving through the trie in a depth-first manner, skipping certain branches
@@ -24,13 +26,23 @@ pub struct TrieWalker<C> {
     pub changes: PrefixSet,
     /// The retained trie node keys that need to be removed.
     removed_keys: Option<HashSet<Nibbles>>,
+    #[cfg(feature = "metrics")]
+    /// Walker metrics.
+    metrics: WalkerMetrics,
 }
 
 impl<C> TrieWalker<C> {
     /// Constructs a new `TrieWalker` from existing stack and a cursor.
     pub fn from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
-        let mut this =
-            Self { cursor, changes, stack, can_skip_current_node: false, removed_keys: None };
+        let mut this = Self {
+            cursor,
+            changes,
+            stack,
+            can_skip_current_node: false,
+            removed_keys: None,
+            #[cfg(feature = "metrics")]
+            metrics: WalkerMetrics::default(),
+        };
         this.update_skip_node();
         this
     }
@@ -45,8 +57,13 @@ impl<C> TrieWalker<C> {
 
     /// Split the walker into stack and trie updates.
     pub fn split(mut self) -> (Vec<CursorSubNode>, HashSet<Nibbles>) {
-        let keys = self.removed_keys.take();
-        (self.stack, keys.unwrap_or_default())
+        let keys = self.take_removed_keys();
+        (self.stack, keys)
+    }
+
+    /// Take removed keys from the walker.
+    pub fn take_removed_keys(&mut self) -> HashSet<Nibbles> {
+        self.removed_keys.take().unwrap_or_default()
     }
 
     /// Prints the current stack of trie nodes.
@@ -75,7 +92,7 @@ impl<C> TrieWalker<C> {
 
     /// Indicates whether the children of the current node are present in the trie.
     pub fn children_are_in_trie(&self) -> bool {
-        self.stack.last().map_or(false, |n| n.tree_flag())
+        self.stack.last().is_some_and(|n| n.tree_flag())
     }
 
     /// Returns the next unprocessed key in the trie.
@@ -99,7 +116,7 @@ impl<C> TrieWalker<C> {
         self.can_skip_current_node = self
             .stack
             .last()
-            .map_or(false, |node| !self.changes.contains(node.full_key()) && node.hash_flag());
+            .is_some_and(|node| !self.changes.contains(node.full_key()) && node.hash_flag());
     }
 }
 
@@ -113,6 +130,8 @@ impl<C: TrieCursor> TrieWalker<C> {
             stack: vec![CursorSubNode::default()],
             can_skip_current_node: false,
             removed_keys: None,
+            #[cfg(feature = "metrics")]
+            metrics: WalkerMetrics::default(),
         };
 
         // Set up the root node of the trie in the stack, if it exists.
@@ -126,11 +145,12 @@ impl<C: TrieCursor> TrieWalker<C> {
     }
 
     /// Advances the walker to the next trie node and updates the skip node flag.
+    /// The new key can then be obtained via `key()`.
     ///
     /// # Returns
     ///
-    /// * `Result<Option<Nibbles>, Error>` - The next key in the trie or an error.
-    pub fn advance(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+    /// * `Result<(), Error>` - Unit on success or an error.
+    pub fn advance(&mut self) -> Result<(), DatabaseError> {
         if let Some(last) = self.stack.last() {
             if !self.can_skip_current_node && self.children_are_in_trie() {
                 // If we can't skip the current node and the children are in the trie,
@@ -148,8 +168,7 @@ impl<C: TrieCursor> TrieWalker<C> {
             self.update_skip_node();
         }
 
-        // Return the current key.
-        Ok(self.key().cloned())
+        Ok(())
     }
 
     /// Retrieves the current root node from the DB, seeking either the exact node or the next one.
@@ -177,6 +196,19 @@ impl<C: TrieCursor> TrieWalker<C> {
         // necessary for proper traversal and accurately representing the trie in the stack.
         if !key.is_empty() && !self.stack.is_empty() {
             self.stack[0].set_nibble(key[0] as i8);
+        }
+
+        // The current tree mask might have been set incorrectly.
+        // Sanity check that the newly retrieved trie node key is the child of the last item
+        // on the stack. If not, advance to the next sibling instead of adding the node to the
+        // stack.
+        if let Some(subnode) = self.stack.last() {
+            if !key.starts_with(subnode.full_key()) {
+                #[cfg(feature = "metrics")]
+                self.metrics.inc_out_of_order_subnode(1);
+                self.move_to_next_sibling(false)?;
+                return Ok(())
+            }
         }
 
         // Create a new CursorSubNode and push it to the stack.

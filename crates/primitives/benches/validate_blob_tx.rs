@@ -1,21 +1,14 @@
 #![allow(missing_docs)]
 
 use alloy_consensus::TxEip4844;
-use alloy_eips::eip4844::{env_settings::EnvKzgSettings, MAX_BLOBS_PER_BLOCK};
-use alloy_primitives::hex;
+use alloy_eips::eip4844::{
+    env_settings::EnvKzgSettings, BlobTransactionSidecar, MAX_BLOBS_PER_BLOCK,
+};
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use proptest::{
-    prelude::*,
-    strategy::ValueTree,
-    test_runner::{RngAlgorithm, TestRng, TestRunner},
-};
+use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
-use reth_primitives::BlobTransactionSidecar;
-
-// constant seed to use for the rng
-const SEED: [u8; 32] = hex!("1337133713371337133713371337133713371337133713371337133713371337");
 
 /// Benchmarks EIP-48444 blob validation.
 fn blob_validation(c: &mut Criterion) {
@@ -34,9 +27,7 @@ fn validate_blob_tx(
     kzg_settings: EnvKzgSettings,
 ) {
     let setup = || {
-        let config = ProptestConfig::default();
-        let rng = TestRng::from_seed(RngAlgorithm::ChaCha, &SEED);
-        let mut runner = TestRunner::new_with_rng(config, rng);
+        let mut runner = TestRunner::deterministic();
 
         // generate tx and sidecar
         let mut tx = arb::<TxEip4844>().new_tree(&mut runner).unwrap().current();
@@ -68,12 +59,10 @@ fn validate_blob_tx(
 
     // for now we just use the default SubPoolLimit
     group.bench_function(group_id, |b| {
+        let kzg_settings = kzg_settings.get();
         b.iter_with_setup(setup, |(tx, blob_sidecar)| {
-            if let Err(err) =
-                std::hint::black_box(tx.validate_blob(&blob_sidecar, kzg_settings.get()))
-            {
-                println!("Validation failed: {err:?}");
-            }
+            let r = tx.validate_blob(&blob_sidecar, kzg_settings);
+            (r, tx, blob_sidecar)
         });
     });
 }

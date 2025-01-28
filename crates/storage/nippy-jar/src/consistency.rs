@@ -28,6 +28,11 @@ pub struct NippyJarChecker<H: NippyJarHeader = ()> {
 }
 
 impl<H: NippyJarHeader> NippyJarChecker<H> {
+    /// Creates a new instance of [`NippyJarChecker`] with the provided [`NippyJar`].
+    ///
+    /// This method initializes the checker without any associated file handles for
+    /// the data or offsets files. The [`NippyJar`] passed in contains all necessary
+    /// configurations for handling data.
     pub const fn new(jar: NippyJar<H>) -> Self {
         Self { jar, data_file: None, offsets_file: None }
     }

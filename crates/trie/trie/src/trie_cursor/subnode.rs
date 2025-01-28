@@ -76,7 +76,7 @@ impl CursorSubNode {
     pub fn state_flag(&self) -> bool {
         self.node
             .as_ref()
-            .map_or(true, |node| self.nibble < 0 || node.state_mask.is_bit_set(self.nibble as u8))
+            .is_none_or(|node| self.nibble < 0 || node.state_mask.is_bit_set(self.nibble as u8))
     }
 
     /// Returns `true` if the tree flag is set for the current nibble.
@@ -84,12 +84,12 @@ impl CursorSubNode {
     pub fn tree_flag(&self) -> bool {
         self.node
             .as_ref()
-            .map_or(true, |node| self.nibble < 0 || node.tree_mask.is_bit_set(self.nibble as u8))
+            .is_none_or(|node| self.nibble < 0 || node.tree_mask.is_bit_set(self.nibble as u8))
     }
 
     /// Returns `true` if the current nibble has a root hash.
     pub fn hash_flag(&self) -> bool {
-        self.node.as_ref().map_or(false, |node| match self.nibble {
+        self.node.as_ref().is_some_and(|node| match self.nibble {
             // This guy has it
             -1 => node.root_hash.is_some(),
             // Or get it from the children

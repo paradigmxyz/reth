@@ -1,3 +1,5 @@
+//! Compact implementation for [`AlloyHeader`]
+
 use crate::Compact;
 use alloy_consensus::Header as AlloyHeader;
 use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, U256};
@@ -10,8 +12,13 @@ use alloy_primitives::{Address, BlockNumber, Bloom, Bytes, B256, U256};
 /// will automatically apply to this type.
 ///
 /// Notice: Make sure this struct is 1:1 with [`alloy_consensus::Header`]
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "test-utils"),
+    derive(serde::Serialize, serde::Deserialize, arbitrary::Arbitrary)
+)]
+#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
+#[reth_codecs(crate = "crate")]
 pub(crate) struct Header {
     parent_hash: B256,
     ommers_hash: B256,
@@ -42,10 +49,15 @@ pub(crate) struct Header {
 /// used as a field of [`Header`] for backwards compatibility.
 ///
 /// More information: <https://github.com/paradigmxyz/reth/issues/7820> & [`reth_codecs_derive::Compact`].
-#[cfg_attr(test, derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    any(test, feature = "test-utils"),
+    derive(serde::Serialize, serde::Deserialize, arbitrary::Arbitrary)
+)]
+#[cfg_attr(feature = "test-utils", allow(unreachable_pub), visibility::make(pub))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Compact)]
+#[reth_codecs(crate = "crate")]
 pub(crate) struct HeaderExt {
-    requests_root: Option<B256>,
+    requests_hash: Option<B256>,
 }
 
 impl HeaderExt {
@@ -53,7 +65,7 @@ impl HeaderExt {
     ///
     /// Required since [`Header`] uses `Option<HeaderExt>` as a field.
     const fn into_option(self) -> Option<Self> {
-        if self.requests_root.is_some() {
+        if self.requests_hash.is_some() {
             Some(self)
         } else {
             None
@@ -66,7 +78,7 @@ impl Compact for AlloyHeader {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let extra_fields = HeaderExt { requests_root: self.requests_root };
+        let extra_fields = HeaderExt { requests_hash: self.requests_hash };
 
         let header = Header {
             parent_hash: self.parent_hash,
@@ -116,7 +128,7 @@ impl Compact for AlloyHeader {
             blob_gas_used: header.blob_gas_used,
             excess_blob_gas: header.excess_blob_gas,
             parent_beacon_block_root: header.parent_beacon_block_root,
-            requests_root: header.extra_fields.and_then(|h| h.requests_root),
+            requests_hash: header.extra_fields.as_ref().and_then(|h| h.requests_hash),
             extra_data: header.extra_data,
         };
         (alloy_header, buf)
@@ -126,12 +138,13 @@ impl Compact for AlloyHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
     use alloy_primitives::{address, b256, bloom, bytes, hex};
 
     /// Holesky block #1947953
     const HOLESKY_BLOCK: Header = Header {
         parent_hash: b256!("8605e0c46689f66b3deed82598e43d5002b71a929023b665228728f0c6e62a95"),
-        ommers_hash: b256!("1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
+        ommers_hash: EMPTY_OMMER_ROOT_HASH,
         beneficiary: address!("c6e2459991bfe27cca6d86722f35da23a1e4cb97"),
         state_root: b256!("edad188ca5647d62f4cca417c11a1afbadebce30d23260767f6f587e9b3b9993"),
         transactions_root: b256!("4daf25dc08a841aa22aa0d3cb3e1f159d4dcaf6a6063d4d36bfac11d3fdb63ee"),
@@ -175,7 +188,7 @@ mod tests {
     #[test]
     fn test_extra_fields() {
         let mut header = HOLESKY_BLOCK;
-        header.extra_fields = Some(HeaderExt { requests_root: Some(B256::random()) });
+        header.extra_fields = Some(HeaderExt { requests_hash: Some(B256::random())});
 
         let mut encoded_header = vec![];
         let len = header.to_compact(&mut encoded_header);

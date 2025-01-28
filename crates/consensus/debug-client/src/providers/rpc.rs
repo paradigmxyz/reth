@@ -1,7 +1,7 @@
 use crate::BlockProvider;
 use alloy_eips::BlockNumberOrTag;
 use alloy_provider::{Provider, ProviderBuilder};
-use alloy_rpc_types::{Block, BlockTransactionsKind};
+use alloy_rpc_types_eth::{Block, BlockTransactionsKind};
 use futures::StreamExt;
 use tokio::sync::mpsc::Sender;
 
@@ -30,9 +30,9 @@ impl BlockProvider for RpcBlockProvider {
             .expect("failed to subscribe on new blocks")
             .into_stream();
 
-        while let Some(block) = stream.next().await {
+        while let Some(header) = stream.next().await {
             let full_block = ws_provider
-                .get_block_by_hash(block.header.hash, BlockTransactionsKind::Full)
+                .get_block_by_hash(header.hash, BlockTransactionsKind::Full)
                 .await
                 .expect("failed to get block")
                 .expect("block not found");
@@ -44,12 +44,9 @@ impl BlockProvider for RpcBlockProvider {
     }
 
     async fn get_block(&self, block_number: u64) -> eyre::Result<Block> {
-        let ws_provider = ProviderBuilder::new()
-            .on_builtin(&self.ws_rpc_url)
-            .await
-            .expect("failed to create WS provider");
+        let ws_provider = ProviderBuilder::new().on_builtin(&self.ws_rpc_url).await?;
         let block: Block = ws_provider
-            .get_block_by_number(BlockNumberOrTag::Number(block_number), true)
+            .get_block_by_number(BlockNumberOrTag::Number(block_number), true.into())
             .await?
             .ok_or_else(|| eyre::eyre!("block not found by number {}", block_number))?;
         Ok(block)

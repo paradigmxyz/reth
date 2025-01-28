@@ -15,7 +15,7 @@ workspace = true
 reth-mdbx-sys.workspace = true
 
 bitflags.workspace = true
-byteorder = "1"
+byteorder.workspace = true
 derive_more.workspace = true
 indexmap = "2"
 parking_lot.workspace = true
@@ -31,11 +31,7 @@ return-borrowed = []
 read-tx-timeouts = ["dep:dashmap"]
 
 [dev-dependencies]
-pprof = { workspace = true, features = [
-    "flamegraph",
-    "frame-pointer",
-    "criterion",
-] }
+pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion.workspace = true
 rand.workspace = true
 rand_xorshift = "0.3"

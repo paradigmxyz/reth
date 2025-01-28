@@ -1,6 +1,6 @@
+use crate::{PruneCheckpoint, PruneMode, PruneSegment};
 use alloy_primitives::{BlockNumber, TxNumber};
-
-use crate::{PruneCheckpoint, PruneLimiter, PruneMode, PruneSegment};
+use derive_more::Display;
 
 /// Pruner run output.
 #[derive(Debug)]
@@ -15,6 +15,18 @@ impl From<PruneProgress> for PrunerOutput {
     fn from(progress: PruneProgress) -> Self {
         Self { progress, segments: Vec::new() }
     }
+}
+
+/// Represents information of a pruner run for a segment.
+#[derive(Debug, Clone, PartialEq, Eq, Display)]
+#[display("(table={segment}, pruned={pruned}, status={progress})")]
+pub struct PrunedSegmentInfo {
+    /// The pruned segment
+    pub segment: PruneSegment,
+    /// Number of pruned entries
+    pub pruned: usize,
+    /// Prune progress
+    pub progress: PruneProgress,
 }
 
 /// Segment pruning output.
@@ -67,16 +79,18 @@ impl SegmentOutputCheckpoint {
 }
 
 /// Progress of pruning.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Display)]
 pub enum PruneProgress {
     /// There is more data to prune.
+    #[display("HasMoreData({_0})")]
     HasMoreData(PruneInterruptReason),
     /// Pruning has been finished.
+    #[display("Finished")]
     Finished,
 }
 
 /// Reason for interrupting a prune run.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Display)]
 pub enum PruneInterruptReason {
     /// Prune run timed out.
     Timeout,
@@ -87,17 +101,6 @@ pub enum PruneInterruptReason {
 }
 
 impl PruneInterruptReason {
-    /// Creates new [`PruneInterruptReason`] based on the [`PruneLimiter`].
-    pub fn new(limiter: &PruneLimiter) -> Self {
-        if limiter.is_time_limit_reached() {
-            Self::Timeout
-        } else if limiter.is_deleted_entries_limit_reached() {
-            Self::DeletedEntriesLimitReached
-        } else {
-            Self::Unknown
-        }
-    }
-
     /// Returns `true` if the reason is timeout.
     pub const fn is_timeout(&self) -> bool {
         matches!(self, Self::Timeout)
@@ -110,19 +113,6 @@ impl PruneInterruptReason {
 }
 
 impl PruneProgress {
-    /// Creates new [`PruneProgress`].
-    ///
-    /// If `done == true`, returns [`PruneProgress::Finished`], otherwise
-    /// [`PruneProgress::HasMoreData`] is returned with [`PruneInterruptReason`] according to the
-    /// passed limiter.
-    pub fn new(done: bool, limiter: &PruneLimiter) -> Self {
-        if done {
-            Self::Finished
-        } else {
-            Self::HasMoreData(PruneInterruptReason::new(limiter))
-        }
-    }
-
     /// Returns `true` if prune run is finished.
     pub const fn is_finished(&self) -> bool {
         matches!(self, Self::Finished)

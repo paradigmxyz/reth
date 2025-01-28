@@ -1,6 +1,6 @@
-use crate::utils::{advance_chain, setup};
 use alloy_rpc_types_engine::PayloadStatusEnum;
-use reth::blockchain_tree::error::BlockchainTreeError;
+use futures::StreamExt;
+use reth_optimism_node::utils::{advance_chain, setup};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -27,15 +27,35 @@ async fn can_sync() -> eyre::Result<()> {
     // On second node, sync optimistically up to block number 88a
     second_node
         .engine_api
+        .update_optimistic_forkchoice(canonical_chain[tip_index - reorg_depth - 1])
+        .await?;
+    second_node
+        .wait_block(
+            (tip - reorg_depth - 1) as u64,
+            canonical_chain[tip_index - reorg_depth - 1],
+            true,
+        )
+        .await?;
+    // We send FCU twice to ensure that pool receives canonical chain update on the second FCU
+    // This is required because notifications are not sent during backfill sync
+    second_node
+        .engine_api
         .update_optimistic_forkchoice(canonical_chain[tip_index - reorg_depth])
         .await?;
     second_node
-        .wait_block((tip - reorg_depth) as u64, canonical_chain[tip_index - reorg_depth], true)
+        .wait_block((tip - reorg_depth) as u64, canonical_chain[tip_index - reorg_depth], false)
         .await?;
+    second_node.engine_api.canonical_stream.next().await.unwrap();
 
-    // On third node, sync optimistically up to block number 90a
+    // Trigger backfil sync until block 80
+    third_node
+        .engine_api
+        .update_forkchoice(canonical_chain[tip_index - 10], canonical_chain[tip_index - 10])
+        .await?;
+    third_node.wait_block((tip - 10) as u64, canonical_chain[tip_index - 10], true).await?;
+    // Trigger live sync to block 90
     third_node.engine_api.update_optimistic_forkchoice(canonical_chain[tip_index]).await?;
-    third_node.wait_block(tip as u64, canonical_chain[tip_index], true).await?;
+    third_node.wait_block(tip as u64, canonical_chain[tip_index], false).await?;
 
     //  On second node, create a side chain: 88a -> 89b -> 90b
     wallet.lock().await.inner_nonce -= reorg_depth as u64;
@@ -51,7 +71,6 @@ async fn can_sync() -> eyre::Result<()> {
             side_payload_chain[0].0.clone(),
             side_payload_chain[0].1.clone(),
             PayloadStatusEnum::Valid,
-            Default::default(),
         )
         .await;
 
@@ -64,26 +83,9 @@ async fn can_sync() -> eyre::Result<()> {
         .wait_block(
             side_payload_chain[0].0.block().number,
             side_payload_chain[0].0.block().hash(),
-            true,
+            false,
         )
         .await?;
-
-    // Make sure that trying to submit 89a again will result in an invalid payload status, since 89b
-    // has been set as finalized.
-    let _ = third_node
-        .engine_api
-        .submit_payload(
-            canonical_payload_chain[tip_index - reorg_depth + 1].0.clone(),
-            canonical_payload_chain[tip_index - reorg_depth + 1].1.clone(),
-            PayloadStatusEnum::Invalid {
-                validation_error: BlockchainTreeError::PendingBlockIsFinalized {
-                    last_finalized: (tip - reorg_depth) as u64 + 1,
-                }
-                .to_string(),
-            },
-            Default::default(),
-        )
-        .await;
 
     Ok(())
 }

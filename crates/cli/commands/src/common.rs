@@ -2,10 +2,10 @@
 
 use alloy_primitives::B256;
 use clap::Parser;
-use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_config::{config::EtlConfig, Config};
+use reth_consensus::noop::NoopConsensus;
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
@@ -15,7 +15,10 @@ use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs},
     dirs::{ChainPath, DataDirPath},
 };
-use reth_provider::{providers::StaticFileProvider, ProviderFactory, StaticFileProviderFactory};
+use reth_provider::{
+    providers::{NodeTypesForProvider, StaticFileProvider},
+    ProviderFactory, StaticFileProviderFactory,
+};
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
@@ -50,13 +53,13 @@ pub struct EnvironmentArgs<C: ChainSpecParser> {
     pub db: DatabaseArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> EnvironmentArgs<C> {
+impl<C: ChainSpecParser> EnvironmentArgs<C> {
     /// Initializes environment according to [`AccessRights`] and returns an instance of
     /// [`Environment`].
-    pub fn init<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
-        &self,
-        access: AccessRights,
-    ) -> eyre::Result<Environment<N>> {
+    pub fn init<N: CliNodeTypes>(&self, access: AccessRights) -> eyre::Result<Environment<N>>
+    where
+        C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+    {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
@@ -103,15 +106,18 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Environmen
     /// Returns a [`ProviderFactory`] after executing consistency checks.
     ///
     /// If it's a read-write environment and an issue is found, it will attempt to heal (including a
-    /// pipeline unwind). Otherwise, it will print out an warning, advising the user to restart the
+    /// pipeline unwind). Otherwise, it will print out a warning, advising the user to restart the
     /// node to heal.
-    fn create_provider_factory<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    fn create_provider_factory<N: CliNodeTypes>(
         &self,
         config: &Config,
         db: Arc<DatabaseEnv>,
-        static_file_provider: StaticFileProvider,
-    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>> {
-        let has_receipt_pruning = config.prune.as_ref().map_or(false, |a| a.has_receipts_pruning());
+        static_file_provider: StaticFileProvider<N::Primitives>,
+    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
+    where
+        C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+    {
+        let has_receipt_pruning = config.prune.as_ref().is_some_and(|a| a.has_receipts_pruning());
         let prune_modes =
             config.prune.as_ref().map(|prune| prune.segments.clone()).unwrap_or_default();
         let factory = ProviderFactory::<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>::new(
@@ -126,7 +132,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Environmen
             .static_file_provider()
             .check_consistency(&factory.provider()?, has_receipt_pruning)?
         {
-            if factory.db_ref().is_read_only() {
+            if factory.db_ref().is_read_only()? {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
                 return Ok(factory)
             }
@@ -144,10 +150,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Environmen
                 .add_stages(DefaultStages::new(
                     factory.clone(),
                     tip_rx,
-                    Arc::new(EthBeaconConsensus::new(self.chain.clone())),
+                    Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    NoopBlockExecutorProvider::default(),
+                    NoopBlockExecutorProvider::<N::Primitives>::default(),
                     config.stages.clone(),
                     prune_modes.clone(),
                 ))
@@ -188,3 +194,8 @@ impl AccessRights {
         matches!(self, Self::RW)
     }
 }
+
+/// Helper trait with a common set of requirements for the
+/// [`NodeTypes`](reth_node_builder::NodeTypes) in CLI.
+pub trait CliNodeTypes: NodeTypesWithEngine + NodeTypesForProvider {}
+impl<N> CliNodeTypes for N where N: NodeTypesWithEngine + NodeTypesForProvider {}

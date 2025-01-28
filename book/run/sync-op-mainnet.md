@@ -1,6 +1,6 @@
 # Sync OP Mainnet
 
-To sync OP mainnet, bedrock state needs to be imported as a starting point. There are currently two ways:
+To sync OP mainnet, Bedrock state needs to be imported as a starting point. There are currently two ways:
 
 * Minimal bootstrap **(recommended)**: only state snapshot at Bedrock block is imported without any OVM historical data.
 * Full bootstrap **(not recommended)**: state, blocks and receipts are imported. *Not recommended for now: [storage consistency issue](https://github.com/paradigmxyz/reth/pull/11099) tldr: sudden crash may break the node

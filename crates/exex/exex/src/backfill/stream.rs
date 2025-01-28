@@ -1,24 +1,23 @@
+use super::job::BackfillJobResult;
 use crate::{BackfillJob, SingleBlockBackfillJob};
-use std::{
-    ops::RangeInclusive,
-    pin::Pin,
-    task::{ready, Context, Poll},
-};
-
 use alloy_primitives::BlockNumber;
 use futures::{
     stream::{FuturesOrdered, Stream},
     StreamExt,
 };
 use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
-use reth_primitives::{BlockWithSenders, Receipt};
-use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
+use reth_node_api::NodePrimitives;
+use reth_primitives::{EthPrimitives, RecoveredBlock};
+use reth_provider::{BlockReader, Chain, StateProviderFactory};
 use reth_prune_types::PruneModes;
 use reth_stages_api::ExecutionStageThresholds;
 use reth_tracing::tracing::debug;
+use std::{
+    ops::RangeInclusive,
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
 use tokio::task::JoinHandle;
-
-use super::job::BackfillJobResult;
 
 /// The default parallelism for active tasks in [`StreamBackfillJob`].
 pub(crate) const DEFAULT_PARALLELISM: usize = 4;
@@ -38,8 +37,11 @@ struct BackfillTaskOutput<T> {
 /// Ordered queue of [`JoinHandle`]s that yield [`BackfillTaskOutput`]s.
 type BackfillTasks<T> = FuturesOrdered<JoinHandle<BackfillTaskOutput<T>>>;
 
-type SingleBlockStreamItem = (BlockWithSenders, BlockExecutionOutput<Receipt>);
-type BatchBlockStreamItem = Chain;
+type SingleBlockStreamItem<N = EthPrimitives> = (
+    RecoveredBlock<<N as NodePrimitives>::Block>,
+    BlockExecutionOutput<<N as NodePrimitives>::Receipt>,
+);
+type BatchBlockStreamItem<N = EthPrimitives> = Chain<N>;
 
 /// Stream for processing backfill jobs asynchronously.
 ///
@@ -73,10 +75,19 @@ where
         self
     }
 
-    /// Spawns a new task calling the [`BackfillTaskIterator::next`] method and pushes it to the
-    /// [`BackfillTasks`] queue.
-    fn push_task(&mut self, mut job: BackfillTaskIterator<T>) {
+    /// Spawns a new task calling the [`BackfillTaskIterator::next`] method and pushes it to the end
+    /// of the [`BackfillTasks`] queue.
+    fn push_back(&mut self, mut job: BackfillTaskIterator<T>) {
         self.tasks.push_back(tokio::task::spawn_blocking(move || BackfillTaskOutput {
+            result: job.next(),
+            job,
+        }));
+    }
+
+    /// Spawns a new task calling the [`BackfillTaskIterator::next`] method and pushes it to the
+    /// front of the  [`BackfillTasks`] queue.
+    fn push_front(&mut self, mut job: BackfillTaskIterator<T>) {
+        self.tasks.push_front(tokio::task::spawn_blocking(move || BackfillTaskOutput {
             result: job.next(),
             job,
         }));
@@ -89,8 +100,9 @@ where
 
             if let BackfillTaskOutput { result: Some(job_result), job } = task_result {
                 // If the task returned a non-empty result, a new task advancing the job is created
-                // and pushed to the front of the queue.
-                self.push_task(job);
+                // and pushed to the __front__ of the queue, so that the next item of this returned
+                // next.
+                self.push_front(job);
 
                 return Poll::Ready(Some(job_result))
             };
@@ -100,12 +112,12 @@ where
     }
 }
 
-impl<E, P> Stream for StreamBackfillJob<E, P, SingleBlockStreamItem>
+impl<E, P> Stream for StreamBackfillJob<E, P, SingleBlockStreamItem<E::Primitives>>
 where
-    E: BlockExecutorProvider + Clone + Send + 'static,
-    P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>> + Clone + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
 {
-    type Item = BackfillJobResult<SingleBlockStreamItem>;
+    type Item = BackfillJobResult<SingleBlockStreamItem<E::Primitives>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -126,50 +138,61 @@ where
                 range: block_number..=block_number,
                 stream_parallelism: this.parallelism,
             }) as BackfillTaskIterator<_>;
-            this.push_task(job);
+            this.push_back(job);
         }
 
         this.poll_next_task(cx)
     }
 }
 
-impl<E, P> Stream for StreamBackfillJob<E, P, BatchBlockStreamItem>
+impl<E, P> Stream for StreamBackfillJob<E, P, BatchBlockStreamItem<E::Primitives>>
 where
-    E: BlockExecutorProvider + Clone + Send + 'static,
-    P: HeaderProvider + BlockReader + StateProviderFactory + Clone + Send + Unpin + 'static,
+    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>> + Clone + 'static,
+    P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
 {
-    type Item = BackfillJobResult<BatchBlockStreamItem>;
+    type Item = BackfillJobResult<BatchBlockStreamItem<E::Primitives>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        // Spawn new tasks only if we are below the parallelism configured.
-        while this.tasks.len() < this.parallelism {
-            // Take the next `batch_size` blocks from the range and calculate the range bounds
-            let mut range = this.range.by_ref().take(this.batch_size);
-            let start = range.next();
-            let range_bounds = start.zip(range.last().or(start));
+        loop {
+            // Spawn new tasks only if we are below the parallelism configured.
+            while this.tasks.len() < this.parallelism {
+                // Take the next `batch_size` blocks from the range and calculate the range bounds
+                let mut range = this.range.by_ref().take(this.batch_size);
+                let start = range.next();
+                let range_bounds = start.zip(range.last().or(start));
 
-            // Create the range from the range bounds. If it is empty, we are done.
-            let Some(range) = range_bounds.map(|(first, last)| first..=last) else {
-                debug!(target: "exex::backfill", tasks = %this.tasks.len(), range = ?this.range, "No more block batches to backfill");
-                break;
-            };
+                // Create the range from the range bounds. If it is empty, we are done.
+                let Some(range) = range_bounds.map(|(first, last)| first..=last) else {
+                    debug!(target: "exex::backfill", tasks = %this.tasks.len(), range = ?this.range, "No more block batches to backfill");
+                    break;
+                };
 
-            // Spawn a new task for that range
-            debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?range, "Spawning new block batch backfill task");
-            let job = Box::new(BackfillJob {
-                executor: this.executor.clone(),
-                provider: this.provider.clone(),
-                prune_modes: this.prune_modes.clone(),
-                thresholds: this.thresholds.clone(),
-                range,
-                stream_parallelism: this.parallelism,
-            }) as BackfillTaskIterator<_>;
-            this.push_task(job);
+                // Spawn a new task for that range
+                debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?range, "Spawning new block batch backfill task");
+                let job = Box::new(BackfillJob {
+                    executor: this.executor.clone(),
+                    provider: this.provider.clone(),
+                    prune_modes: this.prune_modes.clone(),
+                    thresholds: this.thresholds.clone(),
+                    range,
+                    stream_parallelism: this.parallelism,
+                }) as BackfillTaskIterator<_>;
+                this.push_back(job);
+            }
+
+            let res = ready!(this.poll_next_task(cx));
+
+            if res.is_some() {
+                return Poll::Ready(res);
+            }
+
+            if this.range.is_empty() {
+                // only terminate the stream if there are no more blocks to process
+                return Poll::Ready(None);
+            }
         }
-
-        this.poll_next_task(cx)
     }
 }
 
@@ -188,7 +211,10 @@ impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, Single
     }
 }
 
-impl<E, P> From<BackfillJob<E, P>> for StreamBackfillJob<E, P, BatchBlockStreamItem> {
+impl<E, P> From<BackfillJob<E, P>> for StreamBackfillJob<E, P, BatchBlockStreamItem<E::Primitives>>
+where
+    E: BlockExecutorProvider,
+{
     fn from(job: BackfillJob<E, P>) -> Self {
         let batch_size = job.thresholds.max_blocks.map_or(DEFAULT_BATCH_SIZE, |max| max as usize);
         Self {
@@ -209,8 +235,6 @@ impl<E, P> From<BackfillJob<E, P>> for StreamBackfillJob<E, P, BatchBlockStreamI
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use crate::{
         backfill::test_utils::{
             blocks_and_execution_outcome, blocks_and_execution_outputs, chain_spec,
@@ -218,10 +242,9 @@ mod tests {
         BackfillJobFactory,
     };
     use futures::StreamExt;
-    use reth_blockchain_tree::noop::NoopBlockchainTree;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::execute::EthExecutorProvider;
-    use reth_primitives::public_key_to_address;
+    use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
     };
@@ -242,10 +265,7 @@ mod tests {
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(
-            provider_factory.clone(),
-            Arc::new(NoopBlockchainTree::default()),
-        )?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
 
         // Create first 2 blocks
         let blocks_and_execution_outcomes =
@@ -258,8 +278,7 @@ mod tests {
         // execute first block
         let (block, mut execution_output) = backfill_stream.next().await.unwrap().unwrap();
         execution_output.state.reverts.sort();
-        let sealed_block_with_senders = blocks_and_execution_outcomes[0].0.clone();
-        let expected_block = sealed_block_with_senders.unseal();
+        let expected_block = blocks_and_execution_outcomes[0].0.clone();
         let expected_output = &blocks_and_execution_outcomes[0].1;
         assert_eq!(block, expected_block);
         assert_eq!(&execution_output, expected_output);
@@ -283,20 +302,16 @@ mod tests {
         let executor = EthExecutorProvider::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
-        let blockchain_db = BlockchainProvider::new(
-            provider_factory.clone(),
-            Arc::new(NoopBlockchainTree::default()),
-        )?;
+        let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
 
         // Create first 2 blocks
         let (blocks, execution_outcome) =
             blocks_and_execution_outcome(provider_factory, chain_spec, key_pair)?;
 
         // Backfill the same range
-        let factory =
-            BackfillJobFactory::new(executor.clone(), blockchain_db.clone()).with_thresholds(
-                ExecutionStageThresholds { max_blocks: Some(2), ..Default::default() },
-            );
+        let factory = BackfillJobFactory::new(executor.clone(), blockchain_db.clone())
+            .with_thresholds(ExecutionStageThresholds { max_blocks: Some(2), ..Default::default() })
+            .with_stream_parallelism(1);
         let mut backfill_stream = factory.backfill(1..=2).into_stream();
         let mut chain = backfill_stream.next().await.unwrap().unwrap();
         chain.execution_outcome_mut().state_mut().reverts.sort();

@@ -12,19 +12,19 @@ workspace = true
 
 [dependencies]
 # reth
-reth-beacon-consensus.workspace = true
 reth-consensus.workspace = true
 reth-engine-tree.workspace = true
 reth-evm.workspace = true
 reth-network-p2p.workspace = true
 reth-payload-builder.workspace = true
-reth-payload-validator.workspace = true
+reth-primitives.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
 reth-node-types.workspace = true
 reth-chainspec.workspace = true
+reth-engine-primitives.workspace = true
 
 # async
 futures.workspace = true
@@ -35,6 +35,7 @@ thiserror.workspace = true
 
 [dev-dependencies]
 reth-engine-tree = { workspace = true, features = ["test-utils"] }
+reth-ethereum-consensus.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-evm-ethereum.workspace = true
 reth-exex-types.workspace = true

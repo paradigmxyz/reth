@@ -210,6 +210,12 @@ impl FsPathError {
     }
 }
 
+/// Wrapper for [`File::open`].
+pub fn open(path: impl AsRef<Path>) -> Result<File> {
+    let path = path.as_ref();
+    File::open(path).map_err(|err| FsPathError::open(err, path))
+}
+
 /// Wrapper for `std::fs::read_to_string`
 pub fn read_to_string(path: impl AsRef<Path>) -> Result<String> {
     let path = path.as_ref();

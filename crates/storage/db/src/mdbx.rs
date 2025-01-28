@@ -1,6 +1,6 @@
-//! Bindings for [MDBX](https://libmdbx.dqdkfa.ru/).
+//! Helper functions for initializing and opening a database.
 
-use crate::is_database_empty;
+use crate::{is_database_empty, TableSet, Tables};
 use eyre::Context;
 use std::path::Path;
 
@@ -28,27 +28,44 @@ pub fn create_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Resu
     Ok(DatabaseEnv::open(rpath, DatabaseEnvKind::RW, args)?)
 }
 
-/// Opens up an existing database or creates a new one at the specified path. Creates tables if
-/// necessary. Read/Write mode.
+/// Opens up an existing database or creates a new one at the specified path. Creates tables defined
+/// in [`Tables`] if necessary. Read/Write mode.
 pub fn init_db<P: AsRef<Path>>(path: P, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
+    init_db_for::<P, Tables>(path, args)
+}
+
+/// Opens up an existing database or creates a new one at the specified path. Creates tables defined
+/// in the given [`TableSet`] if necessary. Read/Write mode.
+pub fn init_db_for<P: AsRef<Path>, TS: TableSet>(
+    path: P,
+    args: DatabaseArguments,
+) -> eyre::Result<DatabaseEnv> {
     let client_version = args.client_version().clone();
     let db = create_db(path, args)?;
-    db.create_tables()?;
+    db.create_tables_for::<TS>()?;
     db.record_client_version(client_version)?;
     Ok(db)
 }
 
 /// Opens up an existing database. Read only mode. It doesn't create it or create tables if missing.
-pub fn open_db_read_only(path: &Path, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
+pub fn open_db_read_only(
+    path: impl AsRef<Path>,
+    args: DatabaseArguments,
+) -> eyre::Result<DatabaseEnv> {
+    let path = path.as_ref();
     DatabaseEnv::open(path, DatabaseEnvKind::RO, args)
         .with_context(|| format!("Could not open database at path: {}", path.display()))
 }
 
 /// Opens up an existing database. Read/Write mode with `WriteMap` enabled. It doesn't create it or
 /// create tables if missing.
-pub fn open_db(path: &Path, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
-    let db = DatabaseEnv::open(path, DatabaseEnvKind::RW, args.clone())
-        .with_context(|| format!("Could not open database at path: {}", path.display()))?;
-    db.record_client_version(args.client_version().clone())?;
-    Ok(db)
+pub fn open_db(path: impl AsRef<Path>, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
+    fn open(path: &Path, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
+        let client_version = args.client_version().clone();
+        let db = DatabaseEnv::open(path, DatabaseEnvKind::RW, args)
+            .with_context(|| format!("Could not open database at path: {}", path.display()))?;
+        db.record_client_version(client_version)?;
+        Ok(db)
+    }
+    open(path.as_ref(), args)
 }

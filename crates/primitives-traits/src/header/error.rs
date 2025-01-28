@@ -3,6 +3,6 @@
 pub enum HeaderError {
     /// Represents an error when the block difficulty is too large.
     LargeDifficulty,
-    /// Represents an error when the block extradata is too large.
+    /// Represents an error when the block extra data is too large.
     LargeExtraData,
 }

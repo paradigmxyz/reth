@@ -245,7 +245,7 @@ RPC:
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
@@ -269,7 +269,7 @@ RPC:
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner]
 
       --ipcdisable
           Disable the IPC-RPC server
@@ -367,6 +367,9 @@ RPC:
 
           [default: 25]
 
+      --builder.disallow <PATH>
+          Path to file containing disallowed addresses, json-encoded list of strings. Block validation API will reject blocks containing transactions from these addresses
+
 RPC State Cache:
       --rpc-cache.max-blocks <MAX_BLOCKS>
           Max number of blocks in cache
@@ -378,8 +381,8 @@ RPC State Cache:
 
           [default: 2000]
 
-      --rpc-cache.max-envs <MAX_ENVS>
-          Max number of bytes for cached env data
+      --rpc-cache.max-envs <MAX_HEADERS>
+          Max number of headers in cache
 
           [default: 1000]
 
@@ -455,7 +458,7 @@ TxPool:
 
           [default: 7]
 
-      --txpool.gas-limit <GAS_LIMIT>
+      --txpool.gas-limit <ENFORCED_GAS_LIMIT>
           The default enforced gas limit for transactions entering the pool
 
           [default: 30000000]
@@ -499,14 +502,19 @@ TxPool:
 
           [default: 1024]
 
+      --txpool.max-new-pending-txs-notifications <MAX_NEW_PENDING_TXS_NOTIFICATIONS>
+          How many new pending transactions to buffer and send to in progress pending transaction iterators
+
+          [default: 200]
+
 Builder:
-      --builder.extradata <EXTRADATA>
+      --builder.extradata <EXTRA_DATA>
           Block extra data set by the payload builder
 
           [default: reth/<VERSION>/<OS>]
 
       --builder.gaslimit <GAS_LIMIT>
-          Target gas ceiling for built blocks
+          Target gas limit for built blocks
 
           [default: 30000000]
 
@@ -590,6 +598,15 @@ Database:
 
           [possible values: true, false]
 
+      --db.max-size <MAX_SIZE>
+          Maximum database size (e.g., 4TB, 8MB)
+
+      --db.growth-step <GROWTH_STEP>
+          Database growth step (e.g., 4GB, 4KB)
+
+      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
+          Read transaction timeout in seconds, 0 means no timeout
+
 Dev testnet:
       --dev
           Start the node in dev mode
@@ -665,14 +682,6 @@ Pruning:
           Configure receipts log filter. Format: <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
 
 Engine:
-      --engine.experimental
-          Enable the experimental engine features on reth binary
-
-          DEPRECATED: experimental engine is default now, use --engine.legacy to enable the legacy functionality
-
-      --engine.legacy
-          Enable the legacy engine on reth binary
-
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for engine experimental
 
@@ -682,6 +691,12 @@ Engine:
           Configure the target number of blocks to keep in memory
 
           [default: 2]
+
+      --engine.state-root-task
+          Enable state root task
+
+      --engine.state-root-task-compare-updates
+          Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation
 
 Logging:
       --log.stdout.format <FORMAT>

@@ -7,26 +7,30 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use crate::alloc::string::ToString;
+use alloy_primitives::Bytes;
+use reth_chainspec::EthereumHardforks;
 
 mod error;
-
-pub use error::{EngineObjectValidationError, PayloadBuilderError, VersionSpecificValidationError};
-
-mod events;
-pub use crate::events::{Events, PayloadEvents};
+pub use error::{
+    EngineObjectValidationError, InvalidPayloadAttributesError, PayloadBuilderError,
+    VersionSpecificValidationError,
+};
 
 /// Contains traits to abstract over payload attributes types and default implementations of the
 /// [`PayloadAttributes`] trait for ethereum mainnet and optimism types.
 mod traits;
 pub use traits::{
-    BuiltPayload, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilder,
-    PayloadBuilderAttributes,
+    BuiltPayload, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilderAttributes,
 };
 
 mod payload;
 pub use payload::PayloadOrAttributes;
 
-use reth_chainspec::{ChainSpec, EthereumHardforks};
 /// The types that are used by the engine API.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static {
     /// The built payload type.
@@ -125,8 +129,8 @@ pub fn validate_payload_timestamp(
 /// Validates the presence of the `withdrawals` field according to the payload timestamp.
 /// After Shanghai, withdrawals field must be [Some].
 /// Before Shanghai, withdrawals field must be [None];
-pub fn validate_withdrawals_presence(
-    chain_spec: &ChainSpec,
+pub fn validate_withdrawals_presence<T: EthereumHardforks>(
+    chain_spec: &T,
     version: EngineApiMessageVersion,
     message_validation_kind: MessageValidationKind,
     timestamp: u64,
@@ -210,8 +214,8 @@ pub fn validate_withdrawals_presence(
 /// `MessageValidationKind::Payload`, then the error code will be `-32602: Invalid params`. If the
 /// parameter is `MessageValidationKind::PayloadAttributes`, then the error code will be `-38003:
 /// Invalid payload attributes`.
-pub fn validate_parent_beacon_block_root_presence(
-    chain_spec: &ChainSpec,
+pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
+    chain_spec: &T,
     version: EngineApiMessageVersion,
     validation_kind: MessageValidationKind,
     timestamp: u64,
@@ -298,13 +302,14 @@ impl MessageValidationKind {
 /// either an execution payload, or payload attributes.
 ///
 /// The version is provided by the [`EngineApiMessageVersion`] argument.
-pub fn validate_version_specific_fields<Type>(
-    chain_spec: &ChainSpec,
+pub fn validate_version_specific_fields<Type, T>(
+    chain_spec: &T,
     version: EngineApiMessageVersion,
     payload_or_attrs: PayloadOrAttributes<'_, Type>,
 ) -> Result<(), EngineObjectValidationError>
 where
     Type: PayloadAttributes,
+    T: EthereumHardforks,
 {
     validate_withdrawals_presence(
         chain_spec,
@@ -323,30 +328,126 @@ where
 }
 
 /// The version of Engine API message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum EngineApiMessageVersion {
     /// Version 1
-    V1,
+    V1 = 1,
     /// Version 2
     ///
     /// Added in the Shanghai hardfork.
-    V2,
+    V2 = 2,
     /// Version 3
     ///
     /// Added in the Cancun hardfork.
-    V3,
+    #[default]
+    V3 = 3,
     /// Version 4
     ///
     /// Added in the Prague hardfork.
-    V4,
+    V4 = 4,
+}
+
+/// Determines how we should choose the payload to return.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PayloadKind {
+    /// Returns the next best available payload (the earliest available payload).
+    /// This does not wait for a real for pending job to finish if there's no best payload yet and
+    /// is allowed to race various payload jobs (empty, pending best) against each other and
+    /// returns whichever job finishes faster.
+    ///
+    /// This should be used when it's more important to return a valid payload as fast as possible.
+    /// For example, the engine API timeout for `engine_getPayload` is 1s and clients should rather
+    /// return an empty payload than indefinitely waiting for the pending payload job to finish and
+    /// risk missing the deadline.
+    #[default]
+    Earliest,
+    /// Only returns once we have at least one built payload.
+    ///
+    /// Compared to [`PayloadKind::Earliest`] this does not race an empty payload job against the
+    /// already in progress one, and returns the best available built payload or awaits the job in
+    /// progress.
+    WaitForPending,
+}
+
+/// Validates that execution requests are valid according to Engine API specification.
+///
+/// `executionRequests`: `Array of DATA` - List of execution layer triggered requests. Each list
+/// element is a `requests` byte array as defined by [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685).
+/// The first byte of each element is the `request_type` and the remaining bytes are the
+/// `request_data`. Elements of the list **MUST** be ordered by `request_type` in ascending order.
+/// Elements with empty `request_data` **MUST** be excluded from the list. If any element is out of
+/// order or has a length of 1-byte or shorter, client software **MUST** return `-32602: Invalid
+/// params` error.
+pub fn validate_execution_requests(requests: &[Bytes]) -> Result<(), EngineObjectValidationError> {
+    let mut last_request_type = None;
+    for request in requests {
+        if request.len() <= 1 {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "EmptyExecutionRequest".to_string().into(),
+            ))
+        }
+
+        let request_type = request[0];
+        if Some(request_type) < last_request_type {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "OutOfOrderExecutionRequest".to_string().into(),
+            ))
+        }
+
+        last_request_type = Some(request_type);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use assert_matches::assert_matches;
 
     #[test]
     fn version_ord() {
         assert!(EngineApiMessageVersion::V4 > EngineApiMessageVersion::V3);
+    }
+
+    #[test]
+    fn execution_requests_validation() {
+        assert_matches!(validate_execution_requests(&[]), Ok(()));
+
+        let valid_requests = [
+            Bytes::from_iter([1, 2]),
+            Bytes::from_iter([2, 3]),
+            Bytes::from_iter([3, 4]),
+            Bytes::from_iter([4, 5]),
+        ];
+        assert_matches!(validate_execution_requests(&valid_requests), Ok(()));
+
+        let requests_with_empty = [
+            Bytes::from_iter([1, 2]),
+            Bytes::from_iter([2, 3]),
+            Bytes::new(),
+            Bytes::from_iter([3, 4]),
+        ];
+        assert_matches!(
+            validate_execution_requests(&requests_with_empty),
+            Err(EngineObjectValidationError::InvalidParams(_))
+        );
+
+        let mut requests_valid_reversed = valid_requests;
+        requests_valid_reversed.reverse();
+        assert_matches!(
+            validate_execution_requests(&requests_with_empty),
+            Err(EngineObjectValidationError::InvalidParams(_))
+        );
+
+        let requests_out_of_order = [
+            Bytes::from_iter([1, 2]),
+            Bytes::from_iter([2, 3]),
+            Bytes::from_iter([4, 5]),
+            Bytes::from_iter([3, 4]),
+        ];
+        assert_matches!(
+            validate_execution_requests(&requests_out_of_order),
+            Err(EngineObjectValidationError::InvalidParams(_))
+        );
     }
 }

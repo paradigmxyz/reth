@@ -12,11 +12,10 @@ description = "Network peer types and utils"
 workspace = true
 
 [dependencies]
-
 # eth
 alloy-primitives = { workspace = true, features = ["rlp"] }
-alloy-rlp = { workspace = true, features = ["derive"] }
-enr.workspace = true
+alloy-rlp = { workspace = true, features = ["derive", "core-net", "core-error"] }
+enr = { workspace = true, optional = true }
 
 # crypto
 
@@ -32,8 +31,19 @@ alloy-primitives = { workspace = true, features = ["rand"] }
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
 serde_json.workspace = true
+enr.workspace = true
 tokio = { workspace = true, features = ["net", "macros", "rt"] }
 
 [features]
+default = ["std"]
+std = [
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "secp256k1?/std",
+    "serde_with/std",
+    "thiserror/std",
+    "url/std",
+    "serde_json/std",
+]
 secp256k1 = ["dep:secp256k1", "enr/secp256k1"]
-net = ["dep:tokio", "tokio?/net"]
+net = ["std", "dep:tokio", "tokio?/net"]

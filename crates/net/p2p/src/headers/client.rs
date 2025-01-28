@@ -1,8 +1,9 @@
 use crate::{download::DownloadClient, error::PeerRequestResult, priority::Priority};
+use alloy_consensus::Header;
 use alloy_eips::BlockHashOrNumber;
 use futures::{Future, FutureExt};
 pub use reth_eth_wire_types::{BlockHeaders, HeadersDirection};
-use reth_primitives::Header;
+use reth_primitives_traits::BlockHeader;
 use std::{
     fmt::Debug,
     pin::Pin,
@@ -21,14 +22,45 @@ pub struct HeadersRequest {
     pub direction: HeadersDirection,
 }
 
+impl HeadersRequest {
+    /// Creates a request for a single header (direction doesn't matter).
+    ///
+    /// # Arguments
+    /// * `start` - The block hash or number to start from
+    pub const fn one(start: BlockHashOrNumber) -> Self {
+        Self { direction: HeadersDirection::Rising, limit: 1, start }
+    }
+
+    /// Creates a request for headers in rising direction (ascending block numbers).
+    ///
+    /// # Arguments
+    /// * `start` - The block hash or number to start from
+    /// * `limit` - Maximum number of headers to retrieve
+    pub const fn rising(start: BlockHashOrNumber, limit: u64) -> Self {
+        Self { direction: HeadersDirection::Rising, limit, start }
+    }
+
+    /// Creates a request for headers in falling direction (descending block numbers).
+    ///
+    /// # Arguments
+    /// * `start` - The block hash or number to start from
+    /// * `limit` - Maximum number of headers to retrieve
+    pub const fn falling(start: BlockHashOrNumber, limit: u64) -> Self {
+        Self { direction: HeadersDirection::Falling, limit, start }
+    }
+}
+
 /// The headers future type
-pub type HeadersFut = Pin<Box<dyn Future<Output = PeerRequestResult<Vec<Header>>> + Send + Sync>>;
+pub type HeadersFut<H = Header> =
+    Pin<Box<dyn Future<Output = PeerRequestResult<Vec<H>>> + Send + Sync>>;
 
 /// The block headers downloader client
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait HeadersClient: DownloadClient {
+    /// The header type this client fetches.
+    type Header: BlockHeader;
     /// The headers future type
-    type Output: Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send + Unpin;
+    type Output: Future<Output = PeerRequestResult<Vec<Self::Header>>> + Sync + Send + Unpin;
 
     /// Sends the header request to the p2p network and returns the header response received from a
     /// peer.
@@ -55,29 +87,26 @@ pub trait HeadersClient: DownloadClient {
         start: BlockHashOrNumber,
         priority: Priority,
     ) -> SingleHeaderRequest<Self::Output> {
-        let req = HeadersRequest {
-            start,
-            limit: 1,
-            // doesn't matter for a single header
-            direction: HeadersDirection::Rising,
-        };
+        let req = HeadersRequest::one(start);
         let fut = self.get_headers_with_priority(req, priority);
         SingleHeaderRequest { fut }
     }
 }
 
 /// A Future that resolves to a single block body.
+///
+/// Returns `None` if the peer responded with an empty header response.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless polled"]
 pub struct SingleHeaderRequest<Fut> {
     fut: Fut,
 }
 
-impl<Fut> Future for SingleHeaderRequest<Fut>
+impl<Fut, H> Future for SingleHeaderRequest<Fut>
 where
-    Fut: Future<Output = PeerRequestResult<Vec<Header>>> + Sync + Send + Unpin,
+    Fut: Future<Output = PeerRequestResult<Vec<H>>> + Sync + Send + Unpin,
 {
-    type Output = PeerRequestResult<Option<Header>>;
+    type Output = PeerRequestResult<Option<H>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let resp = ready!(self.get_mut().fut.poll_unpin(cx));

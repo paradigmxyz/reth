@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 tracing.workspace = true
-tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "json"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi", "json"] }
 tracing-appender.workspace = true
 tracing-journald = "0.3"
 tracing-logfmt = "0.3.3"
