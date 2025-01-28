@@ -78,12 +78,7 @@ tracing.workspace = true
 serde_json.workspace = true
 
 # async
-tokio = { workspace = true, features = [
-    "sync",
-    "macros",
-    "time",
-    "rt-multi-thread",
-] }
+tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 futures.workspace = true
 
 # misc
@@ -102,9 +97,9 @@ default = ["jemalloc"]
 dev = ["reth-cli-commands/arbitrary"]
 
 asm-keccak = [
-	"reth-node-core/asm-keccak",
-	"reth-primitives/asm-keccak",
-	"alloy-primitives/asm-keccak"
+    "reth-node-core/asm-keccak",
+    "reth-primitives/asm-keccak",
+    "alloy-primitives/asm-keccak",
 ]
 
 jemalloc = [
@@ -113,8 +108,8 @@ jemalloc = [
     "reth-node-metrics/jemalloc",
 ]
 jemalloc-prof = [
-	"reth-cli-util/jemalloc",
-	"reth-cli-util/jemalloc-prof"
+    "reth-cli-util/jemalloc",
+    "reth-cli-util/jemalloc-prof",
 ]
 tracy-allocator = ["reth-cli-util/tracy-allocator"]
 

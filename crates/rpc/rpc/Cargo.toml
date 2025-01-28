@@ -56,11 +56,7 @@ alloy-rpc-types-txpool.workspace = true
 alloy-rpc-types-admin.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-serde.workspace = true
-revm = { workspace = true, features = [
-    "optional_block_gas_limit",
-    "optional_eip3607",
-    "optional_no_base_fee",
-] }
+revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee"] }
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
