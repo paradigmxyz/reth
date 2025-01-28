@@ -8,8 +8,13 @@ pub use super::{
 pub use block_bincode::{Block, BlockBody};
 
 /// Trait for types that can be serialized and deserialized using bincode.
+///
+/// The recommended way to add bincode compatible serialization is via the
+/// [`serde_with`] crate and the `serde_as` macro that. See for reference [`header`].
 pub trait SerdeBincodeCompat: Sized + 'static {
     /// Serde representation of the type for bincode serialization.
+    ///
+    /// This type defines the bincode compatible serde format for the type.
     type BincodeRepr<'a>: Debug + Serialize + DeserializeOwned + From<&'a Self> + Into<Self>;
 }
 
