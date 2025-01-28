@@ -4,10 +4,7 @@
 //! up to the intended build target.
 
 use crate::{providers::StaticFileProvider, ProviderFactory};
-use reth_db_api::{
-    database_metrics::{DatabaseMetrics},
-    Database,
-};
+use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
 use std::{marker::PhantomData, sync::Arc};
 
