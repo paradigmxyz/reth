@@ -19,7 +19,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvmFor, Evm, TxEnvOverrides,
+    ConfigureEvmFor, Evm,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
@@ -104,8 +104,6 @@ where
     chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
-    /// Optional overrides for the transactions environment.
-    tx_env_overrides: Option<Box<dyn TxEnvOverrides>>,
     /// Current state for block execution.
     state: State<DB>,
     /// Utility to call system smart contracts.
@@ -127,14 +125,7 @@ where
         receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
     ) -> Self {
         let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
-        Self {
-            state,
-            chain_spec,
-            evm_config,
-            system_caller,
-            tx_env_overrides: None,
-            receipt_builder,
-        }
+        Self { state, chain_spec, evm_config, system_caller, receipt_builder }
     }
 }
 
@@ -151,10 +142,6 @@ where
     type DB = DB;
     type Primitives = N;
     type Error = BlockExecutionError;
-
-    fn init(&mut self, tx_env_overrides: Box<dyn TxEnvOverrides>) {
-        self.tx_env_overrides = Some(tx_env_overrides);
-    }
 
     fn apply_pre_execution_changes(
         &mut self,
@@ -223,11 +210,7 @@ where
                 .transpose()
                 .map_err(|_| OpBlockExecutionError::AccountLoadFailed(*sender))?;
 
-            let mut tx_env = self.evm_config.tx_env(transaction, *sender);
-
-            if let Some(tx_env_overrides) = &mut self.tx_env_overrides {
-                tx_env_overrides.apply(&mut tx_env);
-            }
+            let tx_env = self.evm_config.tx_env(transaction, *sender);
 
             // Execute transaction.
             let result_and_state = evm.transact(tx_env).map_err(move |err| {
@@ -459,8 +442,8 @@ mod tests {
             .unwrap();
 
         let receipts = executor.receipts();
-        let tx_receipt = receipts[0][0].as_ref().unwrap();
-        let deposit_receipt = receipts[0][1].as_ref().unwrap();
+        let tx_receipt = &receipts[0][0];
+        let deposit_receipt = &receipts[0][1];
 
         assert!(!matches!(tx_receipt, OpReceipt::Deposit(_)));
         // deposit_nonce is present only in deposit transactions
@@ -535,8 +518,8 @@ mod tests {
             .expect("Executing a block while canyon is active should not fail");
 
         let receipts = executor.receipts();
-        let tx_receipt = receipts[0][0].as_ref().unwrap();
-        let deposit_receipt = receipts[0][1].as_ref().unwrap();
+        let tx_receipt = &receipts[0][0];
+        let deposit_receipt = &receipts[0][1];
 
         // deposit_receipt_version is set to 1 for post canyon deposit transactions
         assert!(!matches!(tx_receipt, OpReceipt::Deposit(_)));

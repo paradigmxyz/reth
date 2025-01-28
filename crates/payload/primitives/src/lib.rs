@@ -383,14 +383,14 @@ pub fn validate_execution_requests(requests: &[Bytes]) -> Result<(), EngineObjec
     for request in requests {
         if request.len() <= 1 {
             return Err(EngineObjectValidationError::InvalidParams(
-                "empty execution request".to_string().into(),
+                "EmptyExecutionRequest".to_string().into(),
             ))
         }
 
         let request_type = request[0];
         if Some(request_type) < last_request_type {
             return Err(EngineObjectValidationError::InvalidParams(
-                "execution requests out of order".to_string().into(),
+                "OutOfOrderExecutionRequest".to_string().into(),
             ))
         }
 

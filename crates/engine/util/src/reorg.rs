@@ -322,7 +322,7 @@ where
         }
 
         // Configure the environment for the block.
-        let tx_recovered = tx.clone().try_into_ecrecovered().map_err(|_| {
+        let tx_recovered = tx.try_clone_into_recovered().map_err(|_| {
             BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError)
         })?;
         let tx_env = evm_config.tx_env(&tx_recovered, tx_recovered.signer());
@@ -348,13 +348,13 @@ where
 
         cumulative_gas_used += exec_result.result.gas_used();
         #[allow(clippy::needless_update)] // side-effect of optimism fields
-        receipts.push(Some(Receipt {
+        receipts.push(Receipt {
             tx_type: tx.tx_type(),
             success: exec_result.result.is_success(),
             cumulative_gas_used,
             logs: exec_result.result.into_logs().into_iter().collect(),
             ..Default::default()
-        }));
+        });
 
         // append transaction to the list of executed transactions
         transactions.push(tx);
