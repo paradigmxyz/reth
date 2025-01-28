@@ -46,7 +46,8 @@
 //!             Receipt = reth_primitives::Receipt,
 //!             Header = reth_primitives::Header,
 //!         > + AccountReader
-//!         + ChangeSetReader + CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives>,
+//!         + ChangeSetReader
+//!         + CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives>,
 //!     Pool: TransactionPool<
 //!             Transaction: PoolTransaction<
 //!                 Consensus = TransactionSigned,
