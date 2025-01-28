@@ -41,9 +41,6 @@ alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 revm.workspace = true
 
-# optimism
-reth-optimism-primitives = { workspace = true, features = ["reth-codec"], optional = true }
-
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
@@ -85,15 +82,6 @@ eyre.workspace = true
 alloy-consensus.workspace = true
 
 [features]
-optimism = [
-    "reth-execution-types/optimism",
-    "reth-optimism-primitives",
-    "reth-codecs/op",
-    "reth-db/optimism",
-    "reth-db-api/optimism",
-    "revm/optimism",
-    "reth-optimism-primitives/optimism",
-]
 serde = [
     "dashmap/serde",
     "notify/serde",
@@ -105,7 +93,6 @@ serde = [
     "alloy-rpc-types-engine/serde",
     "revm/serde",
     "reth-codecs/serde",
-    "reth-optimism-primitives?/serde",
     "reth-primitives-traits/serde",
     "reth-execution-types/serde",
     "reth-trie-db/serde",
@@ -128,5 +115,4 @@ test-utils = [
     "revm/test-utils",
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
-    "reth-optimism-primitives?/arbitrary",
 ]
