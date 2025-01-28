@@ -442,8 +442,8 @@ mod tests {
             .unwrap();
 
         let receipts = executor.receipts();
-        let tx_receipt = receipts[0][0].as_ref().unwrap();
-        let deposit_receipt = receipts[0][1].as_ref().unwrap();
+        let tx_receipt = &receipts[0][0];
+        let deposit_receipt = &receipts[0][1];
 
         assert!(!matches!(tx_receipt, OpReceipt::Deposit(_)));
         // deposit_nonce is present only in deposit transactions
@@ -518,8 +518,8 @@ mod tests {
             .expect("Executing a block while canyon is active should not fail");
 
         let receipts = executor.receipts();
-        let tx_receipt = receipts[0][0].as_ref().unwrap();
-        let deposit_receipt = receipts[0][1].as_ref().unwrap();
+        let tx_receipt = &receipts[0][0];
+        let deposit_receipt = &receipts[0][1];
 
         // deposit_receipt_version is set to 1 for post canyon deposit transactions
         assert!(!matches!(tx_receipt, OpReceipt::Deposit(_)));
