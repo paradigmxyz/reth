@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use alloy_consensus::{constants::ETH_TO_WEI, Header, TxEip2930};
+use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader, Header, TxEip2930};
 use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{b256, Address, TxKind, U256};
 use eyre::OptionExt;
@@ -8,9 +8,8 @@ use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN
 use reth_evm::execute::{BatchExecutor, BlockExecutionOutput, BlockExecutorProvider, Executor};
 use reth_evm_ethereum::execute::EthExecutorProvider;
 use reth_node_api::FullNodePrimitives;
-use reth_primitives::{
-    Block, BlockBody, BlockExt, BlockWithSenders, Receipt, SealedBlockWithSenders, Transaction,
-};
+use reth_primitives::{Block, BlockBody, Receipt, RecoveredBlock, Transaction};
+use reth_primitives_traits::Block as _;
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
     ProviderFactory,
@@ -53,7 +52,7 @@ pub(crate) fn chain_spec(address: Address) -> Arc<ChainSpec> {
 pub(crate) fn execute_block_and_commit_to_database<N>(
     provider_factory: &ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
-    block: &BlockWithSenders,
+    block: &RecoveredBlock<reth_primitives::Block>,
 ) -> eyre::Result<BlockExecutionOutput<Receipt>>
 where
     N: ProviderNodeTypes<
@@ -73,13 +72,12 @@ where
     block_execution_output.state.reverts.sort();
 
     // Convert the block execution output to an execution outcome for committing to the database
-    let execution_outcome = to_execution_outcome(block.number, &block_execution_output);
+    let execution_outcome = to_execution_outcome(block.number(), &block_execution_output);
 
     // Commit the block's execution outcome to the database
     let provider_rw = provider_factory.provider_rw()?;
-    let block = block.clone().seal_slow();
     provider_rw.append_blocks_with_state(
-        vec![block],
+        vec![block.clone()],
         &execution_outcome,
         Default::default(),
         Default::default(),
@@ -92,7 +90,8 @@ where
 fn blocks(
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
-) -> eyre::Result<(BlockWithSenders, BlockWithSenders)> {
+) -> eyre::Result<(RecoveredBlock<reth_primitives::Block>, RecoveredBlock<reth_primitives::Block>)>
+{
     // First block has a transaction that transfers some ETH to zero address
     let block1 = Block {
         header: Header {
@@ -128,7 +127,7 @@ fn blocks(
     // Second block resends the same transaction with increased nonce
     let block2 = Block {
         header: Header {
-            parent_hash: block1.header.hash_slow(),
+            parent_hash: block1.hash(),
             receipts_root: b256!(
                 "d3a6acf9a244d78b33831df95d472c4128ea85bf079a1d41e32ed0b7d2244c9e"
             ),
@@ -164,7 +163,7 @@ pub(crate) fn blocks_and_execution_outputs<N>(
     provider_factory: ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
-) -> eyre::Result<Vec<(SealedBlockWithSenders, BlockExecutionOutput<Receipt>)>>
+) -> eyre::Result<Vec<(RecoveredBlock<reth_primitives::Block>, BlockExecutionOutput<Receipt>)>>
 where
     N: ProviderNodeTypes<
         Primitives: FullNodePrimitives<
@@ -181,9 +180,6 @@ where
     let block_output2 =
         execute_block_and_commit_to_database(&provider_factory, chain_spec, &block2)?;
 
-    let block1 = block1.seal_slow();
-    let block2 = block2.seal_slow();
-
     Ok(vec![(block1, block_output1), (block2, block_output2)])
 }
 
@@ -191,7 +187,7 @@ pub(crate) fn blocks_and_execution_outcome<N>(
     provider_factory: ProviderFactory<N>,
     chain_spec: Arc<ChainSpec>,
     key_pair: Keypair,
-) -> eyre::Result<(Vec<SealedBlockWithSenders>, ExecutionOutcome)>
+) -> eyre::Result<(Vec<RecoveredBlock<reth_primitives::Block>>, ExecutionOutcome)>
 where
     N: ProviderNodeTypes,
     N::Primitives:
@@ -206,9 +202,6 @@ where
 
     let mut execution_outcome = executor.execute_and_verify_batch(vec![&block1, &block2])?;
     execution_outcome.state_mut().reverts.sort();
-
-    let block1 = block1.seal_slow();
-    let block2 = block2.seal_slow();
 
     // Commit the block's execution outcome to the database
     let provider_rw = provider_factory.provider_rw()?;

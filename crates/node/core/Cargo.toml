@@ -76,12 +76,11 @@ proptest.workspace = true
 tokio.workspace = true
 
 [features]
-optimism = ["reth-primitives/optimism", "reth-db/optimism"]
+optimism = ["reth-db/optimism"]
 # Features for vergen to generate correct env vars
 jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = ["reth-primitives/asm-keccak", "alloy-primitives/asm-keccak"]
 scroll = [
-    "reth-primitives/scroll",
     "reth-db/scroll",
     "reth-rpc-eth-types/scroll",
 ]

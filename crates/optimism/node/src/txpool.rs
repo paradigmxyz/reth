@@ -11,7 +11,7 @@ use reth_node_api::{Block, BlockBody};
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_primitives::{OpBlock, OpTransactionSigned};
 use reth_primitives::{
-    transaction::TransactionConversionError, GotExpected, InvalidTransactionError, RecoveredTx,
+    transaction::TransactionConversionError, GotExpected, InvalidTransactionError, Recovered,
     SealedBlock,
 };
 use reth_primitives_traits::SignedTransaction;
@@ -25,7 +25,7 @@ use reth_transaction_pool::{
 use revm::primitives::{AccessList, KzgSettings};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc,
+    Arc, OnceLock,
 };
 
 /// Type alias for default optimism transaction pool
@@ -36,131 +36,165 @@ pub type OpTransactionPool<Client, S> = Pool<
 >;
 
 /// Pool transaction for OP.
+///
+/// This type wraps the actual transaction and caches values that are frequently used by the pool.
+/// For payload building this lazily tracks values that are required during payload building:
+///  - Estimated compressed size of this transaction
 #[derive(Debug, Clone, derive_more::Deref)]
-pub struct OpPooledTransaction(EthPooledTransaction<OpTransactionSigned>);
+pub struct OpPooledTransaction {
+    #[deref]
+    inner: EthPooledTransaction<OpTransactionSigned>,
+    /// The estimated size of this transaction, lazily computed.
+    estimated_tx_compressed_size: OnceLock<u64>,
+}
 
 impl OpPooledTransaction {
     /// Create new instance of [Self].
-    pub fn new(transaction: RecoveredTx<OpTransactionSigned>, encoded_length: usize) -> Self {
-        Self(EthPooledTransaction::new(transaction, encoded_length))
+    pub fn new(transaction: Recovered<OpTransactionSigned>, encoded_length: usize) -> Self {
+        Self {
+            inner: EthPooledTransaction::new(transaction, encoded_length),
+            estimated_tx_compressed_size: Default::default(),
+        }
+    }
+
+    /// Returns the estimated compressed size of a transaction in bytes scaled by 1e6.
+    /// This value is computed based on the following formula:
+    /// `max(minTransactionSize, intercept + fastlzCoef*fastlzSize)`
+    pub fn estimated_compressed_size(&self) -> u64 {
+        *self
+            .estimated_tx_compressed_size
+            .get_or_init(|| tx_estimated_size_fjord(&self.inner.transaction().encoded_2718()))
     }
 }
 
-impl From<RecoveredTx<op_alloy_consensus::OpPooledTransaction>> for OpPooledTransaction {
-    fn from(tx: RecoveredTx<op_alloy_consensus::OpPooledTransaction>) -> Self {
+/// Calculate the estimated compressed transaction size in bytes, scaled by 1e6.
+/// This value is computed based on the following formula:
+/// max(minTransactionSize, intercept + fastlzCoef*fastlzSize)
+// TODO(mattsse): replace with library fn from revm or maili once available
+fn tx_estimated_size_fjord(input: &[u8]) -> u64 {
+    let fastlz_size = maili_flz::flz_compress_len(input) as u64;
+
+    fastlz_size.saturating_mul(836_500).saturating_sub(42_585_600).max(100_000_000)
+}
+
+impl From<Recovered<op_alloy_consensus::OpPooledTransaction>> for OpPooledTransaction {
+    fn from(tx: Recovered<op_alloy_consensus::OpPooledTransaction>) -> Self {
         let encoded_len = tx.encode_2718_len();
         let tx = tx.map_transaction(|tx| tx.into());
-        Self(EthPooledTransaction::new(tx, encoded_len))
+        Self {
+            inner: EthPooledTransaction::new(tx, encoded_len),
+            estimated_tx_compressed_size: Default::default(),
+        }
     }
 }
 
-impl TryFrom<RecoveredTx<OpTransactionSigned>> for OpPooledTransaction {
+impl TryFrom<Recovered<OpTransactionSigned>> for OpPooledTransaction {
     type Error = TransactionConversionError;
 
-    fn try_from(value: RecoveredTx<OpTransactionSigned>) -> Result<Self, Self::Error> {
+    fn try_from(value: Recovered<OpTransactionSigned>) -> Result<Self, Self::Error> {
         let (tx, signer) = value.into_parts();
-        let pooled: RecoveredTx<op_alloy_consensus::OpPooledTransaction> =
-            RecoveredTx::new_unchecked(tx.try_into()?, signer);
+        let pooled: Recovered<op_alloy_consensus::OpPooledTransaction> =
+            Recovered::new_unchecked(tx.try_into()?, signer);
         Ok(pooled.into())
     }
 }
 
-impl From<OpPooledTransaction> for RecoveredTx<OpTransactionSigned> {
+impl From<OpPooledTransaction> for Recovered<OpTransactionSigned> {
     fn from(value: OpPooledTransaction) -> Self {
-        value.0.transaction
+        value.inner.transaction
     }
 }
 
 impl PoolTransaction for OpPooledTransaction {
-    type TryFromConsensusError = <Self as TryFrom<RecoveredTx<Self::Consensus>>>::Error;
+    type TryFromConsensusError = <Self as TryFrom<Recovered<Self::Consensus>>>::Error;
     type Consensus = OpTransactionSigned;
     type Pooled = op_alloy_consensus::OpPooledTransaction;
 
-    fn clone_into_consensus(&self) -> RecoveredTx<Self::Consensus> {
-        self.transaction().clone()
+    fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
+        self.inner.transaction().clone()
     }
 
     fn try_consensus_into_pooled(
-        tx: RecoveredTx<Self::Consensus>,
-    ) -> Result<RecoveredTx<Self::Pooled>, Self::TryFromConsensusError> {
+        tx: Recovered<Self::Consensus>,
+    ) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
         let (tx, signer) = tx.into_parts();
-        Ok(RecoveredTx::new_unchecked(tx.try_into()?, signer))
+        Ok(Recovered::new_unchecked(tx.try_into()?, signer))
     }
 
     fn hash(&self) -> &TxHash {
-        self.transaction.tx_hash()
+        self.inner.transaction.tx_hash()
     }
 
     fn sender(&self) -> Address {
-        self.transaction.signer()
+        self.inner.transaction.signer()
     }
 
     fn sender_ref(&self) -> &Address {
-        self.transaction.signer_ref()
+        self.inner.transaction.signer_ref()
     }
 
     fn nonce(&self) -> u64 {
-        self.transaction.nonce()
+        self.inner.transaction.nonce()
     }
 
     fn cost(&self) -> &U256 {
-        &self.cost
+        &self.inner.cost
     }
 
     fn gas_limit(&self) -> u64 {
-        self.transaction.gas_limit()
+        self.inner.transaction.gas_limit()
     }
 
     fn max_fee_per_gas(&self) -> u128 {
-        self.transaction.transaction.max_fee_per_gas()
+        self.inner.transaction.transaction.max_fee_per_gas()
     }
 
     fn access_list(&self) -> Option<&AccessList> {
-        self.transaction.access_list()
+        self.inner.transaction.access_list()
     }
 
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        self.transaction.transaction.max_priority_fee_per_gas()
+        self.inner.transaction.transaction.max_priority_fee_per_gas()
     }
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        self.transaction.max_fee_per_blob_gas()
+        self.inner.transaction.max_fee_per_blob_gas()
     }
 
     fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.transaction.effective_tip_per_gas(base_fee)
+        self.inner.transaction.effective_tip_per_gas(base_fee)
     }
 
     fn priority_fee_or_price(&self) -> u128 {
-        self.transaction.priority_fee_or_price()
+        self.inner.transaction.priority_fee_or_price()
     }
 
     fn kind(&self) -> TxKind {
-        self.transaction.kind()
+        self.inner.transaction.kind()
     }
 
     fn is_create(&self) -> bool {
-        self.transaction.is_create()
+        self.inner.transaction.is_create()
     }
 
     fn input(&self) -> &[u8] {
-        self.transaction.input()
+        self.inner.transaction.input()
     }
 
     fn size(&self) -> usize {
-        self.transaction.transaction.input().len()
+        self.inner.transaction.transaction.input().len()
     }
 
     fn tx_type(&self) -> u8 {
-        self.transaction.ty()
+        self.inner.transaction.ty()
     }
 
     fn encoded_length(&self) -> usize {
-        self.encoded_length
+        self.inner.encoded_length
     }
 
     fn chain_id(&self) -> Option<u64> {
-        self.transaction.chain_id()
+        self.inner.transaction.chain_id()
     }
 }
 
@@ -176,12 +210,12 @@ impl EthPoolTransaction for OpPooledTransaction {
     fn try_into_pooled_eip4844(
         self,
         _sidecar: Arc<BlobTransactionSidecar>,
-    ) -> Option<RecoveredTx<Self::Pooled>> {
+    ) -> Option<Recovered<Self::Pooled>> {
         None
     }
 
     fn try_from_eip4844(
-        _tx: RecoveredTx<Self::Consensus>,
+        _tx: Recovered<Self::Consensus>,
         _sidecar: BlobTransactionSidecar,
     ) -> Option<Self> {
         None
@@ -196,7 +230,7 @@ impl EthPoolTransaction for OpPooledTransaction {
     }
 
     fn authorization_count(&self) -> usize {
-        match &self.transaction.transaction {
+        match &self.inner.transaction.transaction {
             OpTypedTransaction::Eip7702(tx) => tx.authorization_list.len(),
             _ => 0,
         }
@@ -400,10 +434,9 @@ where
         self.validate_all(transactions)
     }
 
-    fn on_new_head_block<H, B>(&self, new_tip_block: &SealedBlock<H, B>)
+    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
     where
-        H: reth_primitives_traits::BlockHeader,
-        B: BlockBody,
+        B: Block,
     {
         self.inner.on_new_head_block(new_tip_block);
         self.update_l1_block_info(
@@ -430,7 +463,7 @@ mod tests {
     use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
     use reth_chainspec::MAINNET;
     use reth_optimism_primitives::OpTransactionSigned;
-    use reth_primitives::RecoveredTx;
+    use reth_primitives::Recovered;
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder, TransactionOrigin,
@@ -459,7 +492,7 @@ mod tests {
         });
         let signature = Signature::test_signature();
         let signed_tx = OpTransactionSigned::new_unhashed(deposit_tx, signature);
-        let signed_recovered = RecoveredTx::new_unchecked(signed_tx, signer);
+        let signed_recovered = Recovered::new_unchecked(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();
         let pooled_tx = OpPooledTransaction::new(signed_recovered, len);
         let outcome = validator.validate_one(origin, pooled_tx);

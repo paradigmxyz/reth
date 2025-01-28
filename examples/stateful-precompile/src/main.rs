@@ -16,7 +16,7 @@ use reth::{
         primitives::{
             CfgEnvWithHandlerCfg, Env, PrecompileResult, SpecId, StatefulPrecompileMut, TxEnv,
         },
-        ContextPrecompile, ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
+        ContextPrecompile, ContextPrecompiles, Database, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
 };
@@ -25,8 +25,8 @@ use reth_evm::env::EvmEnv;
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
-    node::EthereumAddOns, BasicBlockExecutorProvider, EthEvmConfig, EthExecutionStrategyFactory,
-    EthereumNode,
+    evm::EthEvm, node::EthereumAddOns, BasicBlockExecutorProvider, EthEvmConfig,
+    EthExecutionStrategyFactory, EthereumNode,
 };
 use reth_primitives::{EthPrimitives, TransactionSigned};
 use reth_tracing::{RethTracer, Tracer};
@@ -68,8 +68,8 @@ impl MyEvmConfig {
 
     /// Sets the precompiles to the EVM handler
     ///
-    /// This will be invoked when the EVM is created via [ConfigureEvm::evm] or
-    /// [ConfigureEvm::evm_with_inspector]
+    /// This will be invoked when the EVM is created via [ConfigureEvm::evm_with_env] or
+    /// [ConfigureEvm::evm_with_env_and_inspector]
     ///
     /// This will use the default mainnet precompiles and wrap them with a cache.
     pub fn set_precompiles<EXT, DB>(
@@ -155,16 +155,6 @@ impl ConfigureEvmEnv for MyEvmConfig {
         self.inner.fill_tx_env(tx_env, transaction, sender)
     }
 
-    fn fill_tx_env_system_contract_call(
-        &self,
-        env: &mut Env,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    ) {
-        self.inner.fill_tx_env_system_contract_call(env, caller, contract, data)
-    }
-
     fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
         self.inner.fill_cfg_env(cfg_env, header)
     }
@@ -179,20 +169,28 @@ impl ConfigureEvmEnv for MyEvmConfig {
 }
 
 impl ConfigureEvm for MyEvmConfig {
-    type DefaultExternalContext<'a> = ();
+    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
 
-    fn evm<DB: Database>(&self, db: DB) -> Evm<'_, Self::DefaultExternalContext<'_>, DB> {
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
         let new_cache = self.precompile_cache.clone();
         EvmBuilder::default()
             .with_db(db)
+            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+            .with_block_env(evm_env.block_env)
             // add additional precompiles
             .append_handler_register_box(Box::new(move |handler| {
                 MyEvmConfig::set_precompiles(handler, new_cache.clone())
             }))
             .build()
+            .into()
     }
 
-    fn evm_with_inspector<DB, I>(&self, db: DB, inspector: I) -> Evm<'_, I, DB>
+    fn evm_with_env_and_inspector<DB, I>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv,
+        inspector: I,
+    ) -> Self::Evm<'_, DB, I>
     where
         DB: Database,
         I: GetInspector<DB>,
@@ -201,15 +199,16 @@ impl ConfigureEvm for MyEvmConfig {
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
+            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+            .with_block_env(evm_env.block_env)
             // add additional precompiles
             .append_handler_register_box(Box::new(move |handler| {
                 MyEvmConfig::set_precompiles(handler, new_cache.clone())
             }))
             .append_handler_register(inspector_handle_register)
             .build()
+            .into()
     }
-
-    fn default_external_context<'a>(&self) -> Self::DefaultExternalContext<'a> {}
 }
 
 /// Builds a regular ethereum block executor that uses the custom EVM.

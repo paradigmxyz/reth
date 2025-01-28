@@ -1,8 +1,9 @@
 use alloy_consensus::{
-    Eip2718EncodableReceipt, Eip658Value, Receipt, ReceiptWithBloom, RlpDecodableReceipt,
-    RlpEncodableReceipt, TxReceipt, Typed2718,
+    proofs::ordered_trie_root_with_encoder, Eip2718EncodableReceipt, Eip658Value, Receipt,
+    ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt, Typed2718,
 };
-use alloy_primitives::{Bloom, Log, U256};
+use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::{Bloom, Log, B256, U256};
 use alloy_rlp::{BufMut, Decodable, Header};
 use reth_primitives_traits::InMemorySize;
 use scroll_alloy_consensus::{ScrollTransactionReceipt, ScrollTxType};
@@ -107,6 +108,13 @@ impl ScrollReceipt {
             }
             Self::L1Message(_) => U256::ZERO,
         }
+    }
+
+    /// Calculates the receipt root for a header for the reference type of [Receipt].
+    ///
+    /// NOTE: Prefer `proofs::calculate_receipt_root` if you have log blooms memoized.
+    pub fn calculate_receipt_root_no_memo(receipts: &[&Self]) -> B256 {
+        ordered_trie_root_with_encoder(receipts, |r, buf| r.with_bloom_ref().encode_2718(buf))
     }
 }
 

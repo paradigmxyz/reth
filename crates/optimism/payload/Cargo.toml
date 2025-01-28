@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-revm = { workspace = true, features = ["witness"] }
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
@@ -54,7 +55,6 @@ sha2.workspace = true
 
 [features]
 optimism = [
-	"reth-primitives/optimism",
 	"reth-provider/optimism",
 	"reth-optimism-evm/optimism",
 	"revm/optimism",

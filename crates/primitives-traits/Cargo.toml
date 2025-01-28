@@ -59,6 +59,7 @@ rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-codecs.workspace = true
+reth-chainspec = { workspace = true, features = ["arbitrary"] }
 
 alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
 alloy-consensus = { workspace = true, features = ["arbitrary", "serde"] }
@@ -98,12 +99,14 @@ std = [
 	"thiserror/std",
 	"alloy-trie/std",
 	"op-alloy-consensus?/std",
-	"serde_json/std"
+	"serde_json/std",
+	"reth-chainspec/std"
 ]
 secp256k1 = ["dep:secp256k1"]
 test-utils = [
 	"arbitrary",
 	"reth-codecs?/test-utils",
+	"reth-chainspec/test-utils"
 ]
 arbitrary = [
 	"std",
@@ -119,7 +122,8 @@ arbitrary = [
 	"secp256k1?/rand",
 	"op-alloy-consensus?/arbitrary",
 	"alloy-trie/arbitrary",
-	"scroll-alloy-consensus?/arbitrary"
+	"reth-chainspec/arbitrary",
+    "scroll-alloy-consensus?/arbitrary"
 ]
 serde-bincode-compat = [
 	"serde",
@@ -153,7 +157,7 @@ reth-codec = [
 op = [
 	"dep:op-alloy-consensus",
 ]
-scroll-in-memory-size = ["scroll-alloy-consensus"]
+scroll-alloy-traits = ["scroll-alloy-consensus"]
 scroll = ["revm-primitives/scroll"]
 rayon = [
 	"dep:rayon",

@@ -31,8 +31,10 @@ jobs:
             features: ""
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@clippy
         with:
+          toolchain: nightly-2025-01-16
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -52,8 +54,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
         with:
+          toolchain: nightly-2025-01-16
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
@@ -67,6 +71,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: wasm32-wasip1
@@ -85,6 +90,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: riscv32imac-unknown-none-elf
@@ -101,6 +107,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
@@ -123,6 +130,7 @@ jobs:
             network: optimism
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.82" # MSRV
@@ -139,6 +147,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
         with:
@@ -155,6 +164,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
@@ -169,6 +179,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
         with:
@@ -183,8 +194,8 @@ jobs:
             --exclude op-reth --exclude "example-*" --exclude reth --exclude reth-payload-primitives \
             --exclude reth-e2e-test-utils --exclude reth-ethereum-payload-builder --exclude reth-exex-test-utils \
             --exclude reth-node-ethereum --exclude reth-scroll-cli --exclude reth-scroll-evm \
-            --exclude reth-scroll-node --exclude "scroll-reth" --exclude reth-scroll-engine --exclude reth-scroll-rpc \
-            --exclude reth-scroll-trie
+            --exclude reth-scroll-node --exclude scroll-reth --exclude reth-scroll-rpc  --exclude reth-scroll-trie \
+            --exclude reth-scroll-engine-primitives
 
   book:
     name: book
@@ -192,10 +203,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@nightly
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.82" # MSRV
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -230,6 +239,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - name: Ensure no arbitrary or proptest dependency on default build
         run: cargo tree --package reth -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
@@ -241,6 +251,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@clippy
       - uses: Swatinem/rust-cache@v2
         with:

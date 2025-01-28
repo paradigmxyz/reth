@@ -19,8 +19,8 @@ use reth_db_api::models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives::{
-    Account, Block, BlockWithSenders, Bytecode, EthPrimitives, GotExpected, Receipt, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, TransactionSigned,
+    Account, Block, Bytecode, EthPrimitives, GotExpected, Receipt, RecoveredBlock, SealedBlock,
+    SealedHeader, TransactionSigned,
 };
 use reth_primitives_traits::SignedTransaction;
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -221,7 +221,7 @@ impl HeaderProvider for MockEthProvider {
     }
 
     fn sealed_header(&self, number: BlockNumber) -> ProviderResult<Option<SealedHeader>> {
-        Ok(self.header_by_number(number)?.map(SealedHeader::seal))
+        Ok(self.header_by_number(number)?.map(SealedHeader::seal_slow))
     }
 
     fn sealed_headers_while(
@@ -232,7 +232,7 @@ impl HeaderProvider for MockEthProvider {
         Ok(self
             .headers_range(range)?
             .into_iter()
-            .map(SealedHeader::seal)
+            .map(SealedHeader::seal_slow)
             .take_while(|h| predicate(h))
             .collect())
     }
@@ -254,7 +254,7 @@ impl TransactionsProvider for MockEthProvider {
         let tx_number = lock
             .values()
             .flat_map(|block| &block.body.transactions)
-            .position(|tx| tx.hash() == tx_hash)
+            .position(|tx| *tx.tx_hash() == tx_hash)
             .map(|pos| pos as TxNumber);
 
         Ok(tx_number)
@@ -281,7 +281,7 @@ impl TransactionsProvider for MockEthProvider {
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<TransactionSigned>> {
         Ok(self.blocks.lock().iter().find_map(|(_, block)| {
-            block.body.transactions.iter().find(|tx| tx.hash() == hash).cloned()
+            block.body.transactions.iter().find(|tx| *tx.tx_hash() == hash).cloned()
         }))
     }
 
@@ -292,7 +292,7 @@ impl TransactionsProvider for MockEthProvider {
         let lock = self.blocks.lock();
         for (block_hash, block) in lock.iter() {
             for (index, tx) in block.body.transactions.iter().enumerate() {
-                if tx.hash() == hash {
+                if *tx.tx_hash() == hash {
                     let meta = TransactionMeta {
                         tx_hash: hash,
                         index: index as u64,
@@ -498,7 +498,9 @@ impl BlockReader for MockEthProvider {
         Ok(None)
     }
 
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    fn pending_block_with_senders(
+        &self,
+    ) -> ProviderResult<Option<RecoveredBlock<reth_primitives::Block>>> {
         Ok(None)
     }
 
@@ -510,7 +512,7 @@ impl BlockReader for MockEthProvider {
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders>> {
+    ) -> ProviderResult<Option<RecoveredBlock<reth_primitives::Block>>> {
         Ok(None)
     }
 
@@ -518,7 +520,7 @@ impl BlockReader for MockEthProvider {
         &self,
         _id: BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Option<RecoveredBlock<reth_primitives::Block>>> {
         Ok(None)
     }
 
@@ -535,14 +537,14 @@ impl BlockReader for MockEthProvider {
     fn block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<reth_primitives::Block>>> {
         Ok(vec![])
     }
 
     fn sealed_block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<reth_primitives::Block>>> {
         Ok(vec![])
     }
 }
@@ -556,7 +558,7 @@ impl BlockReaderIdExt for MockEthProvider {
     }
 
     fn sealed_header_by_id(&self, id: BlockId) -> ProviderResult<Option<SealedHeader>> {
-        self.header_by_id(id)?.map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal(h))))
+        self.header_by_id(id)?.map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h))))
     }
 
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Header>> {
@@ -787,6 +789,12 @@ impl OmmersProvider for MockEthProvider {
 impl BlockBodyIndicesProvider for MockEthProvider {
     fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
         Ok(None)
+    }
+    fn block_body_indices_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        Ok(vec![])
     }
 }
 

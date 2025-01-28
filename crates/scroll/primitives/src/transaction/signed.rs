@@ -28,9 +28,10 @@ use once_cell::sync::OnceCell as OnceLock;
 use proptest as _;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
+    transaction::error::TransactionConversionError,
     InMemorySize, SignedTransaction,
 };
-use scroll_alloy_consensus::{ScrollTypedTransaction, TxL1Message};
+use scroll_alloy_consensus::{ScrollPooledTransaction, ScrollTypedTransaction, TxL1Message};
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
 
@@ -90,7 +91,7 @@ impl SignedTransaction for ScrollTransactionSigned {
         }
 
         let Self { transaction, signature, .. } = self;
-        let signature_hash = signature_hash(transaction);
+        let signature_hash = transaction.signature_hash();
         recover_signer(signature, signature_hash)
     }
 
@@ -101,7 +102,7 @@ impl SignedTransaction for ScrollTransactionSigned {
         }
 
         let Self { transaction, signature, .. } = self;
-        let signature_hash = signature_hash(transaction);
+        let signature_hash = transaction.signature_hash();
         recover_signer_unchecked(signature, signature_hash)
     }
 
@@ -372,6 +373,18 @@ impl Transaction for ScrollTransactionSigned {
     }
 }
 
+/// A trait that allows to verify if a transaction is a l1 message.
+pub trait IsL1Message {
+    /// Whether the transaction is a l1 transaction.
+    fn is_l1_message(&self) -> bool;
+}
+
+impl IsL1Message for ScrollTransactionSigned {
+    fn is_l1_message(&self) -> bool {
+        matches!(self.transaction, ScrollTypedTransaction::L1Message(_))
+    }
+}
+
 impl Typed2718 for ScrollTransactionSigned {
     fn ty(&self) -> u8 {
         self.deref().ty()
@@ -486,7 +499,7 @@ impl<'a> arbitrary::Arbitrary<'a> for ScrollTransactionSigned {
         let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
         let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
-            signature_hash(&transaction),
+            transaction.signature_hash(),
         )
         .unwrap();
 
@@ -494,16 +507,6 @@ impl<'a> arbitrary::Arbitrary<'a> for ScrollTransactionSigned {
             if is_l1_message(&transaction) { TxL1Message::signature() } else { signature };
 
         Ok(Self::new(transaction, signature))
-    }
-}
-
-/// Calculates the signing hash for the transaction.
-fn signature_hash(tx: &ScrollTypedTransaction) -> B256 {
-    match tx {
-        ScrollTypedTransaction::Legacy(tx) => tx.signature_hash(),
-        ScrollTypedTransaction::Eip2930(tx) => tx.signature_hash(),
-        ScrollTypedTransaction::Eip1559(tx) => tx.signature_hash(),
-        ScrollTypedTransaction::L1Message(_) => B256::ZERO,
     }
 }
 
@@ -518,6 +521,40 @@ impl<T: Into<ScrollTypedTransaction>> From<Signed<T>> for ScrollTransactionSigne
         let this = Self::new(tx.into(), sig);
         this.hash.get_or_init(|| hash);
         this
+    }
+}
+
+impl TryFrom<ScrollTransactionSigned> for scroll_alloy_consensus::ScrollPooledTransaction {
+    type Error = TransactionConversionError;
+
+    fn try_from(value: ScrollTransactionSigned) -> Result<Self, Self::Error> {
+        let hash = *value.tx_hash();
+        let ScrollTransactionSigned { hash: _, signature, transaction } = value;
+
+        match transaction {
+            ScrollTypedTransaction::Legacy(tx) => {
+                Ok(Self::Legacy(Signed::new_unchecked(tx, signature, hash)))
+            }
+            ScrollTypedTransaction::Eip2930(tx) => {
+                Ok(Self::Eip2930(Signed::new_unchecked(tx, signature, hash)))
+            }
+            ScrollTypedTransaction::Eip1559(tx) => {
+                Ok(Self::Eip1559(Signed::new_unchecked(tx, signature, hash)))
+            }
+            ScrollTypedTransaction::L1Message(_) => {
+                Err(TransactionConversionError::UnsupportedForP2P)
+            }
+        }
+    }
+}
+
+impl From<ScrollPooledTransaction> for ScrollTransactionSigned {
+    fn from(value: ScrollPooledTransaction) -> Self {
+        match value {
+            ScrollPooledTransaction::Legacy(tx) => tx.into(),
+            ScrollPooledTransaction::Eip2930(tx) => tx.into(),
+            ScrollPooledTransaction::Eip1559(tx) => tx.into(),
+        }
     }
 }
 

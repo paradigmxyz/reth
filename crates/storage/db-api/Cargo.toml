@@ -27,6 +27,9 @@ alloy-primitives.workspace = true
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
 
+# scroll
+reth-scroll-primitives = { workspace = true, optional = true }
+
 # optimism
 reth-optimism-primitives = { workspace = true, optional = true }
 
@@ -84,13 +87,14 @@ arbitrary = [
 	"reth-prune-types/arbitrary",
 	"reth-stages-types/arbitrary",
 	"alloy-consensus/arbitrary",
-	"reth-optimism-primitives?/arbitrary"
+	"reth-optimism-primitives?/arbitrary",
+	"reth-scroll-primitives?/arbitrary"
 ]
 optimism = [
-	"reth-primitives/optimism",
 	"reth-codecs/op",
 	"reth-optimism-primitives?/optimism",
 	"op",
 ]
 op = ["dep:reth-optimism-primitives", "reth-codecs/op"]
-scroll = ["reth-primitives/scroll"]
+scroll-alloy-traits = ["dep:reth-scroll-primitives"]
+scroll = []

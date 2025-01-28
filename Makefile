@@ -418,7 +418,7 @@ lint-udeps:
         --exclude op-reth --exclude "example-*" --exclude reth --exclude reth-payload-primitives \
         --exclude reth-e2e-test-utils --exclude reth-ethereum-payload-builder --exclude reth-exex-test-utils \
         --exclude reth-node-ethereum --exclude reth-scroll-cli --exclude reth-scroll-evm \
-        --exclude reth-scroll-node --exclude "scroll-reth" --exclude reth-scroll-engine --exclude reth-scroll-rpc \
+        --exclude reth-scroll-node --exclude "scroll-reth" --exclude reth-scroll-rpc \
         --exclude reth-scroll-trie
 
 lint-codespell: ensure-codespell

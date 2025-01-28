@@ -356,7 +356,7 @@ mod test {
     #[test]
     fn eth68_announcement_unrecognized_tx_type() {
         let types = vec![
-            TxType::MAX_RESERVED_EIP as u8 + 1, // the first type isn't valid
+            TxType::Eip7702 as u8 + 1, // the first type isn't valid
             TxType::Legacy as u8,
         ];
         let sizes = vec![MAX_MESSAGE_SIZE, MAX_MESSAGE_SIZE];
@@ -391,8 +391,7 @@ mod test {
 
     #[test]
     fn eth68_announcement_too_small_tx() {
-        let types =
-            vec![TxType::MAX_RESERVED_EIP as u8, TxType::Legacy as u8, TxType::Eip2930 as u8];
+        let types = vec![TxType::Eip7702 as u8, TxType::Legacy as u8, TxType::Eip2930 as u8];
         let sizes = vec![
             0, // the first length isn't valid
             0, // neither is the second

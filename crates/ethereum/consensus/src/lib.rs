@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use alloy_consensus::{BlockHeader, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
 use alloy_eips::{eip7840::BlobParams, merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -21,10 +21,10 @@ use reth_consensus_common::validation::{
     validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
     validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
-use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt, SealedBlock, SealedHeader};
+use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
-    BlockBody,
+    Block, BlockHeader,
 };
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
@@ -103,30 +103,29 @@ where
 {
     fn validate_block_post_execution(
         &self,
-        block: &BlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec, input.receipts, input.requests)
     }
 }
 
-impl<H, B, ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensus<H, B>
+impl<B, ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensus<B>
     for EthBeaconConsensus<ChainSpec>
 where
-    H: BlockHeader,
-    B: BlockBody,
+    B: Block,
 {
     type Error = ConsensusError;
 
     fn validate_body_against_header(
         &self,
-        body: &B,
-        header: &SealedHeader<H>,
+        body: &B::Body,
+        header: &SealedHeader<B::Header>,
     ) -> Result<(), Self::Error> {
         validate_body_against_header(body, header.header())
     }
 
-    fn validate_block_pre_execution(&self, block: &SealedBlock<H, B>) -> Result<(), Self::Error> {
+    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), Self::Error> {
         validate_block_pre_execution(block, &self.chain_spec)
     }
 }
@@ -361,7 +360,7 @@ mod tests {
         };
 
         assert_eq!(
-            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::seal(header,)),
+            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::seal_slow(header,)),
             Ok(())
         );
     }

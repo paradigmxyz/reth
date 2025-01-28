@@ -88,7 +88,6 @@ alloy-consensus.workspace = true
 
 [features]
 optimism = [
-    "reth-primitives/optimism",
     "reth-execution-types/optimism",
     "reth-optimism-primitives",
     "reth-codecs/op",
@@ -134,7 +133,6 @@ test-utils = [
     "reth-optimism-primitives?/arbitrary",
 ]
 scroll = [
-    "reth-primitives/scroll",
     "reth-testing-utils/scroll",
     "reth-db/scroll",
     "reth-trie-db/scroll",

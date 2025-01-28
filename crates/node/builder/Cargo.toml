@@ -112,7 +112,6 @@ test-utils = [
     "reth-transaction-pool/test-utils",
 ]
 scroll = [
-    "reth-primitives/scroll",
     "reth-db-api/scroll",
     "reth-evm/scroll",
     "reth-provider/scroll",

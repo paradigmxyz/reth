@@ -31,7 +31,7 @@
 //! use alloy_consensus::Header;
 //! use alloy_primitives::U256;
 //! use reth_payload_builder::{EthBuiltPayload, PayloadBuilderError, KeepPayloadJobAlive, EthPayloadBuilderAttributes, PayloadJob, PayloadJobGenerator, PayloadKind};
-//! use reth_primitives::{Block, BlockExt};
+//! use reth_primitives::{Block, SealedBlock};
 //!
 //! /// The generator type that creates new jobs that builds empty blocks.
 //! pub struct EmptyBlockPayloadJobGenerator;
@@ -67,7 +67,7 @@
 //!         },
 //!         ..Default::default()
 //!     };
-//!     let payload = EthBuiltPayload::new(self.attributes.id, Arc::new(block.seal_slow()), U256::ZERO, None, None);
+//!     let payload = EthBuiltPayload::new(self.attributes.id, Arc::new(SealedBlock::seal_slow(block)), U256::ZERO, None, None);
 //!     Ok(payload)
 //! }
 //!

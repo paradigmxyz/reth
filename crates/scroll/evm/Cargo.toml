@@ -17,12 +17,13 @@ reth-chainspec.workspace = true
 reth-consensus.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-evm.workspace = true
-reth-primitives.workspace = true
+reth-primitives = { workspace = true, features = ["serde-bincode-compat", "reth-codec"] }
 reth-primitives-traits.workspace = true
 reth-revm.workspace = true
 
 # revm
 revm = { workspace = true, features = ["optional_no_base_fee"] }
+revm-primitives.workspace = true
 
 # scroll
 reth-scroll-chainspec.workspace = true
@@ -34,6 +35,7 @@ alloy-eips.workspace = true
 
 # scroll
 reth-scroll-consensus.workspace = true
+reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat", "reth-codec"] }
 scroll-alloy-consensus.workspace = true
 
 # misc
@@ -47,13 +49,14 @@ eyre.workspace = true
 
 [features]
 optimism = [
-	"reth-primitives/optimism",
-	"revm/optimism"
+	"revm/optimism",
+	"revm-primitives/optimism"
 ]
 scroll = [
 	"reth-evm/scroll",
-	"reth-primitives/scroll",
 	"reth-revm/scroll",
 	"reth-scroll-consensus/scroll",
-	"revm/scroll"
+	"revm/scroll",
+	"revm-primitives/scroll",
+	"reth-scroll-primitives/scroll"
 ]

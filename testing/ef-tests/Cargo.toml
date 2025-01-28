@@ -20,7 +20,6 @@ asm-keccak = [
 ]
 scroll = [
     "reth-revm/scroll",
-    "reth-primitives/scroll",
     "reth-provider/scroll",
     "reth-db/scroll",
     "reth-stages/scroll"

@@ -1,13 +1,13 @@
-use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_api::{AddOnsContext, NodeAddOns};
 use reth_node_builder::{
     rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
     FullNodeComponents,
 };
 use reth_node_types::{NodeTypes, NodeTypesWithEngine};
-use reth_primitives::EthPrimitives;
 
 use reth_scroll_chainspec::ScrollChainSpec;
+use reth_scroll_engine_primitives::ScrollEngineTypes;
+use reth_scroll_primitives::ScrollPrimitives;
 use reth_scroll_rpc::ScrollEthApi;
 
 use crate::{ScrollEngineValidator, ScrollEngineValidatorBuilder, ScrollStorage};
@@ -20,7 +20,7 @@ pub struct ScrollAddOns<N: FullNodeComponents> {
     pub rpc_add_ons: RpcAddOns<N, ScrollEthApi<N>, ScrollEngineValidatorBuilder>,
 }
 
-impl<N: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> Default
+impl<N: FullNodeComponents<Types: NodeTypes<Primitives = ScrollPrimitives>>> Default
     for ScrollAddOns<N>
 {
     fn default() -> Self {
@@ -28,7 +28,7 @@ impl<N: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> Defaul
     }
 }
 
-impl<N: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> ScrollAddOns<N> {
+impl<N: FullNodeComponents<Types: NodeTypes<Primitives = ScrollPrimitives>>> ScrollAddOns<N> {
     /// Build a [`ScrollAddOns`] using [`ScrollAddOnsBuilder`].
     pub fn builder() -> ScrollAddOnsBuilder {
         ScrollAddOnsBuilder::default()
@@ -40,9 +40,9 @@ where
     N: FullNodeComponents<
         Types: NodeTypesWithEngine<
             ChainSpec = ScrollChainSpec,
-            Primitives = EthPrimitives,
+            Primitives = ScrollPrimitives,
             Storage = ScrollStorage,
-            Engine = EthEngineTypes,
+            Engine = ScrollEngineTypes,
         >,
     >,
 {
@@ -62,9 +62,9 @@ where
     N: FullNodeComponents<
         Types: NodeTypesWithEngine<
             ChainSpec = ScrollChainSpec,
-            Primitives = EthPrimitives,
+            Primitives = ScrollPrimitives,
             Storage = ScrollStorage,
-            Engine = EthEngineTypes,
+            Engine = ScrollEngineTypes,
         >,
     >,
 {
@@ -80,8 +80,8 @@ where
     N: FullNodeComponents<
         Types: NodeTypesWithEngine<
             ChainSpec = ScrollChainSpec,
-            Primitives = EthPrimitives,
-            Engine = EthEngineTypes,
+            Primitives = ScrollPrimitives,
+            Engine = ScrollEngineTypes,
         >,
     >,
 {
@@ -101,7 +101,7 @@ impl ScrollAddOnsBuilder {
     /// Builds an instance of [`ScrollAddOns`].
     pub fn build<N>(self) -> ScrollAddOns<N>
     where
-        N: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
+        N: FullNodeComponents<Types: NodeTypes<Primitives = ScrollPrimitives>>,
     {
         ScrollAddOns {
             rpc_add_ons: RpcAddOns::new(

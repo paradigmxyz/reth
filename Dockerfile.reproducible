@@ -8,9 +8,6 @@ RUN apt-get update && apt-get install -y libclang-dev=1:11.0-51+nmu5
 RUN git clone https://github.com/paradigmxyz/reth /app
 WORKDIR /app
 
-# Checkout the reproducible-build branch
-RUN git checkout reproducible-build
-
 # Get the latest commit timestamp and set SOURCE_DATE_EPOCH
 RUN SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct) && \
     echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" >> /etc/environment
@@ -30,8 +27,10 @@ ARG FEATURES="jemalloc asm-keccak"
 RUN . /etc/environment && \
     cargo build --bin reth --features "${FEATURES}" --profile "reproducible" --locked --target x86_64-unknown-linux-gnu
 
-# Create a minimal final image with just the binary
-FROM scratch AS binaries
+RUN . /etc/environment && mv /app/target/x86_64-unknown-linux-gnu/reproducible/reth /reth
 
-# Copy the compiled binary from the builder stage
-COPY --from=builder /app/target/x86_64-unknown-linux-gnu/reproducible/reth /reth
+# Create a minimal final image with just the binary
+FROM gcr.io/distroless/cc-debian12:nonroot-6755e21ccd99ddead6edc8106ba03888cbeed41a
+COPY --from=builder /reth /reth
+EXPOSE 30303 30303/udp 9001 8545 8546
+ENTRYPOINT [ "/reth" ]

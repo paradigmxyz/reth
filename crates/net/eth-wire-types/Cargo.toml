@@ -15,7 +15,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-codecs-derive.workspace = true
-reth-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-ethereum-forks.workspace = true
 
@@ -37,7 +37,7 @@ proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-primitives = { workspace = true, features = ["arbitrary"] }
+alloy-primitives = { workspace = true, features = ["arbitrary", "rand"] }
 alloy-genesis.workspace = true
 alloy-chains = { workspace = true, features = ["arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
@@ -57,14 +57,14 @@ std = [
 	"bytes/std",
 	"derive_more/std",
 	"reth-ethereum-forks/std",
-	"reth-primitives/std",
+	"reth-ethereum-primitives/std",
 	"reth-primitives-traits/std",
 	"serde?/std",
 	"thiserror/std",
 	"reth-chainspec/std"
 ]
 arbitrary = [
-	"reth-primitives/arbitrary",
+	"reth-ethereum-primitives/arbitrary",
 	"alloy-chains/arbitrary",
 	"dep:arbitrary",
 	"dep:proptest",

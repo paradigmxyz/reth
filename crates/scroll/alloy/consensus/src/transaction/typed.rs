@@ -1,7 +1,9 @@
 use crate::{ScrollTxEnvelope, ScrollTxType, TxL1Message};
-use alloy_consensus::{Transaction, TxEip1559, TxEip2930, TxLegacy, Typed2718};
+use alloy_consensus::{
+    SignableTransaction, Transaction, TxEip1559, TxEip2930, TxLegacy, Typed2718,
+};
 use alloy_eips::eip2930::AccessList;
-use alloy_primitives::{Address, Bytes, TxKind};
+use alloy_primitives::{Address, Bytes, TxKind, B256};
 use reth_codecs::{Compact, __private::bytes};
 use reth_codecs_derive::generate_tests;
 
@@ -109,6 +111,16 @@ impl ScrollTypedTransaction {
         match self {
             Self::L1Message(tx) => Some(tx),
             _ => None,
+        }
+    }
+
+    /// Calculates the signing hash for the transaction.
+    pub fn signature_hash(&self) -> B256 {
+        match self {
+            Self::Legacy(tx) => tx.signature_hash(),
+            Self::Eip2930(tx) => tx.signature_hash(),
+            Self::Eip1559(tx) => tx.signature_hash(),
+            Self::L1Message(_) => B256::ZERO,
         }
     }
 }

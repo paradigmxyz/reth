@@ -28,7 +28,7 @@ use reth_optimism_node::{
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
 use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_payload_util::{PayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed};
-use reth_primitives::RecoveredTx;
+use reth_primitives::Recovered;
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
 use reth_transaction_pool::{pool::BestPayloadTransactions, PoolTransaction};
@@ -67,7 +67,7 @@ impl OpPayloadTransactions for CustomTxPriority {
             ..Default::default()
         };
         let signature = sender.sign_transaction_sync(&mut end_of_block_tx).unwrap();
-        let end_of_block_tx = RecoveredTx::new_unchecked(
+        let end_of_block_tx = Recovered::new_unchecked(
             OpTransactionSigned::new_unhashed(
                 OpTypedTransaction::Eip1559(end_of_block_tx),
                 signature,

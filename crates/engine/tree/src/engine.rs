@@ -9,7 +9,7 @@ use alloy_primitives::B256;
 use futures::{Stream, StreamExt};
 use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineTypes};
-use reth_primitives::{NodePrimitives, SealedBlockWithSenders};
+use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::Block;
 use std::{
     collections::HashSet,
@@ -253,7 +253,7 @@ impl<T: EngineTypes, N: NodePrimitives> Display for EngineApiRequest<T, N> {
         match self {
             Self::Beacon(msg) => msg.fmt(f),
             Self::InsertExecutedBlock(block) => {
-                write!(f, "InsertExecutedBlock({:?})", block.block().num_hash())
+                write!(f, "InsertExecutedBlock({:?})", block.recovered_block().num_hash())
             }
         }
     }
@@ -306,7 +306,7 @@ pub enum FromEngine<Req, B: Block> {
     /// Request from the engine.
     Request(Req),
     /// Downloaded blocks from the network.
-    DownloadedBlocks(Vec<SealedBlockWithSenders<B>>),
+    DownloadedBlocks(Vec<RecoveredBlock<B>>),
 }
 
 impl<Req: Display, B: Block> Display for FromEngine<Req, B> {

@@ -12,5 +12,8 @@ pub use l1_message::{ScrollL1MessageTransactionFields, TxL1Message, L1_MESSAGE_T
 mod typed;
 pub use typed::ScrollTypedTransaction;
 
+mod pooled;
+pub use pooled::ScrollPooledTransaction;
+
 #[cfg(feature = "serde")]
 pub use l1_message::serde_l1_message_tx_rpc;

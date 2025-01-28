@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-db.workspace = true
+reth-db = { workspace = true, features = ["scroll-alloy-traits"] }
 reth-cli.workspace = true
 reth-cli-commands.workspace = true
 reth-cli-runner.workspace = true
@@ -31,10 +31,13 @@ alloy-consensus.workspace = true
 reth-scroll-chainspec.workspace = true
 reth-scroll-evm.workspace = true
 reth-scroll-node.workspace = true
+reth-scroll-primitives.workspace = true
+scroll-alloy-consensus = { workspace = true, optional = true }
 
 # misc
 eyre.workspace = true
 clap.workspace = true
+proptest = { workspace = true, optional = true }
 tracing.workspace = true
 
 [features]
@@ -43,7 +46,6 @@ optimism = [
 	"reth-node-core/optimism",
 	"reth-scroll-evm/optimism",
 	"reth-scroll-node/optimism",
-	"reth-primitives/optimism"
 ]
 scroll = [
 	"reth-db/scroll",
@@ -51,4 +53,9 @@ scroll = [
 	"reth-node-core/scroll",
 	"reth-scroll-evm/scroll",
 	"reth-scroll-node/scroll"
+]
+dev = [
+	"dep:proptest",
+	"dep:scroll-alloy-consensus",
+	"reth-cli-commands/arbitrary"
 ]

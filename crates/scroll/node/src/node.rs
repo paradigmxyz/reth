@@ -5,20 +5,21 @@ use crate::{
     ScrollAddOns, ScrollConsensusBuilder, ScrollExecutorBuilder, ScrollNetworkBuilder,
     ScrollPayloadBuilder, ScrollPoolBuilder, ScrollStorage,
 };
-use reth_ethereum_engine_primitives::{
-    EthBuiltPayload, EthEngineTypes, EthPayloadAttributes, EthPayloadBuilderAttributes,
-};
 use reth_node_builder::{
     components::ComponentsBuilder,
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
     Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
 };
-use reth_primitives::EthPrimitives;
 use reth_scroll_chainspec::ScrollChainSpec;
+use reth_scroll_engine_primitives::{
+    ScrollBuiltPayload, ScrollEngineTypes, ScrollPayloadBuilderAttributes,
+};
+use reth_scroll_primitives::ScrollPrimitives;
 use reth_trie_db::MerklePatriciaTrie;
+use scroll_alloy_rpc_types_engine::ScrollPayloadAttributes;
 
 /// The Scroll node implementation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct ScrollNode;
 
 impl ScrollNode {
@@ -33,12 +34,12 @@ impl ScrollNode {
     >
     where
         Node: FullNodeTypes<
-            Types: NodeTypes<ChainSpec = ScrollChainSpec, Primitives = EthPrimitives>,
+            Types: NodeTypes<ChainSpec = ScrollChainSpec, Primitives = ScrollPrimitives>,
         >,
         <Node::Types as NodeTypesWithEngine>::Engine: PayloadTypes<
-            BuiltPayload = EthBuiltPayload,
-            PayloadAttributes = EthPayloadAttributes,
-            PayloadBuilderAttributes = EthPayloadBuilderAttributes,
+            BuiltPayload = ScrollBuiltPayload,
+            PayloadAttributes = ScrollPayloadAttributes,
+            PayloadBuilderAttributes = ScrollPayloadBuilderAttributes,
         >,
     {
         ComponentsBuilder::default()
@@ -78,12 +79,11 @@ where
 }
 
 impl NodeTypesWithEngine for ScrollNode {
-    type Engine = EthEngineTypes;
+    type Engine = ScrollEngineTypes;
 }
 
 impl NodeTypes for ScrollNode {
-    // TODO(scroll): update to scroll primitives when we introduce the revm SDK pattern.
-    type Primitives = EthPrimitives;
+    type Primitives = ScrollPrimitives;
     type ChainSpec = ScrollChainSpec;
     type StateCommitment = MerklePatriciaTrie;
     type Storage = ScrollStorage;

@@ -15,16 +15,16 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{common::CliNodeTypes, node::NoArgs};
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_eth_wire::EthNetworkPrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::LogArgs,
     version::{LONG_VERSION, SHORT_VERSION},
 };
 use reth_node_metrics::recorder::install_prometheus_recorder;
-use reth_primitives::EthPrimitives;
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_evm::ScrollExecutorProvider;
+use reth_scroll_node::ScrollNetworkPrimitives;
+use reth_scroll_primitives::ScrollPrimitives;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
 use tracing::info;
@@ -104,7 +104,7 @@ where
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
-        Types: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>,
+        Types: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = ScrollPrimitives>,
     {
         // add network name to logs dir
         self.logs.log_file_directory =
@@ -131,19 +131,21 @@ where
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<Types>()),
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<Types, _, _, EthNetworkPrimitives>(
+                command.execute::<Types, _, _, ScrollNetworkPrimitives>(
                     ctx,
                     ScrollExecutorProvider::scroll,
                 )
             }),
             Commands::P2P(command) => {
-                runner.run_until_ctrl_c(command.execute::<EthNetworkPrimitives>())
+                runner.run_until_ctrl_c(command.execute::<ScrollNetworkPrimitives>())
             }
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Recover(command) => {
                 runner.run_command_until_exit(|ctx| command.execute::<Types>(ctx))
             }
             Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<Types>()),
+            #[cfg(feature = "dev")]
+            Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         }
     }
 

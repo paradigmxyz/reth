@@ -1,0 +1,21 @@
+[package]
+name = "reth-scroll-payload"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
+
+# misc
+futures-util.workspace = true
+

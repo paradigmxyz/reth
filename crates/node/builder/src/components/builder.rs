@@ -5,12 +5,12 @@ use crate::{
         Components, ConsensusBuilder, ExecutorBuilder, NetworkBuilder, NodeComponents,
         PayloadServiceBuilder, PoolBuilder,
     },
-    BuilderContext, ConfigureEvm, FullNodeTypes,
+    BuilderContext, FullNodeTypes,
 };
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
 use reth_network::NetworkPrimitives;
-use reth_node_api::{BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, TxTy};
+use reth_node_api::{BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{future::Future, marker::PhantomData};
@@ -310,6 +310,7 @@ where
         Primitives: NetworkPrimitives<
             BlockHeader = HeaderTy<Node::Types>,
             BlockBody = BodyTy<Node::Types>,
+            Block = BlockTy<Node::Types>,
         >,
     >,
     PayloadB: PayloadServiceBuilder<Node, PoolB::Pool>,
@@ -393,14 +394,18 @@ pub trait NodeComponentsBuilder<Node: FullNodeTypes>: Send {
 
 impl<Node, N, F, Fut, Pool, EVM, Executor, Cons> NodeComponentsBuilder<Node> for F
 where
-    N: NetworkPrimitives<BlockHeader = HeaderTy<Node::Types>, BlockBody = BodyTy<Node::Types>>,
+    N: NetworkPrimitives<
+        BlockHeader = HeaderTy<Node::Types>,
+        BlockBody = BodyTy<Node::Types>,
+        Block = BlockTy<Node::Types>,
+    >,
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
     Fut: Future<Output = eyre::Result<Components<Node, N, Pool, EVM, Executor, Cons>>> + Send,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    EVM: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>,
+    EVM: ConfigureEvmFor<<Node::Types as NodeTypes>::Primitives>,
     Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
     Cons: FullConsensus<<Node::Types as NodeTypes>::Primitives, Error = ConsensusError>
         + Clone

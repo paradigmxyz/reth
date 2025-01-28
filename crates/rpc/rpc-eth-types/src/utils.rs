@@ -1,7 +1,7 @@
 //! Commonly used code snippets
 
 use super::{EthApiError, EthResult};
-use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, RecoveredTx};
+use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, Recovered};
 use reth_primitives_traits::SignedTransaction;
 use std::future::Future;
 
@@ -11,7 +11,7 @@ use std::future::Future;
 /// malformed.
 ///
 /// See [`alloy_eips::eip2718::Decodable2718::decode_2718`]
-pub fn recover_raw_transaction<T: SignedTransaction>(mut data: &[u8]) -> EthResult<RecoveredTx<T>> {
+pub fn recover_raw_transaction<T: SignedTransaction>(mut data: &[u8]) -> EthResult<Recovered<T>> {
     if data.is_empty() {
         return Err(EthApiError::EmptyRawTransactionData)
     }

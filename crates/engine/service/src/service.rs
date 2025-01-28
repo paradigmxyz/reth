@@ -16,7 +16,7 @@ pub use reth_engine_tree::{
 };
 use reth_evm::execute::BlockExecutorProvider;
 use reth_network_p2p::BlockClient;
-use reth_node_types::{BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine};
+use reth_node_types::{BlockTy, NodeTypes, NodeTypesWithEngine};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::EthPrimitives;
 use reth_provider::{
@@ -52,10 +52,13 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 /// The type that drives the chain forward and communicates progress.
 #[pin_project]
 #[allow(missing_debug_implementations)]
+// TODO(mattsse): remove hidde once fixed : <https://github.com/rust-lang/rust/issues/135363>
+//  otherwise rustdoc fails to resolve the alias
+#[doc(hidden)]
 pub struct EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
-    Client: BlockClient<Header = HeaderTy<N>, Body = BodyTy<N>> + 'static,
+    Client: BlockClient<Block = BlockTy<N>> + 'static,
     E: BlockExecutorProvider + 'static,
 {
     orchestrator: EngineServiceType<N, Client>,
@@ -65,7 +68,7 @@ where
 impl<N, Client, E> EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
-    Client: BlockClient<Header = HeaderTy<N>, Body = BodyTy<N>> + 'static,
+    Client: BlockClient<Block = BlockTy<N>> + 'static,
     E: BlockExecutorProvider<Primitives = N::Primitives> + 'static,
 {
     /// Constructor for `EngineService`.
@@ -133,7 +136,7 @@ where
 impl<N, Client, E> Stream for EngineService<N, Client, E>
 where
     N: EngineNodeTypes,
-    Client: BlockClient<Header = HeaderTy<N>, Body = BodyTy<N>> + 'static,
+    Client: BlockClient<Block = BlockTy<N>> + 'static,
     E: BlockExecutorProvider + 'static,
 {
     type Item = ChainEvent<BeaconConsensusEngineEvent<N::Primitives>>;
