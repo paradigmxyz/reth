@@ -30,7 +30,7 @@ use reth_primitives_traits::Block;
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]
-pub enum TransactionValidationOutcome<T: PoolTransaction> {
+pub enum TransactionValidationOutcome<T: PoolTransaction, E = InvalidPoolTransactionError> {
     /// The transaction is considered _currently_ valid and can be inserted into the pool.
     Valid {
         /// Balance of the sender at the current point.
@@ -49,7 +49,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction> {
     },
     /// The transaction is considered invalid indefinitely: It violates constraints that prevent
     /// this transaction from ever becoming valid.
-    Invalid(T, InvalidPoolTransactionError),
+    Invalid(T, E),
     /// An error occurred while trying to validate the transaction
     Error(TxHash, Box<dyn core::error::Error + Send + Sync>),
 }
