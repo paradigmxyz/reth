@@ -255,6 +255,7 @@ pub struct ExExNotificationsWithHead<P, E>
 where
     E: BlockExecutorProvider,
 {
+    /// The node's real head.
     node_head: Head,
     provider: P,
     executor: E,
@@ -315,9 +316,12 @@ where
         if self.provider.is_known(&self.exex_head.block.hash)? &&
             self.exex_head.block.number <= self.node_head.number
         {
+            // we have the targeted block and that block is below the current head
             debug!(target: "exex::notifications", "ExEx head is on the canonical chain");
             return Ok(None)
         }
+
+        // TODO: skip if exehead is ahead of the node
 
         // If the head block is not found in the database, it means we're not on the canonical
         // chain.
@@ -421,6 +425,8 @@ where
         let Some(notification) = ready!(this.notifications.poll_recv(cx)) else {
             return Poll::Ready(None)
         };
+
+        // TODO skip if chaintip is lower than exexhead
 
         if let Some(committed_chain) = notification.committed_chain() {
             this.exex_head.block = committed_chain.tip().num_hash();
