@@ -546,7 +546,7 @@ where
     /// Channels to the persistence layer.
     persistence: PersistenceHandle<N>,
     /// Tracks the state changes of the persistence task.
-    persistence_state: PersistenceState<N>,
+    persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
     /// Keeps track of the state of the canonical chain that isn't persisted yet.
@@ -621,7 +621,7 @@ where
         state: EngineApiTreeState<N>,
         canonical_in_memory_state: CanonicalInMemoryState<N>,
         persistence: PersistenceHandle<N>,
-        persistence_state: PersistenceState<N>,
+        persistence_state: PersistenceState,
         payload_builder: PayloadBuilderHandle<T>,
         config: TreeConfig,
         engine_kind: EngineApiKind,
@@ -1046,25 +1046,15 @@ where
     fn is_descendant_of_persisting_blocks(&self, block: &N::BlockHeader) -> bool {
         self.persistence_state.current_action().is_none_or(|action| {
             match action {
-                CurrentPersistenceAction::SavingBlocks { blocks } => {
-                    // Get the highest block num and hash
-                    let Some(highest_num_hash) = blocks
-                        .iter()
-                        .max_by_key(|elem| elem.recovered_block().num_hash().number)
-                        .map(|block| block.recovered_block().num_hash())
-                    else {
-                        // If the blocks are empty for some reason, we can actually proceed here.
-                        return true
-                    };
-
+                CurrentPersistenceAction::SavingBlocks { highest } => {
                     // The block being validated can't be a descendant if its number is lower than
                     // the highest block being persisted. In that case, it's likely a fork of a
                     // lower block.
-                    if block.number() <= highest_num_hash.number {
+                    if block.number() <= highest.number {
                         return false
                     }
 
-                    self.state.tree_state.is_descendant(highest_num_hash, block)
+                    self.state.tree_state.is_descendant(*highest, block)
                 }
                 CurrentPersistenceAction::RemovingBlocks { new_tip_num: _ } => false,
             }
@@ -1260,10 +1250,18 @@ where
             return
         }
 
+        // NOTE: checked non-empty above
+        let highest_num_hash = blocks_to_persist
+            .iter()
+            .max_by_key(|block| block.recovered_block().number())
+            .map(|b| b.recovered_block().num_hash())
+            .expect("Checked non-empty persisting blocks");
+
         debug!(target: "engine::tree", blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
         let (tx, rx) = oneshot::channel();
-        let _ = self.persistence.save_blocks(blocks_to_persist.clone(), tx);
-        self.persistence_state.start_save(blocks_to_persist, rx);
+        let _ = self.persistence.save_blocks(blocks_to_persist, tx);
+
+        self.persistence_state.start_save(highest_num_hash, rx);
     }
 
     /// Attempts to advance the persistence state.
@@ -1590,7 +1588,7 @@ where
     /// Returns true if the canonical chain length minus the last persisted
     /// block is greater than or equal to the persistence threshold and
     /// backfill is not running.
-    const fn should_persist(&self) -> bool {
+    pub const fn should_persist(&self) -> bool {
         if !self.backfill_sync_state.is_idle() {
             // can't persist if backfill is running
             return false
@@ -2361,25 +2359,27 @@ where
         // in-memory trie updates we collect in `compute_state_root_parallel`.
         //
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
-        let is_descendant_block = self.is_descendant_of_persisting_blocks(block.header());
+        let is_descendant_of_persisting_blocks =
+            self.is_descendant_of_persisting_blocks(block.header());
 
-        let (state_root_handle, state_root_task_config, state_hook) = if is_descendant_block &&
-            self.config.use_state_root_task()
-        {
-            let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-            let state_root_config = StateRootConfig::new_from_input(
-                consistent_view.clone(),
-                self.compute_trie_input(consistent_view, block.header().parent_hash())
-                    .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
-            );
+        let (state_root_handle, state_root_task_config, state_hook) =
+            if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
+                let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
+                let state_root_config = StateRootConfig::new_from_input(
+                    consistent_view.clone(),
+                    self.compute_trie_input(consistent_view, block.header().parent_hash())
+                        .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
+                );
 
-            let state_root_task =
-                StateRootTask::new(state_root_config.clone(), self.state_root_task_pool.clone());
-            let state_hook = Box::new(state_root_task.state_hook()) as Box<dyn OnStateHook>;
-            (Some(state_root_task.spawn()), Some(state_root_config), state_hook)
-        } else {
-            (None, None, Box::new(NoopHook::default()) as Box<dyn OnStateHook>)
-        };
+                let state_root_task = StateRootTask::new(
+                    state_root_config.clone(),
+                    self.state_root_task_pool.clone(),
+                );
+                let state_hook = Box::new(state_root_task.state_hook()) as Box<dyn OnStateHook>;
+                (Some(state_root_task.spawn()), Some(state_root_config), state_hook)
+            } else {
+                (None, None, Box::new(NoopHook::default()) as Box<dyn OnStateHook>)
+            };
 
         let execution_start = Instant::now();
         let output = self.metrics.executor.execute_metered(executor, &block, state_hook)?;
@@ -2406,7 +2406,7 @@ where
         // is being persisted as we are computing in parallel, because we initialize
         // a different database transaction per thread and it might end up with a
         // different view of the database.
-        let (state_root, trie_output, root_elapsed) = if is_descendant_block {
+        let (state_root, trie_output, root_elapsed) = if is_descendant_of_persisting_blocks {
             if self.config.use_state_root_task() {
                 let state_root_handle = state_root_handle
                     .expect("state root handle must exist if use_state_root_task is true");
@@ -2443,7 +2443,7 @@ where
                 }
             }
         } else {
-            debug!(target: "engine::tree", block=?block_num_hash, ?is_descendant_block, "Failed to compute state root in parallel");
+            debug!(target: "engine::tree", block=?block_num_hash, ?is_descendant_of_persisting_blocks, "Failed to compute state root in parallel");
             let (root, updates) = state_provider.state_root_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
@@ -3744,9 +3744,15 @@ mod tests {
     async fn test_tree_state_on_new_head_reorg() {
         reth_tracing::init_test_tracing();
         let chain_spec = MAINNET.clone();
-        let mut test_harness = TestHarness::new(chain_spec);
-        let mut test_block_builder = TestBlockBuilder::eth();
 
+        // Set persistence_threshold to 1
+        let mut test_harness = TestHarness::new(chain_spec);
+        test_harness.tree.config = test_harness
+            .tree
+            .config
+            .with_persistence_threshold(1)
+            .with_memory_block_buffer_target(1);
+        let mut test_block_builder = TestBlockBuilder::eth();
         let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..6).collect();
 
         for block in &blocks {
@@ -3786,11 +3792,16 @@ mod tests {
         assert_eq!(current_action, None);
 
         // let's attempt to persist and check that it attempts to save blocks
+        //
+        // since in-memory block buffer target and persistence_threshold are both 1, this should
+        // save all but the current tip of the canonical chain (up to blocks[1])
         test_harness.tree.advance_persistence().unwrap();
         let current_action = test_harness.tree.persistence_state.current_action().cloned();
         assert_eq!(
             current_action,
-            Some(CurrentPersistenceAction::SavingBlocks { blocks: vec![blocks[0].clone()] })
+            Some(CurrentPersistenceAction::SavingBlocks {
+                highest: blocks[1].recovered_block().num_hash()
+            })
         );
 
         // get rid of the prev action
@@ -3798,14 +3809,29 @@ mod tests {
         let PersistenceAction::SaveBlocks(saved_blocks, sender) = received_action else {
             panic!("received wrong action");
         };
-        assert_eq!(saved_blocks, vec![blocks[0].clone()]);
+        assert_eq!(saved_blocks, vec![blocks[0].clone(), blocks[1].clone()]);
 
         // send the response so we can advance again
-        sender.send(Some(blocks[0].recovered_block().num_hash())).unwrap();
+        sender.send(Some(blocks[1].recovered_block().num_hash())).unwrap();
+
+        // we should be persisting blocks[1] because we threw out the prev action
+        let current_action = test_harness.tree.persistence_state.current_action().cloned();
+        assert_eq!(
+            current_action,
+            Some(CurrentPersistenceAction::SavingBlocks {
+                highest: blocks[1].recovered_block().num_hash()
+            })
+        );
+
+        // after advancing persistence, we should be at `None` for the next action
+        test_harness.tree.advance_persistence().unwrap();
+        let current_action = test_harness.tree.persistence_state.current_action().cloned();
+        assert_eq!(current_action, None);
 
         // reorg case
         let result = test_harness.tree.on_new_head(fork_block_5.recovered_block().hash()).unwrap();
         assert!(matches!(result, Some(NewCanonicalChain::Reorg { .. })));
+
         if let Some(NewCanonicalChain::Reorg { new, old }) = result {
             assert_eq!(new.len(), 3);
             assert_eq!(new[0].recovered_block().hash(), fork_block_3.recovered_block().hash());
@@ -3816,10 +3842,28 @@ mod tests {
             assert_eq!(old[0].recovered_block().hash(), blocks[2].recovered_block().hash());
         }
 
-        // The persistence threshold is too high for the reorg to result in an on-disk removal
+        // The canonical block has not changed, so we will not get any active persistence action
         test_harness.tree.advance_persistence().unwrap();
         let current_action = test_harness.tree.persistence_state.current_action().cloned();
         assert_eq!(current_action, None);
+
+        // Let's change the canonical head and advance persistence
+        test_harness
+            .tree
+            .state
+            .tree_state
+            .set_canonical_head(fork_block_5.recovered_block().num_hash());
+
+        // The canonical block has changed now, we should get fork_block_4 due to the persistence
+        // threshold and in memory block buffer target
+        test_harness.tree.advance_persistence().unwrap();
+        let current_action = test_harness.tree.persistence_state.current_action().cloned();
+        assert_eq!(
+            current_action,
+            Some(CurrentPersistenceAction::SavingBlocks {
+                highest: fork_block_4.recovered_block().num_hash()
+            })
+        );
     }
 
     #[tokio::test]
@@ -3949,7 +3993,9 @@ mod tests {
         test_harness.tree.advance_persistence().expect("advancing persistence should succeed");
         assert_eq!(
             test_harness.tree.persistence_state.current_action().cloned(),
-            Some(CurrentPersistenceAction::SavingBlocks { blocks: blocks_to_persist })
+            Some(CurrentPersistenceAction::SavingBlocks {
+                highest: blocks_to_persist.last().unwrap().recovered_block().num_hash()
+            })
         );
     }
 

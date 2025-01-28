@@ -1,14 +1,12 @@
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_primitives_traits::NodePrimitives;
 use std::{collections::VecDeque, time::Instant};
 use tokio::sync::oneshot;
 use tracing::{debug, trace};
 
 /// The state of the persistence task.
 #[derive(Default, Debug)]
-pub struct PersistenceState<N: NodePrimitives> {
+pub struct PersistenceState {
     /// Hash and number of the last block persisted.
     ///
     /// This tracks the chain height that is persisted on disk
@@ -16,13 +14,13 @@ pub struct PersistenceState<N: NodePrimitives> {
     /// Receiver end of channel where the result of the persistence task will be
     /// sent when done. A None value means there's no persistence task in progress.
     pub(crate) rx:
-        Option<(oneshot::Receiver<Option<BlockNumHash>>, Instant, CurrentPersistenceAction<N>)>,
+        Option<(oneshot::Receiver<Option<BlockNumHash>>, Instant, CurrentPersistenceAction)>,
     /// The block above which blocks should be removed from disk, because there has been an on disk
     /// reorg.
     pub(crate) remove_above_state: VecDeque<u64>,
 }
 
-impl<N: NodePrimitives> PersistenceState<N> {
+impl PersistenceState {
     /// Determines if there is a persistence task in progress by checking if the
     /// receiver is set.
     pub(crate) const fn in_progress(&self) -> bool {
@@ -42,16 +40,15 @@ impl<N: NodePrimitives> PersistenceState<N> {
     /// Sets the state for a block save operation.
     pub(crate) fn start_save(
         &mut self,
-        to_save: Vec<ExecutedBlockWithTrieUpdates<N>>,
+        highest: BlockNumHash,
         rx: oneshot::Receiver<Option<BlockNumHash>>,
     ) {
-        self.rx =
-            Some((rx, Instant::now(), CurrentPersistenceAction::SavingBlocks { blocks: to_save }));
+        self.rx = Some((rx, Instant::now(), CurrentPersistenceAction::SavingBlocks { highest }));
     }
 
     /// Returns the current persistence action. If there is no persistence task in progress, then
     /// this returns `None`.
-    pub(crate) fn current_action(&self) -> Option<&CurrentPersistenceAction<N>> {
+    pub(crate) fn current_action(&self) -> Option<&CurrentPersistenceAction> {
         self.rx.as_ref().map(|rx| &rx.2)
     }
 
@@ -77,11 +74,11 @@ impl<N: NodePrimitives> PersistenceState<N> {
 
 /// The currently running persistence action.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum CurrentPersistenceAction<N: NodePrimitives> {
+pub(crate) enum CurrentPersistenceAction {
     /// The persistence task is saving blocks.
     SavingBlocks {
-        /// The blocks being saved
-        blocks: Vec<ExecutedBlockWithTrieUpdates<N>>,
+        /// The highest block being saved.
+        highest: BlockNumHash,
     },
     /// The persistence task is removing blocks.
     RemovingBlocks {
