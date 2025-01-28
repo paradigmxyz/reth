@@ -48,7 +48,9 @@ impl HashedPostState {
         let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         for (address, (account, storage)) in hashed {
             accounts.insert(address, account);
-            storages.insert(address, storage);
+            if !storage.is_empty() {
+                storages.insert(address, storage);
+            }
         }
         Self { accounts, storages }
     }
@@ -191,6 +193,11 @@ impl HashedStorage {
     /// Create new instance of [`HashedStorage`].
     pub fn new(wiped: bool) -> Self {
         Self { wiped, storage: HashMap::default() }
+    }
+
+    /// Check if self is empty.
+    pub fn is_empty(&self) -> bool {
+        !self.wiped && self.storage.is_empty()
     }
 
     /// Create new hashed storage from iterator.
