@@ -111,7 +111,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Watching is recommended if the read-only provider is used on a directory that an active node
     /// instance is modifying.
     ///
-    /// See also [StaticFileProvider::watch_directory].
+    /// See also [`StaticFileProvider::watch_directory`].
     pub fn read_only(path: impl AsRef<Path>, watch_directory: bool) -> ProviderResult<Self> {
         let provider = Self::new(path, StaticFileAccess::RO)?;
 

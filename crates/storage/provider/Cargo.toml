@@ -58,6 +58,7 @@ notify = { workspace = true, default-features = false, features = ["macos_fseven
 parking_lot.workspace = true
 dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
+eyre.workspace = true
 
 # test-utils
 reth-ethereum-engine-primitives = { workspace = true, optional = true }

@@ -2,15 +2,13 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_eth::{Filter, FilteredParams};
 use reth_chainspec::ChainSpecBuilder;
-use reth_db::open_db_read_only;
 use reth_node_ethereum::EthereumNode;
 use reth_primitives::{SealedBlock, SealedHeader, TransactionSigned};
 use reth_primitives_traits::transaction::signed::SignedTransaction;
 use reth_provider::{
-    providers::StaticFileProvider, AccountReader, BlockReader, BlockSource, HeaderProvider,
+    providers::ReadOnlyConfig, AccountReader, BlockReader, BlockSource, HeaderProvider,
     ReceiptProvider, StateProvider, TransactionsProvider,
 };
-use std::{path::Path, sync::Arc};
 
 // Providers are zero cost abstractions on top of an opened MDBX Transaction
 // exposing a familiar API to query the chain's information without requiring knowledge
@@ -21,16 +19,11 @@ use std::{path::Path, sync::Arc};
 fn main() -> eyre::Result<()> {
     // Opens a RO handle to the database file.
     let db_path = std::env::var("RETH_DB_PATH")?;
-    let db_path = Path::new(&db_path);
-    let db = open_db_read_only(db_path.join("db").as_path(), Default::default())?;
 
-    // Instantiate a provider factory for Ethereum mainnet using the provided DB.
+    // Instantiate a provider factory for Ethereum mainnet using the provided DB path.
     let spec = ChainSpecBuilder::mainnet().build();
     let factory = EthereumNode::provider_factory_builder()
-        .db(Arc::new(db))
-        .chainspec(spec.into())
-        .static_file(StaticFileProvider::read_only(db_path.join("static_files"), true)?)
-        .build_provider_factory();
+        .open_read_only(spec.into(), ReadOnlyConfig::from_db_dir(db_path))?;
 
     // This call opens a RO transaction on the database. To write to the DB you'd need to call
     // the `provider_rw` function and look for the `Writer` variants of the traits.

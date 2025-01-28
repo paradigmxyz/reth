@@ -43,7 +43,7 @@ pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
 use super::ProviderNodeTypes;
 
 mod builder;
-pub use builder::ProviderFactoryBuilder;
+pub use builder::{ProviderFactoryBuilder, ReadOnlyConfig};
 
 mod metrics;
 

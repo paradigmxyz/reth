@@ -4,9 +4,14 @@
 //! up to the intended build target.
 
 use crate::{providers::StaticFileProvider, ProviderFactory};
+use reth_db::{mdbx::DatabaseArguments, open_db_read_only, DatabaseEnv};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
-use std::{marker::PhantomData, sync::Arc};
+use std::{
+    marker::PhantomData,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// Helper type to create a [`ProviderFactory`].
 ///
@@ -32,12 +37,160 @@ impl<N> ProviderFactoryBuilder<N> {
         TypesAnd1::new(db)
     }
 
-    // TODO: add helper fns for opening a DB
+    /// Opens the database with the given chainspec and [`ReadOnlyConfig`].
+    ///
+    /// # Open a monitored instance
+    ///
+    /// This is recommended when the new read-only instance is used with an active node.
+    ///
+    /// ```no_run
+    /// use reth_chainspec::MAINNET;
+    /// use reth_node_types::NodeTypes;
+    /// use reth_provider::providers::ProviderFactoryBuilder;
+    ///
+    /// fn demo<N: NodeTypes<ChainSpec = reth_chainspec::ChainSpec>>() {
+    ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
+    ///         .open_read_only(MAINNET.clone(), "datadir")
+    ///         .unwrap();
+    /// }
+    /// ```
+    ///
+    /// # Open an unmonitored instace
+    ///
+    /// This is recommended when no changes to the static files are expected (e.g. no active node)
+    ///
+    /// ```no_run
+    /// use reth_chainspec::MAINNET;
+    /// use reth_node_types::NodeTypes;
+    /// ///
+    /// use reth_provider::providers::{ProviderFactoryBuilder, ReadOnlyConfig};
+    ///
+    /// fn demo<N: NodeTypes<ChainSpec = reth_chainspec::ChainSpec>>() {
+    ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
+    ///         .open_read_only(MAINNET.clone(), ReadOnlyConfig::from_datadir("datadir").no_watch())
+    ///         .unwrap();
+    /// }
+    /// ```
+    pub fn open_read_only(
+        self,
+        chainspec: Arc<N::ChainSpec>,
+        config: impl Into<ReadOnlyConfig>,
+    ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
+    where
+        N: NodeTypes,
+    {
+        let ReadOnlyConfig { db_dir, db_args, static_files_dir, watch_static_files } =
+            config.into();
+        Ok(self
+            .db(Arc::new(open_db_read_only(db_dir, db_args)?))
+            .chainspec(chainspec)
+            .static_file(StaticFileProvider::read_only(static_files_dir, watch_static_files)?)
+            .build_provider_factory())
+    }
 }
 
 impl<N> Default for ProviderFactoryBuilder<N> {
     fn default() -> Self {
         Self { _types: Default::default() }
+    }
+}
+
+/// Settings for how to open the database and static files.
+///
+/// The default derivation from a path assumes the path is the datadir:
+/// [`ReadOnlyConfig::from_datadir`]
+#[derive(Debug, Clone)]
+pub struct ReadOnlyConfig {
+    /// The path to the database directory.
+    pub db_dir: PathBuf,
+    /// How to open the database
+    pub db_args: DatabaseArguments,
+    /// The path to the static file dir
+    pub static_files_dir: PathBuf,
+    /// Whether the static files should be watched for changes.
+    pub watch_static_files: bool,
+}
+
+impl ReadOnlyConfig {
+    /// Derives the [`ReadOnlyConfig`] from the datadir.
+    ///
+    /// By default this assumes the following datadir layour:
+    ///
+    /// ```text
+    ///  -`datadir`
+    ///    |__db
+    ///        |__static_files
+    /// ```
+    ///
+    /// By default this watches the static file directory for changes, see also
+    /// [`StaticFileProvider::read_only`]
+    pub fn from_datadir(datadir: impl AsRef<Path>) -> Self {
+        let datadir = datadir.as_ref();
+        let db_path = datadir.join("db");
+        Self::from_db_dir(db_path)
+    }
+
+    /// Derives the [`ReadOnlyConfig`] from the database dir.
+    ///
+    /// By default this assumes the following datadir layour:
+    ///
+    /// ```text
+    ///    - db
+    ///      |__static_files
+    /// ```
+    ///
+    /// By default this watches the static file directory for changes, see also
+    /// [`StaticFileProvider::read_only`]
+    pub fn from_db_dir(db_dir: impl AsRef<Path>) -> Self {
+        let db_dir = db_dir.as_ref();
+        Self {
+            static_files_dir: db_dir.join("static_files"),
+            db_dir: db_dir.into(),
+            db_args: Default::default(),
+            watch_static_files: true,
+        }
+    }
+
+    /// Configures the db arguments used when opening the database.
+    pub fn with_db_args(mut self, db_args: impl Into<DatabaseArguments>) -> Self {
+        self.db_args = db_args.into();
+        self
+    }
+
+    /// Configures the db directory.
+    pub fn with_db_dir(mut self, db_dir: impl Into<PathBuf>) -> Self {
+        self.db_dir = db_dir.into();
+        self
+    }
+
+    /// Configures the static file directory.
+    pub fn with_static_file_dir(mut self, static_file_dir: impl Into<PathBuf>) -> Self {
+        self.static_files_dir = static_file_dir.into();
+        self
+    }
+
+    /// Whether the static file directory should be watches for changes, see also
+    /// [`StaticFileProvider::read_only`]
+    pub fn set_watch_static_files(&mut self, watch_static_files: bool) {
+        self.watch_static_files = watch_static_files;
+    }
+
+    /// Don't watch the static files for changes.
+    ///
+    /// This is only recommended if this is used without a running node instance that modifies
+    /// static files.
+    pub fn no_watch(mut self) -> Self {
+        self.set_watch_static_files(false);
+        self
+    }
+}
+
+impl<T> From<T> for ReadOnlyConfig
+where
+    T: AsRef<Path>,
+{
+    fn from(value: T) -> Self {
+        Self::from_datadir(value.as_ref())
     }
 }
 

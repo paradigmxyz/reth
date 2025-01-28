@@ -66,6 +66,22 @@ impl EthereumNode {
 
     /// Instantiates the [`ProviderFactoryBuilder`] for an ethereum node.
     ///
+    /// # Open a Providerfactory in read-only mode from a datadir
+    ///
+    /// See also: [`ProviderFactoryBuilder`] and
+    /// [`ReadOnlyConfig`](reth_provider::providers::ReadOnlyConfig).
+    ///
+    /// ```no_run
+    /// use reth_chainspec::MAINNET;
+    /// use reth_node_ethereum::EthereumNode;
+    ///
+    /// let factory = EthereumNode::provider_factory_builder()
+    ///     .open_read_only(MAINNET.clone(), "datadir")
+    ///     .unwrap();
+    /// ```
+    ///
+    /// # Open a Providerfactory manually with with all required componets
+    ///
     /// ```no_run
     /// use reth_chainspec::ChainSpecBuilder;
     /// use reth_db::open_db_read_only;
