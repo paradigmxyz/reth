@@ -23,7 +23,7 @@ reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-evm.workspace = true
-reth-revm.workspace=true
+reth-revm.workspace = true
 
 # revm
 revm.workspace = true

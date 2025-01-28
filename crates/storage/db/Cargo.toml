@@ -29,10 +29,7 @@ alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 
 # mdbx
-reth-libmdbx = { workspace = true, optional = true, features = [
-    "return-borrowed",
-    "read-tx-timeouts",
-] }
+reth-libmdbx = { workspace = true, optional = true, features = ["return-borrowed", "read-tx-timeouts"] }
 eyre = { workspace = true, optional = true }
 
 # codecs
@@ -63,11 +60,7 @@ tempfile.workspace = true
 test-fuzz.workspace = true
 parking_lot.workspace = true
 
-pprof = { workspace = true, features = [
-    "flamegraph",
-    "frame-pointer",
-    "criterion",
-] }
+pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 criterion.workspace = true
 
 arbitrary = { workspace = true, features = ["derive"] }

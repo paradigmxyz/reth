@@ -57,9 +57,7 @@ metrics.workspace = true
 # misc
 auto_impl.workspace = true
 itertools.workspace = true
-notify = { workspace = true, default-features = false, features = [
-    "macos_fsevent",
-] }
+notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
 parking_lot.workspace = true
 dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
