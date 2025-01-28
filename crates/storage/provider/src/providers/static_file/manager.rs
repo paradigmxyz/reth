@@ -79,6 +79,13 @@ impl StaticFileAccess {
 }
 
 /// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
+///
+/// "Static files" contain immutable chain history data, such as:
+///  - transactions
+///  - headers
+///  - receipts
+///
+/// This provider type is responsible for reading and writing to static files.
 #[derive(Debug)]
 pub struct StaticFileProvider<N>(pub(crate) Arc<StaticFileProviderInner<N>>);
 
@@ -89,7 +96,7 @@ impl<N> Clone for StaticFileProvider<N> {
 }
 
 impl<N: NodePrimitives> StaticFileProvider<N> {
-    /// Creates a new [`StaticFileProvider`].
+    /// Creates a new [`StaticFileProvider`] with the given [`StaticFileAccess`].
     fn new(path: impl AsRef<Path>, access: StaticFileAccess) -> ProviderResult<Self> {
         let provider = Self(Arc::new(StaticFileProviderInner::new(path, access)?));
         provider.initialize_index()?;
@@ -100,6 +107,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// Set `watch_directory` to `true` to track the most recent changes in static files. Otherwise,
     /// new data won't be detected or queryable.
+    ///
+    /// Watching is recommended if the read-only provider is used on a directory that an active node
+    /// instance is modifying.
+    ///
+    /// See also [`StaticFileProvider::watch_directory`].
     pub fn read_only(path: impl AsRef<Path>, watch_directory: bool) -> ProviderResult<Self> {
         let provider = Self::new(path, StaticFileAccess::RO)?;
 
