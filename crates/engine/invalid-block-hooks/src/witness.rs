@@ -1,20 +1,17 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{keccak256, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
-use eyre::OptionExt;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
-    env::EvmEnv, state_change::post_block_balance_increments, system_calls::SystemCaller,
-    ConfigureEvm,
+    state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvmFor, Evm,
 };
-use reth_primitives::{NodePrimitives, SealedBlockWithSenders, SealedHeader};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
-    database::StateProviderDatabase, db::states::bundle_state::BundleRetention,
-    primitives::EnvWithHandlerCfg, DatabaseCommit, StateBuilder,
+    database::StateProviderDatabase, db::states::bundle_state::BundleRetention, StateBuilder,
 };
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
@@ -59,13 +56,13 @@ where
     fn on_invalid_block<N>(
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
-        block: &SealedBlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) -> eyre::Result<()>
     where
         N: NodePrimitives,
-        EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+        EvmConfig: ConfigureEvmFor<N>,
     {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
@@ -77,46 +74,29 @@ where
             .with_bundle_update()
             .build();
 
-        // Setup environment for the execution.
-        let EvmEnv { cfg_env_with_handler_cfg, block_env } =
-            self.evm_config.cfg_and_block_env(block.header());
-
         // Setup EVM
-        let mut evm = self.evm_config.evm_with_env(
-            &mut db,
-            EnvWithHandlerCfg::new_with_cfg_env(
-                cfg_env_with_handler_cfg,
-                block_env,
-                Default::default(),
-            ),
-        );
+        let mut evm = self.evm_config.evm_for_block(&mut db, block.header());
 
         let mut system_caller =
             SystemCaller::new(self.evm_config.clone(), self.provider.chain_spec());
 
         // Apply pre-block system contract calls.
-        system_caller.apply_pre_execution_changes(&block.clone().unseal().block, &mut evm)?;
+        system_caller.apply_pre_execution_changes(block.header(), &mut evm)?;
 
         // Re-execute all of the transactions in the block to load all touched accounts into
         // the cache DB.
-        for tx in block.transactions() {
-            self.evm_config.fill_tx_env(
-                evm.tx_mut(),
-                tx,
-                tx.recover_signer().ok_or_eyre("failed to recover sender")?,
-            );
-            let result = evm.transact()?;
-            evm.db_mut().commit(result.state);
+        for tx in block.body().transactions() {
+            let signer =
+                tx.recover_signer().map_err(|_| eyre::eyre!("failed to recover sender"))?;
+            evm.transact_commit(self.evm_config.tx_env(tx, signer))?;
         }
 
         drop(evm);
 
         // use U256::MAX here for difficulty, because fetching it is annoying
         // NOTE: This is not mut because we are not doing the DAO irregular state change here
-        let balance_increments = post_block_balance_increments(
-            self.provider.chain_spec().as_ref(),
-            &block.clone().unseal().block,
-        );
+        let balance_increments =
+            post_block_balance_increments(self.provider.chain_spec().as_ref(), block);
 
         // increment balances
         db.increment_balances(balance_increments)?;
@@ -309,12 +289,12 @@ where
         + Send
         + Sync
         + 'static,
-    EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    EvmConfig: ConfigureEvmFor<N>,
 {
     fn on_invalid_block(
         &self,
         parent_header: &SealedHeader<N::BlockHeader>,
-        block: &SealedBlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         output: &BlockExecutionOutput<N::Receipt>,
         trie_updates: Option<(&TrieUpdates, B256)>,
     ) {

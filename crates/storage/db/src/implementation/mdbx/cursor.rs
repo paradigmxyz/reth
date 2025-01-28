@@ -241,7 +241,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
     /// it will append the value to the subkey, even if the subkeys are the same. So if you want
     /// to properly upsert, you'll need to `seek_exact` & `delete_current` if the key+subkey was
     /// found, before calling `upsert`.
-    fn upsert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+    fn upsert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
         self.execute_with_operation_metric(
@@ -263,7 +263,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
         )
     }
 
-    fn insert(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+    fn insert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
         self.execute_with_operation_metric(
@@ -287,7 +287,7 @@ impl<T: Table> DbCursorRW<T> for Cursor<RW, T> {
 
     /// Appends the data to the end of the table. Consequently, the append operation
     /// will fail if the inserted key is less than the last table key
-    fn append(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+    fn append(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         let key = key.encode();
         let value = compress_to_buf_or_ref!(self, value);
         self.execute_with_operation_metric(

@@ -53,7 +53,9 @@ where
         // blob fee is burnt, so we don't need to calculate it
         let total_fees = receipts
             .iter()
-            .map(|receipt| receipt.gas_used().saturating_mul(receipt.effective_gas_price()))
+            .map(|receipt| {
+                (receipt.gas_used() as u128).saturating_mul(receipt.effective_gas_price())
+            })
             .sum::<u128>();
 
         Ok(BlockDetails::new(block, Default::default(), U256::from(total_fees)))
@@ -256,7 +258,7 @@ where
             .map(|(receipt, tx_ty)| {
                 let inner = OtsReceipt {
                     status: receipt.status(),
-                    cumulative_gas_used: receipt.cumulative_gas_used() as u64,
+                    cumulative_gas_used: receipt.cumulative_gas_used(),
                     logs: None,
                     logs_bloom: None,
                     r#type: tx_ty,

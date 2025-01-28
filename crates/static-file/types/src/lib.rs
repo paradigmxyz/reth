@@ -33,6 +33,9 @@ pub struct HighestStaticFiles {
     /// Highest static file block of transactions, inclusive.
     /// If [`None`], no static file is available.
     pub transactions: Option<BlockNumber>,
+    /// Highest static file block of transactions, inclusive.
+    /// If [`None`], no static file is available.
+    pub block_meta: Option<BlockNumber>,
 }
 
 impl HighestStaticFiles {
@@ -42,6 +45,7 @@ impl HighestStaticFiles {
             StaticFileSegment::Headers => self.headers,
             StaticFileSegment::Transactions => self.transactions,
             StaticFileSegment::Receipts => self.receipts,
+            StaticFileSegment::BlockMeta => self.block_meta,
         }
     }
 
@@ -51,17 +55,23 @@ impl HighestStaticFiles {
             StaticFileSegment::Headers => &mut self.headers,
             StaticFileSegment::Transactions => &mut self.transactions,
             StaticFileSegment::Receipts => &mut self.receipts,
+            StaticFileSegment::BlockMeta => &mut self.block_meta,
         }
+    }
+
+    /// Returns an iterator over all static file segments
+    fn iter(&self) -> impl Iterator<Item = Option<BlockNumber>> {
+        [self.headers, self.transactions, self.receipts, self.block_meta].into_iter()
     }
 
     /// Returns the minimum block of all segments.
     pub fn min_block_num(&self) -> Option<u64> {
-        [self.headers, self.transactions, self.receipts].iter().filter_map(|&option| option).min()
+        self.iter().flatten().min()
     }
 
     /// Returns the maximum block of all segments.
     pub fn max_block_num(&self) -> Option<u64> {
-        [self.headers, self.transactions, self.receipts].iter().filter_map(|&option| option).max()
+        self.iter().flatten().max()
     }
 }
 
@@ -74,12 +84,17 @@ pub struct StaticFileTargets {
     pub receipts: Option<RangeInclusive<BlockNumber>>,
     /// Targeted range of transactions.
     pub transactions: Option<RangeInclusive<BlockNumber>>,
+    /// Targeted range of block meta.
+    pub block_meta: Option<RangeInclusive<BlockNumber>>,
 }
 
 impl StaticFileTargets {
     /// Returns `true` if any of the targets are [Some].
     pub const fn any(&self) -> bool {
-        self.headers.is_some() || self.receipts.is_some() || self.transactions.is_some()
+        self.headers.is_some() ||
+            self.receipts.is_some() ||
+            self.transactions.is_some() ||
+            self.block_meta.is_some()
     }
 
     /// Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
@@ -89,6 +104,7 @@ impl StaticFileTargets {
             (self.headers.as_ref(), static_files.headers),
             (self.receipts.as_ref(), static_files.receipts),
             (self.transactions.as_ref(), static_files.transactions),
+            (self.block_meta.as_ref(), static_files.block_meta),
         ]
         .iter()
         .all(|(target_block_range, highest_static_fileted_block)| {
@@ -118,8 +134,12 @@ mod tests {
 
     #[test]
     fn test_highest_static_files_highest() {
-        let files =
-            HighestStaticFiles { headers: Some(100), receipts: Some(200), transactions: None };
+        let files = HighestStaticFiles {
+            headers: Some(100),
+            receipts: Some(200),
+            transactions: None,
+            block_meta: None,
+        };
 
         // Test for headers segment
         assert_eq!(files.highest(StaticFileSegment::Headers), Some(100));
@@ -146,12 +166,20 @@ mod tests {
         // Modify transactions value
         *files.as_mut(StaticFileSegment::Transactions) = Some(350);
         assert_eq!(files.transactions, Some(350));
+
+        // Modify block meta value
+        *files.as_mut(StaticFileSegment::BlockMeta) = Some(350);
+        assert_eq!(files.block_meta, Some(350));
     }
 
     #[test]
     fn test_highest_static_files_min() {
-        let files =
-            HighestStaticFiles { headers: Some(300), receipts: Some(100), transactions: None };
+        let files = HighestStaticFiles {
+            headers: Some(300),
+            receipts: Some(100),
+            transactions: None,
+            block_meta: None,
+        };
 
         // Minimum value among the available segments
         assert_eq!(files.min_block_num(), Some(100));
@@ -163,8 +191,12 @@ mod tests {
 
     #[test]
     fn test_highest_static_files_max() {
-        let files =
-            HighestStaticFiles { headers: Some(300), receipts: Some(100), transactions: Some(500) };
+        let files = HighestStaticFiles {
+            headers: Some(300),
+            receipts: Some(100),
+            transactions: Some(500),
+            block_meta: Some(500),
+        };
 
         // Maximum value among the available segments
         assert_eq!(files.max_block_num(), Some(500));

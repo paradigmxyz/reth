@@ -7,10 +7,8 @@ use crate::{
     PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloy_eips::{
-    eip4895::{Withdrawal, Withdrawals},
-    BlockHashOrNumber,
-};
+use alloy_consensus::transaction::TransactionMeta;
+use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use core::fmt;
 use reth_chainspec::{ChainInfo, EthereumHardforks};
@@ -18,10 +16,7 @@ use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
-use reth_primitives::{
-    BlockWithSenders, SealedBlockFor, SealedBlockWithSenders, SealedHeader, StaticFileSegment,
-    TransactionMeta,
-};
+use reth_primitives::{RecoveredBlock, SealedBlock, SealedHeader, StaticFileSegment};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
@@ -385,19 +380,17 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         self.provider()?.block(id)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlockFor<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
         self.provider()?.pending_block()
     }
 
-    fn pending_block_with_senders(
-        &self,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.provider()?.pending_block_with_senders()
     }
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlockFor<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>> {
         self.provider()?.pending_block_and_receipts()
     }
 
@@ -405,7 +398,7 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<BlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.provider()?.block_with_senders(id, transaction_kind)
     }
 
@@ -413,7 +406,7 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         &self,
         id: BlockHashOrNumber,
         transaction_kind: TransactionVariant,
-    ) -> ProviderResult<Option<SealedBlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.provider()?.sealed_block_with_senders(id, transaction_kind)
     }
 
@@ -424,14 +417,14 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
     fn block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<BlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         self.provider()?.block_with_senders_range(range)
     }
 
     fn sealed_block_with_senders_range(
         &self,
         range: RangeInclusive<BlockNumber>,
-    ) -> ProviderResult<Vec<SealedBlockWithSenders<Self::Block>>> {
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         self.provider()?.sealed_block_with_senders_range(range)
     }
 }
@@ -556,10 +549,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
     ) -> ProviderResult<Option<Withdrawals>> {
         self.provider()?.withdrawals_by_block(id, timestamp)
     }
-
-    fn latest_withdrawal(&self) -> ProviderResult<Option<Withdrawal>> {
-        self.provider()?.latest_withdrawal()
-    }
 }
 
 impl<N: ProviderNodeTypes> OmmersProvider for ProviderFactory<N> {
@@ -573,7 +562,29 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ProviderFactory<N> {
         &self,
         number: BlockNumber,
     ) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        self.provider()?.block_body_indices(number)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::BlockMeta,
+            number,
+            |static_file| static_file.block_body_indices(number),
+            || self.provider()?.block_body_indices(number),
+        )
+    }
+
+    fn block_body_indices_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::BlockMeta,
+            *range.start()..*range.end() + 1,
+            |static_file, range, _| {
+                static_file.block_body_indices_range(range.start..=range.end.saturating_sub(1))
+            },
+            |range, _| {
+                self.provider()?.block_body_indices_range(range.start..=range.end.saturating_sub(1))
+            },
+            |_| true,
+        )
     }
 }
 
@@ -710,18 +721,16 @@ mod tests {
         {
             let provider = factory.provider_rw().unwrap();
             assert_matches!(
-                provider.insert_block(
-                    block.clone().try_seal_with_senders().unwrap(),
-                    StorageLocation::Database
-                ),
+                provider
+                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
                 Ok(_)
             );
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
-                if sender == block.body.transactions[0].recover_signer().unwrap()
+                if sender == block.body().transactions[0].recover_signer().unwrap()
             );
             assert_matches!(
-                provider.transaction_id(block.body.transactions[0].hash()),
+                provider.transaction_id(*block.body().transactions[0].tx_hash()),
                 Ok(Some(0))
             );
         }
@@ -734,14 +743,15 @@ mod tests {
             };
             let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
             assert_matches!(
-                provider.insert_block(
-                    block.clone().try_seal_with_senders().unwrap(),
-                    StorageLocation::Database
-                ),
+                provider
+                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
                 Ok(_)
             );
             assert_matches!(provider.transaction_sender(0), Ok(None));
-            assert_matches!(provider.transaction_id(block.body.transactions[0].hash()), Ok(None));
+            assert_matches!(
+                provider.transaction_id(*block.body().transactions[0].tx_hash()),
+                Ok(None)
+            );
         }
     }
 
@@ -758,10 +768,8 @@ mod tests {
             let provider = factory.provider_rw().unwrap();
 
             assert_matches!(
-                provider.insert_block(
-                    block.clone().try_seal_with_senders().unwrap(),
-                    StorageLocation::Database
-                ),
+                provider
+                    .insert_block(block.clone().try_recover().unwrap(), StorageLocation::Database),
                 Ok(_)
             );
 
@@ -772,13 +780,13 @@ mod tests {
                     .clone()
                     .map(|tx_number| (
                         tx_number,
-                        block.body.transactions[tx_number as usize].recover_signer().unwrap()
+                        block.body().transactions[tx_number as usize].recover_signer().unwrap()
                     ))
                     .collect())
             );
 
             let db_senders = provider.senders_by_tx_range(range);
-            assert_eq!(db_senders, Ok(vec![]));
+            assert!(matches!(db_senders, Ok(ref v) if v.is_empty()));
         }
     }
 

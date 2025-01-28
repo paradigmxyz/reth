@@ -19,7 +19,7 @@ pub fn revm_spec_by_timestamp_after_bedrock(
     timestamp: u64,
 ) -> revm_primitives::SpecId {
     if chain_spec.fork(OpHardfork::Isthmus).active_at_timestamp(timestamp) {
-        todo!()
+        revm_primitives::ISTHMUS
     } else if chain_spec.fork(OpHardfork::Holocene).active_at_timestamp(timestamp) {
         revm_primitives::HOLOCENE
     } else if chain_spec.fork(OpHardfork::Granite).active_at_timestamp(timestamp) {
@@ -50,6 +50,10 @@ mod tests {
             let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10)).into();
             f(cs).build()
         }
+        assert_eq!(
+            revm_spec_by_timestamp_after_bedrock(&op_cs(|cs| cs.isthmus_activated()), 0),
+            revm_primitives::ISTHMUS
+        );
         assert_eq!(
             revm_spec_by_timestamp_after_bedrock(&op_cs(|cs| cs.holocene_activated()), 0),
             revm_primitives::HOLOCENE
@@ -87,6 +91,10 @@ mod tests {
             let cs = ChainSpecBuilder::mainnet().chain(reth_chainspec::Chain::from_id(10)).into();
             f(cs).build()
         }
+        assert_eq!(
+            revm_spec(&op_cs(|cs| cs.isthmus_activated()), &Default::default()),
+            revm_primitives::ISTHMUS
+        );
         assert_eq!(
             revm_spec(&op_cs(|cs| cs.holocene_activated()), &Default::default()),
             revm_primitives::HOLOCENE

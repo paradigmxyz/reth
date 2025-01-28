@@ -12,7 +12,7 @@ use alloy_rlp::{
 use core::mem;
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
-use reth_primitives::TransactionSigned;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::SignedTransaction;
 
 /// This informs peers of new blocks that have appeared on the network.
@@ -69,14 +69,14 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct NewBlock<B = reth_primitives::Block> {
+pub struct NewBlock<B = reth_ethereum_primitives::Block> {
     /// A new block.
     pub block: B,
     /// The current total difficulty.
     pub td: U128,
 }
 
-generate_tests!(#[rlp, 25] NewBlock<reth_primitives::Block>, EthNewBlockTests);
+generate_tests!(#[rlp, 25] NewBlock<reth_ethereum_primitives::Block>, EthNewBlockTests);
 
 /// This informs peers of transactions that have appeared on the network and are not yet included
 /// in a block.
@@ -351,7 +351,7 @@ impl proptest::prelude::Arbitrary for NewPooledTransactionHashes68 {
             .prop_flat_map(|len| {
                 // Use the generated length to create vectors of TxType, usize, and B256
                 let types_vec = vec(
-                    proptest_arbitrary_interop::arb::<reth_primitives::TxType>()
+                    proptest_arbitrary_interop::arb::<reth_ethereum_primitives::TxType>()
                         .prop_map(|ty| ty as u8),
                     len..=len,
                 );

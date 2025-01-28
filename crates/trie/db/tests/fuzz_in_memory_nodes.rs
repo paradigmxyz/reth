@@ -31,7 +31,7 @@ proptest! {
 
         // Insert init state into database
         for (hashed_address, balance) in init_state.clone() {
-            hashed_account_cursor.upsert(hashed_address, Account { balance, ..Default::default() }).unwrap();
+            hashed_account_cursor.upsert(hashed_address, &Account { balance, ..Default::default() }).unwrap();
         }
 
         // Compute initial root and updates
@@ -46,7 +46,7 @@ proptest! {
             for (hashed_address, balance) in state_update {
                 if let Some(balance) = balance {
                     let account = Account { balance, ..Default::default() };
-                    hashed_account_cursor.upsert(hashed_address, account).unwrap();
+                    hashed_account_cursor.upsert(hashed_address, &account).unwrap();
                     hashed_state.accounts.insert(hashed_address, Some(account));
                     state.insert(hashed_address, balance);
                 } else {
@@ -85,7 +85,7 @@ proptest! {
         // Insert init state into database
         for (hashed_slot, value) in init_storage.clone() {
             hashed_storage_cursor
-                .upsert(hashed_address, StorageEntry { key: hashed_slot, value })
+                .upsert(hashed_address, &StorageEntry { key: hashed_slot, value })
                 .unwrap();
         }
 
@@ -102,7 +102,7 @@ proptest! {
             let mut hashed_storage = HashedStorage::new(is_deleted);
             for (hashed_slot, value) in storage_update.clone() {
                 hashed_storage_cursor
-                    .upsert(hashed_address, StorageEntry { key: hashed_slot, value })
+                    .upsert(hashed_address, &StorageEntry { key: hashed_slot, value })
                     .unwrap();
                 hashed_storage.storage.insert(hashed_slot, value);
             }

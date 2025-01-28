@@ -1,15 +1,12 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
-use alloy_consensus::{constants::EMPTY_WITHDRAWALS, Header, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{constants::EMPTY_WITHDRAWALS, Header, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
-use reth_primitives::{
-    logs_bloom,
-    proofs::{calculate_receipt_root_no_memo, calculate_transaction_root},
-    BlockBody, Receipt,
-};
+use reth_primitives::{logs_bloom, BlockBody, Receipt};
+use reth_primitives_traits::proofs::calculate_transaction_root;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderReceipt, ProviderTx,
     StateProviderFactory,
@@ -64,7 +61,8 @@ where
         let chain_spec = self.provider().chain_spec();
 
         let transactions_root = calculate_transaction_root(&transactions);
-        let receipts_root = calculate_receipt_root_no_memo(&receipts.iter().collect::<Vec<_>>());
+        let receipts_root =
+            Receipt::calculate_receipt_root_no_memo(&receipts.iter().collect::<Vec<_>>());
 
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| &r.logs));
 
@@ -97,7 +95,6 @@ where
             extra_data: Default::default(),
             parent_beacon_block_root: is_cancun.then_some(B256::ZERO),
             requests_hash: is_prague.then_some(EMPTY_REQUESTS_HASH),
-            target_blobs_per_block: None,
         };
 
         // seal the block

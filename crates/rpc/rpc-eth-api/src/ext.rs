@@ -1,7 +1,7 @@
 //! `eth_` Extension traits.
 
 use alloy_primitives::{Bytes, B256};
-use alloy_rpc_types_eth::erc4337::ConditionalOptions;
+use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 /// Extension trait for `eth_` namespace for L2s.
@@ -13,6 +13,6 @@ pub trait L2EthApiExt {
     async fn send_raw_transaction_conditional(
         &self,
         bytes: Bytes,
-        condition: ConditionalOptions,
+        condition: TransactionConditional,
     ) -> RpcResult<B256>;
 }

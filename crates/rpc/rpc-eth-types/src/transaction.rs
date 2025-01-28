@@ -4,24 +4,21 @@
 
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
-use reth_primitives::{RecoveredTx, TransactionSigned};
+use reth_primitives::{Recovered, TransactionSigned};
 use reth_primitives_traits::SignedTransaction;
-use reth_rpc_types_compat::{
-    transaction::{from_recovered, from_recovered_with_block_context},
-    TransactionCompat,
-};
+use reth_rpc_types_compat::TransactionCompat;
 
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum TransactionSource<T = TransactionSigned> {
     /// Transaction exists in the pool (Pending)
-    Pool(RecoveredTx<T>),
+    Pool(Recovered<T>),
     /// Transaction already included in a block
     ///
     /// This can be a historical block or a pending block (received from the CL)
     Block {
         /// Transaction fetched via provider
-        transaction: RecoveredTx<T>,
+        transaction: Recovered<T>,
         /// Index of the transaction in the block
         index: u64,
         /// Hash of the block.
@@ -37,7 +34,7 @@ pub enum TransactionSource<T = TransactionSigned> {
 
 impl<T: SignedTransaction> TransactionSource<T> {
     /// Consumes the type and returns the wrapped transaction.
-    pub fn into_recovered(self) -> RecoveredTx<T> {
+    pub fn into_recovered(self) -> Recovered<T> {
         self.into()
     }
 
@@ -47,7 +44,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
         resp_builder: &Builder,
     ) -> Result<Builder::Transaction, Builder::Error> {
         match self {
-            Self::Pool(tx) => from_recovered(tx, resp_builder),
+            Self::Pool(tx) => resp_builder.fill_pending(tx),
             Self::Block { transaction, index, block_hash, block_number, base_fee } => {
                 let tx_info = TransactionInfo {
                     hash: Some(transaction.trie_hash()),
@@ -57,13 +54,13 @@ impl<T: SignedTransaction> TransactionSource<T> {
                     base_fee: base_fee.map(u128::from),
                 };
 
-                from_recovered_with_block_context(transaction, tx_info, resp_builder)
+                resp_builder.fill(transaction, tx_info)
             }
         }
     }
 
     /// Returns the transaction and block related info, if not pending
-    pub fn split(self) -> (RecoveredTx<T>, TransactionInfo) {
+    pub fn split(self) -> (Recovered<T>, TransactionInfo) {
         match self {
             Self::Pool(tx) => {
                 let hash = tx.trie_hash();
@@ -86,7 +83,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
     }
 }
 
-impl<T> From<TransactionSource<T>> for RecoveredTx<T> {
+impl<T> From<TransactionSource<T>> for Recovered<T> {
     fn from(value: TransactionSource<T>) -> Self {
         match value {
             TransactionSource::Pool(tx) => tx,

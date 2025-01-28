@@ -34,11 +34,12 @@ secp256k1 = { workspace = true, features = [
 k256.workspace = true
 
 # misc
+auto_impl.workspace = true
 byteorder = { workspace = true, optional = true }
 bytes.workspace = true
 derive_more.workspace = true
+once_cell.workspace = true
 serde_with = { workspace = true, optional = true }
-auto_impl.workspace = true
 thiserror.workspace = true
 
 # required by reth-codecs
@@ -49,9 +50,11 @@ serde = { workspace = true, optional = true}
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
+rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-codecs.workspace = true
+reth-chainspec = { workspace = true, features = ["arbitrary"] }
 
 alloy-primitives = { workspace = true, features = ["arbitrary", "serde"] }
 alloy-consensus = { workspace = true, features = ["arbitrary", "serde"] }
@@ -86,16 +89,19 @@ std = [
 	"bytes/std",
 	"derive_more/std",
 	"k256/std",
+	"once_cell/std",
 	"secp256k1?/std",
 	"thiserror/std",
 	"alloy-trie/std",
 	"op-alloy-consensus?/std",
-	"serde_json/std"
+	"serde_json/std",
+	"reth-chainspec/std"
 ]
 secp256k1 = ["dep:secp256k1"]
 test-utils = [
 	"arbitrary",
-	"reth-codecs?/test-utils"
+	"reth-codecs?/test-utils",
+	"reth-chainspec/test-utils"
 ]
 arbitrary = [
 	"std",
@@ -110,7 +116,8 @@ arbitrary = [
 	"secp256k1?/global-context",
 	"secp256k1?/rand",
 	"op-alloy-consensus?/arbitrary",
-	"alloy-trie/arbitrary"
+	"alloy-trie/arbitrary",
+	"reth-chainspec/arbitrary"
 ]
 serde-bincode-compat = [
 	"serde",
@@ -141,4 +148,7 @@ reth-codec = [
 ]
 op = [
 	"dep:op-alloy-consensus",
+]
+rayon = [
+	"dep:rayon",
 ]

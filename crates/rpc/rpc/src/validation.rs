@@ -17,8 +17,8 @@ use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
-use reth_primitives::{GotExpected, NodePrimitives, SealedBlockWithSenders, SealedHeader};
-use reth_primitives_traits::{constants::GAS_LIMIT_BOUND_DIVISOR, Block as _, BlockBody};
+use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock};
 use reth_provider::{BlockExecutionOutput, BlockReaderIdExt, StateProviderFactory};
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
@@ -43,7 +43,7 @@ where
     /// Create a new instance of the [`ValidationApi`]
     pub fn new(
         provider: Provider,
-        consensus: Arc<dyn FullConsensus<E::Primitives>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         executor_provider: E,
         config: ValidationApiConfig,
         task_spawner: Box<dyn TaskSpawner>,
@@ -51,7 +51,7 @@ where
             dyn PayloadValidator<Block = <E::Primitives as NodePrimitives>::Block>,
         >,
     ) -> Self {
-        let ValidationApiConfig { disallow } = config;
+        let ValidationApiConfig { disallow, validation_window } = config;
 
         let inner = Arc::new(ValidationApiInner {
             provider,
@@ -59,6 +59,7 @@ where
             payload_validator,
             executor_provider,
             disallow,
+            validation_window,
             cached_state: Default::default(),
             task_spawner,
         });
@@ -98,15 +99,15 @@ where
     /// Validates the given block and a [`BidTrace`] against it.
     pub async fn validate_message_against_block(
         &self,
-        block: SealedBlockWithSenders<<E::Primitives as NodePrimitives>::Block>,
+        block: RecoveredBlock<<E::Primitives as NodePrimitives>::Block>,
         message: BidTrace,
         registered_gas_limit: u64,
     ) -> Result<(), ValidationApiError> {
-        self.validate_message_against_header(&block.header, &message)?;
+        self.validate_message_against_header(block.sealed_header(), &message)?;
 
-        self.consensus.validate_header_with_total_difficulty(&block.header, U256::MAX)?;
-        self.consensus.validate_header(&block.header)?;
-        self.consensus.validate_block_pre_execution(&block)?;
+        self.consensus.validate_header_with_total_difficulty(block.sealed_header(), U256::MAX)?;
+        self.consensus.validate_header(block.sealed_header())?;
+        self.consensus.validate_block_pre_execution(block.sealed_block())?;
 
         if !self.disallow.is_empty() {
             if self.disallow.contains(&block.beneficiary()) {
@@ -115,7 +116,7 @@ where
             if self.disallow.contains(&message.proposer_fee_recipient) {
                 return Err(ValidationApiError::Blacklist(message.proposer_fee_recipient))
             }
-            for (sender, tx) in block.senders.iter().zip(block.transactions()) {
+            for (sender, tx) in block.senders_iter().zip(block.body().transactions()) {
                 if self.disallow.contains(sender) {
                     return Err(ValidationApiError::Blacklist(*sender))
                 }
@@ -130,15 +131,16 @@ where
         let latest_header =
             self.provider.latest_header()?.ok_or_else(|| ValidationApiError::MissingLatestBlock)?;
 
-        if latest_header.hash() != block.header.parent_hash() {
-            return Err(ConsensusError::ParentHashMismatch(
-                GotExpected { got: block.header.parent_hash(), expected: latest_header.hash() }
-                    .into(),
-            )
-            .into())
+        let parent_header = self
+            .provider
+            .header(&block.parent_hash())?
+            .ok_or_else(|| ValidationApiError::MissingParentBlock)?;
+
+        if latest_header.number().saturating_sub(parent_header.number()) > self.validation_window {
+            return Err(ValidationApiError::BlockTooOld)
         }
-        self.consensus.validate_header_against_parent(&block.header, &latest_header)?;
-        self.validate_gas_limit(registered_gas_limit, &latest_header, &block.header)?;
+        self.consensus.validate_header_against_parent(block.sealed_header(), &latest_header)?;
+        self.validate_gas_limit(registered_gas_limit, &latest_header, block.sealed_header())?;
 
         let latest_header_hash = latest_header.hash();
         let state_provider = self.provider.state_by_block_hash(latest_header_hash)?;
@@ -148,7 +150,6 @@ where
         let cached_db = request_cache.as_db_mut(StateProviderDatabase::new(&state_provider));
         let executor = self.executor_provider.executor(cached_db);
 
-        let block = block.unseal();
         let mut accessed_blacklisted = None;
         let output = executor.execute_with_state_closure(&block, |state| {
             if !self.disallow.is_empty() {
@@ -252,7 +253,7 @@ where
     /// to checking the latest block transaction.
     fn ensure_payment(
         &self,
-        block: &<E::Primitives as NodePrimitives>::Block,
+        block: &SealedBlock<<E::Primitives as NodePrimitives>::Block>,
         output: &BlockExecutionOutput<<E::Primitives as NodePrimitives>::Receipt>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
@@ -350,7 +351,7 @@ where
                     versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
                 }),
             )?
-            .try_seal_with_senders()
+            .try_recover()
             .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
 
         self.validate_message_against_block(
@@ -380,11 +381,10 @@ where
                         requests: RequestsOrHash::Requests(
                             request.request.execution_requests.to_requests(),
                         ),
-                        target_blobs_per_block: request.request.target_blobs_per_block,
                     },
                 ),
             )?
-            .try_seal_with_senders()
+            .try_recover()
             .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
 
         self.validate_message_against_block(
@@ -462,13 +462,15 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// Consensus implementation.
-    consensus: Arc<dyn FullConsensus<E::Primitives>>,
+    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
     /// Execution payload validator.
     payload_validator: Arc<dyn PayloadValidator<Block = <E::Primitives as NodePrimitives>::Block>>,
     /// Block executor factory.
     executor_provider: E,
     /// Set of disallowed addresses
     disallow: HashSet<Address>,
+    /// The maximum block distance - parent to latest - allowed for validation
+    validation_window: u64,
     /// Cached state reads to avoid redundant disk I/O across multiple validation attempts
     /// targeting the same state. Stores a tuple of (`block_hash`, `cached_reads`) for the
     /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
@@ -479,10 +481,23 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
 }
 
 /// Configuration for validation API.
-#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ValidationApiConfig {
     /// Disallowed addresses.
     pub disallow: HashSet<Address>,
+    /// The maximum block distance - parent to latest - allowed for validation
+    pub validation_window: u64,
+}
+
+impl ValidationApiConfig {
+    /// Default validation blocks window of 3 blocks
+    pub const DEFAULT_VALIDATION_WINDOW: u64 = 3;
+}
+
+impl Default for ValidationApiConfig {
+    fn default() -> Self {
+        Self { disallow: Default::default(), validation_window: Self::DEFAULT_VALIDATION_WINDOW }
+    }
 }
 
 /// Errors thrown by the validation API.
@@ -498,6 +513,10 @@ pub enum ValidationApiError {
     BlockHashMismatch(GotExpected<B256>),
     #[error("missing latest block in database")]
     MissingLatestBlock,
+    #[error("parent block not found")]
+    MissingParentBlock,
+    #[error("block is too old, outside validation window")]
+    BlockTooOld,
     #[error("could not verify proposer payment")]
     ProposerPayment,
     #[error("invalid blobs bundle")]

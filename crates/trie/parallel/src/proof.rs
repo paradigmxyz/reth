@@ -25,14 +25,14 @@ use reth_trie::{
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{sync::Arc, time::Instant};
-use tracing::{debug, error, trace};
+use tracing::{debug, trace};
 
-#[cfg(feature = "metrics")]
-use crate::metrics::ParallelStateRootMetrics;
-
-/// TODO:
+/// Parallel proof calculator.
+///
+/// This can collect proof for many targets in parallel, spawning a task for each hashed address
+/// that has proof targets.
 #[derive(Debug)]
-pub struct ParallelProof<'env, Factory> {
+pub struct ParallelProof<Factory> {
     /// Consistent view of the database.
     view: ConsistentDbView<Factory>,
     /// The sorted collection of cached in-memory intermediate trie nodes that
@@ -44,44 +44,39 @@ pub struct ParallelProof<'env, Factory> {
     /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
     /// if we have cached nodes for them.
     pub prefix_sets: Arc<TriePrefixSetsMut>,
-    /// Flag indicating whether to include branch node hash masks in the proof.
-    collect_branch_node_hash_masks: bool,
+    /// Flag indicating whether to include branch node masks in the proof.
+    collect_branch_node_masks: bool,
     /// Thread pool for local tasks
-    thread_pool: &'env rayon::ThreadPool,
-    /// Parallel state root metrics.
-    #[cfg(feature = "metrics")]
-    metrics: ParallelStateRootMetrics,
+    thread_pool: Arc<rayon::ThreadPool>,
 }
 
-impl<'env, Factory> ParallelProof<'env, Factory> {
+impl<Factory> ParallelProof<Factory> {
     /// Create new state proof generator.
-    pub fn new(
+    pub const fn new(
         view: ConsistentDbView<Factory>,
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
-        thread_pool: &'env rayon::ThreadPool,
+        thread_pool: Arc<rayon::ThreadPool>,
     ) -> Self {
         Self {
             view,
             nodes_sorted,
             state_sorted,
             prefix_sets,
-            collect_branch_node_hash_masks: false,
+            collect_branch_node_masks: false,
             thread_pool,
-            #[cfg(feature = "metrics")]
-            metrics: ParallelStateRootMetrics::default(),
         }
     }
 
-    /// Set the flag indicating whether to include branch node hash masks in the proof.
-    pub const fn with_branch_node_hash_masks(mut self, branch_node_hash_masks: bool) -> Self {
-        self.collect_branch_node_hash_masks = branch_node_hash_masks;
+    /// Set the flag indicating whether to include branch node masks in the proof.
+    pub const fn with_branch_node_masks(mut self, branch_node_masks: bool) -> Self {
+        self.collect_branch_node_masks = branch_node_masks;
         self
     }
 }
 
-impl<Factory> ParallelProof<'_, Factory>
+impl<Factory> ParallelProof<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader>
         + StateCommitmentProvider
@@ -119,7 +114,7 @@ where
         let storage_root_targets_len = storage_root_targets.len();
 
         debug!(
-            target: "trie::parallel_state_root",
+            target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
             "Starting parallel proof generation"
         );
@@ -137,13 +132,13 @@ where
             let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
             let trie_nodes_sorted = self.nodes_sorted.clone();
             let hashed_state_sorted = self.state_sorted.clone();
-            let collect_masks = self.collect_branch_node_hash_masks;
+            let collect_masks = self.collect_branch_node_masks;
 
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
             self.thread_pool.spawn_fifo(move || {
                 debug!(
-                    target: "trie::parallel",
+                    target: "trie::parallel_proof",
                     ?hashed_address,
                     "Starting proof calculation"
                 );
@@ -153,7 +148,7 @@ where
                     let provider_start = Instant::now();
                     let provider_ro = view.provider_ro()?;
                     trace!(
-                        target: "trie::parallel",
+                        target: "trie::parallel_proof",
                         ?hashed_address,
                         provider_time = ?provider_start.elapsed(),
                         "Got provider"
@@ -169,12 +164,13 @@ where
                         &hashed_state_sorted,
                     );
                     trace!(
-                        target: "trie::parallel",
+                        target: "trie::parallel_proof",
                         ?hashed_address,
                         cursor_time = ?cursor_start.elapsed(),
                         "Created cursors"
                     );
 
+                    let target_slots_len = target_slots.len();
                     let proof_start = Instant::now();
                     let proof_result = StorageProof::new_hashed(
                         trie_cursor_factory,
@@ -182,13 +178,15 @@ where
                         hashed_address,
                     )
                     .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().cloned()))
-                    .with_branch_node_hash_masks(collect_masks)
+                    .with_branch_node_masks(collect_masks)
                     .storage_multiproof(target_slots)
                     .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
                     trace!(
-                        target: "trie::parallel",
+                        target: "trie::parallel_proof",
                         ?hashed_address,
+                        prefix_set = ?prefix_set.len(),
+                        target_slots = ?target_slots_len,
                         proof_time = ?proof_start.elapsed(),
                         "Completed proof calculation"
                     );
@@ -196,9 +194,12 @@ where
                     proof_result
                 })();
 
+                // We can have the receiver dropped before we send, because we still calculate
+                // storage proofs for deleted accounts, but do not actually walk over them in
+                // `account_node_iter` below.
                 if let Err(e) = tx.send(result) {
-                    error!(
-                        target: "trie::parallel",
+                    debug!(
+                        target: "trie::parallel_proof",
                         ?hashed_address,
                         error = ?e,
                         task_time = ?task_start.elapsed(),
@@ -230,7 +231,7 @@ where
         let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
-            .with_updates(self.collect_branch_node_hash_masks);
+            .with_updates(self.collect_branch_node_masks);
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
@@ -294,22 +295,24 @@ where
         }
         let _ = hash_builder.root();
 
-        #[cfg(feature = "metrics")]
-        self.metrics.record_state_trie(tracker.finish());
-
         let account_subtree = hash_builder.take_proof_nodes();
-        let branch_node_hash_masks = if self.collect_branch_node_hash_masks {
-            hash_builder
-                .updated_branch_nodes
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(path, node)| (path, node.hash_mask))
-                .collect()
+        let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
+            let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
+            (
+                updated_branch_nodes
+                    .iter()
+                    .map(|(path, node)| (path.clone(), node.hash_mask))
+                    .collect(),
+                updated_branch_nodes
+                    .into_iter()
+                    .map(|(path, node)| (path, node.tree_mask))
+                    .collect(),
+            )
         } else {
-            HashMap::default()
+            (HashMap::default(), HashMap::default())
         };
 
-        Ok(MultiProof { account_subtree, branch_node_hash_masks, storages })
+        Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
     }
 }
 
@@ -404,7 +407,7 @@ mod tests {
                 Default::default(),
                 Default::default(),
                 Default::default(),
-                &state_root_task_pool
+                Arc::new(state_root_task_pool)
             )
             .multiproof(targets.clone())
             .unwrap(),

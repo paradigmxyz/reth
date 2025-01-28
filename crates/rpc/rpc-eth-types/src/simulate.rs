@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{
     Block, BlockTransactionsKind, Header,
 };
 use jsonrpsee_types::ErrorObject;
-use reth_primitives::BlockWithSenders;
+use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::{block::BlockTx, BlockBody as _, SignedTransaction};
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
@@ -178,11 +178,11 @@ where
         calls.push(call);
     }
 
-    let block = BlockWithSenders::new_unchecked(block, senders);
+    let block = RecoveredBlock::new_unhashed(block, senders);
 
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = from_block(block, txs_kind, None, tx_resp_builder)?;
+    let block = from_block(block, txs_kind, tx_resp_builder)?;
     Ok(SimulatedBlock { inner: block, calls })
 }

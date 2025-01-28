@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 reth-primitives = { workspace = true, features = ["secp256k1", "arbitrary"] }
+reth-primitives-traits = { workspace = true, features = ["secp256k1", "arbitrary"] }
 
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true

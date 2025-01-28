@@ -1,6 +1,6 @@
 use alloc::vec;
 use alloy_primitives::U256;
-use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
+use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;

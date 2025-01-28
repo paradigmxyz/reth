@@ -12,8 +12,9 @@ use op_alloy_network::Network;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
-use reth_primitives::{logs_bloom, BlockBody, SealedBlockWithSenders};
+use reth_primitives::{logs_bloom, BlockBody, RecoveredBlock};
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderHeader,
     ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
@@ -40,7 +41,7 @@ where
             Block = OpBlock,
             Receipt = OpReceipt,
             Header = reth_primitives::Header,
-        > + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+        > + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
         Evm: ConfigureEvm<
@@ -63,7 +64,7 @@ where
         &self,
     ) -> Result<
         Option<(
-            SealedBlockWithSenders<ProviderBlock<Self::Provider>>,
+            RecoveredBlock<ProviderBlock<Self::Provider>>,
             Vec<ProviderReceipt<Self::Provider>>,
         )>,
         Self::Error,
@@ -79,8 +80,7 @@ where
             .provider()
             .block_with_senders(block_id, Default::default())
             .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?
-            .seal_unchecked(latest.hash());
+            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
         let receipts = self
             .provider()
@@ -130,7 +130,7 @@ where
             number: block_env.number.to::<u64>(),
             gas_limit: block_env.gas_limit.to::<u64>(),
             difficulty: U256::ZERO,
-            gas_used: receipts.last().map(|r| r.cumulative_gas_used()).unwrap_or_default() as u64,
+            gas_used: receipts.last().map(|r| r.cumulative_gas_used()).unwrap_or_default(),
             blob_gas_used: is_cancun.then(|| {
                 transactions.iter().map(|tx| tx.blob_gas_used().unwrap_or_default()).sum::<u64>()
             }),
@@ -138,7 +138,6 @@ where
             extra_data: Default::default(),
             parent_beacon_block_root: is_cancun.then_some(B256::ZERO),
             requests_hash: is_prague.then_some(EMPTY_REQUESTS_HASH),
-            target_blobs_per_block: None,
         };
 
         // seal the block
@@ -156,7 +155,7 @@ where
     ) -> reth_provider::ProviderReceipt<Self::Provider> {
         let receipt = alloy_consensus::Receipt {
             status: Eip658Value::Eip658(result.is_success()),
-            cumulative_gas_used: cumulative_gas_used as u128,
+            cumulative_gas_used,
             logs: result.into_logs().into_iter().collect(),
         };
 
