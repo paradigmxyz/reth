@@ -121,13 +121,13 @@ where
                         }
 
                         if block_number == number {
-                            receipts_for_block.push(Some(receipt));
+                            receipts_for_block.push(receipt);
                         } else {
                             receipts.push(receipts_for_block);
 
                             // next block
                             block_number = number;
-                            receipts_for_block = vec![Some(receipt)];
+                            receipts_for_block = vec![receipt];
                         }
                     }
                     None => {
@@ -585,8 +585,8 @@ mod test {
         assert_eq!(2, total_receipts);
         assert_eq!(0, first_block);
         assert!(receipts[0].is_empty());
-        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone().unwrap());
-        assert_eq!(receipt_block_2().receipt, receipts[2][0].clone().unwrap());
+        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone());
+        assert_eq!(receipt_block_2().receipt, receipts[2][0].clone());
         assert!(receipts[3].is_empty());
     }
 
@@ -621,9 +621,9 @@ mod test {
         assert_eq!(2, total_receipts);
         assert_eq!(0, first_block);
         assert!(receipts[0].is_empty());
-        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone().unwrap());
+        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone());
         assert!(receipts[2].is_empty());
-        assert_eq!(receipt_block_3().receipt, receipts[3][0].clone().unwrap());
+        assert_eq!(receipt_block_3().receipt, receipts[3][0].clone());
     }
 
     #[tokio::test]
@@ -658,9 +658,9 @@ mod test {
         assert_eq!(4, total_receipts);
         assert_eq!(0, first_block);
         assert!(receipts[0].is_empty());
-        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone().unwrap());
-        assert_eq!(receipt_block_2().receipt, receipts[2][0].clone().unwrap());
-        assert_eq!(receipt_block_2().receipt, receipts[2][1].clone().unwrap());
-        assert_eq!(receipt_block_3().receipt, receipts[3][0].clone().unwrap());
+        assert_eq!(receipt_block_1().receipt, receipts[1][0].clone());
+        assert_eq!(receipt_block_2().receipt, receipts[2][0].clone());
+        assert_eq!(receipt_block_2().receipt, receipts[2][1].clone());
+        assert_eq!(receipt_block_3().receipt, receipts[3][0].clone());
     }
 }

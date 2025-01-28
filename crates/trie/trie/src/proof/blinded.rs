@@ -9,8 +9,8 @@ use reth_trie_common::{prefix_set::TriePrefixSetsMut, Nibbles};
 use reth_trie_sparse::blinded::{
     pad_path_to_key, BlindedProvider, BlindedProviderFactory, RevealedNode,
 };
-use std::sync::Arc;
-use tracing::trace;
+use std::{sync::Arc, time::Instant};
+use tracing::{enabled, trace, Level};
 
 /// Factory for instantiating providers capable of retrieving blinded trie nodes via proofs.
 #[derive(Debug)]
@@ -88,6 +88,8 @@ where
     H: HashedCursorFactory + Clone + Send + Sync,
 {
     fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+        let start = enabled!(target: "trie::proof::blinded", Level::TRACE).then(Instant::now);
+
         let targets = HashMap::from_iter([(pad_path_to_key(path), HashSet::default())]);
         let mut proof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
@@ -98,8 +100,16 @@ where
         let node = proof.account_subtree.into_inner().remove(path);
         let tree_mask = proof.branch_node_tree_masks.remove(path);
         let hash_mask = proof.branch_node_hash_masks.remove(path);
-        trace!(target: "trie::proof::blinded", ?path, ?node, "Blinded node for account trie");
 
+        trace!(
+            target: "trie::proof::blinded",
+            elapsed = ?start.unwrap().elapsed(),
+            ?path,
+            ?node,
+            ?tree_mask,
+            ?hash_mask,
+            "Blinded node for account trie"
+        );
         Ok(node.map(|node| RevealedNode { node, tree_mask, hash_mask }))
     }
 }
@@ -135,6 +145,8 @@ where
     H: HashedCursorFactory + Clone + Send + Sync,
 {
     fn blinded_node(&mut self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+        let start = enabled!(target: "trie::proof::blinded", Level::TRACE).then(Instant::now);
+
         let targets = HashSet::from_iter([pad_path_to_key(path)]);
         let storage_prefix_set =
             self.prefix_sets.storage_prefix_sets.get(&self.account).cloned().unwrap_or_default();
@@ -150,8 +162,17 @@ where
         let node = proof.subtree.into_inner().remove(path);
         let tree_mask = proof.branch_node_tree_masks.remove(path);
         let hash_mask = proof.branch_node_hash_masks.remove(path);
-        trace!(target: "trie::proof::blinded", account = ?self.account, ?path, ?node, "Blinded node for storage trie");
 
+        trace!(
+            target: "trie::proof::blinded",
+            account = ?self.account,
+            elapsed = ?start.unwrap().elapsed(),
+            ?path,
+            ?node,
+            ?tree_mask,
+            ?hash_mask,
+            "Blinded node for storage trie"
+        );
         Ok(node.map(|node| RevealedNode { node, tree_mask, hash_mask }))
     }
 }

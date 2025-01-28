@@ -16,8 +16,8 @@ use alloy_primitives::{Address, B256};
 use alloy_rlp::{Decodable, Encodable};
 
 use crate::{
-    transaction::signed::RecoveryError, BlockBody, BlockHeader, FullBlockBody, FullBlockHeader,
-    InMemorySize, MaybeSerde, SealedHeader, SignedTransaction,
+    block::error::BlockRecoveryError, transaction::signed::RecoveryError, BlockBody, BlockHeader,
+    FullBlockBody, FullBlockHeader, InMemorySize, MaybeSerde, SealedHeader, SignedTransaction,
 };
 
 /// Bincode-compatible header type serde implementations.
@@ -81,7 +81,7 @@ pub trait Block:
     /// Seal the block with a known hash.
     ///
     /// WARNING: This method does not perform validation whether the hash is correct.
-    fn seal(self, hash: B256) -> SealedBlock<Self> {
+    fn seal_unchecked(self, hash: B256) -> SealedBlock<Self> {
         SealedBlock::new_unchecked(self, hash)
     }
 
@@ -121,37 +121,23 @@ pub trait Block:
     }
 
     /// Expensive operation that recovers transaction signer.
-    fn senders(&self) -> Result<Vec<Address>, RecoveryError>
+    fn recover_signers(&self) -> Result<Vec<Address>, RecoveryError>
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
         self.body().recover_signers()
     }
 
-    /// Transform into a [`RecoveredBlock`].
-    ///
-    /// # Panics
-    ///
-    /// If the number of senders does not match the number of transactions in the block
-    /// and the signer recovery for one of the transactions fails.
-    ///
-    /// Note: this is expected to be called with blocks read from disk.
-    #[track_caller]
-    fn with_senders_unchecked(self, senders: Vec<Address>) -> RecoveredBlock<Self>
-    where
-        <Self::Body as BlockBody>::Transaction: SignedTransaction,
-    {
-        self.try_with_senders_unchecked(senders).expect("stored block is valid")
-    }
-
-    /// Transform into a [`RecoveredBlock`] using the given senders.
+    /// Transform the block into a [`RecoveredBlock`] using the given senders.
     ///
     /// If the number of senders does not match the number of transactions in the block, this falls
     /// back to manually recovery, but _without ensuring that the signature has a low `s` value_.
     ///
-    /// Returns an error if a signature is invalid.
-    #[track_caller]
-    fn try_with_senders_unchecked(self, senders: Vec<Address>) -> Result<RecoveredBlock<Self>, Self>
+    /// Returns the block as error if a signature is invalid.
+    fn try_into_recovered_unchecked(
+        self,
+        senders: Vec<Address>,
+    ) -> Result<RecoveredBlock<Self>, BlockRecoveryError<Self>>
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
@@ -159,22 +145,36 @@ pub trait Block:
             senders
         } else {
             // Fall back to recovery if lengths don't match
-            let Ok(senders) = self.body().recover_signers_unchecked() else { return Err(self) };
+            let Ok(senders) = self.body().recover_signers_unchecked() else {
+                return Err(BlockRecoveryError::new(self))
+            };
             senders
         };
         Ok(RecoveredBlock::new_unhashed(self, senders))
     }
 
-    /// **Expensive**. Transform into a [`RecoveredBlock`] by recovering senders in the contained
-    /// transactions.
+    /// Transform the block into a [`RecoveredBlock`] using the given signers.
     ///
-    /// Returns `None` if a transaction is invalid.
-    fn with_recovered_senders(self) -> Option<RecoveredBlock<Self>>
+    /// Note: This method assumes the signers are correct and does not validate them.
+    fn into_recovered_with_signers(self, signers: Vec<Address>) -> RecoveredBlock<Self>
     where
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
-        let senders = self.body().recover_signers().ok()?;
-        Some(RecoveredBlock::new_unhashed(self, senders))
+        RecoveredBlock::new_unhashed(self, signers)
+    }
+
+    /// **Expensive**. Transform into a [`RecoveredBlock`] by recovering senders in the contained
+    /// transactions.
+    ///
+    /// Returns the block as error if a signature is invalid.
+    fn try_into_recovered(self) -> Result<RecoveredBlock<Self>, BlockRecoveryError<Self>>
+    where
+        <Self::Body as BlockBody>::Transaction: SignedTransaction,
+    {
+        let Ok(signers) = self.body().recover_signers() else {
+            return Err(BlockRecoveryError::new(self))
+        };
+        Ok(RecoveredBlock::new_unhashed(self, signers))
     }
 }
 

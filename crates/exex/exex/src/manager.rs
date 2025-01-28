@@ -7,7 +7,6 @@ use futures::StreamExt;
 use itertools::Itertools;
 use metrics::Gauge;
 use reth_chain_state::ForkChoiceStream;
-use reth_chainspec::Head;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_node_api::NodePrimitives;
@@ -96,7 +95,7 @@ impl<N: NodePrimitives> ExExHandle<N> {
     /// [`mpsc::Receiver`] for [`ExExNotification`]s that should be given to the `ExEx`.
     pub fn new<P, E: BlockExecutorProvider<Primitives = N>>(
         id: String,
-        node_head: Head,
+        node_head: BlockNumHash,
         provider: P,
         executor: E,
         wal_handle: WalHandle<N>,
@@ -685,7 +684,7 @@ mod tests {
 
         let (mut exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -705,7 +704,7 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -727,7 +726,7 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -755,7 +754,7 @@ mod tests {
 
         let (exex_handle, _, _) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -810,7 +809,7 @@ mod tests {
 
         let (exex_handle, _, _) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -861,7 +860,7 @@ mod tests {
 
         let (exex_handle, event_tx, mut _notification_rx) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -916,14 +915,14 @@ mod tests {
         // Create two `ExExHandle` instances
         let (exex_handle1, event_tx1, _) = ExExHandle::new(
             "test_exex1".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
         );
         let (exex_handle2, event_tx2, _) = ExExHandle::new(
             "test_exex2".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -973,14 +972,14 @@ mod tests {
         // Create two `ExExHandle` instances
         let (exex_handle1, event_tx1, _) = ExExHandle::new(
             "test_exex1".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
         );
         let (exex_handle2, event_tx2, _) = ExExHandle::new(
             "test_exex2".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -1036,7 +1035,7 @@ mod tests {
 
         let (exex_handle_1, _, _) = ExExHandle::new(
             "test_exex_1".to_string(),
-            Head::default(),
+            Default::default(),
             (),
             MockExecutorProvider::default(),
             wal.handle(),
@@ -1105,7 +1104,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             provider,
             EthExecutorProvider::mainnet(),
             wal.handle(),
@@ -1160,7 +1159,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             provider,
             EthExecutorProvider::mainnet(),
             wal.handle(),
@@ -1210,7 +1209,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             provider,
             EthExecutorProvider::mainnet(),
             wal.handle(),
@@ -1253,7 +1252,7 @@ mod tests {
 
         let (mut exex_handle, _, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             provider,
             EthExecutorProvider::mainnet(),
             wal.handle(),
@@ -1313,7 +1312,7 @@ mod tests {
 
         let (exex_handle, events_tx, mut notifications) = ExExHandle::new(
             "test_exex".to_string(),
-            Head::default(),
+            Default::default(),
             provider.clone(),
             EthExecutorProvider::mainnet(),
             wal.handle(),

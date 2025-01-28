@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use alloy_consensus::{
     transaction::PooledTransaction, Header, TxEip1559, TxEip2930, TxEip4844, TxEip4844WithSidecar,
     TxEip7702, TxLegacy, TxType,
@@ -104,41 +105,50 @@ impl<T: InMemorySize> InMemorySize for alloy_consensus::Block<T> {
     }
 }
 
-#[cfg(feature = "op")]
-impl InMemorySize for op_alloy_consensus::OpDepositReceipt {
+impl<T: InMemorySize> InMemorySize for Vec<T> {
     fn size(&self) -> usize {
-        let Self { inner, deposit_nonce, deposit_receipt_version } = self;
-        inner.size() +
-            core::mem::size_of_val(deposit_nonce) +
-            core::mem::size_of_val(deposit_receipt_version)
+        // Note: This does not track additional capacity
+        self.iter().map(T::size).sum::<usize>()
     }
 }
 
+/// Implementation for optimism types
 #[cfg(feature = "op")]
-impl InMemorySize for op_alloy_consensus::OpTypedTransaction {
-    fn size(&self) -> usize {
-        match self {
-            Self::Legacy(tx) => tx.size(),
-            Self::Eip2930(tx) => tx.size(),
-            Self::Eip1559(tx) => tx.size(),
-            Self::Eip7702(tx) => tx.size(),
-            Self::Deposit(tx) => tx.size(),
+mod op {
+    use super::*;
+
+    impl InMemorySize for op_alloy_consensus::OpDepositReceipt {
+        fn size(&self) -> usize {
+            let Self { inner, deposit_nonce, deposit_receipt_version } = self;
+            inner.size() +
+                core::mem::size_of_val(deposit_nonce) +
+                core::mem::size_of_val(deposit_receipt_version)
+        }
+    }
+
+    impl InMemorySize for op_alloy_consensus::OpTypedTransaction {
+        fn size(&self) -> usize {
+            match self {
+                Self::Legacy(tx) => tx.size(),
+                Self::Eip2930(tx) => tx.size(),
+                Self::Eip1559(tx) => tx.size(),
+                Self::Eip7702(tx) => tx.size(),
+                Self::Deposit(tx) => tx.size(),
+            }
+        }
+    }
+
+    impl InMemorySize for op_alloy_consensus::OpPooledTransaction {
+        fn size(&self) -> usize {
+            match self {
+                Self::Legacy(tx) => tx.size(),
+                Self::Eip2930(tx) => tx.size(),
+                Self::Eip1559(tx) => tx.size(),
+                Self::Eip7702(tx) => tx.size(),
+            }
         }
     }
 }
-
-#[cfg(feature = "op")]
-impl InMemorySize for op_alloy_consensus::OpPooledTransaction {
-    fn size(&self) -> usize {
-        match self {
-            Self::Legacy(tx) => tx.size(),
-            Self::Eip2930(tx) => tx.size(),
-            Self::Eip1559(tx) => tx.size(),
-            Self::Eip7702(tx) => tx.size(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

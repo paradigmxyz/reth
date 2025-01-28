@@ -17,16 +17,13 @@
 
 extern crate alloc;
 
-use core::fmt::Debug;
-
-use alloy_consensus::BlockHeader as _;
+use alloy_consensus::transaction::Recovered;
 use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Address, Bytes, B256, U256};
+use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{Database, DatabaseCommit, GetInspector};
-use revm_primitives::{
-    BlockEnv, CfgEnvWithHandlerCfg, EVMError, ResultAndState, SpecId, TxEnv, TxKind,
-};
+use revm_primitives::{BlockEnv, EVMError, ResultAndState, TxEnv, TxKind};
 
 pub mod either;
 /// EVM environment configuration.
@@ -59,9 +56,6 @@ pub trait Evm {
 
     /// Reference to [`BlockEnv`].
     fn block(&self) -> &BlockEnv;
-
-    /// Consumes the type and returns the underlying [`EvmEnv`].
-    fn into_env(self) -> EvmEnv;
 
     /// Executes the given transaction.
     fn transact(&mut self, tx: Self::Tx) -> Result<ResultAndState, Self::Error>;
@@ -102,17 +96,21 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// including the spec id and transaction environment.
     ///
     /// This will preserve any handler modifications
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()>;
+    fn evm_with_env<DB: Database>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv<Self::Spec>,
+    ) -> Self::Evm<'_, DB, ()>;
 
     /// Returns a new EVM with the given database configured with `cfg` and `block_env`
     /// configuration derived from the given header. Relies on
-    /// [`ConfigureEvmEnv::cfg_and_block_env`].
+    /// [`ConfigureEvmEnv::evm_env`].
     ///
     /// # Caution
     ///
     /// This does not initialize the tx environment.
     fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Self::Evm<'_, DB, ()> {
-        let evm_env = self.cfg_and_block_env(header);
+        let evm_env = self.evm_env(header);
         self.evm_with_env(db, evm_env)
     }
 
@@ -125,7 +123,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     fn evm_with_env_and_inspector<DB, I>(
         &self,
         db: DB,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<Self::Spec>,
         inspector: I,
     ) -> Self::Evm<'_, DB, I>
     where
@@ -136,7 +134,7 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
 impl<'b, T> ConfigureEvm for &'b T
 where
     T: ConfigureEvm,
-    &'b T: ConfigureEvmEnv<Header = T::Header, TxEnv = T::TxEnv>,
+    &'b T: ConfigureEvmEnv<Header = T::Header, TxEnv = T::TxEnv, Spec = T::Spec>,
 {
     type Evm<'a, DB: Database + 'a, I: 'a> = T::Evm<'a, DB, I>;
 
@@ -144,14 +142,18 @@ where
         (*self).evm_for_block(db, header)
     }
 
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
+    fn evm_with_env<DB: Database>(
+        &self,
+        db: DB,
+        evm_env: EvmEnv<Self::Spec>,
+    ) -> Self::Evm<'_, DB, ()> {
         (*self).evm_with_env(db, evm_env)
     }
 
     fn evm_with_env_and_inspector<DB, I>(
         &self,
         db: DB,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<Self::Spec>,
         inspector: I,
     ) -> Self::Evm<'_, DB, I>
     where
@@ -177,95 +179,39 @@ pub trait ConfigureEvmEnv: Send + Sync + Unpin + Clone + 'static {
     /// Transaction environment used by EVM.
     type TxEnv: TransactionEnv;
 
-    /// The error type that is returned by [`Self::next_cfg_and_block_env`].
+    /// The error type that is returned by [`Self::next_evm_env`].
     type Error: core::error::Error + Send + Sync;
 
+    /// Identifier of the EVM specification.
+    type Spec: Into<revm_primitives::SpecId> + Debug + Copy + Send + Sync;
+
     /// Returns a [`TxEnv`] from a transaction and [`Address`].
-    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv {
-        let mut tx_env = Default::default();
-        self.fill_tx_env(&mut tx_env, transaction, signer);
-        tx_env
-    }
+    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv;
 
-    /// Fill transaction environment from a transaction  and the given sender address.
-    fn fill_tx_env(
-        &self,
-        tx_env: &mut Self::TxEnv,
-        transaction: &Self::Transaction,
-        sender: Address,
-    );
-
-    /// Returns a [`CfgEnvWithHandlerCfg`] for the given header.
-    fn cfg_env(&self, header: &Self::Header) -> CfgEnvWithHandlerCfg {
-        let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-        self.fill_cfg_env(&mut cfg, header);
-        cfg
-    }
-
-    /// Fill [`CfgEnvWithHandlerCfg`] fields according to the chain spec and given header.
-    ///
-    /// This __must__ set the corresponding spec id in the handler cfg, based on timestamp or total
-    /// difficulty
-    fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header);
-
-    /// Fill [`BlockEnv`] field according to the chain spec and given header
-    fn fill_block_env(&self, block_env: &mut BlockEnv, header: &Self::Header, spec_id: SpecId) {
-        block_env.number = U256::from(header.number());
-        block_env.coinbase = header.beneficiary();
-        block_env.timestamp = U256::from(header.timestamp());
-        if spec_id >= SpecId::MERGE {
-            block_env.prevrandao = header.mix_hash();
-            block_env.difficulty = U256::ZERO;
-        } else {
-            block_env.difficulty = header.difficulty();
-            block_env.prevrandao = None;
-        }
-        block_env.basefee = U256::from(header.base_fee_per_gas().unwrap_or_default());
-        block_env.gas_limit = U256::from(header.gas_limit());
-
-        // EIP-4844 excess blob gas of this block, introduced in Cancun
-        if let Some(excess_blob_gas) = header.excess_blob_gas() {
-            block_env.set_blob_excess_gas_and_price(excess_blob_gas, spec_id >= SpecId::PRAGUE);
-        }
+    /// Returns a [`TxEnv`] from a [`Recovered`] transaction.
+    fn tx_env_from_recovered(&self, tx: Recovered<&Self::Transaction>) -> Self::TxEnv {
+        let (tx, address) = tx.into_parts();
+        self.tx_env(tx, address)
     }
 
     /// Creates a new [`EvmEnv`] for the given header.
-    fn cfg_and_block_env(&self, header: &Self::Header) -> EvmEnv {
-        let mut cfg = CfgEnvWithHandlerCfg::new(Default::default(), Default::default());
-        let mut block_env = BlockEnv::default();
-        self.fill_cfg_and_block_env(&mut cfg, &mut block_env, header);
-        EvmEnv::new(cfg, block_env)
-    }
-
-    /// Convenience function to call both [`fill_cfg_env`](ConfigureEvmEnv::fill_cfg_env) and
-    /// [`ConfigureEvmEnv::fill_block_env`].
-    ///
-    /// Note: Implementers should ensure that all fields are required fields are filled.
-    fn fill_cfg_and_block_env(
-        &self,
-        cfg: &mut CfgEnvWithHandlerCfg,
-        block_env: &mut BlockEnv,
-        header: &Self::Header,
-    ) {
-        self.fill_cfg_env(cfg, header);
-        self.fill_block_env(block_env, header, cfg.handler_cfg.spec_id);
-    }
+    fn evm_env(&self, header: &Self::Header) -> EvmEnv<Self::Spec>;
 
     /// Returns the configured [`EvmEnv`] for `parent + 1` block.
     ///
     /// This is intended for usage in block building after the merge and requires additional
     /// attributes that can't be derived from the parent block: attributes that are determined by
     /// the CL, such as the timestamp, suggested fee recipient, and randomness value.
-    fn next_cfg_and_block_env(
+    fn next_evm_env(
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
-    ) -> Result<EvmEnv, Self::Error>;
+    ) -> Result<EvmEnv<Self::Spec>, Self::Error>;
 }
 
 /// Represents additional attributes required to configure the next block.
 /// This is used to configure the next block's environment
-/// [`ConfigureEvmEnv::next_cfg_and_block_env`] and contains fields that can't be derived from the
+/// [`ConfigureEvmEnv::next_evm_env`] and contains fields that can't be derived from the
 /// parent header alone (attributes that are determined by the CL.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NextBlockEnvAttributes {
@@ -292,6 +238,36 @@ pub trait TransactionEnv:
     /// Set the gas limit.
     fn with_gas_limit(mut self, gas_limit: u64) -> Self {
         self.set_gas_limit(gas_limit);
+        self
+    }
+
+    /// Returns the configured nonce.
+    ///
+    /// This may return `None`, if the nonce has been intentionally unset in the environment. This
+    /// is useful in optimizations like transaction prewarming, where nonce checks should be
+    /// ignored.
+    fn nonce(&self) -> Option<u64>;
+
+    /// Sets the nonce.
+    fn set_nonce(&mut self, nonce: u64);
+
+    /// Sets the nonce.
+    fn with_nonce(mut self, nonce: u64) -> Self {
+        self.set_nonce(nonce);
+        self
+    }
+
+    /// Unsets the nonce. This should be used when nonce checks for the transaction should be
+    /// ignored.
+    ///
+    /// See [`TransactionEnv::nonce`] for applications where this may be desired.
+    fn unset_nonce(&mut self);
+
+    /// Constructs a version of this [`TransactionEnv`] that has the nonce unset.
+    ///
+    /// See [`TransactionEnv::nonce`] for applications where this may be desired.
+    fn without_nonce(mut self) -> Self {
+        self.unset_nonce();
         self
     }
 
@@ -331,6 +307,18 @@ impl TransactionEnv for TxEnv {
 
     fn gas_price(&self) -> U256 {
         self.gas_price.to()
+    }
+
+    fn nonce(&self) -> Option<u64> {
+        self.nonce
+    }
+
+    fn set_nonce(&mut self, nonce: u64) {
+        self.nonce = Some(nonce);
+    }
+
+    fn unset_nonce(&mut self) {
+        self.nonce = None;
     }
 
     fn value(&self) -> U256 {

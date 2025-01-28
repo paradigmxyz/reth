@@ -69,7 +69,11 @@ pub trait LoadPendingBlock:
     fn pending_block_env_and_cfg(
         &self,
     ) -> Result<
-        PendingBlockEnv<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>,
+        PendingBlockEnv<
+            ProviderBlock<Self::Provider>,
+            ProviderReceipt<Self::Provider>,
+            <Self::Evm as ConfigureEvmEnv>::Spec,
+        >,
         Self::Error,
     > {
         if let Some(block) =
@@ -83,7 +87,7 @@ pub trait LoadPendingBlock:
                 // Note: for the PENDING block we assume it is past the known merge block and
                 // thus this will not fail when looking up the total
                 // difficulty value for the blockenv.
-                let evm_env = self.evm_config().cfg_and_block_env(block.header());
+                let evm_env = self.evm_config().evm_env(block.header());
 
                 return Ok(PendingBlockEnv::new(
                     evm_env,
@@ -102,7 +106,7 @@ pub trait LoadPendingBlock:
 
         let evm_env = self
             .evm_config()
-            .next_cfg_and_block_env(
+            .next_evm_env(
                 &latest,
                 NextBlockEnvAttributes {
                     timestamp: latest.timestamp() + 12,
@@ -234,7 +238,7 @@ pub trait LoadPendingBlock:
     #[expect(clippy::type_complexity)]
     fn build_block(
         &self,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
         parent_hash: B256,
     ) -> Result<
         (RecoveredBlock<ProviderBlock<Self::Provider>>, Vec<ProviderReceipt<Self::Provider>>),

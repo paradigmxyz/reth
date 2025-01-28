@@ -95,7 +95,7 @@ where
     async fn trace_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<<Eth::Evm as ConfigureEvmEnv>::Spec>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
         // replay all transactions of the block
@@ -156,7 +156,7 @@ where
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
 
-        let evm_env = self.eth_api().evm_config().cfg_and_block_env(block.header());
+        let evm_env = self.eth_api().evm_config().evm_env(block.header());
 
         // Depending on EIP-2 we need to recover the transactions differently
         let senders =
@@ -180,7 +180,7 @@ where
                     .collect()
             };
 
-        self.trace_block(Arc::new(block.with_senders_unchecked(senders)), evm_env, opts).await
+        self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts).await
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -446,7 +446,7 @@ where
                                 &mut inspector,
                             )?;
                             let env = revm_primitives::Env::boxed(
-                                evm_env.cfg_env_with_handler_cfg.cfg_env,
+                                evm_env.cfg_env,
                                 evm_env.block_env,
                                 tx_env.into(),
                             );
@@ -596,10 +596,26 @@ where
             .await
     }
 
+    /// Generates an execution witness for the given block hash. see
+    /// [`Self::debug_execution_witness`] for more info.
+    pub async fn debug_execution_witness_by_block_hash(
+        &self,
+        hash: B256,
+    ) -> Result<ExecutionWitness, Eth::Error> {
+        let this = self.clone();
+        let block = this
+            .eth_api()
+            .block_with_senders(hash.into())
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(hash.into()))?;
+
+        self.debug_execution_witness_for_block(block).await
+    }
+
     /// The `debug_executionWitness` method allows for re-execution of a block with the purpose of
-    /// generating an execution witness. The witness comprises of a map of all hashed trie nodes
-    /// to their preimages that were required during the execution of the block, including during
-    /// state root recomputation.
+    /// generating an execution witness. The witness comprises of a map of all hashed trie nodes to
+    /// their preimages that were required during the execution of the block, including during state
+    /// root recomputation.
     pub async fn debug_execution_witness(
         &self,
         block_id: BlockNumberOrTag,
@@ -611,6 +627,15 @@ where
             .await?
             .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
+        self.debug_execution_witness_for_block(block).await
+    }
+
+    /// Generates an execution witness, using the given recovered block.
+    pub async fn debug_execution_witness_for_block(
+        &self,
+        block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
+    ) -> Result<ExecutionWitness, Eth::Error> {
+        let this = self.clone();
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
                 let db = StateProviderDatabase::new(&state_provider);
@@ -650,7 +675,7 @@ where
     fn trace_transaction(
         &self,
         opts: &GethDebugTracingOptions,
-        evm_env: EvmEnv,
+        evm_env: EvmEnv<<Eth::Evm as ConfigureEvmEnv>::Spec>,
         tx_env: <Eth::Evm as ConfigureEvmEnv>::TxEnv,
         db: &mut StateCacheDb<'_>,
         transaction_context: Option<TransactionContext>,
@@ -781,7 +806,7 @@ where
 
                     let state = res.state.clone();
                     let env = revm_primitives::Env::boxed(
-                        evm_env.cfg_env_with_handler_cfg.cfg_env,
+                        evm_env.cfg_env,
                         evm_env.block_env,
                         tx_env.into(),
                     );
@@ -974,6 +999,15 @@ where
     ) -> RpcResult<ExecutionWitness> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_execution_witness(self, block).await.map_err(Into::into)
+    }
+
+    /// Handler for `debug_executionWitnessByBlockHash`
+    async fn debug_execution_witness_by_block_hash(
+        &self,
+        hash: B256,
+    ) -> RpcResult<ExecutionWitness> {
+        let _permit = self.acquire_trace_permit().await;
+        Self::debug_execution_witness_by_block_hash(self, hash).await.map_err(Into::into)
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {

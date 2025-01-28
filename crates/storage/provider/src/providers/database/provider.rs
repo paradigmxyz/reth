@@ -1229,7 +1229,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
                     // Note: we're using unchecked here because we know the block contains valid txs
                     // wrt to its height and can ignore the s value check so pre
                     // EIP-2 txs are allowed
-                    .try_with_senders_unchecked(senders)
+                    .try_into_recovered_unchecked(senders)
                     .map(Some)
                     .map_err(|_| ProviderError::SenderRecoveryError)
             },
@@ -1274,7 +1274,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             |range| self.headers_range(range),
             |header, body, senders| {
                 Self::Block::new(header, body)
-                    .try_with_senders_unchecked(senders)
+                    .try_into_recovered_unchecked(senders)
                     .map_err(|_| ProviderError::SenderRecoveryError)
             },
         )
@@ -1810,8 +1810,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             ));
         }
 
-        let has_receipts_pruning = self.prune_modes.has_receipts_pruning() ||
-            execution_outcome.receipts.iter().flatten().any(|receipt| receipt.is_none());
+        let has_receipts_pruning = self.prune_modes.has_receipts_pruning();
 
         // Prepare receipts cursor if we are going to write receipts to the database
         //
@@ -1869,26 +1868,21 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
             for (idx, receipt) in receipts.iter().enumerate() {
                 let receipt_idx = first_tx_index + idx as u64;
-                if let Some(receipt) = receipt {
-                    // Skip writing receipt if log filter is active and it does not have any logs to
-                    // retain
-                    if prunable_receipts &&
-                        has_contract_log_filter &&
-                        !receipt
-                            .logs()
-                            .iter()
-                            .any(|log| allowed_addresses.contains(&log.address))
-                    {
-                        continue
-                    }
+                // Skip writing receipt if log filter is active and it does not have any logs to
+                // retain
+                if prunable_receipts &&
+                    has_contract_log_filter &&
+                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                {
+                    continue
+                }
 
-                    if let Some(writer) = &mut receipts_static_writer {
-                        writer.append_receipt(receipt_idx, receipt)?;
-                    }
+                if let Some(writer) = &mut receipts_static_writer {
+                    writer.append_receipt(receipt_idx, receipt)?;
+                }
 
-                    if let Some(cursor) = &mut receipts_cursor {
-                        cursor.append(receipt_idx, receipt)?;
-                    }
+                if let Some(cursor) = &mut receipts_cursor {
+                    cursor.append(receipt_idx, receipt)?;
                 }
             }
         }
@@ -2283,9 +2277,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
             for num in block_body.tx_num_range() {
                 if receipts_iter.peek().is_some_and(|(n, _)| *n == num) {
-                    block_receipts.push(receipts_iter.next().map(|(_, r)| r));
-                } else {
-                    block_receipts.push(None);
+                    block_receipts.push(receipts_iter.next().unwrap().1);
                 }
             }
             receipts.push(block_receipts);
