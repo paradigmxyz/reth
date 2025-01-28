@@ -22,7 +22,7 @@ use reth_node_builder::{
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
 };
 use reth_primitives::{EthPrimitives, PooledTransaction};
-use reth_provider::{CanonStateSubscriptions, EthStorage};
+use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -62,6 +62,41 @@ impl EthereumNode {
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
+    }
+
+    /// Instantiates the [`ProviderFactoryBuilder`] for an ethereum node.
+    ///
+    /// # Open a Providerfactory in read-only mode from a datadir
+    ///
+    /// See also: [`ProviderFactoryBuilder`] and
+    /// [`ReadOnlyConfig`](reth_provider::providers::ReadOnlyConfig).
+    ///
+    /// ```no_run
+    /// use reth_chainspec::MAINNET;
+    /// use reth_node_ethereum::EthereumNode;
+    ///
+    /// let factory = EthereumNode::provider_factory_builder()
+    ///     .open_read_only(MAINNET.clone(), "datadir")
+    ///     .unwrap();
+    /// ```
+    ///
+    /// # Open a Providerfactory manually with with all required componets
+    ///
+    /// ```no_run
+    /// use reth_chainspec::ChainSpecBuilder;
+    /// use reth_db::open_db_read_only;
+    /// use reth_node_ethereum::EthereumNode;
+    /// use reth_provider::providers::StaticFileProvider;
+    /// use std::{path::Path, sync::Arc};
+    ///
+    /// let factory = EthereumNode::provider_factory_builder()
+    ///     .db(Arc::new(open_db_read_only(Path::new("db"), Default::default()).unwrap()))
+    ///     .chainspec(ChainSpecBuilder::mainnet().build().into())
+    ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
+    ///     .build_provider_factory();
+    /// ```
+    pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
+        ProviderFactoryBuilder::default()
     }
 }
 
