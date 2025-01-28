@@ -179,12 +179,6 @@ impl<N: NodePrimitives> TreeState<N> {
 
         self.parent_to_child.entry(parent_hash).or_default().insert(hash);
 
-        if let Some(existing_blocks) = self.blocks_by_number.get(&block_number) {
-            if existing_blocks.len() > 1 {
-                self.parent_to_child.entry(parent_hash).or_default().insert(hash);
-            }
-        }
-
         for children in self.parent_to_child.values_mut() {
             children.retain(|child| self.blocks_by_hash.contains_key(child));
         }
