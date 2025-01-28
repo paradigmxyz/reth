@@ -385,7 +385,7 @@ impl ChainSpec {
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.hardforks.is_fork_active_at_timestamp(fork.clone(), timestamp) {
-                        return *params
+                        return *params;
                     }
                 }
 
@@ -404,13 +404,26 @@ impl ChainSpec {
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.hardforks.is_fork_active_at_block(fork.clone(), block_number) {
-                        return *params
+                        return *params;
                     }
                 }
 
                 bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
             }
         }
+    }
+
+    /// Get the blob fee parameters for the given timestamp.
+    pub fn blob_fee_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
+        let HardforkBlobParams { cancun, prague } = self.blob_params;
+        if self.is_cancun_active_at_timestamp(timestamp) {
+            Some(cancun)
+        } else if self.is_prague_active_at_timestamp(timestamp) {
+            Some(prague)
+        } else {
+            None
+        }
+
     }
 
     /// Get the hash of the genesis block.
@@ -489,8 +502,8 @@ impl ChainSpec {
             // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
             // fork filter.
             Some(match condition {
-                ForkCondition::Block(block) |
-                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
+                ForkCondition::Block(block)
+                | ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
                 ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
                 _ => return None,
             })
@@ -517,8 +530,8 @@ impl ChainSpec {
         for (_, cond) in self.hardforks.forks_iter() {
             // handle block based forks and the sepolia merge netsplit block edge case (TTD
             // ForkCondition with Some(block))
-            if let ForkCondition::Block(block) |
-            ForkCondition::TTD { fork_block: Some(block), .. } = cond
+            if let ForkCondition::Block(block)
+            | ForkCondition::TTD { fork_block: Some(block), .. } = cond
             {
                 if cond.active_at_head(head) {
                     // skip duplicated hardforks: hardforks enabled at genesis block
@@ -529,7 +542,7 @@ impl ChainSpec {
                 } else {
                     // we can return here because this block fork is not active, so we set the
                     // `next` value
-                    return ForkId { hash: forkhash, next: block }
+                    return ForkId { hash: forkhash, next: block };
                 }
             }
         }
@@ -552,7 +565,7 @@ impl ChainSpec {
                 // can safely return here because we have already handled all block forks and
                 // have handled all active timestamp forks, and set the next value to the
                 // timestamp that is known but not active yet
-                return ForkId { hash: forkhash, next: timestamp }
+                return ForkId { hash: forkhash, next: timestamp };
             }
         }
 
