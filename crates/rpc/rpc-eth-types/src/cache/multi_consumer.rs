@@ -9,7 +9,6 @@ use std::{
 
 use reth_primitives_traits::InMemorySize;
 use schnellru::{ByLength, Limiter, LruMap};
-use serde::de::value;
 
 use super::metrics::CacheMetrics;
 
@@ -70,10 +69,9 @@ where
     where
         V: InMemorySize,
     {
-        let _ = self.cache.remove(key);
-        if let Some(value) = self.cache.remove(key) {
-            self.memory_usage -= value.size();
-        }
+        self.cache
+            .remove(key)
+            .inspect(|value| self.memory_usage = self.memory_usage.saturating_sub(value.size()));
         self.queued
             .remove(key)
             .inspect(|removed| self.metrics.queued_consumers_count.decrement(removed.len() as f64))
@@ -103,7 +101,8 @@ where
     {
         let size = value.size();
         if self.cache.insert(key, value) {
-            self.memory_usage += size;
+            self.memory_usage = self.memory_usage.saturating_add(size);
+            self.metrics.memory_usage_bytes.set(self.memory_usage as f64);
             true
         } else {
             false
@@ -127,7 +126,7 @@ where
             cache: LruMap::new(ByLength::new(max_len)),
             queued: Default::default(),
             metrics: CacheMetrics::new_with_labels(&[("cache", cache_id.to_string())]),
-            memory_usage: CacheMetrics::new_with_labels(&[("cache", cache_id.to_string())]),
+            memory_usage: 0,
         }
     }
 }
