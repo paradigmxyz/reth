@@ -546,7 +546,7 @@ pub enum ValidationApiError {
 
 #[derive(Metrics)]
 #[metrics(scope = "builder.validation")]
-pub(crate) struct ValidationMetrics{
+pub(crate) struct ValidationMetrics {
     /// The number of entries configured in the builder validation disallow list
     pub(crate) disallow_size: Gauge,
 }
