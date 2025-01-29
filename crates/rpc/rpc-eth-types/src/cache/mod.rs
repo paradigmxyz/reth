@@ -361,11 +361,8 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
-                                let mut action_sender = ActionSender::new(
-                                    CacheKind::Block,
-                                    block_hash,
-                                    Some(action_tx),
-                                );
+                                let mut action_sender =
+                                    ActionSender::new(CacheKind::Block, block_hash, action_tx);
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
@@ -393,11 +390,8 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
-                                let mut action_sender = ActionSender::new(
-                                    CacheKind::Receipt,
-                                    block_hash,
-                                    Some(action_tx),
-                                );
+                                let mut action_sender =
+                                    ActionSender::new(CacheKind::Receipt, block_hash, action_tx);
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
@@ -428,11 +422,8 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
-                                let mut action_sender = ActionSender::new(
-                                    CacheKind::Header,
-                                    block_hash,
-                                    Some(action_tx),
-                                );
+                                let mut action_sender =
+                                    ActionSender::new(CacheKind::Header, block_hash, action_tx);
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
@@ -565,13 +556,10 @@ struct ActionSender<B: Block, R: Send + Sync> {
 }
 
 impl<R: Send + Sync, B: Block> ActionSender<B, R> {
-    const fn new(
-        kind: CacheKind,
-        blockhash: B256,
-        tx: Option<UnboundedSender<CacheAction<B, R>>>,
-    ) -> Self {
-        Self { kind, blockhash, tx }
+    const fn new(kind: CacheKind, blockhash: B256, tx: UnboundedSender<CacheAction<B, R>>) -> Self {
+        Self { kind, blockhash, tx: Some(tx) }
     }
+
     fn send_block(&mut self, block_sender: Result<Option<Arc<RecoveredBlock<B>>>, ProviderError>) {
         if let Some(tx) = self.tx.take() {
             let _ = tx.send(CacheAction::BlockWithSendersResult {
@@ -580,12 +568,14 @@ impl<R: Send + Sync, B: Block> ActionSender<B, R> {
             });
         }
     }
+
     fn send_receipts(&mut self, receipts: Result<Option<Arc<Vec<R>>>, ProviderError>) {
         if let Some(tx) = self.tx.take() {
             let _ =
                 tx.send(CacheAction::ReceiptsResult { block_hash: self.blockhash, res: receipts });
         }
     }
+
     fn send_header(&mut self, header: Result<<B as Block>::Header, ProviderError>) {
         if let Some(tx) = self.tx.take() {
             let _ = tx.send(CacheAction::HeaderResult {
