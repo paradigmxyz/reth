@@ -923,10 +923,9 @@ where
                         }
 
                         continue
-                    } else {
-                        // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
                     }
+                    // this is an error that we should treat as fatal for this attempt
+                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
                 }
             };
 
