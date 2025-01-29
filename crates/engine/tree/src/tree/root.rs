@@ -263,6 +263,7 @@ impl StateUpdateSequencer {
     /// Adds a state update.
     pub(crate) fn add_state_update(&mut self, sequence: u64, state_update: HashedPostState) {
         if sequence >= self.next_to_deliver {
+            debug!(target: "engine::root::state_update_sequencer", ?sequence, "Adding state update");
             self.pending_state_updates.insert(sequence, state_update);
         }
     }
@@ -271,6 +272,8 @@ impl StateUpdateSequencer {
         &mut self,
         sequence_numbers: Vec<u64>,
     ) -> Vec<HashedPostState> {
+        debug!(target: "engine::root::state_update_sequencer", ?sequence_numbers, "Aggregating state updates");
+
         self.pending_state_update_sequence_numbers.extend(sequence_numbers);
 
         // return early if we don't have the next expected proof
