@@ -128,7 +128,7 @@ where
             let storage = state.storages.get(&hashed_address);
             let storage_trie = sparse_trie
                 .storage_trie_mut(&hashed_address)
-                .ok_or(SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind))?;
+                .ok_or(SparseStateTrieErrorKind::BlindStorageTrie(hashed_address))?;
             for hashed_slot in hashed_slots.into_iter().sorted_unstable() {
                 let storage_nibbles = Nibbles::unpack(hashed_slot);
                 let maybe_leaf_value = storage
