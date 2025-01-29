@@ -100,6 +100,7 @@ members = [
     "crates/rpc/rpc/",
     "crates/scroll/alloy/consensus",
     "crates/scroll/alloy/network",
+    "crates/scroll/alloy/provider",
     "crates/scroll/alloy/rpc-types",
     "crates/scroll/alloy/rpc-types-engine",
     "crates/scroll/bin/scroll-reth",
@@ -487,6 +488,7 @@ alloy-transport-ws = { version = "0.9.2", default-features = false }
 
 # scroll
 scroll-alloy-consensus = { path = "crates/scroll/alloy/consensus" }
+scroll-alloy-provider = { path = "crates/scroll/alloy/provider" }
 scroll-alloy-rpc-types = { path = "crates/scroll/alloy/rpc-types" }
 scroll-alloy-rpc-types-engine = { path = "crates/scroll/alloy/rpc-types-engine" }
 scroll-alloy-network = { path = "crates/scroll/alloy/network" }

@@ -1,0 +1,74 @@
+[package]
+name = "scroll-alloy-provider"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# alloy
+alloy-json-rpc.workspace = true
+alloy-provider.workspace = true
+alloy-primitives.workspace = true
+alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
+alloy-rpc-client.workspace = true
+alloy-transport.workspace = true
+alloy-transport-http = { workspace = true, features = ["jwt-auth"] }
+
+# scroll
+scroll-alloy-network.workspace = true
+scroll-alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
+
+# misc
+async-trait.workspace = true
+derive_more.workspace = true
+eyre.workspace = true
+http-body-util.workspace = true
+reqwest.workspace = true
+tower.workspace = true
+
+[dev-dependencies]
+reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-engine-primitives.workspace = true
+reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-rpc-builder.workspace = true
+reth-rpc-engine-api.workspace = true
+reth-rpc-types-compat.workspace = true
+reth-scroll-engine-primitives.workspace = true
+reth-scroll-node.workspace = true
+reth-scroll-payload.workspace = true
+reth-scroll-chainspec.workspace = true
+reth-tasks.workspace = true
+reth-tracing.workspace = true
+reth-transaction-pool.workspace = true
+
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+futures-util.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "scroll-alloy-rpc-types-engine/std",
+    "derive_more/std",
+    "reth-primitives/std",
+    "reth-primitives-traits/std",
+]
+scroll = [
+    "reth-scroll-node/scroll",
+    "reth-scroll-engine-primitives/scroll"
+]
+optimism = [
+    "reth-provider/optimism",
+    "reth-scroll-engine-primitives/optimism",
+    "reth-scroll-node/optimism"
+]

@@ -47,6 +47,13 @@ pub struct ScrollEngineValidator {
     chainspec: Arc<ScrollChainSpec>,
 }
 
+impl ScrollEngineValidator {
+    /// Returns a new [`ScrollEngineValidator`].
+    pub const fn new(chainspec: Arc<ScrollChainSpec>) -> Self {
+        Self { chainspec }
+    }
+}
+
 impl<Types> EngineValidator<Types> for ScrollEngineValidator
 where
     Types: EngineTypes<PayloadAttributes = ScrollPayloadAttributes>,

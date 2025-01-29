@@ -786,7 +786,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e1509599021330a31c4a6816b655e34bf67acb1cc03c564e09fd8754ff6c5de"
 dependencies = [
  "alloy-json-rpc",
+ "alloy-rpc-types-engine",
  "alloy-transport",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "jsonwebtoken",
  "reqwest",
  "serde_json",
  "tower 0.5.2",
@@ -10335,6 +10340,44 @@ dependencies = [
  "alloy-signer",
  "scroll-alloy-consensus",
  "scroll-alloy-rpc-types",
+]
+
+[[package]]
+name = "scroll-alloy-provider"
+version = "1.1.5"
+dependencies = [
+ "alloy-json-rpc",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-client",
+ "alloy-rpc-types-engine",
+ "alloy-transport",
+ "alloy-transport-http",
+ "async-trait",
+ "derive_more",
+ "eyre",
+ "futures-util",
+ "http-body-util",
+ "reqwest",
+ "reth-engine-primitives",
+ "reth-payload-builder",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-rpc-builder",
+ "reth-rpc-engine-api",
+ "reth-rpc-types-compat",
+ "reth-scroll-chainspec",
+ "reth-scroll-engine-primitives",
+ "reth-scroll-node",
+ "reth-scroll-payload",
+ "reth-tasks",
+ "reth-tracing",
+ "reth-transaction-pool",
+ "scroll-alloy-network",
+ "scroll-alloy-rpc-types-engine",
+ "tokio",
+ "tower 0.4.13",
 ]
 
 [[package]]
