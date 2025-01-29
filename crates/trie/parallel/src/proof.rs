@@ -102,7 +102,7 @@ where
     pub fn multiproof(
         self,
         targets: MultiProofTargets,
-    ) -> Result<(MultiProof, HashedCursorCache<Account>), ParallelStateRootError> {
+    ) -> Result<MultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
         // Extend prefix sets with targets
@@ -331,8 +331,7 @@ where
             branch_node_tree_masks,
             storages,
         };
-        let cache = account_node_iter.hashed_cursor.take_cache();
-        Ok((multiproof, cache))
+        Ok(multiproof)
     }
 }
 

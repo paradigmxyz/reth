@@ -9333,6 +9333,7 @@ dependencies = [
  "codspeed-criterion-compat",
  "itertools 0.13.0",
  "metrics",
+ "moka",
  "proptest",
  "proptest-arbitrary-interop",
  "rayon",

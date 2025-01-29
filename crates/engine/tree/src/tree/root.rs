@@ -174,8 +174,6 @@ pub struct ProofCalculated {
     /// The source of the proof fetch, whether it was requested as a prefetch or as a result of a
     /// state update.
     source: ProofFetchSource,
-    /// Hashed account cursor cache.
-    hashed_account_cache: HashedCursorCache<Account>,
 }
 
 impl ProofCalculated {
@@ -374,8 +372,7 @@ where
 
     /// Signals that a multiproof calculation has finished and there's room to
     /// spawn a new calculation if needed.
-    fn on_calculation_complete(&mut self, cache: HashedCursorCache<Account>) {
-        self.hashed_account_cache.extend(cache);
+    fn on_calculation_complete(&mut self) {
         self.inflight = self.inflight.saturating_sub(1);
 
         if let Some(input) = self.pending.pop_front() {
@@ -413,7 +410,7 @@ where
             );
 
             match result {
-                Ok((proof, cache)) => {
+                Ok(proof) => {
                     let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
                         Box::new(ProofCalculated {
                             sequence_number: proof_sequence_number,
@@ -422,7 +419,6 @@ where
                                 targets: proof_targets,
                                 multiproof: proof,
                             },
-                            hashed_account_cache: cache,
                             source,
                         }),
                     ));
@@ -666,8 +662,7 @@ where
                             "Processing calculated proof"
                         );
 
-                        self.multiproof_manager
-                            .on_calculation_complete(proof_calculated.hashed_account_cache);
+                        self.multiproof_manager.on_calculation_complete();
 
                         if let Some(combined_update) =
                             self.on_proof(proof_calculated.sequence_number, proof_calculated.update)
@@ -837,7 +832,7 @@ fn calculate_multiproof<Factory>(
     config: StateRootConfig<Factory>,
     cache: HashedCursorCache<Account>,
     proof_targets: MultiProofTargets,
-) -> ProviderResult<(MultiProof, HashedCursorCache<Account>)>
+) -> ProviderResult<MultiProof>
 where
     Factory:
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,

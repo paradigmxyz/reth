@@ -1,56 +1,51 @@
 use super::HashedCursor;
-use alloy_primitives::{map::B256HashMap, B256};
+use alloy_primitives::B256;
+use moka::sync::Cache;
 use reth_storage_errors::db::DatabaseError;
 
 /// Cache for hashed cursors.
 #[derive(Clone, Debug)]
-pub struct HashedCursorCache<V> {
-    seek: B256HashMap<Option<(B256, V)>>,
-    next: B256HashMap<Option<(B256, V)>>,
+pub struct HashedCursorCache<V: Clone + Send + Sync + 'static> {
+    seek: Cache<B256, Option<(B256, V)>>,
+    next: Cache<B256, Option<(B256, V)>>,
 }
 
-impl<V> Default for HashedCursorCache<V> {
+impl<V> Default for HashedCursorCache<V>
+where
+    V: Clone + Send + Sync + 'static,
+{
     fn default() -> Self {
-        Self { seek: B256HashMap::default(), next: B256HashMap::default() }
-    }
-}
-
-impl<V> HashedCursorCache<V> {
-    /// Extend cache with contents of the other.
-    pub fn extend(&mut self, other: Self) {
-        self.seek.extend(other.seek);
-        self.next.extend(other.next);
+        Self { seek: Cache::new(10_000), next: Cache::new(10_000) }
     }
 }
 
 /// Hashed cursor that cached `seek` and `next` results.
 #[derive(Debug)]
-pub struct CachedHashedCursor<C, V> {
+pub struct CachedHashedCursor<C, V: Clone + Send + Sync + 'static> {
     cursor: C,
     cache: HashedCursorCache<V>,
     last: Option<B256>,
 }
 
-impl<C, V> CachedHashedCursor<C, V> {
+impl<C, V> CachedHashedCursor<C, V>
+where
+    V: Clone + Send + Sync + 'static,
+{
     /// Create new cached cursor.
     pub fn new(cursor: C, cache: HashedCursorCache<V>) -> Self {
         Self { cursor, cache, last: None }
     }
-
-    /// Take cache.
-    pub fn take_cache(&mut self) -> HashedCursorCache<V> {
-        std::mem::take(&mut self.cache)
-    }
 }
 
-impl<C, V: Clone + std::fmt::Debug> HashedCursor for CachedHashedCursor<C, V>
+impl<C, V> HashedCursor for CachedHashedCursor<C, V>
 where
     C: HashedCursor<Value = V>,
+    V: Clone + std::fmt::Debug + Send + Sync + 'static,
 {
     type Value = C::Value;
 
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        let entry = if let Some(entry) = self.cache.seek.get(&key).cloned() {
+        let entry = if let Some(entry) = self.cache.seek.get(&key) {
             entry
         } else {
             let entry = self.cursor.seek(key)?;
@@ -64,7 +59,7 @@ where
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         let next = match self.last {
             Some(key) => {
-                let entry = if let Some(entry) = self.cache.next.get(&key).cloned() {
+                let entry = if let Some(entry) = self.cache.next.get(&key) {
                     entry
                 } else {
                     // First position the cursor at last entry.
