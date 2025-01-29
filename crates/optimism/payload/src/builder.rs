@@ -818,17 +818,12 @@ where
             let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    match err {
-                        err => {
-                            if err.as_invalid_tx_err().is_some() {
-                                trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                                continue
-                            } else {
-                                // this is an error that we should treat as fatal for this attempt
-                                return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
-                            }
-                        }
+                    if err.as_invalid_tx_err().is_some() {
+                        trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
+                        continue
                     }
+                    // this is an error that we should treat as fatal for this attempt
+                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
                 }
             };
 
