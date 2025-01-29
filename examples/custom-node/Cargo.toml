@@ -1,0 +1,35 @@
+[package]
+name = "custom-node"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# reth
+reth-codecs = { workspace = true, optional = true }
+reth-primitives-traits.workspace = true
+reth-ethereum-primitives.workspace = true
+
+# ethereum
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+alloy-network = { workspace = true, optional = true }
+alloy-consensus = { workspace = true, features = ["serde"] }
+alloy-serde = { workspace = true, optional = true }
+alloy-rlp.workspace = true
+alloy-rpc-types = { workspace = true, optional = true }
+revm-primitives.workspace = true
+
+# misc
+arbitrary = { workspace = true, optional = true, features = ["derive"] }
+derive_more.workspace = true
+rand = { workspace = true, optional = true }
+secp256k1 = { workspace = true, optional = true, features = ["rand"] }
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
+arbitrary = ["dep:arbitrary"]
+reth-codec = ["dep:reth-codecs"]
