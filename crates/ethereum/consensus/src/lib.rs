@@ -104,7 +104,7 @@ where
     fn validate_block_post_execution(
         &self,
         block: &RecoveredBlock<N::Block>,
-        input: PostExecutionInput<'_>,
+        input: PostExecutionInput<'_, N::Receipt>,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec, input.receipts, input.requests)
     }
