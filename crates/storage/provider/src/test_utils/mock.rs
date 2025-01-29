@@ -58,6 +58,17 @@ pub struct MockEthProvider<T = TransactionSigned> {
 }
 
 impl<T> MockEthProvider<T> {
+    /// Create a new, empty instance
+    pub fn new() -> Self {
+        Self {
+            blocks: Default::default(),
+            headers: Default::default(),
+            accounts: Default::default(),
+            chain_spec: Arc::new(reth_chainspec::ChainSpecBuilder::mainnet().build()),
+            state_roots: Default::default(),
+        }
+    }
+
     /// Add block to local block store
     pub fn add_block(&self, hash: B256, block: Block<T>) {
         self.add_header(hash, block.header.clone());
@@ -102,15 +113,9 @@ impl<T> MockEthProvider<T> {
     }
 }
 
-impl<T> Default for MockEthProvider<T> {
+impl Default for MockEthProvider {
     fn default() -> Self {
-        Self {
-            blocks: Default::default(),
-            headers: Default::default(),
-            accounts: Default::default(),
-            chain_spec: Arc::new(reth_chainspec::ChainSpecBuilder::mainnet().build()),
-            state_roots: Default::default(),
-        }
+        Self::new()
     }
 }
 
