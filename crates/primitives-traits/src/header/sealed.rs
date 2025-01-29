@@ -268,7 +268,7 @@ pub(super) mod serde_bincode_compat {
         for SealedHeader<'a, H>
     {
         fn from(value: &'a super::SealedHeader<H>) -> Self {
-            Self { hash: value.hash(), header: (&value.header).into() }
+            Self { hash: value.hash(), header: value.header.as_repr() }
         }
     }
 
@@ -298,6 +298,9 @@ pub(super) mod serde_bincode_compat {
 
     impl<H: Sealable + SerdeBincodeCompat> SerdeBincodeCompat for super::SealedHeader<H> {
         type BincodeRepr<'a> = SealedHeader<'a, H>;
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
     }
 
     #[cfg(test)]

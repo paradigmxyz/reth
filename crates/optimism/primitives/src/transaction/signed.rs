@@ -711,5 +711,9 @@ pub mod serde_bincode_compat {
 
     impl SerdeBincodeCompat for super::OpTransactionSigned {
         type BincodeRepr<'a> = OpTransactionSigned<'a>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
     }
 }
