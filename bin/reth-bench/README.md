@@ -33,7 +33,11 @@ The `reth-bench new-payload-fcu` command is the most representative of ethereum 
 
 Below is an overview of how to execute a benchmark:
 
- 1. **Setup**: Make sure `reth` is running in the background with the proper configuration. This setup involves ensuring the node is at the correct state, setting up profiling tools, and possibly more depending on the purpose of the benchmark's.
+ 1. **Setup**:
+
+     Make sure `reth` is running in the background with the proper configuration. This setup involves ensuring the node is at the correct state, setting up profiling tools, and possibly more depending on the purpose of the benchmark's.
+
+     Also, you should shut down any consensus layer client configured to connect to `reth`, all the engine API interactions during benchmarking will be driven by `reth-bench`.
 
  2. **Run the Benchmark**:
     ```bash
@@ -41,7 +45,7 @@ Below is an overview of how to execute a benchmark:
     ```
 
     Replace `<rpc-url>`, `<start_block>`, `<end_block>`, and `<jwt_file_path>` with the appropriate values for your testing environment.
-    Note that this assumes that the benchmark node's engine API is running on `http://127.0.0.1:8545`, which is set as a default value in `reth-bench`. To configure this value, use the `--engine-rpc-url` flag.
+    Note that this assumes that the benchmark node's engine API is running on `http://127.0.0.1:8551`, which is set as a default value in `reth-bench`. To configure this value, use the `--engine-rpc-url` flag.
 
  3. **Observe Outputs**: Upon running the command, `reth-bench` will output benchmark results, showing processing speeds and gas usage, which are crucial for analyzing the node's performance.
 
@@ -62,4 +66,3 @@ Below is an overview of how to execute a benchmark:
 - **Profiling tools**: If you are collecting CPU profiles, tools like [`samply`](https://github.com/mstange/samply) and [`perf`](https://perf.wiki.kernel.org/index.php/Main_Page) can be useful for analyzing node performance.
 - **Benchmark Data**: `reth-bench` additionally contains a `--benchmark.output` flag, which will output gas used benchmarks across the benchmark range in CSV format. This may be useful for further data analysis.
 - **Platform Information**: To ensure accurate and reproducible benchmarking, document the platform details, including hardware specifications, OS version, and any other relevant information before publishing any benchmarks.
-
