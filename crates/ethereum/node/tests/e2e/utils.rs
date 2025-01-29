@@ -11,10 +11,10 @@ use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use rand::{seq::SliceRandom, Rng};
 use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType, TmpDB};
+use reth_ethereum_primitives::TxType;
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_primitives::TxType;
 use reth_provider::FullProvider;
 use revm::primitives::{AccessListItem, Authorization};
 
