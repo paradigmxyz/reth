@@ -49,5 +49,5 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 optimism = [
     "reth-optimism-evm/optimism",
     "reth-optimism-primitives/optimism",
-    "revm/optimism",
+    "reth-provider/optimism",
 ]

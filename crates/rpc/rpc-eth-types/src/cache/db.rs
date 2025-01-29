@@ -4,10 +4,14 @@
 
 use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
-use reth_revm::{database::StateProviderDatabase, db::CacheDB, DatabaseRef};
+use reth_revm::{database::StateProviderDatabase, DatabaseRef};
 use reth_storage_api::{HashedPostStateProvider, StateProvider};
 use reth_trie::{HashedStorage, MultiProofTargets};
-use revm::Database;
+use revm::{
+    state::{AccountInfo, Bytecode},
+    Database,
+};
+use revm_database::CacheDB;
 
 /// Helper alias type for the state's [`CacheDB`]
 pub type StateCacheDb<'a> = CacheDB<StateProviderDatabase<StateProviderTraitObjWrapper<'a>>>;
@@ -138,7 +142,7 @@ impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'_> {
 impl HashedPostStateProvider for StateProviderTraitObjWrapper<'_> {
     fn hashed_post_state(
         &self,
-        bundle_state: &revm::db::BundleState,
+        bundle_state: &revm_database::BundleState,
     ) -> reth_trie::HashedPostState {
         self.0.hashed_post_state(bundle_state)
     }
@@ -192,11 +196,11 @@ impl<'a> Database for StateCacheDbRefMutWrapper<'a, '_> {
     fn basic(
         &mut self,
         address: revm_primitives::Address,
-    ) -> Result<Option<revm_primitives::AccountInfo>, Self::Error> {
+    ) -> Result<Option<AccountInfo>, Self::Error> {
         self.0.basic(address)
     }
 
-    fn code_by_hash(&mut self, code_hash: B256) -> Result<revm_primitives::Bytecode, Self::Error> {
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         self.0.code_by_hash(code_hash)
     }
 
@@ -219,11 +223,11 @@ impl<'a> DatabaseRef for StateCacheDbRefMutWrapper<'a, '_> {
     fn basic_ref(
         &self,
         address: revm_primitives::Address,
-    ) -> Result<Option<revm_primitives::AccountInfo>, Self::Error> {
+    ) -> Result<Option<AccountInfo>, Self::Error> {
         self.0.basic_ref(address)
     }
 
-    fn code_by_hash_ref(&self, code_hash: B256) -> Result<revm_primitives::Bytecode, Self::Error> {
+    fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         self.0.code_by_hash_ref(code_hash)
     }
 

@@ -6,12 +6,11 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{
     eip7002::WITHDRAWAL_REQUEST_TYPE, eip7251::CONSOLIDATION_REQUEST_TYPE, eip7685::Requests,
 };
-use alloy_primitives::Bytes;
+use alloy_primitives::{Bytes, B256};
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::BlockExecutionError;
-use revm::DatabaseCommit;
-use revm_primitives::{EvmState, B256};
+use revm::{state::EvmState, DatabaseCommit};
 
 mod eip2935;
 mod eip4788;
@@ -167,8 +166,8 @@ where
         let mut evm = evm_config.evm_with_env(db, evm_env.clone());
 
         self.apply_blockhashes_contract_call(
-            evm_env.block_env.timestamp.to(),
-            evm_env.block_env.number.to(),
+            evm_env.block_env.timestamp,
+            evm_env.block_env.number,
             parent_block_hash,
             &mut evm,
         )?;
@@ -220,8 +219,8 @@ where
         let mut evm = evm_config.evm_with_env(db, evm_env.clone());
 
         self.apply_beacon_root_contract_call(
-            evm_env.block_env.timestamp.to(),
-            evm_env.block_env.number.to(),
+            evm_env.block_env.timestamp,
+            evm_env.block_env.number,
             parent_beacon_block_root,
             &mut evm,
         )?;
@@ -279,7 +278,7 @@ where
     /// Applies the post-block call to the EIP-7002 withdrawal request contract.
     pub fn apply_withdrawal_requests_contract_call(
         &mut self,
-        evm: &mut impl Evm<DB: DatabaseCommit, Error: Display>,
+        evm: &mut impl Evm<DB: DatabaseCommit>,
     ) -> Result<Bytes, BlockExecutionError> {
         let result_and_state = eip7002::transact_withdrawal_requests_contract_call(evm)?;
 

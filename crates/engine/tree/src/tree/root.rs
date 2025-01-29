@@ -11,6 +11,7 @@ use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider,
 };
+use reth_revm::state::EvmState;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
@@ -27,7 +28,7 @@ use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie,
 };
-use revm_primitives::{keccak256, EvmState, B256};
+use revm_primitives::{keccak256, B256};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
@@ -1190,9 +1191,9 @@ mod tests {
     };
     use reth_testing_utils::generators::{self, Rng};
     use reth_trie::{test_utils::state_root, TrieInput};
-    use revm_primitives::{
-        Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot,
-        HashMap, B256, KECCAK_EMPTY, U256,
+    use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
+    use revm_state::{
+        Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot,
     };
     use std::sync::Arc;
 

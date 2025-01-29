@@ -21,8 +21,7 @@ use reth_evm::{
 };
 use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
-use revm::db::State;
-use revm_primitives::{db::DatabaseCommit, ResultAndState};
+use reth_revm::{context_interface::result::ResultAndState, db::State, DatabaseCommit};
 
 /// Factory for [`EthExecutionStrategy`].
 #[derive(Debug, Clone)]
@@ -300,10 +299,14 @@ mod tests {
     use reth_primitives::{Account, Block, BlockBody, Transaction};
     use reth_primitives_traits::{crypto::secp256k1::public_key_to_address, Block as _};
     use reth_revm::{
-        database::StateProviderDatabase, test_utils::StateProviderTest, Database, TransitionState,
+        database::StateProviderDatabase,
+        db::TransitionState,
+        primitives::{address, BLOCKHASH_SERVE_WINDOW},
+        state::EvmState,
+        test_utils::StateProviderTest,
+        Database,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-    use revm_primitives::{address, EvmState, BLOCKHASH_SERVE_WINDOW};
     use secp256k1::{Keypair, Secp256k1};
     use std::{collections::HashMap, sync::mpsc};
 
