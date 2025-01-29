@@ -27,6 +27,9 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace};
 
+/// The number of storage slots to process in a single chunk when generating proofs.
+const STORAGE_SLOTS_CHUNK_SIZE: usize = 200;
+
 /// Parallel proof calculator.
 ///
 /// This can collect proof for many targets in parallel, spawning a task for each hashed address
@@ -135,9 +138,9 @@ where
 
             for chunk in &prefix_set
                 .into_iter()
-                .cloned() // TODO(alexey): Avoid cloning here
+                .cloned()
                 .zip(target_slots.into_iter().sorted_unstable())
-                .chunks(200)
+                .chunks(STORAGE_SLOTS_CHUNK_SIZE)
             {
                 let (prefix_set, target_slots): (PrefixSetMut, B256HashSet) = chunk.unzip();
 
