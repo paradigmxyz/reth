@@ -12,7 +12,7 @@ use derive_more::Deref;
 use reth_primitives::NodePrimitives;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider, ProviderBlock,
-    ProviderReceipt, StateProviderFactory,
+    ProviderReceipt,
 };
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
@@ -60,7 +60,7 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReaderIdExt + StateProviderFactory + Unpin + Clone + 'static,
+    Provider: BlockReaderIdExt,
 {
     /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components
     pub fn builder(
