@@ -90,6 +90,7 @@ impl SparseTrieUpdate {
         match message {
             SparseTrieMessage::RevealProof {
                 sequence_number: _,
+                source: _,
                 targets,
                 multiproof,
                 state_root_message_sender: _,
@@ -107,6 +108,7 @@ impl SparseTrieUpdate {
 pub enum SparseTrieMessage {
     RevealProof {
         sequence_number: u64,
+        source: ProofFetchSource,
         targets: MultiProofTargets,
         multiproof: MultiProof,
         state_root_message_sender: mpsc::Sender<StateRootMessage>,
@@ -185,7 +187,7 @@ pub enum StateRootMessage {
     /// Proof calculation completed for a specific state update
     ProofCalculated(Box<ProofCalculated>),
     /// Proof revealed
-    ProofRevealed { sequence_number: u64 },
+    ProofRevealed { highest_sequence_number: u64, revealed_state_update_proofs: usize },
     /// Error during proof calculation
     ProofCalculationError(ProviderError),
     /// State root calculation completed
@@ -225,7 +227,7 @@ impl ProofCalculated {
 }
 
 /// Whether or not a proof was fetched due to a state update, or due to a prefetch command.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ProofFetchSource {
     /// The proof was fetched due to a prefetch command.
     Prefetch,
@@ -703,15 +705,19 @@ where
                         let _ = sparse_trie_tx.as_ref().expect("tx not dropped").send(
                             SparseTrieMessage::RevealProof {
                                 sequence_number: proof_calculated.sequence_number,
+                                source: proof_calculated.source,
                                 targets: proof_calculated.targets,
                                 multiproof: proof_calculated.multiproof,
                                 state_root_message_sender: self.tx.clone(),
                             },
                         );
                     }
-                    StateRootMessage::ProofRevealed { sequence_number } => {
+                    StateRootMessage::ProofRevealed {
+                        highest_sequence_number: sequence_number,
+                        revealed_state_update_proofs,
+                    } => {
                         trace!(target: "engine::root", "processing StateRootMessage::ProofRevealed");
-                        proofs_revealed += 1;
+                        proofs_revealed += revealed_state_update_proofs;
 
                         if let Some(state_update) = self.aggregate_state_updates(sequence_number) {
                             let _ = sparse_trie_tx
@@ -813,12 +819,18 @@ where
 
         let mut reveal_proof_data = None;
         if let SparseTrieMessage::RevealProof {
-            sequence_number, state_root_message_sender, ..
+            sequence_number,
+            source,
+            state_root_message_sender,
+            ..
         } = &message
         {
             let proof_data = reveal_proof_data
-                .get_or_insert_with(|| (*sequence_number, state_root_message_sender.clone()));
+                .get_or_insert_with(|| (*sequence_number, state_root_message_sender.clone(), 0));
             proof_data.0 = proof_data.0.max(*sequence_number);
+            if *source == ProofFetchSource::StateUpdate {
+                proof_data.2 += 1;
+            }
         }
 
         let mut update = SparseTrieUpdate::default();
@@ -838,16 +850,20 @@ where
             "Updating sparse trie"
         );
 
-        // TODO: alexey to remind me why we are doing this
-        // update.targets = get_proof_targets(&update.state, &update.targets);
-
         let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
             ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
         })?;
 
-        if let Some((highest_sequence_number, state_root_message_sender)) = reveal_proof_data {
-            let _ = state_root_message_sender
-                .send(StateRootMessage::ProofRevealed { sequence_number: highest_sequence_number });
+        if let Some((
+            highest_sequence_number,
+            state_root_message_sender,
+            revealed_state_update_proofs,
+        )) = reveal_proof_data
+        {
+            let _ = state_root_message_sender.send(StateRootMessage::ProofRevealed {
+                highest_sequence_number,
+                revealed_state_update_proofs,
+            });
         }
 
         trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
