@@ -39,12 +39,14 @@ Below is an overview of how to execute a benchmark:
 
      Also, you should shut down any consensus layer client configured to connect to `reth`, all the engine API interactions during benchmarking will be driven by `reth-bench`.
 
+     Depending on the block range you want to use in the benchmark you might need to unwind your node, the head of the node should be behind the lowest block in the range.
+
  2. **Run the Benchmark**:
     ```bash
     reth-bench new-payload-fcu --rpc-url http://<rpc-url>:8545 --from <start_block> --to <end_block> --jwtsecret <jwt_file_path>
     ```
 
-    Replace `<rpc-url>`, `<start_block>`, `<end_block>`, and `<jwt_file_path>` with the appropriate values for your testing environment.
+    Replace `<start_block>`, `<end_block>`, and `<jwt_file_path>` with the appropriate values for your testing environment. `<rpc-url>` should be the URL of an RPC endpoint that can provide the blocks that will be used during the execution.
     Note that this assumes that the benchmark node's engine API is running on `http://127.0.0.1:8551`, which is set as a default value in `reth-bench`. To configure this value, use the `--engine-rpc-url` flag.
 
  3. **Observe Outputs**: Upon running the command, `reth-bench` will output benchmark results, showing processing speeds and gas usage, which are crucial for analyzing the node's performance.
