@@ -213,9 +213,9 @@ pub enum StateRootMessage {
 pub struct ProofCalculated {
     /// The index of this proof in the sequence of state updates
     sequence_number: u64,
-    /// Sparse proof targets
+    /// Proof targets
     targets: MultiProofTargets,
-    /// Sparse proof
+    /// Proof
     multiproof: MultiProof,
     /// The source of the proof fetch, whether it was requested as a prefetch or as a result of a
     /// state update.
@@ -238,7 +238,7 @@ pub enum ProofFetchSource {
     StateUpdate,
 }
 
-/// Sequencer to manage state updates that come out of
+/// Sequencer to manage state updates that come out of order
 #[derive(Debug, Default)]
 pub(crate) struct StateUpdateSequencer {
     /// The next sequence number to be produced.
