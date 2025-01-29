@@ -11,8 +11,6 @@
 
 extern crate alloc;
 
-use core::fmt::Display;
-
 use alloc::{
     boxed::Box,
     string::{String, ToString},
