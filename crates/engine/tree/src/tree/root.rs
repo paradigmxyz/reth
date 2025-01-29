@@ -245,9 +245,10 @@ pub(crate) struct StateUpdateSequencer {
     next_sequence: u64,
     /// The next sequence number expected to be delivered.
     next_to_deliver: u64,
-    /// Buffer for out-of-order state updates and a flag indicating if the state update is ready to
-    /// be delivered
-    pending_state_updates: BTreeMap<u64, (HashedPostState, bool)>,
+    /// Buffer for out-of-order state updates that aren't ready to be delivered yet.
+    pending_state_updates: BTreeMap<u64, HashedPostState>,
+    /// Buffer for out-of-order state updates that are ready to be delivered.
+    ready_state_updates: BTreeMap<u64, HashedPostState>,
 }
 
 impl StateUpdateSequencer {
@@ -267,47 +268,44 @@ impl StateUpdateSequencer {
     pub(crate) fn add_state_update(&mut self, sequence: u64, state_update: HashedPostState) {
         if sequence >= self.next_to_deliver {
             debug!(target: "engine::root::state_update_sequencer", ?sequence, "Adding state update");
-            self.pending_state_updates.insert(sequence, (state_update, false));
+            self.pending_state_updates.insert(sequence, state_update);
         }
     }
 
     /// Aggegates state updates for given sequence numbers, and returns a consecutive list of state
-    /// updates that are ready to be applied.
+    /// updates that are ready to be delivered.
     pub(crate) fn aggregate_state_updates(
         &mut self,
         sequence_numbers: Vec<u64>,
     ) -> Vec<HashedPostState> {
         debug!(target: "engine::root::state_update_sequencer", ?sequence_numbers, "Aggregating state updates");
 
+        // move pending state updates to a list of ready state updates
         for sequence_number in sequence_numbers {
-            self.pending_state_updates.get_mut(&sequence_number).expect("missing state update").1 =
-                true;
+            self.ready_state_updates.insert(
+                sequence_number,
+                self.pending_state_updates.remove(&sequence_number).expect("missing state update"),
+            );
         }
 
         // return early if we don't have the next expected state update
-        if !self.pending_state_updates.contains_key(&self.next_to_deliver) {
+        if !self.ready_state_updates.contains_key(&self.next_to_deliver) {
             return Vec::new()
         }
 
-        let mut consecutive_state_updates = Vec::with_capacity(self.pending_state_updates.len());
+        let mut consecutive_state_updates = Vec::with_capacity(self.ready_state_updates.len());
         let mut current_sequence = self.next_to_deliver;
 
         // keep collecting state updates as long as we have consecutive sequence numbers
         loop {
-            match self.pending_state_updates.entry(current_sequence) {
-                Entry::Occupied(entry) if !entry.get().1 => break,
-                Entry::Vacant(_) => break,
-                Entry::Occupied(entry) => {
-                    let pending = entry.remove().0;
+            let Some(pending) = self.ready_state_updates.remove(&current_sequence) else { break };
 
-                    consecutive_state_updates.push(pending);
-                    current_sequence += 1;
+            consecutive_state_updates.push(pending);
+            current_sequence += 1;
 
-                    // if we don't have the next number, stop collecting
-                    if !self.pending_state_updates.contains_key(&current_sequence) {
-                        break;
-                    }
-                }
+            // if we don't have the next number, stop collecting
+            if !self.ready_state_updates.contains_key(&current_sequence) {
+                break;
             }
         }
 
