@@ -274,7 +274,7 @@ where
         >,
     >,
 {
-    type Validator = OpEngineValidator;
+    type Validator = OpEngineValidator<N::Provider>;
 
     async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         OpEngineValidatorBuilder::default().build(ctx).await
@@ -678,10 +678,10 @@ where
     >,
     Node: FullNodeComponents<Types = Types>,
 {
-    type Validator = OpEngineValidator;
+    type Validator = OpEngineValidator<Node::Provider>;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
-        Ok(OpEngineValidator::new(ctx.config.chain.clone()))
+        Ok(OpEngineValidator::new(ctx.config.chain.clone(), ctx.node.provider().clone()))
     }
 }
 
