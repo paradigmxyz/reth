@@ -1,5 +1,5 @@
 use super::HashedCursor;
-use alloy_primitives::B256;
+use alloy_primitives::{map::FbBuildHasher, B256};
 use moka::sync::Cache;
 use reth_storage_errors::db::DatabaseError;
 
@@ -7,9 +7,9 @@ use reth_storage_errors::db::DatabaseError;
 #[derive(Clone, Debug)]
 pub struct HashedCursorCache<V: Clone + Send + Sync + 'static> {
     /// Seek cache.
-    pub seek: Cache<B256, Option<(B256, V)>>,
+    pub seek: Cache<B256, Option<(B256, V)>, FbBuildHasher<32>>,
     /// Next cache.
-    pub next: Cache<B256, Option<(B256, V)>>,
+    pub next: Cache<B256, Option<(B256, V)>, FbBuildHasher<32>>,
 }
 
 impl<V> Default for HashedCursorCache<V>
@@ -17,7 +17,10 @@ where
     V: Clone + Send + Sync + 'static,
 {
     fn default() -> Self {
-        Self { seek: Cache::new(10_000), next: Cache::new(10_000) }
+        Self {
+            seek: Cache::builder().max_capacity(10_000).build_with_hasher(Default::default()),
+            next: Cache::builder().max_capacity(10_000).build_with_hasher(Default::default()),
+        }
     }
 }
 
