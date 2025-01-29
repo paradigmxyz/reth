@@ -772,9 +772,6 @@ where
             "Updating sparse trie"
         );
 
-        // TODO: alexey to remind me why we are doing this
-        update.targets = get_proof_targets(&update.state, &update.targets);
-
         let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
             ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
         })?;
