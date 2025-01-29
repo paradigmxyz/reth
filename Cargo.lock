@@ -7089,6 +7089,7 @@ dependencies = [
 name = "reth-engine-local"
 version = "1.1.5"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -7103,6 +7104,7 @@ dependencies = [
  "reth-ethereum-engine-primitives",
  "reth-evm",
  "reth-node-types",
+ "reth-optimism-chainspec",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
  "reth-payload-primitives",
