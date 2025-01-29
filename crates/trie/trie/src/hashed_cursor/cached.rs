@@ -6,8 +6,10 @@ use reth_storage_errors::db::DatabaseError;
 /// Cache for hashed cursors.
 #[derive(Clone, Debug)]
 pub struct HashedCursorCache<V: Clone + Send + Sync + 'static> {
-    seek: Cache<B256, Option<(B256, V)>>,
-    next: Cache<B256, Option<(B256, V)>>,
+    /// Seek cache.
+    pub seek: Cache<B256, Option<(B256, V)>>,
+    /// Next cache.
+    pub next: Cache<B256, Option<(B256, V)>>,
 }
 
 impl<V> Default for HashedCursorCache<V>
