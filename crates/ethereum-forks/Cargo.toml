@@ -33,23 +33,23 @@ arbitrary = { workspace = true, features = ["derive"] }
 [features]
 default = ["std", "serde", "rustc-hash"]
 arbitrary = [
-	"dep:arbitrary",
-	"alloy-chains/arbitrary",
-	"alloy-primitives/arbitrary",
-	"alloy-eip2124/arbitrary"
+    "dep:arbitrary",
+    "alloy-chains/arbitrary",
+    "alloy-primitives/arbitrary",
+    "alloy-eip2124/arbitrary",
 ]
 serde = [
-	"dep:serde",
-	"alloy-chains/serde",
-	"alloy-primitives/serde",
-	"alloy-eip2124/serde"
+    "dep:serde",
+    "alloy-chains/serde",
+    "alloy-primitives/serde",
+    "alloy-eip2124/serde",
 ]
 std = [
-	"alloy-chains/std",
-	"alloy-primitives/std",
-	"rustc-hash/std",
-	"serde?/std",
-	"alloy-eip2124/std",
-	"once_cell/std"
+    "alloy-chains/std",
+    "alloy-primitives/std",
+    "rustc-hash/std",
+    "serde?/std",
+    "alloy-eip2124/std",
+    "once_cell/std",
 ]
 rustc-hash = ["dep:rustc-hash"]

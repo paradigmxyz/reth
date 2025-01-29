@@ -1,13 +1,13 @@
 //! Mirrored version of [`ExExContext`](`crate::ExExContext`)
 //! without generic abstraction over [Node](`reth_node_api::FullNodeComponents`)
 
-use std::fmt::Debug;
-
-use reth_chainspec::{EthChainSpec, Head};
+use alloy_eips::BlockNumHash;
+use reth_chainspec::EthChainSpec;
 use reth_node_api::{FullNodeComponents, HeaderTy, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::EthPrimitives;
 use reth_provider::BlockReader;
+use std::fmt::Debug;
 use tokio::sync::mpsc;
 
 use crate::{ExExContext, ExExEvent, ExExNotificationsStream};
@@ -16,7 +16,7 @@ use crate::{ExExContext, ExExEvent, ExExNotificationsStream};
 /// Captures the context that an `ExEx` has access to.
 pub struct ExExContextDyn<N: NodePrimitives = EthPrimitives> {
     /// The current head of the blockchain at launch.
-    pub head: Head,
+    pub head: BlockNumHash,
     /// The config of the node
     pub config: NodeConfig<Box<dyn EthChainSpec<Header = N::BlockHeader> + 'static>>,
     /// The loaded node config

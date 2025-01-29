@@ -330,7 +330,7 @@ mod tests {
                         writer.append_receipt(*next_tx_num, &receipt).unwrap();
                     } else {
                         // Used as ID for validation
-                        tx.transaction.set_nonce(*next_tx_num);
+                        tx.transaction_mut().set_nonce(*next_tx_num);
                         writer.append_transaction(*next_tx_num, &tx).unwrap();
                     }
                     *next_tx_num += 1;

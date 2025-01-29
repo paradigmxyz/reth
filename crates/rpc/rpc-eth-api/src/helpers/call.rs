@@ -191,7 +191,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                                     &mut db,
                                     evm_env.clone(),
                                     tx_env,
-                                    TransferInspector::new(false).with_logs(true),
+                                    TransferInspector::new(false)
+                                        // capture transfer inside the evm so they are recorded and
+                                        // included in the result
+                                        .with_logs(true),
                                 )?
                             } else {
                                 this.transact(&mut db, evm_env.clone(), tx_env.clone())?

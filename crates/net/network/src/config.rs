@@ -369,6 +369,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Launches the network with an unused network and discovery port
+    /// This is useful for testing.
+    pub fn with_unused_ports(self) -> Self {
+        self.with_unused_discovery_port().with_unused_listener_port()
+    }
+
     /// Sets the discovery port to an unused port.
     /// This is useful for testing.
     pub fn with_unused_discovery_port(self) -> Self {

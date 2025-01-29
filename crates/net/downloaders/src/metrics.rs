@@ -30,7 +30,7 @@ pub struct BodyDownloaderMetrics {
     pub buffered_responses: Gauge,
     /// The number of blocks the internal buffer of the
     /// downloader.
-    /// These are bodies that have been received, but not cannot be committed yet because they're
+    /// These are bodies that have been received, but cannot be committed yet because they're
     /// not contiguous
     pub buffered_blocks: Gauge,
     /// Total amount of memory used by the buffered blocks in bytes
@@ -101,7 +101,7 @@ pub struct HeaderDownloaderMetrics {
     pub buffered_responses: Gauge,
     /// The number of blocks the internal buffer of the
     /// downloader.
-    /// These are bodies that have been received, but not cannot be committed yet because they're
+    /// These are bodies that have been received, but cannot be committed yet because they're
     /// not contiguous
     pub buffered_blocks: Gauge,
     /// Total amount of memory used by the buffered blocks in bytes

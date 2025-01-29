@@ -1,11 +1,9 @@
 //! A no operation block executor implementation.
 
-use alloy_primitives::BlockNumber;
 use core::fmt::Display;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives::{NodePrimitives, RecoveredBlock};
-use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm::State;
 use revm_primitives::db::Database;
@@ -88,10 +86,6 @@ impl<DB, P: NodePrimitives> BatchExecutor<DB> for NoopBlockExecutorProvider<P> {
     fn finalize(self) -> Self::Output {
         unreachable!()
     }
-
-    fn set_tip(&mut self, _: BlockNumber) {}
-
-    fn set_prune_modes(&mut self, _: PruneModes) {}
 
     fn size_hint(&self) -> Option<usize> {
         None

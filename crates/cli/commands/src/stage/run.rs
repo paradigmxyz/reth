@@ -275,7 +275,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             max_duration: None,
                         },
                         config.stages.merkle.clean_threshold,
-                        prune_modes,
                         ExExManagerHandle::empty(),
                     )),
                     None,

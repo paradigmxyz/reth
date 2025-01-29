@@ -5,7 +5,6 @@ publish = false
 edition.workspace = true
 license.workspace = true
 
-
 [dependencies]
 tokio = { workspace = true, features = ["full"] }
 futures.workspace = true

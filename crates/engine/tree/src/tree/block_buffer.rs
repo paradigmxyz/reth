@@ -1,8 +1,7 @@
 use crate::tree::metrics::BlockBufferMetrics;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber};
-use reth_primitives::RecoveredBlock;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, RecoveredBlock};
 use schnellru::{ByLength, LruMap};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -196,7 +195,7 @@ mod tests {
     use super::*;
     use alloy_eips::BlockNumHash;
     use alloy_primitives::BlockHash;
-    use reth_primitives::RecoveredBlock;
+    use reth_primitives_traits::RecoveredBlock;
     use reth_testing_utils::generators::{self, random_block, BlockParams, Rng};
     use std::collections::HashMap;
 
@@ -205,7 +204,7 @@ mod tests {
         rng: &mut R,
         number: u64,
         parent: BlockHash,
-    ) -> RecoveredBlock<reth_primitives::Block> {
+    ) -> RecoveredBlock<reth_ethereum_primitives::Block> {
         let block =
             random_block(rng, number, BlockParams { parent: Some(parent), ..Default::default() });
         block.try_recover().unwrap()
@@ -228,7 +227,7 @@ mod tests {
     /// Assert that the block was removed from all buffer collections.
     fn assert_block_removal<B: Block>(
         buffer: &BlockBuffer<B>,
-        block: &RecoveredBlock<reth_primitives::Block>,
+        block: &RecoveredBlock<reth_ethereum_primitives::Block>,
     ) {
         assert!(!buffer.blocks.contains_key(&block.hash()));
         assert!(buffer

@@ -4,8 +4,7 @@ use alloy_consensus::BlockHeader;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
 use reth_evm::execute::InternalBlockExecutionError;
-use reth_primitives::SealedBlock;
-use reth_primitives_traits::{Block, BlockBody};
+use reth_primitives_traits::{Block, BlockBody, SealedBlock};
 use tokio::sync::oneshot::error::TryRecvError;
 
 /// This is an error that can come from advancing persistence. Either this can be a

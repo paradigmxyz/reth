@@ -76,6 +76,9 @@ impl TrieUpdates {
         hashed_address: B256,
         storage_updates: StorageTrieUpdates,
     ) {
+        if storage_updates.is_empty() {
+            return;
+        }
         let existing = self.storage_tries.insert(hashed_address, storage_updates);
         debug_assert!(existing.is_none());
     }

@@ -49,9 +49,5 @@ engine-cancun:
   - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
   - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
   - Invalid NewPayload, ExcessBlobGas, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, VersionedHashes Version, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, Incomplete VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
-  - Invalid NewPayload, Extra VersionedHashes, Syncing=False, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
 
 sync: []

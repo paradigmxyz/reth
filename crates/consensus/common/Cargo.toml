@@ -29,11 +29,11 @@ rand.workspace = true
 [features]
 default = ["std"]
 std = [
-	"alloy-consensus/std",
-	"alloy-eips/std",
-	"alloy-primitives/std",
-	"reth-chainspec/std",
-	"reth-consensus/std",
-	"reth-primitives-traits/std",
-	"reth-primitives/std"
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "reth-chainspec/std",
+    "reth-consensus/std",
+    "reth-primitives-traits/std",
+    "reth-primitives/std",
 ]

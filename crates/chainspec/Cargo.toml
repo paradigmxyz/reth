@@ -39,28 +39,28 @@ alloy-genesis.workspace = true
 [features]
 default = ["std"]
 std = [
-	"alloy-chains/std",
-	"alloy-eips/std",
-	"alloy-genesis/std",
-	"alloy-primitives/std",
-	"alloy-trie/std",
-	"reth-primitives-traits/std",
-	"alloy-consensus/std",
-	"alloy-rlp/std",
-	"reth-ethereum-forks/std",
-	"derive_more/std",
-	"reth-network-peers/std",
-	"serde_json/std"
+    "alloy-chains/std",
+    "alloy-eips/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "alloy-trie/std",
+    "reth-primitives-traits/std",
+    "alloy-consensus/std",
+    "alloy-rlp/std",
+    "reth-ethereum-forks/std",
+    "derive_more/std",
+    "reth-network-peers/std",
+    "serde_json/std",
 ]
 arbitrary = [
-	"alloy-chains/arbitrary",
-	"reth-ethereum-forks/arbitrary",
-	"reth-primitives-traits/arbitrary",
-	"alloy-consensus/arbitrary",
-	"alloy-eips/arbitrary",
-	"alloy-primitives/arbitrary",
-	"alloy-trie/arbitrary"
+    "alloy-chains/arbitrary",
+    "reth-ethereum-forks/arbitrary",
+    "reth-primitives-traits/arbitrary",
+    "alloy-consensus/arbitrary",
+    "alloy-eips/arbitrary",
+    "alloy-primitives/arbitrary",
+    "alloy-trie/arbitrary",
 ]
 test-utils = [
-	"reth-primitives-traits/test-utils",
+    "reth-primitives-traits/test-utils",
 ]

@@ -20,7 +20,6 @@ pub type EthApiBuilderCtx<N> = reth_rpc_eth_types::EthApiBuilderCtx<
     <N as RpcNodeCore>::Evm,
     <N as RpcNodeCore>::Network,
     TaskExecutor,
-    <N as RpcNodeCore>::Provider,
 >;
 
 /// A general purpose trait that launches a new node of any kind.

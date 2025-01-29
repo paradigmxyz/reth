@@ -113,13 +113,12 @@ where
                 body_downloader,
                 executor.clone(),
                 stage_config.clone(),
-                prune_modes.clone(),
+                prune_modes,
             )
             .set(ExecutionStage::new(
                 executor,
                 stage_config.execution.into(),
                 stage_config.execution_external_clean_threshold(),
-                prune_modes,
                 exex_manager_handle,
             )),
         )

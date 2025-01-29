@@ -1,4 +1,4 @@
-use super::ExecutedBlock;
+use super::ExecutedBlockWithTrieUpdates;
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{
     keccak256, map::B256HashMap, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
@@ -23,7 +23,7 @@ pub struct MemoryOverlayStateProviderRef<'a, N: NodePrimitives = reth_primitives
     /// Historical state provider for state lookups that are not found in in-memory blocks.
     pub(crate) historical: Box<dyn StateProvider + 'a>,
     /// The collection of executed parent blocks. Expected order is newest to oldest.
-    pub(crate) in_memory: Vec<ExecutedBlock<N>>,
+    pub(crate) in_memory: Vec<ExecutedBlockWithTrieUpdates<N>>,
     /// Lazy-loaded in-memory trie data.
     pub(crate) trie_state: OnceLock<MemoryOverlayTrieState>,
 }
@@ -40,7 +40,10 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
     /// - `in_memory` - the collection of executed ancestor blocks in reverse.
     /// - `historical` - a historical state provider for the latest ancestor block stored in the
     ///   database.
-    pub fn new(historical: Box<dyn StateProvider + 'a>, in_memory: Vec<ExecutedBlock<N>>) -> Self {
+    pub fn new(
+        historical: Box<dyn StateProvider + 'a>,
+        in_memory: Vec<ExecutedBlockWithTrieUpdates<N>>,
+    ) -> Self {
         Self { historical, in_memory, trie_state: OnceLock::new() }
     }
 

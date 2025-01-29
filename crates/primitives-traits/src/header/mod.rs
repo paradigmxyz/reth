@@ -1,5 +1,5 @@
 mod sealed;
-pub use sealed::{Header, SealedHeader};
+pub use sealed::{Header, SealedHeader, SealedHeaderFor};
 
 mod error;
 pub use error::HeaderError;

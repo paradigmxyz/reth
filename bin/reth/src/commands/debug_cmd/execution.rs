@@ -99,7 +99,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     body_downloader,
                     executor.clone(),
                     stage_conf.clone(),
-                    prune_modes.clone(),
+                    prune_modes,
                 )
                 .set(ExecutionStage::new(
                     executor,
@@ -110,7 +110,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                         max_duration: None,
                     },
                     stage_conf.execution_external_clean_threshold(),
-                    prune_modes,
                     ExExManagerHandle::empty(),
                 )),
             )

@@ -6,7 +6,7 @@ use alloy_eips::{
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_primitives::{NodePrimitives, SealedBlock};
 
 /// Represents a built payload type that contains a built `SealedBlock` and can be converted into
@@ -22,7 +22,7 @@ pub trait BuiltPayload: Send + Sync + fmt::Debug {
     fn fees(&self) -> U256;
 
     /// Returns the entire execution data for the built block, if available.
-    fn executed_block(&self) -> Option<ExecutedBlock<Self::Primitives>> {
+    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<Self::Primitives>> {
         None
     }
 

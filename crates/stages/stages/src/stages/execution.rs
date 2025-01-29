@@ -19,7 +19,6 @@ use reth_provider::{
     OriginalValuesKnown, ProviderError, StateCommitmentProvider, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageLocation, TransactionVariant,
 };
-use reth_prune_types::PruneModes;
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
     BlockErrorKind, CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput,
@@ -66,7 +65,7 @@ use super::missing_static_data_error;
 /// - [`tables::PlainAccountState`] [`tables::StoragesHistory`] to remove change set and apply old
 ///   values to [`tables::PlainStorageState`]
 // false positive, we cannot derive it if !DB: Debug.
-#[allow(missing_debug_implementations)]
+#[derive(Debug)]
 pub struct ExecutionStage<E>
 where
     E: BlockExecutorProvider,
@@ -80,8 +79,6 @@ where
     /// [`super::StorageHashingStage`]. This is required to figure out if can prune or not
     /// changesets on subsequent pipeline runs.
     external_clean_threshold: u64,
-    /// Pruning configuration.
-    prune_modes: PruneModes,
     /// Input for the post execute commit hook.
     /// Set after every [`ExecutionStage::execute`] and cleared after
     /// [`ExecutionStage::post_execute_commit`].
@@ -105,14 +102,12 @@ where
         executor_provider: E,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
-        prune_modes: PruneModes,
         exex_manager_handle: ExExManagerHandle<E::Primitives>,
     ) -> Self {
         Self {
             external_clean_threshold,
             executor_provider,
             thresholds,
-            prune_modes,
             post_execute_commit_input: None,
             post_unwind_commit_input: None,
             exex_manager_handle,
@@ -128,7 +123,6 @@ where
             executor_provider,
             ExecutionStageThresholds::default(),
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-            PruneModes::none(),
             ExExManagerHandle::empty(),
         )
     }
@@ -138,18 +132,17 @@ where
         executor_provider: E,
         config: ExecutionConfig,
         external_clean_threshold: u64,
-        prune_modes: PruneModes,
     ) -> Self {
         Self::new(
             executor_provider,
             config.into(),
             external_clean_threshold,
-            prune_modes,
             ExExManagerHandle::empty(),
         )
     }
 
-    /// Adjusts the prune modes related to changesets.
+    /// Returns whether we can perform pruning of [`tables::AccountChangeSets`] and
+    /// [`tables::StorageChangeSets`].
     ///
     /// This function verifies whether the [`super::MerkleStage`] or Hashing stages will run from
     /// scratch. If at least one stage isn't starting anew, it implies that pruning of
@@ -159,23 +152,16 @@ where
     /// Given that `start_block` changes with each checkpoint, it's necessary to inspect
     /// [`tables::AccountsTrie`] to ensure that [`super::MerkleStage`] hasn't
     /// been previously executed.
-    fn adjust_prune_modes(
+    fn can_prune_changesets(
         &self,
         provider: impl StatsReader,
         start_block: u64,
         max_block: u64,
-    ) -> Result<PruneModes, StageError> {
-        let mut prune_modes = self.prune_modes.clone();
-
-        // If we're not executing MerkleStage from scratch (by threshold or first-sync), then erase
-        // changeset related pruning configurations
-        if !(max_block - start_block > self.external_clean_threshold ||
+    ) -> Result<bool, StageError> {
+        // We can only prune changesets if we're not executing MerkleStage from scratch (by
+        // threshold or first-sync)
+        Ok(max_block - start_block > self.external_clean_threshold ||
             provider.count_entries::<tables::AccountsTrie>()?.is_zero())
-        {
-            prune_modes.account_history = None;
-            prune_modes.storage_history = None;
-        }
-        Ok(prune_modes)
     }
 
     /// Performs consistency check on static files.
@@ -197,7 +183,7 @@ where
     {
         // If thre's any receipts pruning configured, receipts are written directly to database and
         // inconsistencies are expected.
-        if self.prune_modes.has_receipts_pruning() {
+        if provider.prune_modes_ref().has_receipts_pruning() {
             return Ok(())
         }
 
@@ -292,15 +278,12 @@ where
 
         let start_block = input.next_block();
         let max_block = input.target();
-        let prune_modes = self.adjust_prune_modes(provider, start_block, max_block)?;
         let static_file_provider = provider.static_file_provider();
 
         self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
         let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
         let mut executor = self.executor_provider.batch_executor(db);
-        executor.set_tip(max_block);
-        executor.set_prune_modes(prune_modes);
 
         // Progress tracking
         let mut stage_progress = start_block;
@@ -399,7 +382,7 @@ where
 
         // prepare execution output for writing
         let time = Instant::now();
-        let state = executor.finalize();
+        let mut state = executor.finalize();
         let write_preparation_duration = time.elapsed();
 
         // log the gas per second for the range we just executed
@@ -429,6 +412,31 @@ where
         }
 
         let time = Instant::now();
+
+        if self.can_prune_changesets(provider, start_block, max_block)? {
+            let prune_modes = provider.prune_modes_ref();
+
+            // Iterate over all reverts and clear them if pruning is configured.
+            for block_number in start_block..=max_block {
+                let Some(reverts) =
+                    state.bundle.reverts.get_mut((block_number - start_block) as usize)
+                else {
+                    break
+                };
+
+                // If both account history and storage history pruning is configured, clear reverts
+                // for this block.
+                if prune_modes
+                    .account_history
+                    .is_some_and(|m| m.should_prune(block_number, max_block)) &&
+                    prune_modes
+                        .storage_history
+                        .is_some_and(|m| m.should_prune(block_number, max_block))
+                {
+                    reverts.clear();
+                }
+            }
+        }
 
         // write output
         provider.write_state(&state, OriginalValuesKnown::Yes, StorageLocation::StaticFiles)?;
@@ -649,6 +657,7 @@ mod tests {
         test_utils::create_test_provider_factory, AccountReader, DatabaseProviderFactory,
         ReceiptProvider, StaticFileProviderFactory,
     };
+    use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
     use reth_stages_api::StageUnitCheckpoint;
     use std::collections::BTreeMap;
@@ -667,7 +676,6 @@ mod tests {
                 max_duration: None,
             },
             MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-            PruneModes::none(),
             ExExManagerHandle::empty(),
         )
     }
@@ -889,7 +897,6 @@ mod tests {
             }
 
             let mut execution_stage = stage();
-            execution_stage.prune_modes = mode.clone().unwrap_or_default();
             provider.set_prune_modes(mode.clone().unwrap_or_default());
 
             let output = execution_stage.execute(&provider, input).unwrap();
@@ -950,7 +957,6 @@ mod tests {
 
             let mut provider = factory.database_provider_rw().unwrap();
             let mut stage = stage();
-            stage.prune_modes = mode.clone().unwrap_or_default();
             provider.set_prune_modes(mode.unwrap_or_default());
 
             let _result = stage
@@ -1027,7 +1033,6 @@ mod tests {
 
             // Test Execution
             let mut execution_stage = stage();
-            execution_stage.prune_modes = mode.clone().unwrap_or_default();
             provider.set_prune_modes(mode.clone().unwrap_or_default());
 
             let result = execution_stage.execute(&provider, input).unwrap();
@@ -1036,7 +1041,6 @@ mod tests {
             // Test Unwind
             provider = factory.database_provider_rw().unwrap();
             let mut stage = stage();
-            stage.prune_modes = mode.clone().unwrap_or_default();
             provider.set_prune_modes(mode.clone().unwrap_or_default());
 
             let result = stage

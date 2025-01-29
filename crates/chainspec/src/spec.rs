@@ -413,6 +413,17 @@ impl ChainSpec {
         }
     }
 
+    /// Get the [`BlobParams`] for the given timestamp.
+    ///
+    /// Note: This always return [`BlobParams::cancun`] pre prague.
+    pub fn blob_fee_params_at_timestamp(&self, timestamp: u64) -> BlobParams {
+        if self.is_prague_active_at_timestamp(timestamp) {
+            self.blob_params.prague
+        } else {
+            self.blob_params.cancun
+        }
+    }
+
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> B256 {
         *self.genesis_hash.get_or_init(|| self.genesis_header().hash_slow())
@@ -644,6 +655,7 @@ impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
         // Block-based hardforks
         let hardfork_opts = [
+            (EthereumHardfork::Frontier.boxed(), Some(0)),
             (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
             (EthereumHardfork::Dao.boxed(), genesis.config.dao_fork_block),
             (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
@@ -2367,6 +2379,7 @@ Post-merge hard forks (timestamp based):
 
         let hardforks: Vec<_> = chain_spec.hardforks.forks_iter().map(|(h, _)| h).collect();
         let expected_hardforks = vec![
+            EthereumHardfork::Frontier.boxed(),
             EthereumHardfork::Homestead.boxed(),
             EthereumHardfork::Dao.boxed(),
             EthereumHardfork::Tangerine.boxed(),

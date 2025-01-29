@@ -1,7 +1,7 @@
 use crate::{BackfillJobFactory, ExExNotification, StreamBackfillJob, WalHandle};
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockNumHash;
 use futures::{Stream, StreamExt};
-use reth_chainspec::Head;
 use reth_evm::execute::BlockExecutorProvider;
 use reth_exex_types::ExExHead;
 use reth_node_api::NodePrimitives;
@@ -84,7 +84,7 @@ where
 {
     /// Creates a new stream of [`ExExNotifications`] without a head.
     pub const fn new(
-        node_head: Head,
+        node_head: BlockNumHash,
         provider: P,
         executor: E,
         notifications: Receiver<ExExNotification<E::Primitives>>,
@@ -183,7 +183,7 @@ pub struct ExExNotificationsWithoutHead<P, E>
 where
     E: BlockExecutorProvider,
 {
-    node_head: Head,
+    node_head: BlockNumHash,
     provider: P,
     executor: E,
     notifications: Receiver<ExExNotification<E::Primitives>>,
@@ -209,7 +209,7 @@ where
 {
     /// Creates a new instance of [`ExExNotificationsWithoutHead`].
     const fn new(
-        node_head: Head,
+        node_head: BlockNumHash,
         provider: P,
         executor: E,
         notifications: Receiver<ExExNotification<E::Primitives>>,
@@ -255,7 +255,7 @@ pub struct ExExNotificationsWithHead<P, E>
 where
     E: BlockExecutorProvider,
 {
-    node_head: Head,
+    node_head: BlockNumHash,
     provider: P,
     executor: E,
     notifications: Receiver<ExExNotification<E::Primitives>>,
@@ -277,7 +277,7 @@ where
 {
     /// Creates a new [`ExExNotificationsWithHead`].
     const fn new(
-        node_head: Head,
+        node_head: BlockNumHash,
         provider: P,
         executor: E,
         notifications: Receiver<ExExNotification<E::Primitives>>,
@@ -477,11 +477,7 @@ mod tests {
             .insert_block(node_head_block.clone().try_recover()?, StorageLocation::Database)?;
         provider_rw.commit()?;
 
-        let node_head = Head {
-            number: node_head_block.number,
-            hash: node_head_block.hash(),
-            ..Default::default()
-        };
+        let node_head = node_head_block.num_hash();
         let exex_head =
             ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
 
@@ -546,10 +542,8 @@ mod tests {
 
         let provider = BlockchainProvider::new(provider_factory)?;
 
-        let node_head =
-            Head { number: genesis_block.number, hash: genesis_hash, ..Default::default() };
-        let exex_head =
-            ExExHead { block: BlockNumHash { number: node_head.number, hash: node_head.hash } };
+        let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
+        let exex_head = ExExHead { block: node_head };
 
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
@@ -608,11 +602,7 @@ mod tests {
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         )
         .try_recover()?;
-        let node_head = Head {
-            number: node_head_block.number,
-            hash: node_head_block.hash(),
-            ..Default::default()
-        };
+        let node_head = node_head_block.num_hash();
         let provider_rw = provider.database_provider_rw()?;
         provider_rw.insert_block(node_head_block, StorageLocation::Database)?;
         provider_rw.commit()?;
@@ -711,8 +701,7 @@ mod tests {
         };
         wal.commit(&exex_head_notification)?;
 
-        let node_head =
-            Head { number: genesis_block.number, hash: genesis_hash, ..Default::default() };
+        let node_head = BlockNumHash { number: genesis_block.number, hash: genesis_hash };
         let exex_head = ExExHead {
             block: BlockNumHash { number: exex_head_block.number, hash: exex_head_block.hash() },
         };

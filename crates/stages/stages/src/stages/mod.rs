@@ -159,7 +159,6 @@ mod tests {
                     max_duration: None,
                 },
                 MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-                prune_modes.clone(),
                 ExExManagerHandle::empty(),
             );
 

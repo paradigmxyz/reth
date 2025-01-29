@@ -47,6 +47,13 @@ pub trait BlockBody:
         self.transactions().iter()
     }
 
+    /// Returns the transaction with the matching hash.
+    ///
+    /// This is a convenience function for `transactions_iter().find()`
+    fn transaction_by_hash(&self, hash: &B256) -> Option<&Self::Transaction> {
+        self.transactions_iter().find(|tx| tx.tx_hash() == hash)
+    }
+
     /// Clones the transactions in the block.
     ///
     /// This is a convenience function for `transactions().to_vec()`

@@ -73,21 +73,20 @@ tempfile.workspace = true
 
 [features]
 optimism = [
-	"reth-db?/optimism",
-	"reth-db-api?/optimism",
-	"reth-provider/optimism"
+    "reth-db?/optimism",
+    "reth-db-api?/optimism",
 ]
 
 test-utils = [
-	"tempfile",
-	"reth-db-api",
-	"reth-db/test-utils",
-	"reth-consensus/test-utils",
-	"reth-network-p2p/test-utils",
-	"reth-testing-utils",
-	"reth-chainspec/test-utils",
-	"reth-primitives/test-utils",
-	"reth-db-api?/test-utils",
-	"reth-provider/test-utils",
-	"reth-primitives-traits/test-utils"
+    "tempfile",
+    "reth-db-api",
+    "reth-db/test-utils",
+    "reth-consensus/test-utils",
+    "reth-network-p2p/test-utils",
+    "reth-testing-utils",
+    "reth-chainspec/test-utils",
+    "reth-primitives/test-utils",
+    "reth-db-api?/test-utils",
+    "reth-provider/test-utils",
+    "reth-primitives-traits/test-utils",
 ]

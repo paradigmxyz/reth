@@ -34,7 +34,7 @@ reth-engine-local.workspace = true
 reth-tasks.workspace = true
 
 # currently need to enable this for workspace level
-reth-optimism-primitives  = { workspace = true, features = ["arbitrary", "serde"] }
+reth-optimism-primitives = { workspace = true, features = ["arbitrary", "serde"] }
 
 # rpc
 jsonrpsee.workspace = true

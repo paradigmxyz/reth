@@ -53,11 +53,7 @@ test-fuzz.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["io", "codec"] }
 rand.workspace = true
-secp256k1 = { workspace = true, features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 arbitrary = { workspace = true, features = ["derive"] }
 proptest.workspace = true
@@ -68,28 +64,28 @@ alloy-eips.workspace = true
 
 [features]
 arbitrary = [
-	"reth-eth-wire-types/arbitrary",
-	"dep:arbitrary",
-	"alloy-eips/arbitrary",
-	"alloy-primitives/arbitrary",
-	"reth-codecs/arbitrary",
-	"alloy-chains/arbitrary",
-	"reth-primitives-traits/arbitrary",
-	"reth-ethereum-forks/arbitrary",
-	"reth-primitives/arbitrary"
+    "reth-eth-wire-types/arbitrary",
+    "dep:arbitrary",
+    "alloy-eips/arbitrary",
+    "alloy-primitives/arbitrary",
+    "reth-codecs/arbitrary",
+    "alloy-chains/arbitrary",
+    "reth-primitives-traits/arbitrary",
+    "reth-ethereum-forks/arbitrary",
+    "reth-primitives/arbitrary",
 ]
 serde = [
-	"dep:serde",
-	"reth-eth-wire-types/serde",
-	"alloy-eips/serde",
-	"alloy-primitives/serde",
-	"bytes/serde",
-	"rand/serde",
-	"secp256k1/serde",
-	"reth-codecs/serde",
-	"alloy-chains/serde",
-	"reth-primitives-traits/serde",
-	"reth-ethereum-forks/serde"
+    "dep:serde",
+    "reth-eth-wire-types/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "bytes/serde",
+    "rand/serde",
+    "secp256k1/serde",
+    "reth-codecs/serde",
+    "alloy-chains/serde",
+    "reth-primitives-traits/serde",
+    "reth-ethereum-forks/serde",
 ]
 
 [[test]]

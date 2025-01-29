@@ -8,6 +8,8 @@ use reth_primitives::EthPrimitives;
 pub use storage::Storage;
 mod metrics;
 use metrics::Metrics;
+mod error;
+pub use error::{WalError, WalResult};
 
 use std::{
     path::Path,
@@ -43,7 +45,7 @@ where
     N: NodePrimitives,
 {
     /// Creates a new instance of [`Wal`].
-    pub fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
+    pub fn new(directory: impl AsRef<Path>) -> WalResult<Self> {
         Ok(Self { inner: Arc::new(WalInner::new(directory)?) })
     }
 
@@ -53,7 +55,7 @@ where
     }
 
     /// Commits the notification to WAL.
-    pub fn commit(&self, notification: &ExExNotification<N>) -> eyre::Result<()> {
+    pub fn commit(&self, notification: &ExExNotification<N>) -> WalResult<()> {
         self.inner.commit(notification)
     }
 
@@ -61,14 +63,14 @@ where
     ///
     /// The caller should check that all ExExes are on the canonical chain and will not need any
     /// blocks from the WAL below the provided block, inclusive.
-    pub fn finalize(&self, to_block: BlockNumHash) -> eyre::Result<()> {
+    pub fn finalize(&self, to_block: BlockNumHash) -> WalResult<()> {
         self.inner.finalize(to_block)
     }
 
     /// Returns an iterator over all notifications in the WAL.
     pub fn iter_notifications(
         &self,
-    ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification<N>>> + '_>> {
+    ) -> WalResult<Box<dyn Iterator<Item = WalResult<ExExNotification<N>>> + '_>> {
         self.inner.iter_notifications()
     }
 
@@ -93,7 +95,7 @@ impl<N> WalInner<N>
 where
     N: NodePrimitives,
 {
-    fn new(directory: impl AsRef<Path>) -> eyre::Result<Self> {
+    fn new(directory: impl AsRef<Path>) -> WalResult<Self> {
         let mut wal = Self {
             next_file_id: AtomicU32::new(0),
             storage: Storage::new(directory)?,
@@ -110,7 +112,7 @@ where
 
     /// Fills the block cache with the notifications from the storage.
     #[instrument(skip(self))]
-    fn fill_block_cache(&mut self) -> eyre::Result<()> {
+    fn fill_block_cache(&mut self) -> WalResult<()> {
         let Some(files_range) = self.storage.files_range()? else { return Ok(()) };
         self.next_file_id.store(files_range.end() + 1, Ordering::Relaxed);
 
@@ -145,7 +147,7 @@ where
         reverted_block_range = ?notification.reverted_chain().as_ref().map(|chain| chain.range()),
         committed_block_range = ?notification.committed_chain().as_ref().map(|chain| chain.range())
     ))]
-    fn commit(&self, notification: &ExExNotification<N>) -> eyre::Result<()> {
+    fn commit(&self, notification: &ExExNotification<N>) -> WalResult<()> {
         let mut block_cache = self.block_cache.write();
 
         let file_id = self.next_file_id.fetch_add(1, Ordering::Relaxed);
@@ -160,7 +162,7 @@ where
     }
 
     #[instrument(skip(self))]
-    fn finalize(&self, to_block: BlockNumHash) -> eyre::Result<()> {
+    fn finalize(&self, to_block: BlockNumHash) -> WalResult<()> {
         let mut block_cache = self.block_cache.write();
         let file_ids = block_cache.remove_before(to_block.number);
 
@@ -195,7 +197,7 @@ where
     /// Returns an iterator over all notifications in the WAL.
     fn iter_notifications(
         &self,
-    ) -> eyre::Result<Box<dyn Iterator<Item = eyre::Result<ExExNotification<N>>> + '_>> {
+    ) -> WalResult<Box<dyn Iterator<Item = WalResult<ExExNotification<N>>> + '_>> {
         let Some(range) = self.storage.files_range()? else {
             return Ok(Box::new(std::iter::empty()))
         };
@@ -218,7 +220,7 @@ where
     pub fn get_committed_notification_by_block_hash(
         &self,
         block_hash: &B256,
-    ) -> eyre::Result<Option<ExExNotification<N>>> {
+    ) -> WalResult<Option<ExExNotification<N>>> {
         let Some(file_id) = self.wal.block_cache().get_file_id_by_committed_block_hash(block_hash)
         else {
             return Ok(None)
@@ -233,7 +235,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::wal::{cache::CachedBlock, Wal};
+    use crate::wal::{cache::CachedBlock, error::WalResult, Wal};
     use alloy_primitives::B256;
     use itertools::Itertools;
     use reth_exex_types::ExExNotification;
@@ -243,7 +245,7 @@ mod tests {
     };
     use std::sync::Arc;
 
-    fn read_notifications(wal: &Wal) -> eyre::Result<Vec<ExExNotification>> {
+    fn read_notifications(wal: &Wal) -> WalResult<Vec<ExExNotification>> {
         wal.inner.storage.files_range()?.map_or(Ok(Vec::new()), |range| {
             wal.inner
                 .storage

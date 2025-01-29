@@ -184,6 +184,12 @@ pub enum ConsistentViewError {
         /// The tip diff.
         tip: GotExpected<Option<B256>>,
     },
+    /// Error thrown when the database does not contain a block from the previous database view.
+    #[display("database view no longer contains block: {block:?}")]
+    Reorged {
+        /// The previous block
+        block: B256,
+    },
 }
 
 impl From<ConsistentViewError> for ProviderError {

@@ -25,3 +25,17 @@ pub type Block = alloy_consensus::Block<TransactionSigned>;
 
 /// Type alias for the ethereum blockbody
 pub type BlockBody = alloy_consensus::BlockBody<TransactionSigned>;
+
+/// Helper struct that specifies the ethereum
+/// [`NodePrimitives`](reth_primitives_traits::NodePrimitives) types.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub struct EthPrimitives;
+
+impl reth_primitives_traits::NodePrimitives for EthPrimitives {
+    type Block = crate::Block;
+    type BlockHeader = alloy_consensus::Header;
+    type BlockBody = crate::BlockBody;
+    type SignedTx = crate::TransactionSigned;
+    type Receipt = crate::Receipt;
+}

@@ -28,9 +28,12 @@ thiserror.workspace = true
 
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-storage-api.workspace = true
+reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
-reth-testing-utils.workspace = true
+reth-trie-db = { workspace = true, features = ["test-utils"] }
 
 arbitrary.workspace = true
 assert_matches.workspace = true
@@ -44,8 +47,10 @@ rand.workspace = true
 [features]
 test-utils = [
     "reth-primitives-traits/test-utils",
-    "reth-trie/test-utils",
+    "reth-provider/test-utils",
     "reth-trie-common/test-utils",
+    "reth-trie-db/test-utils",
+    "reth-trie/test-utils",
 ]
 arbitrary = [
     "reth-primitives-traits/arbitrary",

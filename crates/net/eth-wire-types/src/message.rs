@@ -474,6 +474,7 @@ impl TryFrom<usize> for EthMessageID {
 /// request id.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 pub struct RequestPair<T> {
     /// id for the contained request or response message
     pub request_id: u64,

@@ -241,6 +241,36 @@ pub trait TransactionEnv:
         self
     }
 
+    /// Returns the configured nonce.
+    ///
+    /// This may return `None`, if the nonce has been intentionally unset in the environment. This
+    /// is useful in optimizations like transaction prewarming, where nonce checks should be
+    /// ignored.
+    fn nonce(&self) -> Option<u64>;
+
+    /// Sets the nonce.
+    fn set_nonce(&mut self, nonce: u64);
+
+    /// Sets the nonce.
+    fn with_nonce(mut self, nonce: u64) -> Self {
+        self.set_nonce(nonce);
+        self
+    }
+
+    /// Unsets the nonce. This should be used when nonce checks for the transaction should be
+    /// ignored.
+    ///
+    /// See [`TransactionEnv::nonce`] for applications where this may be desired.
+    fn unset_nonce(&mut self);
+
+    /// Constructs a version of this [`TransactionEnv`] that has the nonce unset.
+    ///
+    /// See [`TransactionEnv::nonce`] for applications where this may be desired.
+    fn without_nonce(mut self) -> Self {
+        self.unset_nonce();
+        self
+    }
+
     /// Returns configured gas price.
     fn gas_price(&self) -> U256;
 
@@ -277,6 +307,18 @@ impl TransactionEnv for TxEnv {
 
     fn gas_price(&self) -> U256 {
         self.gas_price.to()
+    }
+
+    fn nonce(&self) -> Option<u64> {
+        self.nonce
+    }
+
+    fn set_nonce(&mut self, nonce: u64) {
+        self.nonce = Some(nonce);
+    }
+
+    fn unset_nonce(&mut self) {
+        self.nonce = None;
     }
 
     fn value(&self) -> U256 {

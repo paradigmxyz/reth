@@ -68,7 +68,7 @@ rand.workspace = true
 [features]
 default = []
 js-tracer = [
-	"reth-node-builder/js-tracer"
+    "reth-node-builder/js-tracer",
 ]
 test-utils = [
     "reth-node-builder/test-utils",

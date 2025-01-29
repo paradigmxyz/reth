@@ -37,7 +37,7 @@ use reth::tasks::TokioTaskExecutor;
 use reth_node_ethereum::{
     node::EthereumEngineValidator, EthEvmConfig, EthExecutorProvider, EthereumNode,
 };
-use reth_provider::{test_utils::TestCanonStateSubscriptions, ChainSpecProvider};
+use reth_provider::ChainSpecProvider;
 
 // Custom rpc extension
 pub mod myrpc_ext;
@@ -70,7 +70,6 @@ async fn main() -> eyre::Result<()> {
         .with_noop_network()
         .with_executor(TokioTaskExecutor::default())
         .with_evm_config(EthEvmConfig::new(spec.clone()))
-        .with_events(TestCanonStateSubscriptions::default())
         .with_block_executor(EthExecutorProvider::ethereum(provider.chain_spec()))
         .with_consensus(EthBeaconConsensus::new(spec.clone()));
 

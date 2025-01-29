@@ -25,7 +25,7 @@ alloy-serde = { workspace = true, optional = true }
 
 bytes = { workspace = true, optional = true }
 derive_more.workspace = true
-itertools= { workspace = true, features = ["use_alloc"] }
+itertools = { workspace = true, features = ["use_alloc"] }
 nybbles = { workspace = true, features = ["rlp"] }
 
 # `serde` feature
@@ -60,20 +60,20 @@ serde_with.workspace = true
 [features]
 default = ["std"]
 std = [
-	"alloy-consensus/std",
-	"alloy-genesis/std",
-	"alloy-primitives/std",
-	"alloy-rlp/std",
-	"alloy-rpc-types-eth?/std",
-	"alloy-serde?/std",
-	"alloy-trie/std",
-	"bytes?/std",
-	"derive_more/std",
-	"nybbles/std",
-	"reth-primitives-traits/std",
-	"serde?/std",
-	"serde_with?/std",
-	"serde_json/std"
+    "alloy-consensus/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "alloy-rpc-types-eth?/std",
+    "alloy-serde?/std",
+    "alloy-trie/std",
+    "bytes?/std",
+    "derive_more/std",
+    "nybbles/std",
+    "reth-primitives-traits/std",
+    "serde?/std",
+    "serde_with?/std",
+    "serde_json/std",
 ]
 eip1186 = [
     "alloy-rpc-types-eth/serde",
@@ -88,7 +88,7 @@ serde = [
     "alloy-trie/serde",
     "alloy-rpc-types-eth?/serde",
     "reth-primitives-traits/serde",
-    "reth-codecs?/serde"
+    "reth-codecs?/serde",
 ]
 reth-codec = [
     "dep:reth-codecs",
@@ -96,9 +96,9 @@ reth-codec = [
 ]
 serde-bincode-compat = [
     "serde",
-	"reth-primitives-traits/serde-bincode-compat",
-	"alloy-consensus/serde-bincode-compat",
-    "dep:serde_with"
+    "reth-primitives-traits/serde-bincode-compat",
+    "alloy-consensus/serde-bincode-compat",
+    "dep:serde_with",
 ]
 test-utils = [
     "dep:plain_hasher",
@@ -108,17 +108,17 @@ test-utils = [
     "reth-codecs/test-utils",
 ]
 arbitrary = [
-	"std",
-	"dep:reth-codecs",
-	"alloy-trie/arbitrary",
-	"dep:arbitrary",
+    "std",
+    "dep:reth-codecs",
+    "alloy-trie/arbitrary",
+    "dep:arbitrary",
     "alloy-serde?/arbitrary",
-	"reth-primitives-traits/arbitrary",
-	"alloy-consensus/arbitrary",
-	"alloy-primitives/arbitrary",
-	"nybbles/arbitrary",
-	"reth-codecs/arbitrary",
-	"alloy-rpc-types-eth?/arbitrary"
+    "reth-primitives-traits/arbitrary",
+    "alloy-consensus/arbitrary",
+    "alloy-primitives/arbitrary",
+    "nybbles/arbitrary",
+    "reth-codecs/arbitrary",
+    "alloy-rpc-types-eth?/arbitrary",
 ]
 
 [[bench]]

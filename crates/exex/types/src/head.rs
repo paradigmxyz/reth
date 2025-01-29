@@ -8,3 +8,10 @@ pub struct ExExHead {
     /// The head block.
     pub block: BlockNumHash,
 }
+
+impl ExExHead {
+    /// Creates a new instance for the given head block.
+    pub const fn new(block: BlockNumHash) -> Self {
+        Self { block }
+    }
+}

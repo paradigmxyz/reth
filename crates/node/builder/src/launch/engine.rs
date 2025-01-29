@@ -4,10 +4,7 @@ use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider};
-use reth_db_api::{
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-    Database,
-};
+use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
@@ -71,7 +68,7 @@ impl EngineNodeLauncher {
 impl<Types, DB, T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
     Types: NodeTypesForProvider + NodeTypesWithEngine,
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     T: FullNodeTypes<
         Types = Types,
         DB = DB,

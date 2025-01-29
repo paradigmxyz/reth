@@ -161,9 +161,26 @@ impl NetworkManager {
 impl<N: NetworkPrimitives> NetworkManager<N> {
     /// Sets the dedicated channel for events indented for the
     /// [`TransactionsManager`](crate::transactions::TransactionsManager).
+    pub fn with_transactions(
+        mut self,
+        tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>,
+    ) -> Self {
+        self.set_transactions(tx);
+        self
+    }
+
+    /// Sets the dedicated channel for events indented for the
+    /// [`TransactionsManager`](crate::transactions::TransactionsManager).
     pub fn set_transactions(&mut self, tx: mpsc::UnboundedSender<NetworkTransactionEvent<N>>) {
         self.to_transactions_manager =
             Some(UnboundedMeteredSender::new(tx, NETWORK_POOL_TRANSACTIONS_SCOPE));
+    }
+
+    /// Sets the dedicated channel for events indented for the
+    /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler).
+    pub fn with_eth_request_handler(mut self, tx: mpsc::Sender<IncomingEthRequest<N>>) -> Self {
+        self.set_eth_request_handler(tx);
+        self
     }
 
     /// Sets the dedicated channel for events indented for the

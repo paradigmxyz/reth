@@ -175,7 +175,7 @@ impl<T: HeaderDownloader> Future for SpawnedDownloader<T> {
     }
 }
 
-/// Commands delegated tot the spawned [`HeaderDownloader`]
+/// Commands delegated to the spawned [`HeaderDownloader`]
 enum DownloaderUpdates<H> {
     UpdateSyncGap(SealedHeader<H>, SyncTarget),
     UpdateLocalHead(SealedHeader<H>),

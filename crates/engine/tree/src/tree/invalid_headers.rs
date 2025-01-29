@@ -105,7 +105,7 @@ struct InvalidHeaderCacheMetrics {
 mod tests {
     use super::*;
     use alloy_consensus::Header;
-    use reth_primitives::SealedHeader;
+    use reth_primitives_traits::SealedHeader;
 
     #[test]
     fn test_hit_eviction() {

@@ -8,13 +8,25 @@ pub use super::{
 pub use block_bincode::{Block, BlockBody};
 
 /// Trait for types that can be serialized and deserialized using bincode.
+///
+/// The recommended way to add bincode compatible serialization is via the
+/// [`serde_with`] crate and the `serde_as` macro that. See for reference [`header`].
 pub trait SerdeBincodeCompat: Sized + 'static {
     /// Serde representation of the type for bincode serialization.
-    type BincodeRepr<'a>: Debug + Serialize + DeserializeOwned + From<&'a Self> + Into<Self>;
+    ///
+    /// This type defines the bincode compatible serde format for the type.
+    type BincodeRepr<'a>: Debug + Serialize + DeserializeOwned + Into<Self>;
+
+    /// Convert this type into its bincode representation
+    fn as_repr(&self) -> Self::BincodeRepr<'_>;
 }
 
 impl SerdeBincodeCompat for alloy_consensus::Header {
     type BincodeRepr<'a> = alloy_consensus::serde_bincode_compat::Header<'a>;
+
+    fn as_repr(&self) -> Self::BincodeRepr<'_> {
+        self.into()
+    }
 }
 
 /// Type alias for the [`SerdeBincodeCompat::BincodeRepr`] associated type.
@@ -56,7 +68,7 @@ mod block_bincode {
         for Block<'a, T, H>
     {
         fn from(value: &'a alloy_consensus::Block<T, H>) -> Self {
-            Self { header: (&value.header).into(), body: (&value.body).into() }
+            Self { header: value.header.as_repr(), body: (&value.body).into() }
         }
     }
 
@@ -97,6 +109,10 @@ mod block_bincode {
         for alloy_consensus::Block<T, H>
     {
         type BincodeRepr<'a> = Block<'a, T, H>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
     }
 
     /// Bincode-compatible [`alloy_consensus::BlockBody`] serde implementation.
@@ -125,7 +141,7 @@ mod block_bincode {
     impl<'a, T: SerdeBincodeCompat> From<&'a alloy_consensus::BlockBody<T>> for BlockBody<'a, T> {
         fn from(value: &'a alloy_consensus::BlockBody<T>) -> Self {
             Self {
-                transactions: value.transactions.iter().map(Into::into).collect(),
+                transactions: value.transactions.iter().map(|tx| tx.as_repr()).collect(),
                 ommers: value.ommers.iter().map(Into::into).collect(),
                 withdrawals: Cow::Borrowed(&value.withdrawals),
             }
@@ -167,5 +183,9 @@ mod block_bincode {
 
     impl<T: SerdeBincodeCompat> SerdeBincodeCompat for alloy_consensus::BlockBody<T> {
         type BincodeRepr<'a> = BlockBody<'a, T>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
     }
 }

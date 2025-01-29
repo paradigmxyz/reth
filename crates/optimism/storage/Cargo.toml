@@ -21,6 +21,6 @@ reth-stages-types.workspace = true
 
 [features]
 optimism = [
-	"reth-codecs/op",
-	"reth-db-api/optimism"
+    "reth-codecs/op",
+    "reth-db-api/optimism",
 ]

@@ -47,5 +47,5 @@ workspace = true
 
 [features]
 op = [
-    "dep:op-alloy-rpc-types-engine"
+    "dep:op-alloy-rpc-types-engine",
 ]

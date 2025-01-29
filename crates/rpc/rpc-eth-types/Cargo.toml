@@ -62,6 +62,5 @@ itertools.workspace = true
 [dev-dependencies]
 serde_json.workspace = true
 
-
 [features]
 js-tracer = ["revm-inspectors/js-tracer"]

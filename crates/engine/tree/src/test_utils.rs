@@ -1,7 +1,8 @@
 use alloy_primitives::B256;
 use reth_chainspec::ChainSpec;
+use reth_ethereum_primitives::BlockBody;
 use reth_network_p2p::test_utils::TestFullBlockClient;
-use reth_primitives::{BlockBody, SealedHeader};
+use reth_primitives_traits::SealedHeader;
 use reth_provider::{
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
     ExecutionOutcome,

@@ -9,7 +9,7 @@ ignore = [
     # https://rustsec.org/advisories/RUSTSEC-2024-0384 used by sse example
     "RUSTSEC-2024-0384",
     # https://rustsec.org/advisories/RUSTSEC-2024-0388 used by ssz, will be removed https://github.com/sigp/ethereum_ssz/pull/34
-    "RUSTSEC-2024-0388"
+    "RUSTSEC-2024-0388",
 ]
 
 # This section is considered when running `cargo deny check bans`.

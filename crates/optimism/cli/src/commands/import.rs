@@ -9,15 +9,13 @@ use reth_cli_commands::{
 use reth_consensus::noop::NoopConsensus;
 use reth_db::tables;
 use reth_db_api::transaction::DbTx;
-use reth_downloaders::file_client::{
-    ChunkedFileReader, FileClient, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE,
-};
+use reth_downloaders::file_client::{ChunkedFileReader, DEFAULT_BYTE_LEN_CHUNK_CHAIN_FILE};
 use reth_node_builder::BlockTy;
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpExecutorProvider;
 use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives};
-use reth_provider::{ChainSpecProvider, StageCheckpointReader};
+use reth_provider::{BlockNumReader, ChainSpecProvider, HeaderProvider, StageCheckpointReader};
 use reth_prune::PruneModes;
 use reth_stages::StageId;
 use reth_static_file::StaticFileProducer;
@@ -70,7 +68,13 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
         let mut total_decoded_txns = 0;
         let mut total_filtered_out_dup_txns = 0;
 
-        while let Some(mut file_client) = reader.next_chunk::<FileClient<BlockTy<N>>>().await? {
+        let mut sealed_header = provider_factory
+            .sealed_header(provider_factory.last_block_number()?)?
+            .expect("should have genesis");
+
+        while let Some(mut file_client) =
+            reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?
+        {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"
@@ -118,6 +122,10 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
                 res = pipeline.run() => res?,
                 _ = tokio::signal::ctrl_c() => {},
             }
+
+            sealed_header = provider_factory
+                .sealed_header(provider_factory.last_block_number()?)?
+                .expect("should have genesis");
         }
 
         let provider = provider_factory.provider()?;

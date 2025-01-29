@@ -45,19 +45,19 @@ tokio = { workspace = true, features = ["full"] }
 [features]
 default = ["std"]
 test-utils = [
-	"reth-consensus/test-utils",
-	"parking_lot",
-	"reth-network-types/test-utils",
-	"reth-primitives/test-utils",
-	"reth-primitives-traits/test-utils"
+    "reth-consensus/test-utils",
+    "parking_lot",
+    "reth-network-types/test-utils",
+    "reth-primitives/test-utils",
+    "reth-primitives-traits/test-utils",
 ]
 std = [
-	"reth-consensus/std",
-	"reth-primitives/std",
-	"alloy-eips/std",
-	"alloy-primitives/std",
-	"reth-primitives-traits/std",
-	"alloy-consensus/std",
-	"derive_more/std",
-	"reth-network-peers/std"
+    "reth-consensus/std",
+    "reth-primitives/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "reth-primitives-traits/std",
+    "alloy-consensus/std",
+    "derive_more/std",
+    "reth-network-peers/std",
 ]

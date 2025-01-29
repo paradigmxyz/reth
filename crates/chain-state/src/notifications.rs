@@ -334,7 +334,7 @@ mod tests {
         };
 
         // Wrap the receipt in a `Receipts` structure, as expected in the `ExecutionOutcome`.
-        let receipts = Receipts { receipt_vec: vec![vec![Some(receipt1.clone())]] };
+        let receipts = Receipts { receipt_vec: vec![vec![receipt1.clone()]] };
 
         // Define an `ExecutionOutcome` with the created receipts.
         let execution_outcome = ExecutionOutcome { receipts, ..Default::default() };
@@ -393,7 +393,7 @@ mod tests {
             success: false,
             ..Default::default()
         };
-        let old_receipts = Receipts { receipt_vec: vec![vec![Some(old_receipt.clone())]] };
+        let old_receipts = Receipts { receipt_vec: vec![vec![old_receipt.clone()]] };
 
         let old_execution_outcome =
             ExecutionOutcome { receipts: old_receipts, ..Default::default() };
@@ -424,7 +424,7 @@ mod tests {
             success: true,
             ..Default::default()
         };
-        let new_receipts = Receipts { receipt_vec: vec![vec![Some(new_receipt.clone())]] };
+        let new_receipts = Receipts { receipt_vec: vec![vec![new_receipt.clone()]] };
 
         let new_execution_outcome =
             ExecutionOutcome { receipts: new_receipts, ..Default::default() };

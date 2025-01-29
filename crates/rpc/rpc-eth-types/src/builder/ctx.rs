@@ -13,7 +13,7 @@ use crate::{
 
 /// Context for building the `eth` namespace API.
 #[derive(Debug, Clone)]
-pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>
+pub struct EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks>
 where
     Provider: BlockReader,
 {
@@ -29,14 +29,12 @@ where
     pub config: EthConfig,
     /// Runtime handle.
     pub executor: Tasks,
-    /// Events handle.
-    pub events: Events,
     /// RPC cache handle.
     pub cache: EthStateCache<Provider::Block, Provider::Receipt>,
 }
 
-impl<Provider, Pool, EvmConfig, Network, Tasks, Events>
-    EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>
+impl<Provider, Pool, EvmConfig, Network, Tasks>
+    EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks>
 where
     Provider: BlockReaderIdExt + Clone,
 {
@@ -45,13 +43,14 @@ where
     where
         N: NodePrimitives,
         Tasks: TaskSpawner,
-        Events: CanonStateSubscriptions<Primitives = N>,
-        Provider:
-            BlockReaderIdExt<Block = N::Block, Receipt = N::Receipt> + ChainSpecProvider + 'static,
+        Provider: BlockReaderIdExt<Block = N::Block, Receipt = N::Receipt>
+            + CanonStateSubscriptions<Primitives = N>
+            + ChainSpecProvider
+            + 'static,
     {
         let fee_history_cache = FeeHistoryCache::new(self.config.fee_history_cache);
 
-        let new_canonical_blocks = self.events.canonical_state_stream();
+        let new_canonical_blocks = self.provider.canonical_state_stream();
         let fhc = fee_history_cache.clone();
         let provider = self.provider.clone();
         let cache = self.cache.clone();

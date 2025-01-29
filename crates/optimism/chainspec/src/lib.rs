@@ -20,6 +20,7 @@ mod op_sepolia;
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_consensus::{BlockHeader, Header};
+use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;
@@ -260,6 +261,10 @@ impl EthChainSpec for OpChainSpec {
         self.inner.base_fee_params_at_timestamp(timestamp)
     }
 
+    fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
+        self.inner.blob_params_at_timestamp(timestamp)
+    }
+
     fn deposit_contract(&self) -> Option<&DepositContract> {
         self.inner.deposit_contract()
     }
@@ -346,6 +351,7 @@ impl From<Genesis> for OpChainSpec {
 
         // Block-based hardforks
         let hardfork_opts = [
+            (EthereumHardfork::Frontier.boxed(), Some(0)),
             (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
             (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
             (EthereumHardfork::SpuriousDragon.boxed(), genesis.config.eip155_block),
@@ -987,6 +993,7 @@ mod tests {
 
         let hardforks: Vec<_> = chain_spec.hardforks.forks_iter().map(|(h, _)| h).collect();
         let expected_hardforks = vec![
+            EthereumHardfork::Frontier.boxed(),
             EthereumHardfork::Homestead.boxed(),
             EthereumHardfork::Tangerine.boxed(),
             EthereumHardfork::SpuriousDragon.boxed(),

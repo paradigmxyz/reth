@@ -69,7 +69,7 @@ use reth_node_metrics::recorder::install_prometheus_recorder;
 pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs> {
     /// The command to run
     #[command(subcommand)]
-    command: Commands<Spec, Ext>,
+    pub command: Commands<Spec, Ext>,
 
     /// The chain this node is running.
     ///
@@ -82,7 +82,7 @@ pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt:
         value_parser = Spec::parser(),
         global = true,
     )]
-    chain: Arc<Spec::ChainSpec>,
+    pub chain: Arc<Spec::ChainSpec>,
 
     /// Add a new instance of a node.
     ///
@@ -98,10 +98,11 @@ pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt:
     /// - `HTTP_RPC_PORT`: default - `instance` + 1
     /// - `WS_RPC_PORT`: default + `instance` * 2 - 2
     #[arg(long, value_name = "INSTANCE", global = true, default_value_t = 1, value_parser = value_parser!(u16).range(..=200))]
-    instance: u16,
+    pub instance: u16,
 
+    /// The logging configuration for the CLI.
     #[command(flatten)]
-    logs: LogArgs,
+    pub logs: LogArgs,
 }
 
 impl Cli {

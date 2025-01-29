@@ -17,6 +17,7 @@ use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_metrics::{metrics, metrics::Gauge, Metrics};
 use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::{constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock};
 use reth_provider::{BlockExecutionOutput, BlockReaderIdExt, StateProviderFactory};
@@ -62,8 +63,10 @@ where
             validation_window,
             cached_state: Default::default(),
             task_spawner,
+            metrics: Default::default(),
         });
 
+        inner.metrics.disallow_size.set(inner.disallow.len() as f64);
         Self { inner }
     }
 
@@ -478,6 +481,8 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     cached_state: RwLock<(B256, CachedReads)>,
     /// Task spawner for blocking operations
     task_spawner: Box<dyn TaskSpawner>,
+    /// Validation metrics
+    metrics: ValidationMetrics,
 }
 
 /// Configuration for validation API.
@@ -536,4 +541,12 @@ pub enum ValidationApiError {
     Execution(#[from] BlockExecutionError),
     #[error(transparent)]
     Payload(#[from] PayloadError),
+}
+
+/// Metrics for the validation endpoint.
+#[derive(Metrics)]
+#[metrics(scope = "builder.validation")]
+pub(crate) struct ValidationMetrics {
+    /// The number of entries configured in the builder validation disallow list.
+    pub(crate) disallow_size: Gauge,
 }

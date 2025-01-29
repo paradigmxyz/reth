@@ -1,4 +1,4 @@
-//! A Protocol defines a P2P subprotocol in a `RLPx` connection
+//! A Protocol defines a P2P subprotocol in an `RLPx` connection
 
 use crate::{Capability, EthMessageID, EthVersion};
 

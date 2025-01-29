@@ -4,7 +4,7 @@ use metrics::Gauge;
 use moka::sync::CacheBuilder;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
-use reth_primitives::{Account, Bytecode};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
     AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
     StateRootProvider, StorageRootProvider,
