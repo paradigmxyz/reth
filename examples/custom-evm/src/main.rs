@@ -13,14 +13,9 @@ use reth::{
     },
     payload::{EthBuiltPayload, EthPayloadBuilderAttributes},
     revm::{
-        handler::register::EvmHandler,
-        inspector_handle_register,
-        precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
-        primitives::{
-            CfgEnvWithHandlerCfg, EVMError, Env, HaltReason, HandlerCfg, PrecompileResult, SpecId,
-            TxEnv,
-        },
-        ContextPrecompiles, EvmBuilder, GetInspector,
+        context::TxEnv,
+        context_interface::result::{EVMError, HaltReason},
+        inspector::inspectors::NoOpInspector,
     },
     rpc::types::engine::PayloadAttributes,
     tasks::TaskManager,
@@ -53,7 +48,11 @@ impl EvmFactory<EvmEnv> for MyEvmFactory {
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
 
-    fn create_evm<'a, DB: Database + 'a>(&self, db: DB, input: EvmEnv) -> Self::Evm<'a, DB, ()> {
+    fn create_evm<'a, DB: Database + 'a>(
+        &self,
+        db: DB,
+        input: EvmEnv,
+    ) -> Self::Evm<DB, NoOpInspector> {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
             cfg_env: input.cfg_env,
             handler_cfg: HandlerCfg::new(input.spec),
@@ -68,12 +67,12 @@ impl EvmFactory<EvmEnv> for MyEvmFactory {
             .into()
     }
 
-    fn create_evm_with_inspector<'a, DB: Database + 'a, I: GetInspector<DB> + 'a>(
+    fn create_evm_with_inspector<DB: Database, I: GetInspector<DB>>(
         &self,
         db: DB,
         input: EvmEnv,
         inspector: I,
-    ) -> Self::Evm<'a, DB, I> {
+    ) -> Self::Evm<DB, I> {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
             cfg_env: input.cfg_env,
             handler_cfg: HandlerCfg::new(input.spec),

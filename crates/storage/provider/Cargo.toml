@@ -39,7 +39,8 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
-revm.workspace = true
+revm-database.workspace = true
+revm-state = { workspace = true, optional = true }
 
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
@@ -75,6 +76,8 @@ reth-testing-utils.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-ethereum-primitives.workspace = true
 
+revm-database-interface.workspace = true
+revm-state.workspace = true
 parking_lot.workspace = true
 tempfile.workspace = true
 assert_matches.workspace = true
@@ -84,6 +87,12 @@ eyre.workspace = true
 alloy-consensus.workspace = true
 
 [features]
+optimism = [
+    "reth-execution-types/optimism",
+    "reth-codecs/op",
+    "reth-db/optimism",
+    "reth-db-api/optimism",
+]
 serde = [
     "dashmap/serde",
     "notify/serde",
@@ -93,7 +102,6 @@ serde = [
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "alloy-rpc-types-engine/serde",
-    "revm/serde",
     "reth-codecs/serde",
     "reth-primitives-traits/serde",
     "reth-execution-types/serde",
@@ -101,6 +109,9 @@ serde = [
     "reth-trie/serde",
     "reth-stages-types/serde",
     "reth-prune-types/serde",
+    "revm-database/serde",
+    "revm-database-interface/serde",
+    "revm-state?/serde",
 ]
 test-utils = [
     "reth-db/test-utils",
@@ -117,7 +128,7 @@ test-utils = [
     "reth-codecs/test-utils",
     "reth-db-api/test-utils",
     "reth-trie-db/test-utils",
-    "revm/test-utils",
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
+    "revm-state",
 ]

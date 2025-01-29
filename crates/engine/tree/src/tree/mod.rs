@@ -37,7 +37,7 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::BlockExecutorProvider,
     system_calls::{NoopHook, OnStateHook},
-    ConfigureEvm, Evm, TransactionEnv,
+    ConfigureEvm, Evm,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
@@ -50,7 +50,10 @@ use reth_provider::{
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
-use reth_revm::{cancelled::ManualCancel, database::StateProviderDatabase};
+use reth_revm::{
+    cancelled::ManualCancel, context_interface::result::ResultAndState,
+    database::StateProviderDatabase,
+};
 use reth_stages_api::ControlFlow;
 use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState,
@@ -58,7 +61,6 @@ use reth_trie::{
 };
 use reth_trie_db::DatabaseTrieCursorFactory;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::ResultAndState;
 use root::{
     StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootMessage, StateRootTask,
 };
@@ -2760,12 +2762,15 @@ where
 
             let state_provider = StateProviderDatabase::new(&state_provider);
 
+            let mut evm_env = evm_config.evm_env(&block);
+
+            evm_env.cfg_env.disable_nonce_check = true;
+
             // create a new executor and disable nonce checks in the env
-            let mut evm = evm_config.evm_for_block(state_provider, &block);
+            let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
             // create the tx env and reset nonce
-            let mut tx_env = evm_config.tx_env(&tx, tx.signer());
-            tx_env.unset_nonce();
+            let tx_env = evm_config.tx_env(&tx, tx.signer());
 
             // exit early if execution is done
             if cancel_execution.is_cancelled() {

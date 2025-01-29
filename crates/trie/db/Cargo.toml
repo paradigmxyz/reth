@@ -53,6 +53,7 @@ reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 
 alloy-consensus.workspace = true
+revm-database.workspace = true
 
 # trie
 triehash = "0.8"
@@ -75,6 +76,7 @@ serde = [
     "reth-trie-common/serde",
     "reth-provider/serde",
     "reth-primitives-traits/serde",
+    "revm-database/serde",
 ]
 test-utils = [
     "triehash",

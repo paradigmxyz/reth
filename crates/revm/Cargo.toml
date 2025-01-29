@@ -23,6 +23,8 @@ alloy-primitives.workspace = true
 
 # revm
 revm.workspace = true
+revm-database.workspace = true
+revm-inspector.workspace = true
 
 [dev-dependencies]
 reth-trie.workspace = true
@@ -33,13 +35,15 @@ alloy-consensus.workspace = true
 [features]
 default = ["std"]
 std = [
-    "alloy-consensus/std",
-    "alloy-primitives/std",
-    "reth-ethereum-forks/std",
     "reth-primitives-traits/std",
-    "reth-storage-errors/std",
+    "alloy-primitives/std",
     "revm/std",
+    "alloy-consensus/std",
+    "reth-ethereum-forks/std",
+    "revm-database/std",
+    "revm-inspector/std",
     "reth-storage-api/std",
+    "reth-storage-errors/std",
 ]
 witness = ["dep:reth-trie"]
 test-utils = [
@@ -54,5 +58,7 @@ serde = [
     "alloy-consensus/serde",
     "reth-trie?/serde",
     "reth-ethereum-forks/serde",
+    "revm-database/serde",
     "reth-primitives-traits/serde",
+    "revm-inspector/serde",
 ]

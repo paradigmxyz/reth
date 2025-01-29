@@ -27,7 +27,8 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
-use revm::{db::BundleState, primitives::AccountInfo};
+use revm_database::BundleState;
+use revm_state::AccountInfo;
 use std::{
     collections::HashMap,
     ops::Range,

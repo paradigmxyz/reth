@@ -121,5 +121,4 @@ arbitrary = [
 ]
 optimism = [
     "dep:revm-primitives",
-    "revm-primitives/optimism",
 ]

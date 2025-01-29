@@ -6,7 +6,7 @@ use alloy_primitives::B256;
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::{BlockExecutionError, BlockValidationError};
-use revm_primitives::ResultAndState;
+use revm::context_interface::result::ResultAndState;
 
 /// Applies the pre-block call to the [EIP-4788] beacon block root contract, using the given block,
 /// chain spec, EVM.
@@ -18,13 +18,13 @@ use revm_primitives::ResultAndState;
 ///
 /// [EIP-4788]: https://eips.ethereum.org/EIPS/eip-4788
 #[inline]
-pub(crate) fn transact_beacon_root_contract_call(
+pub(crate) fn transact_beacon_root_contract_call<Halt>(
     chain_spec: impl EthereumHardforks,
     block_timestamp: u64,
     block_number: u64,
     parent_beacon_block_root: Option<B256>,
-    evm: &mut impl Evm<Error: Display>,
-) -> Result<Option<ResultAndState>, BlockExecutionError> {
+    evm: &mut impl Evm<Error: Display, HaltReason = Halt>,
+) -> Result<Option<ResultAndState<Halt>>, BlockExecutionError> {
     if !chain_spec.is_cancun_active_at_timestamp(block_timestamp) {
         return Ok(None)
     }
@@ -65,7 +65,7 @@ pub(crate) fn transact_beacon_root_contract_call(
     // There should be no state changes to these addresses anyways as a result of this system call,
     // so we can just remove them from the state returned.
     res.state.remove(&alloy_eips::eip4788::SYSTEM_ADDRESS);
-    res.state.remove(&evm.block().coinbase);
+    res.state.remove(&evm.block().beneficiary);
 
     Ok(Some(res))
 }

@@ -3,7 +3,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use alloy_consensus::Header;
-use alloy_evm::EvmFactory;
+use alloy_evm::{eth::EthEvmContext, EvmFactory};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, Bytes};
 use parking_lot::RwLock;
@@ -12,6 +12,7 @@ use reth::{
     builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
     revm::{
         handler::register::EvmHandler,
+        inspector::inspectors::NoOpInspector,
         inspector_handle_register,
         precompile::{Precompile, PrecompileSpecId},
         primitives::{
@@ -62,12 +63,17 @@ pub struct MyEvmFactory {
 }
 
 impl EvmFactory<EvmEnv> for MyEvmFactory {
-    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
+    type Evm<DB: Database, I> = EthEvm<DB, I>;
     type Tx = TxEnv;
     type Error<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;
+    type Context<DB: Database> = EthEvmContext<DB>;
 
-    fn create_evm<'a, DB: Database + 'a>(&self, db: DB, input: EvmEnv) -> Self::Evm<'a, DB, ()> {
+    fn create_evm<'a, DB: Database + 'a>(
+        &self,
+        db: DB,
+        input: EvmEnv,
+    ) -> Self::Evm<DB, NoOpInspector> {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
             cfg_env: input.cfg_env,
             handler_cfg: HandlerCfg::new(input.spec),
