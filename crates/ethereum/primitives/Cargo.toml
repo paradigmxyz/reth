@@ -51,6 +51,7 @@ alloy-consensus = { workspace = true, features = ["serde", "arbitrary"] }
 
 [features]
 default = ["std"]
+test-utils = []
 alloy-compat = ["dep:alloy-network", "dep:alloy-serde", "dep:alloy-rpc-types"]
 std = [
 	"alloy-consensus/std",

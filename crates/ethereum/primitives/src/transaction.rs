@@ -14,7 +14,6 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
-use derive_more::DerefMut;
 use once_cell as _;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::OnceCell as OnceLock;
@@ -281,10 +280,9 @@ impl From<TypedTransaction> for Transaction {
 }
 
 /// Signed Ethereum transaction.
-#[derive(
-    Debug, Clone, Eq, Serialize, Deserialize, derive_more::AsRef, derive_more::Deref, DerefMut,
-)]
+#[derive(Debug, Clone, Eq, Serialize, Deserialize, derive_more::AsRef, derive_more::Deref)]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
+#[cfg_attr(feature = "test-utils", derive(derive_more::DerefMut))]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionSigned {
     /// Transaction hash
@@ -295,7 +293,6 @@ pub struct TransactionSigned {
     /// Raw transaction info
     #[deref]
     #[as_ref]
-    #[deref_mut]
     transaction: Transaction,
 }
 
@@ -330,6 +327,11 @@ impl TransactionSigned {
     /// Creates a new signed transaction from the given transaction, signature and hash.
     pub fn new(transaction: Transaction, signature: Signature, hash: B256) -> Self {
         Self { hash: hash.into(), signature, transaction }
+    }
+
+    /// Provides mutable access to the transaction.
+    pub fn transaction_mut(&mut self) -> &mut Transaction {
+        &mut self.transaction
     }
 
     /// Consumes the type and returns the transaction.
