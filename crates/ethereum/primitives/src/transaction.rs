@@ -282,17 +282,19 @@ impl From<TypedTransaction> for Transaction {
 /// Signed Ethereum transaction.
 #[derive(Debug, Clone, Eq, Serialize, Deserialize, derive_more::AsRef, derive_more::Deref)]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
+#[cfg_attr(feature = "test-utils", derive(derive_more::DerefMut))]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionSigned {
     /// Transaction hash
     #[serde(skip)]
-    pub hash: OnceLock<TxHash>,
+    hash: OnceLock<TxHash>,
     /// The transaction signature values
-    pub signature: Signature,
+    signature: Signature,
     /// Raw transaction info
     #[deref]
     #[as_ref]
-    pub transaction: Transaction,
+    #[cfg_attr(feature = "test-utils", deref_mut)]
+    transaction: Transaction,
 }
 
 impl Default for TransactionSigned {
@@ -328,11 +330,40 @@ impl TransactionSigned {
         Self { hash: hash.into(), signature, transaction }
     }
 
+    /// Consumes the type and returns the transaction.
+    #[inline]
+    pub fn into_transaction(self) -> Transaction {
+        self.transaction
+    }
+
+    /// Returns the transaction.
+    #[inline]
+    pub const fn transaction(&self) -> &Transaction {
+        &self.transaction
+    }
+
+    /// Returns the transaction hash.
+    #[inline]
+    pub fn hash(&self) -> &B256 {
+        self.hash.get_or_init(|| self.recalculate_hash())
+    }
+
+    /// Returns the transaction signature.
+    #[inline]
+    pub const fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
     /// Creates a new signed transaction from the given transaction and signature without the hash.
     ///
     /// Note: this only calculates the hash on the first [`TransactionSigned::hash`] call.
     pub fn new_unhashed(transaction: Transaction, signature: Signature) -> Self {
         Self { hash: Default::default(), signature, transaction }
+    }
+
+    /// Splits the `TransactionSigned` into its transaction and signature.
+    pub fn split(self) -> (Transaction, Signature) {
+        (self.transaction, self.signature)
     }
 
     /// Converts from an EIP-4844 transaction to a [`PooledTransaction`] with the given sidecar.
@@ -366,6 +397,12 @@ impl TransactionSigned {
             Transaction::Eip4844(tx) => Some(tx),
             _ => None,
         }
+    }
+
+    /// Provides mutable access to the transaction.
+    #[cfg(feature = "test-utils")]
+    pub fn transaction_mut(&mut self) -> &mut Transaction {
+        &mut self.transaction
     }
 }
 
@@ -534,12 +571,12 @@ impl Decodable2718 for TransactionSigned {
 }
 
 impl Encodable for TransactionSigned {
-    fn length(&self) -> usize {
-        self.network_len()
-    }
-
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.network_encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.network_len()
     }
 }
 

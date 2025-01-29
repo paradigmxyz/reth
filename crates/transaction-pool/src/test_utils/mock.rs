@@ -913,7 +913,7 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
         let size = transaction.size();
 
         #[allow(unreachable_patterns)]
-        match transaction.transaction {
+        match transaction.into_transaction() {
             Transaction::Legacy(TxLegacy {
                 chain_id,
                 nonce,

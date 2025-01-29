@@ -376,8 +376,8 @@ pub enum PayloadKind {
 /// The first byte of each element is the `request_type` and the remaining bytes are the
 /// `request_data`. Elements of the list **MUST** be ordered by `request_type` in ascending order.
 /// Elements with empty `request_data` **MUST** be excluded from the list. If any element is out of
-/// order or has a length of 1-byte or shorter, client software **MUST** return `-32602: Invalid
-/// params` error.
+/// order, has a length of 1-byte or shorter, or more than one element has the same type byte,
+/// client software **MUST** return `-32602: Invalid params` error.
 pub fn validate_execution_requests(requests: &[Bytes]) -> Result<(), EngineObjectValidationError> {
     let mut last_request_type = None;
     for request in requests {
@@ -391,6 +391,12 @@ pub fn validate_execution_requests(requests: &[Bytes]) -> Result<(), EngineObjec
         if Some(request_type) < last_request_type {
             return Err(EngineObjectValidationError::InvalidParams(
                 "OutOfOrderExecutionRequest".to_string().into(),
+            ))
+        }
+
+        if Some(request_type) == last_request_type {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "DuplicatedExecutionRequestType".to_string().into(),
             ))
         }
 
@@ -447,6 +453,17 @@ mod tests {
         ];
         assert_matches!(
             validate_execution_requests(&requests_out_of_order),
+            Err(EngineObjectValidationError::InvalidParams(_))
+        );
+
+        let duplicate_request_types = [
+            Bytes::from_iter([1, 2]),
+            Bytes::from_iter([3, 3]),
+            Bytes::from_iter([4, 5]),
+            Bytes::from_iter([4, 4]),
+        ];
+        assert_matches!(
+            validate_execution_requests(&duplicate_request_types),
             Err(EngineObjectValidationError::InvalidParams(_))
         );
     }

@@ -250,7 +250,7 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
                 let (blocks, receipts): (Vec<_>, Vec<_>) = committed
                     .blocks_and_receipts()
                     .map(|(block, receipts)| {
-                        (block.clone_sealed_block(), Arc::new(receipts.iter().flatten().cloned().collect::<Vec<_>>()))
+                        (block.clone_sealed_block(), Arc::new(receipts.clone()))
                     })
                     .unzip();
                 fee_history_cache.insert_blocks(blocks.iter().zip(receipts)).await;
