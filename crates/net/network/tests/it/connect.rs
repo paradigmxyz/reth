@@ -617,7 +617,7 @@ async fn test_exceed_outgoing_connections() {
 
     handle.add_peer(*handle1.peer_id(), handle1.local_addr());
 
-    // wait 2 seconds, the number of connections is still 1, indicating tha max outbound is in
+    // wait 2 seconds, the number of connections is still 1, indicating that the max outbound is in
     // effect.
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(handle.num_connected_peers(), 1);
