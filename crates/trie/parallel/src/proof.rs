@@ -253,7 +253,7 @@ where
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let hashed_account_cursor = CachedHashedCursor::new(
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
-            Default::default(),
+            self.hashed_account_cache,
         );
         let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
         while let Some(account_node) =
