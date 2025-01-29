@@ -4,6 +4,7 @@ mod active;
 mod conn;
 mod counter;
 mod handle;
+mod pending;
 
 use active::QueuedOutgoingMessages;
 pub use conn::EthRlpxConnection;
@@ -257,9 +258,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             pending_events.clone(),
             start_pending_incoming_session(
                 disconnect_rx,
-                session_id,
-                stream,
                 pending_events,
+                stream,
+                session_id,
                 remote_addr,
                 secret_key,
                 hello_message,
@@ -812,11 +813,13 @@ pub(crate) async fn pending_session_with_timeout<F, N: NetworkPrimitives>(
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
     disconnect_rx: oneshot::Receiver<()>,
-    session_id: SessionId,
+    to_events: mpsc::Sender<PendingSessionEvent<N>>,
     stream: TcpStream,
-    events: mpsc::Sender<PendingSessionEvent<N>>,
+
+    session_id: SessionId,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
+
     hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
@@ -824,16 +827,16 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 ) {
     authenticate(
         disconnect_rx,
-        events,
+        to_events,
         stream,
         session_id,
         remote_addr,
         secret_key,
-        Direction::Incoming,
         hello,
         status,
         fork_filter,
         extra_handlers,
+        Direction::Incoming,
     )
     .await
 }
@@ -843,11 +846,13 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 #[allow(clippy::too_many_arguments)]
 async fn start_pending_outbound_session<N: NetworkPrimitives>(
     disconnect_rx: oneshot::Receiver<()>,
-    events: mpsc::Sender<PendingSessionEvent<N>>,
+    to_events: mpsc::Sender<PendingSessionEvent<N>>,
+
     session_id: SessionId,
     remote_addr: SocketAddr,
     remote_peer_id: PeerId,
     secret_key: SecretKey,
+
     hello: HelloMessageWithProtocols,
     status: Status,
     fork_filter: ForkFilter,
@@ -861,7 +866,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
             stream
         }
         Err(error) => {
-            let _ = events
+            let _ = to_events
                 .send(PendingSessionEvent::OutgoingConnectionError {
                     remote_addr,
                     session_id,
@@ -874,16 +879,16 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
     };
     authenticate(
         disconnect_rx,
-        events,
+        to_events,
         stream,
         session_id,
         remote_addr,
         secret_key,
-        Direction::Outgoing(remote_peer_id),
         hello,
         status,
         fork_filter,
         extra_handlers,
+        Direction::Outgoing(remote_peer_id),
     )
     .await
 }
@@ -892,22 +897,25 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
 #[allow(clippy::too_many_arguments)]
 async fn authenticate<N: NetworkPrimitives>(
     disconnect_rx: oneshot::Receiver<()>,
-    events: mpsc::Sender<PendingSessionEvent<N>>,
+    to_events: mpsc::Sender<PendingSessionEvent<N>>,
     stream: TcpStream,
+    // Session data
     session_id: SessionId,
     remote_addr: SocketAddr,
     secret_key: SecretKey,
-    direction: Direction,
-    hello: HelloMessageWithProtocols,
-    status: Status,
+    // Handshake data
+    hello_msg: HelloMessageWithProtocols,
+    status_msg: Status,
     fork_filter: ForkFilter,
     extra_handlers: RlpxSubProtocolHandlers,
+
+    direction: Direction,
 ) {
     let local_addr = stream.local_addr().ok();
     let stream = match get_ecies_stream(stream, secret_key, direction).await {
         Ok(stream) => stream,
         Err(error) => {
-            let _ = events
+            let _ = to_events
                 .send(PendingSessionEvent::EciesAuthError {
                     remote_addr,
                     session_id,
@@ -920,23 +928,23 @@ async fn authenticate<N: NetworkPrimitives>(
     };
 
     let unauthed = UnauthedP2PStream::new(stream);
-    // TODO: make this configurable
+
     let auth = authenticate_stream(
         unauthed,
         session_id,
         remote_addr,
         local_addr,
-        direction,
-        hello,
-        status,
+        hello_msg,
+        status_msg,
         fork_filter,
         extra_handlers,
+        direction,
     )
     .boxed();
 
     match futures::future::select(disconnect_rx, auth).await {
         Either::Left((_, _)) => {
-            let _ = events
+            let _ = to_events
                 .send(PendingSessionEvent::Disconnected {
                     remote_addr,
                     session_id,
@@ -946,22 +954,7 @@ async fn authenticate<N: NetworkPrimitives>(
                 .await;
         }
         Either::Right((res, _)) => {
-            let _ = events.send(res).await;
-        }
-    }
-}
-
-/// Returns an [`ECIESStream`] if it can be built. If not, send a
-/// [`PendingSessionEvent::EciesAuthError`] and returns `None`
-async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
-    stream: Io,
-    secret_key: SecretKey,
-    direction: Direction,
-) -> Result<ECIESStream<Io>, ECIESError> {
-    match direction {
-        Direction::Incoming => ECIESStream::incoming(stream, secret_key).await,
-        Direction::Outgoing(remote_peer_id) => {
-            ECIESStream::connect(stream, secret_key, remote_peer_id).await
+            let _ = to_events.send(res).await;
         }
     }
 }
@@ -974,21 +967,25 @@ async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
 /// also negotiate the additional protocols.
 #[allow(clippy::too_many_arguments)]
 async fn authenticate_stream<N: NetworkPrimitives>(
-    stream: UnauthedP2PStream<ECIESStream<TcpStream>>,
+    unauthed_stream: UnauthedP2PStream<ECIESStream<TcpStream>>,
+    // Session data
     session_id: SessionId,
     remote_addr: SocketAddr,
     local_addr: Option<SocketAddr>,
-    direction: Direction,
+
+    // Handshake data
     mut hello: HelloMessageWithProtocols,
     mut status: Status,
     fork_filter: ForkFilter,
     mut extra_handlers: RlpxSubProtocolHandlers,
+
+    direction: Direction,
 ) -> PendingSessionEvent<N> {
     // Add extra protocols to the hello message
     extra_handlers.retain(|handler| hello.try_add_protocol(handler.protocol()).is_ok());
 
     // conduct the p2p handshake and return the authenticated stream
-    let (p2p_stream, their_hello) = match stream.handshake(hello).await {
+    let (p2p_stream, their_hello) = match unauthed_stream.handshake(hello).await {
         Ok(stream_res) => stream_res,
         Err(err) => {
             return PendingSessionEvent::Disconnected {
@@ -1072,5 +1069,20 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         conn,
         direction,
         client_id: their_hello.client_version,
+    }
+}
+
+/// Returns an [`ECIESStream`] if it can be built. If not, send a
+/// [`PendingSessionEvent::EciesAuthError`] and returns `None`
+async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
+    stream: Io,
+    secret_key: SecretKey,
+    direction: Direction,
+) -> Result<ECIESStream<Io>, ECIESError> {
+    match direction {
+        Direction::Incoming => ECIESStream::incoming(stream, secret_key).await,
+        Direction::Outgoing(remote_peer_id) => {
+            ECIESStream::connect(stream, secret_key, remote_peer_id).await
+        }
     }
 }
