@@ -293,6 +293,7 @@ pub struct TransactionSigned {
     /// Raw transaction info
     #[deref]
     #[as_ref]
+    #[cfg_attr(feature = "test-utils", deref_mut)]
     transaction: Transaction,
 }
 
