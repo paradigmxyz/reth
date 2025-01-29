@@ -6,6 +6,7 @@ use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::ConfigureEvmFor;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{FullNodeTypes, NodeTypesWithEngine, PrimitivesTy, TxTy};
@@ -13,7 +14,6 @@ use reth_node_builder::{
     components::PayloadServiceBuilder, BuilderContext, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::EthPrimitives;
 use reth_provider::CanonStateSubscriptions;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
