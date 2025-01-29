@@ -22,16 +22,13 @@ use reth_rpc_eth_types::{
     EthApiBuilderCtx, EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle,
     PendingBlock,
 };
-use reth_rpc_server_types::constants::{
-    DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
-};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskSpawner, TokioTaskExecutor,
+    TaskSpawner,
 };
 use tokio::sync::{broadcast, Mutex};
 
-use crate::eth::EthTxBuilder;
+use crate::{eth::EthTxBuilder, EthApiBuilder};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
@@ -64,7 +61,7 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReaderIdExt,
+    Provider: BlockReaderIdExt + StateProviderFactory + Unpin + Clone + 'static,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[allow(clippy::too_many_arguments)]
@@ -82,23 +79,16 @@ where
         evm_config: EvmConfig,
         proof_permits: usize,
     ) -> Self {
-        let inner = EthApiInner::new(
-            provider,
-            pool,
-            network,
-            eth_cache,
-            gas_oracle,
-            gas_cap,
-            max_simulate_blocks,
-            eth_proof_window,
-            blocking_task_pool,
-            fee_history_cache,
-            evm_config,
-            TokioTaskExecutor::default(),
-            proof_permits,
-        );
-
-        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
+        EthApiBuilder::new(provider, pool, network, evm_config)
+            .eth_cache(eth_cache)
+            .gas_oracle(gas_oracle)
+            .gas_cap(gas_cap.into())
+            .max_simulate_blocks(max_simulate_blocks)
+            .eth_proof_window(eth_proof_window)
+            .blocking_task_pool(blocking_task_pool)
+            .fee_history_cache(fee_history_cache)
+            .proof_permits(proof_permits)
+            .build()
     }
 }
 
@@ -450,128 +440,6 @@ where
     #[inline]
     pub fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
         let _ = self.raw_tx_sender.send(raw_tx);
-    }
-}
-
-/// A helper to build the `EthApi` instance.
-#[derive(Debug)]
-pub struct EthApiBuilder<Provider, Pool, Network, EvmConfig>
-where
-    Provider: BlockReaderIdExt,
-{
-    provider: Provider,
-    pool: Pool,
-    network: Network,
-    evm_config: EvmConfig,
-    eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
-    gas_oracle: GasPriceOracle<Provider>,
-    gas_cap: GasCap,
-    max_simulate_blocks: u64,
-    eth_proof_window: u64,
-    blocking_task_pool: BlockingTaskPool,
-    fee_history_cache: FeeHistoryCache,
-    proof_permits: usize,
-}
-
-impl<Provider, Pool, Network, EvmConfig> EthApiBuilder<Provider, Pool, Network, EvmConfig>
-where
-    Provider: BlockReaderIdExt,
-{
-    /// Creates a new `EthApiBuilder` instance.
-    ///
-    /// # Panics
-    ///
-    /// This function panics if the blocking task pool cannot be built.
-    pub fn new(provider: Provider, pool: Pool, network: Network, evm_config: EvmConfig) -> Self
-    where
-        Provider: BlockReaderIdExt + StateProviderFactory + Clone + Unpin + 'static,
-    {
-        let cache = EthStateCache::spawn(provider.clone(), Default::default());
-
-        Self {
-            provider: provider.clone(),
-            pool,
-            network,
-            evm_config,
-            eth_cache: cache.clone(),
-            gas_oracle: GasPriceOracle::new(provider, Default::default(), cache),
-            gas_cap: GasCap::default(),
-            max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
-            eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
-            blocking_task_pool: BlockingTaskPool::build()
-                .expect("failed to build blocking task pool"),
-            fee_history_cache: FeeHistoryCache::new(Default::default()),
-            proof_permits: DEFAULT_PROOF_PERMITS,
-        }
-    }
-
-    /// Sets `eth_cache` instance
-    pub fn eth_cache(
-        mut self,
-        eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
-    ) -> Self {
-        self.eth_cache = eth_cache;
-        self
-    }
-
-    /// Sets `gas_oracle` instance
-    pub fn gas_oracle(mut self, gas_oracle: GasPriceOracle<Provider>) -> Self {
-        self.gas_oracle = gas_oracle;
-        self
-    }
-
-    /// Sets the gas cap.
-    pub const fn gas_cap(mut self, gas_cap: GasCap) -> Self {
-        self.gas_cap = gas_cap;
-        self
-    }
-
-    /// Sets the maximum number of blocks for `eth_simulateV1`.
-    pub const fn max_simulate_blocks(mut self, max_simulate_blocks: u64) -> Self {
-        self.max_simulate_blocks = max_simulate_blocks;
-        self
-    }
-
-    /// Sets the maximum number of blocks into the past for generating state proofs.
-    pub const fn eth_proof_window(mut self, eth_proof_window: u64) -> Self {
-        self.eth_proof_window = eth_proof_window;
-        self
-    }
-
-    /// Sets the blocking task pool.
-    pub fn blocking_task_pool(mut self, blocking_task_pool: BlockingTaskPool) -> Self {
-        self.blocking_task_pool = blocking_task_pool;
-        self
-    }
-
-    /// Sets the fee history cache.
-    pub fn fee_history_cache(mut self, fee_history_cache: FeeHistoryCache) -> Self {
-        self.fee_history_cache = fee_history_cache;
-        self
-    }
-
-    /// Sets the proof permits.
-    pub const fn proof_permits(mut self, proof_permits: usize) -> Self {
-        self.proof_permits = proof_permits;
-        self
-    }
-
-    /// Builds the `EthApi` instance.
-    pub fn build(self) -> EthApi<Provider, Pool, Network, EvmConfig> {
-        EthApi::new(
-            self.provider,
-            self.pool,
-            self.network,
-            self.eth_cache,
-            self.gas_oracle,
-            self.gas_cap,
-            self.max_simulate_blocks,
-            self.eth_proof_window,
-            self.blocking_task_pool,
-            self.fee_history_cache,
-            self.evm_config,
-            self.proof_permits,
-        )
     }
 }
 
