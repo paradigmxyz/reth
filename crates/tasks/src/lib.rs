@@ -113,7 +113,7 @@ pub struct TokioTaskExecutor;
 
 impl TokioTaskExecutor {
     /// Converts the instance to a boxed [`TaskSpawner`].
-    pub fn boxed(self) -> Box<dyn TaskSpawner> {
+    pub fn boxed(self) -> Box<dyn TaskSpawner + 'static> {
         Box::new(self)
     }
 }

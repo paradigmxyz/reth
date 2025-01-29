@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use crate::{eth::EthTxBuilder, EthApiBuilder};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
@@ -24,11 +25,9 @@ use reth_rpc_eth_types::{
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
-    TaskSpawner,
+    TaskSpawner, TokioTaskExecutor,
 };
 use tokio::sync::{broadcast, Mutex};
-
-use crate::{eth::EthTxBuilder, EthApiBuilder};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
@@ -63,6 +62,16 @@ impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConf
 where
     Provider: BlockReaderIdExt + StateProviderFactory + Unpin + Clone + 'static,
 {
+    /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components
+    pub fn builder(
+        provider: Provider,
+        pool: Pool,
+        network: Network,
+        evm_config: EvmConfig,
+    ) -> EthApiBuilder<Provider, Pool, Network, EvmConfig> {
+        EthApiBuilder::new(provider, pool, network, evm_config)
+    }
+
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -79,16 +88,23 @@ where
         evm_config: EvmConfig,
         proof_permits: usize,
     ) -> Self {
-        EthApiBuilder::new(provider, pool, network, evm_config)
-            .eth_cache(eth_cache)
-            .gas_oracle(gas_oracle)
-            .gas_cap(gas_cap.into())
-            .max_simulate_blocks(max_simulate_blocks)
-            .eth_proof_window(eth_proof_window)
-            .blocking_task_pool(blocking_task_pool)
-            .fee_history_cache(fee_history_cache)
-            .proof_permits(proof_permits)
-            .build()
+        let inner = EthApiInner::new(
+            provider,
+            pool,
+            network,
+            eth_cache,
+            gas_oracle,
+            gas_cap,
+            max_simulate_blocks,
+            eth_proof_window,
+            blocking_task_pool,
+            fee_history_cache,
+            evm_config,
+            TokioTaskExecutor::default().boxed(),
+            proof_permits,
+        );
+
+        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
     }
 }
 
@@ -127,7 +143,7 @@ where
             blocking_task_pool,
             ctx.new_fee_history_cache(),
             ctx.evm_config.clone(),
-            ctx.executor.clone(),
+            Box::new(ctx.executor.clone()),
             ctx.config.proof_permits,
         );
 
@@ -288,7 +304,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache,
         evm_config: EvmConfig,
-        task_spawner: impl TaskSpawner + 'static,
+        task_spawner: Box<dyn TaskSpawner + 'static>,
         proof_permits: usize,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
@@ -315,7 +331,7 @@ where
             max_simulate_blocks,
             eth_proof_window,
             starting_block,
-            task_spawner: Box::new(task_spawner),
+            task_spawner,
             pending_block: Default::default(),
             blocking_task_pool,
             fee_history_cache,

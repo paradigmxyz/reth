@@ -1,20 +1,21 @@
 //! `EthApiBuilder` implementation
 
-use std::sync::Arc;
-
+use crate::{
+    eth::{core::EthApiInner, EthTxBuilder},
+    EthApi,
+};
 use reth_provider::{BlockReaderIdExt, StateProviderFactory};
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle};
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
-use reth_tasks::{pool::BlockingTaskPool, TokioTaskExecutor};
+use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
+use std::sync::Arc;
 
-use crate::{
-    eth::{core::EthApiInner, EthTxBuilder},
-    EthApi,
-};
-
-/// A helper to build the `EthApi` instance.
+/// A helper to build the `EthApi` handler instance.
+///
+/// This builder type contains all settings to create an [`EthApiInner`] or an [`EthApi`] instance
+/// directly.
 #[derive(Debug)]
 pub struct EthApiBuilder<Provider, Pool, Network, EvmConfig>
 where
@@ -24,14 +25,15 @@ where
     pool: Pool,
     network: Network,
     evm_config: EvmConfig,
-    eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
-    gas_oracle: GasPriceOracle<Provider>,
     gas_cap: GasCap,
     max_simulate_blocks: u64,
     eth_proof_window: u64,
-    blocking_task_pool: Option<BlockingTaskPool>,
     fee_history_cache: FeeHistoryCache,
     proof_permits: usize,
+    eth_cache: Option<EthStateCache<Provider::Block, Provider::Receipt>>,
+    gas_oracle: Option<GasPriceOracle<Provider>>,
+    blocking_task_pool: Option<BlockingTaskPool>,
+    task_spawner: Box<dyn TaskSpawner + 'static>,
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApiBuilder<Provider, Pool, Network, EvmConfig>
@@ -41,24 +43,29 @@ where
     /// Creates a new `EthApiBuilder` instance.
     pub fn new(provider: Provider, pool: Pool, network: Network, evm_config: EvmConfig) -> Self
     where
-        Provider: BlockReaderIdExt + StateProviderFactory + Clone + Unpin + 'static,
+        Provider: BlockReaderIdExt,
     {
-        let cache = EthStateCache::spawn(provider.clone(), Default::default());
-
         Self {
-            provider: provider.clone(),
+            provider,
             pool,
             network,
             evm_config,
-            eth_cache: cache.clone(),
-            gas_oracle: GasPriceOracle::new(provider, Default::default(), cache),
+            eth_cache: None,
+            gas_oracle: None,
             gas_cap: GasCap::default(),
             max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
             eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
             blocking_task_pool: None,
             fee_history_cache: FeeHistoryCache::new(Default::default()),
             proof_permits: DEFAULT_PROOF_PERMITS,
+            task_spawner: TokioTaskExecutor::default().boxed(),
         }
+    }
+
+    /// Configures the task spawner used to spawn additional tasks.
+    pub fn task_spawner(mut self, spawner: impl TaskSpawner + 'static) -> Self {
+        self.task_spawner = Box::new(spawner);
+        self
     }
 
     /// Sets `eth_cache` instance
@@ -66,13 +73,13 @@ where
         mut self,
         eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
     ) -> Self {
-        self.eth_cache = eth_cache;
+        self.eth_cache = Some(eth_cache);
         self
     }
 
     /// Sets `gas_oracle` instance
     pub fn gas_oracle(mut self, gas_oracle: GasPriceOracle<Provider>) -> Self {
-        self.gas_oracle = gas_oracle;
+        self.gas_oracle = Some(gas_oracle);
         self
     }
 
@@ -112,37 +119,71 @@ where
         self
     }
 
-    /// Builds the `EthApiInner` instance
+    /// Builds the `EthApiInner` instance.
+    ///
+    /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
     ///
     /// # Panics
     ///
     /// This function panics if the blocking task pool cannot be built.
-    fn build_inner(self) -> EthApiInner<Provider, Pool, Network, EvmConfig> {
+    /// This will panic if called outside the context of a Tokio runtime.
+    pub fn build_inner(self) -> EthApiInner<Provider, Pool, Network, EvmConfig>
+    where
+        Provider: BlockReaderIdExt + StateProviderFactory + Clone + Unpin + 'static,
+    {
+        let Self {
+            provider,
+            pool,
+            network,
+            evm_config,
+            eth_cache,
+            gas_oracle,
+            gas_cap,
+            max_simulate_blocks,
+            eth_proof_window,
+            blocking_task_pool,
+            fee_history_cache,
+            proof_permits,
+            task_spawner,
+        } = self;
+
+        let eth_cache =
+            eth_cache.unwrap_or_else(|| EthStateCache::spawn(provider.clone(), Default::default()));
+        let gas_oracle = gas_oracle.unwrap_or_else(|| {
+            GasPriceOracle::new(provider.clone(), Default::default(), eth_cache.clone())
+        });
+
         EthApiInner::new(
-            self.provider,
-            self.pool,
-            self.network,
-            self.eth_cache,
-            self.gas_oracle,
-            self.gas_cap,
-            self.max_simulate_blocks,
-            self.eth_proof_window,
-            self.blocking_task_pool.unwrap_or_else(|| {
+            provider,
+            pool,
+            network,
+            eth_cache,
+            gas_oracle,
+            gas_cap,
+            max_simulate_blocks,
+            eth_proof_window,
+            blocking_task_pool.unwrap_or_else(|| {
                 BlockingTaskPool::build().expect("failed to build blocking task pool")
             }),
-            self.fee_history_cache,
-            self.evm_config,
-            TokioTaskExecutor::default(),
-            self.proof_permits,
+            fee_history_cache,
+            evm_config,
+            task_spawner,
+            proof_permits,
         )
     }
 
     /// Builds the `EthApi` instance.
     ///
+    /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
+    ///
     /// # Panics
     ///
     /// This function panics if the blocking task pool cannot be built.
-    pub fn build(self) -> EthApi<Provider, Pool, Network, EvmConfig> {
+    /// This will panic if called outside the context of a Tokio runtime.
+    pub fn build(self) -> EthApi<Provider, Pool, Network, EvmConfig>
+    where
+        Provider: BlockReaderIdExt + StateProviderFactory + Clone + Unpin + 'static,
+    {
         EthApi { inner: Arc::new(self.build_inner()), tx_resp_builder: EthTxBuilder }
     }
 }
