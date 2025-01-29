@@ -214,12 +214,10 @@ where
             self.chain_spec.is_paris_active_at_block(header.number()).is_some_and(|active| active);
 
         if is_post_merge {
-            // TODO: add `is_zero_difficulty` to `alloy_consensus::BlockHeader` trait
             if !header.difficulty().is_zero() {
                 return Err(ConsensusError::TheMergeDifficultyIsNotZero)
             }
 
-            // TODO: helper fn in `alloy_consensus::BlockHeader` trait
             if !header.nonce().is_some_and(|nonce| nonce.is_zero()) {
                 return Err(ConsensusError::TheMergeNonceIsNotZero)
             }
@@ -242,15 +240,14 @@ where
             // mixHash is used instead of difficulty inside EVM
             // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
         } else {
-            // TODO Consensus checks for old blocks:
-            //  * difficulty, mix_hash & nonce aka PoW stuff
-            // low priority as syncing is done in reverse order
+            // Note: This does not perform any pre merge checks for difficulty, mix_hash & nonce
+            // because those are deprecated and the expectation is that a reth node syncs in reverse
+            // order, making those checks obsolete.
 
             // Check if timestamp is in the future. Clock can drift but this can be consensus issue.
             let present_timestamp =
                 SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
 
-            // TODO: move this to `alloy_consensus::BlockHeader`
             if header.timestamp() > present_timestamp + ALLOWED_FUTURE_BLOCK_TIME_SECONDS {
                 return Err(ConsensusError::TimestampIsInFuture {
                     timestamp: header.timestamp(),
