@@ -50,25 +50,30 @@ where
     type Value = C::Value;
 
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        self.last = Some(key);
-        if let Some(entry) = self.cache.seek.get(&key).cloned() {
-            return Ok(entry)
-        }
-        let entry = self.cursor.seek(key)?;
-        self.cache.seek.insert(key, entry.clone());
+        let entry = if let Some(entry) = self.cache.seek.get(&key).cloned() {
+            entry
+        } else {
+            let entry = self.cursor.seek(key)?;
+            self.cache.seek.insert(key, entry.clone());
+            entry
+        };
+        self.last = entry.as_ref().map(|e| e.0);
         Ok(entry)
     }
 
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         let next = match self.last {
             Some(key) => {
-                if let Some(entry) = self.cache.next.get(&key).cloned() {
-                    return Ok(entry)
-                }
-                // First position the cursor at last entry.
-                self.cursor.seek(key)?;
-                let entry = self.cursor.next()?;
-                self.cache.next.insert(key, entry.clone());
+                let entry = if let Some(entry) = self.cache.next.get(&key).cloned() {
+                    entry
+                } else {
+                    // First position the cursor at last entry.
+                    self.cursor.seek(key)?;
+                    let entry = self.cursor.next()?;
+                    self.cache.next.insert(key, entry.clone());
+                    entry
+                };
+                self.last = entry.as_ref().map(|e| e.0);
                 entry
             }
             // no previous entry was found
