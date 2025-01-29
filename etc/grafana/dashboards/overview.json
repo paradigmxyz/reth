@@ -8311,6 +8311,57 @@
         },
         {
           "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_memory_usage{instance=\"$instance\", cache=\"receipts\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Receipts cache memory usage",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+      },
+      {
+          "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_memory_usage{instance=\"$instance\", cache=\"blocks\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Blocks cache memory usage",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
+      },
+      {
+          "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_memory_usage{instance=\"$instance\", cache=\"headers\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Headers cache memory usage",
+          "range": true,
+          "refId": "F",
+          "useBackend": false
+      },
+        {
+          "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
