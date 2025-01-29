@@ -37,13 +37,13 @@ use reth_primitives_traits::{
 pub struct OpTransactionSigned {
     /// Transaction hash
     #[cfg_attr(feature = "serde", serde(skip))]
-    pub hash: OnceLock<TxHash>,
+    hash: OnceLock<TxHash>,
     /// The transaction signature values
-    pub signature: Signature,
+    signature: Signature,
     /// Raw transaction info
     #[deref]
     #[as_ref]
-    pub transaction: OpTypedTransaction,
+    transaction: OpTypedTransaction,
 }
 
 impl OpTransactionSigned {
@@ -55,6 +55,23 @@ impl OpTransactionSigned {
         }
 
         signed_tx
+    }
+
+    /// Consumes the type and returns the transaction.
+    #[inline]
+    pub fn into_transaction(self) -> OpTypedTransaction {
+        self.transaction
+    }
+
+    /// Returns the transaction.
+    #[inline]
+    pub const fn transaction(&self) -> &OpTypedTransaction {
+        &self.transaction
+    }
+
+    /// Splits the `OpTransactionSigned` into its transaction and signature.
+    pub fn split(self) -> (OpTypedTransaction, Signature) {
+        (self.transaction, self.signature)
     }
 
     /// Creates a new signed transaction from the given transaction and signature without the hash.
@@ -379,6 +396,18 @@ impl Transaction for OpTransactionSigned {
         self.deref().priority_fee_or_price()
     }
 
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.deref().effective_gas_price(base_fee)
+    }
+
+    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        self.deref().effective_tip_per_gas(base_fee)
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.deref().is_dynamic_fee()
+    }
+
     fn kind(&self) -> TxKind {
         self.deref().kind()
     }
@@ -405,18 +434,6 @@ impl Transaction for OpTransactionSigned {
 
     fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
         self.deref().authorization_list()
-    }
-
-    fn is_dynamic_fee(&self) -> bool {
-        self.deref().is_dynamic_fee()
-    }
-
-    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        self.deref().effective_gas_price(base_fee)
-    }
-
-    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.deref().effective_tip_per_gas(base_fee)
     }
 }
 
