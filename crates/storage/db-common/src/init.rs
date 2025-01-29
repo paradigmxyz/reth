@@ -86,7 +86,6 @@ where
         + HeaderProvider
         + HashingWriter
         + StateWriter
-        + StateWriter
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
