@@ -15,6 +15,7 @@ use alloy_primitives::{
     keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
 };
 use alloy_rlp::Header;
+use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use core::{
     hash::{Hash, Hasher},
     mem,
@@ -33,7 +34,7 @@ use reth_primitives_traits::{
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Eq, AsRef, Deref)]
+#[derive(Debug, Clone, AsRef, Deref)]
 pub struct OpTransactionSigned {
     /// Transaction hash
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -44,7 +45,13 @@ pub struct OpTransactionSigned {
     #[deref]
     #[as_ref]
     pub transaction: OpTypedTransaction,
+
+    /// Can we attach a conditional the moment a transaction is deserialized?
+    pub conditional: Option<TransactionConditional>
 }
+
+// TEMPORARY since TransactionConditional does not impl eq
+impl Eq for OpTransactionSigned {}
 
 impl OpTransactionSigned {
     /// Calculates hash of given transaction and signature and returns new instance.
@@ -61,8 +68,9 @@ impl OpTransactionSigned {
     ///
     /// Note: this only calculates the hash on the first [`OpTransactionSigned::hash`] call.
     pub fn new_unhashed(transaction: OpTypedTransaction, signature: Signature) -> Self {
-        Self { hash: Default::default(), signature, transaction }
+        Self { hash: Default::default(), signature, transaction, conditional: None }
     }
+
 
     /// Returns whether this transaction is a deposit.
     pub const fn is_deposit(&self) -> bool {
