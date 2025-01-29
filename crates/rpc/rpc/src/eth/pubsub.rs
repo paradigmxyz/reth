@@ -32,40 +32,38 @@ use tracing::error;
 ///
 /// This handles `eth_subscribe` RPC calls.
 #[derive(Clone)]
-pub struct EthPubSub<Eth, Events> {
+pub struct EthPubSub<Eth> {
     /// All nested fields bundled together.
-    inner: Arc<EthPubSubInner<Eth, Events>>,
+    inner: Arc<EthPubSubInner<Eth>>,
     /// The type that's used to spawn subscription tasks.
     subscription_task_spawner: Box<dyn TaskSpawner>,
 }
 
 // === impl EthPubSub ===
 
-impl<Eth, Events> EthPubSub<Eth, Events> {
+impl<Eth> EthPubSub<Eth> {
     /// Creates a new, shareable instance.
     ///
     /// Subscription tasks are spawned via [`tokio::task::spawn`]
-    pub fn new(eth_api: Eth, chain_events: Events) -> Self {
-        Self::with_spawner(eth_api, chain_events, Box::<TokioTaskExecutor>::default())
+    pub fn new(eth_api: Eth) -> Self {
+        Self::with_spawner(eth_api, Box::<TokioTaskExecutor>::default())
     }
 
     /// Creates a new, shareable instance.
-    pub fn with_spawner(
-        eth_api: Eth,
-        chain_events: Events,
-        subscription_task_spawner: Box<dyn TaskSpawner>,
-    ) -> Self {
-        let inner = EthPubSubInner { eth_api, chain_events };
+    pub fn with_spawner(eth_api: Eth, subscription_task_spawner: Box<dyn TaskSpawner>) -> Self {
+        let inner = EthPubSubInner { eth_api };
         Self { inner: Arc::new(inner), subscription_task_spawner }
     }
 }
 
 #[async_trait::async_trait]
-impl<Eth, Events> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth, Events>
+impl<Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth>
 where
-    Events: CanonStateSubscriptions + 'static,
-    Eth: RpcNodeCore<Provider: BlockNumReader, Pool: TransactionPool, Network: NetworkInfo>
-        + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>
+    Eth: RpcNodeCore<
+            Provider: BlockNumReader + CanonStateSubscriptions,
+            Pool: TransactionPool,
+            Network: NetworkInfo,
+        > + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>
         + 'static,
 {
     /// Handler for `eth_subscribe`
@@ -86,16 +84,18 @@ where
 }
 
 /// The actual handler for an accepted [`EthPubSub::subscribe`] call.
-async fn handle_accepted<Eth, Events>(
-    pubsub: Arc<EthPubSubInner<Eth, Events>>,
+async fn handle_accepted<Eth>(
+    pubsub: Arc<EthPubSubInner<Eth>>,
     accepted_sink: SubscriptionSink,
     kind: SubscriptionKind,
     params: Option<Params>,
 ) -> Result<(), ErrorObject<'static>>
 where
-    Events: CanonStateSubscriptions + 'static,
-    Eth: RpcNodeCore<Provider: BlockNumReader, Pool: TransactionPool, Network: NetworkInfo>
-        + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>,
+    Eth: RpcNodeCore<
+            Provider: BlockNumReader + CanonStateSubscriptions,
+            Pool: TransactionPool,
+            Network: NetworkInfo,
+        > + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>,
 {
     match kind {
         SubscriptionKind::NewHeads => {
@@ -152,7 +152,7 @@ where
         SubscriptionKind::Syncing => {
             // get new block subscription
             let mut canon_state =
-                BroadcastStream::new(pubsub.chain_events.subscribe_to_canonical_state());
+                BroadcastStream::new(pubsub.eth_api.provider().subscribe_to_canonical_state());
             // get current sync status
             let mut initial_sync_status = pubsub.eth_api.network().is_syncing();
             let current_sub_res = pubsub.sync_status(initial_sync_status);
@@ -235,7 +235,7 @@ where
     }
 }
 
-impl<Eth, Events> std::fmt::Debug for EthPubSub<Eth, Events> {
+impl<Eth> std::fmt::Debug for EthPubSub<Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthPubSub").finish_non_exhaustive()
     }
@@ -243,16 +243,14 @@ impl<Eth, Events> std::fmt::Debug for EthPubSub<Eth, Events> {
 
 /// Container type `EthPubSub`
 #[derive(Clone)]
-struct EthPubSubInner<EthApi, Events> {
+struct EthPubSubInner<EthApi> {
     /// The `eth` API.
     eth_api: EthApi,
-    /// A type that allows to create new event subscriptions.
-    chain_events: Events,
 }
 
 // == impl EthPubSubInner ===
 
-impl<Eth, Events> EthPubSubInner<Eth, Events>
+impl<Eth> EthPubSubInner<Eth>
 where
     Eth: RpcNodeCore<Provider: BlockNumReader>,
 {
@@ -277,7 +275,7 @@ where
     }
 }
 
-impl<Eth, Events> EthPubSubInner<Eth, Events>
+impl<Eth> EthPubSubInner<Eth>
 where
     Eth: RpcNodeCore<Pool: TransactionPool>,
 {
@@ -294,15 +292,13 @@ where
     }
 }
 
-impl<Eth, Events> EthPubSubInner<Eth, Events>
+impl<N: NodePrimitives, Eth> EthPubSubInner<Eth>
 where
-    Events: CanonStateSubscriptions,
+    Eth: RpcNodeCore<Provider: CanonStateSubscriptions<Primitives = N>>,
 {
     /// Returns a stream that yields all new RPC blocks.
-    fn new_headers_stream(
-        &self,
-    ) -> impl Stream<Item = Header<<Events::Primitives as NodePrimitives>::BlockHeader>> {
-        self.chain_events.canonical_state_stream().flat_map(|new_chain| {
+    fn new_headers_stream(&self) -> impl Stream<Item = Header<N::BlockHeader>> {
+        self.eth_api.provider().canonical_state_stream().flat_map(|new_chain| {
             let headers = new_chain.committed().headers().collect::<Vec<_>>();
             futures::stream::iter(
                 headers.into_iter().map(|h| Header::from_consensus(h.into(), None, None)),
@@ -312,7 +308,7 @@ where
 
     /// Returns a stream that yields all logs that match the given filter.
     fn log_stream(&self, filter: FilteredParams) -> impl Stream<Item = Log> {
-        BroadcastStream::new(self.chain_events.subscribe_to_canonical_state())
+        BroadcastStream::new(self.eth_api.provider().subscribe_to_canonical_state())
             .map(move |canon_state| {
                 canon_state.expect("new block subscription never ends").block_receipts()
             })

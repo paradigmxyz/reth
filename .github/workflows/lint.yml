@@ -210,6 +210,17 @@ jobs:
         with:
           skip: "*.json"
 
+  check-toml:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Run dprint
+        uses: dprint/check@v2.2
+        with:
+          config-path: dprint.json
+
   grafana:
     runs-on: ubuntu-latest
     timeout-minutes: 30

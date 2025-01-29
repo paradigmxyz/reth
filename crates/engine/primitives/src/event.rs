@@ -1,16 +1,16 @@
 //! Events emitted by the beacon consensus engine.
 
 use crate::ForkchoiceStatus;
+use alloc::{boxed::Box, sync::Arc};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
-use reth_primitives::{EthPrimitives, SealedBlock};
-use reth_primitives_traits::{NodePrimitives, SealedHeader};
-use std::{
+use core::{
     fmt::{Display, Formatter, Result},
-    sync::Arc,
     time::Duration,
 };
+use reth_primitives::{EthPrimitives, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, SealedHeader};
 
 /// Events emitted by the consensus engine.
 #[derive(Clone, Debug)]

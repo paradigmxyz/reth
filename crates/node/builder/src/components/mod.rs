@@ -28,7 +28,7 @@ use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
 use reth_network::{NetworkHandle, NetworkPrimitives};
 use reth_network_api::FullNetwork;
 use reth_node_api::{
-    BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, PayloadBuilder, TxTy,
+    BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, PayloadBuilder, PrimitivesTy, TxTy,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -112,11 +112,9 @@ where
         + Unpin
         + 'static,
     EVM: ConfigureEvm<Header = HeaderTy<Node::Types>, Transaction = TxTy<Node::Types>>,
-    Executor: BlockExecutorProvider<Primitives = <Node::Types as NodeTypes>::Primitives>,
-    Cons: FullConsensus<<Node::Types as NodeTypes>::Primitives, Error = ConsensusError>
-        + Clone
-        + Unpin
-        + 'static,
+    Executor: BlockExecutorProvider<Primitives = PrimitivesTy<Node::Types>>,
+    Cons:
+        FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
 {
     type Pool = Pool;
     type Evm = EVM;

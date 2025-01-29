@@ -46,9 +46,9 @@ alloy-consensus.workspace = true
 
 [features]
 test-utils = [
-	"alloy-primitives",
-	"reth-chain-state/test-utils",
-	"reth-primitives/test-utils",
-	"revm/test-utils",
-	"reth-primitives-traits/test-utils"
+    "alloy-primitives",
+    "reth-chain-state/test-utils",
+    "reth-primitives/test-utils",
+    "revm/test-utils",
+    "reth-primitives-traits/test-utils",
 ]

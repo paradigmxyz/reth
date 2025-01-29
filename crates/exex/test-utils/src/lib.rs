@@ -45,7 +45,7 @@ use reth_node_ethereum::{
     EthEngineTypes, EthEvmConfig,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
-use reth_primitives::{EthPrimitives, Head, RecoveredBlock, TransactionSigned};
+use reth_primitives::{EthPrimitives, RecoveredBlock, TransactionSigned};
 use reth_primitives_traits::Block as _;
 use reth_provider::{
     providers::{BlockchainProvider, StaticFileProvider},
@@ -308,13 +308,7 @@ pub async fn test_exex_context_with_chain_spec(
         .seal_slow()
         .try_recover()?;
 
-    let head = Head {
-        number: genesis.number,
-        hash: genesis_hash,
-        difficulty: genesis.difficulty,
-        timestamp: genesis.timestamp,
-        total_difficulty: Default::default(),
-    };
+    let head = genesis.num_hash();
 
     let wal_directory = tempfile::tempdir()?;
     let wal = Wal::new(wal_directory.path())?;

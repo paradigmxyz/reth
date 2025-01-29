@@ -45,8 +45,7 @@ use reth_stages::{
         IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
         TransactionLookupStage,
     },
-    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageError, StageExt, UnwindInput,
-    UnwindOutput,
+    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
 use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::watch;
@@ -190,16 +189,18 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                     // Use `to` as the tip for the stage
                     let tip: P::BlockHeader = loop {
-                            match fetch_client.get_header(BlockHashOrNumber::Number(self.to)).await {
-                                Ok(header) => break header,
-                                Err(error) if error.is_retryable() => {
-                                    warn!(target: "reth::cli", "Error requesting header: {error}. Retrying...")
+                        match fetch_client.get_header(BlockHashOrNumber::Number(self.to)).await {
+                            Ok(header) => {
+                                if let Some(header) = header.into_data() {
+                                    break header
                                 }
-                                Err(error) => return Err(error.into()),
                             }
+                            Err(error) if error.is_retryable() => {
+                                warn!(target: "reth::cli", "Error requesting header: {error}. Retrying...")
+                            }
+                            Err(error) => return Err(error.into()),
                         }
-                        .into_data()
-                        .ok_or(StageError::MissingSyncGap)?;
+                    };
                     let (_, rx) = watch::channel(tip.hash_slow());
                     (
                         Box::new(HeaderStage::new(

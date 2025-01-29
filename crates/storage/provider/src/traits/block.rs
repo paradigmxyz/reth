@@ -3,6 +3,7 @@ use reth_db_api::models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_node_types::NodePrimitives;
 use reth_primitives::RecoveredBlock;
+use reth_primitives_traits::Block;
 use reth_storage_api::{NodePrimitivesProvider, StorageLocation};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
@@ -71,7 +72,7 @@ pub trait StateReader: Send + Sync {
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockWriter: Send + Sync {
     /// The body this writer can write.
-    type Block: reth_primitives_traits::Block;
+    type Block: Block;
     /// The receipt type for [`ExecutionOutcome`].
     type Receipt: Send + Sync;
 
@@ -96,7 +97,7 @@ pub trait BlockWriter: Send + Sync {
     /// Bodies are passed as [`Option`]s, if body is `None` the corresponding block is empty.
     fn append_block_bodies(
         &self,
-        bodies: Vec<(BlockNumber, Option<<Self::Block as reth_primitives_traits::Block>::Body>)>,
+        bodies: Vec<(BlockNumber, Option<<Self::Block as Block>::Body>)>,
         write_to: StorageLocation,
     ) -> ProviderResult<()>;
 

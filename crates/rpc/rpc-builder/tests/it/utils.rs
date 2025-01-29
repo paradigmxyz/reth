@@ -12,7 +12,7 @@ use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::{execute::EthExecutionStrategyFactory, EthEvmConfig};
 use reth_network_api::noop::NoopNetwork;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
+use reth_provider::test_utils::NoopProvider;
 use reth_rpc::EthApi;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
@@ -134,7 +134,6 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
     TestPool,
     NoopNetwork,
     TokioTaskExecutor,
-    TestCanonStateSubscriptions,
     EthEvmConfig,
     BasicBlockExecutorProvider<EthExecutionStrategyFactory>,
     NoopConsensus,
@@ -144,7 +143,6 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
         .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
-        .with_events(TestCanonStateSubscriptions::default())
         .with_evm_config(EthEvmConfig::new(MAINNET.clone()))
         .with_block_executor(
             BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::mainnet()),

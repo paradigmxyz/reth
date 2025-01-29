@@ -47,6 +47,20 @@ pub trait BlockBody:
         self.transactions().iter()
     }
 
+    /// Returns the transaction with the matching hash.
+    ///
+    /// This is a convenience function for `transactions_iter().find()`
+    fn transaction_by_hash(&self, hash: &B256) -> Option<&Self::Transaction> {
+        self.transactions_iter().find(|tx| tx.tx_hash() == hash)
+    }
+
+    /// Clones the transactions in the block.
+    ///
+    /// This is a convenience function for `transactions().to_vec()`
+    fn clone_transactions(&self) -> Vec<Self::Transaction> {
+        self.transactions().to_vec()
+    }
+
     /// Returns an iterator over all transaction hashes in the block body.
     fn transaction_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
         self.transactions_iter().map(|tx| tx.tx_hash())
@@ -123,11 +137,11 @@ pub trait BlockBody:
     }
 
     /// Recover signer addresses for all transactions in the block body.
-    fn recover_signers(&self) -> Option<Vec<Address>>
+    fn recover_signers(&self) -> Result<Vec<Address>, RecoveryError>
     where
         Self::Transaction: SignedTransaction,
     {
-        crate::transaction::recover::recover_signers(self.transactions())
+        crate::transaction::recover::recover_signers(self.transactions()).map_err(|_| RecoveryError)
     }
 
     /// Recover signer addresses for all transactions in the block body.
@@ -137,14 +151,14 @@ pub trait BlockBody:
     where
         Self::Transaction: SignedTransaction,
     {
-        self.recover_signers().ok_or(RecoveryError)
+        self.recover_signers()
     }
 
     /// Recover signer addresses for all transactions in the block body _without ensuring that the
     /// signature has a low `s` value_.
     ///
     /// Returns `None`, if some transaction's signature is invalid.
-    fn recover_signers_unchecked(&self) -> Option<Vec<Address>>
+    fn recover_signers_unchecked(&self) -> Result<Vec<Address>, RecoveryError>
     where
         Self::Transaction: SignedTransaction,
     {
@@ -159,7 +173,7 @@ pub trait BlockBody:
     where
         Self::Transaction: SignedTransaction,
     {
-        self.recover_signers_unchecked().ok_or(RecoveryError)
+        self.recover_signers_unchecked()
     }
 }
 

@@ -55,13 +55,7 @@ derive_more = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 clap = { workspace = true, features = ["derive", "env"] }
 
-
-tokio = { workspace = true, features = [
-    "sync",
-    "macros",
-    "time",
-    "rt-multi-thread",
-] }
+tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["codec"] }
 tracing.workspace = true
 eyre.workspace = true
@@ -69,7 +63,6 @@ eyre.workspace = true
 # reth test-vectors
 proptest = { workspace = true, optional = true }
 op-alloy-consensus = { workspace = true, optional = true }
-
 
 [dev-dependencies]
 tempfile.workspace = true
@@ -80,18 +73,17 @@ reth-cli-commands.workspace = true
 [features]
 optimism = [
     "op-alloy-consensus",
-	"alloy-consensus",
-	"dep:derive_more",
-	"dep:serde",
-	"reth-optimism-evm/optimism",
-	"reth-provider/optimism",
-	"reth-node-core/optimism",
-	"reth-optimism-node/optimism",
-	"reth-execution-types/optimism",
-	"reth-db/optimism",
-	"reth-db-api/optimism",
+    "alloy-consensus",
+    "dep:derive_more",
+    "dep:serde",
+    "reth-optimism-evm/optimism",
+    "reth-node-core/optimism",
+    "reth-optimism-node/optimism",
+    "reth-execution-types/optimism",
+    "reth-db/optimism",
+    "reth-db-api/optimism",
     "reth-optimism-primitives/optimism",
-	"reth-downloaders/optimism"
+    "reth-downloaders/optimism",
 ]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
@@ -103,19 +95,19 @@ asm-keccak = [
 # Jemalloc feature for vergen to generate correct env vars
 jemalloc = [
     "reth-node-core/jemalloc",
-    "reth-node-metrics/jemalloc"
+    "reth-node-metrics/jemalloc",
 ]
 
 dev = [
     "dep:proptest",
-    "reth-cli-commands/arbitrary"
+    "reth-cli-commands/arbitrary",
 ]
 serde = [
-	"alloy-consensus?/serde",
-	"alloy-eips/serde",
-	"alloy-primitives/serde",
-	"op-alloy-consensus?/serde",
-	"reth-execution-types/serde",
-	"reth-provider/serde",
-	"reth-optimism-primitives/serde",
+    "alloy-consensus?/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "op-alloy-consensus?/serde",
+    "reth-execution-types/serde",
+    "reth-provider/serde",
+    "reth-optimism-primitives/serde",
 ]

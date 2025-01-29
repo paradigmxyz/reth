@@ -64,7 +64,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
             self.exec_results.lock().pop().unwrap();
         Ok(BlockExecutionOutput {
             state: bundle,
-            receipts: receipts.into_iter().flatten().flatten().collect(),
+            receipts: receipts.into_iter().flatten().collect(),
             requests: requests.into_iter().fold(Requests::default(), |mut reqs, req| {
                 reqs.extend(req);
                 reqs

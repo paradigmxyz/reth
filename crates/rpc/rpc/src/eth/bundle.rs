@@ -1,18 +1,16 @@
 //! `Eth` bundle implementation and helpers.
 
-use alloy_consensus::{BlockHeader, EnvKzgSettings, Transaction as _};
+use alloy_consensus::{EnvKzgSettings, Transaction as _};
 use alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK;
 use alloy_primitives::{Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
 use reth_primitives_traits::SignedTransaction;
-use reth_provider::{ChainSpecProvider, HeaderProvider};
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
-    EthCallBundleApiServer, FromEthApiError, FromEvmError, RpcNodeCore,
+    EthCallBundleApiServer, FromEthApiError, FromEvmError,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, RpcInvalidTransactionError};
 use reth_tasks::pool::BlockingTaskGuard;
@@ -23,7 +21,6 @@ use revm::{
     db::{CacheDB, DatabaseCommit, DatabaseRef},
     primitives::ResultAndState,
 };
-use revm_primitives::SpecId;
 use std::sync::Arc;
 
 /// `Eth` bundle implementation.
@@ -132,21 +129,6 @@ where
 
         if let Some(base_fee) = base_fee {
             evm_env.block_env.basefee = U256::from(base_fee);
-        } else if evm_env.cfg_env_with_handler_cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON)
-        {
-            let parent_block = evm_env.block_env.number.saturating_to::<u64>();
-            // here we need to fetch the _next_ block's basefee based on the parent block <https://github.com/flashbots/mev-geth/blob/fddf97beec5877483f879a77b7dea2e58a58d653/internal/ethapi/api.go#L2130>
-            let parent = RpcNodeCore::provider(self.eth_api())
-                .header_by_number(parent_block)
-                .map_err(Eth::Error::from_eth_err)?
-                .ok_or(EthApiError::HeaderNotFound(parent_block.into()))?;
-            if let Some(base_fee) = parent.next_block_base_fee(
-                RpcNodeCore::provider(self.eth_api())
-                    .chain_spec()
-                    .base_fee_params_at_block(parent_block),
-            ) {
-                evm_env.block_env.basefee = U256::from(base_fee);
-            }
         }
 
         let state_block_number = evm_env.block_env.number;

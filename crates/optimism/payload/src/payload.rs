@@ -11,7 +11,7 @@ use op_alloy_consensus::{encode_holocene_extra_data, EIP1559ParamError};
 /// Re-export for use in downstream arguments.
 pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_chainspec::EthereumHardforks;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{OpBlock, OpPrimitives, OpTransactionSigned};
@@ -137,7 +137,7 @@ pub struct OpBuiltPayload {
     /// The built block
     pub(crate) block: Arc<SealedBlock<OpBlock>>,
     /// Block execution data for the payload, if any.
-    pub(crate) executed_block: Option<ExecutedBlock<OpPrimitives>>,
+    pub(crate) executed_block: Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
@@ -159,7 +159,7 @@ impl OpBuiltPayload {
         fees: U256,
         chain_spec: Arc<OpChainSpec>,
         attributes: OpPayloadBuilderAttributes,
-        executed_block: Option<ExecutedBlock<OpPrimitives>>,
+        executed_block: Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
     ) -> Self {
         Self { id, block, executed_block, fees, sidecars: Vec::new(), chain_spec, attributes }
     }
@@ -196,7 +196,7 @@ impl BuiltPayload for OpBuiltPayload {
         self.fees
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlock<OpPrimitives>> {
+    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<OpPrimitives>> {
         self.executed_block.clone()
     }
 
@@ -216,7 +216,7 @@ impl BuiltPayload for &OpBuiltPayload {
         (**self).fees()
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlock<OpPrimitives>> {
+    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<OpPrimitives>> {
         self.executed_block.clone()
     }
 
