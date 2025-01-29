@@ -434,6 +434,15 @@ impl MockTransaction {
         }
     }
 
+    pub const fn get_chain_id(&self) -> Option<u64> {
+        match self {
+            Self::Eip1559 { chain_id, .. } |
+            Self::Eip4844 { chain_id, .. } |
+            Self::Eip7702 { chain_id, .. } => Some(*chain_id),
+            _ => None,
+        }
+    }
+
     /// Sets the max fee for dynamic fee transactions (EIP-1559 and EIP-4844)
     pub fn set_max_fee(&mut self, val: u128) -> &mut Self {
         if let Self::Eip1559 { max_fee_per_gas, .. } |
@@ -657,6 +666,90 @@ impl MockTransaction {
                 *cost = U256::from(*gas_limit) * U256::from(*max_fee_per_gas) + *value
             }
         };
+    }
+}
+
+impl alloy_consensus::Typed2718 for MockTransaction {
+    fn ty(&self) -> u8 {
+        self.tx_type()
+    }
+}
+
+impl alloy_consensus::Transaction for MockTransaction {
+    fn chain_id(&self) -> Option<ChainId> {
+        self.get_chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        *self.get_nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        *self.get_gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        Some(self.get_gas_price())
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.get_max_fee().unwrap()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        None
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        None
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.get_gas_price()
+    }
+
+    fn effective_gas_price(&self, _base_fee: Option<u64>) -> u128 {
+        0
+    }
+
+    fn effective_tip_per_gas(&self, _base_fee: u64) -> Option<u128> {
+        None
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        false
+    }
+
+    fn kind(&self) -> TxKind {
+        TxKind::Call(Address::ZERO)
+    }
+
+    fn is_create(&self) -> bool {
+        false
+    }
+
+    fn to(&self) -> Option<Address> {
+        None
+    }
+
+    fn value(&self) -> U256 {
+        U256::ZERO
+    }
+
+    fn input(&self) -> &Bytes {
+        Default::default()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        None
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        None
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        None
     }
 }
 

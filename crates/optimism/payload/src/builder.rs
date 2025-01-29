@@ -25,6 +25,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_transaction_pool::OpPooledTransaction;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
@@ -123,7 +124,7 @@ where
     ) -> Result<BuildOutcome<OpBuiltPayload>, PayloadBuilderError>
     where
         Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-        Txs: PayloadTransactions<Transaction = OpTransactionSigned>,
+        Txs: PayloadTransactions<Transaction = OpPooledTransaction>,
     {
         let evm_env = self
             .evm_env(&args.config.attributes, &args.config.parent_header)
@@ -216,7 +217,7 @@ where
 impl<Pool, Client, EvmConfig, Txs> PayloadBuilder<Pool, Client> for OpPayloadBuilder<EvmConfig, Txs>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = EvmConfig::Transaction>>,
+    Pool: TransactionPool<Transaction = OpPooledTransaction>,
     EvmConfig: ConfigureEvm<Header = Header, Transaction = OpTransactionSigned>,
     Txs: OpPayloadTransactions,
 {
@@ -292,7 +293,7 @@ impl<'a, Txs> OpBuilder<'a, Txs> {
 
 impl<Txs> OpBuilder<'_, Txs>
 where
-    Txs: PayloadTransactions<Transaction = OpTransactionSigned>,
+    Txs: PayloadTransactions<Transaction = OpPooledTransaction>,
 {
     /// Executes the payload and returns the outcome.
     pub fn execute<EvmConfig, DB>(
@@ -492,22 +493,22 @@ pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
     /// Returns an iterator that yields the transaction in the order they should get included in the
     /// new payload.
     fn best_transactions<
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = OpTransactionSigned>>,
+        Pool: TransactionPool<Transaction = OpPooledTransaction>,
     >(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> impl PayloadTransactions<Transaction = OpTransactionSigned>;
+    ) -> impl PayloadTransactions<Transaction = OpPooledTransaction>;
 }
 
 impl OpPayloadTransactions for () {
     fn best_transactions<
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = OpTransactionSigned>>,
+        Pool: TransactionPool<Transaction = OpPooledTransaction>,
     >(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
-    ) -> impl PayloadTransactions<Transaction = OpTransactionSigned> {
+    ) -> impl PayloadTransactions<Transaction = OpPooledTransaction> {
         BestPayloadTransactions::new(pool.best_transactions_with_attributes(attr))
     }
 }
@@ -877,7 +878,7 @@ where
         &self,
         info: &mut ExecutionInfo,
         db: &mut State<DB>,
-        mut best_txs: impl PayloadTransactions<Transaction = EvmConfig::Transaction>,
+        mut best_txs: impl PayloadTransactions<Transaction = OpPooledTransaction>,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
@@ -890,7 +891,9 @@ where
         let mut evm = self.evm_config.evm_with_env(&mut *db, self.evm_env.clone());
 
         while let Some(tx) = best_txs.next(()) {
-            if info.is_tx_over_limits(tx.tx(), block_gas_limit, tx_da_limit, block_da_limit) {
+            let tx_consensus = tx.tx().transaction();
+
+            if info.is_tx_over_limits(tx_consensus, block_gas_limit, tx_da_limit, block_da_limit) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -910,7 +913,7 @@ where
             }
 
             // Configure the environment for the tx.
-            let tx_env = self.evm_config.tx_env(tx.tx(), tx.signer());
+            let tx_env = self.evm_config.tx_env(tx_consensus, tx.signer());
 
             let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
@@ -945,7 +948,7 @@ where
             // add gas used by the transaction to cumulative gas used, before creating the
             // receipt
             info.cumulative_gas_used += gas_used;
-            info.cumulative_da_bytes_used += tx.length() as u64;
+            info.cumulative_da_bytes_used += tx_consensus.length() as u64;
 
             let receipt = alloy_consensus::Receipt {
                 status: Eip658Value::Eip658(result.is_success()),
@@ -954,7 +957,7 @@ where
             };
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            info.receipts.push(match tx.tx_type() {
+            info.receipts.push(match tx_consensus.tx_type() {
                 OpTxType::Legacy => OpReceipt::Legacy(receipt),
                 OpTxType::Eip2930 => OpReceipt::Eip2930(receipt),
                 OpTxType::Eip1559 => OpReceipt::Eip1559(receipt),
@@ -974,7 +977,7 @@ where
 
             // append sender and transaction to the respective lists
             info.executed_senders.push(tx.signer());
-            info.executed_transactions.push(tx.into_tx());
+            info.executed_transactions.push(tx.clone_into_consensus().into_tx());
         }
 
         Ok(None)
