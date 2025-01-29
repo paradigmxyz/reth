@@ -107,9 +107,9 @@ pub enum SparseStateTrieErrorKind {
         /// Encoded first proof node.
         node: Bytes,
     },
-    /// Storage trie is still blind. Thrown on attempt to update it.
-    #[error("storage trie for address {0} is blind")]
-    BlindStorageTrie(B256),
+    /// Storage sparse trie error.
+    #[error("error in storage trie for address {0:?}: {1:?}")]
+    SparseStorageTrie(B256, SparseTrieErrorKind),
     /// Sparse trie error.
     #[error(transparent)]
     Sparse(#[from] SparseTrieErrorKind),
