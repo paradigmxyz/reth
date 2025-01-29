@@ -9,7 +9,9 @@ use crate::{
 use op_alloy_consensus::OpPooledTransaction;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvmEnv, ConfigureEvmFor};
+use reth_evm::{
+    execute::BasicBlockExecutorProvider, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor,
+};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
 use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, PrimitivesTy, TxTy};
 use reth_node_builder::{
@@ -32,10 +34,11 @@ use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_rpc::{
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
-    OpEthApi, SequencerClient,
+    OpEthApi, OpEthApiError, SequencerClient,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{CanonStateSubscriptions, EthStorage};
+use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -193,6 +196,7 @@ where
         >,
         Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
     >,
+    OpEthApiError: FromEvmError<N::Evm>,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
 
@@ -241,8 +245,9 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
+        Evm: ConfigureEvm<TxEnv = TxEnv>,
     >,
+    OpEthApiError: FromEvmError<N::Evm>,
 {
     type EthApi = OpEthApi<N>;
 

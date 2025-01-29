@@ -8,14 +8,13 @@ pub use reth_execution_errors::{
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
-use crate::system_calls::OnStateHook;
+use crate::{system_calls::OnStateHook, Database};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     map::{DefaultHashBuilder, HashMap},
     Address,
 };
-use core::fmt::Display;
 use reth_consensus::ConsensusError;
 use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
 use reth_revm::batch::BlockBatchRecord;
@@ -23,7 +22,7 @@ use revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
     State,
 };
-use revm_primitives::{db::Database, Account, AccountStatus, EvmState};
+use revm_primitives::{Account, AccountStatus, EvmState};
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
@@ -134,7 +133,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     ///
     /// It is not expected to validate the state trie root, this must be done by the caller using
     /// the returned state.
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
+    type Executor<DB: Database>: for<'a> Executor<
         DB,
         Input<'a> = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         Output = BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>,
@@ -142,7 +141,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     >;
 
     /// An executor that can execute a batch of blocks given a database.
-    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
+    type BatchExecutor<DB: Database>: for<'a> BatchExecutor<
         DB,
         Input<'a> = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         Output = ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>,
@@ -154,7 +153,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// This is used to execute a single block and get the changed state.
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>;
+        DB: Database;
 
     /// Creates a new batch executor with the given database and pruning modes.
     ///
@@ -162,7 +161,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// during historical sync which involves executing multiple blocks in sequence.
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>;
+        DB: Database;
 }
 
 /// Helper type for the output of executing a block.
@@ -177,13 +176,13 @@ pub struct ExecuteOutput<R = Receipt> {
 /// Defines the strategy for executing a single block.
 pub trait BlockExecutionStrategy {
     /// Database this strategy operates on.
-    type DB: Database;
+    type DB: revm::Database;
 
     /// Primitive types used by the strategy.
     type Primitives: NodePrimitives;
 
     /// The error type returned by this strategy's methods.
-    type Error: From<ProviderError> + core::error::Error;
+    type Error: core::error::Error;
 
     /// Applies any necessary changes before executing the block's transactions.
     fn apply_pre_execution_changes(
@@ -236,7 +235,7 @@ pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
     type Primitives: NodePrimitives;
 
     /// Associated strategy type.
-    type Strategy<DB: Database<Error: Into<ProviderError> + Display>>: BlockExecutionStrategy<
+    type Strategy<DB: Database>: BlockExecutionStrategy<
         DB = DB,
         Primitives = Self::Primitives,
         Error = BlockExecutionError,
@@ -245,7 +244,7 @@ pub trait BlockExecutionStrategyFactory: Send + Sync + Clone + Unpin + 'static {
     /// Creates a strategy using the give database.
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>;
+        DB: Database;
 }
 
 impl<F> Clone for BasicBlockExecutorProvider<F>
@@ -276,15 +275,13 @@ where
 {
     type Primitives = F::Primitives;
 
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
-        BasicBlockExecutor<F::Strategy<DB>>;
+    type Executor<DB: Database> = BasicBlockExecutor<F::Strategy<DB>>;
 
-    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
-        BasicBatchExecutor<F::Strategy<DB>>;
+    type BatchExecutor<DB: Database> = BasicBatchExecutor<F::Strategy<DB>>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database,
     {
         let strategy = self.strategy_factory.create_strategy(db);
         BasicBlockExecutor::new(strategy)
@@ -292,7 +289,7 @@ where
 
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database,
     {
         let strategy = self.strategy_factory.create_strategy(db);
         let batch_record = BlockBatchRecord::default();
@@ -318,7 +315,7 @@ impl<S> BasicBlockExecutor<S> {
 impl<S, DB> Executor<DB> for BasicBlockExecutor<S>
 where
     S: BlockExecutionStrategy<DB = DB>,
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: Database,
 {
     type Input<'a> = &'a RecoveredBlock<<S::Primitives as NodePrimitives>::Block>;
     type Output = BlockExecutionOutput<<S::Primitives as NodePrimitives>::Receipt>;
@@ -401,7 +398,7 @@ where
 impl<S, DB> BatchExecutor<DB> for BasicBatchExecutor<S>
 where
     S: BlockExecutionStrategy<DB = DB, Error = BlockExecutionError>,
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: Database,
 {
     type Input<'a> = &'a RecoveredBlock<<S::Primitives as NodePrimitives>::Block>;
     type Output = ExecutionOutcome<<S::Primitives as NodePrimitives>::Receipt>;
@@ -495,19 +492,19 @@ mod tests {
 
     impl BlockExecutorProvider for TestExecutorProvider {
         type Primitives = EthPrimitives;
-        type Executor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
-        type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = TestExecutor<DB>;
+        type Executor<DB: Database> = TestExecutor<DB>;
+        type BatchExecutor<DB: Database> = TestExecutor<DB>;
 
         fn executor<DB>(&self, _db: DB) -> Self::Executor<DB>
         where
-            DB: Database<Error: Into<ProviderError> + Display>,
+            DB: Database,
         {
             TestExecutor(PhantomData)
         }
 
         fn batch_executor<DB>(&self, _db: DB) -> Self::BatchExecutor<DB>
         where
-            DB: Database<Error: Into<ProviderError> + Display>,
+            DB: Database,
         {
             TestExecutor(PhantomData)
         }
@@ -585,12 +582,11 @@ mod tests {
 
     impl BlockExecutionStrategyFactory for TestExecutorStrategyFactory {
         type Primitives = EthPrimitives;
-        type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
-            TestExecutorStrategy<DB, TestEvmConfig>;
+        type Strategy<DB: Database> = TestExecutorStrategy<DB, TestEvmConfig>;
 
         fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
         where
-            DB: Database<Error: Into<ProviderError> + Display>,
+            DB: Database,
         {
             let state = State::builder()
                 .with_database(db)

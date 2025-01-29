@@ -11,6 +11,8 @@
 
 extern crate alloc;
 
+use core::fmt::Display;
+
 use alloc::{
     boxed::Box,
     string::{String, ToString},
@@ -20,22 +22,22 @@ use alloy_primitives::B256;
 use reth_consensus::ConsensusError;
 use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
-use revm_primitives::EVMError;
 use thiserror::Error;
 
 pub mod trie;
 pub use trie::*;
 
 /// Transaction validation errors
-#[derive(Error, Clone, Debug)]
+#[derive(Error, derive_more::Debug)]
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
     #[error("EVM reported invalid transaction ({hash}): {error}")]
+    #[debug("{error}")]
     EVM {
         /// The hash of the transaction
         hash: B256,
         /// The EVM error.
-        error: Box<EVMError<ProviderError>>,
+        error: Box<dyn Display + Send + Sync>,
     },
     /// Error when recovering the sender for a transaction
     #[error("failed to recover sender for transaction")]

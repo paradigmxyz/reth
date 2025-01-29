@@ -6,7 +6,7 @@ use reth_optimism_evm::OpBlockExecutionError;
 use reth_rpc_eth_api::AsEthApiError;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
-use revm::primitives::{InvalidTransaction, OptimismInvalidTransaction};
+use revm::primitives::{EVMError, InvalidTransaction, OptimismInvalidTransaction};
 
 /// Optimism specific errors, that extend [`EthApiError`].
 #[derive(Debug, thiserror::Error)]
@@ -116,6 +116,15 @@ impl From<SequencerClientError> for jsonrpsee_types::error::ErrorObject<'static>
 
 impl From<BlockError> for OpEthApiError {
     fn from(error: BlockError) -> Self {
+        Self::Eth(error.into())
+    }
+}
+
+impl<DB> From<EVMError<DB>> for OpEthApiError
+where
+    EthApiError: From<EVMError<DB>>,
+{
+    fn from(error: EVMError<DB>) -> Self {
         Self::Eth(error.into())
     }
 }

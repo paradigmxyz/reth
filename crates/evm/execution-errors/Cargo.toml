@@ -19,19 +19,18 @@ reth-prune-types.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-eips.workspace = true
-revm-primitives.workspace = true
 nybbles.workspace = true
 
 thiserror.workspace = true
+derive_more.workspace = true
 
 [features]
 default = ["std"]
 std = [
-    "reth-consensus/std",
-    "alloy-eips/std",
-    "alloy-primitives/std",
-    "revm-primitives/std",
-    "alloy-rlp/std",
-    "thiserror/std",
-    "nybbles/std",
+	"reth-consensus/std",
+	"alloy-eips/std",
+	"alloy-primitives/std",
+	"alloy-rlp/std",
+	"thiserror/std",
+	"nybbles/std"
 ]

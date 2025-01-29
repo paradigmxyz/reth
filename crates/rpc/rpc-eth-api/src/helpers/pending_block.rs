@@ -13,7 +13,8 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{
     env::EvmEnv, state_change::post_block_withdrawals_balance_increments,
-    system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Evm, NextBlockEnvAttributes,
+    system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Evm, EvmError, InvalidTxError,
+    NextBlockEnvAttributes,
 };
 use reth_primitives::{InvalidTransactionError, RecoveredBlock};
 use reth_primitives_traits::Receipt;
@@ -23,7 +24,7 @@ use reth_provider::{
 };
 use reth_revm::{
     database::StateProviderDatabase,
-    primitives::{BlockEnv, EVMError, ExecutionResult, InvalidTransaction, ResultAndState},
+    primitives::{BlockEnv, ExecutionResult, ResultAndState},
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_transaction_pool::{
@@ -43,6 +44,7 @@ pub trait LoadPendingBlock:
         NetworkTypes: Network<
             HeaderResponse = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
         >,
+        Error: FromEvmError<Self::Evm>,
     > + RpcNodeCore<
         Provider: BlockReaderIdExt<Receipt: Receipt>
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
@@ -334,27 +336,23 @@ pub trait LoadPendingBlock:
             let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    match err {
-                        EVMError::Transaction(err) => {
-                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                                // if the nonce is too low, we can skip this transaction
-                            } else {
-                                // if the transaction is invalid, we can skip it and all of its
-                                // descendants
-                                best_txs.mark_invalid(
-                                    &pool_tx,
-                                    InvalidPoolTransactionError::Consensus(
-                                        InvalidTransactionError::TxTypeNotSupported,
-                                    ),
-                                );
-                            }
-                            continue
+                    if let Some(err) = err.as_invalid_tx_err() {
+                        if err.is_nonce_too_low() {
+                            // if the nonce is too low, we can skip this transaction
+                        } else {
+                            // if the transaction is invalid, we can skip it and all of its
+                            // descendants
+                            best_txs.mark_invalid(
+                                &pool_tx,
+                                InvalidPoolTransactionError::Consensus(
+                                    InvalidTransactionError::TxTypeNotSupported,
+                                ),
+                            );
                         }
-                        err => {
-                            // this is an error that we should treat as fatal for this attempt
-                            return Err(Self::Error::from_evm_err(err))
-                        }
+                        continue
                     }
+                    // this is an error that we should treat as fatal for this attempt
+                    return Err(Self::Error::from_evm_err(err));
                 }
             };
             // drop evm to release db reference.
