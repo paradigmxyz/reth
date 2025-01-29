@@ -127,8 +127,9 @@ where
             self.gas_cap,
             self.max_simulate_blocks,
             self.eth_proof_window,
-            self.blocking_task_pool
-                .unwrap_or(BlockingTaskPool::build().expect("failed to build blocking task pool")),
+            self.blocking_task_pool.unwrap_or_else(|| {
+                BlockingTaskPool::build().expect("failed to build blocking task pool")
+            }),
             self.fee_history_cache,
             self.evm_config,
             TokioTaskExecutor::default(),
