@@ -9,7 +9,7 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{Block, BlockBody};
-use reth_storage_api::{BlockReader, StateProviderFactory, TransactionVariant};
+use reth_storage_api::{BlockReader, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use schnellru::{ByLength, Limiter};
 use std::{
@@ -106,8 +106,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     /// See also [`Self::spawn_with`]
     pub fn spawn<Provider>(provider: Provider, config: EthStateCacheConfig) -> Self
     where
-        Provider:
-            StateProviderFactory + BlockReader<Block = B, Receipt = R> + Clone + Unpin + 'static,
+        Provider: BlockReader<Block = B, Receipt = R> + Clone + Unpin + 'static,
     {
         Self::spawn_with(provider, config, TokioTaskExecutor::default())
     }
@@ -122,8 +121,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
         executor: Tasks,
     ) -> Self
     where
-        Provider:
-            StateProviderFactory + BlockReader<Block = B, Receipt = R> + Clone + Unpin + 'static,
+        Provider: BlockReader<Block = B, Receipt = R> + Clone + Unpin + 'static,
         Tasks: TaskSpawner + Clone + 'static,
     {
         let EthStateCacheConfig {
@@ -242,7 +240,7 @@ pub(crate) struct EthStateCacheService<
 
 impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
 where
-    Provider: StateProviderFactory + BlockReader + Clone + Unpin + 'static,
+    Provider: BlockReader + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
     fn on_new_block(
@@ -335,7 +333,7 @@ where
 
 impl<Provider, Tasks> Future for EthStateCacheService<Provider, Tasks>
 where
-    Provider: StateProviderFactory + BlockReader + Clone + Unpin + 'static,
+    Provider: BlockReader + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
     type Output = ();
