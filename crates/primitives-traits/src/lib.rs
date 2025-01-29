@@ -120,7 +120,7 @@ pub mod sync;
 
 /// Common header types
 pub mod header;
-pub use header::{Header, HeaderError, SealedHeader};
+pub use header::{Header, HeaderError, SealedHeader, SealedHeaderFor};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
 ///
