@@ -27,10 +27,10 @@ derive_more.workspace = true
 [features]
 default = ["std"]
 std = [
-	"reth-consensus/std",
-	"alloy-eips/std",
-	"alloy-primitives/std",
-	"alloy-rlp/std",
-	"thiserror/std",
-	"nybbles/std"
+    "reth-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "thiserror/std",
+    "nybbles/std",
 ]
