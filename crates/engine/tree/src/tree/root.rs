@@ -659,8 +659,13 @@ where
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
                             total_proofs = proofs_processed,
-                            seek_cache_size = self.multiproof_manager.hashed_account_cache.seek.weighted_size(),
-                            next_cache_size = self.multiproof_manager.hashed_account_cache.next.weighted_size(),
+                            cache_sizes = ?{
+                                let now = std::time::Instant::now();
+                                let cache = &self.multiproof_manager.hashed_account_cache;
+                                cache.seek.run_pending_tasks();
+                                cache.next.run_pending_tasks();
+                                (cache.seek.entry_count(), cache.next.entry_count(), now.elapsed())
+                            },
                             "Processing calculated proof"
                         );
 
