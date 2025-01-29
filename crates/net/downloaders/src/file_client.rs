@@ -253,27 +253,28 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
                     }
                     Err(err) => return Err(err),
                 };
-                let block_number = block.header().number();
-                let block_hash = block.header().hash_slow();
 
-                // Validate incoming header
-                let sealed = SealedHeader::new(block.header().clone(), block_hash);
-                self.consensus.validate_header(&sealed)?;
+                let block  = SealedBlock::seal_slow(
+                    block,
+                );
+
+                // Validate standalone header
+                self.consensus.validate_header(block.sealed_header())?;
                 if let Some(parent) = &parent_header {
-                    self.consensus.validate_header_against_parent(&sealed, parent)?;
-                    parent_header = Some(sealed);
+                    self.consensus.validate_header_against_parent(block.sealed_header(), parent)?;
+                    parent_header = Some(block.sealed_header().clone());
                 }
 
                 // Validate block against header
-                self.consensus.validate_block_pre_execution(&SealedBlock::new_unchecked(
-                    block.clone(),
-                    block_hash,
-                ))?;
+                self.consensus.validate_block_pre_execution(&block)?;
 
                 // add to the internal maps
-                headers.insert(block.header().number(), block.header().clone());
-                hash_to_number.insert(block_hash, block.header().number());
-                bodies.insert(block_hash, block.body().clone());
+                let block_hash = block.hash();
+                let block_number = block.number();
+                let (header, body) = block.split_sealed_header_body();
+                headers.insert(block_number, header.unseal());
+                hash_to_number.insert(block_hash, block_number);
+                bodies.insert(block_hash, body);
 
                 if log_interval == 0 {
                     trace!(target: "downloaders::file",
