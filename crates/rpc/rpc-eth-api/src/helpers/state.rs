@@ -2,7 +2,7 @@
 //! RPC methods.
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
-use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
+use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, EIP1186AccountProofResponse};
@@ -12,12 +12,11 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{env::EvmEnv, ConfigureEvmEnv};
 use reth_provider::{
-    BlockIdReader, BlockNumReader, ChainSpecProvider, EvmEnvProvider as _, ProviderHeader,
-    StateProvider, StateProviderBox, StateProviderFactory,
+    BlockIdReader, BlockNumReader, ChainSpecProvider, StateProvider, StateProviderBox,
+    StateProviderFactory,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::SpecId;
 
 /// Helper methods for `eth_` methods relating to state (accounts).
 pub trait EthState: LoadState + SpawnBlocking {
@@ -54,7 +53,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         self.spawn_blocking_io(move |this| {
             Ok(this
                 .state_at_block_id_or_latest(block_id)?
-                .account_balance(address)
+                .account_balance(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default())
         })
@@ -132,7 +131,7 @@ pub trait EthState: LoadState + SpawnBlocking {
     ) -> impl Future<Output = Result<Option<Account>, Self::Error>> + Send {
         self.spawn_blocking_io(move |this| {
             let state = this.state_at_block_id(block_id)?;
-            let account = state.basic_account(address).map_err(Self::Error::from_eth_err)?;
+            let account = state.basic_account(&address).map_err(Self::Error::from_eth_err)?;
             let Some(account) = account else { return Ok(None) };
 
             // Check whether the distance to the block exceeds the maximum configured proof window.
@@ -211,18 +210,20 @@ pub trait LoadState:
     /// for.
     /// If the [`BlockId`] is pending, this will return the "Pending" tag, otherwise this returns
     /// the hash of the exact block.
+    #[expect(clippy::type_complexity)]
     fn evm_env_at(
         &self,
         at: BlockId,
-    ) -> impl Future<Output = Result<(EvmEnv, BlockId), Self::Error>> + Send
+    ) -> impl Future<
+        Output = Result<(EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>, BlockId), Self::Error>,
+    > + Send
     where
         Self: LoadPendingBlock + SpawnBlocking,
     {
         async move {
             if at.is_pending() {
-                let PendingBlockEnv { cfg, block_env, origin } =
-                    self.pending_block_env_and_cfg()?;
-                Ok(((cfg, block_env).into(), origin.state_block_id()))
+                let PendingBlockEnv { evm_env, origin } = self.pending_block_env_and_cfg()?;
+                Ok((evm_env, origin.state_block_id()))
             } else {
                 // Use cached values if there is no pending block
                 let block_hash = RpcNodeCore::provider(self)
@@ -232,35 +233,10 @@ pub trait LoadState:
 
                 let header =
                     self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
-                let evm_config = self.evm_config().clone();
-                let evm_env = self
-                    .provider()
-                    .env_with_header(&header, evm_config)
-                    .map_err(Self::Error::from_eth_err)?;
+                let evm_env = self.evm_config().evm_env(&header);
+
                 Ok((evm_env, block_hash.into()))
             }
-        }
-    }
-
-    /// Returns the revm evm env for the raw block header
-    ///
-    /// This is used for tracing raw blocks
-    fn evm_env_for_raw_block(
-        &self,
-        header: &ProviderHeader<Self::Provider>,
-    ) -> impl Future<Output = Result<EvmEnv, Self::Error>> + Send
-    where
-        Self: LoadPendingBlock + SpawnBlocking,
-    {
-        async move {
-            // get the parent config first
-            let (evm_env, _) = self.evm_env_at(header.parent_hash().into()).await?;
-            let EvmEnv { cfg_env_with_handler_cfg, mut block_env } = evm_env;
-
-            let after_merge = cfg_env_with_handler_cfg.handler_cfg.spec_id >= SpecId::MERGE;
-            self.evm_config().fill_block_env(&mut block_env, header, after_merge);
-
-            Ok((cfg_env_with_handler_cfg, block_env).into())
         }
     }
 
@@ -278,7 +254,7 @@ pub trait LoadState:
             // first fetch the on chain nonce of the account
             let on_chain_account_nonce = this
                 .latest_state()?
-                .account_nonce(address)
+                .account_nonce(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default();
 
@@ -316,7 +292,7 @@ pub trait LoadState:
             // first fetch the on chain nonce of the account
             let on_chain_account_nonce = this
                 .state_at_block_id_or_latest(block_id)?
-                .account_nonce(address)
+                .account_nonce(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default();
 
@@ -359,7 +335,7 @@ pub trait LoadState:
         self.spawn_blocking_io(move |this| {
             Ok(this
                 .state_at_block_id_or_latest(block_id)?
-                .account_code(address)
+                .account_code(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default()
                 .original_bytes())

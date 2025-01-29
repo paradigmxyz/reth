@@ -7,7 +7,7 @@ use futures::{future::Either, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
-use reth_primitives::{NodePrimitives, SealedBlockWithSenders};
+use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{Block, BlockBody};
 use reth_storage_api::{BlockReader, StateProviderFactory, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
@@ -29,12 +29,12 @@ pub mod db;
 pub mod metrics;
 pub mod multi_consumer;
 
-/// The type that can send the response to a requested [`SealedBlockWithSenders`]
+/// The type that can send the response to a requested [`RecoveredBlock`]
 type BlockTransactionsResponseSender<T> = oneshot::Sender<ProviderResult<Option<Vec<T>>>>;
 
-/// The type that can send the response to a requested [`SealedBlockWithSenders`]
+/// The type that can send the response to a requested [`RecoveredBlock`]
 type BlockWithSendersResponseSender<B> =
-    oneshot::Sender<ProviderResult<Option<Arc<SealedBlockWithSenders<B>>>>>;
+    oneshot::Sender<ProviderResult<Option<Arc<RecoveredBlock<B>>>>>;
 
 /// The type that can send the response to the requested receipts of a block.
 type ReceiptsResponseSender<R> = oneshot::Sender<ProviderResult<Option<Arc<Vec<R>>>>>;
@@ -44,7 +44,7 @@ type HeaderResponseSender<H> = oneshot::Sender<ProviderResult<H>>;
 
 type BlockLruCache<B, L> = MultiConsumerLruCache<
     B256,
-    Arc<SealedBlockWithSenders<B>>,
+    Arc<RecoveredBlock<B>>,
     L,
     Either<
         BlockWithSendersResponseSender<B>,
@@ -144,13 +144,13 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
         this
     }
 
-    /// Requests the  [`SealedBlockWithSenders`] for the block hash
+    /// Requests the  [`RecoveredBlock`] for the block hash
     ///
     /// Returns `None` if the block does not exist.
     pub async fn get_sealed_block_with_senders(
         &self,
         block_hash: B256,
-    ) -> ProviderResult<Option<Arc<SealedBlockWithSenders<B>>>> {
+    ) -> ProviderResult<Option<Arc<RecoveredBlock<B>>>> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetBlockWithSenders { block_hash, response_tx });
         rx.await.map_err(|_| ProviderError::CacheServiceUnavailable)?
@@ -169,7 +169,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     pub async fn get_block_and_receipts(
         &self,
         block_hash: B256,
-    ) -> ProviderResult<Option<(Arc<SealedBlockWithSenders<B>>, Arc<Vec<R>>)>> {
+    ) -> ProviderResult<Option<(Arc<RecoveredBlock<B>>, Arc<Vec<R>>)>> {
         let block = self.get_sealed_block_with_senders(block_hash);
         let receipts = self.get_receipts(block_hash);
 
@@ -213,15 +213,15 @@ pub(crate) struct EthStateCacheService<
     LimitHeaders = ByLength,
 > where
     Provider: BlockReader,
-    LimitBlocks: Limiter<B256, Arc<SealedBlockWithSenders<Provider::Block>>>,
+    LimitBlocks: Limiter<B256, Arc<RecoveredBlock<Provider::Block>>>,
     LimitReceipts: Limiter<B256, Arc<Vec<Provider::Receipt>>>,
     LimitHeaders: Limiter<B256, Provider::Header>,
 {
     /// The type used to lookup data from disk
     provider: Provider,
-    /// The LRU cache for full blocks grouped by their hash.
+    /// The LRU cache for full blocks grouped by their block hash.
     full_block_cache: BlockLruCache<Provider::Block, LimitBlocks>,
-    /// The LRU cache for full blocks grouped by their hash.
+    /// The LRU cache for block receipts grouped by the block hash.
     receipts_cache: ReceiptsLruCache<Provider::Receipt, LimitReceipts>,
     /// The LRU cache for headers.
     ///
@@ -234,7 +234,9 @@ pub(crate) struct EthStateCacheService<
     action_rx: UnboundedReceiverStream<CacheAction<Provider::Block, Provider::Receipt>>,
     /// The type that's used to spawn tasks that do the actual work
     action_task_spawner: Tasks,
-    /// Rate limiter
+    /// Rate limiter for spawned fetch tasks.
+    ///
+    /// This restricts the max concurrent fetch tasks at the same time.
     rate_limiter: Arc<Semaphore>,
 }
 
@@ -246,7 +248,7 @@ where
     fn on_new_block(
         &mut self,
         block_hash: B256,
-        res: ProviderResult<Option<Arc<SealedBlockWithSenders<Provider::Block>>>>,
+        res: ProviderResult<Option<Arc<RecoveredBlock<Provider::Block>>>>,
     ) {
         if let Some(queued) = self.full_block_cache.remove(&block_hash) {
             // send the response to queued senders
@@ -257,7 +259,7 @@ where
                     }
                     Either::Right(transaction_tx) => {
                         let _ = transaction_tx.send(res.clone().map(|maybe_block| {
-                            maybe_block.map(|block| block.block.body.transactions().to_vec())
+                            maybe_block.map(|block| block.body().transactions().to_vec())
                         }));
                     }
                 }
@@ -291,7 +293,7 @@ where
     fn on_reorg_block(
         &mut self,
         block_hash: B256,
-        res: ProviderResult<Option<SealedBlockWithSenders<Provider::Block>>>,
+        res: ProviderResult<Option<RecoveredBlock<Provider::Block>>>,
     ) {
         let res = res.map(|b| b.map(Arc::new));
         if let Some(queued) = self.full_block_cache.remove(&block_hash) {
@@ -303,7 +305,7 @@ where
                     }
                     Either::Right(transaction_tx) => {
                         let _ = transaction_tx.send(res.clone().map(|maybe_block| {
-                            maybe_block.map(|block| block.block.body.transactions().to_vec())
+                            maybe_block.map(|block| block.body().transactions().to_vec())
                         }));
                     }
                 }
@@ -359,6 +361,8 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
+                                let mut action_sender =
+                                    ActionSender::new(CacheKind::Block, block_hash, action_tx);
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
@@ -370,10 +374,7 @@ where
                                             TransactionVariant::WithHash,
                                         )
                                         .map(|maybe_block| maybe_block.map(Arc::new));
-                                    let _ = action_tx.send(CacheAction::BlockWithSendersResult {
-                                        block_hash,
-                                        res: block_sender,
-                                    });
+                                    action_sender.send_block(block_sender);
                                 }));
                             }
                         }
@@ -389,6 +390,8 @@ where
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
+                                let mut action_sender =
+                                    ActionSender::new(CacheKind::Receipt, block_hash, action_tx);
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
@@ -396,8 +399,7 @@ where
                                         .receipts_by_block(block_hash.into())
                                         .map(|maybe_receipts| maybe_receipts.map(Arc::new));
 
-                                    let _ = action_tx
-                                        .send(CacheAction::ReceiptsResult { block_hash, res });
+                                    action_sender.send_receipts(res);
                                 }));
                             }
                         }
@@ -408,12 +410,20 @@ where
                                 continue
                             }
 
+                            // it's possible we have the entire block cached
+                            if let Some(block) = this.full_block_cache.get(&block_hash) {
+                                let _ = response_tx.send(Ok(block.clone_header()));
+                                continue
+                            }
+
                             // header is not in the cache, request it if this is the first
                             // consumer
                             if this.headers_cache.queue(block_hash, response_tx) {
                                 let provider = this.provider.clone();
                                 let action_tx = this.action_tx.clone();
                                 let rate_limiter = this.rate_limiter.clone();
+                                let mut action_sender =
+                                    ActionSender::new(CacheKind::Header, block_hash, action_tx);
                                 this.action_task_spawner.spawn_blocking(Box::pin(async move {
                                     // Acquire permit
                                     let _permit = rate_limiter.acquire().await;
@@ -422,10 +432,7 @@ where
                                             ProviderError::HeaderNotFound(block_hash.into())
                                         })
                                     });
-                                    let _ = action_tx.send(CacheAction::HeaderResult {
-                                        block_hash,
-                                        res: Box::new(header),
-                                    });
+                                    action_sender.send_header(header);
                                 }));
                             }
                         }
@@ -465,9 +472,7 @@ where
                             for block_receipts in chain_change.receipts {
                                 this.on_new_receipts(
                                     block_receipts.block_hash,
-                                    Ok(Some(Arc::new(
-                                        block_receipts.receipts.into_iter().flatten().collect(),
-                                    ))),
+                                    Ok(Some(Arc::new(block_receipts.receipts))),
                                 );
                             }
                         }
@@ -479,9 +484,7 @@ where
                             for block_receipts in chain_change.receipts {
                                 this.on_reorg_receipts(
                                     block_receipts.block_hash,
-                                    Ok(Some(Arc::new(
-                                        block_receipts.receipts.into_iter().flatten().collect(),
-                                    ))),
+                                    Ok(Some(Arc::new(block_receipts.receipts))),
                                 );
                             }
                         }
@@ -495,46 +498,24 @@ where
 
 /// All message variants sent through the channel
 enum CacheAction<B: Block, R> {
-    GetBlockWithSenders {
-        block_hash: B256,
-        response_tx: BlockWithSendersResponseSender<B>,
-    },
-    GetHeader {
-        block_hash: B256,
-        response_tx: HeaderResponseSender<B::Header>,
-    },
-    GetReceipts {
-        block_hash: B256,
-        response_tx: ReceiptsResponseSender<R>,
-    },
-    BlockWithSendersResult {
-        block_hash: B256,
-        res: ProviderResult<Option<Arc<SealedBlockWithSenders<B>>>>,
-    },
-    ReceiptsResult {
-        block_hash: B256,
-        res: ProviderResult<Option<Arc<Vec<R>>>>,
-    },
-    HeaderResult {
-        block_hash: B256,
-        res: Box<ProviderResult<B::Header>>,
-    },
-    CacheNewCanonicalChain {
-        chain_change: ChainChange<B, R>,
-    },
-    RemoveReorgedChain {
-        chain_change: ChainChange<B, R>,
-    },
+    GetBlockWithSenders { block_hash: B256, response_tx: BlockWithSendersResponseSender<B> },
+    GetHeader { block_hash: B256, response_tx: HeaderResponseSender<B::Header> },
+    GetReceipts { block_hash: B256, response_tx: ReceiptsResponseSender<R> },
+    BlockWithSendersResult { block_hash: B256, res: ProviderResult<Option<Arc<RecoveredBlock<B>>>> },
+    ReceiptsResult { block_hash: B256, res: ProviderResult<Option<Arc<Vec<R>>>> },
+    HeaderResult { block_hash: B256, res: Box<ProviderResult<B::Header>> },
+    CacheNewCanonicalChain { chain_change: ChainChange<B, R> },
+    RemoveReorgedChain { chain_change: ChainChange<B, R> },
 }
 
 struct BlockReceipts<R> {
     block_hash: B256,
-    receipts: Vec<Option<R>>,
+    receipts: Vec<R>,
 }
 
 /// A change of the canonical chain
 struct ChainChange<B: Block, R> {
-    blocks: Vec<SealedBlockWithSenders<B>>,
+    blocks: Vec<RecoveredBlock<B>>,
     receipts: Vec<BlockReceipts<R>>,
 }
 
@@ -547,11 +528,82 @@ impl<B: Block, R: Clone> ChainChange<B, R> {
             .blocks_and_receipts()
             .map(|(block, receipts)| {
                 let block_receipts =
-                    BlockReceipts { block_hash: block.block.hash(), receipts: receipts.clone() };
+                    BlockReceipts { block_hash: block.hash(), receipts: receipts.clone() };
                 (block.clone(), block_receipts)
             })
             .unzip();
         Self { blocks, receipts }
+    }
+}
+
+/// Identifier for the caches.
+#[derive(Copy, Clone, Debug)]
+enum CacheKind {
+    Block,
+    Receipt,
+    Header,
+}
+
+/// Drop aware sender struct that ensures a response is always emitted even if the db task panics
+/// before a result could be sent.
+///
+/// This type wraps a sender and in case the sender is still present on drop emit an error response.
+#[derive(Debug)]
+struct ActionSender<B: Block, R: Send + Sync> {
+    kind: CacheKind,
+    blockhash: B256,
+    tx: Option<UnboundedSender<CacheAction<B, R>>>,
+}
+
+impl<R: Send + Sync, B: Block> ActionSender<B, R> {
+    const fn new(kind: CacheKind, blockhash: B256, tx: UnboundedSender<CacheAction<B, R>>) -> Self {
+        Self { kind, blockhash, tx: Some(tx) }
+    }
+
+    fn send_block(&mut self, block_sender: Result<Option<Arc<RecoveredBlock<B>>>, ProviderError>) {
+        if let Some(tx) = self.tx.take() {
+            let _ = tx.send(CacheAction::BlockWithSendersResult {
+                block_hash: self.blockhash,
+                res: block_sender,
+            });
+        }
+    }
+
+    fn send_receipts(&mut self, receipts: Result<Option<Arc<Vec<R>>>, ProviderError>) {
+        if let Some(tx) = self.tx.take() {
+            let _ =
+                tx.send(CacheAction::ReceiptsResult { block_hash: self.blockhash, res: receipts });
+        }
+    }
+
+    fn send_header(&mut self, header: Result<<B as Block>::Header, ProviderError>) {
+        if let Some(tx) = self.tx.take() {
+            let _ = tx.send(CacheAction::HeaderResult {
+                block_hash: self.blockhash,
+                res: Box::new(header),
+            });
+        }
+    }
+}
+impl<R: Send + Sync, B: Block> Drop for ActionSender<B, R> {
+    fn drop(&mut self) {
+        if let Some(tx) = self.tx.take() {
+            let msg = match self.kind {
+                CacheKind::Block => CacheAction::BlockWithSendersResult {
+                    block_hash: self.blockhash,
+                    res: Err(ProviderError::CacheServiceUnavailable),
+                },
+                CacheKind::Receipt => CacheAction::ReceiptsResult {
+                    block_hash: self.blockhash,
+                    res: Err(ProviderError::CacheServiceUnavailable),
+                },
+                CacheKind::Header => CacheAction::HeaderResult {
+                    block_hash: self.blockhash,
+                    res: Box::new(Err(ProviderError::CacheServiceUnavailable)),
+                },
+            };
+            let _ = tx.send(msg);
+        }
     }
 }
 

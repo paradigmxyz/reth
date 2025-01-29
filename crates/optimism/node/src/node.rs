@@ -6,13 +6,12 @@ use crate::{
     txpool::{OpTransactionPool, OpTransactionValidator},
     OpEngineTypes,
 };
-use alloy_consensus::Header;
+use op_alloy_consensus::OpPooledTransaction;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
-use reth_db::transaction::{DbTx, DbTxMut};
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvm};
-use reth_network::{EthNetworkPrimitives, NetworkConfig, NetworkHandle, NetworkManager, PeersInfo};
-use reth_node_api::{AddOnsContext, EngineValidator, FullNodeComponents, NodeAddOns, TxTy};
+use reth_chainspec::{EthChainSpec, Hardforks};
+use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvmEnv, ConfigureEvmFor};
+use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
+use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, PrimitivesTy, TxTy};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
@@ -29,18 +28,14 @@ use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
 };
-use reth_optimism_primitives::OpPrimitives;
+use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_rpc::{
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi, SequencerClient,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
-use reth_primitives::{BlockBody, PooledTransaction, TransactionSigned};
-use reth_provider::{
-    providers::ChainStorage, BlockBodyReader, BlockBodyWriter, CanonStateSubscriptions,
-    ChainSpecProvider, DBProvider, EthStorage, ProviderResult, ReadBodyInput, StorageLocation,
-};
+use reth_provider::{CanonStateSubscriptions, EthStorage};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -48,67 +43,11 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
+use revm::primitives::TxEnv;
 use std::sync::Arc;
 
 /// Storage implementation for Optimism.
-#[derive(Debug, Default, Clone)]
-pub struct OpStorage(EthStorage);
-
-impl<Provider: DBProvider<Tx: DbTxMut>> BlockBodyWriter<Provider, BlockBody> for OpStorage {
-    fn write_block_bodies(
-        &self,
-        provider: &Provider,
-        bodies: Vec<(u64, Option<BlockBody>)>,
-        write_to: StorageLocation,
-    ) -> ProviderResult<()> {
-        self.0.write_block_bodies(provider, bodies, write_to)
-    }
-
-    fn remove_block_bodies_above(
-        &self,
-        provider: &Provider,
-        block: alloy_primitives::BlockNumber,
-        remove_from: StorageLocation,
-    ) -> ProviderResult<()> {
-        self.0.remove_block_bodies_above(provider, block, remove_from)
-    }
-}
-
-impl<Provider: DBProvider + ChainSpecProvider<ChainSpec: EthereumHardforks>>
-    BlockBodyReader<Provider> for OpStorage
-{
-    type Block = reth_primitives::Block;
-
-    fn read_block_bodies(
-        &self,
-        provider: &Provider,
-        inputs: Vec<ReadBodyInput<'_, Self::Block>>,
-    ) -> ProviderResult<Vec<BlockBody>> {
-        self.0.read_block_bodies(provider, inputs)
-    }
-}
-
-impl ChainStorage<OpPrimitives> for OpStorage {
-    fn reader<TX, Types>(
-        &self,
-    ) -> impl reth_provider::ChainStorageReader<reth_provider::DatabaseProvider<TX, Types>, OpPrimitives>
-    where
-        TX: DbTx + 'static,
-        Types: reth_provider::providers::NodeTypesForProvider<Primitives = OpPrimitives>,
-    {
-        self
-    }
-
-    fn writer<TX, Types>(
-        &self,
-    ) -> impl reth_provider::ChainStorageWriter<reth_provider::DatabaseProvider<TX, Types>, OpPrimitives>
-    where
-        TX: DbTxMut + DbTx + 'static,
-        Types: NodeTypes<Primitives = OpPrimitives>,
-    {
-        self
-    }
-}
+pub type OpStorage = EthStorage<OpTransactionSigned>;
 
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
@@ -252,9 +191,8 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
+        Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
     >,
-    OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
 
@@ -303,9 +241,8 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
-        Pool: TransactionPool<Transaction: PoolTransaction<Pooled = PooledTransaction>>,
+        Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
     >,
-    OpEngineValidator: EngineValidator<<N::Types as NodeTypesWithEngine>::Engine>,
 {
     type EthApi = OpEthApi<N>;
 
@@ -384,15 +321,14 @@ where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
 {
     type EVM = OpEvmConfig;
-    type Executor = BasicBlockExecutorProvider<OpExecutionStrategyFactory>;
+    type Executor = BasicBlockExecutorProvider<OpExecutionStrategyFactory<OpPrimitives>>;
 
     async fn build_evm(
         self,
         ctx: &BuilderContext<Node>,
     ) -> eyre::Result<(Self::EVM, Self::Executor)> {
         let evm_config = OpEvmConfig::new(ctx.chain_spec());
-        let strategy_factory =
-            OpExecutionStrategyFactory::new(ctx.chain_spec(), evm_config.clone());
+        let strategy_factory = OpExecutionStrategyFactory::optimism(ctx.chain_spec());
         let executor = BasicBlockExecutorProvider::new(strategy_factory);
 
         Ok((evm_config, executor))
@@ -551,7 +487,7 @@ where
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
             + Unpin
             + 'static,
-        Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
+        Evm: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
             evm_config,
@@ -621,7 +557,7 @@ impl OpNetworkBuilder {
     pub fn network_config<Node>(
         &self,
         ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider>>
+    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, OpNetworkPrimitives>>
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     {
@@ -666,17 +602,20 @@ impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTransaction>,
+            Transaction: PoolTransaction<
+                Consensus = TxTy<Node::Types>,
+                Pooled = OpPooledTransaction,
+            >,
         > + Unpin
         + 'static,
 {
-    type Primitives = EthNetworkPrimitives;
+    type Primitives = OpNetworkPrimitives;
 
     async fn build_network(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<NetworkHandle> {
+    ) -> eyre::Result<NetworkHandle<Self::Primitives>> {
         let network_config = self.network_config(ctx)?;
         let network = NetworkManager::builder(network_config).await?;
         let handle = ctx.start_network(network, pool);
@@ -721,4 +660,18 @@ where
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
         Ok(OpEngineValidator::new(ctx.config.chain.clone()))
     }
+}
+
+/// Network primitive types used by Optimism networks.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct OpNetworkPrimitives;
+
+impl NetworkPrimitives for OpNetworkPrimitives {
+    type BlockHeader = alloy_consensus::Header;
+    type BlockBody = reth_primitives::BlockBody<OpTransactionSigned>;
+    type Block = reth_primitives::Block<OpTransactionSigned>;
+    type BroadcastedTransaction = OpTransactionSigned;
+    type PooledTransaction = OpPooledTransaction;
+    type Receipt = OpReceipt;
 }

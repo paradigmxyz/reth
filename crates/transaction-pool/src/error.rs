@@ -196,7 +196,7 @@ pub enum InvalidPoolTransactionError {
     ExceedsGasLimit(u64, u64),
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
     /// respect the `max_init_code_size`.
-    #[error("transaction's size {0} exceeds max_init_code_size {1}")]
+    #[error("transaction's input size {0} exceeds max_init_code_size {1}")]
     ExceedsMaxInitCodeSize(usize, usize),
     /// Thrown if the input data of a transaction is greater
     /// than some meaningful limit a user might use. This is not a consensus error

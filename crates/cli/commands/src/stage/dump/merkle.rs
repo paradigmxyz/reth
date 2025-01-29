@@ -9,7 +9,6 @@ use reth_db_api::{database::Database, table::TableImporter};
 use reth_db_common::DbTool;
 use reth_evm::noop::NoopBlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
-use reth_node_api::NodePrimitives;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
     providers::{ProviderNodeTypes, StaticFileProvider},
@@ -33,14 +32,7 @@ pub(crate) async fn dump_merkle_stage<N>(
     should_run: bool,
 ) -> Result<()>
 where
-    N: ProviderNodeTypes<
-        DB = Arc<DatabaseEnv>,
-        Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            BlockHeader = reth_primitives::Header,
-        >,
-    >,
+    N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>,
 {
     let (output_db, tip_block_number) = setup(from, to, &output_datadir.db(), db_tool)?;
 
@@ -78,15 +70,7 @@ where
 }
 
 /// Dry-run an unwind to FROM block and copy the necessary table data to the new database.
-fn unwind_and_copy<
-    N: ProviderNodeTypes<
-        Primitives: NodePrimitives<
-            Block = reth_primitives::Block,
-            Receipt = reth_primitives::Receipt,
-            BlockHeader = reth_primitives::Header,
-        >,
-    >,
->(
+fn unwind_and_copy<N: ProviderNodeTypes>(
     db_tool: &DbTool<N>,
     range: (u64, u64),
     tip_block_number: u64,
@@ -166,7 +150,7 @@ fn unwind_and_copy<
 /// Try to re-execute the stage straight away
 fn dry_run<N>(output_provider_factory: ProviderFactory<N>, to: u64, from: u64) -> eyre::Result<()>
 where
-    N: ProviderNodeTypes<Primitives: NodePrimitives<BlockHeader = reth_primitives::Header>>,
+    N: ProviderNodeTypes,
 {
     info!(target: "reth::cli", "Executing stage.");
     let provider = output_provider_factory.database_provider_rw()?;

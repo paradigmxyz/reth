@@ -5,11 +5,10 @@ use alloy_consensus::BlockHeader;
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
-pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives_traits::Block as _;
+pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
-use crate::{system_calls::OnStateHook, TxEnvOverrides};
+use crate::system_calls::OnStateHook;
 use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
@@ -18,14 +17,14 @@ use alloy_primitives::{
 };
 use core::fmt::Display;
 use reth_consensus::ConsensusError;
-use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt};
+use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
 use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
     State,
 };
-use revm_primitives::{db::Database, Account, AccountStatus, EvmState, U256};
+use revm_primitives::{db::Database, Account, AccountStatus, EvmState};
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
@@ -38,9 +37,6 @@ pub trait Executor<DB> {
     type Output;
     /// The error type returned by the executor.
     type Error;
-
-    /// Initialize the executor with the given transaction environment overrides.
-    fn init(&mut self, _tx_env_overrides: Box<dyn TxEnvOverrides>) {}
 
     /// Consumes the type and executes the block.
     ///
@@ -151,10 +147,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// the returned state.
     type Executor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> Executor<
         DB,
-        Input<'a> = BlockExecutionInput<
-            'a,
-            BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
-        >,
+        Input<'a> = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         Output = BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>,
         Error = BlockExecutionError,
     >;
@@ -162,10 +155,7 @@ pub trait BlockExecutorProvider: Send + Sync + Clone + Unpin + 'static {
     /// An executor that can execute a batch of blocks given a database.
     type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>>: for<'a> BatchExecutor<
         DB,
-        Input<'a> = BlockExecutionInput<
-            'a,
-            BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
-        >,
+        Input<'a> = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         Output = ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>,
         Error = BlockExecutionError,
     >;
@@ -206,28 +196,22 @@ pub trait BlockExecutionStrategy {
     /// The error type returned by this strategy's methods.
     type Error: From<ProviderError> + core::error::Error;
 
-    /// Initialize the strategy with the given transaction environment overrides.
-    fn init(&mut self, _tx_env_overrides: Box<dyn TxEnvOverrides>) {}
-
     /// Applies any necessary changes before executing the block's transactions.
     fn apply_pre_execution_changes(
         &mut self,
-        block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
-        total_difficulty: U256,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<(), Self::Error>;
 
     /// Executes all transactions in the block.
     fn execute_transactions(
         &mut self,
-        block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
-        total_difficulty: U256,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<ExecuteOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
     /// Applies any necessary changes after executing the block's transactions.
     fn apply_post_execution_changes(
         &mut self,
-        block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
-        total_difficulty: U256,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         receipts: &[<Self::Primitives as NodePrimitives>::Receipt],
     ) -> Result<Requests, Self::Error>;
 
@@ -249,7 +233,7 @@ pub trait BlockExecutionStrategy {
     /// Validate a block with regard to execution results.
     fn validate_block_post_execution(
         &self,
-        _block: &BlockWithSenders<<Self::Primitives as NodePrimitives>::Block>,
+        _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
         _receipts: &[<Self::Primitives as NodePrimitives>::Receipt],
         _requests: &Requests,
     ) -> Result<(), ConsensusError> {
@@ -347,23 +331,14 @@ where
     S: BlockExecutionStrategy<DB = DB>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
-    type Input<'a> =
-        BlockExecutionInput<'a, BlockWithSenders<<S::Primitives as NodePrimitives>::Block>>;
+    type Input<'a> = &'a RecoveredBlock<<S::Primitives as NodePrimitives>::Block>;
     type Output = BlockExecutionOutput<<S::Primitives as NodePrimitives>::Receipt>;
     type Error = S::Error;
 
-    fn init(&mut self, env_overrides: Box<dyn TxEnvOverrides>) {
-        self.strategy.init(env_overrides);
-    }
-
-    fn execute(mut self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
-        let BlockExecutionInput { block, total_difficulty } = input;
-
-        self.strategy.apply_pre_execution_changes(block, total_difficulty)?;
-        let ExecuteOutput { receipts, gas_used } =
-            self.strategy.execute_transactions(block, total_difficulty)?;
-        let requests =
-            self.strategy.apply_post_execution_changes(block, total_difficulty, &receipts)?;
+    fn execute(mut self, block: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
+        self.strategy.apply_pre_execution_changes(block)?;
+        let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
+        let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
         let state = self.strategy.finish();
 
         Ok(BlockExecutionOutput { state, receipts, requests, gas_used })
@@ -371,19 +346,15 @@ where
 
     fn execute_with_state_closure<F>(
         mut self,
-        input: Self::Input<'_>,
+        block: Self::Input<'_>,
         mut state: F,
     ) -> Result<Self::Output, Self::Error>
     where
         F: FnMut(&State<DB>),
     {
-        let BlockExecutionInput { block, total_difficulty } = input;
-
-        self.strategy.apply_pre_execution_changes(block, total_difficulty)?;
-        let ExecuteOutput { receipts, gas_used } =
-            self.strategy.execute_transactions(block, total_difficulty)?;
-        let requests =
-            self.strategy.apply_post_execution_changes(block, total_difficulty, &receipts)?;
+        self.strategy.apply_pre_execution_changes(block)?;
+        let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
+        let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
 
         state(self.strategy.state_ref());
 
@@ -394,21 +365,17 @@ where
 
     fn execute_with_state_hook<H>(
         mut self,
-        input: Self::Input<'_>,
+        block: Self::Input<'_>,
         state_hook: H,
     ) -> Result<Self::Output, Self::Error>
     where
         H: OnStateHook + 'static,
     {
-        let BlockExecutionInput { block, total_difficulty } = input;
-
         self.strategy.with_state_hook(Some(Box::new(state_hook)));
 
-        self.strategy.apply_pre_execution_changes(block, total_difficulty)?;
-        let ExecuteOutput { receipts, gas_used } =
-            self.strategy.execute_transactions(block, total_difficulty)?;
-        let requests =
-            self.strategy.apply_post_execution_changes(block, total_difficulty, &receipts)?;
+        self.strategy.apply_pre_execution_changes(block)?;
+        let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
+        let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
 
         let state = self.strategy.finish();
 
@@ -447,23 +414,18 @@ where
     S: BlockExecutionStrategy<DB = DB, Error = BlockExecutionError>,
     DB: Database<Error: Into<ProviderError> + Display>,
 {
-    type Input<'a> =
-        BlockExecutionInput<'a, BlockWithSenders<<S::Primitives as NodePrimitives>::Block>>;
+    type Input<'a> = &'a RecoveredBlock<<S::Primitives as NodePrimitives>::Block>;
     type Output = ExecutionOutcome<<S::Primitives as NodePrimitives>::Receipt>;
     type Error = BlockExecutionError;
 
-    fn execute_and_verify_one(&mut self, input: Self::Input<'_>) -> Result<(), Self::Error> {
-        let BlockExecutionInput { block, total_difficulty } = input;
-
+    fn execute_and_verify_one(&mut self, block: Self::Input<'_>) -> Result<(), Self::Error> {
         if self.batch_record.first_block().is_none() {
             self.batch_record.set_first_block(block.header().number());
         }
 
-        self.strategy.apply_pre_execution_changes(block, total_difficulty)?;
-        let ExecuteOutput { receipts, .. } =
-            self.strategy.execute_transactions(block, total_difficulty)?;
-        let requests =
-            self.strategy.apply_post_execution_changes(block, total_difficulty, &receipts)?;
+        self.strategy.apply_pre_execution_changes(block)?;
+        let ExecuteOutput { receipts, .. } = self.strategy.execute_transactions(block)?;
+        let requests = self.strategy.apply_post_execution_changes(block, &receipts)?;
 
         self.strategy.validate_block_post_execution(block, &receipts, &requests)?;
 
@@ -472,7 +434,7 @@ where
         self.strategy.state_mut().merge_transitions(retention);
 
         // store receipts in the set
-        self.batch_record.save_receipts(receipts)?;
+        self.batch_record.save_receipts(receipts);
 
         // store requests in the set
         self.batch_record.save_requests(requests);
@@ -546,7 +508,7 @@ mod tests {
     use reth_chainspec::{ChainSpec, MAINNET};
     use reth_primitives::EthPrimitives;
     use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::{address, bytes, AccountInfo, TxEnv, KECCAK_EMPTY};
+    use revm_primitives::{address, bytes, AccountInfo, KECCAK_EMPTY};
     use std::sync::Arc;
 
     #[derive(Clone, Default)]
@@ -575,7 +537,7 @@ mod tests {
     struct TestExecutor<DB>(PhantomData<DB>);
 
     impl<DB> Executor<DB> for TestExecutor<DB> {
-        type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+        type Input<'a> = &'a RecoveredBlock<reth_primitives::Block>;
         type Output = BlockExecutionOutput<Receipt>;
         type Error = BlockExecutionError;
 
@@ -607,7 +569,7 @@ mod tests {
     }
 
     impl<DB> BatchExecutor<DB> for TestExecutor<DB> {
-        type Input<'a> = BlockExecutionInput<'a, BlockWithSenders>;
+        type Input<'a> = &'a RecoveredBlock<reth_primitives::Block>;
         type Output = ExecutionOutcome;
         type Error = BlockExecutionError;
 
@@ -688,24 +650,21 @@ mod tests {
 
         fn apply_pre_execution_changes(
             &mut self,
-            _block: &BlockWithSenders,
-            _total_difficulty: U256,
+            _block: &RecoveredBlock<reth_primitives::Block>,
         ) -> Result<(), Self::Error> {
             Ok(())
         }
 
         fn execute_transactions(
             &mut self,
-            _block: &BlockWithSenders,
-            _total_difficulty: U256,
+            _block: &RecoveredBlock<reth_primitives::Block>,
         ) -> Result<ExecuteOutput<Receipt>, Self::Error> {
             Ok(self.execute_transactions_result.clone())
         }
 
         fn apply_post_execution_changes(
             &mut self,
-            _block: &BlockWithSenders,
-            _total_difficulty: U256,
+            _block: &RecoveredBlock<reth_primitives::Block>,
             _receipts: &[Receipt],
         ) -> Result<Requests, Self::Error> {
             Ok(self.apply_post_execution_changes_result.clone())
@@ -719,19 +678,8 @@ mod tests {
             &mut self.state
         }
 
-        fn with_state_hook(&mut self, _hook: Option<Box<dyn OnStateHook>>) {}
-
         fn finish(&mut self) -> BundleState {
             self.finish_result.clone()
-        }
-
-        fn validate_block_post_execution(
-            &self,
-            _block: &BlockWithSenders,
-            _receipts: &[Receipt],
-            _requests: &Requests,
-        ) -> Result<(), ConsensusError> {
-            Ok(())
         }
     }
 
@@ -743,7 +691,7 @@ mod tests {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
         let executor = provider.executor(db);
-        let _ = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
+        let _ = executor.execute(&Default::default());
     }
 
     #[test]
@@ -766,7 +714,7 @@ mod tests {
         let provider = BasicBlockExecutorProvider::new(strategy_factory);
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
         let executor = provider.executor(db);
-        let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
+        let result = executor.execute(&Default::default());
 
         assert!(result.is_ok());
         let block_execution_output = result.unwrap();
@@ -774,30 +722,6 @@ mod tests {
         assert_eq!(block_execution_output.receipts, expected_receipts);
         assert_eq!(block_execution_output.requests, expected_apply_post_execution_changes_result);
         assert_eq!(block_execution_output.state, expected_finish_result);
-    }
-
-    #[test]
-    fn test_tx_env_overrider() {
-        let strategy_factory = TestExecutorStrategyFactory {
-            execute_transactions_result: ExecuteOutput {
-                receipts: vec![Receipt::default()],
-                gas_used: 10,
-            },
-            apply_post_execution_changes_result: Requests::new(vec![bytes!("deadbeef")]),
-            finish_result: BundleState::default(),
-        };
-        let provider = BasicBlockExecutorProvider::new(strategy_factory);
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-
-        // if we want to apply tx env overrides the executor must be mut.
-        let mut executor = provider.executor(db);
-        // execute consumes the executor, so we can only call it once.
-        // let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
-        executor.init(Box::new(|tx_env: &mut TxEnv| {
-            tx_env.nonce.take();
-        }));
-        let result = executor.execute(BlockExecutionInput::new(&Default::default(), U256::ZERO));
-        assert!(result.is_ok());
     }
 
     fn setup_state_with_account(

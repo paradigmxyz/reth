@@ -1,4 +1,8 @@
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    BlockNumber, B256,
+};
+use core::{marker::PhantomData, ops::RangeInclusive};
 use derive_more::Deref;
 use reth_db::tables;
 use reth_db_api::{
@@ -11,11 +15,6 @@ use reth_primitives::StorageEntry;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
     KeyHasher, Nibbles,
-};
-use std::{
-    collections::{HashMap, HashSet},
-    marker::PhantomData,
-    ops::RangeInclusive,
 };
 
 /// A wrapper around a database transaction that loads prefix sets within a given block range.

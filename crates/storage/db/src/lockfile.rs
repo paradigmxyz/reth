@@ -64,7 +64,7 @@ impl StorageLock {
 impl Drop for StorageLock {
     fn drop(&mut self) {
         // The lockfile is not created in disable-lock mode, so we don't need to delete it.
-        #[cfg(not(feature = "disable-lock"))]
+        #[cfg(any(test, not(feature = "disable-lock")))]
         if Arc::strong_count(&self.0) == 1 && self.0.file_path.exists() {
             // TODO: should only happen during tests that the file does not exist: tempdir is
             // getting dropped first. However, tempdir shouldn't be dropped

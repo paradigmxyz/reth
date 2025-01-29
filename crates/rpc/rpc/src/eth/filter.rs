@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_chainspec::ChainInfo;
-use reth_primitives::SealedBlockWithSenders;
+use reth_primitives::RecoveredBlock;
 use reth_provider::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderError, ProviderReceipt,
@@ -23,7 +23,6 @@ use reth_rpc_eth_types::{
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
-use reth_rpc_types_compat::transaction::from_recovered;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
@@ -547,7 +546,7 @@ where
     ) -> Result<
         Option<(
             Arc<Vec<ProviderReceipt<Eth::Provider>>>,
-            Option<Arc<SealedBlockWithSenders<ProviderBlock<Eth::Provider>>>>,
+            Option<Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
         )>,
         EthFilterError,
     > {
@@ -637,7 +636,7 @@ where
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            match from_recovered(tx.transaction.to_consensus(), &self.tx_resp_builder) {
+            match self.tx_resp_builder.fill_pending(tx.transaction.to_consensus()) {
                 Ok(tx) => pending_txs.push(tx),
                 Err(err) => {
                     error!(target: "rpc",

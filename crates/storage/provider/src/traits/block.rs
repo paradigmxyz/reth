@@ -2,7 +2,8 @@ use alloy_primitives::BlockNumber;
 use reth_db_api::models::StoredBlockBodyIndices;
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_node_types::NodePrimitives;
-use reth_primitives::SealedBlockWithSenders;
+use reth_primitives::RecoveredBlock;
+use reth_primitives_traits::Block;
 use reth_storage_api::{NodePrimitivesProvider, StorageLocation};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{updates::TrieUpdates, HashedPostStateSorted};
@@ -71,7 +72,7 @@ pub trait StateReader: Send + Sync {
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockWriter: Send + Sync {
     /// The body this writer can write.
-    type Block: reth_primitives_traits::Block;
+    type Block: Block;
     /// The receipt type for [`ExecutionOutcome`].
     type Receipt: Send + Sync;
 
@@ -85,7 +86,7 @@ pub trait BlockWriter: Send + Sync {
     /// written.
     fn insert_block(
         &self,
-        block: SealedBlockWithSenders<Self::Block>,
+        block: RecoveredBlock<Self::Block>,
         write_to: StorageLocation,
     ) -> ProviderResult<StoredBlockBodyIndices>;
 
@@ -96,7 +97,7 @@ pub trait BlockWriter: Send + Sync {
     /// Bodies are passed as [`Option`]s, if body is `None` the corresponding block is empty.
     fn append_block_bodies(
         &self,
-        bodies: Vec<(BlockNumber, Option<<Self::Block as reth_primitives_traits::Block>::Body>)>,
+        bodies: Vec<(BlockNumber, Option<<Self::Block as Block>::Body>)>,
         write_to: StorageLocation,
     ) -> ProviderResult<()>;
 
@@ -124,7 +125,7 @@ pub trait BlockWriter: Send + Sync {
     ///
     /// # Parameters
     ///
-    /// - `blocks`: Vector of `SealedBlockWithSenders` instances to append.
+    /// - `blocks`: Vector of `RecoveredBlock` instances to append.
     /// - `state`: Post-state information to update after appending.
     ///
     /// # Returns
@@ -132,8 +133,8 @@ pub trait BlockWriter: Send + Sync {
     /// Returns `Ok(())` on success, or an error if any operation fails.
     fn append_blocks_with_state(
         &self,
-        blocks: Vec<SealedBlockWithSenders<Self::Block>>,
-        execution_outcome: ExecutionOutcome<Self::Receipt>,
+        blocks: Vec<RecoveredBlock<Self::Block>>,
+        execution_outcome: &ExecutionOutcome<Self::Receipt>,
         hashed_state: HashedPostStateSorted,
         trie_updates: TrieUpdates,
     ) -> ProviderResult<()>;

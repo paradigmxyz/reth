@@ -75,10 +75,7 @@ impl AuthServerConfig {
                 .clone()
                 .unwrap_or_else(|| constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string());
             let ipc_server = ipc_server_config.build(ipc_endpoint_str);
-            let res = ipc_server
-                .start(module.inner)
-                .await
-                .map_err(reth_ipc::server::IpcServerStartError::from)?;
+            let res = ipc_server.start(module.inner).await?;
             ipc_handle = Some(res);
         }
 

@@ -5,12 +5,12 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
-use reth_consensus::Consensus;
+use reth_consensus::{Consensus, ConsensusError};
 use reth_network_p2p::{
     bodies::client::BodiesClient, headers::client::HeadersClient, priority::Priority,
 };
 use reth_primitives::SealedBlock;
-use reth_primitives_traits::SealedHeader;
+use reth_primitives_traits::{Block, SealedHeader};
 use std::{
     env::VarError,
     path::{Path, PathBuf},
@@ -49,7 +49,7 @@ where
         eyre::bail!("Invalid number of headers received. Expected: 1. Received: 0")
     };
 
-    let header = SealedHeader::seal(header);
+    let header = SealedHeader::seal_slow(header);
 
     let valid = match id {
         BlockHashOrNumber::Hash(hash) => header.hash() == hash,
@@ -69,13 +69,14 @@ where
 }
 
 /// Get a body from network based on header
-pub async fn get_single_body<H, Client>(
+pub async fn get_single_body<B, Client>(
     client: Client,
-    header: SealedHeader<H>,
-    consensus: impl Consensus<H, Client::Body>,
-) -> Result<SealedBlock<H, Client::Body>>
+    header: SealedHeader<B::Header>,
+    consensus: impl Consensus<B, Error = ConsensusError>,
+) -> Result<SealedBlock<B>>
 where
-    Client: BodiesClient,
+    B: Block,
+    Client: BodiesClient<Body = B::Body>,
 {
     let (peer_id, response) = client.get_block_body(header.hash()).await?.split();
 
@@ -84,7 +85,7 @@ where
         eyre::bail!("Invalid number of bodies received. Expected: 1. Received: 0")
     };
 
-    let block = SealedBlock { header, body };
+    let block = SealedBlock::from_sealed_parts(header, body);
     consensus.validate_block_pre_execution(&block)?;
 
     Ok(block)

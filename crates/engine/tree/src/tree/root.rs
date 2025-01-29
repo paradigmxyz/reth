@@ -1,39 +1,53 @@
 //! State root task related functionality.
 
 use alloy_primitives::map::HashSet;
+use derive_more::derive::Deref;
 use rayon::iter::{ParallelBridge, ParallelIterator};
+use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::system_calls::OnStateHook;
-use reth_execution_errors::StateProofError;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider,
 };
 use reth_trie::{
-    proof::Proof, updates::TrieUpdates, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, Nibbles, TrieInput,
+    hashed_cursor::HashedPostStateCursorFactory,
+    prefix_set::TriePrefixSetsMut,
+    proof::ProofBlindedProviderFactory,
+    trie_cursor::InMemoryTrieCursorFactory,
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, Nibbles,
+    TrieInput,
 };
-use reth_trie_db::DatabaseProof;
-use reth_trie_parallel::root::ParallelStateRootError;
+use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
-    errors::{SparseStateTrieError, SparseStateTrieResult, SparseTrieError, SparseTrieErrorKind},
+    errors::{SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie,
 };
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
-    collections::BTreeMap,
-    ops::Deref,
+    collections::{BTreeMap, VecDeque},
     sync::{
         mpsc::{self, channel, Receiver, Sender},
         Arc,
     },
-    thread::{self},
     time::{Duration, Instant},
 };
 use tracing::{debug, error, trace};
 
 /// The level below which the sparse trie hashes are calculated in [`update_sparse_trie`].
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
+
+/// Determines the size of the thread pool to be used in [`StateRootTask`].
+/// It should be at least three, one for multiproof calculations  plus two to be
+/// used internally in [`StateRootTask`].
+///
+/// NOTE: this value can be greater than the available cores in the host, it
+/// represents the maximum number of threads that can be handled by the pool.
+pub(crate) fn thread_pool_size() -> usize {
+    std::thread::available_parallelism().map_or(3, |num| (num.get() / 2).max(3))
+}
 
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates and the total time spent.
@@ -43,6 +57,34 @@ pub struct StateRootComputeOutcome {
     pub state_root: (B256, TrieUpdates),
     /// The total time spent calculating the state root
     pub total_time: Duration,
+    /// The time spent calculating the state root since the last state update
+    pub time_from_last_update: Duration,
+}
+
+/// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
+/// state.
+#[derive(Default, Debug)]
+pub struct SparseTrieUpdate {
+    /// The state update that was used to calculate the proof
+    state: HashedPostState,
+    /// The proof targets
+    targets: MultiProofTargets,
+    /// The calculated multiproof
+    multiproof: MultiProof,
+}
+
+impl SparseTrieUpdate {
+    /// Construct update from multiproof.
+    pub fn from_multiproof(multiproof: MultiProof) -> Self {
+        Self { multiproof, ..Default::default() }
+    }
+
+    /// Extend update with contents of the other.
+    pub fn extend(&mut self, other: Self) {
+        self.state.extend(other.state);
+        extend_multi_proof_targets(&mut self.targets, other.targets);
+        self.multiproof.extend(other.multiproof);
+    }
 }
 
 /// Result of the state root calculation
@@ -50,13 +92,11 @@ pub(crate) type StateRootResult = Result<StateRootComputeOutcome, ParallelStateR
 
 /// Handle to a spawned state root task.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct StateRootHandle {
     /// Channel for receiving the final result.
     rx: mpsc::Receiver<StateRootResult>,
 }
 
-#[allow(dead_code)]
 impl StateRootHandle {
     /// Creates a new handle from a receiver.
     pub(crate) const fn new(rx: mpsc::Receiver<StateRootResult>) -> Self {
@@ -70,33 +110,55 @@ impl StateRootHandle {
 }
 
 /// Common configuration for state root tasks
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StateRootConfig<Factory> {
     /// View over the state in the database.
     pub consistent_view: ConsistentDbView<Factory>,
-    /// Latest trie input.
-    pub input: Arc<TrieInput>,
+    /// The sorted collection of cached in-memory intermediate trie nodes that
+    /// can be reused for computation.
+    pub nodes_sorted: Arc<TrieUpdatesSorted>,
+    /// The sorted in-memory overlay hashed state.
+    pub state_sorted: Arc<HashedPostStateSorted>,
+    /// The collection of prefix sets for the computation. Since the prefix sets _always_
+    /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
+    /// if we have cached nodes for them.
+    pub prefix_sets: Arc<TriePrefixSetsMut>,
+}
+
+impl<Factory> StateRootConfig<Factory> {
+    /// Creates a new state root config from the consistent view and the trie input.
+    pub fn new_from_input(consistent_view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
+        Self {
+            consistent_view,
+            nodes_sorted: Arc::new(input.nodes.into_sorted()),
+            state_sorted: Arc::new(input.state.into_sorted()),
+            prefix_sets: Arc::new(input.prefix_sets),
+        }
+    }
 }
 
 /// Messages used internally by the state root task
 #[derive(Debug)]
-#[allow(dead_code)]
-pub enum StateRootMessage<BPF: BlindedProviderFactory> {
+pub enum StateRootMessage {
+    /// Prefetch proof targets
+    PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
     ProofCalculated(Box<ProofCalculated>),
     /// Error during proof calculation
-    ProofCalculationError(StateProofError),
+    ProofCalculationError(ProviderError),
     /// State root calculation completed
     RootCalculated {
-        /// The updated sparse trie
-        trie: Box<SparseStateTrie<BPF>>,
-        /// Time taken to calculate the root
-        elapsed: Duration,
+        /// Final state root.
+        state_root: B256,
+        /// Trie updates.
+        trie_updates: TrieUpdates,
+        /// The number of time sparse trie was updated.
+        iterations: u64,
     },
     /// Error during state root calculation
-    RootCalculationError(SparseStateTrieError),
+    RootCalculationError(ParallelStateRootError),
     /// Signals state update stream end.
     FinishedStateUpdates,
 }
@@ -104,14 +166,29 @@ pub enum StateRootMessage<BPF: BlindedProviderFactory> {
 /// Message about completion of proof calculation for a specific state update
 #[derive(Debug)]
 pub struct ProofCalculated {
-    /// The state update that was used to calculate the proof
-    state_update: HashedPostState,
-    /// The proof targets
-    targets: MultiProofTargets,
-    /// The calculated proof
-    proof: MultiProof,
     /// The index of this proof in the sequence of state updates
     sequence_number: u64,
+    /// Sparse trie update
+    update: SparseTrieUpdate,
+    /// The source of the proof fetch, whether it was requested as a prefetch or as a result of a
+    /// state update.
+    source: ProofFetchSource,
+}
+
+impl ProofCalculated {
+    /// Returns true if the proof was calculated as a result of a state update.
+    pub(crate) const fn is_from_state_update(&self) -> bool {
+        matches!(self.source, ProofFetchSource::StateUpdate)
+    }
+}
+
+/// Whether or not a proof was fetched due to a state update, or due to a prefetch command.
+#[derive(Debug)]
+pub enum ProofFetchSource {
+    /// The proof was fetched due to a prefetch command.
+    Prefetch,
+    /// The proof was fetched due to a state update.
+    StateUpdate,
 }
 
 /// Handle to track proof calculation ordering
@@ -122,7 +199,7 @@ pub(crate) struct ProofSequencer {
     /// The next sequence number expected to be delivered.
     next_to_deliver: u64,
     /// Buffer for out-of-order proofs and corresponding state updates
-    pending_proofs: BTreeMap<u64, (HashedPostState, MultiProofTargets, MultiProof)>,
+    pending_proofs: BTreeMap<u64, SparseTrieUpdate>,
 }
 
 impl ProofSequencer {
@@ -143,12 +220,10 @@ impl ProofSequencer {
     pub(crate) fn add_proof(
         &mut self,
         sequence: u64,
-        state_update: HashedPostState,
-        targets: MultiProofTargets,
-        proof: MultiProof,
-    ) -> Vec<(HashedPostState, MultiProofTargets, MultiProof)> {
+        update: SparseTrieUpdate,
+    ) -> Vec<SparseTrieUpdate> {
         if sequence >= self.next_to_deliver {
-            self.pending_proofs.insert(sequence, (state_update, targets, proof));
+            self.pending_proofs.insert(sequence, update);
         }
 
         // return early if we don't have the next expected proof
@@ -182,25 +257,16 @@ impl ProofSequencer {
 }
 
 /// A wrapper for the sender that signals completion when dropped
-#[allow(dead_code)]
-pub(crate) struct StateHookSender<BPF: BlindedProviderFactory>(Sender<StateRootMessage<BPF>>);
+#[derive(Deref, Debug)]
+pub struct StateHookSender(Sender<StateRootMessage>);
 
-#[allow(dead_code)]
-impl<BPF: BlindedProviderFactory> StateHookSender<BPF> {
-    pub(crate) const fn new(inner: Sender<StateRootMessage<BPF>>) -> Self {
+impl StateHookSender {
+    pub(crate) const fn new(inner: Sender<StateRootMessage>) -> Self {
         Self(inner)
     }
 }
 
-impl<BPF: BlindedProviderFactory> Deref for StateHookSender<BPF> {
-    type Target = Sender<StateRootMessage<BPF>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl<BPF: BlindedProviderFactory> Drop for StateHookSender<BPF> {
+impl Drop for StateHookSender {
     fn drop(&mut self) {
         // Send completion signal when the sender is dropped
         let _ = self.0.send(StateRootMessage::FinishedStateUpdates);
@@ -227,16 +293,140 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
                 })
                 .peekable();
 
-            if destroyed || changed_storage_iter.peek().is_some() {
-                hashed_state.storages.insert(
-                    hashed_address,
-                    HashedStorage::from_iter(destroyed, changed_storage_iter),
-                );
+            if destroyed {
+                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
+            } else if changed_storage_iter.peek().is_some() {
+                hashed_state
+                    .storages
+                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
             }
         }
     }
 
     hashed_state
+}
+
+/// Input parameters for spawning a multiproof calculation.
+#[derive(Debug)]
+struct MultiproofInput<Factory> {
+    config: StateRootConfig<Factory>,
+    hashed_state_update: HashedPostState,
+    proof_targets: MultiProofTargets,
+    proof_sequence_number: u64,
+    state_root_message_sender: Sender<StateRootMessage>,
+    source: ProofFetchSource,
+}
+
+/// Manages concurrent multiproof calculations.
+/// Takes care of not having more calculations in flight than a given thread
+/// pool size, further calculation requests are queued and spawn later, after
+/// availability has been signaled.
+#[derive(Debug)]
+struct MultiproofManager<Factory> {
+    /// Maximum number of concurrent calculations.
+    max_concurrent: usize,
+    /// Currently running calculations.
+    inflight: usize,
+    /// Queued calculations.
+    pending: VecDeque<MultiproofInput<Factory>>,
+    /// Thread pool to spawn multiproof calculations.
+    thread_pool: Arc<rayon::ThreadPool>,
+}
+
+impl<Factory> MultiproofManager<Factory>
+where
+    Factory: DatabaseProviderFactory<Provider: BlockReader>
+        + StateCommitmentProvider
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+{
+    /// Creates a new [`MultiproofManager`].
+    fn new(thread_pool: Arc<rayon::ThreadPool>, thread_pool_size: usize) -> Self {
+        // we keep 2 threads to be used internally by [`StateRootTask`]
+        let max_concurrent = thread_pool_size.saturating_sub(2);
+        debug_assert!(max_concurrent != 0);
+        Self {
+            thread_pool,
+            max_concurrent,
+            inflight: 0,
+            pending: VecDeque::with_capacity(max_concurrent),
+        }
+    }
+
+    /// Spawns a new multiproof calculation or enqueues it for later if
+    /// `max_concurrent` are already inflight.
+    fn spawn_or_queue(&mut self, input: MultiproofInput<Factory>) {
+        if self.inflight >= self.max_concurrent {
+            self.pending.push_back(input);
+            return;
+        }
+
+        self.spawn_multiproof(input);
+    }
+
+    /// Signals that a multiproof calculation has finished and there's room to
+    /// spawn a new calculation if needed.
+    fn on_calculation_complete(&mut self) {
+        self.inflight = self.inflight.saturating_sub(1);
+
+        if let Some(input) = self.pending.pop_front() {
+            self.spawn_multiproof(input);
+        }
+    }
+
+    /// Spawns a multiproof calculation.
+    fn spawn_multiproof(&mut self, input: MultiproofInput<Factory>) {
+        let MultiproofInput {
+            config,
+            hashed_state_update,
+            proof_targets,
+            proof_sequence_number,
+            state_root_message_sender,
+            source,
+        } = input;
+        let thread_pool = self.thread_pool.clone();
+
+        self.thread_pool.spawn(move || {
+            trace!(
+                target: "engine::root",
+                proof_sequence_number,
+                ?proof_targets,
+                "Starting multiproof calculation",
+            );
+            let start = Instant::now();
+            let result = calculate_multiproof(thread_pool, config, proof_targets.clone());
+            trace!(
+                target: "engine::root",
+                proof_sequence_number,
+                elapsed = ?start.elapsed(),
+                "Multiproof calculated",
+            );
+
+            match result {
+                Ok(proof) => {
+                    let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
+                        Box::new(ProofCalculated {
+                            sequence_number: proof_sequence_number,
+                            update: SparseTrieUpdate {
+                                state: hashed_state_update,
+                                targets: proof_targets,
+                                multiproof: proof,
+                            },
+                            source,
+                        }),
+                    ));
+                }
+                Err(error) => {
+                    let _ = state_root_message_sender
+                        .send(StateRootMessage::ProofCalculationError(error));
+                }
+            }
+        });
+
+        self.inflight += 1;
+    }
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -248,26 +438,24 @@ fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
 /// to the tree.
 /// Then it updates relevant leaves according to the result of the transaction.
 #[derive(Debug)]
-pub struct StateRootTask<Factory, BPF: BlindedProviderFactory> {
+pub struct StateRootTask<Factory> {
     /// Task configuration.
     config: StateRootConfig<Factory>,
     /// Receiver for state root related messages.
-    rx: Receiver<StateRootMessage<BPF>>,
+    rx: Receiver<StateRootMessage>,
     /// Sender for state root related messages.
-    tx: Sender<StateRootMessage<BPF>>,
+    tx: Sender<StateRootMessage>,
     /// Proof targets that have been already fetched.
     fetched_proof_targets: MultiProofTargets,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
-    /// The sparse trie used for the state root calculation. If [`None`], then update is in
-    /// progress.
-    sparse_trie: Option<Box<SparseStateTrie<BPF>>>,
-    /// Timestamp when the first state update was received
-    start_time: Option<Instant>,
+    /// Reference to the shared thread pool for parallel proof generation.
+    thread_pool: Arc<rayon::ThreadPool>,
+    /// Manages calculation of multiproofs.
+    multiproof_manager: MultiproofManager<Factory>,
 }
 
-#[allow(dead_code)]
-impl<'env, Factory, ABP, SBP, BPF> StateRootTask<Factory, BPF>
+impl<Factory> StateRootTask<Factory>
 where
     Factory: DatabaseProviderFactory<Provider: BlockReader>
         + StateCommitmentProvider
@@ -275,47 +463,29 @@ where
         + Send
         + Sync
         + 'static,
-    ABP: BlindedProvider<Error = SparseTrieError> + Send + Sync + 'env,
-    SBP: BlindedProvider<Error = SparseTrieError> + Send + Sync + 'env,
-    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP>
-        + Send
-        + Sync
-        + 'env,
 {
     /// Creates a new state root task with the unified message channel
-    pub fn new(config: StateRootConfig<Factory>, blinded_provider: BPF) -> Self {
+    pub fn new(config: StateRootConfig<Factory>, thread_pool: Arc<rayon::ThreadPool>) -> Self {
         let (tx, rx) = channel();
-
         Self {
             config,
             rx,
             tx,
             fetched_proof_targets: Default::default(),
             proof_sequencer: ProofSequencer::new(),
-            sparse_trie: Some(Box::new(SparseStateTrie::new(blinded_provider).with_updates(true))),
-            start_time: None,
+            thread_pool: thread_pool.clone(),
+            multiproof_manager: MultiproofManager::new(thread_pool, thread_pool_size()),
         }
     }
 
-    /// Spawns the state root task and returns a handle to await its result.
-    pub fn spawn<'scope>(self, scope: &'scope thread::Scope<'scope, 'env>) -> StateRootHandle {
-        let (tx, rx) = mpsc::sync_channel(1);
-        std::thread::Builder::new()
-            .name("State Root Task".to_string())
-            .spawn_scoped(scope, move || {
-                debug!(target: "engine::tree", "Starting state root task");
-
-                let result = rayon::scope(|scope| self.run(scope));
-                let _ = tx.send(result);
-            })
-            .expect("failed to spawn state root thread");
-
-        StateRootHandle::new(rx)
+    /// Returns a [`StateHookSender`] that can be used to send state updates to this task.
+    pub fn state_hook_sender(&self) -> StateHookSender {
+        StateHookSender::new(self.tx.clone())
     }
 
     /// Returns a state hook to be used to send state updates to this task.
     pub fn state_hook(&self) -> impl OnStateHook {
-        let state_hook = StateHookSender::new(self.tx.clone());
+        let state_hook = self.state_hook_sender();
 
         move |state: &EvmState| {
             if let Err(error) = state_hook.send(StateRootMessage::StateUpdate(state.clone())) {
@@ -324,56 +494,73 @@ where
         }
     }
 
+    /// Spawns the state root task and returns a handle to await its result.
+    pub fn spawn(self) -> StateRootHandle {
+        let sparse_trie_tx =
+            Self::spawn_sparse_trie(self.thread_pool.clone(), self.config.clone(), self.tx.clone());
+        let (tx, rx) = mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("State Root Task".to_string())
+            .spawn(move || {
+                debug!(target: "engine::tree", "Starting state root task");
+
+                let result = self.run(sparse_trie_tx);
+                let _ = tx.send(result);
+            })
+            .expect("failed to spawn state root thread");
+
+        StateRootHandle::new(rx)
+    }
+
+    /// Spawn long running sparse trie task that forwards the final result upon completion.
+    fn spawn_sparse_trie(
+        thread_pool: Arc<rayon::ThreadPool>,
+        config: StateRootConfig<Factory>,
+        task_tx: Sender<StateRootMessage>,
+    ) -> Sender<SparseTrieUpdate> {
+        let (tx, rx) = mpsc::channel();
+        thread_pool.spawn(move || {
+            debug!(target: "engine::tree", "Starting sparse trie task");
+            let result = match run_sparse_trie(config, rx) {
+                Ok((state_root, trie_updates, iterations)) => {
+                    StateRootMessage::RootCalculated { state_root, trie_updates, iterations }
+                }
+                Err(error) => StateRootMessage::RootCalculationError(error),
+            };
+            let _ = task_tx.send(result);
+        });
+        tx
+    }
+
+    /// Handles request for proof prefetch.
+    fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
+        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &targets);
+
+        self.multiproof_manager.spawn_or_queue(MultiproofInput {
+            config: self.config.clone(),
+            hashed_state_update: Default::default(),
+            proof_targets: targets,
+            proof_sequence_number: self.proof_sequencer.next_sequence(),
+            state_root_message_sender: self.tx.clone(),
+            source: ProofFetchSource::Prefetch,
+        });
+    }
+
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
-    fn on_state_update(
-        scope: &rayon::Scope<'env>,
-        view: ConsistentDbView<Factory>,
-        input: Arc<TrieInput>,
-        update: EvmState,
-        fetched_proof_targets: &mut MultiProofTargets,
-        proof_sequence_number: u64,
-        state_root_message_sender: Sender<StateRootMessage<BPF>>,
-    ) {
+    fn on_state_update(&mut self, update: EvmState, proof_sequence_number: u64) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
+        let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
+        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
-        let proof_targets = get_proof_targets(&hashed_state_update, fetched_proof_targets);
-        extend_multi_proof_targets_ref(fetched_proof_targets, &proof_targets);
-
-        // Dispatch proof gathering for this state update
-        scope.spawn(move |_| {
-            let provider = match view.provider_ro() {
-                Ok(provider) => provider,
-                Err(error) => {
-                    error!(target: "engine::root", ?error, "Could not get provider");
-                    return;
-                }
-            };
-
-            // TODO: replace with parallel proof
-            let result = Proof::overlay_multiproof(
-                provider.tx_ref(),
-                // TODO(alexey): this clone can be expensive, we should avoid it
-                input.as_ref().clone(),
-                proof_targets.clone(),
-            );
-            match result {
-                Ok(proof) => {
-                    let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
-                        Box::new(ProofCalculated {
-                            state_update: hashed_state_update,
-                            targets: proof_targets,
-                            proof,
-                            sequence_number: proof_sequence_number,
-                        }),
-                    ));
-                }
-                Err(e) => {
-                    let _ =
-                        state_root_message_sender.send(StateRootMessage::ProofCalculationError(e));
-                }
-            }
+        self.multiproof_manager.spawn_or_queue(MultiproofInput {
+            config: self.config.clone(),
+            hashed_state_update,
+            proof_targets,
+            proof_sequence_number,
+            state_root_message_sender: self.tx.clone(),
+            source: ProofFetchSource::StateUpdate,
         });
     }
 
@@ -381,213 +568,141 @@ where
     fn on_proof(
         &mut self,
         sequence_number: u64,
-        state_update: HashedPostState,
-        targets: MultiProofTargets,
-        proof: MultiProof,
-    ) -> Option<(HashedPostState, MultiProofTargets, MultiProof)> {
-        let ready_proofs =
-            self.proof_sequencer.add_proof(sequence_number, state_update, targets, proof);
+        update: SparseTrieUpdate,
+    ) -> Option<SparseTrieUpdate> {
+        let ready_proofs = self.proof_sequencer.add_proof(sequence_number, update);
 
         if ready_proofs.is_empty() {
             None
         } else {
             // Merge all ready proofs and state updates
-            ready_proofs.into_iter().reduce(
-                |(mut acc_state_update, mut acc_targets, mut acc_proof),
-                 (state_update, targets, proof)| {
-                    acc_state_update.extend(state_update);
-                    extend_multi_proof_targets(&mut acc_targets, targets);
-                    acc_proof.extend(proof);
-
-                    (acc_state_update, acc_targets, acc_proof)
-                },
-            )
+            ready_proofs.into_iter().reduce(|mut acc_update, update| {
+                acc_update.extend(update);
+                acc_update
+            })
         }
     }
 
-    /// Spawns root calculation with the current state and proofs.
-    fn spawn_root_calculation(
-        &mut self,
-        scope: &rayon::Scope<'env>,
-        state: HashedPostState,
-        targets: MultiProofTargets,
-        multiproof: MultiProof,
-    ) {
-        let Some(trie) = self.sparse_trie.take() else { return };
+    fn run(mut self, sparse_trie_tx: Sender<SparseTrieUpdate>) -> StateRootResult {
+        let mut sparse_trie_tx = Some(sparse_trie_tx);
 
-        trace!(
-            target: "engine::root",
-            account_proofs = multiproof.account_subtree.len(),
-            storage_proofs = multiproof.storages.len(),
-            "Spawning root calculation"
-        );
-
-        // TODO(alexey): store proof targets in `ProofSequecner` to avoid recomputing them
-        let targets = get_proof_targets(&state, &targets);
-
-        let tx = self.tx.clone();
-        scope.spawn(move |_| {
-            let result = update_sparse_trie(trie, multiproof, targets, state);
-            match result {
-                Ok((trie, elapsed)) => {
-                    trace!(
-                        target: "engine::root",
-                        ?elapsed,
-                        "Root calculation completed, sending result"
-                    );
-                    let _ = tx.send(StateRootMessage::RootCalculated { trie, elapsed });
-                }
-                Err(e) => {
-                    let _ = tx.send(StateRootMessage::RootCalculationError(e));
-                }
-            }
-        });
-    }
-
-    fn run(mut self, scope: &rayon::Scope<'env>) -> StateRootResult {
-        let mut current_state_update = HashedPostState::default();
-        let mut current_proof_targets = MultiProofTargets::default();
-        let mut current_multiproof = MultiProof::default();
         let mut updates_received = 0;
         let mut proofs_processed = 0;
-        let mut roots_calculated = 0;
+
         let mut updates_finished = false;
 
+        // Timestamp when the first state update was received
+        let mut first_update_time = None;
+        // Timestamp when the last state update was received
+        let mut last_update_time = None;
+
         loop {
+            trace!(target: "engine::root", "entering main channel receiving loop");
             match self.rx.recv() {
                 Ok(message) => match message {
+                    StateRootMessage::PrefetchProofs(targets) => {
+                        trace!(target: "engine::root", "processing StateRootMessage::PrefetchProofs");
+                        debug!(
+                            target: "engine::root",
+                            len = targets.len(),
+                            "Prefetching proofs"
+                        );
+                        self.on_prefetch_proof(targets);
+                    }
                     StateRootMessage::StateUpdate(update) => {
+                        trace!(target: "engine::root", "processing StateRootMessage::StateUpdate");
                         if updates_received == 0 {
-                            self.start_time = Some(Instant::now());
+                            first_update_time = Some(Instant::now());
                             debug!(target: "engine::root", "Started state root calculation");
                         }
+                        last_update_time = Some(Instant::now());
 
                         updates_received += 1;
-                        trace!(
+                        debug!(
                             target: "engine::root",
                             len = update.len(),
                             total_updates = updates_received,
                             "Received new state update"
                         );
-                        Self::on_state_update(
-                            scope,
-                            self.config.consistent_view.clone(),
-                            self.config.input.clone(),
-                            update,
-                            &mut self.fetched_proof_targets,
-                            self.proof_sequencer.next_sequence(),
-                            self.tx.clone(),
-                        );
+                        let next_sequence = self.proof_sequencer.next_sequence();
+                        self.on_state_update(update, next_sequence);
                     }
                     StateRootMessage::FinishedStateUpdates => {
+                        trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
                         updates_finished = true;
+
+                        let all_proofs_received = proofs_processed >= updates_received;
+                        let no_pending = !self.proof_sequencer.has_pending();
+                        if all_proofs_received && no_pending {
+                            // drop the sender
+                            sparse_trie_tx.take();
+                            debug!(
+                                target: "engine::root",
+                                total_updates = updates_received,
+                                total_proofs = proofs_processed,
+                                "State updates finished and all proofs processed, ending calculation"
+                            );
+                        }
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
-                        proofs_processed += 1;
-                        trace!(
+                        trace!(target: "engine::root", "processing StateRootMessage::ProofCalculated");
+                        if proof_calculated.is_from_state_update() {
+                            proofs_processed += 1;
+                        }
+
+                        debug!(
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
                             total_proofs = proofs_processed,
                             "Processing calculated proof"
                         );
 
-                        trace!(target: "engine::root", proof = ?proof_calculated.proof, "Proof calculated");
+                        self.multiproof_manager.on_calculation_complete();
 
-                        if let Some((
-                            combined_state_update,
-                            combined_proof_targets,
-                            combined_proof,
-                        )) = self.on_proof(
-                            proof_calculated.sequence_number,
-                            proof_calculated.state_update,
-                            proof_calculated.targets,
-                            proof_calculated.proof,
-                        ) {
-                            if self.sparse_trie.is_none() {
-                                current_state_update.extend(combined_state_update);
-                                extend_multi_proof_targets(
-                                    &mut current_proof_targets,
-                                    combined_proof_targets,
-                                );
-                                current_multiproof.extend(combined_proof);
-                            } else {
-                                self.spawn_root_calculation(
-                                    scope,
-                                    combined_state_update,
-                                    combined_proof_targets,
-                                    combined_proof,
-                                );
-                            }
+                        if let Some(combined_update) =
+                            self.on_proof(proof_calculated.sequence_number, proof_calculated.update)
+                        {
+                            let _ = sparse_trie_tx
+                                .as_ref()
+                                .expect("tx not dropped")
+                                .send(combined_update);
                         }
-                    }
-                    StateRootMessage::RootCalculated { trie, elapsed } => {
-                        roots_calculated += 1;
-                        trace!(
-                            target: "engine::root",
-                            ?elapsed,
-                            roots_calculated,
-                            proofs = proofs_processed,
-                            updates = updates_received,
-                            "Computed intermediate root"
-                        );
-                        self.sparse_trie = Some(trie);
 
-                        let has_new_proofs = !current_multiproof.account_subtree.is_empty() ||
-                            !current_multiproof.storages.is_empty();
                         let all_proofs_received = proofs_processed >= updates_received;
                         let no_pending = !self.proof_sequencer.has_pending();
-
-                        trace!(
-                            target: "engine::root",
-                            has_new_proofs,
-                            all_proofs_received,
-                            no_pending,
-                            "State check"
-                        );
-
-                        // only spawn new calculation if we have accumulated new proofs
-                        if has_new_proofs {
-                            trace!(
-                                target: "engine::root",
-                                account_proofs = current_multiproof.account_subtree.len(),
-                                storage_proofs = current_multiproof.storages.len(),
-                                "Spawning subsequent root calculation"
-                            );
-                            self.spawn_root_calculation(
-                                scope,
-                                std::mem::take(&mut current_state_update),
-                                std::mem::take(&mut current_proof_targets),
-                                std::mem::take(&mut current_multiproof),
-                            );
-                        } else if all_proofs_received && no_pending && updates_finished {
+                        if all_proofs_received && no_pending && updates_finished {
+                            // drop the sender
+                            sparse_trie_tx.take();
                             debug!(
                                 target: "engine::root",
                                 total_updates = updates_received,
                                 total_proofs = proofs_processed,
-                                roots_calculated,
                                 "All proofs processed, ending calculation"
                             );
-                            let total_time =
-                                self.start_time.expect("start time should be set").elapsed();
-                            debug!(
-                                target: "engine::root",
-                                ?total_time,
-                                "Total time spent calculating state root"
-                            );
-                            let mut trie = self
-                                .sparse_trie
-                                .take()
-                                .expect("sparse trie update should not be in progress");
-                            let root = trie.root().expect("sparse trie should be revealed");
-                            let trie_updates = trie
-                                .take_trie_updates()
-                                .expect("sparse trie should have updates retention enabled");
-                            return Ok(StateRootComputeOutcome {
-                                state_root: (root, trie_updates),
-                                total_time,
-                            });
                         }
                     }
+                    StateRootMessage::RootCalculated { state_root, trie_updates, iterations } => {
+                        trace!(target: "engine::root", "processing StateRootMessage::RootCalculated");
+                        let total_time =
+                            first_update_time.expect("first update time should be set").elapsed();
+                        let time_from_last_update =
+                            last_update_time.expect("last update time should be set").elapsed();
+                        debug!(
+                            target: "engine::root",
+                            total_updates = updates_received,
+                            total_proofs = proofs_processed,
+                            roots_calculated = iterations,
+                            ?total_time,
+                            ?time_from_last_update,
+                            "All proofs processed, ending calculation"
+                        );
+                        return Ok(StateRootComputeOutcome {
+                            state_root: (state_root, trie_updates),
+                            total_time,
+                            time_from_last_update,
+                        });
+                    }
+
                     StateRootMessage::ProofCalculationError(e) => {
                         return Err(ParallelStateRootError::Other(format!(
                             "could not calculate multiproof: {e:?}"
@@ -613,6 +728,63 @@ where
             }
         }
     }
+}
+
+/// Listen to incoming sparse trie updates and update the sparse trie.
+/// Returns final state root, trie updates and the number of update iterations.
+fn run_sparse_trie<Factory>(
+    config: StateRootConfig<Factory>,
+    update_rx: mpsc::Receiver<SparseTrieUpdate>,
+) -> Result<(B256, TrieUpdates, u64), ParallelStateRootError>
+where
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
+{
+    let provider_ro = config.consistent_view.provider_ro()?;
+    let in_memory_trie_cursor = InMemoryTrieCursorFactory::new(
+        DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+        &config.nodes_sorted,
+    );
+    let blinded_provider_factory = ProofBlindedProviderFactory::new(
+        in_memory_trie_cursor.clone(),
+        HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+            &config.state_sorted,
+        ),
+        config.prefix_sets.clone(),
+    );
+
+    let mut num_iterations = 0;
+    let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
+
+    while let Ok(mut update) = update_rx.recv() {
+        num_iterations += 1;
+        let mut num_updates = 1;
+        while let Ok(next) = update_rx.try_recv() {
+            update.extend(next);
+            num_updates += 1;
+        }
+
+        debug!(
+            target: "engine::root",
+            num_updates,
+            account_proofs = update.multiproof.account_subtree.len(),
+            storage_proofs = update.multiproof.storages.len(),
+            "Updating sparse trie"
+        );
+
+        // TODO: alexey to remind me why we are doing this
+        update.targets = get_proof_targets(&update.state, &update.targets);
+
+        let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
+            ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
+        })?;
+        trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
+    }
+
+    debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
+    let root = trie.root().expect("sparse trie should be revealed");
+    let trie_updates = trie.take_trie_updates().expect("retention must be enabled");
+    Ok((root, trie_updates, num_iterations))
 }
 
 /// Returns accounts only with those storages that were not already fetched, and
@@ -648,18 +820,38 @@ fn get_proof_targets(
     targets
 }
 
-/// Updates the sparse trie with the given proofs and state, and returns the updated trie and the
-/// time it took.
-fn update_sparse_trie<
-    ABP: BlindedProvider<Error = SparseTrieError> + Send + Sync,
-    SBP: BlindedProvider<Error = SparseTrieError> + Send + Sync,
-    BPF: BlindedProviderFactory<AccountNodeProvider = ABP, StorageNodeProvider = SBP> + Send + Sync,
->(
-    mut trie: Box<SparseStateTrie<BPF>>,
-    multiproof: MultiProof,
-    targets: MultiProofTargets,
-    state: HashedPostState,
-) -> SparseStateTrieResult<(Box<SparseStateTrie<BPF>>, Duration)> {
+/// Calculate multiproof for the targets.
+#[inline]
+fn calculate_multiproof<Factory>(
+    thread_pool: Arc<rayon::ThreadPool>,
+    config: StateRootConfig<Factory>,
+    proof_targets: MultiProofTargets,
+) -> ProviderResult<MultiProof>
+where
+    Factory:
+        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
+{
+    Ok(ParallelProof::new(
+        config.consistent_view,
+        config.nodes_sorted,
+        config.state_sorted,
+        config.prefix_sets,
+        thread_pool,
+    )
+    .with_branch_node_masks(true)
+    .multiproof(proof_targets)?)
+}
+
+/// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
+fn update_sparse_trie<BPF>(
+    trie: &mut SparseStateTrie<BPF>,
+    SparseTrieUpdate { state, targets, multiproof }: SparseTrieUpdate,
+) -> SparseStateTrieResult<Duration>
+where
+    BPF: BlindedProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
+    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+{
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
 
@@ -715,7 +907,7 @@ fn update_sparse_trie<
     trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
     let elapsed = started_at.elapsed();
 
-    Ok((trie, elapsed))
+    Ok(elapsed)
 }
 
 fn extend_multi_proof_targets(targets: &mut MultiProofTargets, other: MultiProofTargets) {
@@ -733,16 +925,12 @@ fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &Multi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_primitives::{Account as RethAccount, StorageEntry};
+    use reth_primitives_traits::{Account as RethAccount, StorageEntry};
     use reth_provider::{
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
     };
     use reth_testing_utils::generators::{self, Rng};
-    use reth_trie::{
-        hashed_cursor::HashedPostStateCursorFactory, proof::ProofBlindedProviderFactory,
-        test_utils::state_root, trie_cursor::InMemoryTrieCursorFactory, TrieInput,
-    };
-    use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
+    use reth_trie::{test_utils::state_root, TrieInput};
     use revm_primitives::{
         Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot,
         HashMap, B256, KECCAK_EMPTY, U256,
@@ -855,37 +1043,34 @@ mod tests {
             }
         }
 
+        let input = TrieInput::from_state(hashed_state);
+        let nodes_sorted = Arc::new(input.nodes.clone().into_sorted());
+        let state_sorted = Arc::new(input.state.clone().into_sorted());
         let config = StateRootConfig {
             consistent_view: ConsistentDbView::new(factory, None),
-            input: Arc::new(TrieInput::from_state(hashed_state)),
+            nodes_sorted,
+            state_sorted,
+            prefix_sets: Arc::new(input.prefix_sets),
         };
-        let provider = config.consistent_view.provider_ro().unwrap();
-        let nodes_sorted = config.input.nodes.clone().into_sorted();
-        let state_sorted = config.input.state.clone().into_sorted();
-        let blinded_provider_factory = ProofBlindedProviderFactory::new(
-            InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::new(provider.tx_ref()),
-                &nodes_sorted,
-            ),
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(provider.tx_ref()),
-                &state_sorted,
-            ),
-            Arc::new(config.input.prefix_sets.clone()),
-        );
-        let (root_from_task, _) = std::thread::scope(|std_scope| {
-            let task = StateRootTask::new(config, blinded_provider_factory);
-            let mut state_hook = task.state_hook();
-            let handle = task.spawn(std_scope);
 
-            for update in state_updates {
-                state_hook.on_state(&update);
-            }
-            drop(state_hook);
+        let num_threads = thread_pool_size();
 
-            handle.wait_for_result().expect("task failed")
-        })
-        .state_root;
+        let state_root_task_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("proof-worker-{}", i))
+            .build()
+            .expect("Failed to create proof worker thread pool");
+
+        let task = StateRootTask::new(config, Arc::new(state_root_task_pool));
+        let mut state_hook = task.state_hook();
+        let handle = task.spawn();
+
+        for update in state_updates {
+            state_hook.on_state(&update);
+        }
+        drop(state_hook);
+
+        let (root_from_task, _) = handle.wait_for_result().expect("task failed").state_root;
         let root_from_base = state_root(accumulated_state);
 
         assert_eq!(
@@ -901,21 +1086,11 @@ mod tests {
         let proof2 = MultiProof::default();
         sequencer.next_sequence = 2;
 
-        let ready = sequencer.add_proof(
-            0,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proof1,
-        );
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1));
         assert_eq!(ready.len(), 1);
         assert!(!sequencer.has_pending());
 
-        let ready = sequencer.add_proof(
-            1,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proof2,
-        );
+        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2));
         assert_eq!(ready.len(), 1);
         assert!(!sequencer.has_pending());
     }
@@ -928,30 +1103,15 @@ mod tests {
         let proof3 = MultiProof::default();
         sequencer.next_sequence = 3;
 
-        let ready = sequencer.add_proof(
-            2,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proof3,
-        );
+        let ready = sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proof3));
         assert_eq!(ready.len(), 0);
         assert!(sequencer.has_pending());
 
-        let ready = sequencer.add_proof(
-            0,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proof1,
-        );
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1));
         assert_eq!(ready.len(), 1);
         assert!(sequencer.has_pending());
 
-        let ready = sequencer.add_proof(
-            1,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proof2,
-        );
+        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2));
         assert_eq!(ready.len(), 2);
         assert!(!sequencer.has_pending());
     }
@@ -963,20 +1123,10 @@ mod tests {
         let proof3 = MultiProof::default();
         sequencer.next_sequence = 3;
 
-        let ready = sequencer.add_proof(
-            0,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proof1,
-        );
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1));
         assert_eq!(ready.len(), 1);
 
-        let ready = sequencer.add_proof(
-            2,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proof3,
-        );
+        let ready = sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proof3));
         assert_eq!(ready.len(), 0);
         assert!(sequencer.has_pending());
     }
@@ -987,20 +1137,10 @@ mod tests {
         let proof1 = MultiProof::default();
         let proof2 = MultiProof::default();
 
-        let ready = sequencer.add_proof(
-            0,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proof1,
-        );
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1));
         assert_eq!(ready.len(), 1);
 
-        let ready = sequencer.add_proof(
-            0,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proof2,
-        );
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof2));
         assert_eq!(ready.len(), 0);
         assert!(!sequencer.has_pending());
     }
@@ -1011,37 +1151,12 @@ mod tests {
         let proofs: Vec<_> = (0..5).map(|_| MultiProof::default()).collect();
         sequencer.next_sequence = 5;
 
-        sequencer.add_proof(
-            4,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proofs[4].clone(),
-        );
-        sequencer.add_proof(
-            2,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proofs[2].clone(),
-        );
-        sequencer.add_proof(
-            1,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proofs[1].clone(),
-        );
-        sequencer.add_proof(
-            3,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proofs[3].clone(),
-        );
+        sequencer.add_proof(4, SparseTrieUpdate::from_multiproof(proofs[4].clone()));
+        sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proofs[2].clone()));
+        sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proofs[1].clone()));
+        sequencer.add_proof(3, SparseTrieUpdate::from_multiproof(proofs[3].clone()));
 
-        let ready = sequencer.add_proof(
-            0,
-            HashedPostState::default(),
-            MultiProofTargets::default(),
-            proofs[0].clone(),
-        );
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proofs[0].clone()));
         assert_eq!(ready.len(), 5);
         assert!(!sequencer.has_pending());
     }

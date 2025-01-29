@@ -4,15 +4,15 @@ use std::{
 };
 
 use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
-use reth_beacon_consensus::BeaconConsensusEngineHandle;
 use reth_chainspec::MAINNET;
 use reth_consensus::noop::NoopConsensus;
+use reth_engine_primitives::BeaconConsensusEngineHandle;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::{execute::EthExecutionStrategyFactory, EthEvmConfig};
 use reth_network_api::noop::NoopNetwork;
 use reth_payload_builder::test_utils::spawn_test_payload_service;
-use reth_provider::test_utils::{NoopProvider, TestCanonStateSubscriptions};
+use reth_provider::test_utils::NoopProvider;
 use reth_rpc::EthApi;
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle},
@@ -37,8 +37,7 @@ pub const fn test_address() -> SocketAddr {
 pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
     let config = AuthServerConfig::builder(secret).socket_addr(test_address()).build();
     let (tx, _rx) = unbounded_channel();
-    let beacon_engine_handle =
-        BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx, Default::default());
+    let beacon_engine_handle = BeaconConsensusEngineHandle::<EthEngineTypes>::new(tx);
     let client = ClientVersionV1 {
         code: ClientCode::RH,
         name: "Reth".to_string(),
@@ -135,7 +134,6 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
     TestPool,
     NoopNetwork,
     TokioTaskExecutor,
-    TestCanonStateSubscriptions,
     EthEvmConfig,
     BasicBlockExecutorProvider<EthExecutionStrategyFactory>,
     NoopConsensus,
@@ -145,7 +143,6 @@ pub fn test_rpc_builder() -> RpcModuleBuilder<
         .with_pool(TestPoolBuilder::default().into())
         .with_network(NoopNetwork::default())
         .with_executor(TokioTaskExecutor::default())
-        .with_events(TestCanonStateSubscriptions::default())
         .with_evm_config(EthEvmConfig::new(MAINNET.clone()))
         .with_block_executor(
             BasicBlockExecutorProvider::new(EthExecutionStrategyFactory::mainnet()),

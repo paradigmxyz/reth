@@ -99,25 +99,24 @@ where
     }
 }
 
-impl<Provider, Pool, EvmConfig, Network> EthApi<Provider, Pool, Network, EvmConfig>
+impl<N, Provider, Pool, EvmConfig, Network> EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: ChainSpecProvider + BlockReaderIdExt + Clone + 'static,
+    N: NodePrimitives,
+    Provider: ChainSpecProvider
+        + BlockReaderIdExt<Block = N::Block, Receipt = N::Receipt>
+        + CanonStateSubscriptions<Primitives = N>
+        + Clone
+        + 'static,
     Pool: Clone,
     EvmConfig: Clone,
     Network: Clone,
 {
     /// Creates a new, shareable instance.
-    pub fn with_spawner<Tasks, Events>(
-        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks, Events>,
+    pub fn with_spawner<Tasks>(
+        ctx: &EthApiBuilderCtx<Provider, Pool, EvmConfig, Network, Tasks>,
     ) -> Self
     where
         Tasks: TaskSpawner + Clone + 'static,
-        Events: CanonStateSubscriptions<
-            Primitives: NodePrimitives<
-                Block = ProviderBlock<Provider>,
-                Receipt = ProviderReceipt<Provider>,
-            >,
-        >,
     {
         let blocking_task_pool =
             BlockingTaskPool::build().expect("failed to build blocking task pool");
@@ -158,7 +157,7 @@ where
 
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCore for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReader + Send + Sync + Clone + Unpin,
+    Provider: BlockReader + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
@@ -193,7 +192,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCoreExt
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Provider: BlockReader + Send + Sync + Clone + Unpin,
+    Provider: BlockReader + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
@@ -464,7 +463,7 @@ mod tests {
     use reth_primitives::{Block, BlockBody, TransactionSigned};
     use reth_provider::{
         test_utils::{MockEthProvider, NoopProvider},
-        BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, StateProviderFactory,
+        BlockReader, BlockReaderIdExt, ChainSpecProvider, StateProviderFactory,
     };
     use reth_rpc_eth_api::EthApiServer;
     use reth_rpc_eth_types::{
@@ -484,7 +483,6 @@ mod tests {
                 Header = reth_primitives::Header,
             > + BlockReader
             + ChainSpecProvider<ChainSpec = ChainSpec>
-            + EvmEnvProvider
             + StateProviderFactory
             + Unpin
             + Clone
@@ -538,7 +536,7 @@ mod tests {
                 number: newest_block - i,
                 gas_limit,
                 gas_used,
-                base_fee_per_gas: base_fee_per_gas.map(Into::into),
+                base_fee_per_gas,
                 parent_hash,
                 ..Default::default()
             };

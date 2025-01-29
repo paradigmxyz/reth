@@ -8,10 +8,10 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use alloy_consensus::{BlockHeader, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS;
+use alloy_consensus::EMPTY_OMMER_ROOT_HASH;
+use alloy_eips::{eip7840::BlobParams, merge::ALLOWED_FUTURE_BLOCK_TIME_SECONDS};
 use alloy_primitives::U256;
-use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{
     Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput,
 };
@@ -19,12 +19,12 @@ use reth_consensus_common::validation::{
     validate_4844_header_standalone, validate_against_parent_4844,
     validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
     validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
-    validate_header_base_fee, validate_header_extradata, validate_header_gas,
+    validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
-use reth_primitives::{BlockWithSenders, NodePrimitives, Receipt, SealedBlock, SealedHeader};
+use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_primitives_traits::{
     constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
-    BlockBody,
+    Block, BlockHeader,
 };
 use std::{fmt::Debug, sync::Arc, time::SystemTime};
 
@@ -56,16 +56,16 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         parent: &SealedHeader<H>,
     ) -> Result<(), ConsensusError> {
         // Determine the parent gas limit, considering elasticity multiplier on the London fork.
-        let parent_gas_limit =
-            if self.chain_spec.fork(EthereumHardfork::London).transitions_at_block(header.number())
-            {
-                parent.gas_limit() *
-                    self.chain_spec
-                        .base_fee_params_at_timestamp(header.timestamp())
-                        .elasticity_multiplier as u64
-            } else {
-                parent.gas_limit()
-            };
+        let parent_gas_limit = if !self.chain_spec.is_london_active_at_block(parent.number()) &&
+            self.chain_spec.is_london_active_at_block(header.number())
+        {
+            parent.gas_limit() *
+                self.chain_spec
+                    .base_fee_params_at_timestamp(header.timestamp())
+                    .elasticity_multiplier as u64
+        } else {
+            parent.gas_limit()
+        };
 
         // Check for an increase in gas limit beyond the allowed threshold.
         if header.gas_limit() > parent_gas_limit {
@@ -103,31 +103,29 @@ where
 {
     fn validate_block_post_execution(
         &self,
-        block: &BlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         input: PostExecutionInput<'_>,
     ) -> Result<(), ConsensusError> {
         validate_block_post_execution(block, &self.chain_spec, input.receipts, input.requests)
     }
 }
 
-impl<H, B, ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensus<H, B>
+impl<B, ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug> Consensus<B>
     for EthBeaconConsensus<ChainSpec>
 where
-    H: BlockHeader,
-    B: BlockBody,
+    B: Block,
 {
+    type Error = ConsensusError;
+
     fn validate_body_against_header(
         &self,
-        body: &B,
-        header: &SealedHeader<H>,
-    ) -> Result<(), ConsensusError> {
+        body: &B::Body,
+        header: &SealedHeader<B::Header>,
+    ) -> Result<(), Self::Error> {
         validate_body_against_header(body, header.header())
     }
 
-    fn validate_block_pre_execution(
-        &self,
-        block: &SealedBlock<H, B>,
-    ) -> Result<(), ConsensusError> {
+    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), Self::Error> {
         validate_block_pre_execution(block, &self.chain_spec)
     }
 }
@@ -195,7 +193,13 @@ where
 
         // ensure that the blob gas fields for this block
         if self.chain_spec.is_cancun_active_at_timestamp(header.timestamp()) {
-            validate_against_parent_4844(header.header(), parent.header())?;
+            let blob_params = if self.chain_spec.is_prague_active_at_timestamp(header.timestamp()) {
+                BlobParams::prague()
+            } else {
+                BlobParams::cancun()
+            };
+
+            validate_against_parent_4844(header.header(), parent.header(), blob_params)?;
         }
 
         Ok(())
@@ -204,12 +208,10 @@ where
     fn validate_header_with_total_difficulty(
         &self,
         header: &H,
-        total_difficulty: U256,
+        _total_difficulty: U256,
     ) -> Result<(), ConsensusError> {
-        let is_post_merge = self
-            .chain_spec
-            .fork(EthereumHardfork::Paris)
-            .active_at_ttd(total_difficulty, header.difficulty());
+        let is_post_merge =
+            self.chain_spec.is_paris_active_at_block(header.number()).is_some_and(|active| active);
 
         if is_post_merge {
             // TODO: add `is_zero_difficulty` to `alloy_consensus::BlockHeader` trait
@@ -234,8 +236,8 @@ where
             // Block validation with respect to the parent should ensure that the block timestamp
             // is greater than its parent timestamp.
 
-            // validate header extradata for all networks post merge
-            validate_header_extradata(header)?;
+            // validate header extra data for all networks post merge
+            validate_header_extra_data(header)?;
 
             // mixHash is used instead of difficulty inside EVM
             // https://eips.ethereum.org/EIPS/eip-4399#using-mixhash-field-instead-of-difficulty
@@ -256,7 +258,7 @@ where
                 })
             }
 
-            validate_header_extradata(header)?;
+            validate_header_extra_data(header)?;
         }
 
         Ok(())
@@ -268,7 +270,7 @@ mod tests {
     use super::*;
     use alloy_primitives::B256;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
-    use reth_primitives::proofs;
+    use reth_primitives_traits::proofs;
 
     fn header_with_gas_limit(gas_limit: u64) -> SealedHeader {
         let header = reth_primitives::Header { gas_limit, ..Default::default() };
@@ -358,7 +360,7 @@ mod tests {
         };
 
         assert_eq!(
-            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::seal(header,)),
+            EthBeaconConsensus::new(chain_spec).validate_header(&SealedHeader::seal_slow(header,)),
             Ok(())
         );
     }

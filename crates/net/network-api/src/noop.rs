@@ -26,12 +26,13 @@ impl NetworkInfo for NoopNetwork {
     }
 
     async fn network_status(&self) -> Result<NetworkStatus, NetworkError> {
+        #[allow(deprecated)]
         Ok(NetworkStatus {
             client_version: "reth-test".to_string(),
             protocol_version: ProtocolVersion::V5 as u64,
             eth_protocol_info: EthProtocolInfo {
-                difficulty: Default::default(),
                 network: 1,
+                difficulty: None,
                 genesis: Default::default(),
                 config: Default::default(),
                 head: Default::default(),

@@ -6,10 +6,11 @@ use crate::{
 };
 
 use alloy_primitives::U256;
-use reth_chain_state::{CanonStateNotification, ExecutedBlock};
+use reth_chain_state::CanonStateNotification;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{PayloadKind, PayloadTypes};
-use reth_primitives::{Block, BlockExt};
+use reth_primitives::Block;
+use reth_primitives_traits::Block as _;
 use std::{
     future::Future,
     pin::Pin,
@@ -89,7 +90,6 @@ impl PayloadJob for TestPayloadJob {
             self.attr.payload_id(),
             Arc::new(Block::default().seal_slow()),
             U256::ZERO,
-            Some(ExecutedBlock::default()),
             Some(Default::default()),
         ))
     }

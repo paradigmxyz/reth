@@ -1,4 +1,5 @@
-use crate::{DBProvider, StorageLocation};
+use crate::{DBProvider, OmmersProvider, StorageLocation};
+use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_db::{
@@ -8,7 +9,8 @@ use reth_db::{
     transaction::{DbTx, DbTxMut},
     DbTxUnwindExt,
 };
-use reth_primitives_traits::{Block, BlockBody, FullNodePrimitives};
+use reth_primitives::TransactionSigned;
+use reth_primitives_traits::{Block, BlockBody, FullNodePrimitives, SignedTransaction};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Trait that implements how block bodies are written to the storage.
@@ -78,17 +80,24 @@ impl<T, Provider, Primitives: FullNodePrimitives> ChainStorageReader<Provider, P
 }
 
 /// Ethereum storage implementation.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct EthStorage;
+#[derive(Debug, Clone, Copy)]
+pub struct EthStorage<T = TransactionSigned>(std::marker::PhantomData<T>);
 
-impl<Provider> BlockBodyWriter<Provider, reth_primitives::BlockBody> for EthStorage
+impl<T> Default for EthStorage<T> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<Provider, T> BlockBodyWriter<Provider, reth_primitives::BlockBody<T>> for EthStorage<T>
 where
     Provider: DBProvider<Tx: DbTxMut>,
+    T: SignedTransaction,
 {
     fn write_block_bodies(
         &self,
         provider: &Provider,
-        bodies: Vec<(u64, Option<reth_primitives::BlockBody>)>,
+        bodies: Vec<(u64, Option<reth_primitives::BlockBody<T>>)>,
         _write_to: StorageLocation,
     ) -> ProviderResult<()> {
         let mut ommers_cursor = provider.tx_ref().cursor_write::<tables::BlockOmmers>()?;
@@ -100,14 +109,14 @@ where
 
             // Write ommers if any
             if !body.ommers.is_empty() {
-                ommers_cursor.append(block_number, StoredBlockOmmers { ommers: body.ommers })?;
+                ommers_cursor.append(block_number, &StoredBlockOmmers { ommers: body.ommers })?;
             }
 
             // Write withdrawals if any
             if let Some(withdrawals) = body.withdrawals {
                 if !withdrawals.is_empty() {
                     withdrawals_cursor
-                        .append(block_number, StoredBlockWithdrawals { withdrawals })?;
+                        .append(block_number, &StoredBlockWithdrawals { withdrawals })?;
                 }
             }
         }
@@ -128,11 +137,14 @@ where
     }
 }
 
-impl<Provider> BlockBodyReader<Provider> for EthStorage
+impl<Provider, T> BlockBodyReader<Provider> for EthStorage<T>
 where
-    Provider: DBProvider + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    Provider: DBProvider
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + OmmersProvider<Header = Header>,
+    T: SignedTransaction,
 {
-    type Block = reth_primitives::Block;
+    type Block = reth_primitives::Block<T>;
 
     fn read_block_bodies(
         &self,
@@ -142,7 +154,6 @@ where
         // TODO: Ideally storage should hold its own copy of chain spec
         let chain_spec = provider.chain_spec();
 
-        let mut ommers_cursor = provider.tx_ref().cursor_read::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = provider.tx_ref().cursor_read::<tables::BlockWithdrawals>()?;
 
         let mut bodies = Vec::with_capacity(inputs.len());
@@ -162,7 +173,7 @@ where
             let ommers = if chain_spec.final_paris_total_difficulty(header.number).is_some() {
                 Vec::new()
             } else {
-                ommers_cursor.seek_exact(header.number)?.map(|(_, o)| o.ommers).unwrap_or_default()
+                provider.ommers(header.number.into())?.unwrap_or_default()
             };
 
             bodies.push(reth_primitives::BlockBody { transactions, ommers, withdrawals });

@@ -11,11 +11,11 @@ use std::{borrow::Cow, time::Duration};
 /// [`PayloadBuilderArgs`](crate::args::PayloadBuilderArgs) type.
 pub trait PayloadBuilderConfig {
     /// Block extra data set by the payload builder.
-    fn extradata(&self) -> Cow<'_, str>;
+    fn extra_data(&self) -> Cow<'_, str>;
 
-    /// Returns the extradata as bytes.
-    fn extradata_bytes(&self) -> Bytes {
-        self.extradata().as_bytes().to_vec().into()
+    /// Returns the extra data as bytes.
+    fn extra_data_bytes(&self) -> Bytes {
+        self.extra_data().as_bytes().to_vec().into()
     }
 
     /// The interval at which the job should build a new payload after the last.

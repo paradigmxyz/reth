@@ -11,5 +11,5 @@
 mod traits;
 mod transaction;
 
-pub use traits::PayloadTransactions;
+pub use traits::{NoopPayloadTransactions, PayloadTransactions};
 pub use transaction::{PayloadTransactionsChain, PayloadTransactionsFixed};

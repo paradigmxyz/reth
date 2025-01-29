@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-evm.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-rpc-eth-types.workspace = true
@@ -68,11 +69,9 @@ reth-optimism-chainspec.workspace = true
 
 [features]
 optimism = [
-	"reth-optimism-evm/optimism",
-	"reth-primitives/optimism",
-	"reth-provider/optimism",
-	"revm/optimism",
-	"reth-optimism-consensus/optimism",
-	"reth-optimism-payload-builder/optimism",
-	"reth-optimism-primitives/optimism",
+    "reth-optimism-evm/optimism",
+    "revm/optimism",
+    "reth-optimism-consensus/optimism",
+    "reth-optimism-payload-builder/optimism",
+    "reth-optimism-primitives/optimism",
 ]

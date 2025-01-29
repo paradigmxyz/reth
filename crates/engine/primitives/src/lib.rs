@@ -7,32 +7,40 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
+use reth_payload_primitives::{BuiltPayload, PayloadAttributes};
 mod error;
 
 use core::fmt;
 
 use alloy_consensus::BlockHeader;
 use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError};
-pub use error::BeaconOnNewPayloadError;
+pub use error::*;
 
 mod forkchoice;
 pub use forkchoice::{ForkchoiceStateHash, ForkchoiceStateTracker, ForkchoiceStatus};
 
 mod message;
-pub use message::{BeaconEngineMessage, OnForkChoiceUpdated};
+pub use message::*;
+
+mod event;
+pub use event::*;
 
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 
-pub use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes,
-    PayloadTypes,
+use reth_payload_primitives::{
+    validate_execution_requests, EngineApiMessageVersion, EngineObjectValidationError,
+    InvalidPayloadAttributesError, PayloadOrAttributes, PayloadTypes,
 };
-use reth_payload_primitives::{InvalidPayloadAttributesError, PayloadAttributes};
-use reth_primitives::SealedBlockFor;
+use reth_primitives::{NodePrimitives, SealedBlock};
 use reth_primitives_traits::Block;
 use serde::{de::DeserializeOwned, ser::Serialize};
+
+use alloy_eips::eip7685::Requests;
 
 /// This type defines the versioned types of the engine API.
 ///
@@ -80,6 +88,13 @@ pub trait EngineTypes:
         + Send
         + Sync
         + 'static;
+
+    /// Converts a [`BuiltPayload`] into an [`ExecutionPayload`] and [`ExecutionPayloadSidecar`].
+    fn block_to_payload(
+        block: SealedBlock<
+            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
+        >,
+    ) -> (ExecutionPayload, ExecutionPayloadSidecar);
 }
 
 /// Type that validates an [`ExecutionPayload`].
@@ -99,11 +114,19 @@ pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
         &self,
         payload: ExecutionPayload,
         sidecar: ExecutionPayloadSidecar,
-    ) -> Result<SealedBlockFor<Self::Block>, PayloadError>;
+    ) -> Result<SealedBlock<Self::Block>, PayloadError>;
 }
 
 /// Type that validates the payloads processed by the engine.
 pub trait EngineValidator<Types: EngineTypes>: PayloadValidator {
+    /// Validates the execution requests according to [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685).
+    fn validate_execution_requests(
+        &self,
+        requests: &Requests,
+    ) -> Result<(), EngineObjectValidationError> {
+        validate_execution_requests(requests)
+    }
+
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
     fn validate_version_specific_fields(

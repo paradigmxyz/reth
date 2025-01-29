@@ -4,7 +4,7 @@ use crate::{
     budget::DEFAULT_BUDGET_TRY_DRAIN_DOWNLOADERS, metered_poll_nested_stream_with_budget,
     metrics::EthRequestHandlerMetrics,
 };
-use alloy_consensus::{BlockHeader, ReceiptWithBloom, TxReceipt};
+use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_eips::BlockHashOrNumber;
 use alloy_rlp::Encodable;
 use futures::StreamExt;
@@ -16,7 +16,7 @@ use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
 use reth_network_peers::PeerId;
 use reth_primitives_traits::Block;
-use reth_storage_api::{BlockReader, HeaderProvider, ReceiptProvider};
+use reth_storage_api::{BlockReader, HeaderProvider};
 use std::{
     future::Future,
     pin::Pin,
@@ -44,7 +44,7 @@ const MAX_HEADERS_SERVE: usize = 1024;
 /// `SOFT_RESPONSE_LIMIT`.
 const MAX_BODIES_SERVE: usize = 1024;
 
-/// Maximum size of replies to data retrievals.
+/// Maximum size of replies to data retrievals: 2MB
 const SOFT_RESPONSE_LIMIT: usize = 2 * 1024 * 1024;
 
 /// Manages eth related requests on top of the p2p network.
@@ -81,7 +81,7 @@ impl<C, N: NetworkPrimitives> EthRequestHandler<C, N> {
 impl<C, N> EthRequestHandler<C, N>
 where
     N: NetworkPrimitives,
-    C: BlockReader + HeaderProvider + ReceiptProvider<Receipt: Encodable + TxReceipt>,
+    C: BlockReader,
 {
     /// Returns the list of requested headers
     fn get_headers_response(&self, request: GetBlockHeaders) -> Vec<C::Header> {
@@ -158,9 +158,7 @@ where
         &self,
         _peer_id: PeerId,
         request: GetBlockBodies,
-        response: oneshot::Sender<
-            RequestResult<BlockBodies<<C::Block as reth_primitives_traits::Block>::Body>>,
-        >,
+        response: oneshot::Sender<RequestResult<BlockBodies<<C::Block as Block>::Body>>>,
     ) {
         self.metrics.eth_bodies_requests_received_total.increment(1);
         let mut bodies = Vec::new();
@@ -169,7 +167,7 @@ where
 
         for hash in request.0 {
             if let Some(block) = self.client.block_by_hash(hash).unwrap_or_default() {
-                let (_, body) = block.split();
+                let body = block.into_body();
                 total_bytes += body.length();
                 bodies.push(body);
 

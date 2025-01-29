@@ -26,7 +26,7 @@ pub struct ConsensusLayerHealthEvents<H = Header> {
     canon_chain: Box<dyn CanonChainTracker<Header = H>>,
 }
 
-impl fmt::Debug for ConsensusLayerHealthEvents {
+impl<H> fmt::Debug for ConsensusLayerHealthEvents<H> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConsensusLayerHealthEvents").field("interval", &self.interval).finish()
     }
@@ -41,7 +41,7 @@ impl<H> ConsensusLayerHealthEvents<H> {
     }
 }
 
-impl Stream for ConsensusLayerHealthEvents {
+impl<H: Send + Sync> Stream for ConsensusLayerHealthEvents<H> {
     type Item = ConsensusLayerHealthEvent;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

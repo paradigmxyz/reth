@@ -20,6 +20,7 @@ reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
 reth-engine-primitives.workspace = true
 reth-errors.workspace = true
+reth-metrics.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network-api.workspace = true
@@ -46,7 +47,7 @@ alloy-genesis.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-alloy-rpc-types-beacon.workspace = true
+alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
 alloy-rpc-types.workspace = true
 alloy-rpc-types-eth = { workspace = true, features = ["jsonrpsee-types", "serde"] }
 alloy-rpc-types-debug.workspace = true
@@ -56,11 +57,7 @@ alloy-rpc-types-txpool.workspace = true
 alloy-rpc-types-admin.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-serde.workspace = true
-revm = { workspace = true, features = [
-    "optional_block_gas_limit",
-    "optional_eip3607",
-    "optional_no_base_fee",
-] }
+revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee"] }
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc

@@ -1,8 +1,8 @@
 //! Loads a receipt from database. Helper trait for `eth_` block and transaction RPC methods, that
 //! loads receipt data w.r.t. network.
 
+use alloy_consensus::transaction::TransactionMeta;
 use futures::Future;
-use reth_primitives::TransactionMeta;
 use reth_provider::{ProviderReceipt, ProviderTx, ReceiptProvider, TransactionsProvider};
 
 use crate::{EthApiTypes, RpcNodeCoreExt, RpcReceipt};

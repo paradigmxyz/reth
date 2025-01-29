@@ -5,58 +5,49 @@ use alloc::{
     vec::Vec,
 };
 use core::{
-    fmt,
     fmt::{Debug, Display},
     str::FromStr,
 };
 
 /// Database error type.
-#[derive(Clone, Debug, PartialEq, Eq, derive_more::Display)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum DatabaseError {
     /// Failed to open the database.
-    #[display("failed to open the database: {_0}")]
+    #[error("failed to open the database: {_0}")]
     Open(DatabaseErrorInfo),
     /// Failed to create a table in the database.
-    #[display("failed to create a table: {_0}")]
+    #[error("failed to create a table: {_0}")]
     CreateTable(DatabaseErrorInfo),
     /// Failed to write a value into a table.
+    #[error(transparent)]
     Write(Box<DatabaseWriteError>),
     /// Failed to read a value from a table.
-    #[display("failed to read a value from a database table: {_0}")]
+    #[error("failed to read a value from a database table: {_0}")]
     Read(DatabaseErrorInfo),
     /// Failed to delete a `(key, value)` pair from a table.
-    #[display("database delete error code: {_0}")]
+    #[error("database delete error code: {_0}")]
     Delete(DatabaseErrorInfo),
     /// Failed to commit transaction changes into the database.
-    #[display("failed to commit transaction changes: {_0}")]
+    #[error("failed to commit transaction changes: {_0}")]
     Commit(DatabaseErrorInfo),
     /// Failed to initiate a transaction.
-    #[display("failed to initialize a transaction: {_0}")]
+    #[error("failed to initialize a transaction: {_0}")]
     InitTx(DatabaseErrorInfo),
     /// Failed to initialize a cursor.
-    #[display("failed to initialize a cursor: {_0}")]
+    #[error("failed to initialize a cursor: {_0}")]
     InitCursor(DatabaseErrorInfo),
     /// Failed to decode a key from a table.
-    #[display("failed to decode a key from a table")]
+    #[error("failed to decode a key from a table")]
     Decode,
     /// Failed to get database stats.
-    #[display("failed to get stats: {_0}")]
+    #[error("failed to get stats: {_0}")]
     Stats(DatabaseErrorInfo),
     /// Failed to use the specified log level, as it's not available.
-    #[display("log level {_0:?} is not available")]
+    #[error("log level {_0:?} is not available")]
     LogLevelUnavailable(LogLevel),
     /// Other unspecified error.
-    #[display("{_0}")]
+    #[error("{_0}")]
     Other(String),
-}
-
-impl core::error::Error for DatabaseError {
-    fn source(&self) -> Option<&(dyn core::error::Error + 'static)> {
-        match self {
-            Self::Write(err) => core::error::Error::source(err),
-            _ => Option::None,
-        }
-    }
 }
 
 /// Common error struct to propagate implementation-specific error information.
@@ -87,7 +78,12 @@ impl From<DatabaseWriteError> for DatabaseError {
 }
 
 /// Database write error.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("write operation {:?} failed for key \"{}\" in table {}: {}",
+            self.operation,
+            alloy_primitives::hex::encode(&self.key),
+            self.table_name,
+            self.info)]
 pub struct DatabaseWriteError {
     /// The error code and message.
     pub info: DatabaseErrorInfo,
@@ -98,21 +94,6 @@ pub struct DatabaseWriteError {
     /// The write key.
     pub key: Vec<u8>,
 }
-
-impl fmt::Display for DatabaseWriteError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "write operation {:?} failed for key \"{}\" in table {}: {}",
-            self.operation,
-            alloy_primitives::hex::encode(&self.key),
-            self.table_name,
-            self.info
-        )
-    }
-}
-
-impl core::error::Error for DatabaseWriteError {}
 
 /// Database write operation type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

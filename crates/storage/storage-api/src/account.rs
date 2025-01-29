@@ -14,7 +14,7 @@ pub trait AccountReader: Send + Sync {
     /// Get basic account information.
     ///
     /// Returns `None` if the account doesn't exist.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>>;
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>>;
 }
 
 /// Account reader

@@ -46,7 +46,7 @@ impl BlobStoreCanonTracker {
     {
         let blob_txs = blocks.iter().map(|(num, block)| {
             let iter = block
-                .body
+                .body()
                 .transactions()
                 .iter()
                 .filter(|tx| tx.is_eip4844())
@@ -92,8 +92,7 @@ mod tests {
     use alloy_primitives::PrimitiveSignature as Signature;
     use reth_execution_types::Chain;
     use reth_primitives::{
-        BlockBody, SealedBlock, SealedBlockWithSenders, SealedHeader, Transaction,
-        TransactionSigned,
+        BlockBody, RecoveredBlock, SealedBlock, SealedHeader, Transaction, TransactionSigned,
     };
 
     use super::*;
@@ -127,13 +126,10 @@ mod tests {
         let tx3_hash = B256::random(); // Non-EIP-4844 transaction
 
         // Creating a first block with EIP-4844 transactions
-        let block1 = SealedBlockWithSenders {
-            block: SealedBlock {
-                header: SealedHeader::new(
-                    Header { number: 10, ..Default::default() },
-                    B256::random(),
-                ),
-                body: BlockBody {
+        let block1 = RecoveredBlock::new_sealed(
+            SealedBlock::from_sealed_parts(
+                SealedHeader::new(Header { number: 10, ..Default::default() }, B256::random()),
+                BlockBody {
                     transactions: vec![
                         TransactionSigned::new(
                             Transaction::Eip4844(Default::default()),
@@ -154,19 +150,16 @@ mod tests {
                     ],
                     ..Default::default()
                 },
-            },
-            ..Default::default()
-        };
+            ),
+            Default::default(),
+        );
 
         // Creating a second block with EIP-1559 and EIP-2930 transactions
         // Note: This block does not contain any EIP-4844 transactions
-        let block2 = SealedBlockWithSenders {
-            block: SealedBlock {
-                header: SealedHeader::new(
-                    Header { number: 11, ..Default::default() },
-                    B256::random(),
-                ),
-                body: BlockBody {
+        let block2 = RecoveredBlock::new_sealed(
+            SealedBlock::from_sealed_parts(
+                SealedHeader::new(Header { number: 11, ..Default::default() }, B256::random()),
+                BlockBody {
                     transactions: vec![
                         TransactionSigned::new(
                             Transaction::Eip1559(Default::default()),
@@ -181,9 +174,9 @@ mod tests {
                     ],
                     ..Default::default()
                 },
-            },
-            ..Default::default()
-        };
+            ),
+            Default::default(),
+        );
 
         // Extract blocks from the chain
         let chain: Chain = Chain::new(vec![block1, block2], Default::default(), None);

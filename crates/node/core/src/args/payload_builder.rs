@@ -13,8 +13,8 @@ use std::{borrow::Cow, ffi::OsStr, time::Duration};
 #[command(next_help_heading = "Builder")]
 pub struct PayloadBuilderArgs {
     /// Block extra data set by the payload builder.
-    #[arg(long = "builder.extradata", value_parser = ExtradataValueParser::default(), default_value_t = default_extra_data())]
-    pub extradata: String,
+    #[arg(long = "builder.extradata", value_parser = ExtraDataValueParser::default(), default_value_t = default_extra_data())]
+    pub extra_data: String,
 
     /// Target gas limit for built blocks.
     #[arg(long = "builder.gaslimit", default_value_t = ETHEREUM_BLOCK_GAS_LIMIT, value_name = "GAS_LIMIT")]
@@ -40,7 +40,7 @@ pub struct PayloadBuilderArgs {
 impl Default for PayloadBuilderArgs {
     fn default() -> Self {
         Self {
-            extradata: default_extra_data(),
+            extra_data: default_extra_data(),
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             interval: Duration::from_secs(1),
             deadline: SLOT_DURATION,
@@ -50,8 +50,8 @@ impl Default for PayloadBuilderArgs {
 }
 
 impl PayloadBuilderConfig for PayloadBuilderArgs {
-    fn extradata(&self) -> Cow<'_, str> {
-        self.extradata.as_str().into()
+    fn extra_data(&self) -> Cow<'_, str> {
+        self.extra_data.as_str().into()
     }
 
     fn interval(&self) -> Duration {
@@ -73,9 +73,9 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
 
 #[derive(Clone, Debug, Default)]
 #[non_exhaustive]
-struct ExtradataValueParser;
+struct ExtraDataValueParser;
 
-impl TypedValueParser for ExtradataValueParser {
+impl TypedValueParser for ExtraDataValueParser {
     type Value = String;
 
     fn parse_ref(
@@ -130,23 +130,23 @@ mod tests {
 
     #[test]
     fn test_default_extra_data() {
-        let extradata = default_extra_data();
+        let extra_data = default_extra_data();
         let args = CommandParser::<PayloadBuilderArgs>::parse_from([
             "reth",
             "--builder.extradata",
-            extradata.as_str(),
+            extra_data.as_str(),
         ])
         .args;
-        assert_eq!(args.extradata, extradata);
+        assert_eq!(args.extra_data, extra_data);
     }
 
     #[test]
-    fn test_invalid_extradata() {
-        let extradata = "x".repeat(MAXIMUM_EXTRA_DATA_SIZE + 1);
+    fn test_invalid_extra_data() {
+        let extra_data = "x".repeat(MAXIMUM_EXTRA_DATA_SIZE + 1);
         let args = CommandParser::<PayloadBuilderArgs>::try_parse_from([
             "reth",
             "--builder.extradata",
-            extradata.as_str(),
+            extra_data.as_str(),
         ]);
         assert!(args.is_err());
     }

@@ -1,7 +1,7 @@
 //! Run with
 //!
 //! ```not_rust
-//! cargo run -p beacon-api-beacon-sidecar-fetcher --node -- full
+//! cargo run -p beacon-api-beacon-sidecar-fetcher --node --full
 //! ```
 //!
 //! This launches a regular reth instance and subscribes to payload attributes event stream.

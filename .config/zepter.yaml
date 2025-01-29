@@ -18,7 +18,7 @@ workflows:
         # Ignore the case that `A` it outside of the workspace. Otherwise it will report errors in external dependencies that we have no influence on.
 
         "--left-side-outside-workspace=ignore",
-        # Auxillary flags:
+        # Auxilary flags:
         "--offline",
         "--locked",
         "--show-path",

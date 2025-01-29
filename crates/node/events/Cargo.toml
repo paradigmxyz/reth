@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 # reth
 reth-storage-api.workspace = true
-reth-beacon-consensus.workspace = true
 reth-network-api.workspace = true
 reth-stages.workspace = true
 reth-prune-types.workspace = true
@@ -38,3 +37,4 @@ tracing.workspace = true
 # misc
 pin-project.workspace = true
 humantime.workspace = true
+derive_more.workspace = true

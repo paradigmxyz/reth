@@ -3,9 +3,6 @@
 // Re-export all the traits
 pub use reth_storage_api::*;
 
-// Re-export for convenience
-pub use reth_evm::provider::EvmEnvProvider;
-
 mod block;
 pub use block::*;
 
@@ -22,6 +19,3 @@ pub use static_file_provider::StaticFileProviderFactory;
 
 mod full;
 pub use full::{FullProvider, FullRpcProvider};
-
-mod tree_viewer;
-pub use tree_viewer::TreeViewer;

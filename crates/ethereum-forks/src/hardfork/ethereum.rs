@@ -45,9 +45,9 @@ hardfork!(
         Paris,
         /// Shanghai: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/shanghai.md>.
         Shanghai,
-        /// Cancun.
+        /// Cancun: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/cancun.md>
         Cancun,
-        /// Prague: <https://github.com/ethereum/execution-specs/blob/master/network-upgrades/mainnet-upgrades/prague.md>
+        /// Prague.
         Prague,
         /// Osaka: <https://eips.ethereum.org/EIPS/eip-7607>
         Osaka,
@@ -96,7 +96,7 @@ impl EthereumHardfork {
     /// Retrieves the activation block for the specified hardfork on the Sepolia testnet.
     pub const fn sepolia_activation_block(&self) -> Option<u64> {
         match self {
-            Self::Paris => Some(1735371),
+            Self::Paris => Some(1450409),
             Self::Shanghai => Some(2990908),
             Self::Cancun => Some(5187023),
             Self::Frontier |
@@ -352,6 +352,7 @@ impl EthereumHardfork {
             (
                 Self::Paris,
                 ForkCondition::TTD {
+                    activation_block_number: 15537394,
                     fork_block: None,
                     total_difficulty: uint!(58_750_000_000_000_000_000_000_U256),
                 },
@@ -379,6 +380,7 @@ impl EthereumHardfork {
             (
                 Self::Paris,
                 ForkCondition::TTD {
+                    activation_block_number: 1735371,
                     fork_block: Some(1735371),
                     total_difficulty: uint!(17_000_000_000_000_000_U256),
                 },
@@ -403,7 +405,14 @@ impl EthereumHardfork {
             (Self::MuirGlacier, ForkCondition::Block(0)),
             (Self::Berlin, ForkCondition::Block(0)),
             (Self::London, ForkCondition::Block(0)),
-            (Self::Paris, ForkCondition::TTD { fork_block: Some(0), total_difficulty: U256::ZERO }),
+            (
+                Self::Paris,
+                ForkCondition::TTD {
+                    activation_block_number: 0,
+                    fork_block: Some(0),
+                    total_difficulty: U256::ZERO,
+                },
+            ),
             (Self::Shanghai, ForkCondition::Timestamp(1696000704)),
             (Self::Cancun, ForkCondition::Timestamp(1707305664)),
         ]

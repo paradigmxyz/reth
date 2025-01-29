@@ -19,7 +19,8 @@ use reth_evm::state_change::post_block_withdrawals_balance_increments;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
-use reth_primitives::{proofs, SealedHeader};
+use reth_primitives::{NodePrimitives, SealedHeader};
+use reth_primitives_traits::proofs;
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use reth_revm::cached::CachedReads;
 use reth_tasks::TaskSpawner;
@@ -191,7 +192,7 @@ where
         Ok(job)
     }
 
-    fn on_new_state(&mut self, new_state: CanonStateNotification) {
+    fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
         let mut cached = CachedReads::default();
 
         // extract the state from the notification and put it into the cache
@@ -295,6 +296,15 @@ impl Default for BasicPayloadJobGeneratorConfig {
 }
 
 /// A basic payload job that continuously builds a payload with the best transactions from the pool.
+///
+/// This type is a [`PayloadJob`] and [`Future`] that terminates when the deadline is reached or
+/// when the job is resolved: [`PayloadJob::resolve`].
+///
+/// This basic job implementation will trigger new payload build task continuously until the job is
+/// resolved or the deadline is reached, or until the built payload is marked as frozen:
+/// [`BuildOutcome::Freeze`]. Once a frozen payload is returned, no additional payloads will be
+/// built and this future will wait to be resolved: [`PayloadJob::resolve`] or terminated if the
+/// deadline is reached..
 #[derive(Debug)]
 pub struct BasicPayloadJob<Client, Pool, Tasks, Builder>
 where
