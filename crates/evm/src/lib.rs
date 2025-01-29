@@ -108,7 +108,7 @@ pub trait EvmError: core::error::Error + Send + Sync + 'static {
     /// configuration.
     type InvalidTransaction: InvalidTxError;
 
-    /// Returns the [`InvalidTransactionError`] if the error is an invalid transaction error.
+    /// Returns the [`EvmError::InvalidTransaction`] if the error is an invalid transaction error.
     fn as_invalid_tx_err(&self) -> Option<&Self::InvalidTransaction>;
 }
 
