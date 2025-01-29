@@ -672,10 +672,6 @@ mod tests {
                         for tx_id in body.tx_num_range() {
                             let transaction: TransactionSigned = provider
                                 .transaction_by_id_unhashed(tx_id)?
-                                .map(|tx| {
-                                    let (transaction, signature) = tx.split();
-                                    TransactionSigned::new_unhashed(transaction, signature)
-                                })
                                 .expect("no transaction entry");
                             let signer =
                                 transaction.recover_signer().expect("failed to recover signer");

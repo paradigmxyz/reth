@@ -1404,7 +1404,7 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 
     fn blob_count(&self) -> usize {
-        match &self.transaction.transaction() {
+        match self.transaction.transaction() {
             Transaction::Eip4844(tx) => tx.blob_versioned_hashes.len(),
             _ => 0,
         }
@@ -1437,14 +1437,14 @@ impl EthPoolTransaction for EthPooledTransaction {
         sidecar: &BlobTransactionSidecar,
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
-        match &self.transaction.transaction() {
+        match self.transaction.transaction() {
             Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
             _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.tx_type())),
         }
     }
 
     fn authorization_count(&self) -> usize {
-        match &self.transaction.transaction() {
+        match self.transaction.transaction() {
             Transaction::Eip7702(tx) => tx.authorization_list.len(),
             _ => 0,
         }

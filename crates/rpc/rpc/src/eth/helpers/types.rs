@@ -45,10 +45,9 @@ where
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
         let hash = *tx.tx_hash();
-        let transaction = tx.transaction().clone();
         let signature = *tx.signature();
 
-        let inner: TxEnvelope = match transaction {
+        let inner: TxEnvelope = match tx.into_tx().into_transaction() {
             reth_primitives::Transaction::Legacy(tx) => {
                 Signed::new_unchecked(tx, signature, hash).into()
             }
@@ -64,8 +63,6 @@ where
             reth_primitives::Transaction::Eip7702(tx) => {
                 Signed::new_unchecked(tx, signature, hash).into()
             }
-            #[allow(unreachable_patterns)]
-            _ => unreachable!(),
         };
 
         let TransactionInfo {

@@ -330,11 +330,6 @@ impl TransactionSigned {
         Self { hash: hash.into(), signature, transaction }
     }
 
-    /// Provides mutable access to the transaction.
-    pub fn transaction_mut(&mut self) -> &mut Transaction {
-        &mut self.transaction
-    }
-
     /// Consumes the type and returns the transaction.
     #[inline]
     pub fn into_transaction(self) -> Transaction {
@@ -402,6 +397,12 @@ impl TransactionSigned {
             Transaction::Eip4844(tx) => Some(tx),
             _ => None,
         }
+    }
+
+    /// Provides mutable access to the transaction.
+    #[cfg(feature = "test-utils")]
+    pub fn transaction_mut(&mut self) -> &mut Transaction {
+        &mut self.transaction
     }
 }
 
@@ -570,12 +571,12 @@ impl Decodable2718 for TransactionSigned {
 }
 
 impl Encodable for TransactionSigned {
-    fn length(&self) -> usize {
-        self.network_len()
-    }
-
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.network_encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.network_len()
     }
 }
 
