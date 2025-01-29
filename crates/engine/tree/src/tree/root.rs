@@ -277,8 +277,13 @@ impl StateUpdateSequencer {
         let mut consecutive_state_updates = Vec::with_capacity(self.pending_state_updates.len());
         let mut current_sequence = self.next_to_deliver;
 
-        // keep collecting proofs and state updates as long as we have consecutive sequence numbers
-        while let Some(pending) = self.pending_state_updates.remove(&current_sequence) {
+        // keep collecting nd state updates as long as we have consecutive sequence numbers
+        loop {
+            if current_sequence > highest_sequence {
+                break
+            }
+
+            let Some(pending) = self.pending_state_updates.remove(&current_sequence) else { break };
             consecutive_state_updates.push(pending);
             current_sequence += 1;
 
