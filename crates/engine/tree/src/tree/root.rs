@@ -27,7 +27,7 @@ use reth_trie_sparse::{
 };
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::{
         mpsc::{self, channel, Receiver, Sender},
         Arc,
@@ -187,7 +187,7 @@ pub enum StateRootMessage {
     /// Proof calculation completed for a specific state update
     ProofCalculated(Box<ProofCalculated>),
     /// Proof revealed
-    ProofRevealed { highest_sequence_number: u64, revealed_state_update_proofs: usize },
+    ProofRevealed { revealed_state_update_sequence_numbers: Vec<u64> },
     /// Error during proof calculation
     ProofCalculationError(ProviderError),
     /// State root calculation completed
@@ -244,6 +244,7 @@ pub(crate) struct StateUpdateSequencer {
     next_to_deliver: u64,
     /// Buffer for out-of-order proofs and corresponding state updates
     pending_state_updates: BTreeMap<u64, HashedPostState>,
+    pending_state_update_sequence_numbers: BTreeSet<u64>,
 }
 
 impl StateUpdateSequencer {
@@ -268,29 +269,33 @@ impl StateUpdateSequencer {
 
     pub(crate) fn aggregate_state_updates(
         &mut self,
-        highest_sequence: u64,
+        sequence_numbers: Vec<u64>,
     ) -> Vec<HashedPostState> {
         // return early if we don't have the next expected proof
-        if !self.pending_state_updates.contains_key(&self.next_to_deliver) {
+        if !self.pending_state_updates.contains_key(&self.next_to_deliver) ||
+            !self.pending_state_update_sequence_numbers.contains(&self.next_to_deliver)
+        {
             return Vec::new()
         }
+
+        self.pending_state_update_sequence_numbers.extend(sequence_numbers);
 
         let mut consecutive_state_updates = Vec::with_capacity(self.pending_state_updates.len());
         let mut current_sequence = self.next_to_deliver;
 
         // keep collecting nd state updates as long as we have consecutive sequence numbers
         loop {
-            if current_sequence > highest_sequence {
-                break
+            let Some(pending) = self.pending_state_updates.remove(&current_sequence) else { break };
+            if !self.pending_state_update_sequence_numbers.remove(&current_sequence) {
+                break;
             }
 
-            let Some(pending) = self.pending_state_updates.remove(&current_sequence) else { break };
             consecutive_state_updates.push(pending);
             current_sequence += 1;
 
             // if we don't have the next number, stop collecting
             if !self.pending_state_updates.contains_key(&current_sequence) ||
-                current_sequence > highest_sequence
+                !self.pending_state_update_sequence_numbers.contains(&current_sequence)
             {
                 break;
             }
@@ -609,13 +614,12 @@ where
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
-    fn aggregate_state_updates(&mut self, sequence_number: u64) -> Option<HashedPostState> {
+    fn aggregate_state_updates(&mut self, sequence_numbers: Vec<u64>) -> Option<HashedPostState> {
         let ready_state_updates =
-            self.state_update_sequencer.aggregate_state_updates(sequence_number);
+            self.state_update_sequencer.aggregate_state_updates(sequence_numbers);
 
         debug!(
             target: "engine::root",
-            ?sequence_number,
             ready_state_updates = ?ready_state_updates.len(),
             "Returning state updates"
         );
@@ -713,14 +717,13 @@ where
                             },
                         );
                     }
-                    StateRootMessage::ProofRevealed {
-                        highest_sequence_number: sequence_number,
-                        revealed_state_update_proofs,
-                    } => {
+                    StateRootMessage::ProofRevealed { revealed_state_update_sequence_numbers } => {
                         trace!(target: "engine::root", "processing StateRootMessage::ProofRevealed");
-                        proofs_revealed += revealed_state_update_proofs;
+                        proofs_revealed += revealed_state_update_sequence_numbers.len();
 
-                        if let Some(state_update) = self.aggregate_state_updates(sequence_number) {
+                        if let Some(state_update) =
+                            self.aggregate_state_updates(revealed_state_update_sequence_numbers)
+                        {
                             let _ = sparse_trie_tx
                                 .as_ref()
                                 .expect("tx not dropped")
@@ -826,11 +829,11 @@ where
             ..
         } = &message
         {
-            let proof_data = reveal_proof_data
-                .get_or_insert_with(|| (*sequence_number, state_root_message_sender.clone(), 0));
-            proof_data.0 = proof_data.0.max(*sequence_number);
             if *source == ProofFetchSource::StateUpdate {
-                proof_data.2 += 1;
+                reveal_proof_data
+                    .get_or_insert_with(|| (Vec::new(), state_root_message_sender.clone()))
+                    .0
+                    .push(*sequence_number);
             }
         }
 
@@ -855,16 +858,11 @@ where
             ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
         })?;
 
-        if let Some((
-            highest_sequence_number,
-            state_root_message_sender,
-            revealed_state_update_proofs,
-        )) = reveal_proof_data
+        if let Some((revealed_state_update_sequence_numbers, state_root_message_sender)) =
+            reveal_proof_data
         {
-            let _ = state_root_message_sender.send(StateRootMessage::ProofRevealed {
-                highest_sequence_number,
-                revealed_state_update_proofs,
-            });
+            let _ = state_root_message_sender
+                .send(StateRootMessage::ProofRevealed { revealed_state_update_sequence_numbers });
         }
 
         trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
