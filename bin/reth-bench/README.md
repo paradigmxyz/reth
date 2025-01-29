@@ -43,7 +43,7 @@ Below is an overview of how to execute a benchmark:
 
  2. **Run the Benchmark**:
     ```bash
-    reth-bench new-payload-fcu --rpc-url http://<rpc-url>:8545 --from <start_block> --to <end_block> --jwtsecret <jwt_file_path>
+    reth-bench new-payload-fcu --rpc-url <rpc-url> --from <start_block> --to <end_block> --jwtsecret <jwt_file_path>
     ```
 
     Replace `<start_block>`, `<end_block>`, and `<jwt_file_path>` with the appropriate values for your testing environment. `<rpc-url>` should be the URL of an RPC endpoint that can provide the blocks that will be used during the execution.
