@@ -306,6 +306,8 @@ impl StateUpdateSequencer {
 
         self.next_to_deliver += consecutive_state_updates.len() as u64;
 
+        debug!(target: "engine::root::state_update_sequencer",  updates = ?consecutive_state_updates.len(), "Aggregated state updates");
+
         consecutive_state_updates
     }
 
