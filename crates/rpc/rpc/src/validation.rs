@@ -54,7 +54,6 @@ where
     ) -> Self {
         let ValidationApiConfig { disallow, validation_window } = config;
 
-        let disallow_size = disallow.len();
         let inner = Arc::new(ValidationApiInner {
             provider,
             consensus,
@@ -67,7 +66,7 @@ where
             metrics: Default::default(),
         });
 
-        inner.metrics.disallow_size.set(disallow_size as f64);
+        inner.metrics.disallow_size.set(inner.disallow.len() as f64);
         Self { inner }
     }
 
@@ -544,9 +543,10 @@ pub enum ValidationApiError {
     Payload(#[from] PayloadError),
 }
 
+/// Metrics for the validation endpoint.
 #[derive(Metrics)]
 #[metrics(scope = "builder.validation")]
 pub(crate) struct ValidationMetrics {
-    /// The number of entries configured in the builder validation disallow list
+    /// The number of entries configured in the builder validation disallow list.
     pub(crate) disallow_size: Gauge,
 }
