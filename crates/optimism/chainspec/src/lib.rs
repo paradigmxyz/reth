@@ -20,6 +20,7 @@ mod op_sepolia;
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
 use alloy_consensus::{BlockHeader, Header};
+use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 pub use base::BASE_MAINNET;

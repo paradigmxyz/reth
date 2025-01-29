@@ -414,14 +414,13 @@ impl ChainSpec {
     }
 
     /// Get the [`BlobParams`] for the given timestamp.
-    pub fn blob_fee_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
-        let HardforkBlobParams { cancun, prague } = self.blob_params;
+    ///
+    /// Note: This always return [`BlobParams::cancun`] pre prague.
+    pub fn blob_fee_params_at_timestamp(&self, timestamp: u64) -> BlobParams {
         if self.is_prague_active_at_timestamp(timestamp) {
-            Some(prague)
-        } else if self.is_cancun_active_at_timestamp(timestamp) {
-            Some(cancun)
+            self.blob_params.prague
         } else {
-            None
+            self.blob_params.cancun
         }
     }
 

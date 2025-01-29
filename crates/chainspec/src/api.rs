@@ -6,6 +6,7 @@ use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams};
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
 use core::fmt::{Debug, Display};
+use reth_ethereum_forks::EthereumHardforks;
 use reth_network_peers::NodeRecord;
 
 /// Trait representing type configuring a chain spec.
@@ -32,6 +33,8 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams;
 
     /// Get the [`BlobParams`] for the given timestamp
+    ///
+    /// Note: This is expected to always return the cancun [`BlobParams`] before prague.
     fn blob_params_at_timestamp(&self, timestamp: u64) -> BlobParams;
 
     /// Returns the deposit contract data for the chain, if it's present
@@ -82,7 +85,11 @@ impl EthChainSpec for ChainSpec {
     }
 
     fn blob_params_at_timestamp(&self, timestamp: u64) -> BlobParams {
-        self.blob_params_at_timestamp(timestamp)
+        if self.is_prague_active_at_timestamp(timestamp) {
+            self.blob_params.prague
+        } else {
+            self.blob_params.cancun
+        }
     }
 
     fn deposit_contract(&self) -> Option<&DepositContract> {
