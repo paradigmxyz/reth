@@ -106,6 +106,7 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-chain-state/test-utils",
     "reth-ethereum-engine-primitives",
+    "reth-ethereum-primitives/test-utils",
     "reth-chainspec/test-utils",
     "reth-evm/test-utils",
     "reth-network-p2p/test-utils",

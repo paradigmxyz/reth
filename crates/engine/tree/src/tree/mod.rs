@@ -400,7 +400,7 @@ impl<N: NodePrimitives> TreeState<N> {
             return false
         };
 
-        while current_block.number() > first.number {
+        while current_block.number() > first.number + 1 {
             let Some(block) = self.block_by_hash(current_block.header().parent_hash()) else {
                 // If we can't find its parent in the tree, we can't continue, so return false
                 return false
@@ -410,7 +410,7 @@ impl<N: NodePrimitives> TreeState<N> {
         }
 
         // Now the block numbers should be equal, so we compare hashes.
-        current_block.hash() == first.hash
+        current_block.parent_hash() == first.hash
     }
 
     /// Updates the canonical head to the given block.
