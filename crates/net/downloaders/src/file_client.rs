@@ -254,9 +254,7 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
                     Err(err) => return Err(err),
                 };
 
-                let block  = SealedBlock::seal_slow(
-                    block,
-                );
+                let block = SealedBlock::seal_slow(block);
 
                 // Validate standalone header
                 self.consensus.validate_header(block.sealed_header())?;
