@@ -259,8 +259,7 @@ impl StateUpdateSequencer {
         seq
     }
 
-    /// Adds a proof with the corresponding state update and returns all sequential proofs and state
-    /// updates if we have a continuous sequence
+    /// Adds a state update.
     pub(crate) fn add_state_update(&mut self, sequence: u64, state_update: HashedPostState) {
         if sequence >= self.next_to_deliver {
             self.pending_state_updates.insert(sequence, state_update);
@@ -492,7 +491,7 @@ pub struct StateRootTask<Factory> {
     tx: Sender<StateRootMessage>,
     /// Proof targets that have been already fetched.
     fetched_proof_targets: MultiProofTargets,
-    /// Proof sequencing handler.
+    /// State update sequencing handler.
     state_update_sequencer: StateUpdateSequencer,
     /// Reference to the shared thread pool for parallel proof generation.
     thread_pool: Arc<rayon::ThreadPool>,
@@ -593,16 +592,17 @@ where
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
-    fn on_state_update(&mut self, update: EvmState, proof_sequence_number: u64) {
+    fn on_state_update(&mut self, update: EvmState, state_update_sequence_number: u64) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
         let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
-        self.state_update_sequencer.add_state_update(proof_sequence_number, hashed_state_update);
+        self.state_update_sequencer
+            .add_state_update(state_update_sequence_number, hashed_state_update);
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
             proof_targets,
-            state_update_sequence_number: proof_sequence_number,
+            state_update_sequence_number,
             state_root_message_sender: self.tx.clone(),
             source: ProofFetchSource::StateUpdate,
         });
@@ -615,6 +615,7 @@ where
 
         debug!(
             target: "engine::root",
+            ?sequence_number,
             ready_state_updates = ?ready_state_updates.len(),
             "Returning state updates"
         );
