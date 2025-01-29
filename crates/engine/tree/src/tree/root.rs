@@ -27,7 +27,7 @@ use reth_trie_sparse::{
 };
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{btree_map::Entry, BTreeMap, BTreeSet, VecDeque},
     sync::{
         mpsc::{self, channel, Receiver, Sender},
         Arc,
@@ -186,8 +186,11 @@ pub enum StateRootMessage {
     StateUpdate(EvmState),
     /// Proof calculation completed for a specific state update
     ProofCalculated(Box<ProofCalculated>),
-    /// Proof revealed
-    ProofRevealed { revealed_state_update_sequence_numbers: Vec<u64> },
+    /// Proofs revealed
+    ProofsRevealed {
+        /// Sequence numbers of the state update proofs that were revealed
+        revealed_state_update_sequence_numbers: Vec<u64>,
+    },
     /// Error during proof calculation
     ProofCalculationError(ProviderError),
     /// State root calculation completed
@@ -235,16 +238,16 @@ pub enum ProofFetchSource {
     StateUpdate,
 }
 
-/// Handle to track proof calculation ordering
+/// Sequencer to manage state updates that come out of
 #[derive(Debug, Default)]
 pub(crate) struct StateUpdateSequencer {
-    /// The next proof sequence number to be produced.
+    /// The next sequence number to be produced.
     next_sequence: u64,
     /// The next sequence number expected to be delivered.
     next_to_deliver: u64,
-    /// Buffer for out-of-order proofs and corresponding state updates
-    pending_state_updates: BTreeMap<u64, HashedPostState>,
-    pending_state_update_sequence_numbers: BTreeSet<u64>,
+    /// Buffer for out-of-order state updates and a flag indicating if the state update is ready to
+    /// be delivered
+    pending_state_updates: BTreeMap<u64, (HashedPostState, bool)>,
 }
 
 impl StateUpdateSequencer {
@@ -264,54 +267,58 @@ impl StateUpdateSequencer {
     pub(crate) fn add_state_update(&mut self, sequence: u64, state_update: HashedPostState) {
         if sequence >= self.next_to_deliver {
             debug!(target: "engine::root::state_update_sequencer", ?sequence, "Adding state update");
-            self.pending_state_updates.insert(sequence, state_update);
+            self.pending_state_updates.insert(sequence, (state_update, false));
         }
     }
 
+    /// Aggegates state updates for given sequence numbers, and returns a consecutive list of state
+    /// updates that are ready to be applied.
     pub(crate) fn aggregate_state_updates(
         &mut self,
         sequence_numbers: Vec<u64>,
     ) -> Vec<HashedPostState> {
         debug!(target: "engine::root::state_update_sequencer", ?sequence_numbers, "Aggregating state updates");
 
-        self.pending_state_update_sequence_numbers.extend(sequence_numbers);
+        for sequence_number in sequence_numbers {
+            self.pending_state_updates.get_mut(&sequence_number).expect("missing state update").1 =
+                true;
+        }
 
-        // return early if we don't have the next expected proof
-        if !self.pending_state_updates.contains_key(&self.next_to_deliver) ||
-            !self.pending_state_update_sequence_numbers.contains(&self.next_to_deliver)
-        {
+        // return early if we don't have the next expected state update
+        if !self.pending_state_updates.contains_key(&self.next_to_deliver) {
             return Vec::new()
         }
 
         let mut consecutive_state_updates = Vec::with_capacity(self.pending_state_updates.len());
         let mut current_sequence = self.next_to_deliver;
 
-        // keep collecting nd state updates as long as we have consecutive sequence numbers
+        // keep collecting state updates as long as we have consecutive sequence numbers
         loop {
-            if !self.pending_state_update_sequence_numbers.remove(&current_sequence) {
-                break;
-            }
-            let Some(pending) = self.pending_state_updates.remove(&current_sequence) else { break };
+            match self.pending_state_updates.entry(current_sequence) {
+                Entry::Occupied(entry) if !entry.get().1 => break,
+                Entry::Vacant(_) => break,
+                Entry::Occupied(entry) => {
+                    let pending = entry.remove().0;
 
-            consecutive_state_updates.push(pending);
-            current_sequence += 1;
+                    consecutive_state_updates.push(pending);
+                    current_sequence += 1;
 
-            // if we don't have the next number, stop collecting
-            if !self.pending_state_updates.contains_key(&current_sequence) ||
-                !self.pending_state_update_sequence_numbers.contains(&current_sequence)
-            {
-                break;
+                    // if we don't have the next number, stop collecting
+                    if !self.pending_state_updates.contains_key(&current_sequence) {
+                        break;
+                    }
+                }
             }
         }
 
         self.next_to_deliver += consecutive_state_updates.len() as u64;
 
-        debug!(target: "engine::root::state_update_sequencer",  updates = ?consecutive_state_updates.len(), "Aggregated state updates");
+        debug!(target: "engine::root::state_update_sequencer", updates = ?consecutive_state_updates.len(), "Aggregated state updates");
 
         consecutive_state_updates
     }
 
-    /// Returns true if we still have pending proofs
+    /// Returns true if we still have pending state updates
     pub(crate) fn has_pending(&self) -> bool {
         !self.pending_state_updates.is_empty()
     }
@@ -722,7 +729,7 @@ where
                             },
                         );
                     }
-                    StateRootMessage::ProofRevealed { revealed_state_update_sequence_numbers } => {
+                    StateRootMessage::ProofsRevealed { revealed_state_update_sequence_numbers } => {
                         trace!(target: "engine::root", "processing StateRootMessage::ProofRevealed");
                         proofs_revealed += revealed_state_update_sequence_numbers.len();
 
@@ -883,7 +890,7 @@ where
                 "Sending proof revealed"
             );
             let _ = state_root_message_sender
-                .send(StateRootMessage::ProofRevealed { revealed_state_update_sequence_numbers });
+                .send(StateRootMessage::ProofsRevealed { revealed_state_update_sequence_numbers });
         }
 
         trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
