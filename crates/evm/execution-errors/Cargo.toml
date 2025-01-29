@@ -22,7 +22,6 @@ alloy-eips.workspace = true
 nybbles.workspace = true
 
 thiserror.workspace = true
-derive_more.workspace = true
 
 [features]
 default = ["std"]

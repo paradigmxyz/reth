@@ -7511,7 +7511,6 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "derive_more",
  "nybbles",
  "reth-consensus",
  "reth-prune-types",

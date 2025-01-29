@@ -28,16 +28,15 @@ pub mod trie;
 pub use trie::*;
 
 /// Transaction validation errors
-#[derive(Error, derive_more::Debug)]
+#[derive(Error, Debug)]
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
     #[error("EVM reported invalid transaction ({hash}): {error}")]
-    #[debug("{error}")]
     EVM {
         /// The hash of the transaction
         hash: B256,
         /// The EVM error.
-        error: Box<dyn Display + Send + Sync>,
+        error: Box<dyn core::error::Error + Send + Sync>,
     },
     /// Error when recovering the sender for a transaction
     #[error("failed to recover sender for transaction")]
