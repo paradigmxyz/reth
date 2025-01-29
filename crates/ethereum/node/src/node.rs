@@ -80,7 +80,7 @@ impl EthereumNode {
     ///     .unwrap();
     /// ```
     ///
-    /// # Open a Providerfactory manually with with all required componets
+    /// # Open a Providerfactory manually with with all required components
     ///
     /// ```no_run
     /// use reth_chainspec::ChainSpecBuilder;
