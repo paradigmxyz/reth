@@ -9,7 +9,7 @@ use alloy_primitives::{
 };
 use itertools::Itertools;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
-use reth_primitives::Account;
+use reth_primitives_traits::Account;
 use reth_trie_common::KeyHasher;
 use revm::db::{AccountStatus, BundleAccount};
 use std::borrow::Cow;
