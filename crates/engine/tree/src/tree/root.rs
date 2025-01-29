@@ -659,6 +659,7 @@ where
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
                             total_proofs = proofs_processed,
+                            cache_size = self.multiproof_manager.hashed_account_cache.weighted_size(),
                             "Processing calculated proof"
                         );
 
