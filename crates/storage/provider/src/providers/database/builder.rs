@@ -55,7 +55,7 @@ impl<N> ProviderFactoryBuilder<N> {
     /// }
     /// ```
     ///
-    /// # Open an unmonitored instace
+    /// # Open an unmonitored instance
     ///
     /// This is recommended when no changes to the static files are expected (e.g. no active node)
     ///
