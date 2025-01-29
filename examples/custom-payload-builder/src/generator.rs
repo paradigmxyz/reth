@@ -80,7 +80,7 @@ where
                 .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?;
 
             // we already know the hash, so we can seal it
-            block.seal(attributes.parent())
+            block.seal_unchecked(attributes.parent())
         };
         let hash = parent_block.hash();
         let header = SealedHeader::new(parent_block.header().clone(), hash);

@@ -15,8 +15,8 @@ use reth::{
         handler::register::EvmHandler,
         inspector_handle_register,
         precompile::{Precompile, PrecompileOutput, PrecompileSpecId},
-        primitives::{CfgEnvWithHandlerCfg, Env, PrecompileResult, TxEnv},
-        ContextPrecompiles, Database, Evm, EvmBuilder, GetInspector,
+        primitives::{CfgEnvWithHandlerCfg, Env, HandlerCfg, PrecompileResult, SpecId, TxEnv},
+        ContextPrecompiles, Database, EvmBuilder, GetInspector,
     },
     rpc::types::engine::PayloadAttributes,
     tasks::TaskManager,
@@ -24,7 +24,7 @@ use reth::{
 };
 use reth_chainspec::{Chain, ChainSpec};
 use reth_evm::env::EvmEnv;
-use reth_evm_ethereum::EthEvmConfig;
+use reth_evm_ethereum::{EthEvm, EthEvmConfig};
 use reth_node_api::{
     ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NextBlockEnvAttributes, NodeTypes,
     NodeTypesWithEngine, PayloadTypes,
@@ -86,69 +86,70 @@ impl MyEvmConfig {
 impl ConfigureEvmEnv for MyEvmConfig {
     type Header = Header;
     type Transaction = TransactionSigned;
-
     type Error = Infallible;
+    type TxEnv = TxEnv;
+    type Spec = SpecId;
 
-    fn fill_tx_env(&self, tx_env: &mut TxEnv, transaction: &TransactionSigned, sender: Address) {
-        self.inner.fill_tx_env(tx_env, transaction, sender);
+    fn tx_env(&self, transaction: &Self::Transaction, signer: Address) -> Self::TxEnv {
+        self.inner.tx_env(transaction, signer)
     }
 
-    fn fill_tx_env_system_contract_call(
-        &self,
-        env: &mut Env,
-        caller: Address,
-        contract: Address,
-        data: Bytes,
-    ) {
-        self.inner.fill_tx_env_system_contract_call(env, caller, contract, data);
+    fn evm_env(&self, header: &Self::Header) -> EvmEnv {
+        self.inner.evm_env(header)
     }
 
-    fn fill_cfg_env(&self, cfg_env: &mut CfgEnvWithHandlerCfg, header: &Self::Header) {
-        self.inner.fill_cfg_env(cfg_env, header);
-    }
-
-    fn next_cfg_and_block_env(
+    fn next_evm_env(
         &self,
         parent: &Self::Header,
         attributes: NextBlockEnvAttributes,
     ) -> Result<EvmEnv, Self::Error> {
-        self.inner.next_cfg_and_block_env(parent, attributes)
+        self.inner.next_evm_env(parent, attributes)
     }
 }
 
 impl ConfigureEvm for MyEvmConfig {
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv, tx: TxEnv) -> Evm<'_, (), DB> {
+    type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
+
+    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
+        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env: evm_env.cfg_env,
+            handler_cfg: HandlerCfg::new(evm_env.spec),
+        };
         EvmBuilder::default()
             .with_db(db)
-            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
             .with_block_env(evm_env.block_env)
-            .with_tx_env(tx)
             // add additional precompiles
             .append_handler_register(MyEvmConfig::set_precompiles)
             .build()
+            .into()
     }
 
     fn evm_with_env_and_inspector<DB, I>(
         &self,
         db: DB,
         evm_env: EvmEnv,
-        tx: TxEnv,
         inspector: I,
-    ) -> Evm<'_, I, DB>
+    ) -> Self::Evm<'_, DB, I>
     where
         DB: Database,
         I: GetInspector<DB>,
     {
+        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
+            cfg_env: evm_env.cfg_env,
+            handler_cfg: HandlerCfg::new(evm_env.spec),
+        };
+
         EvmBuilder::default()
             .with_db(db)
             .with_external_context(inspector)
-            .with_cfg_env_with_handler_cfg(evm_env.cfg_env_with_handler_cfg)
+            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
             .with_block_env(evm_env.block_env)
-            .with_tx_env(tx)
             // add additional precompiles
             .append_handler_register(MyEvmConfig::set_precompiles)
             .append_handler_register(inspector_handle_register)
             .build()
+            .into()
     }
 }
 

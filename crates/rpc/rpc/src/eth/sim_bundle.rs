@@ -1,6 +1,5 @@
 //! `Eth` Sim bundle implementation and helpers.
 
-use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::BlockId;
@@ -9,21 +8,20 @@ use alloy_rpc_types_mev::{
     SimBundleOverrides, SimBundleResponse, Validity,
 };
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::EthChainSpec;
-use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
-use reth_provider::{ChainSpecProvider, HeaderProvider, ProviderTx};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
+use reth_provider::ProviderTx;
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
-    FromEthApiError, RpcNodeCore,
+    FromEthApiError,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::{
     db::CacheDB,
-    primitives::{Address, ResultAndState, SpecId},
+    primitives::{Address, ResultAndState},
     DatabaseCommit, DatabaseRef,
 };
 use std::{sync::Arc, time::Duration};
@@ -246,15 +244,6 @@ where
         let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
         let (mut evm_env, current_block) = self.eth_api().evm_env_at(block_id).await?;
 
-        let parent_header = RpcNodeCore::provider(&self.inner.eth_api)
-            .header_by_number(evm_env.block_env.number.saturating_to::<u64>())
-            .map_err(EthApiError::from_eth_err)? // Explicitly map the error
-            .ok_or_else(|| {
-                EthApiError::HeaderNotFound(
-                    (evm_env.block_env.number.saturating_to::<u64>()).into(),
-                )
-            })?;
-
         // apply overrides
         if let Some(block_number) = block_number {
             evm_env.block_env.number = U256::from(block_number);
@@ -274,15 +263,6 @@ where
 
         if let Some(base_fee) = base_fee {
             evm_env.block_env.basefee = U256::from(base_fee);
-        } else if evm_env.cfg_env_with_handler_cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON)
-        {
-            if let Some(base_fee) = parent_header.next_block_base_fee(
-                RpcNodeCore::provider(&self.inner.eth_api)
-                    .chain_spec()
-                    .base_fee_params_at_block(evm_env.block_env.number.saturating_to::<u64>()),
-            ) {
-                evm_env.block_env.basefee = U256::from(base_fee);
-            }
         }
 
         let eth_api = self.inner.eth_api.clone();
@@ -308,7 +288,7 @@ where
                 let mut refundable_value = U256::ZERO;
                 let mut body_logs: Vec<SimBundleLogs> = Vec::new();
 
-                let mut evm = eth_api.evm_config().evm_with_env(db, evm_env, Default::default());
+                let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
 
                 for item in &flattened_bundle {
                     // Check inclusion constraints
@@ -324,10 +304,10 @@ where
                         )
                         .into());
                     }
-                    eth_api.evm_config().fill_tx_env(evm.tx_mut(), &item.tx, item.signer);
 
-                    let ResultAndState { result, state } =
-                        evm.transact().map_err(EthApiError::from_eth_err)?;
+                    let ResultAndState { result, state } = evm
+                        .transact(eth_api.evm_config().tx_env(&item.tx, item.signer))
+                        .map_err(EthApiError::from_eth_err)?;
 
                     if !result.is_success() && !item.can_revert {
                         return Err(EthApiError::InvalidParams(
@@ -366,7 +346,7 @@ where
                     }
 
                     // Apply state changes
-                    evm.context.evm.db.commit(state);
+                    evm.db_mut().commit(state);
                 }
 
                 // After processing all transactions, process refunds

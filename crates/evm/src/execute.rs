@@ -8,17 +8,16 @@ pub use reth_execution_errors::{
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 pub use reth_storage_errors::provider::ProviderError;
 
-use crate::{system_calls::OnStateHook, TxEnvOverrides};
+use crate::system_calls::OnStateHook;
 use alloc::{boxed::Box, vec::Vec};
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{
     map::{DefaultHashBuilder, HashMap},
-    Address, BlockNumber,
+    Address,
 };
 use core::fmt::Display;
 use reth_consensus::ConsensusError;
 use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
-use reth_prune_types::PruneModes;
 use reth_revm::batch::BlockBatchRecord;
 use revm::{
     db::{states::bundle_state::BundleRetention, BundleState},
@@ -37,9 +36,6 @@ pub trait Executor<DB> {
     type Output;
     /// The error type returned by the executor.
     type Error;
-
-    /// Initialize the executor with the given transaction environment overrides.
-    fn init(&mut self, _tx_env_overrides: Box<dyn TxEnvOverrides>) {}
 
     /// Consumes the type and executes the block.
     ///
@@ -116,16 +112,6 @@ pub trait BatchExecutor<DB> {
     /// Finishes the batch and return the final state.
     fn finalize(self) -> Self::Output;
 
-    /// Set the expected tip of the batch.
-    ///
-    /// This can be used to optimize state pruning during execution.
-    fn set_tip(&mut self, tip: BlockNumber);
-
-    /// Set the prune modes.
-    ///
-    /// They are used to determine which parts of the state should be kept during execution.
-    fn set_prune_modes(&mut self, prune_modes: PruneModes);
-
     /// The size hint of the batch's tracked state size.
     ///
     /// This is used to optimize DB commits depending on the size of the state.
@@ -198,9 +184,6 @@ pub trait BlockExecutionStrategy {
 
     /// The error type returned by this strategy's methods.
     type Error: From<ProviderError> + core::error::Error;
-
-    /// Initialize the strategy with the given transaction environment overrides.
-    fn init(&mut self, _tx_env_overrides: Box<dyn TxEnvOverrides>) {}
 
     /// Applies any necessary changes before executing the block's transactions.
     fn apply_pre_execution_changes(
@@ -341,10 +324,6 @@ where
     type Output = BlockExecutionOutput<<S::Primitives as NodePrimitives>::Receipt>;
     type Error = S::Error;
 
-    fn init(&mut self, env_overrides: Box<dyn TxEnvOverrides>) {
-        self.strategy.init(env_overrides);
-    }
-
     fn execute(mut self, block: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         self.strategy.apply_pre_execution_changes(block)?;
         let ExecuteOutput { receipts, gas_used } = self.strategy.execute_transactions(block)?;
@@ -439,12 +418,10 @@ where
 
         self.strategy.validate_block_post_execution(block, &receipts, &requests)?;
 
-        // prepare the state according to the prune mode
-        let retention = self.batch_record.bundle_retention(block.header().number());
-        self.strategy.state_mut().merge_transitions(retention);
+        self.strategy.state_mut().merge_transitions(BundleRetention::Reverts);
 
         // store receipts in the set
-        self.batch_record.save_receipts(receipts)?;
+        self.batch_record.save_receipts(receipts);
 
         // store requests in the set
         self.batch_record.save_requests(requests);
@@ -459,14 +436,6 @@ where
             self.batch_record.first_block().unwrap_or_default(),
             self.batch_record.take_requests(),
         )
-    }
-
-    fn set_tip(&mut self, tip: BlockNumber) {
-        self.batch_record.set_tip(tip);
-    }
-
-    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
-        self.batch_record.set_prune_modes(prune_modes);
     }
 
     fn size_hint(&self) -> Option<usize> {
@@ -518,7 +487,7 @@ mod tests {
     use reth_chainspec::{ChainSpec, MAINNET};
     use reth_primitives::EthPrimitives;
     use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::{address, bytes, AccountInfo, TxEnv, KECCAK_EMPTY};
+    use revm_primitives::{address, bytes, AccountInfo, KECCAK_EMPTY};
     use std::sync::Arc;
 
     #[derive(Clone, Default)]
@@ -588,14 +557,6 @@ mod tests {
         }
 
         fn finalize(self) -> Self::Output {
-            todo!()
-        }
-
-        fn set_tip(&mut self, _tip: BlockNumber) {
-            todo!()
-        }
-
-        fn set_prune_modes(&mut self, _prune_modes: PruneModes) {
             todo!()
         }
 
@@ -732,29 +693,6 @@ mod tests {
         assert_eq!(block_execution_output.receipts, expected_receipts);
         assert_eq!(block_execution_output.requests, expected_apply_post_execution_changes_result);
         assert_eq!(block_execution_output.state, expected_finish_result);
-    }
-
-    #[test]
-    fn test_tx_env_overrider() {
-        let strategy_factory = TestExecutorStrategyFactory {
-            execute_transactions_result: ExecuteOutput {
-                receipts: vec![Receipt::default()],
-                gas_used: 10,
-            },
-            apply_post_execution_changes_result: Requests::new(vec![bytes!("deadbeef")]),
-            finish_result: BundleState::default(),
-        };
-        let provider = BasicBlockExecutorProvider::new(strategy_factory);
-        let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
-
-        // if we want to apply tx env overrides the executor must be mut.
-        let mut executor = provider.executor(db);
-        // execute consumes the executor, so we can only call it once.
-        executor.init(Box::new(|tx_env: &mut TxEnv| {
-            tx_env.nonce.take();
-        }));
-        let result = executor.execute(&Default::default());
-        assert!(result.is_ok());
     }
 
     fn setup_state_with_account(

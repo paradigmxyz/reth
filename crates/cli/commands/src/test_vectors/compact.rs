@@ -17,7 +17,10 @@ use reth_codecs::alloy::{
     withdrawal::Withdrawal,
 };
 use reth_db::{
-    models::{AccountBeforeTx, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
+    models::{
+        AccountBeforeTx, StaticFileBlockWithdrawals, StoredBlockBodyIndices, StoredBlockOmmers,
+        StoredBlockWithdrawals,
+    },
     ClientVersion,
 };
 use reth_fs_util as fs;
@@ -110,6 +113,7 @@ compact_types!(
         StoredBlockOmmers,
         StoredBlockBodyIndices,
         StoredBlockWithdrawals,
+        StaticFileBlockWithdrawals,
         // Manual implementations
         TransactionSigned,
         // Bytecode, // todo revm arbitrary

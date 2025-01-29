@@ -17,6 +17,7 @@ use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_metrics::{metrics, metrics::Gauge, Metrics};
 use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::{constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock};
 use reth_provider::{BlockExecutionOutput, BlockReaderIdExt, StateProviderFactory};
@@ -51,7 +52,7 @@ where
             dyn PayloadValidator<Block = <E::Primitives as NodePrimitives>::Block>,
         >,
     ) -> Self {
-        let ValidationApiConfig { disallow } = config;
+        let ValidationApiConfig { disallow, validation_window } = config;
 
         let inner = Arc::new(ValidationApiInner {
             provider,
@@ -59,10 +60,13 @@ where
             payload_validator,
             executor_provider,
             disallow,
+            validation_window,
             cached_state: Default::default(),
             task_spawner,
+            metrics: Default::default(),
         });
 
+        inner.metrics.disallow_size.set(inner.disallow.len() as f64);
         Self { inner }
     }
 
@@ -130,11 +134,13 @@ where
         let latest_header =
             self.provider.latest_header()?.ok_or_else(|| ValidationApiError::MissingLatestBlock)?;
 
-        if latest_header.hash() != block.parent_hash() {
-            return Err(ConsensusError::ParentHashMismatch(
-                GotExpected { got: block.parent_hash(), expected: latest_header.hash() }.into(),
-            )
-            .into())
+        let parent_header = self
+            .provider
+            .header(&block.parent_hash())?
+            .ok_or_else(|| ValidationApiError::MissingParentBlock)?;
+
+        if latest_header.number().saturating_sub(parent_header.number()) > self.validation_window {
+            return Err(ValidationApiError::BlockTooOld)
         }
         self.consensus.validate_header_against_parent(block.sealed_header(), &latest_header)?;
         self.validate_gas_limit(registered_gas_limit, &latest_header, block.sealed_header())?;
@@ -466,6 +472,8 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     executor_provider: E,
     /// Set of disallowed addresses
     disallow: HashSet<Address>,
+    /// The maximum block distance - parent to latest - allowed for validation
+    validation_window: u64,
     /// Cached state reads to avoid redundant disk I/O across multiple validation attempts
     /// targeting the same state. Stores a tuple of (`block_hash`, `cached_reads`) for the
     /// latest head block state. Uses async `RwLock` to safely handle concurrent validation
@@ -473,13 +481,28 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     cached_state: RwLock<(B256, CachedReads)>,
     /// Task spawner for blocking operations
     task_spawner: Box<dyn TaskSpawner>,
+    /// Validation metrics
+    metrics: ValidationMetrics,
 }
 
 /// Configuration for validation API.
-#[derive(Debug, Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ValidationApiConfig {
     /// Disallowed addresses.
     pub disallow: HashSet<Address>,
+    /// The maximum block distance - parent to latest - allowed for validation
+    pub validation_window: u64,
+}
+
+impl ValidationApiConfig {
+    /// Default validation blocks window of 3 blocks
+    pub const DEFAULT_VALIDATION_WINDOW: u64 = 3;
+}
+
+impl Default for ValidationApiConfig {
+    fn default() -> Self {
+        Self { disallow: Default::default(), validation_window: Self::DEFAULT_VALIDATION_WINDOW }
+    }
 }
 
 /// Errors thrown by the validation API.
@@ -495,6 +518,10 @@ pub enum ValidationApiError {
     BlockHashMismatch(GotExpected<B256>),
     #[error("missing latest block in database")]
     MissingLatestBlock,
+    #[error("parent block not found")]
+    MissingParentBlock,
+    #[error("block is too old, outside validation window")]
+    BlockTooOld,
     #[error("could not verify proposer payment")]
     ProposerPayment,
     #[error("invalid blobs bundle")]
@@ -514,4 +541,12 @@ pub enum ValidationApiError {
     Execution(#[from] BlockExecutionError),
     #[error(transparent)]
     Payload(#[from] PayloadError),
+}
+
+/// Metrics for the validation endpoint.
+#[derive(Metrics)]
+#[metrics(scope = "builder.validation")]
+pub(crate) struct ValidationMetrics {
+    /// The number of entries configured in the builder validation disallow list.
+    pub(crate) disallow_size: Gauge,
 }

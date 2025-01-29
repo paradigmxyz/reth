@@ -1,19 +1,17 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{keccak256, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
-use eyre::OptionExt;
 use pretty_assertions::Comparison;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{
-    state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvm,
+    state_change::post_block_balance_increments, system_calls::SystemCaller, ConfigureEvmFor, Evm,
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactory};
 use reth_revm::{
-    database::StateProviderDatabase, db::states::bundle_state::BundleRetention, DatabaseCommit,
-    StateBuilder,
+    database::StateProviderDatabase, db::states::bundle_state::BundleRetention, StateBuilder,
 };
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
@@ -64,7 +62,7 @@ where
     ) -> eyre::Result<()>
     where
         N: NodePrimitives,
-        EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+        EvmConfig: ConfigureEvmFor<N>,
     {
         // TODO(alexey): unify with `DebugApi::debug_execution_witness`
 
@@ -88,13 +86,9 @@ where
         // Re-execute all of the transactions in the block to load all touched accounts into
         // the cache DB.
         for tx in block.body().transactions() {
-            self.evm_config.fill_tx_env(
-                evm.tx_mut(),
-                tx,
-                tx.recover_signer().ok_or_eyre("failed to recover sender")?,
-            );
-            let result = evm.transact()?;
-            evm.db_mut().commit(result.state);
+            let signer =
+                tx.recover_signer().map_err(|_| eyre::eyre!("failed to recover sender"))?;
+            evm.transact_commit(self.evm_config.tx_env(tx, signer))?;
         }
 
         drop(evm);
@@ -295,7 +289,7 @@ where
         + Send
         + Sync
         + 'static,
-    EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    EvmConfig: ConfigureEvmFor<N>,
 {
     fn on_invalid_block(
         &self,

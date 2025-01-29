@@ -1,4 +1,4 @@
-use crate::{sync::OnceLock, InMemorySize};
+use crate::{sync::OnceLock, InMemorySize, NodePrimitives};
 pub use alloy_consensus::Header;
 use alloy_consensus::Sealed;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
@@ -7,6 +7,9 @@ use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
 use derive_more::{AsRef, Deref};
+
+/// Type alias for [`SealedHeader`] generic over the `BlockHeader` type of [`NodePrimitives`].
+pub type SealedHeaderFor<N> = SealedHeader<<N as NodePrimitives>::BlockHeader>;
 
 /// Seals the header with the block hash.
 ///
@@ -96,14 +99,16 @@ impl<H: Sealable> SealedHeader<H> {
         let hash = self.hash();
         (self.header, hash)
     }
+}
 
-    /// Clones the header and returns a new sealed header.
-    pub fn cloned(self) -> Self
+impl<H: Sealable> SealedHeader<&H> {
+    /// Maps a `SealedHeader<&H>` to a `SealedHeader<H>` by cloning the header.
+    pub fn cloned(self) -> SealedHeader<H>
     where
         H: Clone,
     {
-        let (header, hash) = self.split();
-        Self::new(header, hash)
+        let Self { hash, header } = self;
+        SealedHeader { hash, header: header.clone() }
     }
 }
 

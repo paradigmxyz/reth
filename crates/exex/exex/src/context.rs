@@ -1,17 +1,19 @@
 use crate::{ExExContextDyn, ExExEvent, ExExNotifications, ExExNotificationsStream};
+use alloy_eips::BlockNumHash;
 use reth_exex_types::ExExHead;
-use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes};
+use reth_node_api::{FullNodeComponents, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_node_core::node_config::NodeConfig;
-use reth_primitives::Head;
 use reth_provider::BlockReader;
 use reth_tasks::TaskExecutor;
 use std::fmt::Debug;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{error::SendError, UnboundedSender};
 
 /// Captures the context that an `ExEx` has access to.
+///
+/// This type wraps various node components that the `ExEx` has access to.
 pub struct ExExContext<Node: FullNodeComponents> {
     /// The current head of the blockchain at launch.
-    pub head: Head,
+    pub head: BlockNumHash,
     /// The config of the node
     pub config: NodeConfig<<Node::Types as NodeTypes>::ChainSpec>,
     /// The loaded node config
@@ -21,7 +23,7 @@ pub struct ExExContext<Node: FullNodeComponents> {
     /// # Important
     ///
     /// The exex should emit a `FinishedHeight` whenever a processed block is safe to prune.
-    /// Additionally, the exex can pre-emptively emit a `FinishedHeight` event to specify what
+    /// Additionally, the exex can preemptively emit a `FinishedHeight` event to specify what
     /// blocks to receive notifications for.
     pub events: UnboundedSender<ExExEvent>,
     /// Channel to receive [`ExExNotification`](crate::ExExNotification)s.
@@ -62,7 +64,7 @@ where
     Node::Types: NodeTypes<Primitives: NodePrimitives>,
 {
     /// Returns dynamic version of the context
-    pub fn into_dyn(self) -> ExExContextDyn<<Node::Types as NodeTypes>::Primitives> {
+    pub fn into_dyn(self) -> ExExContextDyn<PrimitivesTy<Node::Types>> {
         ExExContextDyn::from(self)
     }
 }
@@ -103,6 +105,8 @@ where
     }
 
     /// Returns the task executor.
+    ///
+    /// This type should be used to spawn (critical) tasks.
     pub fn task_executor(&self) -> &TaskExecutor {
         self.components.task_executor()
     }
@@ -118,15 +122,25 @@ where
     pub fn set_notifications_with_head(&mut self, head: ExExHead) {
         self.notifications.set_with_head(head);
     }
+
+    /// Sends an [`ExExEvent::FinishedHeight`] to the ExEx task manager letting it know that this
+    /// ExEx has processed the corresponding block.
+    ///
+    /// Returns an error if the channel was closed (ExEx task manager panicked).
+    pub fn send_finished_height(
+        &self,
+        height: BlockNumHash,
+    ) -> Result<(), SendError<BlockNumHash>> {
+        self.events.send(ExExEvent::FinishedHeight(height)).map_err(|_| SendError(height))
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::ExExContext;
     use reth_exex_types::ExExHead;
     use reth_node_api::FullNodeComponents;
     use reth_provider::BlockReader;
-
-    use crate::ExExContext;
 
     /// <https://github.com/paradigmxyz/reth/issues/12054>
     #[test]

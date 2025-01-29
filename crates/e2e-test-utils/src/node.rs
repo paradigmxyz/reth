@@ -11,7 +11,7 @@ use eyre::Ok;
 use futures_util::Future;
 use reth_chainspec::EthereumHardforks;
 use reth_network_api::test_utils::PeersHandleProvider;
-use reth_node_api::{Block, BlockBody, BlockTy, EngineTypes, FullNodeComponents};
+use reth_node_api::{Block, BlockBody, BlockTy, EngineTypes, FullNodeComponents, PrimitivesTy};
 use reth_node_builder::{rpc::RethRpcAddOns, FullNode, NodeTypes, NodeTypesWithEngine};
 use reth_node_core::primitives::SignedTransaction;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
@@ -41,7 +41,7 @@ where
     pub engine_api: EngineApiTestContext<
         <Node::Types as NodeTypesWithEngine>::Engine,
         <Node::Types as NodeTypes>::ChainSpec,
-        <Node::Types as NodeTypes>::Primitives,
+        PrimitivesTy<Node::Types>,
     >,
     /// Context for testing RPC features.
     pub rpc: RpcTestContext<Node, AddOns::EthApi>,

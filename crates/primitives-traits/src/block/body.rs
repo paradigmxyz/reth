@@ -33,18 +33,37 @@ pub trait BlockBody:
     + MaybeSerde
     + 'static
 {
-    /// Ordered list of signed transactions as committed in block.
+    /// Ordered list of signed transactions as committed in the block.
     type Transaction: SignedTransaction;
 
     /// Ommer header type.
     type OmmerHeader: BlockHeader;
 
-    /// Returns reference to transactions in block.
+    /// Returns reference to transactions in the block.
     fn transactions(&self) -> &[Self::Transaction];
+
+    /// Returns an iterator over the transactions in the block.
+    fn transactions_iter(&self) -> impl Iterator<Item = &Self::Transaction> {
+        self.transactions().iter()
+    }
+
+    /// Returns the transaction with the matching hash.
+    ///
+    /// This is a convenience function for `transactions_iter().find()`
+    fn transaction_by_hash(&self, hash: &B256) -> Option<&Self::Transaction> {
+        self.transactions_iter().find(|tx| tx.tx_hash() == hash)
+    }
+
+    /// Clones the transactions in the block.
+    ///
+    /// This is a convenience function for `transactions().to_vec()`
+    fn clone_transactions(&self) -> Vec<Self::Transaction> {
+        self.transactions().to_vec()
+    }
 
     /// Returns an iterator over all transaction hashes in the block body.
     fn transaction_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
-        self.transactions().iter().map(|tx| tx.tx_hash())
+        self.transactions_iter().map(|tx| tx.tx_hash())
     }
 
     /// Returns the number of the transactions in the block.
@@ -57,7 +76,7 @@ pub trait BlockBody:
 
     /// Returns `true` if the block body contains a transaction of the given type.
     fn contains_transaction_type(&self, tx_type: u8) -> bool {
-        self.transactions().iter().any(|tx| tx.is_type(tx_type))
+        self.transactions_iter().any(|tx| tx.is_type(tx_type))
     }
 
     /// Calculate the transaction root for the block body.
@@ -89,12 +108,12 @@ pub trait BlockBody:
 
     /// Calculates the total blob gas used by _all_ EIP-4844 transactions in the block.
     fn blob_gas_used(&self) -> u64 {
-        self.transactions().iter().filter_map(|tx| tx.blob_gas_used()).sum()
+        self.transactions_iter().filter_map(|tx| tx.blob_gas_used()).sum()
     }
 
     /// Returns an iterator over all blob versioned hashes in the block body.
     fn blob_versioned_hashes_iter(&self) -> impl Iterator<Item = &B256> + '_ {
-        self.transactions().iter().filter_map(|tx| tx.blob_versioned_hashes()).flatten()
+        self.transactions_iter().filter_map(|tx| tx.blob_versioned_hashes()).flatten()
     }
 
     /// Returns an iterator over the encoded 2718 transactions.
@@ -104,7 +123,7 @@ pub trait BlockBody:
     /// See also [`Encodable2718`].
     #[doc(alias = "raw_transactions_iter")]
     fn encoded_2718_transactions_iter(&self) -> impl Iterator<Item = Vec<u8>> + '_ {
-        self.transactions().iter().map(|tx| tx.encoded_2718())
+        self.transactions_iter().map(|tx| tx.encoded_2718())
     }
 
     /// Returns a vector of encoded 2718 transactions.
@@ -118,11 +137,11 @@ pub trait BlockBody:
     }
 
     /// Recover signer addresses for all transactions in the block body.
-    fn recover_signers(&self) -> Option<Vec<Address>>
+    fn recover_signers(&self) -> Result<Vec<Address>, RecoveryError>
     where
         Self::Transaction: SignedTransaction,
     {
-        crate::transaction::recover::recover_signers(self.transactions())
+        crate::transaction::recover::recover_signers(self.transactions()).map_err(|_| RecoveryError)
     }
 
     /// Recover signer addresses for all transactions in the block body.
@@ -132,14 +151,14 @@ pub trait BlockBody:
     where
         Self::Transaction: SignedTransaction,
     {
-        self.recover_signers().ok_or(RecoveryError)
+        self.recover_signers()
     }
 
     /// Recover signer addresses for all transactions in the block body _without ensuring that the
     /// signature has a low `s` value_.
     ///
     /// Returns `None`, if some transaction's signature is invalid.
-    fn recover_signers_unchecked(&self) -> Option<Vec<Address>>
+    fn recover_signers_unchecked(&self) -> Result<Vec<Address>, RecoveryError>
     where
         Self::Transaction: SignedTransaction,
     {
@@ -154,7 +173,7 @@ pub trait BlockBody:
     where
         Self::Transaction: SignedTransaction,
     {
-        self.recover_signers_unchecked().ok_or(RecoveryError)
+        self.recover_signers_unchecked()
     }
 }
 

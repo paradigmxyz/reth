@@ -72,23 +72,23 @@ test-utils = [
     "reth-stages-types/test-utils",
 ]
 arbitrary = [
-	"reth-primitives/arbitrary",
-	"reth-db-models/arbitrary",
-	"dep:arbitrary",
-	"dep:proptest",
-	"reth-primitives-traits/arbitrary",
-	"reth-trie-common/arbitrary",
-	"alloy-primitives/arbitrary",
-	"parity-scale-codec/arbitrary",
-	"reth-codecs/arbitrary",
-	"reth-prune-types/arbitrary",
-	"reth-stages-types/arbitrary",
-	"alloy-consensus/arbitrary",
-	"reth-optimism-primitives?/arbitrary"
+    "reth-primitives/arbitrary",
+    "reth-db-models/arbitrary",
+    "dep:arbitrary",
+    "dep:proptest",
+    "reth-primitives-traits/arbitrary",
+    "reth-trie-common/arbitrary",
+    "alloy-primitives/arbitrary",
+    "parity-scale-codec/arbitrary",
+    "reth-codecs/arbitrary",
+    "reth-prune-types/arbitrary",
+    "reth-stages-types/arbitrary",
+    "alloy-consensus/arbitrary",
+    "reth-optimism-primitives?/arbitrary",
 ]
 optimism = [
-	"reth-codecs/op",
-	"reth-optimism-primitives?/optimism",
+    "reth-codecs/op",
+    "reth-optimism-primitives?/optimism",
     "op",
 ]
 op = ["dep:reth-optimism-primitives", "reth-codecs/op"]

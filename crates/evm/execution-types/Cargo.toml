@@ -38,35 +38,35 @@ reth-ethereum-primitives.workspace = true
 default = ["std"]
 optimism = ["revm/optimism"]
 serde = [
-	"dep:serde",
-	"rand/serde",
-	"revm/serde",
-	"alloy-eips/serde",
-	"alloy-primitives/serde",
-	"reth-primitives-traits/serde",
-	"alloy-consensus/serde",
-	"reth-trie/serde",
-	"reth-trie-common?/serde"
+    "dep:serde",
+    "rand/serde",
+    "revm/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "reth-primitives-traits/serde",
+    "alloy-consensus/serde",
+    "reth-trie/serde",
+    "reth-trie-common?/serde",
 ]
 serde-bincode-compat = [
-	"serde",
-	"reth-trie-common/serde-bincode-compat",
-	"reth-primitives/serde-bincode-compat",
-	"reth-primitives-traits/serde-bincode-compat",
-	"serde_with",
-	"alloy-eips/serde-bincode-compat",
-	"alloy-consensus/serde-bincode-compat",
-	"reth-ethereum-primitives/serde-bincode-compat"
+    "serde",
+    "reth-trie-common/serde-bincode-compat",
+    "reth-primitives/serde-bincode-compat",
+    "reth-primitives-traits/serde-bincode-compat",
+    "serde_with",
+    "alloy-eips/serde-bincode-compat",
+    "alloy-consensus/serde-bincode-compat",
+    "reth-ethereum-primitives/serde-bincode-compat",
 ]
 std = [
-	"reth-primitives/std",
-	"alloy-eips/std",
-	"alloy-primitives/std",
-	"revm/std",
-	"serde?/std",
-	"reth-primitives-traits/std",
-	"alloy-consensus/std",
-	"serde_with?/std",
-	"reth-trie-common?/std",
-    "reth-ethereum-primitives/std"
+    "reth-primitives/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "revm/std",
+    "serde?/std",
+    "reth-primitives-traits/std",
+    "alloy-consensus/std",
+    "serde_with?/std",
+    "reth-trie-common?/std",
+    "reth-ethereum-primitives/std",
 ]

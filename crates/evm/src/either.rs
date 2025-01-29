@@ -6,9 +6,6 @@ use crate::{
     execute::{BatchExecutor, BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
 };
-use alloc::boxed::Box;
-use alloy_primitives::BlockNumber;
-use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderError;
 use revm_primitives::db::Database;
 
@@ -59,13 +56,6 @@ where
     type Input<'a> = A::Input<'a>;
     type Output = A::Output;
     type Error = A::Error;
-
-    fn init(&mut self, tx_env_overrides: Box<dyn crate::TxEnvOverrides>) {
-        match self {
-            Self::Left(a) => a.init(tx_env_overrides),
-            Self::Right(b) => b.init(tx_env_overrides),
-        }
-    }
 
     fn execute(self, input: Self::Input<'_>) -> Result<Self::Output, Self::Error> {
         match self {
@@ -124,20 +114,6 @@ where
         match self {
             Self::Left(a) => a.finalize(),
             Self::Right(b) => b.finalize(),
-        }
-    }
-
-    fn set_tip(&mut self, tip: BlockNumber) {
-        match self {
-            Self::Left(a) => a.set_tip(tip),
-            Self::Right(b) => b.set_tip(tip),
-        }
-    }
-
-    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
-        match self {
-            Self::Left(a) => a.set_prune_modes(prune_modes),
-            Self::Right(b) => b.set_prune_modes(prune_modes),
         }
     }
 

@@ -1,17 +1,13 @@
 //! Traits for configuring a node.
 
-use crate::ConfigureEvm;
 use alloy_rpc_types_engine::JwtSecret;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_db_api::{
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-    Database,
-};
+use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::BeaconConsensusEngineHandle;
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
-use reth_node_types::{HeaderTy, NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine, TxTy};
+use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine, TxTy};
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
@@ -26,7 +22,7 @@ pub trait FullNodeTypes: Send + Sync + Unpin + 'static {
     /// Node's types with the database.
     type Types: NodeTypesWithEngine;
     /// Underlying database type used by the node to store and retrieve data.
-    type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
+    type DB: Database + DatabaseMetrics + Clone + Unpin + 'static;
     /// The provider type used to interact with the node.
     type Provider: FullProvider<NodeTypesWithDBAdapter<Self::Types, Self::DB>>;
 }
@@ -38,7 +34,7 @@ pub struct FullNodeTypesAdapter<Types, DB, Provider>(PhantomData<(Types, DB, Pro
 impl<Types, DB, Provider> FullNodeTypes for FullNodeTypesAdapter<Types, DB, Provider>
 where
     Types: NodeTypesWithEngine,
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     Provider: FullProvider<NodeTypesWithDBAdapter<Types, DB>>,
 {
     type Types = Types;
@@ -52,7 +48,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Self::Types>>> + Unpin;
 
     /// The node's EVM configuration, defining settings for the Ethereum Virtual Machine.
-    type Evm: ConfigureEvm<Header = HeaderTy<Self::Types>, Transaction = TxTy<Self::Types>>;
+    type Evm: ConfigureEvmFor<<Self::Types as NodeTypes>::Primitives>;
 
     /// The type that knows how to execute blocks.
     type Executor: BlockExecutorProvider<Primitives = <Self::Types as NodeTypes>::Primitives>;

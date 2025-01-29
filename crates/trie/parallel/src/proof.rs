@@ -27,10 +27,10 @@ use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace};
 
-#[cfg(feature = "metrics")]
-use crate::metrics::ParallelStateRootMetrics;
-
-/// TODO:
+/// Parallel proof calculator.
+///
+/// This can collect proof for many targets in parallel, spawning a task for each hashed address
+/// that has proof targets.
 #[derive(Debug)]
 pub struct ParallelProof<Factory> {
     /// Consistent view of the database.
@@ -48,14 +48,11 @@ pub struct ParallelProof<Factory> {
     collect_branch_node_masks: bool,
     /// Thread pool for local tasks
     thread_pool: Arc<rayon::ThreadPool>,
-    /// Parallel state root metrics.
-    #[cfg(feature = "metrics")]
-    metrics: ParallelStateRootMetrics,
 }
 
 impl<Factory> ParallelProof<Factory> {
     /// Create new state proof generator.
-    pub fn new(
+    pub const fn new(
         view: ConsistentDbView<Factory>,
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
@@ -69,8 +66,6 @@ impl<Factory> ParallelProof<Factory> {
             prefix_sets,
             collect_branch_node_masks: false,
             thread_pool,
-            #[cfg(feature = "metrics")]
-            metrics: ParallelStateRootMetrics::default(),
         }
     }
 
@@ -119,7 +114,7 @@ where
         let storage_root_targets_len = storage_root_targets.len();
 
         debug!(
-            target: "trie::parallel_state_root",
+            target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
             "Starting parallel proof generation"
         );
@@ -147,13 +142,12 @@ where
                 let (prefix_set, target_slots): (PrefixSetMut, B256HashSet) = chunk.unzip();
 
                 let (tx, rx) = std::sync::mpsc::sync_channel(1);
-
                 let view = self.view.clone();
                 let trie_nodes_sorted = self.nodes_sorted.clone();
                 let hashed_state_sorted = self.state_sorted.clone();
                 self.thread_pool.spawn_fifo(move || {
                     debug!(
-                        target: "trie::parallel",
+                        target: "trie::parallel_proof",
                         ?hashed_address,
                         "Starting proof calculation"
                     );
@@ -163,7 +157,7 @@ where
                         let provider_start = Instant::now();
                         let provider_ro = view.provider_ro()?;
                         trace!(
-                            target: "trie::parallel",
+                            target: "trie::parallel_proof",
                             ?hashed_address,
                             provider_time = ?provider_start.elapsed(),
                             "Got provider"
@@ -199,7 +193,7 @@ where
                         .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
                         trace!(
-                            target: "trie::parallel",
+                            target: "trie::parallel_proof",
                             ?hashed_address,
                             prefix_set = ?prefix_set_len,
                             target_slots = ?target_slots_len,
@@ -215,7 +209,7 @@ where
                     // `account_node_iter` below.
                     if let Err(e) = tx.send(result) {
                         debug!(
-                            target: "trie::parallel",
+                            target: "trie::parallel_proof",
                             ?hashed_address,
                             error = ?e,
                             task_time = ?task_start.elapsed(),
@@ -323,9 +317,6 @@ where
             }
         }
         let _ = hash_builder.root();
-
-        #[cfg(feature = "metrics")]
-        self.metrics.record_state_trie(tracker.finish());
 
         let account_subtree = hash_builder.take_proof_nodes();
         let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {

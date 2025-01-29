@@ -38,5 +38,3 @@ impl reth_primitives_traits::NodePrimitives for OpPrimitives {
     type SignedTx = OpTransactionSigned;
     type Receipt = OpReceipt;
 }
-
-use once_cell as _;

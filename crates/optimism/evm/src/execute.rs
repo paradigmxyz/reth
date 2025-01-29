@@ -8,7 +8,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Eip658Value, Receipt, Transaction as _};
 use alloy_eips::eip7685::Requests;
 use core::fmt::Display;
-use op_alloy_consensus::{DepositTransaction, OpDepositReceipt};
+use op_alloy_consensus::OpDepositReceipt;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_evm::{
@@ -19,12 +19,14 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm, TxEnvOverrides,
+    ConfigureEvmFor, Evm,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
 use reth_optimism_forks::OpHardfork;
-use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt};
+use reth_optimism_primitives::{
+    transaction::signed::OpTransaction, DepositReceipt, OpPrimitives, OpReceipt,
+};
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_revm::{Database, State};
@@ -69,14 +71,9 @@ where
     N: NodePrimitives<
         BlockHeader = alloy_consensus::Header,
         Receipt = OpReceipt,
-        SignedTx: DepositTransaction,
+        SignedTx: OpTransaction,
     >,
-    EvmConfig: Clone
-        + Unpin
-        + Sync
-        + Send
-        + 'static
-        + ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    EvmConfig: ConfigureEvmFor<N> + Clone + Unpin + Sync + Send + 'static,
 {
     type Primitives = N;
     type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
@@ -107,8 +104,6 @@ where
     chain_spec: Arc<OpChainSpec>,
     /// How to create an EVM.
     evm_config: EvmConfig,
-    /// Optional overrides for the transactions environment.
-    tx_env_overrides: Option<Box<dyn TxEnvOverrides>>,
     /// Current state for block execution.
     state: State<DB>,
     /// Utility to call system smart contracts.
@@ -130,14 +125,7 @@ where
         receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
     ) -> Self {
         let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
-        Self {
-            state,
-            chain_spec,
-            evm_config,
-            system_caller,
-            tx_env_overrides: None,
-            receipt_builder,
-        }
+        Self { state, chain_spec, evm_config, system_caller, receipt_builder }
     }
 }
 
@@ -146,18 +134,14 @@ where
     DB: Database<Error: Into<ProviderError> + Display>,
     N: NodePrimitives<
         BlockHeader = alloy_consensus::Header,
-        SignedTx: DepositTransaction,
+        SignedTx: OpTransaction,
         Receipt: DepositReceipt,
     >,
-    EvmConfig: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
+    EvmConfig: ConfigureEvmFor<N>,
 {
     type DB = DB;
     type Primitives = N;
     type Error = BlockExecutionError;
-
-    fn init(&mut self, tx_env_overrides: Box<dyn TxEnvOverrides>) {
-        self.tx_env_overrides = Some(tx_env_overrides);
-    }
 
     fn apply_pre_execution_changes(
         &mut self,
@@ -226,14 +210,10 @@ where
                 .transpose()
                 .map_err(|_| OpBlockExecutionError::AccountLoadFailed(*sender))?;
 
-            self.evm_config.fill_tx_env(evm.tx_mut(), transaction, *sender);
-
-            if let Some(tx_env_overrides) = &mut self.tx_env_overrides {
-                tx_env_overrides.apply(evm.tx_mut());
-            }
+            let tx_env = self.evm_config.tx_env(transaction, *sender);
 
             // Execute transaction.
-            let result_and_state = evm.transact().map_err(move |err| {
+            let result_and_state = evm.transact(tx_env).map_err(move |err| {
                 let new_err = err.map_db_err(|e| e.into());
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {
@@ -462,8 +442,8 @@ mod tests {
             .unwrap();
 
         let receipts = executor.receipts();
-        let tx_receipt = receipts[0][0].as_ref().unwrap();
-        let deposit_receipt = receipts[0][1].as_ref().unwrap();
+        let tx_receipt = &receipts[0][0];
+        let deposit_receipt = &receipts[0][1];
 
         assert!(!matches!(tx_receipt, OpReceipt::Deposit(_)));
         // deposit_nonce is present only in deposit transactions
@@ -538,8 +518,8 @@ mod tests {
             .expect("Executing a block while canyon is active should not fail");
 
         let receipts = executor.receipts();
-        let tx_receipt = receipts[0][0].as_ref().unwrap();
-        let deposit_receipt = receipts[0][1].as_ref().unwrap();
+        let tx_receipt = &receipts[0][0];
+        let deposit_receipt = &receipts[0][1];
 
         // deposit_receipt_version is set to 1 for post canyon deposit transactions
         assert!(!matches!(tx_receipt, OpReceipt::Deposit(_)));
