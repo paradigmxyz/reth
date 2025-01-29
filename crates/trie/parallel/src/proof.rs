@@ -7,12 +7,16 @@ use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_db::DatabaseError;
 use reth_execution_errors::StorageRootError;
+use reth_primitives::Account;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory, ProviderError,
     StateCommitmentProvider,
 };
 use reth_trie::{
-    hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
+    hashed_cursor::{
+        cached::{CachedHashedCursor, HashedCursorCache},
+        HashedCursorFactory, HashedPostStateCursorFactory,
+    },
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     proof::StorageProof,
@@ -44,6 +48,8 @@ pub struct ParallelProof<Factory> {
     /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
     /// if we have cached nodes for them.
     pub prefix_sets: Arc<TriePrefixSetsMut>,
+    /// Cache for hashed account cursor.
+    hashed_account_cache: HashedCursorCache<Account>,
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
     /// Thread pool for local tasks
@@ -52,7 +58,7 @@ pub struct ParallelProof<Factory> {
 
 impl<Factory> ParallelProof<Factory> {
     /// Create new state proof generator.
-    pub const fn new(
+    pub fn new(
         view: ConsistentDbView<Factory>,
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
@@ -64,14 +70,21 @@ impl<Factory> ParallelProof<Factory> {
             nodes_sorted,
             state_sorted,
             prefix_sets,
-            collect_branch_node_masks: false,
             thread_pool,
+            hashed_account_cache: Default::default(),
+            collect_branch_node_masks: false,
         }
     }
 
     /// Set the flag indicating whether to include branch node masks in the proof.
     pub const fn with_branch_node_masks(mut self, branch_node_masks: bool) -> Self {
         self.collect_branch_node_masks = branch_node_masks;
+        self
+    }
+
+    /// Set the hashed account cache.
+    pub fn with_hashed_account_cache(mut self, cache: HashedCursorCache<Account>) -> Self {
+        self.hashed_account_cache = cache;
         self
     }
 }
@@ -89,7 +102,7 @@ where
     pub fn multiproof(
         self,
         targets: MultiProofTargets,
-    ) -> Result<MultiProof, ParallelStateRootError> {
+    ) -> Result<(MultiProof, HashedCursorCache<Account>), ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
         // Extend prefix sets with targets
@@ -238,10 +251,11 @@ where
         let mut storages: B256HashMap<_> =
             targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
-        let mut account_node_iter = TrieNodeIter::new(
-            walker,
+        let hashed_account_cursor = CachedHashedCursor::new(
             hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
+            Default::default(),
         );
+        let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
         while let Some(account_node) =
             account_node_iter.try_next().map_err(ProviderError::Database)?
         {
@@ -311,8 +325,14 @@ where
         } else {
             (HashMap::default(), HashMap::default())
         };
-
-        Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
+        let multiproof = MultiProof {
+            account_subtree,
+            branch_node_hash_masks,
+            branch_node_tree_masks,
+            storages,
+        };
+        let cache = account_node_iter.hashed_cursor.take_cache();
+        Ok((multiproof, cache))
     }
 }
 

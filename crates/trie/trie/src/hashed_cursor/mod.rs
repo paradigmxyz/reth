@@ -6,6 +6,9 @@ use reth_storage_errors::db::DatabaseError;
 mod post_state;
 pub use post_state::*;
 
+/// Cached cursor implementation.
+pub mod cached;
+
 /// Implementation of noop hashed state cursor.
 pub mod noop;
 

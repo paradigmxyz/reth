@@ -5,12 +5,13 @@ use derive_more::derive::Deref;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::system_calls::OnStateHook;
+use reth_primitives_traits::Account;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider,
 };
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory,
+    hashed_cursor::{cached::HashedCursorCache, HashedPostStateCursorFactory},
     prefix_set::TriePrefixSetsMut,
     proof::ProofBlindedProviderFactory,
     trie_cursor::InMemoryTrieCursorFactory,
@@ -173,6 +174,8 @@ pub struct ProofCalculated {
     /// The source of the proof fetch, whether it was requested as a prefetch or as a result of a
     /// state update.
     source: ProofFetchSource,
+    /// Hashed account cursor cache.
+    hashed_account_cache: HashedCursorCache<Account>,
 }
 
 impl ProofCalculated {
@@ -329,6 +332,8 @@ struct MultiproofManager<Factory> {
     inflight: usize,
     /// Queued calculations.
     pending: VecDeque<MultiproofInput<Factory>>,
+    /// Cache for hashed account cursors.
+    hashed_account_cache: HashedCursorCache<Account>,
     /// Thread pool to spawn multiproof calculations.
     thread_pool: Arc<rayon::ThreadPool>,
 }
@@ -351,6 +356,7 @@ where
             thread_pool,
             max_concurrent,
             inflight: 0,
+            hashed_account_cache: Default::default(),
             pending: VecDeque::with_capacity(max_concurrent),
         }
     }
@@ -368,7 +374,8 @@ where
 
     /// Signals that a multiproof calculation has finished and there's room to
     /// spawn a new calculation if needed.
-    fn on_calculation_complete(&mut self) {
+    fn on_calculation_complete(&mut self, cache: HashedCursorCache<Account>) {
+        self.hashed_account_cache.extend(cache);
         self.inflight = self.inflight.saturating_sub(1);
 
         if let Some(input) = self.pending.pop_front() {
@@ -386,6 +393,7 @@ where
             state_root_message_sender,
             source,
         } = input;
+        let cache = self.hashed_account_cache.clone();
         let thread_pool = self.thread_pool.clone();
 
         self.thread_pool.spawn(move || {
@@ -396,7 +404,7 @@ where
                 "Starting multiproof calculation",
             );
             let start = Instant::now();
-            let result = calculate_multiproof(thread_pool, config, proof_targets.clone());
+            let result = calculate_multiproof(thread_pool, config, cache, proof_targets.clone());
             trace!(
                 target: "engine::root",
                 proof_sequence_number,
@@ -405,7 +413,7 @@ where
             );
 
             match result {
-                Ok(proof) => {
+                Ok((proof, cache)) => {
                     let _ = state_root_message_sender.send(StateRootMessage::ProofCalculated(
                         Box::new(ProofCalculated {
                             sequence_number: proof_sequence_number,
@@ -414,6 +422,7 @@ where
                                 targets: proof_targets,
                                 multiproof: proof,
                             },
+                            hashed_account_cache: cache,
                             source,
                         }),
                     ));
@@ -657,7 +666,8 @@ where
                             "Processing calculated proof"
                         );
 
-                        self.multiproof_manager.on_calculation_complete();
+                        self.multiproof_manager
+                            .on_calculation_complete(proof_calculated.hashed_account_cache);
 
                         if let Some(combined_update) =
                             self.on_proof(proof_calculated.sequence_number, proof_calculated.update)
@@ -825,8 +835,9 @@ fn get_proof_targets(
 fn calculate_multiproof<Factory>(
     thread_pool: Arc<rayon::ThreadPool>,
     config: StateRootConfig<Factory>,
+    cache: HashedCursorCache<Account>,
     proof_targets: MultiProofTargets,
-) -> ProviderResult<MultiProof>
+) -> ProviderResult<(MultiProof, HashedCursorCache<Account>)>
 where
     Factory:
         DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
@@ -838,6 +849,7 @@ where
         config.prefix_sets,
         thread_pool,
     )
+    .with_hashed_account_cache(cache)
     .with_branch_node_masks(true)
     .multiproof(proof_targets)?)
 }
