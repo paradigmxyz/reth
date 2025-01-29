@@ -105,7 +105,8 @@ alloy-compat = [
 test-utils = [
 	"reth-primitives-traits/test-utils",
 	"arbitrary",
-	"reth-codecs/test-utils"
+	"reth-codecs/test-utils",
+	"reth-ethereum-primitives/test-utils"
 ]
 serde-bincode-compat = [
 	"alloy-eips/serde-bincode-compat",
