@@ -169,7 +169,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .try_clone_into_recovered()
                 .map_err(|e| eyre::eyre!("failed to recover tx: {e}"))?;
 
-            let encoded_length = match &transaction.transaction {
+            let encoded_length = match transaction.transaction() {
                 Transaction::Eip4844(TxEip4844 { blob_versioned_hashes, .. }) => {
                     let blobs_bundle = blobs_bundle.as_mut().ok_or_else(|| {
                         eyre::eyre!("encountered a blob tx. `--blobs-bundle-path` must be provided")
