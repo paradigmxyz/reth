@@ -260,6 +260,10 @@ impl EthChainSpec for OpChainSpec {
         self.inner.base_fee_params_at_timestamp(timestamp)
     }
 
+    fn blob_params_at_timestamp(&self, timestamp: u64) -> BlobParams {
+        self.inner.blob_params_at_timestamp(timestamp)
+    }
+
     fn deposit_contract(&self) -> Option<&DepositContract> {
         self.inner.deposit_contract()
     }

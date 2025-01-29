@@ -385,7 +385,7 @@ impl ChainSpec {
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.hardforks.is_fork_active_at_timestamp(fork.clone(), timestamp) {
-                        return *params;
+                        return *params
                     }
                 }
 
@@ -404,7 +404,7 @@ impl ChainSpec {
                 // given timestamp.
                 for (fork, params) in bf_params.iter().rev() {
                     if self.hardforks.is_fork_active_at_block(fork.clone(), block_number) {
-                        return *params;
+                        return *params
                     }
                 }
 
@@ -413,13 +413,13 @@ impl ChainSpec {
         }
     }
 
-    /// Get the blob fee parameters for the given timestamp.
+    /// Get the [`BlobParams`] for the given timestamp.
     pub fn blob_fee_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
         let HardforkBlobParams { cancun, prague } = self.blob_params;
-        if self.is_cancun_active_at_timestamp(timestamp) {
-            Some(cancun)
-        } else if self.is_prague_active_at_timestamp(timestamp) {
+        if self.is_prague_active_at_timestamp(timestamp) {
             Some(prague)
+        } else if self.is_cancun_active_at_timestamp(timestamp) {
+            Some(cancun)
         } else {
             None
         }

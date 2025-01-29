@@ -2,7 +2,7 @@ use crate::{ChainSpec, DepositContract};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
 use alloy_consensus::Header;
-use alloy_eips::eip1559::BaseFeeParams;
+use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams};
 use alloy_genesis::Genesis;
 use alloy_primitives::B256;
 use core::fmt::{Debug, Display};
@@ -30,6 +30,9 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
 
     /// Get the [`BaseFeeParams`] for the chain at the given timestamp.
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams;
+
+    /// Get the [`BlobParams`] for the given timestamp
+    fn blob_params_at_timestamp(&self, timestamp: u64) -> BlobParams;
 
     /// Returns the deposit contract data for the chain, if it's present
     fn deposit_contract(&self) -> Option<&DepositContract>;
@@ -76,6 +79,10 @@ impl EthChainSpec for ChainSpec {
 
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         self.base_fee_params_at_timestamp(timestamp)
+    }
+
+    fn blob_params_at_timestamp(&self, timestamp: u64) -> BlobParams {
+        self.blob_params_at_timestamp(timestamp)
     }
 
     fn deposit_contract(&self) -> Option<&DepositContract> {
