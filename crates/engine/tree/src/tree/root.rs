@@ -829,17 +829,15 @@ where
         let mut reveal_proof_data = None;
         if let SparseTrieMessage::RevealProof {
             sequence_number,
-            source,
+            source: ProofFetchSource::StateUpdate,
             state_root_message_sender,
             ..
         } = &message
         {
-            if *source == ProofFetchSource::StateUpdate {
-                reveal_proof_data
-                    .get_or_insert_with(|| (Vec::new(), state_root_message_sender.clone()))
-                    .0
-                    .push(*sequence_number);
-            }
+            reveal_proof_data
+                .get_or_insert_with(|| (Vec::new(), state_root_message_sender.clone()))
+                .0
+                .push(*sequence_number);
         }
 
         let mut update = SparseTrieUpdate::default();
@@ -849,17 +847,15 @@ where
         while let Ok(message) = message_rx.try_recv() {
             if let SparseTrieMessage::RevealProof {
                 sequence_number,
-                source,
+                source: ProofFetchSource::StateUpdate,
                 state_root_message_sender,
                 ..
             } = &message
             {
-                if *source == ProofFetchSource::StateUpdate {
-                    reveal_proof_data
-                        .get_or_insert_with(|| (Vec::new(), state_root_message_sender.clone()))
-                        .0
-                        .push(*sequence_number);
-                }
+                reveal_proof_data
+                    .get_or_insert_with(|| (Vec::new(), state_root_message_sender.clone()))
+                    .0
+                    .push(*sequence_number);
             }
 
             update.extend_with_message(message);
