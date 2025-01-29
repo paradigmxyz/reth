@@ -436,8 +436,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         tx_env.set_access_list(access_list.clone());
         match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
-                let error =
-                    Some(RpcInvalidTransactionError::halt(reason, tx_env.gas_limit()).to_string());
+                let error = Some(RpcInvalidTransactionError::halt(reason).to_string());
                 return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Revert { output, gas_used } => {
@@ -448,11 +447,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         };
 
         // transact again to get the exact gas used
-        let (result, (_, tx_env)) = self.transact(&mut db, evm_env, tx_env)?;
+        let (result, _) = self.transact(&mut db, evm_env, tx_env)?;
         let res = match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
-                let error =
-                    Some(RpcInvalidTransactionError::halt(reason, tx_env.gas_limit()).to_string());
+                let error = Some(RpcInvalidTransactionError::halt(reason).to_string());
                 AccessListResult { access_list, gas_used: U256::from(gas_used), error }
             }
             ExecutionResult::Revert { output, gas_used } => {

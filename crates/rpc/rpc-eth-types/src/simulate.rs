@@ -1,6 +1,6 @@
 //! Utilities for serving `eth_simulateV1`
 
-use alloy_consensus::{BlockHeader, Transaction as _, TxType};
+use alloy_consensus::{BlockHeader, TxType};
 use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     transaction::TransactionRequest,
@@ -127,7 +127,7 @@ where
     for (index, (result, tx)) in results.iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
             ExecutionResult::Halt { reason, gas_used } => {
-                let error = RpcInvalidTransactionError::halt(*reason, tx.gas_limit());
+                let error = RpcInvalidTransactionError::halt(*reason);
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {

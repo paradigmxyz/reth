@@ -4,6 +4,7 @@ pub mod api;
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 
 use core::time::Duration;
+use std::fmt::Debug;
 
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, U256};
@@ -18,7 +19,7 @@ use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError,
 };
-use revm::primitives::{EVMError, ExecutionResult, HaltReason, InvalidTransaction, OutOfGasError};
+use revm::primitives::{EVMError, ExecutionResult, InvalidTransaction};
 use revm_inspectors::tracing::MuxError;
 use revm_primitives::InvalidHeader;
 use tracing::error;
@@ -371,24 +372,12 @@ pub enum RpcInvalidTransactionError {
     /// Contains the gas limit.
     #[error("out of gas: gas required exceeds: {0}")]
     BasicOutOfGas(u64),
-    /// Gas limit was exceeded during memory expansion.
-    /// Contains the gas limit.
-    #[error("out of gas: gas exhausted during memory expansion: {0}")]
-    MemoryOutOfGas(u64),
-    /// Gas limit was exceeded during precompile execution.
-    /// Contains the gas limit.
-    #[error("out of gas: gas exhausted during precompiled contract execution: {0}")]
-    PrecompileOutOfGas(u64),
-    /// An operand to an opcode was invalid or out of range.
-    /// Contains the gas limit.
-    #[error("out of gas: invalid operand to an opcode: {0}")]
-    InvalidOperandOutOfGas(u64),
     /// Thrown if executing a transaction failed during estimate/call
     #[error(transparent)]
     Revert(RevertError),
     /// Unspecific EVM halt error.
     #[error("EVM error: {0:?}")]
-    EvmHalt(HaltReason),
+    EvmHalt(Box<dyn Debug + Send + Sync>),
     /// Invalid chain id set for the transaction.
     #[error("invalid chain ID")]
     InvalidChainId,
@@ -459,22 +448,8 @@ impl RpcInvalidTransactionError {
     /// Converts the halt error
     ///
     /// Takes the configured gas limit of the transaction which is attached to the error
-    pub const fn halt(reason: HaltReason, gas_limit: u64) -> Self {
-        match reason {
-            HaltReason::OutOfGas(err) => Self::out_of_gas(err, gas_limit),
-            HaltReason::NonceOverflow => Self::NonceMaxValue,
-            err => Self::EvmHalt(err),
-        }
-    }
-
-    /// Converts the out of gas error
-    pub const fn out_of_gas(reason: OutOfGasError, gas_limit: u64) -> Self {
-        match reason {
-            OutOfGasError::Basic => Self::BasicOutOfGas(gas_limit),
-            OutOfGasError::Memory | OutOfGasError::MemoryLimit => Self::MemoryOutOfGas(gas_limit),
-            OutOfGasError::Precompile => Self::PrecompileOutOfGas(gas_limit),
-            OutOfGasError::InvalidOperand => Self::InvalidOperandOutOfGas(gas_limit),
-        }
+    pub fn halt(reason: impl Debug + Send + Sync + 'static) -> Self {
+        Self::EvmHalt(Box::new(reason))
     }
 }
 
@@ -760,8 +735,8 @@ pub fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
         ExecutionResult::Revert { output, .. } => {
             Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into())
         }
-        ExecutionResult::Halt { reason, gas_used } => {
-            Err(RpcInvalidTransactionError::halt(reason, gas_used).into())
+        ExecutionResult::Halt { reason, .. } => {
+            Err(RpcInvalidTransactionError::halt(reason).into())
         }
     }
 }
