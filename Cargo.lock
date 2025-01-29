@@ -2488,35 +2488,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "custom-headers-and-txs-node"
+name = "custom-node"
 version = "0.0.0"
 dependencies = [
  "alloy-consensus",
- "alloy-genesis",
+ "alloy-eips",
+ "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
+ "alloy-rpc-types",
  "alloy-serde",
- "bincode",
- "eyre",
- "futures-util",
- "reth",
- "reth-basic-payload-builder",
- "reth-chainspec",
+ "arbitrary",
+ "derive_more",
+ "rand 0.8.5",
  "reth-codecs",
- "reth-evm",
- "reth-network",
- "reth-node-api",
- "reth-node-builder",
- "reth-node-core",
- "reth-node-ethereum",
- "reth-primitives",
+ "reth-ethereum-primitives",
  "reth-primitives-traits",
- "reth-provider",
- "reth-transaction-pool",
- "reth-trie-db",
+ "revm-primitives",
+ "secp256k1",
  "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
