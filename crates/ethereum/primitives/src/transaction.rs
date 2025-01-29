@@ -898,6 +898,10 @@ pub mod serde_bincode_compat {
     }
     impl SerdeBincodeCompat for super::TransactionSigned {
         type BincodeRepr<'a> = TransactionSigned<'a>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
     }
 
     #[cfg(test)]
