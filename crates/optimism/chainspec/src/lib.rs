@@ -261,7 +261,7 @@ impl EthChainSpec for OpChainSpec {
         self.inner.base_fee_params_at_timestamp(timestamp)
     }
 
-    fn blob_params_at_timestamp(&self, timestamp: u64) -> BlobParams {
+    fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
         self.inner.blob_params_at_timestamp(timestamp)
     }
 

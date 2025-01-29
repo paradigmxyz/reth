@@ -33,9 +33,7 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams;
 
     /// Get the [`BlobParams`] for the given timestamp
-    ///
-    /// Note: This is expected to always return the cancun [`BlobParams`] before prague.
-    fn blob_params_at_timestamp(&self, timestamp: u64) -> BlobParams;
+    fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams>;
 
     /// Returns the deposit contract data for the chain, if it's present
     fn deposit_contract(&self) -> Option<&DepositContract>;
@@ -84,11 +82,13 @@ impl EthChainSpec for ChainSpec {
         self.base_fee_params_at_timestamp(timestamp)
     }
 
-    fn blob_params_at_timestamp(&self, timestamp: u64) -> BlobParams {
+    fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
         if self.is_prague_active_at_timestamp(timestamp) {
-            self.blob_params.prague
+            Some(self.blob_params.prague)
+        } else if self.is_cancun_active_at_timestamp(timestamp) {
+            Some(self.blob_params.cancun)
         } else {
-            self.blob_params.cancun
+            None
         }
     }
 
