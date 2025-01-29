@@ -17,14 +17,11 @@ use crate::{
     shutdown::{signal, GracefulShutdown, GracefulShutdownGuard, Shutdown, Signal},
 };
 use dyn_clone::DynClone;
-use futures_util::{
-    future::{select, BoxFuture},
-    Future, FutureExt, TryFutureExt,
-};
+use futures_util::{future::BoxFuture, Future, FutureExt, TryFutureExt};
 use std::{
     any::Any,
     fmt::{Display, Formatter},
-    pin::{pin, Pin},
+    pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -36,6 +33,7 @@ use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
 };
+use tokio_util::task::TaskTracker;
 use tracing::{debug, error};
 use tracing_futures::Instrument;
 
@@ -91,7 +89,11 @@ pub trait TaskSpawner: Send + Sync + Unpin + std::fmt::Debug + DynClone {
     fn spawn(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
 
     /// This spawns a critical task onto the runtime.
-    fn spawn_critical(&self, name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
+    fn spawn_critical(
+        &self,
+        name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> JoinHandle<Option<()>>;
 
     /// Spawns a blocking task onto the runtime.
     fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()>;
@@ -101,7 +103,7 @@ pub trait TaskSpawner: Send + Sync + Unpin + std::fmt::Debug + DynClone {
         &self,
         name: &'static str,
         fut: BoxFuture<'static, ()>,
-    ) -> JoinHandle<()>;
+    ) -> JoinHandle<Option<()>>;
 }
 
 dyn_clone::clone_trait_object!(TaskSpawner);
@@ -123,8 +125,12 @@ impl TaskSpawner for TokioTaskExecutor {
         tokio::task::spawn(fut)
     }
 
-    fn spawn_critical(&self, _name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
-        tokio::task::spawn(fut)
+    fn spawn_critical(
+        &self,
+        _name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> JoinHandle<Option<()>> {
+        tokio::task::spawn(fut.map(Some))
     }
 
     fn spawn_blocking(&self, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
@@ -135,8 +141,8 @@ impl TaskSpawner for TokioTaskExecutor {
         &self,
         _name: &'static str,
         fut: BoxFuture<'static, ()>,
-    ) -> JoinHandle<()> {
-        tokio::task::spawn_blocking(move || tokio::runtime::Handle::current().block_on(fut))
+    ) -> JoinHandle<Option<()>> {
+        tokio::task::spawn_blocking(move || Some(tokio::runtime::Handle::current().block_on(fut)))
     }
 }
 
@@ -209,6 +215,7 @@ impl TaskManager {
             panicked_tasks_tx: self.panicked_tasks_tx.clone(),
             metrics: Default::default(),
             graceful_tasks: Arc::clone(&self.graceful_tasks),
+            tracker: TaskTracker::new(),
         }
     }
 
@@ -299,6 +306,8 @@ pub struct TaskExecutor {
     metrics: TaskExecutorMetrics,
     /// How many [`GracefulShutdown`] tasks are currently active
     graceful_tasks: Arc<AtomicUsize>,
+
+    tracker: TaskTracker,
 }
 
 // === impl TaskExecutor ===
@@ -315,26 +324,26 @@ impl TaskExecutor {
     }
 
     /// Spawns a future on the tokio runtime depending on the [`TaskKind`]
-    fn spawn_on_rt<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
+    fn spawn_on_rt<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<F::Output>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
         match task_kind {
-            TaskKind::Default => self.handle.spawn(fut),
+            TaskKind::Default => self.tracker.spawn_on(fut, &self.handle),
             TaskKind::Blocking => {
                 let handle = self.handle.clone();
-                self.handle.spawn_blocking(move || handle.block_on(fut))
+                self.tracker.spawn_blocking_on(move || handle.block_on(fut), &self.handle)
             }
         }
     }
 
     /// Spawns a regular task depending on the given [`TaskKind`]
-    fn spawn_task_as<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
+    fn spawn_task_as<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<F::Output>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
-        let on_shutdown = self.on_shutdown.clone();
-
         // Clone only the specific counter that we need.
         let finished_regular_tasks_total_metrics =
             self.metrics.finished_regular_tasks_total.clone();
@@ -344,8 +353,7 @@ impl TaskExecutor {
                 // Create an instance of IncCounterOnDrop with the counter to increment
                 let _inc_counter_on_drop =
                     IncCounterOnDrop::new(finished_regular_tasks_total_metrics);
-                let fut = pin!(fut);
-                let _ = select(on_shutdown, fut).await;
+                fut.await
             }
         }
         .in_current_span();
@@ -357,9 +365,10 @@ impl TaskExecutor {
     /// The given future resolves as soon as the [Shutdown] signal is received.
     ///
     /// See also [`Handle::spawn`].
-    pub fn spawn<F>(&self, fut: F) -> JoinHandle<()>
+    pub fn spawn<F>(&self, fut: F) -> JoinHandle<F::Output>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
         self.spawn_task_as(fut, TaskKind::Default)
     }
@@ -368,9 +377,10 @@ impl TaskExecutor {
     /// The given future resolves as soon as the [Shutdown] signal is received.
     ///
     /// See also [`Handle::spawn_blocking`].
-    pub fn spawn_blocking<F>(&self, fut: F) -> JoinHandle<()>
+    pub fn spawn_blocking<F>(&self, fut: F) -> JoinHandle<F::Output>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
         self.spawn_task_as(fut, TaskKind::Blocking)
     }
@@ -379,9 +389,10 @@ impl TaskExecutor {
     /// The given future resolves as soon as the [Shutdown] signal is received.
     ///
     /// See also [`Handle::spawn`].
-    pub fn spawn_with_signal<F>(&self, f: impl FnOnce(Shutdown) -> F) -> JoinHandle<()>
+    pub fn spawn_with_signal<F>(&self, f: impl FnOnce(Shutdown) -> F) -> JoinHandle<F::Output>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
         let on_shutdown = self.on_shutdown.clone();
         let fut = f(on_shutdown);
@@ -391,18 +402,20 @@ impl TaskExecutor {
         self.handle.spawn(task)
     }
 
-    /// Spawns a critical task depending on the given [`TaskKind`]
+    /// Spawns a critical task depending on the given [`TaskKind`].
+    ///
+    /// This will return `None` if the task panics.
     fn spawn_critical_as<F>(
         &self,
         name: &'static str,
         fut: F,
         task_kind: TaskKind,
-    ) -> JoinHandle<()>
+    ) -> JoinHandle<Option<F::Output>>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
         let panicked_tasks_tx = self.panicked_tasks_tx.clone();
-        let on_shutdown = self.on_shutdown.clone();
 
         // wrap the task in catch unwind
         let task = std::panic::AssertUnwindSafe(fut)
@@ -420,8 +433,7 @@ impl TaskExecutor {
         let task = async move {
             // Create an instance of IncCounterOnDrop with the counter to increment
             let _inc_counter_on_drop = IncCounterOnDrop::new(finished_critical_tasks_total_metrics);
-            let task = pin!(task);
-            let _ = select(on_shutdown, task).await;
+            task.await.ok()
         };
 
         self.spawn_on_rt(task, task_kind)
@@ -431,9 +443,16 @@ impl TaskExecutor {
     /// The given future resolves as soon as the [Shutdown] signal is received.
     ///
     /// If this task panics, the [`TaskManager`] is notified.
-    pub fn spawn_critical_blocking<F>(&self, name: &'static str, fut: F) -> JoinHandle<()>
+    ///
+    /// This will return `None` if the task panics.
+    pub fn spawn_critical_blocking<F>(
+        &self,
+        name: &'static str,
+        fut: F,
+    ) -> JoinHandle<Option<F::Output>>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
         self.spawn_critical_as(name, fut, TaskKind::Blocking)
     }
@@ -442,9 +461,10 @@ impl TaskExecutor {
     /// The given future resolves as soon as the [Shutdown] signal is received.
     ///
     /// If this task panics, the [`TaskManager`] is notified.
-    pub fn spawn_critical<F>(&self, name: &'static str, fut: F) -> JoinHandle<()>
+    pub fn spawn_critical<F>(&self, name: &'static str, fut: F) -> JoinHandle<Option<F::Output>>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
         self.spawn_critical_as(name, fut, TaskKind::Default)
     }
@@ -456,26 +476,15 @@ impl TaskExecutor {
         &self,
         name: &'static str,
         f: impl FnOnce(Shutdown) -> F,
-    ) -> JoinHandle<()>
+    ) -> JoinHandle<Option<F::Output>>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
-        let panicked_tasks_tx = self.panicked_tasks_tx.clone();
         let on_shutdown = self.on_shutdown.clone();
         let fut = f(on_shutdown);
 
-        // wrap the task in catch unwind
-        let task = std::panic::AssertUnwindSafe(fut)
-            .catch_unwind()
-            .map_err(move |error| {
-                let task_error = PanickedTaskError::new(name, error);
-                error!("{task_error}");
-                let _ = panicked_tasks_tx.send(task_error);
-            })
-            .map(drop)
-            .in_current_span();
-
-        self.handle.spawn(task)
+        self.spawn_critical(name, fut)
     }
 
     /// This spawns a critical task onto the runtime.
@@ -502,29 +511,18 @@ impl TaskExecutor {
         &self,
         name: &'static str,
         f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
+    ) -> JoinHandle<Option<F::Output>>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
-        let panicked_tasks_tx = self.panicked_tasks_tx.clone();
         let on_shutdown = GracefulShutdown::new(
             self.on_shutdown.clone(),
             GracefulShutdownGuard::new(Arc::clone(&self.graceful_tasks)),
         );
         let fut = f(on_shutdown);
 
-        // wrap the task in catch unwind
-        let task = std::panic::AssertUnwindSafe(fut)
-            .catch_unwind()
-            .map_err(move |error| {
-                let task_error = PanickedTaskError::new(name, error);
-                error!("{task_error}");
-                let _ = panicked_tasks_tx.send(task_error);
-            })
-            .map(drop)
-            .in_current_span();
-
-        self.handle.spawn(task)
+        self.spawn_critical(name, fut)
     }
 
     /// This spawns a regular task onto the runtime.
@@ -549,9 +547,10 @@ impl TaskExecutor {
     pub fn spawn_with_graceful_shutdown_signal<F>(
         &self,
         f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
+    ) -> JoinHandle<F::Output>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
         let on_shutdown = GracefulShutdown::new(
             self.on_shutdown.clone(),
@@ -559,7 +558,7 @@ impl TaskExecutor {
         );
         let fut = f(on_shutdown);
 
-        self.handle.spawn(fut)
+        self.spawn(fut)
     }
 }
 
@@ -569,7 +568,11 @@ impl TaskSpawner for TaskExecutor {
         self.spawn(fut)
     }
 
-    fn spawn_critical(&self, name: &'static str, fut: BoxFuture<'static, ()>) -> JoinHandle<()> {
+    fn spawn_critical(
+        &self,
+        name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> JoinHandle<Option<()>> {
         self.metrics.inc_critical_tasks();
         Self::spawn_critical(self, name, fut)
     }
@@ -582,7 +585,7 @@ impl TaskSpawner for TaskExecutor {
         &self,
         name: &'static str,
         fut: BoxFuture<'static, ()>,
-    ) -> JoinHandle<()> {
+    ) -> JoinHandle<Option<()>> {
         Self::spawn_critical_blocking(self, name, fut)
     }
 }
@@ -598,9 +601,10 @@ pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
         &self,
         name: &'static str,
         f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
+    ) -> JoinHandle<Option<F::Output>>
     where
-        F: Future<Output = ()> + Send + 'static;
+        F: Future + Send + 'static,
+        F::Output: Send + 'static;
 
     /// This spawns a regular task onto the runtime.
     ///
@@ -608,9 +612,10 @@ pub trait TaskSpawnerExt: Send + Sync + Unpin + std::fmt::Debug + DynClone {
     fn spawn_with_graceful_shutdown_signal<F>(
         &self,
         f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
+    ) -> JoinHandle<F::Output>
     where
-        F: Future<Output = ()> + Send + 'static;
+        F: Future + Send + 'static,
+        F::Output: Send + 'static;
 }
 
 impl TaskSpawnerExt for TaskExecutor {
@@ -618,9 +623,10 @@ impl TaskSpawnerExt for TaskExecutor {
         &self,
         name: &'static str,
         f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
+    ) -> JoinHandle<Option<F::Output>>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
         Self::spawn_critical_with_graceful_shutdown_signal(self, name, f)
     }
@@ -628,9 +634,10 @@ impl TaskSpawnerExt for TaskExecutor {
     fn spawn_with_graceful_shutdown_signal<F>(
         &self,
         f: impl FnOnce(GracefulShutdown) -> F,
-    ) -> JoinHandle<()>
+    ) -> JoinHandle<F::Output>
     where
-        F: Future<Output = ()> + Send + 'static,
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
     {
         Self::spawn_with_graceful_shutdown_signal(self, f)
     }

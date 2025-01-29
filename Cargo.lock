@@ -9229,6 +9229,7 @@ dependencies = [
  "reth-metrics",
  "thiserror 2.0.11",
  "tokio",
+ "tokio-util",
  "tracing",
  "tracing-futures",
 ]
@@ -10945,6 +10946,8 @@ dependencies = [
  "futures-core",
  "futures-io",
  "futures-sink",
+ "futures-util",
+ "hashbrown 0.14.5",
  "pin-project-lite",
  "slab",
  "tokio",
