@@ -271,14 +271,14 @@ impl StateUpdateSequencer {
         &mut self,
         sequence_numbers: Vec<u64>,
     ) -> Vec<HashedPostState> {
+        self.pending_state_update_sequence_numbers.extend(sequence_numbers);
+
         // return early if we don't have the next expected proof
         if !self.pending_state_updates.contains_key(&self.next_to_deliver) ||
             !self.pending_state_update_sequence_numbers.contains(&self.next_to_deliver)
         {
             return Vec::new()
         }
-
-        self.pending_state_update_sequence_numbers.extend(sequence_numbers);
 
         let mut consecutive_state_updates = Vec::with_capacity(self.pending_state_updates.len());
         let mut current_sequence = self.next_to_deliver;
