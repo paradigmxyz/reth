@@ -1,16 +1,14 @@
 //! Metered cache, which also provides storage for senders in order to queue queries that result in
 //! a cache miss.
 
+use super::metrics::CacheMetrics;
+use reth_primitives_traits::InMemorySize;
+use schnellru::{ByLength, Limiter, LruMap};
 use std::{
     collections::{hash_map::Entry, HashMap},
     fmt::{self, Debug, Formatter},
     hash::Hash,
 };
-
-use reth_primitives_traits::InMemorySize;
-use schnellru::{ByLength, Limiter, LruMap};
-
-use super::metrics::CacheMetrics;
 
 /// A multi-consumer LRU cache.
 pub struct MultiConsumerLruCache<K, V, L, S>
@@ -24,7 +22,7 @@ where
     queued: HashMap<K, Vec<S>>,
     /// Cache metrics
     metrics: CacheMetrics,
-    // Heap usage
+    // Tracked heap usage
     memory_usage: usize,
 }
 
@@ -38,6 +36,7 @@ where
             .field("cache_length", &self.cache.len())
             .field("cache_memory_usage", &self.cache.memory_usage())
             .field("queued_length", &self.queued.len())
+            .field("memory_usage", &self.memory_usage)
             .finish()
     }
 }
@@ -102,7 +101,6 @@ where
         let size = value.size();
         if self.cache.insert(key, value) {
             self.memory_usage = self.memory_usage.saturating_add(size);
-            self.metrics.memory_usage_bytes.set(self.memory_usage as f64);
             true
         } else {
             false
@@ -113,6 +111,7 @@ where
     #[inline]
     pub fn update_cached_metrics(&self) {
         self.metrics.cached_count.set(self.cache.len() as f64);
+        self.metrics.memory_usage.set(self.memory_usage as f64);
     }
 }
 
