@@ -144,7 +144,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                         max_duration: None,
                     },
                     stage_conf.execution_external_clean_threshold(),
-                    prune_modes.clone(),
                     ExExManagerHandle::empty(),
                 )),
             )
