@@ -119,7 +119,7 @@ where
         self
     }
 
-    /// Builds the `EthApiInner` instance.
+    /// Builds the [`EthApiInner`] instance.
     ///
     /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
     ///
@@ -172,7 +172,7 @@ where
         )
     }
 
-    /// Builds the `EthApi` instance.
+    /// Builds the [`EthApi`] instance.
     ///
     /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
     ///
