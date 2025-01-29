@@ -866,6 +866,11 @@ where
         if let Some((revealed_state_update_sequence_numbers, state_root_message_sender)) =
             reveal_proof_data
         {
+            debug!(
+                target: "engine::root",
+                ?revealed_state_update_sequence_numbers,
+                "Sending proof revealed"
+            );
             let _ = state_root_message_sender
                 .send(StateRootMessage::ProofRevealed { revealed_state_update_sequence_numbers });
         }
