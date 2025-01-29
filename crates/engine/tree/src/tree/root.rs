@@ -847,6 +847,21 @@ where
 
         let mut num_messages = 1;
         while let Ok(message) = message_rx.try_recv() {
+            if let SparseTrieMessage::RevealProof {
+                sequence_number,
+                source,
+                state_root_message_sender,
+                ..
+            } = &message
+            {
+                if *source == ProofFetchSource::StateUpdate {
+                    reveal_proof_data
+                        .get_or_insert_with(|| (Vec::new(), state_root_message_sender.clone()))
+                        .0
+                        .push(*sequence_number);
+                }
+            }
+
             update.extend_with_message(message);
             num_messages += 1;
         }
