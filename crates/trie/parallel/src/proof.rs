@@ -28,7 +28,7 @@ use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace};
 
 /// The number of storage slots to process in a single chunk when generating proofs.
-const STORAGE_SLOTS_CHUNK_SIZE: usize = 200;
+const STORAGE_SLOTS_CHUNK_SIZE: usize = 50;
 
 /// Parallel proof calculator.
 ///
