@@ -285,10 +285,10 @@ impl StateUpdateSequencer {
 
         // keep collecting nd state updates as long as we have consecutive sequence numbers
         loop {
-            let Some(pending) = self.pending_state_updates.remove(&current_sequence) else { break };
             if !self.pending_state_update_sequence_numbers.remove(&current_sequence) {
                 break;
             }
+            let Some(pending) = self.pending_state_updates.remove(&current_sequence) else { break };
 
             consecutive_state_updates.push(pending);
             current_sequence += 1;
