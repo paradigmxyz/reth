@@ -936,8 +936,8 @@ async fn authenticate<N: NetworkPrimitives>(
         local_addr,
         hello_msg,
         status_msg,
-        fork_filter,
         extra_handlers,
+        fork_filter,
         direction,
     )
     .boxed();
@@ -976,8 +976,8 @@ async fn authenticate_stream<N: NetworkPrimitives>(
     // Handshake data
     mut hello: HelloMessageWithProtocols,
     mut status: Status,
-    fork_filter: ForkFilter,
     mut extra_handlers: RlpxSubProtocolHandlers,
+    fork_filter: ForkFilter,
 
     direction: Direction,
 ) -> PendingSessionEvent<N> {
