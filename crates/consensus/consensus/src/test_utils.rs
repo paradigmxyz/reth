@@ -1,8 +1,7 @@
 use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput};
 use alloy_primitives::U256;
 use core::sync::atomic::{AtomicBool, Ordering};
-use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 
 /// Consensus engine implementation for testing
 #[derive(Debug)]
