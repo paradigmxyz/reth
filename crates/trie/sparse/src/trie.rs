@@ -572,7 +572,7 @@ impl<P> RevealedSparseTrie<P> {
     pub fn root(&mut self) -> B256 {
         // Take the current prefix set
         let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
-        let rlp_node = self.rlp_node_allocate(Nibbles::default(), &mut prefix_set);
+        let rlp_node = self.rlp_node_allocate(&mut prefix_set);
         if let Some(root_hash) = rlp_node.as_hash() {
             root_hash
         } else {
@@ -593,19 +593,19 @@ impl<P> RevealedSparseTrie<P> {
         self.prefix_set = new_prefix_set;
 
         trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
-        for target in targets {
+        for (level, path) in targets {
             buffers.path_stack.push(RlpNodePathStackItem {
-                level: 0,
-                path: target,
+                level,
+                path,
                 is_in_prefix_set: Some(true),
             });
             self.rlp_node(&mut prefix_set, &mut buffers);
         }
     }
 
-    /// Returns a list of paths to the nodes that were changed according to the prefix set and are
-    /// located at the provided depth when counting from the root node. If there's a leaf at a
-    /// depth less than the provided depth, it will be included in the result.
+    /// Returns a list of levels and paths to the nodes that were changed according to the prefix
+    /// set and are located at the provided depth when counting from the root node. If there's a
+    /// leaf at a depth less than the provided depth, it will be included in the result.
     ///
     /// Additionally, returns a new prefix set containing the paths that will not be updated, thus
     /// need re-calculation.
@@ -613,7 +613,7 @@ impl<P> RevealedSparseTrie<P> {
         &self,
         prefix_set: &mut PrefixSet,
         depth: usize,
-    ) -> (Vec<Nibbles>, PrefixSetMut) {
+    ) -> (Vec<(usize, Nibbles)>, PrefixSetMut) {
         let mut unchanged_prefix_set = PrefixSetMut::default();
         let mut paths = Vec::from([(Nibbles::default(), 0)]);
         let mut targets = Vec::new();
@@ -626,7 +626,7 @@ impl<P> RevealedSparseTrie<P> {
                         continue
                     }
 
-                    targets.push(path);
+                    targets.push((level, path));
                 }
                 SparseNode::Extension { key, hash, store_in_db_trie: _ } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
@@ -634,7 +634,7 @@ impl<P> RevealedSparseTrie<P> {
                     }
 
                     if level >= depth {
-                        targets.push(path);
+                        targets.push((level, path));
                     } else {
                         unchanged_prefix_set.insert(path.clone());
 
@@ -648,7 +648,7 @@ impl<P> RevealedSparseTrie<P> {
                     }
 
                     if level >= depth {
-                        targets.push(path);
+                        targets.push((level, path));
                     } else {
                         unchanged_prefix_set.insert(path.clone());
 
@@ -667,13 +667,13 @@ impl<P> RevealedSparseTrie<P> {
         (targets, unchanged_prefix_set)
     }
 
-    /// Look up or calculate the RLP of the node at the given path.
+    /// Look up or calculate the RLP of the node at the root path.
     ///
     /// # Panics
     ///
     /// If the node at provided path does not exist.
-    pub fn rlp_node_allocate(&mut self, path: Nibbles, prefix_set: &mut PrefixSet) -> RlpNode {
-        let mut buffers = RlpNodeBuffers::new_with_path(path);
+    pub fn rlp_node_allocate(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
+        let mut buffers = RlpNodeBuffers::new_with_root_path();
         self.rlp_node(prefix_set, &mut buffers)
     }
 
@@ -1446,10 +1446,14 @@ pub struct RlpNodeBuffers {
 }
 
 impl RlpNodeBuffers {
-    /// Creates a new instance of buffers with the given path on the stack.
-    fn new_with_path(path: Nibbles) -> Self {
+    /// Creates a new instance of buffers with the root path on the stack.
+    fn new_with_root_path() -> Self {
         Self {
-            path_stack: vec![RlpNodePathStackItem { level: 0, path, is_in_prefix_set: None }],
+            path_stack: vec![RlpNodePathStackItem {
+                level: 0,
+                path: Nibbles::default(),
+                is_in_prefix_set: None,
+            }],
             rlp_node_stack: Vec::new(),
             branch_child_buf: SmallVec::<[Nibbles; 16]>::new_const(),
             branch_value_stack_buf: SmallVec::<[RlpNode; 16]>::new_const(),
@@ -1460,8 +1464,7 @@ impl RlpNodeBuffers {
 /// RLP node path stack item.
 #[derive(Debug)]
 struct RlpNodePathStackItem {
-    /// Level at which the node exists, starting from the node where the calculation began. Higher
-    /// numbers correspond to lower levels in the trie.
+    /// Level at which the node is located. Higher numbers correspond to lower levels in the trie.
     level: usize,
     /// Path to the node.
     path: Nibbles,
@@ -2595,19 +2598,19 @@ mod tests {
 
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 0),
-            (vec![Nibbles::default()], PrefixSetMut::default())
+            (vec![(0, Nibbles::default())], PrefixSetMut::default())
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 1),
-            (vec![Nibbles::from_nibbles_unchecked([0x5])], [Nibbles::default()].into())
+            (vec![(1, Nibbles::from_nibbles_unchecked([0x5]))], [Nibbles::default()].into())
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 2),
             (
                 vec![
-                    Nibbles::from_nibbles_unchecked([0x5, 0x0]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x2]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x3])
+                    (2, Nibbles::from_nibbles_unchecked([0x5, 0x0])),
+                    (2, Nibbles::from_nibbles_unchecked([0x5, 0x2])),
+                    (2, Nibbles::from_nibbles_unchecked([0x5, 0x3]))
                 ],
                 [Nibbles::default(), Nibbles::from_nibbles_unchecked([0x5])].into()
             )
@@ -2616,10 +2619,10 @@ mod tests {
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 3),
             (
                 vec![
-                    Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x2]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3])
+                    (3, Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3])),
+                    (2, Nibbles::from_nibbles_unchecked([0x5, 0x2])),
+                    (3, Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1])),
+                    (3, Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3]))
                 ],
                 [
                     Nibbles::default(),
@@ -2634,12 +2637,12 @@ mod tests {
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 4),
             (
                 vec![
-                    Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x2]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x0]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x2])
+                    (4, Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1])),
+                    (4, Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3])),
+                    (2, Nibbles::from_nibbles_unchecked([0x5, 0x2])),
+                    (3, Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1])),
+                    (4, Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x0])),
+                    (4, Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x2]))
                 ],
                 [
                     Nibbles::default(),
