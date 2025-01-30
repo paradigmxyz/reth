@@ -1763,7 +1763,7 @@ where
     /// Returns an error if we failed to fetch the state from the database.
     fn state_provider(&self, hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
-            debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory");
+            debug!(target: "engine::tree", ?hash, ?historical, "found canonical state for block in memory");
             // the block leads back to the canonical chain
             let historical = self.provider.state_by_block_hash(historical)?;
             return Ok(Some(Box::new(MemoryOverlayStateProvider::new(historical, blocks))))
@@ -1771,7 +1771,7 @@ where
 
         // the hash could belong to an unknown block or a persisted block
         if let Some(header) = self.provider.header(&hash)? {
-            debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database");
+            debug!(target: "engine::tree", ?hash, number = ?header.number(), "found canonical state for block in database");
             // the block is known and persisted
             let historical = self.provider.state_by_block_hash(hash)?;
             return Ok(Some(historical))
@@ -2425,6 +2425,7 @@ where
         );
 
         info!(target: "engine::tree", "Spawning prewarm threads");
+        let prewarm_start = Instant::now();
 
         // Prewarm transactions
         for (tx_idx, (tx, sender)) in
@@ -2447,8 +2448,9 @@ where
         }
 
         drop(state_root_sender);
+        let elapsed = prewarm_start.elapsed();
 
-        info!(target: "engine::tree", "Done spawning prewarm threads");
+        info!(target: "engine::tree", ?elapsed, "Done spawning prewarm threads");
         trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
 
         let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
@@ -2622,7 +2624,7 @@ where
         Ok(input)
     }
 
-    /// Runs execution for a single transaction, spawning it in th eprewarm threadpool.
+    /// Runs execution for a single transaction, spawning it in the prewarm threadpool.
     #[allow(clippy::too_many_arguments)]
     fn prewarm_transaction(
         &self,
@@ -2634,10 +2636,13 @@ where
         state_root_sender: Option<Sender<StateRootMessage>>,
         execution_finished: Arc<AtomicBool>,
     ) -> Result<(), InsertBlockErrorKind> {
+        let provider_latency = Instant::now();
         let Some(state_provider) = self.state_provider(block.parent_hash())? else {
             error!(target: "engine::tree", parent=?block.parent_hash(), "Could not get state provider for prewarm");
             return Ok(())
         };
+        let provider_latency = provider_latency.elapsed();
+        info!(target: "engine::tree", ?provider_latency, "Got state provider for prewarm");
 
         // Use the caches to create a new executor
         let state_provider =
