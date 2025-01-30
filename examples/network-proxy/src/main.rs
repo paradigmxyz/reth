@@ -65,10 +65,10 @@ async fn main() -> eyre::Result<()> {
         // receive incoming eth requests and transaction messages
         tokio::select! {
               eth_request = requests_rx.recv() => {
-                     let Some(eth_request) = eth_request else {break};
-                     match eth_request {
+                    let Some(eth_request) = eth_request else {break};
+                    match eth_request {
                         IncomingEthRequest::GetBlockHeaders { peer_id, request, response } => {
-                            println!("Received block headers request: {:?}, {:?}", peer_id, request);
+                            println!("Received block headers request: {peer_id:?}, {request:?}");
                             response.send(Ok(vec![DEV.genesis_header().clone()].into())).unwrap();
                         }
                         IncomingEthRequest::GetBlockBodies { .. } => {}
@@ -79,13 +79,13 @@ async fn main() -> eyre::Result<()> {
              transaction_message = transactions_rx.recv() => {
                 let Some(transaction_message) = transaction_message else {break};
                 match transaction_message {
-                    NetworkTransactionEvent::IncomingTransactions{..  } => {}
-                    NetworkTransactionEvent::IncomingPooledTransactionHashes{peer_id,msg  } => {
-                        println!("Received incoming tx hashes broadcast: {:?}, {:?}", peer_id, msg);
+                    NetworkTransactionEvent::IncomingTransactions { .. } => {}
+                    NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
+                        println!("Received incoming tx hashes broadcast: {peer_id:?}, {msg:?}");
                     }
-                    NetworkTransactionEvent::GetPooledTransactions{ .. } => {}
+                    NetworkTransactionEvent::GetPooledTransactions { .. } => {}
                     NetworkTransactionEvent::GetTransactionsHandle(_) => {}
-               }
+                }
             }
         }
     }
