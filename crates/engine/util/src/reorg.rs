@@ -327,7 +327,7 @@ where
         let tx_env = evm_config.tx_env(&tx_recovered, tx_recovered.signer());
         let exec_result = match evm.transact(tx_env) {
             Ok(result) => result,
-            Err(err) if err.as_invalid_tx_err().is_some() => {
+            Err(err) if err.is_invalid_tx_err() => {
                 trace!(target: "engine::stream::reorg", hash = %tx.tx_hash(), ?err, "Error executing transaction from next block");
                 continue
             }

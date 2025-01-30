@@ -23,11 +23,14 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
 use revm::{DatabaseCommit, GetInspector};
-use revm_primitives::{BlockEnv, EVMError, InvalidTransaction, ResultAndState, TxEnv, TxKind};
+use revm_primitives::{BlockEnv, ResultAndState, TxEnv, TxKind};
 
 pub mod either;
 /// EVM environment configuration.
 pub mod env;
+/// EVM error types.
+mod error;
+pub use error::*;
 pub mod execute;
 pub use env::EvmEnv;
 
@@ -82,50 +85,6 @@ pub trait Evm {
         Ok(result)
     }
 }
-
-/// Abstraction over transaction validation error.
-pub trait InvalidTxError: core::error::Error + Send + Sync + 'static {
-    /// Returns whether the error cause by transaction having a nonce lower than expected.
-    fn is_nonce_too_low(&self) -> bool;
-}
-
-impl InvalidTxError for InvalidTransaction {
-    fn is_nonce_too_low(&self) -> bool {
-        matches!(self, Self::NonceTooLow { .. })
-    }
-}
-
-/// Abstraction over errors that can occur during EVM execution.
-///
-/// It's assumed that errors can occur either because of an invalid transaction, meaning that other
-/// transaction might still result in successful execution, or because of a general EVM
-/// misconfiguration.
-///
-/// If caller occurs a error different from [`EvmError::InvalidTransaction`], it should most likely
-/// be treated as fatal error flagging some EVM misconfiguration.
-pub trait EvmError: core::error::Error + Send + Sync + 'static {
-    /// Errors which might occur as a result of an invalid transaction. i.e unrelated to general EVM
-    /// configuration.
-    type InvalidTransaction: InvalidTxError;
-
-    /// Returns the [`EvmError::InvalidTransaction`] if the error is an invalid transaction error.
-    fn as_invalid_tx_err(&self) -> Option<&Self::InvalidTransaction>;
-}
-
-impl<DBError> EvmError for EVMError<DBError>
-where
-    DBError: core::error::Error + Send + Sync + 'static,
-{
-    type InvalidTransaction = InvalidTransaction;
-
-    fn as_invalid_tx_err(&self) -> Option<&Self::InvalidTransaction> {
-        match self {
-            Self::Transaction(err) => Some(err),
-            _ => None,
-        }
-    }
-}
-
 /// Helper trait to bound [`revm::Database::Error`] with common requirements.
 pub trait Database: revm::Database<Error: core::error::Error + Send + Sync + 'static> {}
 impl<T> Database for T where T: revm::Database<Error: core::error::Error + Send + Sync + 'static> {}

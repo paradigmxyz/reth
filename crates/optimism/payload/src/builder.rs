@@ -818,7 +818,7 @@ where
             let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    if err.as_invalid_tx_err().is_some() {
+                    if err.is_invalid_tx_err() {
                         trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
                         continue
                     }
