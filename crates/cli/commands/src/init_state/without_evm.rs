@@ -4,6 +4,7 @@ use alloy_rlp::Decodable;
 use reth_codecs::Compact;
 use reth_node_builder::NodePrimitives;
 use reth_primitives::{SealedBlock, SealedHeader, StaticFileSegment};
+use reth_primitives_traits::SealedHeaderFor;
 use reth_provider::{
     providers::StaticFileProvider, BlockWriter, StageCheckpointWriter, StaticFileProviderFactory,
     StaticFileWriter, StorageLocation,
@@ -59,7 +60,7 @@ where
 /// height.
 fn append_first_block<Provider>(
     provider_rw: &Provider,
-    header: &SealedHeader<<Provider::Primitives as NodePrimitives>::BlockHeader>,
+    header: &SealedHeaderFor<Provider::Primitives>,
     total_difficulty: U256,
 ) -> Result<(), eyre::Error>
 where
