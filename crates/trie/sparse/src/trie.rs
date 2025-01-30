@@ -588,7 +588,7 @@ impl<P> RevealedSparseTrie<P> {
 
         let targets = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
         for target in targets {
-            buffers.path_stack.push((target, Some(true)));
+            buffers.path_stack.push((0, target, Some(true)));
             self.rlp_node(&mut prefix_set, &mut buffers);
         }
     }
@@ -665,7 +665,9 @@ impl<P> RevealedSparseTrie<P> {
         prefix_set: &mut PrefixSet,
         buffers: &mut RlpNodeBuffers,
     ) -> RlpNode {
-        'main: while let Some((path, mut is_in_prefix_set)) = buffers.path_stack.pop() {
+        let starting_path = buffers.path_stack.last().map(|(_, path, _)| path).cloned();
+
+        'main: while let Some((level, path, mut is_in_prefix_set)) = buffers.path_stack.pop() {
             // Check if the path is in the prefix set.
             // First, check the cached value. If it's `None`, then check the prefix set, and update
             // the cached value.
@@ -726,7 +728,10 @@ impl<P> RevealedSparseTrie<P> {
                         )
                     } else {
                         // need to get rlp node for child first
-                        buffers.path_stack.extend([(path, is_in_prefix_set), (child_path, None)]);
+                        buffers.path_stack.extend([
+                            (level, path, is_in_prefix_set),
+                            (level + 1, child_path, None),
+                        ]);
                         continue
                     }
                 }
@@ -815,10 +820,10 @@ impl<P> RevealedSparseTrie<P> {
                             added_children = true;
                         } else {
                             debug_assert!(!added_children);
-                            buffers.path_stack.push((path, is_in_prefix_set));
-                            buffers
-                                .path_stack
-                                .extend(buffers.branch_child_buf.drain(..).map(|p| (p, None)));
+                            buffers.path_stack.push((level, path, is_in_prefix_set));
+                            buffers.path_stack.extend(
+                                buffers.branch_child_buf.drain(..).map(|p| (level + 1, p, None)),
+                            );
                             continue 'main
                         }
                     }
@@ -893,6 +898,16 @@ impl<P> RevealedSparseTrie<P> {
                     )
                 }
             };
+
+            trace!(
+                target: "trie::sparse",
+                ?starting_path,
+                ?level,
+                ?path,
+                ?is_in_prefix_set,
+                "Popped path from stack"
+            );
+
             buffers.rlp_node_stack.push((path, rlp_node, node_type));
         }
 
@@ -1362,7 +1377,7 @@ struct RemovedSparseNode {
 #[derive(Debug, Default)]
 pub struct RlpNodeBuffers {
     /// Stack of paths we need rlp nodes for and whether the path is in the prefix set.
-    path_stack: Vec<(Nibbles, Option<bool>)>,
+    path_stack: Vec<(usize, Nibbles, Option<bool>)>,
     /// Stack of rlp nodes
     rlp_node_stack: Vec<(Nibbles, RlpNode, SparseNodeType)>,
     /// Reusable branch child path
@@ -1375,7 +1390,7 @@ impl RlpNodeBuffers {
     /// Creates a new instance of buffers with the given path on the stack.
     fn new_with_path(path: Nibbles) -> Self {
         Self {
-            path_stack: vec![(path, None)],
+            path_stack: vec![(0, path, None)],
             rlp_node_stack: Vec::new(),
             branch_child_buf: SmallVec::<[Nibbles; 16]>::new_const(),
             branch_value_stack_buf: SmallVec::<[RlpNode; 16]>::new_const(),
