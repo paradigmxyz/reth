@@ -570,7 +570,7 @@ impl<P> RevealedSparseTrie<P> {
     /// Return the root of the sparse trie.
     /// Updates all remaining dirty nodes before calculating the root.
     pub fn root(&mut self) -> B256 {
-        // take the current prefix set.
+        // Take the current prefix set
         let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
         let rlp_node = self.rlp_node_allocate(Nibbles::default(), &mut prefix_set);
         if let Some(root_hash) = rlp_node.as_hash() {
@@ -583,12 +583,14 @@ impl<P> RevealedSparseTrie<P> {
     /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
     /// depth. Root node has a level of 0.
     pub fn update_rlp_node_level(&mut self, depth: usize) {
+        // Take the current prefix set
         let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
         let mut buffers = RlpNodeBuffers::default();
 
-        let (targets, unchanged_prefix_set) =
-            self.get_changed_nodes_at_depth(&mut prefix_set, depth);
-        self.prefix_set = unchanged_prefix_set;
+        // Get the nodes that have changed at the given depth.
+        let (targets, new_prefix_set) = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
+        // Update the prefix set to the prefix set of the nodes that stil need to be updated.
+        self.prefix_set = new_prefix_set;
 
         trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
         for target in targets {
@@ -1405,7 +1407,8 @@ struct RemovedSparseNode {
 /// Collection of reusable buffers for [`RevealedSparseTrie::rlp_node`].
 #[derive(Debug, Default)]
 pub struct RlpNodeBuffers {
-    /// Stack of paths we need rlp nodes for and whether the path is in the prefix set.
+    /// Stack of levels of depth starting from the node where the calculation began, paths we need
+    /// rlp nodes for, whether the path is in the prefix set.
     path_stack: Vec<(usize, Nibbles, Option<bool>)>,
     /// Stack of rlp nodes
     rlp_node_stack: Vec<(Nibbles, RlpNode, SparseNodeType)>,
