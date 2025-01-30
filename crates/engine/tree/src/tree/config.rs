@@ -46,6 +46,8 @@ pub struct TreeConfig {
     /// Whether to always compare trie updates from the state root task to the trie updates from
     /// the regular state root calculation.
     always_compare_trie_updates: bool,
+    /// Whether to use cross-block caching and parallel prewarming
+    use_caching_and_prewarming: bool,
 }
 
 impl Default for TreeConfig {
@@ -58,12 +60,14 @@ impl Default for TreeConfig {
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
             use_state_root_task: false,
             always_compare_trie_updates: false,
+            use_caching_and_prewarming: false,
         }
     }
 }
 
 impl TreeConfig {
     /// Create engine tree configuration.
+    #[allow(clippy::too_many_arguments)]
     pub const fn new(
         persistence_threshold: u64,
         memory_block_buffer_target: u64,
@@ -72,6 +76,7 @@ impl TreeConfig {
         max_execute_block_batch_size: usize,
         use_state_root_task: bool,
         always_compare_trie_updates: bool,
+        use_caching_and_prewarming: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -81,6 +86,7 @@ impl TreeConfig {
             max_execute_block_batch_size,
             use_state_root_task,
             always_compare_trie_updates,
+            use_caching_and_prewarming,
         }
     }
 
@@ -112,6 +118,11 @@ impl TreeConfig {
     /// Returns whether to use the state root task calculation method.
     pub const fn use_state_root_task(&self) -> bool {
         self.use_state_root_task
+    }
+
+    /// Returns whether or not cross-block caching and parallel prewarming should be used.
+    pub const fn use_caching_and_prewarming(&self) -> bool {
+        self.use_caching_and_prewarming
     }
 
     /// Returns whether to always compare trie updates from the state root task to the trie updates
@@ -162,6 +173,12 @@ impl TreeConfig {
     /// Setter for whether to use the new state root task calculation method.
     pub const fn with_state_root_task(mut self, use_state_root_task: bool) -> Self {
         self.use_state_root_task = use_state_root_task;
+        self
+    }
+
+    /// Setter for whether to use the new state root task calculation method.
+    pub const fn with_caching_and_prewarming(mut self, use_caching_and_prewarming: bool) -> Self {
+        self.use_caching_and_prewarming = use_caching_and_prewarming;
         self
     }
 
