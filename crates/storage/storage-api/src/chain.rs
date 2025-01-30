@@ -1,4 +1,5 @@
-use crate::{DBProvider, StorageLocation};
+use crate::{DBProvider, OmmersProvider, StorageLocation};
+use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_db::{
@@ -138,7 +139,9 @@ where
 
 impl<Provider, T> BlockBodyReader<Provider> for EthStorage<T>
 where
-    Provider: DBProvider + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    Provider: DBProvider
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + OmmersProvider<Header = Header>,
     T: SignedTransaction,
 {
     type Block = reth_primitives::Block<T>;
@@ -151,7 +154,6 @@ where
         // TODO: Ideally storage should hold its own copy of chain spec
         let chain_spec = provider.chain_spec();
 
-        let mut ommers_cursor = provider.tx_ref().cursor_read::<tables::BlockOmmers>()?;
         let mut withdrawals_cursor = provider.tx_ref().cursor_read::<tables::BlockWithdrawals>()?;
 
         let mut bodies = Vec::with_capacity(inputs.len());
@@ -171,7 +173,7 @@ where
             let ommers = if chain_spec.final_paris_total_difficulty(header.number).is_some() {
                 Vec::new()
             } else {
-                ommers_cursor.seek_exact(header.number)?.map(|(_, o)| o.ommers).unwrap_or_default()
+                provider.ommers(header.number.into())?.unwrap_or_default()
             };
 
             bodies.push(reth_primitives::BlockBody { transactions, ommers, withdrawals });

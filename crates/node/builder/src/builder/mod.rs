@@ -13,10 +13,7 @@ use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli_util::get_secret_key;
-use reth_db_api::{
-    database::Database,
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-};
+use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_engine_tree::tree::TreeConfig;
 use reth_exex::ExExContext;
 use reth_network::{
@@ -34,7 +31,7 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider, NodeTypesForTree},
+    providers::{BlockchainProvider, NodeTypesForProvider},
     ChainSpecProvider, FullProvider,
 };
 use reth_tasks::TaskExecutor;
@@ -236,13 +233,13 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
 
 impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec>
 where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForTree,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
     {
         self.with_types_and_provider()
     }
@@ -266,7 +263,7 @@ where
         node: N,
     ) -> NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>
     where
-        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForTree,
+        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
     {
         self.with_types().with_components(node.components_builder()).with_add_ons(node.add_ons())
     }
@@ -297,13 +294,13 @@ impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>> {
 
 impl<DB, ChainSpec> WithLaunchContext<NodeBuilder<DB, ChainSpec>>
 where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
     ChainSpec: EthChainSpec + EthereumHardforks,
 {
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
-        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForTree,
+        T: NodeTypesWithEngine<ChainSpec = ChainSpec> + NodeTypesForProvider,
     {
         WithLaunchContext { builder: self.builder.with_types(), task_executor: self.task_executor }
     }
@@ -332,7 +329,7 @@ where
         NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
     >
     where
-        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForTree,
+        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
     {
         self.with_types().with_components(node.components_builder()).with_add_ons(node.add_ons())
     }
@@ -351,14 +348,14 @@ where
         >>::Node,
     >
     where
-        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForTree,
+        N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
         N::AddOns: RethRpcAddOns<
             NodeAdapter<
                 RethFullAdapter<DB, N>,
                 <N::ComponentsBuilder as NodeComponentsBuilder<RethFullAdapter<DB, N>>>::Components,
             >,
         >,
-        N::Primitives: FullNodePrimitives<BlockBody = reth_primitives::BlockBody>,
+        N::Primitives: FullNodePrimitives,
         EngineNodeLauncher: LaunchNode<
             NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
         >,
@@ -548,8 +545,8 @@ where
 
 impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
 where
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
-    T: NodeTypesWithEngine + NodeTypesForTree,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
+    T: NodeTypesWithEngine + NodeTypesForProvider,
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     AO: RethRpcAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
     EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>,

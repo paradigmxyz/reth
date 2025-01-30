@@ -19,7 +19,7 @@ use crate::{
     StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, TrieWriter, WithdrawalsProvider,
 };
-use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Header};
+use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Header, TxReceipt};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{
     keccak256,
@@ -51,7 +51,9 @@ use reth_primitives::{
     StaticFileSegment, StorageEntry,
 };
 use reth_primitives_traits::{Block as _, BlockBody as _, SignedTransaction};
-use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
+use reth_prune_types::{
+    PruneCheckpoint, PruneMode, PruneModes, PruneSegment, MINIMUM_PRUNING_DISTANCE,
+};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, NodePrimitivesProvider, OmmersProvider,
@@ -691,9 +693,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
                     match known_senders.get(&tx_num) {
                         None => {
                             // recover the sender from the transaction if not found
-                            let sender = tx
-                                .recover_signer_unchecked()
-                                .ok_or(ProviderError::SenderRecoveryError)?;
+                            let sender = tx.recover_signer_unchecked()?;
                             senders.push(sender);
                         }
                         Some(sender) => senders.push(*sender),
@@ -1229,7 +1229,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
                     // Note: we're using unchecked here because we know the block contains valid txs
                     // wrt to its height and can ignore the s value check so pre
                     // EIP-2 txs are allowed
-                    .try_with_senders_unchecked(senders)
+                    .try_into_recovered_unchecked(senders)
                     .map(Some)
                     .map_err(|_| ProviderError::SenderRecoveryError)
             },
@@ -1274,7 +1274,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             |range| self.headers_range(range),
             |header, body, senders| {
                 Self::Block::new(header, body)
-                    .try_with_senders_unchecked(senders)
+                    .try_into_recovered_unchecked(senders)
                     .map_err(|_| ProviderError::SenderRecoveryError)
             },
         )
@@ -1574,14 +1574,21 @@ impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> Withdrawals
     ) -> ProviderResult<Option<Withdrawals>> {
         if self.chain_spec.is_shanghai_active_at_timestamp(timestamp) {
             if let Some(number) = self.convert_hash_or_number(id)? {
-                // If we are past shanghai, then all blocks should have a withdrawal list, even if
-                // empty
-                let withdrawals = self
-                    .tx
-                    .get::<tables::BlockWithdrawals>(number)
-                    .map(|w| w.map(|w| w.withdrawals))?
-                    .unwrap_or_default();
-                return Ok(Some(withdrawals))
+                return self.static_file_provider.get_with_static_file_or_database(
+                    StaticFileSegment::BlockMeta,
+                    number,
+                    |static_file| static_file.withdrawals_by_block(number.into(), timestamp),
+                    || {
+                        // If we are past shanghai, then all blocks should have a withdrawal list,
+                        // even if empty
+                        let withdrawals = self
+                            .tx
+                            .get::<tables::BlockWithdrawals>(number)
+                            .map(|w| w.map(|w| w.withdrawals))?
+                            .unwrap_or_default();
+                        Ok(Some(withdrawals))
+                    },
+                )
             }
         }
         Ok(None)
@@ -1601,9 +1608,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> OmmersProvider for DatabasePro
                 return Ok(Some(Vec::new()))
             }
 
-            let ommers =
-                self.tx.get::<tables::BlockOmmers<Self::Header>>(number)?.map(|o| o.ommers);
-            return Ok(ommers)
+            return self.static_file_provider.get_with_static_file_or_database(
+                StaticFileSegment::BlockMeta,
+                number,
+                |static_file| static_file.ommers(id),
+                || Ok(self.tx.get::<tables::BlockOmmers<Self::Header>>(number)?.map(|o| o.ommers)),
+            )
         }
 
         Ok(None)
@@ -1614,19 +1624,27 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockBodyIndicesProvider
     for DatabaseProvider<TX, N>
 {
     fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        Ok(self.tx.get::<tables::BlockBodyIndices>(num)?)
+        self.static_file_provider.get_with_static_file_or_database(
+            StaticFileSegment::BlockMeta,
+            num,
+            |static_file| static_file.block_body_indices(num),
+            || Ok(self.tx.get::<tables::BlockBodyIndices>(num)?),
+        )
     }
 
     fn block_body_indices_range(
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
-        Ok(self
-            .tx_ref()
-            .cursor_read::<tables::BlockBodyIndices>()?
-            .walk_range(range)?
-            .map(|r| r.map(|(_, b)| b))
-            .collect::<Result<_, _>>()?)
+        self.static_file_provider.get_range_with_static_file_or_database(
+            StaticFileSegment::BlockMeta,
+            *range.start()..*range.end() + 1,
+            |static_file, range, _| {
+                static_file.block_body_indices_range(range.start..=range.end.saturating_sub(1))
+            },
+            |range, _| self.cursor_read_collect::<tables::BlockBodyIndices>(range),
+            |_| true,
+        )
     }
 }
 
@@ -1765,9 +1783,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         write_receipts_to: StorageLocation,
     ) -> ProviderResult<()> {
         let first_block = execution_outcome.first_block();
-        let block_count = execution_outcome.receipts.len() as u64;
-        let block_range = first_block..=first_block.saturating_add(block_count).saturating_sub(1);
-        let last_block = *block_range.end();
+        let block_count = execution_outcome.len() as u64;
+        let last_block = execution_outcome.last_block();
+        let block_range = first_block..=last_block;
+
+        let tip = self.last_block_number()?.max(last_block);
 
         let (plain_state, reverts) =
             execution_outcome.bundle.to_plain_state_and_reverts(is_value_known);
@@ -1790,8 +1810,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             ));
         }
 
-        let has_receipts_pruning = self.prune_modes.has_receipts_pruning() ||
-            execution_outcome.receipts.iter().flatten().any(|receipt| receipt.is_none());
+        let has_receipts_pruning = self.prune_modes.has_receipts_pruning();
 
         // Prepare receipts cursor if we are going to write receipts to the database
         //
@@ -1809,6 +1828,20 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             .then(|| self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts))
             .transpose()?;
 
+        let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
+        let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
+
+        // All receipts from the last 128 blocks are required for blockchain tree, even with
+        // [`PruneSegment::ContractLogs`].
+        let prunable_receipts =
+            PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(first_block, tip);
+
+        // Prepare set of addresses which logs should not be pruned.
+        let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
+        for (_, addresses) in contract_log_pruner.range(..first_block) {
+            allowed_addresses.extend(addresses.iter().copied());
+        }
+
         for (idx, (receipts, first_tx_index)) in
             execution_outcome.receipts.iter().zip(block_indices).enumerate()
         {
@@ -1819,16 +1852,37 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 writer.increment_block(block_number)?;
             }
 
+            // Skip writing receipts if pruning configuration requires us to.
+            if prunable_receipts &&
+                self.prune_modes
+                    .receipts
+                    .is_some_and(|mode| mode.should_prune(block_number, tip))
+            {
+                continue
+            }
+
+            // If there are new addresses to retain after this block number, track them
+            if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
+                allowed_addresses.extend(new_addresses.iter().copied());
+            }
+
             for (idx, receipt) in receipts.iter().enumerate() {
                 let receipt_idx = first_tx_index + idx as u64;
-                if let Some(receipt) = receipt {
-                    if let Some(writer) = &mut receipts_static_writer {
-                        writer.append_receipt(receipt_idx, receipt)?;
-                    }
+                // Skip writing receipt if log filter is active and it does not have any logs to
+                // retain
+                if prunable_receipts &&
+                    has_contract_log_filter &&
+                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                {
+                    continue
+                }
 
-                    if let Some(cursor) = &mut receipts_cursor {
-                        cursor.append(receipt_idx, receipt)?;
-                    }
+                if let Some(writer) = &mut receipts_static_writer {
+                    writer.append_receipt(receipt_idx, receipt)?;
+                }
+
+                if let Some(cursor) = &mut receipts_cursor {
+                    cursor.append(receipt_idx, receipt)?;
                 }
             }
         }
@@ -2223,9 +2277,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let mut block_receipts = Vec::with_capacity(block_body.tx_count as usize);
             for num in block_body.tx_num_range() {
                 if receipts_iter.peek().is_some_and(|(n, _)| *n == num) {
-                    block_receipts.push(receipts_iter.next().map(|(_, r)| r));
-                } else {
-                    block_receipts.push(None);
+                    block_receipts.push(receipts_iter.next().unwrap().1);
                 }
             }
             receipts.push(block_receipts);
@@ -2818,7 +2870,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         let tx_count = block.body().transaction_count() as u64;
 
         // Ensures we have all the senders for the block's transactions.
-        for (transaction, sender) in block.body().transactions().iter().zip(block.senders_iter()) {
+        for (transaction, sender) in block.body().transactions_iter().zip(block.senders_iter()) {
             let hash = transaction.tx_hash();
 
             if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {

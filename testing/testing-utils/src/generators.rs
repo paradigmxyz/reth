@@ -12,11 +12,11 @@ use rand::{
     distributions::uniform::SampleRange, rngs::StdRng, seq::SliceRandom, thread_rng, SeedableRng,
 };
 use reth_primitives::{
-    proofs, Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
+    Account, BlockBody, Log, Receipt, SealedBlock, SealedHeader, StorageEntry, Transaction,
     TransactionSigned,
 };
 
-use reth_primitives_traits::{crypto::secp256k1::sign_message, Block as _};
+use reth_primitives_traits::{crypto::secp256k1::sign_message, proofs, Block as _};
 use secp256k1::{Keypair, Secp256k1};
 use std::{
     cmp::{max, min},
@@ -196,7 +196,7 @@ pub fn random_block<R: Rng>(rng: &mut R, number: u64, block_params: BlockParams)
     let tx_count = block_params.tx_count.unwrap_or_else(|| rng.gen::<u8>());
     let transactions: Vec<TransactionSigned> =
         (0..tx_count).map(|_| random_signed_tx(rng)).collect();
-    let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction.gas_limit());
+    let total_gas = transactions.iter().fold(0, |sum, tx| sum + tx.transaction().gas_limit());
 
     // Generate ommers
     let ommers_count = block_params.ommers_count.unwrap_or_else(|| rng.gen_range(0..2));

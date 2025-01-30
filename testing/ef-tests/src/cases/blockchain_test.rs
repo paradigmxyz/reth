@@ -206,6 +206,18 @@ pub fn should_skip(path: &Path) -> bool {
         | "loopMul.json"
         | "CALLBlake2f_MaxRounds.json"
         | "shiftCombinations.json"
+
+        // Skipped by revm as well: <https://github.com/bluealloy/revm/blob/be92e1db21f1c47b34c5a58cfbf019f6b97d7e4b/bins/revme/src/cmd/statetest/runner.rs#L115-L125>
+        | "RevertInCreateInInit_Paris.json"
+        | "RevertInCreateInInit.json"
+        | "dynamicAccountOverwriteEmpty.json"
+        | "dynamicAccountOverwriteEmpty_Paris.json"
+        | "RevertInCreateInInitCreate2Paris.json"
+        | "create2collisionStorage.json"
+        | "RevertInCreateInInitCreate2.json"
+        | "create2collisionStorageParis.json"
+        | "InitCollision.json"
+        | "InitCollisionParis.json"
     )
     // Ignore outdated EOF tests that haven't been updated for Cancun yet.
     || path_contains(path_str, &["EIPTests", "stEOF"])

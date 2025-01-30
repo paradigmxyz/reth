@@ -20,8 +20,8 @@ use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes, EngineValidator};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
-    validate_execution_requests, validate_payload_timestamp, EngineApiMessageVersion,
-    PayloadBuilderAttributes, PayloadOrAttributes,
+    validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes,
+    PayloadOrAttributes,
 };
 use reth_rpc_api::EngineApiServer;
 use reth_rpc_types_compat::engine::payload::convert_to_payload_body_v1;
@@ -268,8 +268,7 @@ where
             .validator
             .validate_version_specific_fields(EngineApiMessageVersion::V4, payload_or_attrs)?;
 
-        validate_execution_requests(&execution_requests)?;
-
+        self.inner.validator.validate_execution_requests(&execution_requests)?;
         Ok(self
             .inner
             .beacon_consensus

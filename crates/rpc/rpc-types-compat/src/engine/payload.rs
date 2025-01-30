@@ -108,7 +108,7 @@ pub fn convert_block_to_payload_field_v2<T: SignedTransaction>(
 pub fn convert_to_payload_body_v1(
     value: impl reth_primitives_traits::Block,
 ) -> ExecutionPayloadBodyV1 {
-    let transactions = value.body().transactions().iter().map(|tx| tx.encoded_2718().into());
+    let transactions = value.body().transactions_iter().map(|tx| tx.encoded_2718().into());
     ExecutionPayloadBodyV1 {
         transactions: transactions.collect(),
         withdrawals: value.body().withdrawals().cloned().map(Withdrawals::into_inner),

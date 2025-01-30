@@ -63,20 +63,11 @@ alloy-eips = { workspace = true, features = ["kzg"] }
 
 ## async
 futures.workspace = true
-tokio = { workspace = true, features = [
-    "sync",
-    "macros",
-    "time",
-    "rt-multi-thread",
-] }
+tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
 tokio-stream.workspace = true
 
 ## crypto
-secp256k1 = { workspace = true, features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 ## misc
 aquamarine.workspace = true

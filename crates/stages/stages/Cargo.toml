@@ -22,11 +22,10 @@ reth-db-api.workspace = true
 reth-etl.workspace = true
 reth-evm.workspace = true
 reth-exex.workspace = true
+reth-fs-util.workspace = true
 reth-network-p2p.workspace = true
 reth-primitives = { workspace = true, features = ["secp256k1"] }
-reth-primitives-traits = { workspace = true, features = [
-    "serde-bincode-compat",
-] }
+reth-primitives-traits = { workspace = true, features = ["serde-bincode-compat"] }
 reth-provider.workspace = true
 reth-execution-types.workspace = true
 reth-prune.workspace = true
@@ -57,6 +56,9 @@ rayon.workspace = true
 num-traits = "0.2.15"
 tempfile = { workspace = true, optional = true }
 bincode.workspace = true
+blake3.workspace = true
+reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots", "blocking"] }
+serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 # reth
@@ -75,6 +77,7 @@ reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-network-peers.workspace = true
+reth-tracing.workspace = true
 
 alloy-rlp.workspace = true
 itertools.workspace = true
@@ -88,11 +91,7 @@ tempfile.workspace = true
 criterion = { workspace = true, features = ["async_tokio"] }
 
 [target.'cfg(not(target_os = "windows"))'.dev-dependencies]
-pprof = { workspace = true, features = [
-    "flamegraph",
-    "frame-pointer",
-    "criterion",
-] }
+pprof = { workspace = true, features = ["flamegraph", "frame-pointer", "criterion"] }
 
 [features]
 test-utils = [

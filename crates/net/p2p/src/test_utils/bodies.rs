@@ -6,6 +6,7 @@ use crate::{
 };
 use alloy_primitives::B256;
 use futures::FutureExt;
+use reth_network_peers::PeerId;
 use reth_primitives::BlockBody;
 use std::fmt::{Debug, Formatter};
 use tokio::sync::oneshot;
@@ -23,7 +24,7 @@ impl<F> Debug for TestBodiesClient<F> {
 }
 
 impl<F: Sync + Send> DownloadClient for TestBodiesClient<F> {
-    fn report_bad_message(&self, _peer_id: reth_network_peers::PeerId) {
+    fn report_bad_message(&self, _peer_id: PeerId) {
         // noop
     }
 

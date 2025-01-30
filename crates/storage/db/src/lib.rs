@@ -46,9 +46,7 @@ pub mod test_utils {
     use crate::mdbx::DatabaseArguments;
     use parking_lot::RwLock;
     use reth_db_api::{
-        database::Database,
-        database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
-        models::ClientVersion,
+        database::Database, database_metrics::DatabaseMetrics, models::ClientVersion,
     };
     use reth_fs_util;
     use reth_libmdbx::MaxReadTransactionDuration;
@@ -152,12 +150,6 @@ pub mod test_utils {
     impl<DB: DatabaseMetrics> DatabaseMetrics for TempDatabase<DB> {
         fn report_metrics(&self) {
             self.db().report_metrics()
-        }
-    }
-
-    impl<DB: DatabaseMetadata> DatabaseMetadata for TempDatabase<DB> {
-        fn metadata(&self) -> DatabaseMetadataValue {
-            self.db().metadata()
         }
     }
 

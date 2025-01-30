@@ -123,7 +123,7 @@ where
     pub fn pre_block_blockhashes_contract_call<DB>(
         &mut self,
         db: &mut DB,
-        evm_env: &EvmEnv,
+        evm_env: &EvmEnv<EvmConfig::Spec>,
         parent_block_hash: B256,
     ) -> Result<(), BlockExecutionError>
     where
@@ -131,7 +131,7 @@ where
         DB::Error: Display,
     {
         let evm_config = self.evm_config.clone();
-        let mut evm = evm_config.evm_with_env(db, evm_env.clone(), Default::default());
+        let mut evm = evm_config.evm_with_env(db, evm_env.clone());
 
         self.apply_blockhashes_contract_call(
             evm_env.block_env.timestamp.to(),
@@ -173,7 +173,7 @@ where
     pub fn pre_block_beacon_root_contract_call<DB>(
         &mut self,
         db: &mut DB,
-        evm_env: &EvmEnv,
+        evm_env: &EvmEnv<EvmConfig::Spec>,
         parent_beacon_block_root: Option<B256>,
     ) -> Result<(), BlockExecutionError>
     where
@@ -181,7 +181,7 @@ where
         DB::Error: Display,
     {
         let evm_config = self.evm_config.clone();
-        let mut evm = evm_config.evm_with_env(db, evm_env.clone(), Default::default());
+        let mut evm = evm_config.evm_with_env(db, evm_env.clone());
 
         self.apply_beacon_root_contract_call(
             evm_env.block_env.timestamp.to(),
@@ -223,14 +223,14 @@ where
     pub fn post_block_withdrawal_requests_contract_call<DB>(
         &mut self,
         db: &mut DB,
-        evm_env: &EvmEnv,
+        evm_env: &EvmEnv<EvmConfig::Spec>,
     ) -> Result<Bytes, BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
     {
         let evm_config = self.evm_config.clone();
-        let mut evm = evm_config.evm_with_env(db, evm_env.clone(), Default::default());
+        let mut evm = evm_config.evm_with_env(db, evm_env.clone());
 
         let result = self.apply_withdrawal_requests_contract_call(&mut evm)?;
 
@@ -256,14 +256,14 @@ where
     pub fn post_block_consolidation_requests_contract_call<DB>(
         &mut self,
         db: &mut DB,
-        evm_env: &EvmEnv,
+        evm_env: &EvmEnv<EvmConfig::Spec>,
     ) -> Result<Bytes, BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
         DB::Error: Display,
     {
         let evm_config = self.evm_config.clone();
-        let mut evm = evm_config.evm_with_env(db, evm_env.clone(), Default::default());
+        let mut evm = evm_config.evm_with_env(db, evm_env.clone());
 
         let res = self.apply_consolidation_requests_contract_call(&mut evm)?;
 
