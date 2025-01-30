@@ -330,6 +330,12 @@ pub fn update_estimated_gas_range(
         ExecutionResult::Revert { .. } | ExecutionResult::Halt { .. } => {
             // We know that transaction succeeded with a higher gas limit before, so any failure
             // means that we need to increase it.
+            //
+            // We are ignoring all halts here, and not just OOG errors because there are cases when
+            // non-OOG halt might flag insufficient gas limit as well.
+            //
+            // Common usage of invalid opcode in OpenZeppelin:
+            // <https://github.com/OpenZeppelin/openzeppelin-contracts/blob/94697be8a3f0dfcd95dfb13ffbd39b5973f5c65d/contracts/metatx/ERC2771Forwarder.sol#L360-L367>
             *lowest_gas_limit = tx_gas_limit;
         }
     };
