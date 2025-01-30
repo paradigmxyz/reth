@@ -668,13 +668,15 @@ impl<P> RevealedSparseTrie<P> {
         let starting_path = buffers.path_stack.last().map(|(_, path, _)| path).cloned();
 
         'main: while let Some((level, path, mut is_in_prefix_set)) = buffers.path_stack.pop() {
+            let node = self.nodes.get_mut(&path).unwrap();
             trace!(
                 target: "trie::sparse",
                 ?starting_path,
                 ?level,
                 ?path,
                 ?is_in_prefix_set,
-                "Popped path from stack"
+                ?node,
+                "Popped node from path stack"
             );
 
             // Check if the path is in the prefix set.
@@ -683,7 +685,7 @@ impl<P> RevealedSparseTrie<P> {
             let mut prefix_set_contains =
                 |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
 
-            let (rlp_node, node_type) = match self.nodes.get_mut(&path).unwrap() {
+            let (rlp_node, node_type) = match node {
                 SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), SparseNodeType::Empty),
                 SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), SparseNodeType::Hash),
                 SparseNode::Leaf { key, hash } => {
@@ -913,9 +915,10 @@ impl<P> RevealedSparseTrie<P> {
                 ?starting_path,
                 ?level,
                 ?path,
+                ?node,
                 ?node_type,
                 ?is_in_prefix_set,
-                "Adding node to rlp node stack"
+                "Added node to rlp node stack"
             );
 
             buffers.rlp_node_stack.push((path, rlp_node, node_type));
