@@ -586,7 +586,8 @@ impl<P> RevealedSparseTrie<P> {
         let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
         let mut buffers = RlpNodeBuffers::default();
 
-        let targets = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
+        let (new_prefix_set, targets) = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
+        self.prefix_set = new_prefix_set;
         trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
         for target in targets {
             buffers.path_stack.push((0, target, Some(true)));
@@ -597,7 +598,12 @@ impl<P> RevealedSparseTrie<P> {
     /// Returns a list of paths to the nodes that were changed according to the prefix set and are
     /// located at the provided depth when counting from the root node. If there's a leaf at a
     /// depth less than the provided depth, it will be included in the result.
-    fn get_changed_nodes_at_depth(&self, prefix_set: &mut PrefixSet, depth: usize) -> Vec<Nibbles> {
+    fn get_changed_nodes_at_depth(
+        &self,
+        prefix_set: &mut PrefixSet,
+        depth: usize,
+    ) -> (PrefixSetMut, Vec<Nibbles>) {
+        let mut new_prefix_set = PrefixSetMut::default();
         let mut paths = Vec::from([(Nibbles::default(), 0)]);
         let mut targets = Vec::new();
 
@@ -606,6 +612,7 @@ impl<P> RevealedSparseTrie<P> {
                 SparseNode::Empty | SparseNode::Hash(_) => {}
                 SparseNode::Leaf { key: _, hash } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
+                        new_prefix_set.insert(path);
                         continue
                     }
 
@@ -613,6 +620,7 @@ impl<P> RevealedSparseTrie<P> {
                 }
                 SparseNode::Extension { key, hash, store_in_db_trie: _ } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
+                        new_prefix_set.insert(path);
                         continue
                     }
 
@@ -625,6 +633,7 @@ impl<P> RevealedSparseTrie<P> {
                 }
                 SparseNode::Branch { state_mask, hash, store_in_db_trie: _ } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
+                        new_prefix_set.insert(path);
                         continue
                     }
 
@@ -643,7 +652,7 @@ impl<P> RevealedSparseTrie<P> {
             }
         }
 
-        targets
+        (new_prefix_set, targets)
     }
 
     /// Look up or calculate the RLP of the node at the given path.
