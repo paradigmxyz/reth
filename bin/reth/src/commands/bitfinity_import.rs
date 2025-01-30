@@ -28,7 +28,9 @@ use reth_provider::{
 };
 use reth_prune::PruneModes;
 use reth_stages::{
-    prelude::*, stages::{ExecutionStage, SenderRecoveryStage}, ExecutionStageThresholds, Pipeline, StageSet
+    prelude::*,
+    stages::{ExecutionStage, SenderRecoveryStage},
+    ExecutionStageThresholds, Pipeline, StageSet,
 };
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -142,6 +144,7 @@ impl BitfinityImportCommand {
             backup_url: self.bitfinity.backup_rpc_url.clone(),
             max_retries: self.bitfinity.max_retries,
             retry_delay: Duration::from_secs(self.bitfinity.retry_delay_secs),
+            max_block_age_secs: Duration::from_secs(self.bitfinity.max_block_age_secs),
         };
 
         let remote_client = Arc::new(
@@ -155,6 +158,7 @@ impl BitfinityImportCommand {
                     evmc_principal: self.bitfinity.evmc_principal.clone(),
                     ic_root_key: self.bitfinity.ic_root_key.clone(),
                 }),
+                self.bitfinity.check_evm_state_before_importing,
             )
             .await?,
         );

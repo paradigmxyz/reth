@@ -48,6 +48,11 @@ pub struct BitfinityImportArgs {
     #[arg(long, value_name = "MAX_FETCH_BLOCKS", default_value = "10000")]
     pub max_fetch_blocks: u64,
 
+    /// Maximum age (in seconds) of the latest block to consider the EVM as active
+    /// Default: 600 seconds (10 minutes)
+    #[arg(long, value_name = "MAX_BLOCK_AGE_SECS", default_value = "600")]
+    pub max_block_age_secs: u64,
+
     /// Canister principal
     /// Default value corresponds to testnet
     #[arg(long, value_name = "EVMC_PRINCIPAL", default_value = "4fe7g-7iaaa-aaaak-aegcq-cai")]
@@ -56,6 +61,10 @@ pub struct BitfinityImportArgs {
     /// Root key for the IC network
     #[arg(long, value_name = "IC_ROOT_KEY", default_value = IC_MAINNET_KEY)]
     pub ic_root_key: String,
+
+    /// A flag to check the EVM state before importing blocks
+    #[arg(long, default_value = "true")]
+    pub check_evm_state_before_importing: bool,
 }
 
 /// Bitfinity Related Args

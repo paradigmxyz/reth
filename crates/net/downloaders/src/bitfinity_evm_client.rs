@@ -46,6 +46,8 @@ pub struct RpcClientConfig {
     pub max_retries: u32,
     /// Delay between retries
     pub retry_delay: Duration,
+    /// Maximum age of the latest block to consider the EVM as active
+    pub max_block_age_secs: Duration,
 }
 
 /// Front-end API for fetching chain data from remote sources.
@@ -98,6 +100,7 @@ impl BitfinityEvmClient {
         batch_size: usize,
         max_blocks: u64,
         certificate_settings: Option<CertificateCheckSettings>,
+        check_evm_state_before_importing: bool,
     ) -> Result<Self, RemoteClientError> {
         let mut headers = HashMap::new();
         let mut hash_to_number = HashMap::new();
@@ -106,6 +109,21 @@ impl BitfinityEvmClient {
         let provider = Self::client(rpc_config)
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
+
+        if check_evm_state_before_importing {
+            match Self::is_evm_enabled(&provider).await {
+                Ok(true) => {
+                    info!(target: "downloaders::bitfinity_evm_client", "EVM is enabled, proceeding with import");
+                }
+                Ok(false) => {
+                    info!(target: "downloaders::bitfinity_evm_client", "Skipping block import: EVM is disabled");
+                    return Ok(Self { headers, hash_to_number, bodies });
+                }
+                Err(e) => {
+                    warn!(target: "downloaders::bitfinity_evm_client", "Failed to check EVM state: {}. Proceeding with import", e);
+                }
+            }
+        }
 
         let block_checker = match certificate_settings {
             None => None,
@@ -317,7 +335,11 @@ impl BitfinityEvmClient {
                 (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
                 (
                     EthereumHardfork::Paris.boxed(),
-                    ForkCondition::TTD { activation_block_number: 0, fork_block: Some(0), total_difficulty: U256::from(0) },
+                    ForkCondition::TTD {
+                        activation_block_number: 0,
+                        fork_block: Some(0),
+                        total_difficulty: U256::from(0),
+                    },
                 ),
             ]),
             deposit_contract: None,
@@ -347,53 +369,99 @@ impl BitfinityEvmClient {
         self
     }
 
+    /// Check if the RPC endpoint is producing new blocks
+    async fn is_producing_blocks(
+        client: &EthJsonRpcClient<ReqwestClient>,
+        max_block_age_secs: Duration,
+    ) -> Result<bool> {
+        debug!(target: "downloaders::bitfinity_evm_client", "Checking if the EVM is producing blocks");
+
+        let last_block = client
+            .get_block_by_number(did::BlockNumber::Latest)
+            .await
+            .map_err(|e| eyre::eyre!("error getting block number: {}", e))?;
+
+        let block_ts = last_block.timestamp.0.to::<u64>();
+
+        let current_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Should be able to get the time")
+            .as_secs();
+
+        Ok(current_ts - block_ts <= max_block_age_secs.as_secs())
+    }
+
     /// Creates a new JSON-RPC client with retry functionality
     ///
-    /// Tries the primary URL first, falls back to backup URL if provided
+    /// Tries the primary URL first, falls back to backup URL if provided or if primary is not producing blocks
     pub async fn client(config: RpcClientConfig) -> Result<EthJsonRpcClient<ReqwestClient>> {
+        // Create retry configuration
         let backoff = ExponentialBuilder::default()
             .with_max_times(config.max_retries as _)
             .with_max_delay(config.retry_delay)
             .with_jitter();
 
-        // Helper closure to create and test a client connection
-        let try_connect = move |url: String| {
-            let backoff = backoff;
-            let client = EthJsonRpcClient::new(ReqwestClient::new(url));
-
-            async move {
-                // Test connection by getting chain ID
-                (|| async { client.get_chain_id().await })
-                    .retry(&backoff)
-                    .notify(|e, dur| {
-                        error!(
-                            target: "downloaders::bitfinity_evm_client",
-                            "Failed to connect after {}s and {} retries: {}",
-                            dur.as_secs(),
-                            config.max_retries,
-                            e
-                        );
-                    })
-                    .await
-                    .map(|_| client)
-            }
-        };
-
         // Try primary URL first
-        if let Ok(client) = try_connect(config.primary_url).await {
-            debug!(target: "downloaders::bitfinity_evm_client", "Connected to primary RPC endpoint");
-            return Ok(client);
+        if let Ok(primary) = Self::connect_and_verify(&config.primary_url, &backoff).await {
+            if Self::is_producing_blocks(&primary, config.max_block_age_secs).await? {
+                debug!(target: "downloaders::bitfinity_evm_client", "Using primary RPC endpoint - producing blocks");
+
+                return Ok(primary);
+            }
         }
 
-        // Fall back to backup URL if available
+        // Try backup URL if available
         if let Some(backup_url) = config.backup_url {
-            if let Ok(client) = try_connect(backup_url).await {
-                debug!(target: "downloaders::bitfinity_evm_client", "Connected to backup RPC endpoint");
-                return Ok(client);
+            if let Ok(backup) = Self::connect_and_verify(&backup_url, &backoff).await {
+                if Self::is_producing_blocks(&backup, config.max_block_age_secs).await? {
+                    warn!(target: "downloaders::bitfinity_evm_client", "Primary RPC endpoint not producing blocks, using backup");
+
+                    return Ok(backup);
+                }
             }
+        }
+
+        // Fall back to primary if it connected but wasn't producing blocks
+        if let Ok(primary) = Self::connect_and_verify(&config.primary_url, &backoff).await {
+            warn!(target: "downloaders::bitfinity_evm_client", "No endpoints producing blocks, using primary as fallback");
+
+            return Ok(primary);
         }
 
         Err(eyre::eyre!("Failed to connect to any RPC endpoint"))
+    }
+
+    /// Helper function to connect to an RPC endpoint and verify the connection
+    async fn connect_and_verify(
+        url: &str,
+        backoff: &ExponentialBuilder,
+    ) -> Result<EthJsonRpcClient<ReqwestClient>> {
+        let client = EthJsonRpcClient::new(ReqwestClient::new(url.to_string()));
+
+        // Test connection by getting chain ID
+        Ok((|| async { client.get_chain_id().await })
+            .retry(backoff)
+            .notify(|e, dur| {
+                error!(
+                    target: "downloaders::bitfinity_evm_client",
+                    "Failed to connect to {} after {}s: {}",
+                    url,
+                    dur.as_secs(),
+                    e
+                );
+            })
+            .await
+            .map(|_| client)
+            .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?)
+    }
+
+    /// Check if the node is enabled
+    pub async fn is_evm_enabled(client: &EthJsonRpcClient<ReqwestClient>) -> Result<bool> {
+        let state = client.get_evm_global_state().await.map_err(|e| {
+            RemoteClientError::ProviderError(format!("failed to get evm global state: {e}"))
+        })?;
+
+        Ok(state.is_enabled())
     }
 }
 
@@ -451,14 +519,21 @@ impl BlockCertificateChecker {
             })?;
 
         let current_time_ns = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("Should be able to get the time")
-        .as_nanos();
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Should be able to get the time")
+            .as_nanos();
         let allowed_certificate_time_offset = Duration::from_secs(120).as_nanos();
 
-        certificate.verify(self.evmc_principal.as_ref(), &self.ic_root_key, &current_time_ns, &allowed_certificate_time_offset).map_err(|e| {
-            RemoteClientError::CertificateError(format!("certificate validation error: {e}"))
-        })?;
+        certificate
+            .verify(
+                self.evmc_principal.as_ref(),
+                &self.ic_root_key,
+                &current_time_ns,
+                &allowed_certificate_time_offset,
+            )
+            .map_err(|e| {
+                RemoteClientError::CertificateError(format!("certificate validation error: {e}"))
+            })?;
 
         let tree = HashTree::from_cbor(&self.certified_data.witness).map_err(|e| {
             RemoteClientError::CertificateError(format!("failed to parse witness: {e}"))
@@ -591,12 +666,14 @@ mod tests {
                 backup_url: None,
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
+                max_block_age_secs: Duration::from_secs(600),
             },
             0,
             Some(5),
             5,
             1000,
             None,
+            false,
         )
         .await
         .unwrap();
@@ -611,12 +688,14 @@ mod tests {
                 backup_url: Some("https://cloudflare-eth.com".to_string()),
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
+                max_block_age_secs: Duration::from_secs(600),
             },
             0,
             Some(5),
             5,
             1000,
             None,
+            false,
         )
         .await
         .unwrap();
@@ -631,12 +710,14 @@ mod tests {
                 backup_url: None,
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
+                max_block_age_secs: Duration::from_secs(600),
             },
             0,
             Some(5),
             5,
             1000,
             None,
+            false,
         )
         .await
         .unwrap();
@@ -662,12 +743,14 @@ mod tests {
                 backup_url: None,
                 max_retries: 3,
                 retry_delay: Duration::from_secs(1),
+                max_block_age_secs: Duration::from_secs(600),
             },
             0,
             Some(5),
             5,
             1000,
             None,
+            false,
         )
         .await
         .unwrap();
