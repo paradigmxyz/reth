@@ -18,8 +18,8 @@ where
 {
     fn default() -> Self {
         Self {
-            seek: Cache::builder().max_capacity(100_000).build_with_hasher(Default::default()),
-            next: Cache::builder().max_capacity(100_000).build_with_hasher(Default::default()),
+            seek: Cache::builder().max_capacity(10_000).build_with_hasher(Default::default()),
+            next: Cache::builder().max_capacity(10_000).build_with_hasher(Default::default()),
         }
     }
 }
