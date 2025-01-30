@@ -108,6 +108,7 @@ where
             ),
             storage_prefix_sets: with_account_targets
                 .iter()
+                .chain(only_storage_targets.iter())
                 .filter(|&(_hashed_address, slots)| (!slots.is_empty()))
                 .map(|(hashed_address, slots)| {
                     (*hashed_address, PrefixSetMut::from(slots.iter().map(Nibbles::unpack)))
@@ -132,8 +133,10 @@ where
         // Pre-calculate storage roots for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
-        let mut storage_proofs =
-            B256HashMap::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
+        let mut storage_proofs = B256HashMap::with_capacity_and_hasher(
+            storage_root_targets.len() + only_storage_targets.len(),
+            Default::default(),
+        );
 
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
@@ -312,22 +315,15 @@ where
         }
         let _ = hash_builder.root();
 
-        for (hashed_address, slots) in only_storage_targets {
-            let storage_multiproof = StorageProof::new_hashed(
-                trie_cursor_factory.clone(),
-                hashed_cursor_factory.clone(),
+        for (hashed_address, rx) in storage_proofs {
+            storages.insert(
                 hashed_address,
-            )
-            .with_prefix_set_mut(Default::default())
-            .with_branch_node_masks(self.collect_branch_node_masks)
-            .storage_multiproof(slots)
-            .map_err(|e| {
-                ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                    DatabaseError::Other(e.to_string()),
-                ))
-            })?;
-
-            storages.insert(hashed_address, storage_multiproof);
+                rx.recv().map_err(|_| {
+                    ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                        DatabaseError::Other(format!("channel closed for {hashed_address}")),
+                    ))
+                })??,
+            );
         }
 
         let account_subtree = hash_builder.take_proof_nodes();
