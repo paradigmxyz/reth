@@ -4,9 +4,9 @@ use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockError};
 use jsonrpsee_types::error::INTERNAL_ERROR_CODE;
 use reth_optimism_evm::OpBlockExecutionError;
 use reth_rpc_eth_api::AsEthApiError;
-use reth_rpc_eth_types::EthApiError;
+use reth_rpc_eth_types::{error::api::FromEvmHalt, EthApiError};
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
-use revm::primitives::{EVMError, InvalidTransaction, OptimismInvalidTransaction};
+use revm::primitives::{EVMError, HaltReason, InvalidTransaction, OptimismInvalidTransaction};
 
 /// Optimism specific errors, that extend [`EthApiError`].
 #[derive(Debug, thiserror::Error)]
@@ -126,5 +126,11 @@ where
 {
     fn from(error: EVMError<DB>) -> Self {
         Self::Eth(error.into())
+    }
+}
+
+impl FromEvmHalt for OpEthApiError {
+    fn from_evm_halt(halt: HaltReason, gas_limit: u64) -> Self {
+        EthApiError::from_evm_halt(halt, gas_limit).into()
     }
 }

@@ -15,18 +15,15 @@ extern crate alloc;
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip7840::BlobParams;
+use alloy_op_evm::OpEvmFactory;
 use alloy_primitives::{Address, U256};
 use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Database, Evm, NextBlockEnvAttributes};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Database, Evm, EvmEnv, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::FillTxEnv;
-use reth_revm::{
-    inspector_handle_register,
-    primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    EvmBuilder, GetInspector,
-};
+use reth_revm::primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv};
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock};
@@ -40,8 +37,8 @@ pub use receipts::*;
 mod error;
 pub use error::OpBlockExecutionError;
 use revm_primitives::{
-    BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, EVMError, HandlerCfg, OptimismFields,
-    ResultAndState, SpecId, TxKind,
+    BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, EVMError, HaltReason, HandlerCfg,
+    OptimismFields, ResultAndState, SpecId, TxKind,
 };
 
 /// OP EVM implementation.
@@ -53,6 +50,7 @@ impl<EXT, DB: Database> Evm for OpEvm<'_, EXT, DB> {
     type DB = DB;
     type Tx = TxEnv;
     type Error = EVMError<DB::Error>;
+    type HaltReason = HaltReason;
 
     fn block(&self) -> &BlockEnv {
         self.0.block()
@@ -128,12 +126,13 @@ impl<EXT, DB: Database> Evm for OpEvm<'_, EXT, DB> {
 #[derive(Debug, Clone)]
 pub struct OpEvmConfig {
     chain_spec: Arc<OpChainSpec>,
+    evm_factory: OpEvmFactory,
 }
 
 impl OpEvmConfig {
     /// Creates a new [`OpEvmConfig`] with the given chain spec.
-    pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
-        Self { chain_spec }
+    pub fn new(chain_spec: Arc<OpChainSpec>) -> Self {
+        Self { chain_spec, evm_factory: OpEvmFactory::default() }
     }
 
     /// Returns the chain spec associated with this configuration.
@@ -223,46 +222,10 @@ impl ConfigureEvmEnv for OpEvmConfig {
 }
 
 impl ConfigureEvm for OpEvmConfig {
-    type Evm<'a, DB: Database + 'a, I: 'a> = OpEvm<'a, I, DB>;
-    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type EvmFactory = OpEvmFactory;
 
-    fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
-        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
-            cfg_env: evm_env.cfg_env,
-            handler_cfg: HandlerCfg { spec_id: evm_env.spec, is_optimism: true },
-        };
-
-        EvmBuilder::default()
-            .with_db(db)
-            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
-            .with_block_env(evm_env.block_env)
-            .build()
-            .into()
-    }
-
-    fn evm_with_env_and_inspector<DB, I>(
-        &self,
-        db: DB,
-        evm_env: EvmEnv,
-        inspector: I,
-    ) -> Self::Evm<'_, DB, I>
-    where
-        DB: Database,
-        I: GetInspector<DB>,
-    {
-        let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
-            cfg_env: evm_env.cfg_env,
-            handler_cfg: HandlerCfg { spec_id: evm_env.spec, is_optimism: true },
-        };
-
-        EvmBuilder::default()
-            .with_db(db)
-            .with_external_context(inspector)
-            .with_cfg_env_with_handler_cfg(cfg_env_with_handler_cfg)
-            .with_block_env(evm_env.block_env)
-            .append_handler_register(inspector_handle_register)
-            .build()
-            .into()
+    fn evm_factory(&self) -> &Self::EvmFactory {
+        &self.evm_factory
     }
 }
 
