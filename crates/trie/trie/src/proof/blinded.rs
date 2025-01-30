@@ -5,7 +5,7 @@ use alloy_primitives::{
     B256,
 };
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
-use reth_trie_common::{prefix_set::TriePrefixSetsMut, MultiProofAccountTarget, Nibbles};
+use reth_trie_common::{prefix_set::TriePrefixSetsMut, MultiProofAccountStorageTarget, Nibbles};
 use reth_trie_sparse::blinded::{
     pad_path_to_key, BlindedProvider, BlindedProviderFactory, RevealedNode,
 };
@@ -92,7 +92,7 @@ where
 
         let targets = HashMap::from_iter([(
             pad_path_to_key(path),
-            MultiProofAccountTarget::WithAccount(HashSet::default()),
+            MultiProofAccountStorageTarget::WithAccountProof(HashSet::default()),
         )]);
         let mut proof =
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())

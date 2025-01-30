@@ -566,7 +566,7 @@ mod tests {
     use reth_primitives_traits::Account;
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, EMPTY_ROOT_HASH};
     use reth_trie_common::{
-        proof::ProofRetainer, MultiProofAccountTarget, StorageMultiProof, TrieMask,
+        proof::ProofRetainer, MultiProofAccountStorageTarget, StorageMultiProof, TrieMask,
     };
 
     #[test]
@@ -688,11 +688,15 @@ mod tests {
                 HashMap::from_iter([
                     (
                         address_1,
-                        MultiProofAccountTarget::WithAccount(HashSet::from_iter([slot_1, slot_2])),
+                        MultiProofAccountStorageTarget::WithAccountProof(HashSet::from_iter([
+                            slot_1, slot_2,
+                        ])),
                     ),
                     (
                         address_2,
-                        MultiProofAccountTarget::WithAccount(HashSet::from_iter([slot_1, slot_2])),
+                        MultiProofAccountStorageTarget::WithAccountProof(HashSet::from_iter([
+                            slot_1, slot_2,
+                        ])),
                     ),
                 ]),
                 MultiProof {

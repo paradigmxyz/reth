@@ -17,8 +17,8 @@ use reth_trie::{
     proof::ProofBlindedProviderFactory,
     trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofAccountTarget,
-    MultiProofTargets, Nibbles, TrieInput,
+    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof,
+    MultiProofAccountStorageTarget, MultiProofTargets, Nibbles, TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
@@ -695,10 +695,10 @@ where
                         let mut only_storage_accounts = 0;
                         let mut only_storage_slots = 0;
                         for slots in proof_calculated.update.targets.values() {
-                            if slots.is_with_account() {
+                            if slots.is_with_account_proof() {
                                 with_account_accounts += 1;
                                 with_account_slots += slots.len();
-                            } else if slots.is_only_storage() {
+                            } else if slots.is_only_storage_proofs() {
                                 only_storage_accounts += 1;
                                 only_storage_slots += slots.len();
                             }
@@ -873,8 +873,10 @@ fn get_proof_targets(
     // first collect all new accounts (not previously fetched)
     for &hashed_address in state_update.accounts.keys() {
         if !fetched_proof_targets.contains_key(&hashed_address) {
-            targets
-                .insert(hashed_address, MultiProofAccountTarget::WithAccount(HashSet::default()));
+            targets.insert(
+                hashed_address,
+                MultiProofAccountStorageTarget::WithAccountProof(HashSet::default()),
+            );
         }
     }
 
@@ -892,12 +894,12 @@ fn get_proof_targets(
             if fetched.is_some() {
                 targets.insert(
                     *hashed_address,
-                    MultiProofAccountTarget::OnlyStorage(changed_slots.collect()),
+                    MultiProofAccountStorageTarget::OnlyStorageProofs(changed_slots.collect()),
                 );
             } else {
                 targets.insert(
                     *hashed_address,
-                    MultiProofAccountTarget::WithAccount(changed_slots.collect()),
+                    MultiProofAccountStorageTarget::WithAccountProof(changed_slots.collect()),
                 );
             }
         }
@@ -1000,10 +1002,10 @@ fn extend_multi_proof_targets(targets: &mut MultiProofTargets, other: MultiProof
     for (address, slots) in other {
         match targets.entry(address) {
             Entry::Occupied(mut entry) => {
-                entry.get_mut().into_only_storage_mut().extend(slots);
+                entry.get_mut().into_only_storage_proofs_mut().extend(slots);
             }
             Entry::Vacant(entry) => {
-                entry.insert(slots.into_with_account());
+                entry.insert(slots.into_with_account_proof());
             }
         }
     }
@@ -1013,10 +1015,10 @@ fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &Multi
     for (address, slots) in other {
         match targets.entry(*address) {
             Entry::Occupied(mut entry) => {
-                entry.get_mut().into_only_storage_mut().extend(slots.clone());
+                entry.get_mut().into_only_storage_proofs_mut().extend(slots.clone());
             }
             Entry::Vacant(entry) => {
-                entry.insert(slots.clone().into_with_account());
+                entry.insert(slots.clone().into_with_account_proof());
             }
         }
     }
@@ -1324,7 +1326,10 @@ mod tests {
             .expect("Should have an account without storage");
 
         // mark the account as already fetched
-        fetched.insert(*fetched_addr, MultiProofAccountTarget::WithAccount(HashSet::default()));
+        fetched.insert(
+            *fetched_addr,
+            MultiProofAccountStorageTarget::WithAccountProof(HashSet::default()),
+        );
 
         let targets = get_proof_targets(&state, &fetched);
 
@@ -1344,7 +1349,7 @@ mod tests {
         let mut fetched_slots = HashSet::default();
         let fetched_slot = *storage.storage.keys().next().unwrap();
         fetched_slots.insert(fetched_slot);
-        fetched.insert(*addr, MultiProofAccountTarget::WithAccount(fetched_slots));
+        fetched.insert(*addr, MultiProofAccountStorageTarget::WithAccountProof(fetched_slots));
 
         let targets = get_proof_targets(&state, &fetched);
 
@@ -1384,7 +1389,7 @@ mod tests {
 
         let mut fetched_slots = HashSet::default();
         fetched_slots.insert(slot1);
-        fetched.insert(addr1, MultiProofAccountTarget::WithAccount(fetched_slots));
+        fetched.insert(addr1, MultiProofAccountStorageTarget::WithAccountProof(fetched_slots));
 
         let targets = get_proof_targets(&state, &fetched);
 

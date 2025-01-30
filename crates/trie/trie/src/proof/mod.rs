@@ -15,8 +15,8 @@ use alloy_rlp::{BufMut, Encodable};
 use itertools::{Either, Itertools};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    proof::ProofRetainer, AccountProof, MultiProof, MultiProofAccountTarget, MultiProofTargets,
-    StorageMultiProof,
+    proof::ProofRetainer, AccountProof, MultiProof, MultiProofAccountStorageTarget,
+    MultiProofTargets, StorageMultiProof,
 };
 
 mod blinded;
@@ -97,7 +97,9 @@ where
         Ok(self
             .multiproof(HashMap::from_iter([(
                 keccak256(address),
-                MultiProofAccountTarget::WithAccount(slots.iter().map(keccak256).collect()),
+                MultiProofAccountStorageTarget::WithAccountProof(
+                    slots.iter().map(keccak256).collect(),
+                ),
             )]))?
             .account_proof(address, slots)?)
     }
@@ -111,8 +113,12 @@ where
             B256HashMap<B256HashSet>,
             B256HashMap<B256HashSet>,
         ) = targets.into_iter().partition_map(|(key, target)| match target {
-            MultiProofAccountTarget::WithAccount(hash_set) => Either::Left((key, hash_set)),
-            MultiProofAccountTarget::OnlyStorage(hash_set) => Either::Right((key, hash_set)),
+            MultiProofAccountStorageTarget::WithAccountProof(hash_set) => {
+                Either::Left((key, hash_set))
+            }
+            MultiProofAccountStorageTarget::OnlyStorageProofs(hash_set) => {
+                Either::Right((key, hash_set))
+            }
         });
 
         // Create the walker.

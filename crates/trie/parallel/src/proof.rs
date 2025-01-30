@@ -19,8 +19,8 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
-    HashBuilder, HashedPostStateSorted, MultiProof, MultiProofAccountTarget, MultiProofTargets,
-    Nibbles, StorageMultiProof, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    HashBuilder, HashedPostStateSorted, MultiProof, MultiProofAccountStorageTarget,
+    MultiProofTargets, Nibbles, StorageMultiProof, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -96,8 +96,8 @@ where
             B256HashMap<B256HashSet>,
             B256HashMap<B256HashSet>,
         ) = targets.into_iter().partition_map(|(key, target)| match target {
-            MultiProofAccountTarget::WithAccount(slots) => Either::Left((key, slots)),
-            MultiProofAccountTarget::OnlyStorage(slots) => Either::Right((key, slots)),
+            MultiProofAccountStorageTarget::WithAccountProof(slots) => Either::Left((key, slots)),
+            MultiProofAccountStorageTarget::OnlyStorageProofs(slots) => Either::Right((key, slots)),
         });
 
         // Extend prefix sets with targets
@@ -418,7 +418,10 @@ mod tests {
             }
 
             if !target_slots.is_empty() {
-                targets.insert(hashed_address, MultiProofAccountTarget::WithAccount(target_slots));
+                targets.insert(
+                    hashed_address,
+                    MultiProofAccountStorageTarget::WithAccountProof(target_slots),
+                );
             }
         }
 
