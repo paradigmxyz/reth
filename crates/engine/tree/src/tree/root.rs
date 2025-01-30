@@ -439,21 +439,21 @@ where
 #[metrics(scope = "tree.root")]
 struct StateRootTaskMetrics {
     /// Histogram of proof calculation durations.
-    pub proof_calculation_histogram: Histogram,
+    pub proof_calculation_duration_histogram: Histogram,
     /// Histogram of proof calculation targets.
     pub proof_calculation_targets_histogram: Histogram,
     /// Histogram of proof calculation storage targets.
     pub proof_calculation_storage_targets_histogram: Histogram,
 
     /// Histogram of sparse trie update durations.
-    pub sparse_trie_update_histogram: Histogram,
+    pub sparse_trie_update_duration_histogram: Histogram,
 
-    /// Histogram of updates received.
-    pub updates_received_histogram: Histogram,
+    /// Histogram of state updates received.
+    pub state_updates_received_histogram: Histogram,
     /// Histogram of proofs processed.
     pub proofs_processed_histogram: Histogram,
     /// Histogram of state root update iterations.
-    pub iterations_histogram: Histogram,
+    pub state_root_iterations_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -684,7 +684,9 @@ where
                             proofs_processed += 1;
                         }
 
-                        self.metrics.proof_calculation_histogram.record(proof_calculated.elapsed);
+                        self.metrics
+                            .proof_calculation_duration_histogram
+                            .record(proof_calculated.elapsed);
                         self.metrics
                             .proof_calculation_targets_histogram
                             .record(proof_calculated.update.targets.len() as f64);
@@ -741,9 +743,9 @@ where
                             "All proofs processed, ending calculation"
                         );
 
-                        self.metrics.updates_received_histogram.record(updates_received);
+                        self.metrics.state_updates_received_histogram.record(updates_received);
                         self.metrics.proofs_processed_histogram.record(proofs_processed);
-                        self.metrics.iterations_histogram.record(iterations as f64);
+                        self.metrics.state_root_iterations_histogram.record(iterations as f64);
 
                         return Ok(StateRootComputeOutcome {
                             state_root: (state_root, trie_updates),
@@ -825,7 +827,7 @@ where
         let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
             ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
         })?;
-        metrics.sparse_trie_update_histogram.record(elapsed);
+        metrics.sparse_trie_update_duration_histogram.record(elapsed);
         trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
     }
 
