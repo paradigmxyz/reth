@@ -12,6 +12,7 @@ use alloy_primitives::{
     Address, B256,
 };
 use alloy_rlp::{BufMut, Encodable};
+use itertools::{Either, Itertools};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, MultiProofAccountTarget, MultiProofTargets,
@@ -102,34 +103,34 @@ where
     }
 
     /// Generate a state multiproof according to specified targets.
-    pub fn multiproof(
-        mut self,
-        mut targets: MultiProofTargets,
-    ) -> Result<MultiProof, StateProofError> {
+    pub fn multiproof(mut self, targets: MultiProofTargets) -> Result<MultiProof, StateProofError> {
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let trie_cursor = self.trie_cursor_factory.account_trie_cursor()?;
 
-        let account_targets = targets
-            .iter()
-            .filter(|(_, target)| target.is_with_account())
-            .map(|(key, target)| (*key, target.clone().into_slots()))
-            .collect::<B256HashMap<B256HashSet>>();
+        let (mut with_account_targets, only_storage_targets): (
+            B256HashMap<B256HashSet>,
+            B256HashMap<B256HashSet>,
+        ) = targets.into_iter().partition_map(|(key, target)| match target {
+            MultiProofAccountTarget::WithAccount(hash_set) => Either::Left((key, hash_set)),
+            MultiProofAccountTarget::OnlyStorage(hash_set) => Either::Right((key, hash_set)),
+        });
 
         // Create the walker.
         let mut prefix_set = self.prefix_sets.account_prefix_set.clone();
-        prefix_set.extend_keys(account_targets.keys().map(Nibbles::unpack));
+        prefix_set.extend_keys(with_account_targets.keys().map(Nibbles::unpack));
         let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer = account_targets.keys().map(Nibbles::unpack).collect();
+        let retainer = with_account_targets.keys().map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
-        let mut storages: B256HashMap<_> = targets
+        let mut storages: B256HashMap<_> = with_account_targets
             .iter()
+            .chain(only_storage_targets.iter())
             .filter(|(_, slots)| !slots.is_empty())
             .map(|(key, _)| (*key, StorageMultiProof::empty()))
             .collect();
@@ -141,7 +142,7 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    let proof_targets = targets.remove(&hashed_address);
+                    let proof_targets = with_account_targets.remove(&hashed_address);
                     let leaf_is_proof_target = proof_targets.is_some();
                     let storage_prefix_set = self
                         .prefix_sets
@@ -155,9 +156,7 @@ where
                     )
                     .with_prefix_set_mut(storage_prefix_set)
                     .with_branch_node_masks(self.collect_branch_node_masks)
-                    .storage_multiproof(
-                        proof_targets.map_or_else(B256HashSet::default, |t| t.into_slots()),
-                    )?;
+                    .storage_multiproof(proof_targets.unwrap_or_default())?;
 
                     // Encode account
                     account_rlp.clear();
@@ -175,24 +174,19 @@ where
             }
         }
 
-        for (hashed_address, account_target) in targets {
-            if let MultiProofAccountTarget::OnlyStorage(slots) = account_target {
-                let storage_prefix_set = self
-                    .prefix_sets
-                    .storage_prefix_sets
-                    .remove(&hashed_address)
-                    .unwrap_or_default();
-                let storage_multiproof = StorageProof::new_hashed(
-                    self.trie_cursor_factory.clone(),
-                    self.hashed_cursor_factory.clone(),
-                    hashed_address,
-                )
-                .with_prefix_set_mut(storage_prefix_set)
-                .with_branch_node_masks(self.collect_branch_node_masks)
-                .storage_multiproof(slots)?;
+        for (hashed_address, slots) in only_storage_targets {
+            let storage_prefix_set =
+                self.prefix_sets.storage_prefix_sets.remove(&hashed_address).unwrap_or_default();
+            let storage_multiproof = StorageProof::new_hashed(
+                self.trie_cursor_factory.clone(),
+                self.hashed_cursor_factory.clone(),
+                hashed_address,
+            )
+            .with_prefix_set_mut(storage_prefix_set)
+            .with_branch_node_masks(self.collect_branch_node_masks)
+            .storage_multiproof(slots)?;
 
-                storages.insert(hashed_address, storage_multiproof);
-            }
+            storages.insert(hashed_address, storage_multiproof);
         }
 
         let _ = hash_builder.root();

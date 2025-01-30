@@ -4,7 +4,7 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use reth_db::DatabaseError;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
@@ -92,19 +92,21 @@ where
     ) -> Result<MultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
-        let account_targets = targets
-            .iter()
-            .filter(|(_, target)| target.is_with_account())
-            .map(|(key, target)| (*key, target.clone().into_slots()))
-            .collect::<B256HashMap<B256HashSet>>();
+        let (with_account_targets, only_storage_targets): (
+            B256HashMap<B256HashSet>,
+            B256HashMap<B256HashSet>,
+        ) = targets.into_iter().partition_map(|(key, target)| match target {
+            MultiProofAccountTarget::WithAccount(hash_set) => Either::Left((key, hash_set)),
+            MultiProofAccountTarget::OnlyStorage(hash_set) => Either::Right((key, hash_set)),
+        });
 
         // Extend prefix sets with targets
         let mut prefix_sets = (*self.prefix_sets).clone();
         prefix_sets.extend(TriePrefixSetsMut {
             account_prefix_set: PrefixSetMut::from(
-                account_targets.keys().copied().map(Nibbles::unpack),
+                with_account_targets.keys().copied().map(Nibbles::unpack),
             ),
-            storage_prefix_sets: account_targets
+            storage_prefix_sets: with_account_targets
                 .iter()
                 .filter(|&(_hashed_address, slots)| (!slots.is_empty()))
                 .map(|(hashed_address, slots)| {
@@ -137,7 +139,8 @@ where
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
             let view = self.view.clone();
-            let target_slots = account_targets.get(&hashed_address).cloned().unwrap_or_default();
+            let target_slots =
+                with_account_targets.get(&hashed_address).cloned().unwrap_or_default();
             let trie_nodes_sorted = self.nodes_sorted.clone();
             let hashed_state_sorted = self.state_sorted.clone();
             let collect_masks = self.collect_branch_node_masks;
@@ -236,15 +239,18 @@ where
         .with_deletions_retained(true);
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
+        let retainer: ProofRetainer = with_account_targets.keys().map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
-        let mut storages: B256HashMap<_> =
-            targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
+        let mut storages: B256HashMap<_> = with_account_targets
+            .keys()
+            .chain(only_storage_targets.keys())
+            .map(|key| (*key, StorageMultiProof::empty()))
+            .collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(
             walker,
@@ -277,7 +283,10 @@ where
                             )
                             .with_prefix_set_mut(Default::default())
                             .storage_multiproof(
-                                account_targets.get(&hashed_address).cloned().unwrap_or_default(),
+                                with_account_targets
+                                    .get(&hashed_address)
+                                    .cloned()
+                                    .unwrap_or_default(),
                             )
                             .map_err(|e| {
                                 ParallelStateRootError::StorageRoot(StorageRootError::Database(
@@ -295,7 +304,7 @@ where
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 
                     // We might be adding leaves that are not necessarily our proof targets.
-                    if targets.contains_key(&hashed_address) {
+                    if with_account_targets.contains_key(&hashed_address) {
                         storages.insert(hashed_address, storage_multiproof);
                     }
                 }
@@ -303,24 +312,22 @@ where
         }
         let _ = hash_builder.root();
 
-        for (hashed_address, account_target) in targets {
-            if let MultiProofAccountTarget::OnlyStorage(slots) = account_target {
-                let storage_multiproof = StorageProof::new_hashed(
-                    trie_cursor_factory.clone(),
-                    hashed_cursor_factory.clone(),
-                    hashed_address,
-                )
-                .with_prefix_set_mut(Default::default())
-                .with_branch_node_masks(self.collect_branch_node_masks)
-                .storage_multiproof(slots)
-                .map_err(|e| {
-                    ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                        DatabaseError::Other(e.to_string()),
-                    ))
-                })?;
+        for (hashed_address, slots) in only_storage_targets {
+            let storage_multiproof = StorageProof::new_hashed(
+                trie_cursor_factory.clone(),
+                hashed_cursor_factory.clone(),
+                hashed_address,
+            )
+            .with_prefix_set_mut(Default::default())
+            .with_branch_node_masks(self.collect_branch_node_masks)
+            .storage_multiproof(slots)
+            .map_err(|e| {
+                ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                    DatabaseError::Other(e.to_string()),
+                ))
+            })?;
 
-                storages.insert(hashed_address, storage_multiproof);
-            }
+            storages.insert(hashed_address, storage_multiproof);
         }
 
         let account_subtree = hash_builder.take_proof_nodes();
