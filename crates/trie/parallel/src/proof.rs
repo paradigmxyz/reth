@@ -142,8 +142,11 @@ where
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
             let view = self.view.clone();
-            let target_slots =
-                with_account_targets.get(&hashed_address).cloned().unwrap_or_default();
+            let target_slots = with_account_targets
+                .get(&hashed_address)
+                .cloned()
+                .or_else(|| only_storage_targets.get(&hashed_address).cloned())
+                .unwrap_or_default();
             let trie_nodes_sorted = self.nodes_sorted.clone();
             let hashed_state_sorted = self.state_sorted.clone();
             let collect_masks = self.collect_branch_node_masks;
