@@ -904,6 +904,7 @@ impl<P> RevealedSparseTrie<P> {
                 ?starting_path,
                 ?level,
                 ?path,
+                ?node_type,
                 ?is_in_prefix_set,
                 "Popped path from stack"
             );
