@@ -30,7 +30,7 @@ use reth_revm::{
 };
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
-    error::ensure_success,
+    error::{api::FromEvmHalt, ensure_success},
     revm_utils::{
         apply_block_overrides, apply_state_overrides, caller_gas_allowance, get_precompiles,
     },
@@ -441,7 +441,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
-                    Some(RpcInvalidTransactionError::halt(reason, tx_env.gas_limit()).to_string());
+                    Some(Self::Error::from_evm_halt(reason, tx_env.gas_limit()).to_string());
                 return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Revert { output, gas_used } => {
@@ -456,7 +456,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         let res = match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
-                    Some(RpcInvalidTransactionError::halt(reason, tx_env.gas_limit()).to_string());
+                    Some(Self::Error::from_evm_halt(reason, tx_env.gas_limit()).to_string());
                 AccessListResult { access_list, gas_used: U256::from(gas_used), error }
             }
             ExecutionResult::Revert { output, gas_used } => {
