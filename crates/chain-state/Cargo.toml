@@ -29,7 +29,7 @@ alloy-consensus.workspace = true
 revm.workspace = true
 
 # async
-tokio = { workspace = true, default-features = false, features = ["sync", "macros"] }
+tokio = { workspace = true, default-features = false, features = ["sync", "macros", "rt-multi-thread"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 
 # tracing
@@ -53,6 +53,7 @@ alloy-signer.workspace = true
 alloy-signer-local.workspace = true
 alloy-consensus.workspace = true
 rand.workspace = true
+futures.workspace = true
 
 [features]
 test-utils = [

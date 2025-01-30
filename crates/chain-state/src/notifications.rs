@@ -2,6 +2,7 @@
 
 use alloy_eips::eip2718::Encodable2718;
 use derive_more::{Deref, DerefMut};
+use pin_project::pin_project;
 use reth_execution_types::{BlockReceipts, Chain};
 use reth_primitives::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_storage_api::NodePrimitivesProvider;
@@ -208,6 +209,74 @@ impl<T: Clone + Sync + Send + 'static> Stream for ForkChoiceStream<T> {
                 None => return Poll::Ready(None),
             }
         }
+    }
+}
+
+/// A stream that emits canonical chain notifications only when blocks are finalized.
+#[derive(Debug)]
+#[pin_project]
+pub(crate) struct FinalizedNotificationStream<N: NodePrimitives> {
+    #[pin]
+    canon_stream: CanonStateNotificationStream<N>,
+    #[pin]
+    finalized_stream: ForkChoiceStream<SealedHeader<alloy_consensus::Header>>,
+    // Buffer for the most recent canonical notification
+    buffered_notification: Option<CanonStateNotification<N>>,
+}
+
+impl<N: NodePrimitives> FinalizedNotificationStream<N>
+where
+    N::Block: Clone + Send + Sync + 'static,
+{
+    /// Creates a new `FinalizedNotificationStream` that combines canonical state notifications with
+    /// finalization events.
+    pub(crate) const fn new(
+        canon_stream: CanonStateNotificationStream<N>,
+        finalized_stream: ForkChoiceStream<SealedHeader<alloy_consensus::Header>>,
+    ) -> Self {
+        Self { canon_stream, finalized_stream, buffered_notification: None }
+    }
+}
+
+impl<N: NodePrimitives> Stream for FinalizedNotificationStream<N>
+where
+    N::Block: Send + Sync + 'static,
+{
+    type Item = CanonStateNotification<N>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+
+        // Poll the canonical state stream first
+        match this.canon_stream.poll_next(cx) {
+            Poll::Ready(Some(notification)) => {
+                // Update our buffer with the latest notification
+                *this.buffered_notification = Some(notification);
+                // Don't return yet - we need a finalization event
+            }
+            Poll::Ready(None) => return Poll::Ready(None),
+            Poll::Pending => {}
+        }
+
+        // Now check for finalization events
+        match this.finalized_stream.poll_next(cx) {
+            Poll::Ready(Some(finalized_header)) => {
+                // If we have a buffered notification and it matches the finalized block,
+                // we can emit it
+                if let Some(notification) = this.buffered_notification.take() {
+                    let tip = notification.tip();
+                    if tip.hash() == finalized_header.hash() {
+                        return Poll::Ready(Some(notification));
+                    }
+                    // If it doesn't match, keep it buffered
+                    *this.buffered_notification = Some(notification);
+                }
+            }
+            Poll::Ready(None) => return Poll::Ready(None),
+            Poll::Pending => {}
+        }
+
+        Poll::Pending
     }
 }
 
@@ -471,5 +540,123 @@ mod tests {
         );
         // Confirm this is from the committed segment.
         assert!(!block_receipts[1].1);
+    }
+
+    #[tokio::test]
+    async fn test_finalized_notification_stream() {
+        use futures::{FutureExt, StreamExt};
+        use tokio::sync::{broadcast, watch};
+
+        // Create channels for canonical and finalized notifications
+        let (canon_tx, canon_rx) = broadcast::channel(10);
+        let (finalized_tx, finalized_rx) = watch::channel(None);
+
+        // Create the streams
+        let canon_stream = CanonStateNotificationStream::<reth_primitives::EthPrimitives> {
+            st: BroadcastStream::new(canon_rx),
+        };
+        let finalized_stream = ForkChoiceStream::new(finalized_rx);
+
+        // Create the FinalizedNotificationStream
+        let mut stream = FinalizedNotificationStream::new(canon_stream, finalized_stream);
+
+        // Create a test block
+        let mut block = RecoveredBlock::<reth_primitives::Block>::default();
+        block.set_block_number(1);
+        let block_hash = B256::new([0x01; 32]);
+        block.set_hash(block_hash);
+
+        // Create a chain with the test block
+        let chain = Arc::new(Chain::new(vec![block], ExecutionOutcome::default(), None));
+
+        // Create a notification
+        let notification = CanonStateNotification::Commit { new: chain };
+
+        // Send the canonical notification
+        canon_tx.send(notification.clone()).unwrap();
+
+        // Send the finalization event with matching hash
+        let header = alloy_consensus::Header::default();
+        let finalized_header = SealedHeader::new(header, block_hash);
+        finalized_tx.send(Some(finalized_header)).unwrap();
+
+        // The stream should now emit our notification since we have both a canonical update
+        // and a matching finalization event
+        let received = stream.next().await;
+        assert_eq!(received, Some(notification));
+
+        // After receiving the notification, the stream should be empty
+        let received = stream.next().now_or_never();
+        assert!(received.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_finalized_notification_stream_no_match() {
+        use futures::{FutureExt, StreamExt};
+        use tokio::sync::{broadcast, watch};
+
+        // Create channels for canonical and finalized notifications
+        let (canon_tx, canon_rx) = broadcast::channel(10);
+        let (finalized_tx, finalized_rx) = watch::channel(None);
+
+        // Create the streams
+        let canon_stream = CanonStateNotificationStream::<reth_primitives::EthPrimitives> {
+            st: BroadcastStream::new(canon_rx),
+        };
+        let finalized_stream = ForkChoiceStream::new(finalized_rx);
+
+        // Create the FinalizedNotificationStream
+        let mut stream = FinalizedNotificationStream::new(canon_stream, finalized_stream);
+
+        // Create a test block
+        let mut block = RecoveredBlock::<reth_primitives::Block>::default();
+        block.set_block_number(1);
+        let block_hash = B256::new([0x01; 32]);
+        block.set_hash(block_hash);
+
+        // Create a chain with the test block
+        let chain = Arc::new(Chain::new(vec![block], ExecutionOutcome::default(), None));
+
+        // Create a notification
+        let notification = CanonStateNotification::Commit { new: chain };
+
+        // Send the canonical notification
+        canon_tx.send(notification).unwrap();
+
+        // Send the finalization event with non-matching hash
+        let different_hash = B256::new([0x02; 32]);
+        let header = alloy_consensus::Header::default();
+        let finalized_header = SealedHeader::new(header, different_hash);
+        finalized_tx.send(Some(finalized_header)).unwrap();
+
+        // The stream should not emit anything since hashes don't match
+        let received = stream.next().now_or_never();
+        assert!(received.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_finalized_notification_stream_channel_closed() {
+        use futures::StreamExt;
+        use tokio::sync::{broadcast, watch};
+
+        // Create channels for canonical and finalized notifications
+        let (canon_tx, canon_rx) = broadcast::channel::<CanonStateNotification>(10);
+        let (finalized_tx, finalized_rx) =
+            watch::channel::<Option<SealedHeader<alloy_consensus::Header>>>(None);
+
+        // Create the streams
+        let canon_stream = CanonStateNotificationStream { st: BroadcastStream::new(canon_rx) };
+        let finalized_stream = ForkChoiceStream::new(finalized_rx);
+
+        // Create the FinalizedNotificationStream
+        let mut stream = FinalizedNotificationStream::new(canon_stream, finalized_stream);
+
+        // Drop the senders to close the channels
+        drop(canon_tx);
+        drop(finalized_tx);
+
+        // The stream should complete (return None) when channels are closed
+        let result = stream.next().await;
+        assert!(result.is_none());
     }
 }
