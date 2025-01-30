@@ -11,7 +11,7 @@ use reth_provider::{ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
-use crate::{AsEthApiError, FromEthApiError, FromEvmError, RpcNodeCore};
+use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
 
 /// Network specific `eth` API types.
 pub trait EthApiTypes: Send + Sync + Clone {
@@ -19,7 +19,6 @@ pub trait EthApiTypes: Send + Sync + Clone {
     type Error: Into<jsonrpsee_types::error::ErrorObject<'static>>
         + FromEthApiError
         + AsEthApiError
-        + FromEvmError
         + Error
         + Send
         + Sync;
