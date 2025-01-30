@@ -440,8 +440,8 @@ where
 struct StateRootTaskMetrics {
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
-    /// Histogram of proof calculation targets.
-    pub proof_calculation_targets_histogram: Histogram,
+    /// Histogram of proof calculation account targets.
+    pub proof_calculation_account_targets_histogram: Histogram,
     /// Histogram of proof calculation storage targets.
     pub proof_calculation_storage_targets_histogram: Histogram,
 
@@ -688,13 +688,16 @@ where
                             .proof_calculation_duration_histogram
                             .record(proof_calculated.elapsed);
                         self.metrics
-                            .proof_calculation_targets_histogram
+                            .proof_calculation_account_targets_histogram
                             .record(proof_calculated.update.targets.len() as f64);
-                        for slots in proof_calculated.update.targets.values() {
-                            self.metrics
-                                .proof_calculation_storage_targets_histogram
-                                .record(slots.len() as f64);
-                        }
+                        self.metrics.proof_calculation_storage_targets_histogram.record(
+                            proof_calculated
+                                .update
+                                .targets
+                                .values()
+                                .map(|targets| targets.len() as f64)
+                                .sum::<f64>(),
+                        );
 
                         debug!(
                             target: "engine::root",
