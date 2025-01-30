@@ -1000,7 +1000,7 @@ fn extend_multi_proof_targets(targets: &mut MultiProofTargets, other: MultiProof
     for (address, slots) in other {
         match targets.entry(address) {
             Entry::Occupied(mut entry) => {
-                entry.get_mut().into_only_storage().extend(slots);
+                entry.get_mut().into_only_storage_mut().extend(slots);
             }
             Entry::Vacant(entry) => {
                 entry.insert(slots.into_with_account());
@@ -1013,7 +1013,7 @@ fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &Multi
     for (address, slots) in other {
         match targets.entry(*address) {
             Entry::Occupied(mut entry) => {
-                entry.get_mut().into_only_storage().extend(slots.clone());
+                entry.get_mut().into_only_storage_mut().extend(slots.clone());
             }
             Entry::Vacant(entry) => {
                 entry.insert(slots.clone().into_with_account());

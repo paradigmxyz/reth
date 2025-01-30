@@ -20,9 +20,12 @@ use reth_primitives_traits::Account;
 /// Proof targets map.
 pub type MultiProofTargets = B256HashMap<MultiProofAccountTarget>;
 
+/// Proof target account.
 #[derive(Debug, Clone)]
 pub enum MultiProofAccountTarget {
+    /// Fetch both account proof and storage slot proofs.
     WithAccount(B256HashSet),
+    /// Fetch only storage slot proofs.
     OnlyStorage(B256HashSet),
 }
 
@@ -38,32 +41,38 @@ impl IntoIterator for MultiProofAccountTarget {
 }
 
 impl MultiProofAccountTarget {
+    /// Returns `true` if the target is fetching both account and storage slot proofs.
     pub const fn is_with_account(&self) -> bool {
         matches!(self, Self::WithAccount(_))
     }
 
+    /// Returns `true` if the target is fetching only storage slot proofs.
     pub const fn is_only_storage(&self) -> bool {
         matches!(self, Self::OnlyStorage(_))
     }
 
+    /// Returns `true` if no storage slot proofs are fetched.
     pub fn is_empty(&self) -> bool {
         match self {
             Self::WithAccount(set) | Self::OnlyStorage(set) => set.is_empty(),
         }
     }
 
+    /// Returns the number of storage slot proofs.
     pub fn len(&self) -> usize {
         match self {
             Self::WithAccount(set) | Self::OnlyStorage(set) => set.len(),
         }
     }
 
+    /// Returns `true` if the storage slot is included.
     pub fn contains(&self, value: &B256) -> bool {
         match self {
             Self::WithAccount(set) | Self::OnlyStorage(set) => set.contains(value),
         }
     }
 
+    /// Extends the target with another target.
     pub fn extend(&mut self, other: Self) {
         match (self, other) {
             (
@@ -73,21 +82,23 @@ impl MultiProofAccountTarget {
         }
     }
 
+    /// Converts the target into [`Self::WithAccount`].
     pub fn into_with_account(self) -> Self {
         match self {
-            Self::WithAccount(set) | Self::OnlyStorage(set) => Self::WithAccount(set),
+            Self::OnlyStorage(set) => Self::WithAccount(set),
+            Self::WithAccount(_) => self,
         }
     }
 
-    pub fn into_only_storage(&mut self) -> &mut Self {
-        *self = match self {
-            Self::OnlyStorage(set) | Self::WithAccount(set) => {
-                Self::OnlyStorage(std::mem::take(set))
-            }
-        };
+    /// Converts the target into a mutable reference to [`Self::OnlyStorage`].
+    pub fn into_only_storage_mut(&mut self) -> &mut Self {
+        if let Self::OnlyStorage(set) = self {
+            *self = Self::OnlyStorage(std::mem::take(set));
+        }
         self
     }
 
+    /// Converts the target into a [`B256HashSet`] set of storage slots.
     pub fn into_slots(self) -> B256HashSet {
         match self {
             Self::WithAccount(set) | Self::OnlyStorage(set) => set,
