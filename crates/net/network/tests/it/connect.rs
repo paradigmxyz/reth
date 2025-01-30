@@ -208,9 +208,8 @@ async fn test_connect_with_boot_nodes() {
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
-    let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
-        .discovery(discv4)
-        .build(NoopProvider::default());
+    let config =
+        NetworkConfigBuilder::eth(secret_key).discovery(discv4).build(NoopProvider::default());
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
@@ -231,9 +230,7 @@ async fn test_connect_with_builder() {
     discv4.add_boot_nodes(mainnet_nodes());
 
     let client = NoopProvider::default();
-    let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
-        .discovery(discv4)
-        .build(client.clone());
+    let config = NetworkConfigBuilder::eth(secret_key).discovery(discv4).build(client.clone());
     let (handle, network, _, requests) = NetworkManager::new(config)
         .await
         .unwrap()
@@ -269,9 +266,7 @@ async fn test_connect_to_trusted_peer() {
     let discv4 = Discv4Config::builder();
 
     let client = NoopProvider::default();
-    let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
-        .discovery(discv4)
-        .build(client.clone());
+    let config = NetworkConfigBuilder::eth(secret_key).discovery(discv4).build(client.clone());
     let transactions_manager_config = config.transactions_manager_config.clone();
     let (handle, network, transactions, requests) = NetworkManager::new(config)
         .await
@@ -473,7 +468,7 @@ async fn test_geth_disconnect() {
     tokio::time::timeout(GETH_TIMEOUT, async move {
         let secret_key = SecretKey::new(&mut rand::thread_rng());
 
-        let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
+        let config = NetworkConfigBuilder::eth(secret_key)
             .listener_port(0)
             .disable_discovery()
             .build(NoopProvider::default());
@@ -588,7 +583,7 @@ async fn test_exceed_outgoing_connections() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let peers_config = PeersConfig::default().with_max_outbound(1);
 
-    let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
+    let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(0)
         .disable_discovery()
         .peer_config(peers_config)
@@ -629,7 +624,7 @@ async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let peers_config = PeersConfig::default().with_max_inbound(0);
 
-    let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
+    let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(0)
         .disable_discovery()
         .peer_config(peers_config)
