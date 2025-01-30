@@ -93,7 +93,7 @@ impl MultiProofAccountStorageTarget {
     /// Converts the target into a mutable reference to [`Self::OnlyStorageProofs`].
     pub fn into_only_storage_proofs_mut(&mut self) -> &mut Self {
         if let Self::OnlyStorageProofs(set) = self {
-            *self = Self::OnlyStorageProofs(std::mem::take(set));
+            *self = Self::OnlyStorageProofs(core::mem::take(set));
         }
         self
     }
