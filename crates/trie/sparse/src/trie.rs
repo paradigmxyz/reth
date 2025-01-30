@@ -587,6 +587,7 @@ impl<P> RevealedSparseTrie<P> {
         let mut buffers = RlpNodeBuffers::default();
 
         let targets = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
+        trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
         for target in targets {
             buffers.path_stack.push((0, target, Some(true)));
             self.rlp_node(&mut prefix_set, &mut buffers);
