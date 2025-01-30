@@ -28,7 +28,6 @@ use reth_revm::{
     db::{states::bundle_state::BundleRetention, State},
     DatabaseCommit,
 };
-use reth_rpc_types_compat::engine::payload::block_to_payload;
 use revm_primitives::EVMError;
 use std::{
     collections::VecDeque,
@@ -427,7 +426,7 @@ where
     .seal_slow();
 
     Ok((
-        block_to_payload(reorg_block).0,
+        ExecutionPayload::from(reorg_block),
         // todo(onbjerg): how do we support execution requests?
         reorg_target
             .header

@@ -17,8 +17,8 @@ use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
+use alloy_rpc_types_engine::ExecutionPayload;
 use tracing::{debug, info};
 
 /// `reth benchmark new-payload-only` command
@@ -64,7 +64,7 @@ impl Command {
             let versioned_hashes: Vec<B256> =
                 block.body().blob_versioned_hashes_iter().copied().collect();
             let parent_beacon_block_root = block.parent_beacon_block_root;
-            let payload = block_to_payload(block).0;
+            let payload = ExecutionPayload::from(block);
 
             let block_number = payload.block_number();
 
