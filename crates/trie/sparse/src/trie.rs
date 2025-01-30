@@ -583,7 +583,7 @@ impl<P> RevealedSparseTrie<P> {
     /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
     /// depth. Root node has a level of 0.
     pub fn update_rlp_node_level(&mut self, depth: usize) {
-        let mut prefix_set = self.prefix_set.clone().freeze();
+        let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
         let mut buffers = RlpNodeBuffers::default();
 
         let targets = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
