@@ -7,7 +7,6 @@ use crate::{
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::{eip6110, eip7685::Requests};
-use core::fmt::Display;
 use reth_chainspec::{ChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_consensus::ConsensusError;
 use reth_ethereum_consensus::validate_block_post_execution;
@@ -15,19 +14,15 @@ use reth_evm::{
     execute::{
         balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
         BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
-        ProviderError,
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm, Evm,
+    ConfigureEvm, Database, Evm,
 };
 use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_revm::db::State;
-use revm_primitives::{
-    db::{Database, DatabaseCommit},
-    ResultAndState,
-};
+use revm_primitives::{db::DatabaseCommit, ResultAndState};
 
 /// Factory for [`EthExecutionStrategy`].
 #[derive(Debug, Clone)]
@@ -71,12 +66,11 @@ where
 {
     type Primitives = EthPrimitives;
 
-    type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
-        EthExecutionStrategy<DB, EvmConfig>;
+    type Strategy<DB: Database> = EthExecutionStrategy<DB, EvmConfig>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database,
     {
         let state =
             State::builder().with_database(db).with_bundle_update().without_state_clear().build();
@@ -113,7 +107,7 @@ where
 
 impl<DB, EvmConfig> BlockExecutionStrategy for EthExecutionStrategy<DB, EvmConfig>
 where
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: Database,
     EvmConfig: ConfigureEvm<
         Header = alloy_consensus::Header,
         Transaction = reth_primitives::TransactionSigned,
@@ -163,11 +157,10 @@ where
 
             // Execute transaction.
             let result_and_state = evm.transact(tx_env).map_err(move |err| {
-                let new_err = err.map_db_err(|e| e.into());
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {
                     hash: transaction.recalculate_hash(),
-                    error: Box::new(new_err),
+                    error: Box::new(err),
                 }
             })?;
             self.system_caller.on_state(&result_and_state.state);
@@ -307,7 +300,7 @@ mod tests {
     use reth_primitives::{Account, Block, BlockBody, Transaction};
     use reth_primitives_traits::{crypto::secp256k1::public_key_to_address, Block as _};
     use reth_revm::{
-        database::StateProviderDatabase, test_utils::StateProviderTest, TransitionState,
+        database::StateProviderDatabase, test_utils::StateProviderTest, Database, TransitionState,
     };
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
     use revm_primitives::{address, EvmState, BLOCKHASH_SERVE_WINDOW};
@@ -393,7 +386,7 @@ mod tests {
             );
 
         assert!(matches!(
-            err.as_validation().unwrap().clone(),
+            err.as_validation().unwrap(),
             BlockValidationError::MissingParentBeaconBlockRoot
         ));
 
