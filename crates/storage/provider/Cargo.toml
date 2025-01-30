@@ -41,9 +41,6 @@ alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
 revm.workspace = true
 
-# optimism
-reth-optimism-primitives = { workspace = true, features = ["reth-codec"], optional = true }
-
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
@@ -57,12 +54,11 @@ metrics.workspace = true
 # misc
 auto_impl.workspace = true
 itertools.workspace = true
-notify = { workspace = true, default-features = false, features = [
-    "macos_fsevent",
-] }
+notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
 parking_lot.workspace = true
 dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
+eyre.workspace = true
 
 # test-utils
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
@@ -77,6 +73,7 @@ reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-ethereum-engine-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 
 parking_lot.workspace = true
 tempfile.workspace = true
@@ -87,15 +84,6 @@ eyre.workspace = true
 alloy-consensus.workspace = true
 
 [features]
-optimism = [
-    "reth-execution-types/optimism",
-    "reth-optimism-primitives",
-    "reth-codecs/op",
-    "reth-db/optimism",
-    "reth-db-api/optimism",
-    "revm/optimism",
-    "reth-optimism-primitives/optimism",
-]
 serde = [
     "dashmap/serde",
     "notify/serde",
@@ -107,7 +95,6 @@ serde = [
     "alloy-rpc-types-engine/serde",
     "revm/serde",
     "reth-codecs/serde",
-    "reth-optimism-primitives?/serde",
     "reth-primitives-traits/serde",
     "reth-execution-types/serde",
     "reth-trie-db/serde",
@@ -119,6 +106,7 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-chain-state/test-utils",
     "reth-ethereum-engine-primitives",
+    "reth-ethereum-primitives/test-utils",
     "reth-chainspec/test-utils",
     "reth-evm/test-utils",
     "reth-network-p2p/test-utils",
@@ -130,5 +118,4 @@ test-utils = [
     "revm/test-utils",
     "reth-prune-types/test-utils",
     "reth-stages-types/test-utils",
-    "reth-optimism-primitives?/arbitrary",
 ]

@@ -22,12 +22,15 @@ use alloy_eips::eip2930::AccessList;
 use alloy_primitives::{Address, Bytes, B256, U256};
 use core::fmt::Debug;
 use reth_primitives_traits::{BlockHeader, SignedTransaction};
-use revm::{Database, DatabaseCommit, GetInspector};
-use revm_primitives::{BlockEnv, EVMError, ResultAndState, TxEnv, TxKind};
+use revm::{DatabaseCommit, GetInspector};
+use revm_primitives::{BlockEnv, ResultAndState, TxEnv, TxKind};
 
 pub mod either;
 /// EVM environment configuration.
 pub mod env;
+/// EVM error types.
+mod error;
+pub use error::*;
 pub mod execute;
 pub use env::EvmEnv;
 
@@ -82,6 +85,9 @@ pub trait Evm {
         Ok(result)
     }
 }
+/// Helper trait to bound [`revm::Database::Error`] with common requirements.
+pub trait Database: revm::Database<Error: core::error::Error + Send + Sync + 'static> {}
+impl<T> Database for T where T: revm::Database<Error: core::error::Error + Send + Sync + 'static> {}
 
 /// Trait for configuring the EVM for executing full blocks.
 pub trait ConfigureEvm: ConfigureEvmEnv {
@@ -89,8 +95,11 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     type Evm<'a, DB: Database + 'a, I: 'a>: Evm<
         Tx = Self::TxEnv,
         DB = DB,
-        Error = EVMError<DB::Error>,
+        Error = Self::EvmError<DB::Error>,
     >;
+
+    /// The error type returned by the EVM.
+    type EvmError<DBError: core::error::Error + Send + Sync + 'static>: EvmError;
 
     /// Returns a new EVM with the given database configured with the given environment settings,
     /// including the spec id and transaction environment.
@@ -137,6 +146,7 @@ where
     &'b T: ConfigureEvmEnv<Header = T::Header, TxEnv = T::TxEnv, Spec = T::Spec>,
 {
     type Evm<'a, DB: Database + 'a, I: 'a> = T::Evm<'a, DB, I>;
+    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = T::EvmError<DBError>;
 
     fn evm_for_block<DB: Database>(&self, db: DB, header: &Self::Header) -> Self::Evm<'_, DB, ()> {
         (*self).evm_for_block(db, header)

@@ -40,8 +40,7 @@ where
             let excess_blob_gas = block.excess_blob_gas();
             let timestamp = block.timestamp();
 
-            let mut l1_block_info =
-                reth_optimism_evm::extract_l1_info(block.body()).map_err(OpEthApiError::from)?;
+            let mut l1_block_info = reth_optimism_evm::extract_l1_info(block.body())?;
 
             return block
                 .body()

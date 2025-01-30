@@ -806,9 +806,11 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
                     |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
                 )
             }
-            BlockSource::Pending => {
-                Ok(self.canonical_in_memory_state.pending_block().map(|block| block.into_block()))
-            }
+            BlockSource::Pending => Ok(self
+                .canonical_in_memory_state
+                .pending_block()
+                .filter(|block| block.hash() == hash)
+                .map(|block| block.into_block())),
         }
     }
 
