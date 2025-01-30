@@ -586,8 +586,10 @@ impl<P> RevealedSparseTrie<P> {
         let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
         let mut buffers = RlpNodeBuffers::default();
 
-        let (new_prefix_set, targets) = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
-        self.prefix_set = new_prefix_set;
+        let (targets, unchanged_prefix_set) =
+            self.get_changed_nodes_at_depth(&mut prefix_set, depth);
+        self.prefix_set = unchanged_prefix_set;
+
         trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
         for target in targets {
             buffers.path_stack.push((0, target, Some(true)));
@@ -598,12 +600,15 @@ impl<P> RevealedSparseTrie<P> {
     /// Returns a list of paths to the nodes that were changed according to the prefix set and are
     /// located at the provided depth when counting from the root node. If there's a leaf at a
     /// depth less than the provided depth, it will be included in the result.
+    ///
+    /// Additionally, returns a new prefix set containing the paths that will not be updated, thus
+    /// need re-calculation.
     fn get_changed_nodes_at_depth(
         &self,
         prefix_set: &mut PrefixSet,
         depth: usize,
-    ) -> (PrefixSetMut, Vec<Nibbles>) {
-        let mut new_prefix_set = PrefixSetMut::default();
+    ) -> (Vec<Nibbles>, PrefixSetMut) {
+        let mut unchanged_prefix_set = PrefixSetMut::default();
         let mut paths = Vec::from([(Nibbles::default(), 0)]);
         let mut targets = Vec::new();
 
@@ -625,7 +630,7 @@ impl<P> RevealedSparseTrie<P> {
                     if level >= depth {
                         targets.push(path);
                     } else {
-                        new_prefix_set.insert(path.clone());
+                        unchanged_prefix_set.insert(path.clone());
 
                         path.extend_from_slice_unchecked(key);
                         paths.push((path, level + 1));
@@ -639,7 +644,7 @@ impl<P> RevealedSparseTrie<P> {
                     if level >= depth {
                         targets.push(path);
                     } else {
-                        new_prefix_set.insert(path.clone());
+                        unchanged_prefix_set.insert(path.clone());
 
                         for bit in CHILD_INDEX_RANGE.rev() {
                             if state_mask.is_bit_set(bit) {
@@ -653,7 +658,7 @@ impl<P> RevealedSparseTrie<P> {
             }
         }
 
-        (new_prefix_set, targets)
+        (targets, unchanged_prefix_set)
     }
 
     /// Look up or calculate the RLP of the node at the given path.
