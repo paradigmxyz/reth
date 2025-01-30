@@ -80,10 +80,7 @@ std = [
     "reth-consensus-common/std",
 ]
 optimism = [
-    "reth-execution-types/optimism",
-    "reth-optimism-consensus/optimism",
-    "revm/optimism",
-    "revm-primitives/optimism",
-    "reth-optimism-primitives/optimism",
-    "alloy-op-evm/optimism",
+	"reth-execution-types/optimism",
+	"reth-optimism-consensus/optimism",
+	"reth-optimism-primitives/optimism",
 ]

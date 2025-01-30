@@ -420,10 +420,18 @@ reth-trie-sparse = { path = "crates/trie/sparse" }
 reth-zstd-compressors = { path = "crates/storage/zstd-compressors", default-features = false }
 
 # revm
-revm = { version = "19.4.0", default-features = false }
-revm-primitives = { version = "15.1.0", default-features = false }
-revm-interpreter = { version = "15.0.0", default-features = false }
-revm-inspectors = "0.14.1"
+revm = { git = "https://github.com/bluealloy/revm", rev = "1d95779" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "1d95779" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "1d95779" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "1d95779" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "1d95779" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "1d95779" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", rev = "1d95779" }
+revm-context = { git = "https://github.com/bluealloy/revm", rev = "1d95779" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", rev = "1d95779" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "1d95779" }
+revm-specification = { git = "https://github.com/bluealloy/revm", rev = "1d95779" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "2b1a434" }
 
 # eth
 alloy-chains = { version = "0.1.32", default-features = false }
@@ -604,7 +612,9 @@ snmalloc-rs = { version = "0.3.7", features = ["build_cc"] }
 # See: https://github.com/eira-fransham/crunchy/issues/13
 crunchy = "=0.2.2"
 
-# [patch.crates-io]
+[patch.'https://github.com/paradigmxyz/revm-inspectors']
+revm-inspectors = { git = "https://github.com/klkvr/evm-inspectors", rev = "fde5bf3" }
+
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "5492e40" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "5492e40" }
 # alloy-genesis = { git = "https://github.com/alloy-rs/alloy", rev = "5492e40" }

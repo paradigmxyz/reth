@@ -22,10 +22,10 @@ use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKin
 use reth_primitives::{NodePrimitives, SealedHeader};
 use reth_primitives_traits::proofs;
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
-use reth_revm::cached::CachedReads;
+use reth_revm::{cached::CachedReads, db::State};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
-use revm::{Database, State};
+use revm::Database;
 use std::{
     fmt,
     future::Future,

@@ -13,7 +13,7 @@ use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives::{EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredBlock};
-use revm::State;
+use revm_database::State;
 use std::sync::Arc;
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.

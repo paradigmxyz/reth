@@ -18,11 +18,8 @@ use alloy_primitives::{
 use reth_consensus::ConsensusError;
 use reth_primitives::{NodePrimitives, Receipt, RecoveredBlock};
 use reth_revm::batch::BlockBatchRecord;
-use revm::{
-    db::{states::bundle_state::BundleRetention, BundleState},
-    State,
-};
-use revm_primitives::{Account, AccountStatus, EvmState};
+use revm::state::{Account, AccountStatus, EvmState};
+use revm_database::{states::bundle_state::BundleRetention, BundleState, State};
 
 /// A general purpose executor trait that executes an input (e.g. block) and produces an output
 /// (e.g. state changes and receipts).
@@ -483,8 +480,12 @@ mod tests {
     use core::marker::PhantomData;
     use reth_chainspec::{ChainSpec, MAINNET};
     use reth_primitives::EthPrimitives;
-    use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::{address, bytes, AccountInfo, KECCAK_EMPTY};
+    use revm::{
+        database_interface::EmptyDBTyped,
+        primitives::{address, bytes, KECCAK_EMPTY},
+        state::AccountInfo,
+    };
+    use revm_database::CacheDB;
     use std::sync::Arc;
 
     #[derive(Clone, Default)]

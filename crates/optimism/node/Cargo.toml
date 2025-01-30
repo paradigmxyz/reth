@@ -91,15 +91,15 @@ futures.workspace = true
 [features]
 default = ["reth-codec"]
 optimism = [
-    "reth-optimism-evm/optimism",
-    "reth-optimism-payload-builder/optimism",
-    "revm/optimism",
-    "reth-optimism-rpc/optimism",
-    "reth-engine-local/op",
-    "reth-optimism-consensus/optimism",
-    "reth-db/optimism",
-    "reth-optimism-node/optimism",
-    "reth-node-core/optimism",
+	"reth-provider/optimism",
+	"reth-optimism-evm/optimism",
+	"reth-optimism-payload-builder/optimism",
+	"reth-optimism-rpc/optimism",
+	"reth-engine-local/op",
+	"reth-optimism-consensus/optimism",
+	"reth-db/optimism",
+	"reth-optimism-node/optimism",
+	"reth-node-core/optimism",
     "reth-optimism-primitives/optimism",
 ]
 asm-keccak = [

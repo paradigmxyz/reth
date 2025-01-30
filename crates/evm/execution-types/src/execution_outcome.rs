@@ -5,10 +5,8 @@ use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Lo
 use reth_primitives::Receipts;
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie::{HashedPostState, KeyHasher};
-use revm::{
-    db::{states::BundleState, BundleAccount},
-    primitives::AccountInfo,
-};
+use revm::state::AccountInfo;
+use revm_database::{states::BundleState, BundleAccount};
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,15 +1,14 @@
 //! A no operation block executor implementation.
 
-use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-use reth_primitives::{NodePrimitives, RecoveredBlock};
-use revm::State;
-
 use crate::{
     execute::{BatchExecutor, BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
     Database,
 };
+use reth_execution_errors::BlockExecutionError;
+use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
+use reth_primitives::{NodePrimitives, RecoveredBlock};
+use revm_database::State;
 
 const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
 

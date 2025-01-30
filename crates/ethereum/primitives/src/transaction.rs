@@ -7,7 +7,7 @@ use alloy_consensus::{
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip2930::AccessList,
-    eip7702::SignedAuthorization,
+    eip7702::{constants::SECP256K1N_HALF, SignedAuthorization},
 };
 use alloy_primitives::{
     keccak256, Address, Bytes, ChainId, PrimitiveSignature as Signature, TxHash, TxKind, B256, U256,
@@ -22,7 +22,7 @@ use reth_primitives_traits::{
     transaction::{error::TransactionConversionError, signed::RecoveryError},
     FillTxEnv, InMemorySize, SignedTransaction,
 };
-use revm_primitives::{AuthorizationList, TxEnv};
+use revm_context::TxEnv;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "std")]
 use std::sync::OnceLock;
@@ -668,81 +668,124 @@ impl reth_codecs::Compact for TransactionSigned {
     }
 }
 
-impl FillTxEnv for TransactionSigned {
+impl FillTxEnv<TxEnv> for TransactionSigned {
     fn fill_tx_env(&self, tx_env: &mut TxEnv, sender: Address) {
-        tx_env.caller = sender;
-        match self.as_ref() {
-            Transaction::Legacy(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.gas_price);
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = tx.chain_id;
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clear();
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-                tx_env.authorization_list = None;
-            }
-            Transaction::Eip2930(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.gas_price);
-                tx_env.gas_priority_fee = None;
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clone_from(&tx.access_list.0);
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-                tx_env.authorization_list = None;
-            }
-            Transaction::Eip1559(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
-                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-                tx_env.transact_to = tx.to;
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clone_from(&tx.access_list.0);
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-                tx_env.authorization_list = None;
-            }
-            Transaction::Eip4844(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
-                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-                tx_env.transact_to = TxKind::Call(tx.to);
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clone_from(&tx.access_list.0);
-                tx_env.blob_hashes.clone_from(&tx.blob_versioned_hashes);
-                tx_env.max_fee_per_blob_gas = Some(U256::from(tx.max_fee_per_blob_gas));
-                tx_env.authorization_list = None;
-            }
-            Transaction::Eip7702(tx) => {
-                tx_env.gas_limit = tx.gas_limit;
-                tx_env.gas_price = U256::from(tx.max_fee_per_gas);
-                tx_env.gas_priority_fee = Some(U256::from(tx.max_priority_fee_per_gas));
-                tx_env.transact_to = tx.to.into();
-                tx_env.value = tx.value;
-                tx_env.data = tx.input.clone();
-                tx_env.chain_id = Some(tx.chain_id);
-                tx_env.nonce = Some(tx.nonce);
-                tx_env.access_list.clone_from(&tx.access_list.0);
-                tx_env.blob_hashes.clear();
-                tx_env.max_fee_per_blob_gas.take();
-                tx_env.authorization_list =
-                    Some(AuthorizationList::Signed(tx.authorization_list.clone()));
-            }
+        *tx_env = match self.as_ref() {
+            Transaction::Legacy(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.gas_price,
+                gas_priority_fee: None,
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: tx.chain_id,
+                nonce: tx.nonce,
+                access_list: Default::default(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                tx_type: 0,
+                caller: sender,
+            },
+            Transaction::Eip2930(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.gas_price,
+                gas_priority_fee: None,
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: None,
+                nonce: tx.nonce,
+                access_list: tx
+                    .access_list
+                    .0
+                    .clone()
+                    .into_iter()
+                    .map(|item| (item.address, item.storage_keys))
+                    .collect(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                tx_type: 0,
+                caller: sender,
+            },
+            Transaction::Eip1559(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.max_fee_per_gas,
+                gas_priority_fee: Some(tx.max_priority_fee_per_gas),
+                kind: tx.to,
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: Some(tx.chain_id),
+                nonce: tx.nonce,
+                access_list: tx
+                    .access_list
+                    .0
+                    .clone()
+                    .into_iter()
+                    .map(|item| (item.address, item.storage_keys))
+                    .collect(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+                tx_type: 0,
+                caller: sender,
+            },
+            Transaction::Eip4844(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.max_fee_per_gas,
+                gas_priority_fee: Some(tx.max_priority_fee_per_gas),
+                kind: TxKind::Call(tx.to),
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: Some(tx.chain_id),
+                nonce: tx.nonce,
+                access_list: tx
+                    .access_list
+                    .0
+                    .clone()
+                    .into_iter()
+                    .map(|item| (item.address, item.storage_keys))
+                    .collect(),
+                blob_hashes: tx.blob_versioned_hashes.clone(),
+                max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
+                authorization_list: Default::default(),
+                tx_type: 0,
+                caller: sender,
+            },
+            Transaction::Eip7702(tx) => TxEnv {
+                gas_limit: tx.gas_limit,
+                gas_price: tx.max_fee_per_gas,
+                gas_priority_fee: Some(tx.max_priority_fee_per_gas),
+                kind: TxKind::Call(tx.to),
+                value: tx.value,
+                data: tx.input.clone(),
+                chain_id: Some(tx.chain_id),
+                nonce: tx.nonce,
+                access_list: tx
+                    .access_list
+                    .0
+                    .clone()
+                    .into_iter()
+                    .map(|item| (item.address, item.storage_keys))
+                    .collect(),
+                blob_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: tx
+                    .authorization_list
+                    .iter()
+                    .map(|item| {
+                        let authority = if item.s() > SECP256K1N_HALF {
+                            None
+                        } else {
+                            item.recover_authority().ok()
+                        };
+                        (authority, item.chain_id, item.nonce, item.address)
+                    })
+                    .collect(),
+                tx_type: 0,
+                caller: sender,
+            },
         }
     }
 }

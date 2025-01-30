@@ -688,7 +688,7 @@ impl<T: Transaction> StateProofProvider for MockEthProvider<T> {
 }
 
 impl<T: Transaction> HashedPostStateProvider for MockEthProvider<T> {
-    fn hashed_post_state(&self, _state: &revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, _state: &revm_database::BundleState) -> HashedPostState {
         HashedPostState::default()
     }
 }

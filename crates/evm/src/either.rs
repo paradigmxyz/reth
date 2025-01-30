@@ -8,7 +8,7 @@ use crate::{
 
 // re-export Either
 pub use futures_util::future::Either;
-use revm::State;
+use revm_database::State;
 
 impl<A, B> BlockExecutorProvider for Either<A, B>
 where

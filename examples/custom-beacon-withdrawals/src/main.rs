@@ -13,7 +13,7 @@ use reth::{
     cli::Cli,
     revm::{
         primitives::{address, Address},
-        DatabaseCommit, State,
+        DatabaseCommit,
     },
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -200,7 +200,7 @@ pub fn apply_withdrawals_contract_call(
 
     // Clean-up post system tx context
     state.remove(&SYSTEM_ADDRESS);
-    state.remove(&evm.block().coinbase);
+    state.remove(&evm.block().beneficiary);
 
     evm.db_mut().commit(state);
 

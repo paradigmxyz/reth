@@ -35,3 +35,8 @@ where
 pub type EvmErrorFor<Evm, DB> = <<Evm as ConfigureEvm>::EvmFactory as EvmFactory<
     EvmEnv<<Evm as ConfigureEvmEnv>::Spec>,
 >>::Error<DB>;
+
+/// Helper to access [`EvmFactory::HaltReason`] for a given [`ConfigureEvm`].
+pub type HaltReasonFor<Evm> = <<Evm as ConfigureEvm>::EvmFactory as EvmFactory<
+    EvmEnv<<Evm as ConfigureEvmEnv>::Spec>,
+>>::HaltReason;

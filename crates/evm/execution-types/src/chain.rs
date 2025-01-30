@@ -12,7 +12,7 @@ use reth_primitives::{
 };
 use reth_primitives_traits::{Block, BlockBody, NodePrimitives, SignedTransaction};
 use reth_trie::updates::TrieUpdates;
-use revm::db::BundleState;
+use revm_database::BundleState;
 
 /// A chain of blocks and their final state.
 ///
@@ -704,7 +704,7 @@ mod tests {
     use alloy_primitives::{Address, B256};
     use reth_ethereum_primitives::Receipt;
     use reth_primitives::Receipts;
-    use revm::primitives::{AccountInfo, HashMap};
+    use revm::{primitives::HashMap, state::AccountInfo};
 
     // TODO: this is temporary, until we fully switch over to `reth_ethereum_primitives` for the
     // `Receipt` type in `EthPrimitives`.

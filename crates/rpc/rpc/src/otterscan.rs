@@ -1,5 +1,5 @@
 use alloy_consensus::{BlockHeader, Transaction, Typed2718};
-use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_eips::{eip7702::SignedAuthorization, BlockId, BlockNumberOrTag};
 use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, TransactionReceipt};
@@ -19,11 +19,11 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
+use revm::context_interface::result::ExecutionResult;
 use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
 };
-use revm_primitives::{ExecutionResult, SignedAuthorization};
 
 const API_LEVEL: u64 = 8;
 

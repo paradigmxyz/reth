@@ -49,6 +49,7 @@ where
         &self,
         block_env: &BlockEnv,
         request: TransactionRequest,
+        db: impl Database,
     ) -> Result<TxEnv, Self::Error> {
         // Ensure that if versioned hashes are set, they're not empty
         if request.blob_versioned_hashes.as_ref().is_some_and(|hashes| hashes.is_empty()) {

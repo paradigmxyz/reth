@@ -24,7 +24,8 @@ reth-revm.workspace = true
 reth-storage-errors.workspace = true
 
 revm.workspace = true
-revm-primitives.workspace = true
+revm-database.workspace = true
+revm-inspector.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -55,7 +56,6 @@ std = [
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
-    "revm-primitives/std",
     "revm/std",
     "reth-ethereum-forks/std",
     "reth-chainspec/std",

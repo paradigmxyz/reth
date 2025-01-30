@@ -8,7 +8,7 @@ use metrics::{Counter, Gauge, Histogram};
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
 use reth_primitives::RecoveredBlock;
-use revm_primitives::EvmState;
+use revm::state::EvmState;
 use std::time::Instant;
 
 /// Wrapper struct that combines metrics and state hook
@@ -144,11 +144,10 @@ impl ExecutorMetrics {
 mod tests {
     use super::*;
     use alloy_eips::eip7685::Requests;
+    use alloy_primitives::{B256, U256};
     use metrics_util::debugging::{DebugValue, DebuggingRecorder, Snapshotter};
-    use revm::db::BundleState;
-    use revm_primitives::{
-        Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot, B256, U256,
-    };
+    use revm::state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot};
+    use revm_database::BundleState;
     use std::sync::mpsc;
 
     /// A mock executor that simulates state changes
@@ -178,7 +177,7 @@ mod tests {
             _state: F,
         ) -> Result<Self::Output, Self::Error>
         where
-            F: FnMut(&revm::State<()>),
+            F: FnMut(&revm_database::State<()>),
         {
             Ok(BlockExecutionOutput {
                 state: BundleState::default(),

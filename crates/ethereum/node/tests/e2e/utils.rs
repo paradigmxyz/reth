@@ -16,7 +16,6 @@ use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_provider::FullProvider;
-use revm::primitives::{AccessListItem, Authorization};
 
 /// Helper function to create a new eth payload attributes
 pub(crate) fn eth_payload_attributes(timestamp: u64) -> EthPayloadBuilderAttributes {

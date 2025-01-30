@@ -187,7 +187,7 @@ impl<SP: StateProvider, EDP: ExecutionDataProvider> StateProofProvider
 impl<SP: StateProvider, EDP: ExecutionDataProvider> HashedPostStateProvider
     for BundleStateProvider<SP, EDP>
 {
-    fn hashed_post_state(&self, bundle_state: &revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
         self.state_provider.hashed_post_state(bundle_state)
     }
 }

@@ -10,7 +10,7 @@ use alloy_rpc_types_mev::{
 use jsonrpsee::core::RpcResult;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
 use reth_provider::ProviderTx;
-use reth_revm::database::StateProviderDatabase;
+use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
@@ -19,11 +19,8 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::{
-    db::CacheDB,
-    primitives::{Address, ResultAndState},
-    DatabaseCommit, DatabaseRef,
-};
+use revm::{context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef};
+use revm_primitives::Address;
 use std::{sync::Arc, time::Duration};
 use tracing::info;
 
@@ -246,23 +243,23 @@ where
 
         // apply overrides
         if let Some(block_number) = block_number {
-            evm_env.block_env.number = U256::from(block_number);
+            evm_env.block_env.number = block_number;
         }
 
         if let Some(coinbase) = coinbase {
-            evm_env.block_env.coinbase = coinbase;
+            evm_env.block_env.beneficiary = coinbase;
         }
 
         if let Some(timestamp) = timestamp {
-            evm_env.block_env.timestamp = U256::from(timestamp);
+            evm_env.block_env.timestamp = timestamp;
         }
 
         if let Some(gas_limit) = gas_limit {
-            evm_env.block_env.gas_limit = U256::from(gas_limit);
+            evm_env.block_env.gas_limit = gas_limit;
         }
 
         if let Some(base_fee) = base_fee {
-            evm_env.block_env.basefee = U256::from(base_fee);
+            evm_env.block_env.basefee = base_fee;
         }
 
         let eth_api = self.inner.eth_api.clone();
@@ -273,7 +270,7 @@ where
             .spawn_with_state_at_block(current_block, move |state| {
                 // Setup environment
                 let current_block_number = current_block.as_u64().unwrap();
-                let coinbase = evm_env.block_env.coinbase;
+                let coinbase = evm_env.block_env.beneficiary;
                 let basefee = evm_env.block_env.basefee;
                 let db = CacheDB::new(StateProviderDatabase::new(state));
 
@@ -358,7 +355,7 @@ where
                         });
 
                         // Calculate payout transaction fee
-                        let payout_tx_fee = basefee *
+                        let payout_tx_fee = U256::from(basefee) *
                             U256::from(SBUNDLE_PAYOUT_MAX_COST) *
                             U256::from(refund_configs.len() as u64);
 

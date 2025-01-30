@@ -3,6 +3,8 @@
 
 #![allow(missing_docs)]
 
+use alloy_consensus::constants::KECCAK_EMPTY;
+use alloy_primitives::{Address, B256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::test_runner::TestRunner;
 use rand::Rng;
@@ -15,10 +17,8 @@ use reth_provider::{
     AccountReader, HashingWriter, ProviderFactory,
 };
 use reth_trie::TrieInput;
-use revm_primitives::{
-    Account as RevmAccount, AccountInfo, AccountStatus, Address, EvmState, EvmStorageSlot, HashMap,
-    B256, KECCAK_EMPTY, U256,
-};
+use revm_primitives::{HashMap, U256};
+use revm_state::{Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
 use std::{hint::black_box, sync::Arc};
 
 #[derive(Debug, Clone)]

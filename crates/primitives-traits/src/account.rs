@@ -3,7 +3,8 @@ use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Bytes, B256, U256};
 use alloy_trie::TrieAccount;
 use derive_more::Deref;
-use revm_primitives::{AccountInfo, Bytecode as RevmBytecode, BytecodeDecodeError};
+use revm_bytecode::{Bytecode as RevmBytecode, BytecodeDecodeError};
+use revm_state::AccountInfo;
 
 #[cfg(any(test, feature = "reth-codec"))]
 /// Identifiers used in [`Compact`](reth_codecs::Compact) encoding of [`Bytecode`].
@@ -105,13 +106,9 @@ impl reth_codecs::Compact for Bytecode {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        use compact_ids::{
-            EIP7702_BYTECODE_ID, EOF_BYTECODE_ID, LEGACY_ANALYZED_BYTECODE_ID,
-            LEGACY_RAW_BYTECODE_ID,
-        };
+        use compact_ids::{EIP7702_BYTECODE_ID, EOF_BYTECODE_ID, LEGACY_ANALYZED_BYTECODE_ID};
 
         let bytecode = match &self.0 {
-            RevmBytecode::LegacyRaw(bytes) => bytes,
             RevmBytecode::LegacyAnalyzed(analyzed) => analyzed.bytecode(),
             RevmBytecode::Eof(eof) => eof.raw(),
             RevmBytecode::Eip7702(eip7702) => eip7702.raw(),
@@ -119,10 +116,6 @@ impl reth_codecs::Compact for Bytecode {
         buf.put_u32(bytecode.len() as u32);
         buf.put_slice(bytecode.as_ref());
         let len = match &self.0 {
-            RevmBytecode::LegacyRaw(_) => {
-                buf.put_u8(LEGACY_RAW_BYTECODE_ID);
-                1
-            }
             // [`REMOVED_BYTECODE_ID`] has been removed.
             RevmBytecode::LegacyAnalyzed(analyzed) => {
                 buf.put_u8(LEGACY_ANALYZED_BYTECODE_ID);
@@ -165,7 +158,7 @@ impl reth_codecs::Compact for Bytecode {
                 RevmBytecode::new_analyzed(
                     bytes,
                     buf.read_u64::<byteorder::BigEndian>().unwrap() as usize,
-                    revm_primitives::JumpTable::from_slice(buf),
+                    revm_bytecode::JumpTable::from_slice(buf),
                 )
             }),
             EOF_BYTECODE_ID | EIP7702_BYTECODE_ID => {
@@ -221,11 +214,10 @@ impl From<Account> for AccountInfo {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use alloy_primitives::{hex_literal::hex, B256, U256};
     use reth_codecs::Compact;
-    use revm_primitives::{JumpTable, LegacyAnalyzedBytecode};
-
-    use super::*;
+    use revm_bytecode::{JumpTable, LegacyAnalyzedBytecode};
 
     #[test]
     fn test_account() {

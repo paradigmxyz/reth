@@ -19,10 +19,12 @@ reth-codecs = { workspace = true, optional = true }
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-genesis.workspace = true
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["k256"] }
 alloy-rlp.workspace = true
 alloy-trie.workspace = true
 revm-primitives.workspace = true
+revm-bytecode.workspace = true
+revm-state.workspace = true
 
 # op
 op-alloy-consensus = { workspace = true, optional = true }
@@ -121,19 +123,21 @@ serde-bincode-compat = [
     "op-alloy-consensus?/serde-bincode-compat",
 ]
 serde = [
-    "dep:serde",
-    "alloy-consensus/serde",
-    "alloy-eips/serde",
-    "alloy-primitives/serde",
-    "bytes/serde",
-    "rand/serde",
-    "reth-codecs?/serde",
-    "revm-primitives/serde",
-    "revm-primitives/serde",
-    "op-alloy-consensus?/serde",
-    "k256/serde",
-    "secp256k1?/serde",
-    "alloy-trie/serde",
+	"dep:serde",
+	"alloy-consensus/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"bytes/serde",
+	"rand/serde",
+	"reth-codecs?/serde",
+	"revm-primitives/serde",
+	"revm-primitives/serde",
+	"op-alloy-consensus?/serde",
+	"k256/serde",
+	"secp256k1?/serde",
+	"alloy-trie/serde",
+	"revm-bytecode/serde",
+	"revm-state/serde"
 ]
 reth-codec = [
     "dep:reth-codecs",
