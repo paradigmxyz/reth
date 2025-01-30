@@ -588,7 +588,7 @@ async fn test_exceed_outgoing_connections() {
     let secret_key = SecretKey::new(&mut rand::thread_rng());
     let peers_config = PeersConfig::default().with_max_outbound(1);
 
-    let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
+    let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(0)
         .disable_discovery()
         .peer_config(peers_config)
