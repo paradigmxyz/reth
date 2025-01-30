@@ -20,7 +20,6 @@ reth-execution-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
-reth-prune-types.workspace = true
 reth-revm.workspace = true
 reth-storage-errors.workspace = true
 
@@ -69,5 +68,4 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-revm/test-utils",
     "revm/test-utils",
-    "reth-prune-types/test-utils",
 ]

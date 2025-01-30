@@ -1326,7 +1326,7 @@ impl PoolTransaction for EthPooledTransaction {
     ///
     /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
     fn max_fee_per_gas(&self) -> u128 {
-        self.transaction.transaction.max_fee_per_gas()
+        self.transaction.transaction().max_fee_per_gas()
     }
 
     fn access_list(&self) -> Option<&AccessList> {
@@ -1337,7 +1337,7 @@ impl PoolTransaction for EthPooledTransaction {
     ///
     /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        self.transaction.transaction.max_priority_fee_per_gas()
+        self.transaction.transaction().max_priority_fee_per_gas()
     }
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
@@ -1375,7 +1375,7 @@ impl PoolTransaction for EthPooledTransaction {
 
     /// Returns a measurement of the heap usage of this type and all its internals.
     fn size(&self) -> usize {
-        self.transaction.transaction.input().len()
+        self.transaction.transaction().input().len()
     }
 
     /// Returns the transaction type
@@ -1404,7 +1404,7 @@ impl EthPoolTransaction for EthPooledTransaction {
     }
 
     fn blob_count(&self) -> usize {
-        match &self.transaction.transaction {
+        match self.transaction.transaction() {
             Transaction::Eip4844(tx) => tx.blob_versioned_hashes.len(),
             _ => 0,
         }
@@ -1437,14 +1437,14 @@ impl EthPoolTransaction for EthPooledTransaction {
         sidecar: &BlobTransactionSidecar,
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
-        match &self.transaction.transaction {
+        match self.transaction.transaction() {
             Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
             _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.tx_type())),
         }
     }
 
     fn authorization_count(&self) -> usize {
-        match &self.transaction.transaction {
+        match self.transaction.transaction() {
             Transaction::Eip7702(tx) => tx.authorization_list.len(),
             _ => 0,
         }

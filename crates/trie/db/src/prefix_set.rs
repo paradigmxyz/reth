@@ -11,7 +11,7 @@ use reth_db_api::{
     transaction::DbTx,
     DatabaseError,
 };
-use reth_primitives::StorageEntry;
+use reth_primitives_traits::StorageEntry;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
     KeyHasher, Nibbles,

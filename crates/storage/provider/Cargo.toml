@@ -73,6 +73,7 @@ reth-chain-state = { workspace = true, features = ["test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 reth-ethereum-engine-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 
 parking_lot.workspace = true
 tempfile.workspace = true
@@ -105,6 +106,7 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-chain-state/test-utils",
     "reth-ethereum-engine-primitives",
+    "reth-ethereum-primitives/test-utils",
     "reth-chainspec/test-utils",
     "reth-evm/test-utils",
     "reth-network-p2p/test-utils",

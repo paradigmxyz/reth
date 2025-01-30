@@ -344,7 +344,7 @@ impl OpEthApiBuilder {
             blocking_task_pool,
             ctx.new_fee_history_cache(),
             ctx.evm_config.clone(),
-            ctx.executor.clone(),
+            Box::new(ctx.executor.clone()),
             ctx.config.proof_permits,
         );
 

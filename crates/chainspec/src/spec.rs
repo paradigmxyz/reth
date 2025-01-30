@@ -413,6 +413,17 @@ impl ChainSpec {
         }
     }
 
+    /// Get the [`BlobParams`] for the given timestamp.
+    ///
+    /// Note: This always return [`BlobParams::cancun`] pre prague.
+    pub fn blob_fee_params_at_timestamp(&self, timestamp: u64) -> BlobParams {
+        if self.is_prague_active_at_timestamp(timestamp) {
+            self.blob_params.prague
+        } else {
+            self.blob_params.cancun
+        }
+    }
+
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> B256 {
         *self.genesis_hash.get_or_init(|| self.genesis_header().hash_slow())
