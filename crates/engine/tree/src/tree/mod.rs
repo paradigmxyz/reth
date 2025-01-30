@@ -44,7 +44,8 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_primitives_traits::{
-    Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, BlockBody, SignedTransaction,
+    Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    SignedTransaction,
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -59,7 +60,7 @@ use reth_trie::{
 };
 use reth_trie_db::DatabaseTrieCursorFactory;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::{EvmState, ResultAndState};
+use revm_primitives::ResultAndState;
 use root::{
     StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootMessage, StateRootTask,
 };
@@ -2402,15 +2403,7 @@ where
                     self.state_root_task_pool.clone(),
                 );
                 let state_root_sender = state_root_task.state_root_message_sender();
-                let mut state_hook = state_root_task.state_hook();
-
-                // Ensure that prewarm tasks don't send proof messages after state hook sender is
-                // dropped
-                let execution_finished = execution_finished.clone();
-                let state_hook = Box::new(move |state: &EvmState| {
-                    execution_finished.store(true, std::sync::atomic::Ordering::SeqCst);
-                    state_hook.on_state(state)
-                }) as Box<dyn OnStateHook>;
+                let state_hook = Box::new(state_root_task.state_hook()) as Box<dyn OnStateHook>;
                 (
                     Some(state_root_task.spawn()),
                     Some(state_root_config),
@@ -2434,9 +2427,12 @@ where
         info!(target: "engine::tree", "Spawning prewarm threads");
 
         // Prewarm transactions
-        for (tx, sender) in block.body().transactions().iter().zip(block.senders()) {
+        for (tx_idx, (tx, sender)) in
+            block.body().transactions().iter().zip(block.senders()).enumerate()
+        {
             let state_root_sender = state_root_sender.clone();
 
+            let start = Instant::now();
             self.prewarm_transaction(
                 block.header().clone(),
                 tx.clone(),
@@ -2446,6 +2442,8 @@ where
                 state_root_sender,
                 execution_finished.clone(),
             )?;
+            let elapsed = start.elapsed();
+            debug!(target: "engine::tree", ?tx_idx, elapsed = ?elapsed, "Spawned transaction prewarm");
         }
 
         drop(state_root_sender);
@@ -2458,6 +2456,10 @@ where
         let output = self.metrics.executor.execute_metered(executor, &block, state_hook)?;
         let execution_time = execution_start.elapsed();
         trace!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
+
+        // Ensure that prewarm tasks don't send proof messages after state hook sender is
+        // dropped
+        execution_finished.store(true, std::sync::atomic::Ordering::SeqCst);
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
