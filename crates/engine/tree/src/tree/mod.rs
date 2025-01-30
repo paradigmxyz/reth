@@ -2448,6 +2448,8 @@ where
             )?;
         }
 
+        drop(state_root_sender);
+
         info!(target: "engine::tree", "Done spawning prewarm threads");
         trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
 

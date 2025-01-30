@@ -254,6 +254,11 @@ impl ProofSequencer {
         consecutive_proofs
     }
 
+    /// Returns the number of pending proofs
+    pub(crate) fn pending_proofs(&self) -> usize {
+        self.pending_proofs.len()
+    }
+
     /// Returns true if we still have pending proofs
     pub(crate) fn has_pending(&self) -> bool {
         !self.pending_proofs.is_empty()
@@ -669,7 +674,7 @@ where
                         self.on_state_update(update, next_sequence);
                     }
                     StateRootMessage::FinishedStateUpdates => {
-                        trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
+                        trace!(target: "engine::root", ?proofs_processed, ?updates_received, pending_proofs=?self.proof_sequencer.pending_proofs(), "processing StateRootMessage::FinishedStateUpdates");
                         updates_finished = true;
 
                         let all_proofs_received = proofs_processed >= updates_received;
@@ -686,7 +691,7 @@ where
                         }
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
-                        trace!(target: "engine::root", "processing StateRootMessage::ProofCalculated");
+                        trace!(target: "engine::root", proofs_processed, pending_proofs=?self.proof_sequencer.pending_proofs(), "processing StateRootMessage::ProofCalculated");
                         let Some(sparse_trie_tx_ref) = sparse_trie_tx.as_ref() else {
                             debug!(
                                 target: "engine::root",
