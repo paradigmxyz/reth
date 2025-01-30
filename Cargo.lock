@@ -7088,7 +7088,6 @@ dependencies = [
 name = "reth-engine-local"
 version = "1.1.5"
 dependencies = [
- "alloy-chains",
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-engine",
