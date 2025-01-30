@@ -97,7 +97,7 @@ impl InvalidTxError for InvalidTransaction {
 
 /// Abstraction over errors that can occur during EVM execution.
 ///
-/// Assumed that errors can occur either because of an invalid transaction, meaning that other
+/// It's assumed that errors can occur either because of an invalid transaction, meaning that other
 /// transaction might still result in successful execution, or because of a general EVM
 /// misconfiguration.
 ///
