@@ -1,5 +1,7 @@
 //! Merkle trie proofs.
 
+use core::ops::{Deref, DerefMut};
+
 use crate::{Nibbles, TrieAccount};
 use alloc::vec::Vec;
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -40,6 +42,24 @@ impl IntoIterator for MultiProofAccountStorageTarget {
     }
 }
 
+impl Deref for MultiProofAccountStorageTarget {
+    type Target = B256HashSet;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::WithAccountProof(set) | Self::OnlyStorageProofs(set) => set,
+        }
+    }
+}
+
+impl DerefMut for MultiProofAccountStorageTarget {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::WithAccountProof(set) | Self::OnlyStorageProofs(set) => set,
+        }
+    }
+}
+
 impl MultiProofAccountStorageTarget {
     /// Returns `true` if the target is fetching both account and storage slot proofs.
     pub const fn is_with_account_proof(&self) -> bool {
@@ -49,37 +69,6 @@ impl MultiProofAccountStorageTarget {
     /// Returns `true` if the target is fetching only storage slot proofs.
     pub const fn is_only_storage_proofs(&self) -> bool {
         matches!(self, Self::OnlyStorageProofs(_))
-    }
-
-    /// Returns `true` if no storage slot proofs are fetched.
-    pub fn is_empty(&self) -> bool {
-        match self {
-            Self::WithAccountProof(set) | Self::OnlyStorageProofs(set) => set.is_empty(),
-        }
-    }
-
-    /// Returns the number of storage slot proofs.
-    pub fn len(&self) -> usize {
-        match self {
-            Self::WithAccountProof(set) | Self::OnlyStorageProofs(set) => set.len(),
-        }
-    }
-
-    /// Returns `true` if the storage slot is included.
-    pub fn contains(&self, value: &B256) -> bool {
-        match self {
-            Self::WithAccountProof(set) | Self::OnlyStorageProofs(set) => set.contains(value),
-        }
-    }
-
-    /// Extends the target with another target.
-    pub fn extend(&mut self, other: Self) {
-        match (self, other) {
-            (
-                Self::WithAccountProof(a) | Self::OnlyStorageProofs(a),
-                Self::WithAccountProof(b) | Self::OnlyStorageProofs(b),
-            ) => a.extend(b),
-        }
     }
 
     /// Converts the target into [`Self::WithAccountProof`].
@@ -96,13 +85,6 @@ impl MultiProofAccountStorageTarget {
             *self = Self::OnlyStorageProofs(core::mem::take(set));
         }
         self
-    }
-
-    /// Converts the target into a [`B256HashSet`] set of storage slots.
-    pub fn into_slots(self) -> B256HashSet {
-        match self {
-            Self::WithAccountProof(set) | Self::OnlyStorageProofs(set) => set,
-        }
     }
 }
 

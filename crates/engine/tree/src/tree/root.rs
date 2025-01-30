@@ -886,7 +886,7 @@ fn get_proof_targets(
         let mut changed_slots = storage
             .storage
             .keys()
-            .filter(|slot| !fetched.is_some_and(|f| f.contains(slot)))
+            .filter(|slot| !fetched.is_some_and(|f| f.contains(*slot)))
             .copied()
             .peekable();
 
