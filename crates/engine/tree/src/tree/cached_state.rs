@@ -416,9 +416,9 @@ impl Default for ProviderCacheBuilder {
         //
         // See: https://github.com/moka-rs/moka/wiki#admission-and-eviction-policies
         Self {
-            code_cache_size: 1000000,
-            storage_cache_size: 100000000,
-            account_cache_size: 10000000,
+            code_cache_size: 1_000_000,
+            storage_cache_size: 10_000_000,
+            account_cache_size: 10_000_000,
         }
     }
 }
@@ -482,6 +482,6 @@ impl AccountStorageCache {
 
 impl Default for AccountStorageCache {
     fn default() -> Self {
-        Self::new(1000)
+        Self::new(10000)
     }
 }
