@@ -528,7 +528,7 @@ impl OpGenesisInfo {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use alloc::sync::Arc;
 
     use alloy_genesis::{ChainConfig, Genesis};
     use alloy_primitives::{b256, hex, Bytes};
