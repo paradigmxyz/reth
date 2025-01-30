@@ -7,7 +7,6 @@ use crate::{
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Eip658Value, Receipt, Transaction as _};
 use alloy_eips::eip7685::Requests;
-use core::fmt::Display;
 use op_alloy_consensus::OpDepositReceipt;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
@@ -15,11 +14,10 @@ use reth_evm::{
     execute::{
         balance_increment_state, BasicBlockExecutorProvider, BlockExecutionError,
         BlockExecutionStrategy, BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
-        ProviderError,
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvmFor, Evm,
+    ConfigureEvmFor, Database, Evm,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::validate_block_post_execution;
@@ -29,7 +27,7 @@ use reth_optimism_primitives::{
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
-use reth_revm::{Database, State};
+use reth_revm::State;
 use revm_primitives::{db::DatabaseCommit, ResultAndState};
 use tracing::trace;
 
@@ -76,12 +74,11 @@ where
     EvmConfig: ConfigureEvmFor<N> + Clone + Unpin + Sync + Send + 'static,
 {
     type Primitives = N;
-    type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
-        OpExecutionStrategy<DB, N, EvmConfig>;
+    type Strategy<DB: Database> = OpExecutionStrategy<DB, N, EvmConfig>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database,
     {
         let state =
             State::builder().with_database(db).with_bundle_update().without_state_clear().build();
@@ -131,7 +128,7 @@ where
 
 impl<DB, N, EvmConfig> BlockExecutionStrategy for OpExecutionStrategy<DB, N, EvmConfig>
 where
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: Database,
     N: NodePrimitives<
         BlockHeader = alloy_consensus::Header,
         SignedTx: OpTransaction,
@@ -214,11 +211,10 @@ where
 
             // Execute transaction.
             let result_and_state = evm.transact(tx_env).map_err(move |err| {
-                let new_err = err.map_db_err(|e| e.into());
                 // Ensure hash is calculated for error log, if not already done
                 BlockValidationError::EVM {
                     hash: transaction.recalculate_hash(),
-                    error: Box::new(new_err),
+                    error: Box::new(err),
                 }
             })?;
 

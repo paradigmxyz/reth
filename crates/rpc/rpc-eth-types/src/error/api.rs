@@ -1,7 +1,8 @@
 //! Helper traits to wrap generic l1 errors, in network specific error type configured in
 //! `reth_rpc_eth_api::EthApiTypes`.
 
-use revm_primitives::EVMError;
+use reth_errors::ProviderError;
+use reth_evm::ConfigureEvm;
 
 use crate::EthApiError;
 
@@ -79,21 +80,16 @@ impl AsEthApiError for EthApiError {
 }
 
 /// Helper trait to convert from revm errors.
-pub trait FromEvmError: From<EthApiError> {
-    /// Converts from a revm error.
-    fn from_evm_err<E>(err: EVMError<E>) -> Self
-    where
-        EthApiError: From<E>;
+pub trait FromEvmError<Evm: ConfigureEvm>: From<Evm::EvmError<ProviderError>> {
+    /// Converts from EVM error to this type.
+    fn from_evm_err(err: Evm::EvmError<ProviderError>) -> Self {
+        err.into()
+    }
 }
 
-impl<T> FromEvmError for T
+impl<T, Evm> FromEvmError<Evm> for T
 where
-    T: From<EthApiError>,
+    T: From<Evm::EvmError<ProviderError>>,
+    Evm: ConfigureEvm,
 {
-    fn from_evm_err<E>(err: EVMError<E>) -> Self
-    where
-        EthApiError: From<E>,
-    {
-        err.into_eth_err()
-    }
 }

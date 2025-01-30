@@ -6,7 +6,8 @@ use alloy_primitives::U256;
 use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest, BlockId};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
-use reth_evm::{env::EvmEnv, ConfigureEvmEnv, TransactionEnv};
+use reth_errors::ProviderError;
+use reth_evm::{env::EvmEnv, ConfigureEvmEnv, Database, TransactionEnv};
 use reth_provider::StateProvider;
 use reth_revm::{
     database::StateProviderDatabase,
@@ -18,7 +19,7 @@ use reth_rpc_eth_types::{
     EthApiError, RevertError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
-use revm_primitives::{db::Database, TxKind};
+use revm_primitives::TxKind;
 use tracing::trace;
 
 /// Gas execution estimates
@@ -286,7 +287,7 @@ pub trait EstimateCall: Call {
         db: &mut DB,
     ) -> Self::Error
     where
-        DB: Database,
+        DB: Database<Error = ProviderError>,
         EthApiError: From<DB::Error>,
     {
         let req_gas_limit = tx_env.gas_limit();
