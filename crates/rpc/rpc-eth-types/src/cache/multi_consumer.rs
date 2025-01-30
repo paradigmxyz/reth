@@ -107,6 +107,12 @@ where
         }
     }
 
+    /// Shrinks the capacity of the queue with a lower limit.
+    #[inline]
+    pub fn shrink_to(&mut self, min_capacity: usize) {
+        self.queued.shrink_to(min_capacity);
+    }
+
     /// Update metrics for the inner cache.
     #[inline]
     pub fn update_cached_metrics(&self) {
