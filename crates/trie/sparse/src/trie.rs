@@ -612,7 +612,6 @@ impl<P> RevealedSparseTrie<P> {
                 SparseNode::Empty | SparseNode::Hash(_) => {}
                 SparseNode::Leaf { key: _, hash } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
-                        new_prefix_set.insert(path);
                         continue
                     }
 
@@ -620,26 +619,28 @@ impl<P> RevealedSparseTrie<P> {
                 }
                 SparseNode::Extension { key, hash, store_in_db_trie: _ } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
-                        new_prefix_set.insert(path);
                         continue
                     }
 
                     if level >= depth {
                         targets.push(path);
                     } else {
+                        new_prefix_set.insert(path.clone());
+
                         path.extend_from_slice_unchecked(key);
                         paths.push((path, level + 1));
                     }
                 }
                 SparseNode::Branch { state_mask, hash, store_in_db_trie: _ } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
-                        new_prefix_set.insert(path);
                         continue
                     }
 
                     if level >= depth {
                         targets.push(path);
                     } else {
+                        new_prefix_set.insert(path.clone());
+
                         for bit in CHILD_INDEX_RANGE.rev() {
                             if state_mask.is_bit_set(bit) {
                                 let mut child_path = path.clone();
@@ -2536,39 +2537,62 @@ mod tests {
 
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 0),
-            vec![Nibbles::default()]
+            (PrefixSetMut::default(), vec![Nibbles::default()])
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 1),
-            vec![Nibbles::from_nibbles_unchecked([0x5])]
+            ([Nibbles::default()].into(), vec![Nibbles::from_nibbles_unchecked([0x5])])
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 2),
-            vec![
-                Nibbles::from_nibbles_unchecked([0x5, 0x0]),
-                Nibbles::from_nibbles_unchecked([0x5, 0x2]),
-                Nibbles::from_nibbles_unchecked([0x5, 0x3])
-            ]
+            (
+                [Nibbles::default(), Nibbles::from_nibbles_unchecked([0x5])].into(),
+                vec![
+                    Nibbles::from_nibbles_unchecked([0x5, 0x0]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x2]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3])
+                ]
+            )
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 3),
-            vec![
-                Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
-                Nibbles::from_nibbles_unchecked([0x5, 0x2]),
-                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
-                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3])
-            ]
+            (
+                [
+                    Nibbles::default(),
+                    Nibbles::from_nibbles_unchecked([0x5]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x0]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3])
+                ]
+                .into(),
+                vec![
+                    Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x2]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3])
+                ]
+            )
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 4),
-            vec![
-                Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1]),
-                Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3]),
-                Nibbles::from_nibbles_unchecked([0x5, 0x2]),
-                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
-                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x0]),
-                Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x2])
-            ]
+            (
+                [
+                    Nibbles::default(),
+                    Nibbles::from_nibbles_unchecked([0x5]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x0]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3])
+                ]
+                .into(),
+                vec![
+                    Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x2]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x0]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x2])
+                ]
+            )
         );
     }
 
