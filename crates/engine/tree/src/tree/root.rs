@@ -689,26 +689,47 @@ where
                         self.metrics
                             .proof_calculation_duration_histogram
                             .record(proof_calculated.elapsed);
-                        self.metrics.proof_calculation_with_account_targets_histogram.record(
-                            proof_calculated
-                                .update
-                                .targets
-                                .values()
-                                .filter(|slots| slots.is_with_account())
-                                .count() as f64,
-                        );
-                        self.metrics.proof_calculation_only_storage_targets_histogram.record(
-                            proof_calculated
-                                .update
-                                .targets
-                                .values()
-                                .filter(|slots| slots.is_only_storage())
-                                .count() as f64,
-                        );
+                        let with_account_accounts = proof_calculated
+                            .update
+                            .targets
+                            .values()
+                            .filter(|slots| slots.is_with_account())
+                            .count();
+                        let with_account_slots = proof_calculated
+                            .update
+                            .targets
+                            .values()
+                            .filter(|slots| slots.is_with_account())
+                            .map(|slots| slots.len())
+                            .sum::<usize>();
+                        self.metrics
+                            .proof_calculation_with_account_targets_histogram
+                            .record(with_account_accounts as f64);
+
+                        let only_storage_accounts = proof_calculated
+                            .update
+                            .targets
+                            .values()
+                            .filter(|slots| slots.is_only_storage())
+                            .count();
+                        let only_storage_slots = proof_calculated
+                            .update
+                            .targets
+                            .values()
+                            .filter(|slots| slots.is_only_storage())
+                            .map(|slots| slots.len())
+                            .sum::<usize>();
+                        self.metrics
+                            .proof_calculation_only_storage_targets_histogram
+                            .record(only_storage_accounts as f64);
 
                         debug!(
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
+                            ?with_account_accounts,
+                            ?with_account_slots,
+                            ?only_storage_accounts,
+                            ?only_storage_slots,
                             total_proofs = proofs_processed,
                             "Processing calculated proof"
                         );
