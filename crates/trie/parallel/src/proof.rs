@@ -120,7 +120,7 @@ where
 
         let storage_root_targets = StorageRootTargets::new(
             prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
-            prefix_sets.storage_prefix_sets.clone(),
+            prefix_sets.storage_prefix_sets,
         );
         let storage_root_targets_len = storage_root_targets.len();
 
@@ -133,10 +133,8 @@ where
         // Pre-calculate storage roots for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
-        let mut storage_proofs = B256HashMap::with_capacity_and_hasher(
-            storage_root_targets.len() + only_storage_targets.len(),
-            Default::default(),
-        );
+        let mut storage_proofs =
+            B256HashMap::with_capacity_and_hasher(storage_root_targets.len(), Default::default());
 
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
@@ -144,8 +142,8 @@ where
             let view = self.view.clone();
             let target_slots = with_account_targets
                 .get(&hashed_address)
+                .or_else(|| only_storage_targets.get(&hashed_address))
                 .cloned()
-                .or_else(|| only_storage_targets.get(&hashed_address).cloned())
                 .unwrap_or_default();
             let trie_nodes_sorted = self.nodes_sorted.clone();
             let hashed_state_sorted = self.state_sorted.clone();
@@ -318,9 +316,11 @@ where
         }
         let _ = hash_builder.root();
 
-        for (hashed_address, rx) in storage_proofs {
+        for hashed_address in only_storage_targets.keys() {
+            let rx = storage_proofs.remove(hashed_address).unwrap();
+
             storages.insert(
-                hashed_address,
+                *hashed_address,
                 rx.recv().map_err(|_| {
                     ParallelStateRootError::StorageRoot(StorageRootError::Database(
                         DatabaseError::Other(format!("channel closed for {hashed_address}")),
