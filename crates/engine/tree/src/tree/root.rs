@@ -447,6 +447,8 @@ struct StateRootTaskMetrics {
 
     /// Histogram of sparse trie update durations.
     pub sparse_trie_update_duration_histogram: Histogram,
+    /// Histogram of sparse trie final update durations.
+    pub sparse_trie_final_update_duration_histogram: Histogram,
 
     /// Histogram of state updates received.
     pub state_updates_received_histogram: Histogram,
@@ -835,7 +837,12 @@ where
     }
 
     debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
+
+    let start = Instant::now();
     let root = trie.root().expect("sparse trie should be revealed");
+    let elapsed = start.elapsed();
+    metrics.sparse_trie_final_update_duration_histogram.record(elapsed);
+
     let trie_updates = trie.take_trie_updates().expect("retention must be enabled");
     Ok((root, trie_updates, num_iterations))
 }
