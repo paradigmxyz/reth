@@ -1,10 +1,10 @@
 //! Helper traits to wrap generic l1 errors, in network specific error type configured in
 //! `reth_rpc_eth_api::EthApiTypes`.
 
+use crate::{EthApiError, RpcInvalidTransactionError};
 use reth_errors::ProviderError;
 use reth_evm::ConfigureEvm;
-
-use crate::EthApiError;
+use revm_primitives::HaltReason;
 
 /// Helper trait to wrap core [`EthApiError`].
 pub trait FromEthApiError: From<EthApiError> {
@@ -80,7 +80,9 @@ impl AsEthApiError for EthApiError {
 }
 
 /// Helper trait to convert from revm errors.
-pub trait FromEvmError<Evm: ConfigureEvm>: From<Evm::EvmError<ProviderError>> {
+pub trait FromEvmError<Evm: ConfigureEvm>:
+    From<Evm::EvmError<ProviderError>> + FromEvmHalt
+{
     /// Converts from EVM error to this type.
     fn from_evm_err(err: Evm::EvmError<ProviderError>) -> Self {
         err.into()
@@ -89,7 +91,19 @@ pub trait FromEvmError<Evm: ConfigureEvm>: From<Evm::EvmError<ProviderError>> {
 
 impl<T, Evm> FromEvmError<Evm> for T
 where
-    T: From<Evm::EvmError<ProviderError>>,
+    T: From<Evm::EvmError<ProviderError>> + FromEvmHalt,
     Evm: ConfigureEvm,
 {
+}
+
+/// Helper trait to convert from revm errors.
+pub trait FromEvmHalt<Halt = HaltReason> {
+    /// Converts from EVM halt to this type.
+    fn from_evm_halt(halt: Halt, gas_limit: u64) -> Self;
+}
+
+impl FromEvmHalt for EthApiError {
+    fn from_evm_halt(halt: HaltReason, gas_limit: u64) -> Self {
+        RpcInvalidTransactionError::halt(halt, gas_limit).into()
+    }
 }
