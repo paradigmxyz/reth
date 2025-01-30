@@ -2542,44 +2542,52 @@ mod tests {
 
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 0),
-            (PrefixSetMut::default(), vec![Nibbles::default()])
+            (vec![Nibbles::default()], PrefixSetMut::default())
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 1),
-            ([Nibbles::default()].into(), vec![Nibbles::from_nibbles_unchecked([0x5])])
+            (vec![Nibbles::from_nibbles_unchecked([0x5])], [Nibbles::default()].into())
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 2),
             (
-                [Nibbles::default(), Nibbles::from_nibbles_unchecked([0x5])].into(),
                 vec![
                     Nibbles::from_nibbles_unchecked([0x5, 0x0]),
                     Nibbles::from_nibbles_unchecked([0x5, 0x2]),
                     Nibbles::from_nibbles_unchecked([0x5, 0x3])
-                ]
+                ],
+                [Nibbles::default(), Nibbles::from_nibbles_unchecked([0x5])].into()
             )
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 3),
             (
+                vec![
+                    Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x2]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3])
+                ],
                 [
                     Nibbles::default(),
                     Nibbles::from_nibbles_unchecked([0x5]),
                     Nibbles::from_nibbles_unchecked([0x5, 0x0]),
                     Nibbles::from_nibbles_unchecked([0x5, 0x3])
                 ]
-                .into(),
-                vec![
-                    Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x2]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3])
-                ]
+                .into()
             )
         );
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 4),
             (
+                vec![
+                    Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x2]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x0]),
+                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x2])
+                ],
                 [
                     Nibbles::default(),
                     Nibbles::from_nibbles_unchecked([0x5]),
@@ -2588,15 +2596,7 @@ mod tests {
                     Nibbles::from_nibbles_unchecked([0x5, 0x3]),
                     Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3])
                 ]
-                .into(),
-                vec![
-                    Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x1]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x0, 0x2, 0x3, 0x3]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x2]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x1]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x0]),
-                    Nibbles::from_nibbles_unchecked([0x5, 0x3, 0x3, 0x2])
-                ]
+                .into()
             )
         );
     }
