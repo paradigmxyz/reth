@@ -1332,12 +1332,22 @@ where
             FromEngine::Request(request) => {
                 match request {
                     EngineApiRequest::InsertExecutedBlock(block) => {
-                        debug!(target: "engine::tree", block=?block.recovered_block().num_hash(), "inserting already executed block");
+                        let block_num_hash = block.recovered_block().num_hash();
+                        debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
                         let now = Instant::now();
+
+                        // if the parent is the canonical head, we can insert the block as the
+                        // pending block
+                        if self.state.tree_state.canonical_block_hash() ==
+                            block.recovered_block().parent_hash()
+                        {
+                            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
+                            self.canonical_in_memory_state.set_pending_block(block.clone());
+                        }
+
                         let sealed_block = Arc::new(block.sealed_block().clone());
                         self.state.tree_state.insert_executed(block);
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
-
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             BeaconConsensusEngineEvent::CanonicalBlockAdded(
                                 sealed_block,
@@ -2474,10 +2484,10 @@ where
             trie: Arc::new(trie_output),
         };
 
+        // if the parent is the canonical head, we can insert the block as the pending block
         if self.state.tree_state.canonical_block_hash() == executed.recovered_block().parent_hash()
         {
             debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-            // if the parent is the canonical head, we can insert the block as the pending block
             self.canonical_in_memory_state.set_pending_block(executed.clone());
         }
 
