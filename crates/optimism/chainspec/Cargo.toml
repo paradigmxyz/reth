@@ -67,4 +67,5 @@ std = [
     "thiserror/std",
     "serde_json/std",
     "op-alloy-consensus/std",
+    "tracing/std",
 ]

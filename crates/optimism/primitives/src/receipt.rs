@@ -229,7 +229,7 @@ impl DepositReceipt for OpReceipt {
 #[cfg(feature = "reth-codec")]
 mod compact {
     use super::*;
-    use alloc::borrow::Cow;
+    use alloc::{borrow::Cow, vec::Vec};
     use reth_codecs::Compact;
 
     #[derive(reth_codecs::CompactZstd)]
@@ -322,6 +322,7 @@ mod compact {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec::Vec;
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{address, b256, bytes, hex_literal::hex, Bytes};
     use alloy_rlp::Encodable;
