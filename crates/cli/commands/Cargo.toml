@@ -48,6 +48,7 @@ reth-static-file.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
 reth-trie-common = { workspace = true, optional = true }
+reth-primitives-traits.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -109,4 +110,5 @@ arbitrary = [
     "reth-stages-types?/arbitrary",
     "reth-trie-common?/arbitrary",
     "alloy-consensus/arbitrary",
+    "reth-primitives-traits/arbitrary",
 ]

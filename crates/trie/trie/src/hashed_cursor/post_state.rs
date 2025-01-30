@@ -4,7 +4,7 @@ use crate::{
     HashedStorageSorted,
 };
 use alloy_primitives::{map::B256HashSet, B256, U256};
-use reth_primitives::Account;
+use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 
 /// The hashed cursor factory for the post state.

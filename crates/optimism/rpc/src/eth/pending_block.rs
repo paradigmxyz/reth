@@ -21,7 +21,7 @@ use reth_provider::{
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
-    EthApiTypes, FromEthApiError, RpcNodeCore,
+    EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -34,6 +34,7 @@ where
             NetworkTypes: Network<
                 HeaderResponse = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
             >,
+            Error: FromEvmError<Self::Evm>,
         >,
     N: RpcNodeCore<
         Provider: BlockReaderIdExt<

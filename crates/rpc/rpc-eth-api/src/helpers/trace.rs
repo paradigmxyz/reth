@@ -7,7 +7,10 @@ use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
-use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Evm};
+use reth_errors::ProviderError;
+use reth_evm::{
+    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Database, Evm,
+};
 use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
@@ -16,7 +19,7 @@ use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     EthApiError,
 };
-use revm::{db::CacheDB, Database, DatabaseCommit, GetInspector, Inspector};
+use revm::{db::CacheDB, DatabaseCommit, GetInspector, Inspector};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use revm_primitives::{EvmState, ExecutionResult, ResultAndState};
 use std::{fmt::Display, sync::Arc};
@@ -29,6 +32,7 @@ pub trait Trace:
         Header = ProviderHeader<Self::Provider>,
         Transaction = ProviderTx<Self::Provider>,
     >,
+    Error: FromEvmError<Self::Evm>,
 >
 {
     /// Executes the [`EvmEnv`] against the given [Database] without committing state
@@ -48,8 +52,7 @@ pub trait Trace:
         Self::Error,
     >
     where
-        DB: Database,
-        EthApiError: From<DB::Error>,
+        DB: Database<Error = ProviderError>,
         I: GetInspector<DB>,
     {
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env.clone(), inspector);

@@ -87,7 +87,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
         let mut total_decoded_blocks = 0;
         let mut total_decoded_txns = 0;
 
-        while let Some(file_client) = reader.next_chunk::<FileClient<_>>().await? {
+        let mut sealed_header = provider_factory
+            .sealed_header(provider_factory.last_block_number()?)?
+            .expect("should have genesis");
+
+        while let Some(file_client) =
+            reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?
+        {
             // create a new FileClient from chunk read from file
             info!(target: "reth::cli",
                 "Importing chain file chunk"
@@ -125,6 +131,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
                 res = pipeline.run() => res?,
                 _ = tokio::signal::ctrl_c() => {},
             }
+
+            sealed_header = provider_factory
+                .sealed_header(provider_factory.last_block_number()?)?
+                .expect("should have genesis");
         }
 
         let provider = provider_factory.provider()?;

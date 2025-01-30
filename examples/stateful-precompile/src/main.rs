@@ -14,15 +14,15 @@ use reth::{
         inspector_handle_register,
         precompile::{Precompile, PrecompileSpecId},
         primitives::{
-            CfgEnvWithHandlerCfg, Env, HandlerCfg, PrecompileResult, SpecId, StatefulPrecompileMut,
-            TxEnv,
+            CfgEnvWithHandlerCfg, EVMError, Env, HandlerCfg, PrecompileResult, SpecId,
+            StatefulPrecompileMut, TxEnv,
         },
-        ContextPrecompile, ContextPrecompiles, Database, EvmBuilder, GetInspector,
+        ContextPrecompile, ContextPrecompiles, EvmBuilder, GetInspector,
     },
     tasks::TaskManager,
 };
 use reth_chainspec::{Chain, ChainSpec};
-use reth_evm::env::EvmEnv;
+use reth_evm::{env::EvmEnv, Database};
 use reth_node_api::{ConfigureEvm, ConfigureEvmEnv, FullNodeTypes, NodeTypes};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
@@ -173,6 +173,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
 
 impl ConfigureEvm for MyEvmConfig {
     type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
+    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
 
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
