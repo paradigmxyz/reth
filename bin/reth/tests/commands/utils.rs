@@ -50,7 +50,7 @@ pub fn init_logs() -> eyre::Result<Option<FileWorkerGuard>> {
     let mut tracer = RethTracer::new();
     let stdout = LayerInfo::new(
         LogFormat::Terminal,
-        "trace".to_string(),
+        "info".to_string(),
         String::new(),
         Some("always".to_string()),
     );
