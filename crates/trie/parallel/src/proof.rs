@@ -96,8 +96,8 @@ where
             B256HashMap<B256HashSet>,
             B256HashMap<B256HashSet>,
         ) = targets.into_iter().partition_map(|(key, target)| match target {
-            MultiProofAccountTarget::WithAccount(hash_set) => Either::Left((key, hash_set)),
-            MultiProofAccountTarget::OnlyStorage(hash_set) => Either::Right((key, hash_set)),
+            MultiProofAccountTarget::WithAccount(slots) => Either::Left((key, slots)),
+            MultiProofAccountTarget::OnlyStorage(slots) => Either::Right((key, slots)),
         });
 
         // Extend prefix sets with targets

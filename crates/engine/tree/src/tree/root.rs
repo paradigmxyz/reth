@@ -440,10 +440,10 @@ where
 struct StateRootTaskMetrics {
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
-    /// Histogram of proof calculation account targets.
-    pub proof_calculation_account_targets_histogram: Histogram,
-    /// Histogram of proof calculation storage targets.
-    pub proof_calculation_storage_targets_histogram: Histogram,
+    /// Histogram of proof calculation targets with a ccounts.
+    pub proof_calculation_with_account_targets_histogram: Histogram,
+    /// Histogram of proof calculation targets with only storage slots.
+    pub proof_calculation_only_storage_targets_histogram: Histogram,
 
     /// Histogram of sparse trie update durations.
     pub sparse_trie_update_duration_histogram: Histogram,
@@ -689,16 +689,21 @@ where
                         self.metrics
                             .proof_calculation_duration_histogram
                             .record(proof_calculated.elapsed);
-                        self.metrics
-                            .proof_calculation_account_targets_histogram
-                            .record(proof_calculated.update.targets.len() as f64);
-                        self.metrics.proof_calculation_storage_targets_histogram.record(
+                        self.metrics.proof_calculation_with_account_targets_histogram.record(
                             proof_calculated
                                 .update
                                 .targets
                                 .values()
-                                .map(|targets| targets.len() as f64)
-                                .sum::<f64>(),
+                                .filter(|slots| slots.is_with_account())
+                                .count() as f64,
+                        );
+                        self.metrics.proof_calculation_only_storage_targets_histogram.record(
+                            proof_calculated
+                                .update
+                                .targets
+                                .values()
+                                .filter(|slots| slots.is_only_storage())
+                                .count() as f64,
                         );
 
                         debug!(

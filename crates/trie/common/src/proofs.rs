@@ -42,6 +42,10 @@ impl MultiProofAccountTarget {
         matches!(self, Self::WithAccount(_))
     }
 
+    pub const fn is_only_storage(&self) -> bool {
+        matches!(self, Self::OnlyStorage(_))
+    }
+
     pub fn is_empty(&self) -> bool {
         match self {
             Self::WithAccount(set) | Self::OnlyStorage(set) => set.is_empty(),
