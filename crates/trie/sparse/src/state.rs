@@ -565,7 +565,9 @@ mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_primitives_traits::Account;
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, EMPTY_ROOT_HASH};
-    use reth_trie_common::{proof::ProofRetainer, StorageMultiProof, TrieMask};
+    use reth_trie_common::{
+        proof::ProofRetainer, MultiProofAccountTarget, StorageMultiProof, TrieMask,
+    };
 
     #[test]
     fn validate_root_node_first_node_not_root() {
@@ -684,8 +686,14 @@ mod tests {
         sparse
             .reveal_multiproof(
                 HashMap::from_iter([
-                    (address_1, HashSet::from_iter([slot_1, slot_2])),
-                    (address_2, HashSet::from_iter([slot_1, slot_2])),
+                    (
+                        address_1,
+                        MultiProofAccountTarget::WithAccount(HashSet::from_iter([slot_1, slot_2])),
+                    ),
+                    (
+                        address_2,
+                        MultiProofAccountTarget::WithAccount(HashSet::from_iter([slot_1, slot_2])),
+                    ),
                 ]),
                 MultiProof {
                     account_subtree: proof_nodes,

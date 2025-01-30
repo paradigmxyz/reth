@@ -18,7 +18,78 @@ use itertools::Itertools;
 use reth_primitives_traits::Account;
 
 /// Proof targets map.
-pub type MultiProofTargets = B256HashMap<B256HashSet>;
+pub type MultiProofTargets = B256HashMap<MultiProofAccountTarget>;
+
+#[derive(Debug, Clone)]
+pub enum MultiProofAccountTarget {
+    WithAccount(B256HashSet),
+    OnlyStorage(B256HashSet),
+}
+
+impl IntoIterator for MultiProofAccountTarget {
+    type Item = B256;
+    type IntoIter = alloy_primitives::map::hash_set::IntoIter<B256>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            Self::WithAccount(set) | Self::OnlyStorage(set) => set.into_iter(),
+        }
+    }
+}
+
+impl MultiProofAccountTarget {
+    pub const fn is_with_account(&self) -> bool {
+        matches!(self, Self::WithAccount(_))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::WithAccount(set) | Self::OnlyStorage(set) => set.is_empty(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        match self {
+            Self::WithAccount(set) | Self::OnlyStorage(set) => set.len(),
+        }
+    }
+
+    pub fn contains(&self, value: &B256) -> bool {
+        match self {
+            Self::WithAccount(set) | Self::OnlyStorage(set) => set.contains(value),
+        }
+    }
+
+    pub fn extend(&mut self, other: Self) {
+        match (self, other) {
+            (
+                Self::WithAccount(a) | Self::OnlyStorage(a),
+                Self::WithAccount(b) | Self::OnlyStorage(b),
+            ) => a.extend(b),
+        }
+    }
+
+    pub fn into_with_account(self) -> Self {
+        match self {
+            Self::WithAccount(set) | Self::OnlyStorage(set) => Self::WithAccount(set),
+        }
+    }
+
+    pub fn into_only_storage(&mut self) -> &mut Self {
+        *self = match self {
+            Self::OnlyStorage(set) | Self::WithAccount(set) => {
+                Self::OnlyStorage(std::mem::take(set))
+            }
+        };
+        self
+    }
+
+    pub fn into_slots(self) -> B256HashSet {
+        match self {
+            Self::WithAccount(set) | Self::OnlyStorage(set) => set,
+        }
+    }
+}
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes

@@ -1,6 +1,6 @@
 use crate::{root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets};
 use alloy_primitives::{
-    map::{B256HashMap, HashMap},
+    map::{B256HashMap, B256HashSet, HashMap},
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
@@ -19,8 +19,8 @@ use reth_trie::{
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
-    HashBuilder, HashedPostStateSorted, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    HashBuilder, HashedPostStateSorted, MultiProof, MultiProofAccountTarget, MultiProofTargets,
+    Nibbles, StorageMultiProof, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -92,11 +92,19 @@ where
     ) -> Result<MultiProof, ParallelStateRootError> {
         let mut tracker = ParallelTrieTracker::default();
 
+        let account_targets = targets
+            .iter()
+            .filter(|(_, target)| target.is_with_account())
+            .map(|(key, target)| (*key, target.clone().into_slots()))
+            .collect::<B256HashMap<B256HashSet>>();
+
         // Extend prefix sets with targets
         let mut prefix_sets = (*self.prefix_sets).clone();
         prefix_sets.extend(TriePrefixSetsMut {
-            account_prefix_set: PrefixSetMut::from(targets.keys().copied().map(Nibbles::unpack)),
-            storage_prefix_sets: targets
+            account_prefix_set: PrefixSetMut::from(
+                account_targets.keys().copied().map(Nibbles::unpack),
+            ),
+            storage_prefix_sets: account_targets
                 .iter()
                 .filter(|&(_hashed_address, slots)| (!slots.is_empty()))
                 .map(|(hashed_address, slots)| {
@@ -129,7 +137,7 @@ where
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
             let view = self.view.clone();
-            let target_slots = targets.get(&hashed_address).cloned().unwrap_or_default();
+            let target_slots = account_targets.get(&hashed_address).cloned().unwrap_or_default();
             let trie_nodes_sorted = self.nodes_sorted.clone();
             let hashed_state_sorted = self.state_sorted.clone();
             let collect_masks = self.collect_branch_node_masks;
@@ -269,7 +277,7 @@ where
                             )
                             .with_prefix_set_mut(Default::default())
                             .storage_multiproof(
-                                targets.get(&hashed_address).cloned().unwrap_or_default(),
+                                account_targets.get(&hashed_address).cloned().unwrap_or_default(),
                             )
                             .map_err(|e| {
                                 ParallelStateRootError::StorageRoot(StorageRootError::Database(
@@ -294,6 +302,26 @@ where
             }
         }
         let _ = hash_builder.root();
+
+        for (hashed_address, account_target) in targets {
+            if let MultiProofAccountTarget::OnlyStorage(slots) = account_target {
+                let storage_multiproof = StorageProof::new_hashed(
+                    trie_cursor_factory.clone(),
+                    hashed_cursor_factory.clone(),
+                    hashed_address,
+                )
+                .with_prefix_set_mut(Default::default())
+                .with_branch_node_masks(self.collect_branch_node_masks)
+                .storage_multiproof(slots)
+                .map_err(|e| {
+                    ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                        DatabaseError::Other(e.to_string()),
+                    ))
+                })?;
+
+                storages.insert(hashed_address, storage_multiproof);
+            }
+        }
 
         let account_subtree = hash_builder.take_proof_nodes();
         let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
@@ -384,7 +412,7 @@ mod tests {
             }
 
             if !target_slots.is_empty() {
-                targets.insert(hashed_address, target_slots);
+                targets.insert(hashed_address, MultiProofAccountTarget::WithAccount(target_slots));
             }
         }
 
