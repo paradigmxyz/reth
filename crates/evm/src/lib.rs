@@ -54,9 +54,12 @@ pub trait Evm {
     type DB;
     /// Transaction environment
     type Tx;
-    /// Error type.
+    /// Error type returned by EVM. Contains either errors related to invalid transactions or
+    /// internal irrecoverable execution errors.
     type Error;
-    /// Halt reason.
+    /// Halt reason. Enum over all possible reasons for halting the execution. When execution halts,
+    /// it means that transaction is valid, however, it's execution was interrupted (e.g because of
+    /// running out of gas or overflowing stack).
     type HaltReason;
 
     /// Reference to [`BlockEnv`].
@@ -101,10 +104,10 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
         HaltReason = Self::HaltReason,
     >;
 
-    /// The error type returned by the EVM.
+    /// The error type returned by the EVM. See [`Evm::Error`].
     type EvmError<DBError: core::error::Error + Send + Sync + 'static>: EvmError;
 
-    /// Halt reason type returned by the EVM.
+    /// Halt reason type returned by the EVM. See [`Evm::HaltReason`].
     type HaltReason;
 
     /// Returns a new EVM with the given database configured with the given environment settings,
