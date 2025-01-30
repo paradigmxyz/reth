@@ -2677,8 +2677,18 @@ where
 
             let mut targets = MultiProofTargets::default();
             for (addr, account) in state {
+                // if account was not touched, do not fetch for it
+                if !account.is_touched() {
+                    continue
+                }
+
                 let mut storage_set = B256Set::default();
-                for (key, _) in account.storage {
+                for (key, slot) in account.storage {
+                    // do nothing if unchanged
+                    if !slot.is_changed() {
+                        continue
+                    }
+
                     storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
                 }
 
