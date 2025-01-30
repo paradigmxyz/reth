@@ -53,7 +53,7 @@ pub trait AsEthApiError {
     fn as_err(&self) -> Option<&EthApiError>;
 
     /// Returns `true` if error is
-    /// [`RpcInvalidTransactionError::GasTooHigh`](crate::RpcInvalidTransactionError::GasTooHigh).
+    /// [`RpcInvalidTransactionError::GasTooHigh`].
     fn is_gas_too_high(&self) -> bool {
         if let Some(err) = self.as_err() {
             return err.is_gas_too_high()
@@ -63,7 +63,7 @@ pub trait AsEthApiError {
     }
 
     /// Returns `true` if error is
-    /// [`RpcInvalidTransactionError::GasTooLow`](crate::RpcInvalidTransactionError::GasTooLow).
+    /// [`RpcInvalidTransactionError::GasTooLow`].
     fn is_gas_too_low(&self) -> bool {
         if let Some(err) = self.as_err() {
             return err.is_gas_too_low()
