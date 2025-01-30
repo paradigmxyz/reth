@@ -108,7 +108,11 @@ pub trait ConfigureEvm: ConfigureEvmEnv {
     /// The error type returned by the EVM. See [`Evm::Error`].
     type EvmError<DBError: core::error::Error + Send + Sync + 'static>: EvmError;
 
+<<<<<<< HEAD
     /// Halt reason type returned by the EVM. See [`Evm::HaltReason`].
+=======
+    /// Halt reason type returned by the EVM.
+>>>>>>> 5c5521fab (wip)
     type HaltReason;
 
     /// Returns a new EVM with the given database configured with the given environment settings,
