@@ -2,8 +2,8 @@
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930,
-    TxEip7702, TxLegacy, Typed2718,
+    transaction::RlpEcdsaTx, Sealed, SignableTransaction, Signed, Transaction, TxEip1559,
+    TxEip2930, TxEip7702, TxLegacy, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -30,19 +30,6 @@ use reth_primitives_traits::{
     transaction::{error::TransactionConversionError, signed::RecoveryError},
     InMemorySize, SignedTransaction,
 };
-
-macro_rules! impl_from_signed {
-    ($($tx:ident),*) => {
-        $(
-            impl From<Signed<$tx>> for OpTransactionSigned {
-                fn from(value: Signed<$tx>) -> Self {
-                    let(tx,sig,hash) = value.into_parts();
-                    Self::new(tx.into(), sig, hash)
-                }
-            }
-        )*
-    };
-}
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -156,6 +143,19 @@ impl SignedTransaction for OpTransactionSigned {
     }
 }
 
+macro_rules! impl_from_signed {
+    ($($tx:ident),*) => {
+        $(
+            impl From<Signed<$tx>> for OpTransactionSigned {
+                fn from(value: Signed<$tx>) -> Self {
+                    let(tx,sig,hash) = value.into_parts();
+                    Self::new(tx.into(), sig, hash)
+                }
+            }
+        )*
+    };
+}
+
 impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, OpTypedTransaction);
 
 impl From<OpTxEnvelope> for OpTransactionSigned {
@@ -165,11 +165,7 @@ impl From<OpTxEnvelope> for OpTransactionSigned {
             OpTxEnvelope::Eip2930(tx) => tx.into(),
             OpTxEnvelope::Eip1559(tx) => tx.into(),
             OpTxEnvelope::Eip7702(tx) => tx.into(),
-            OpTxEnvelope::Deposit(tx) => {
-                let (tx, hash) = tx.into_parts();
-                Self::new(OpTypedTransaction::Deposit(tx), TxDeposit::signature(), hash)
-            }
-            _ => panic!("Invalid OpTxEnvelope variant"),
+            OpTxEnvelope::Deposit(tx) => tx.into(),
         }
     }
 }
@@ -178,6 +174,13 @@ impl From<OpTransactionSigned> for Signed<OpTypedTransaction> {
     fn from(value: OpTransactionSigned) -> Self {
         let (tx, sig, hash) = value.into_parts();
         Self::new_unchecked(tx, sig, hash)
+    }
+}
+
+impl From<Sealed<TxDeposit>> for OpTransactionSigned {
+    fn from(value: Sealed<TxDeposit>) -> Self {
+        let (tx, hash) = value.into_parts();
+        Self::new(OpTypedTransaction::Deposit(tx), TxDeposit::signature(), hash)
     }
 }
 
@@ -605,9 +608,8 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
         }
 
         let signature = if is_deposit(&transaction) { TxDeposit::signature() } else { signature };
-        let hash = if is_deposit(&transaction) { B256::ZERO } else { signature_hash(&transaction) };
 
-        Ok(Self::new(transaction, signature, hash))
+        Ok(Self::new_unhashed(transaction, signature))
     }
 }
 
