@@ -3,11 +3,10 @@
 
 use crate::{authenticated_transport::AuthenticatedTransportConnect, bench_mode::BenchMode};
 use alloy_eips::BlockNumberOrTag;
-use alloy_provider::{network::AnyNetwork, Provider, ProviderBuilder, RootProvider};
+use alloy_provider::{network::AnyNetwork, Provider, RootProvider};
 use alloy_rpc_client::ClientBuilder;
 use alloy_rpc_types_engine::JwtSecret;
-use alloy_transport_http::Http;
-use reqwest::{Client, Url};
+use reqwest::Url;
 use reth_node_core::args::BenchmarkArgs;
 use tracing::info;
 
@@ -42,8 +41,8 @@ impl BenchContext {
         }
 
         // set up alloy client for blocks
-        let block_provider: RootProvider<AnyNetwork> =
-            ProviderBuilder::new().network::<AnyNetwork>().on_http(rpc_url.parse()?);
+        let client = ClientBuilder::default().http(rpc_url.parse()?);
+        let block_provider = RootProvider::<AnyNetwork>::new(client);
 
         // If neither `--from` nor `--to` are provided, we will run the benchmark continuously,
         // starting at the latest block.

@@ -8,7 +8,7 @@ use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3,
     ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
 };
-use alloy_transport::{Transport, TransportResult};
+use alloy_transport::TransportResult;
 use reth_node_api::EngineApiMessageVersion;
 use tracing::error;
 

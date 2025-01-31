@@ -175,19 +175,9 @@ impl AuthenticatedTransport {
             }
 
             match inner_and_claims.0 {
-                InnerTransport::Http(ref http) => {
-                    let mut http = http;
-                    http.call(req)
-                }
-                InnerTransport::Ws(ref ws) => {
-                    let mut ws = ws;
-                    ws.call(req)
-                }
-                InnerTransport::Ipc(ref ipc) => {
-                    let mut ipc = ipc;
-                    // we don't need to recreate the client for IPC
-                    ipc.call(req)
-                }
+                InnerTransport::Http(ref mut http) => http.call(req),
+                InnerTransport::Ws(ref mut ws) => ws.call(req),
+                InnerTransport::Ipc(ref mut ipc) => ipc.call(req),
             }
             .await
         })
