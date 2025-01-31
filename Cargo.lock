@@ -8554,7 +8554,6 @@ dependencies = [
  "arbitrary",
  "c-kzg",
  "codspeed-criterion-compat",
- "derive_more",
  "once_cell",
  "pprof",
  "proptest",
@@ -8564,7 +8563,6 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "reth-static-file-types",
- "serde",
  "serde_json",
 ]
 

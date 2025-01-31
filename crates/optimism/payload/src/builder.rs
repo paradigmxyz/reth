@@ -359,7 +359,7 @@ where
         let block_number = ctx.block_number();
         let execution_outcome = ExecutionOutcome::new(
             state.take_bundle(),
-            info.receipts.into(),
+            vec![info.receipts],
             block_number,
             Vec::new(),
         );
