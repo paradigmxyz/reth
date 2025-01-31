@@ -455,15 +455,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         // Avoid using `entry` directly to avoid a write lock in the common case.
         trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Getting provider");
-        let mut provider: StaticFileJarProvider<'_, N> = if let Some(jar) = self.map.get(&key) {
-            trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Jar found in cache");
-            jar.into()
-        } else {
-            trace!(target: "provider::static_file", ?segment, ?fixed_block_range, "Creating jar from scratch");
-            let path = self.path.join(segment.filename(fixed_block_range));
-            let jar = NippyJar::load(&path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
-            self.map.entry(key).insert(LoadedJar::new(jar)?).downgrade().into()
-        };
+
+        let path = self.path.join(segment.filename(fixed_block_range));
+        let jar = NippyJar::load(&path).map_err(|e| ProviderError::NippyJar(e.to_string()))?;
+        let mut provider: StaticFileJarProvider<'_, N> = LoadedJar::new(jar)?.into();
 
         if let Some(metrics) = &self.metrics {
             provider = provider.with_metrics(metrics.clone());

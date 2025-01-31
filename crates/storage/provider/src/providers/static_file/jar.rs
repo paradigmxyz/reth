@@ -1,6 +1,6 @@
 use super::{
     metrics::{StaticFileProviderMetrics, StaticFileProviderOperation},
-    LoadedJarRef,
+    LoadedJar, LoadedJarRef,
 };
 use crate::{
     to_range, BlockHashReader, BlockNumReader, HeaderProvider, ReceiptProvider,
@@ -33,24 +33,25 @@ use std::{
 #[derive(Debug)]
 pub struct StaticFileJarProvider<'a, N> {
     /// Main static file segment
-    jar: LoadedJarRef<'a>,
+    pub jar: LoadedJar,
     /// Another kind of static file segment to help query data from the main one.
     auxiliary_jar: Option<Box<Self>>,
     /// Metrics for the static files.
     metrics: Option<Arc<StaticFileProviderMetrics>>,
     /// Node primitives
-    _pd: std::marker::PhantomData<N>,
+    _pd: std::marker::PhantomData<&'a N>,
 }
 
 impl<'a, N: NodePrimitives> Deref for StaticFileJarProvider<'a, N> {
-    type Target = LoadedJarRef<'a>;
+    type Target = LoadedJar;
+
     fn deref(&self) -> &Self::Target {
         &self.jar
     }
 }
 
-impl<'a, N: NodePrimitives> From<LoadedJarRef<'a>> for StaticFileJarProvider<'a, N> {
-    fn from(value: LoadedJarRef<'a>) -> Self {
+impl<'a, N: NodePrimitives> From<LoadedJar> for StaticFileJarProvider<'a, N> {
+    fn from(value: LoadedJar) -> Self {
         StaticFileJarProvider {
             jar: value,
             auxiliary_jar: None,
@@ -66,7 +67,7 @@ impl<'a, N: NodePrimitives> StaticFileJarProvider<'a, N> {
     where
         'b: 'a,
     {
-        let result = StaticFileCursor::new(self.value(), self.mmap_handle())?;
+        let result = StaticFileCursor::new(&self.jar.jar, self.mmap_handle())?;
 
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
