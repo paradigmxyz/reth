@@ -1018,7 +1018,7 @@ mod tests {
         let txs = vec![tx.clone(), tx.clone()];
         let mut tx_hashes =
             NewPooledTransactionHashes68 { types: vec![], sizes: vec![], hashes: vec![] };
-        tx_hashes.extend(txs);
+        tx_hashes.extend(&txs);
         assert_eq!(tx_hashes.types.len(), 2);
         assert_eq!(tx_hashes.sizes.len(), 2);
         assert_eq!(tx_hashes.hashes.len(), 2);
@@ -1050,7 +1050,7 @@ mod tests {
         let txs = vec![tx.clone(), tx.clone()];
         let tx_hashes =
             NewPooledTransactionHashes68 { types: vec![], sizes: vec![], hashes: vec![] }
-                .with_transactions(txs);
+                .with_transactions(&txs);
         assert_eq!(tx_hashes.types.len(), 2);
         assert_eq!(tx_hashes.sizes.len(), 2);
         assert_eq!(tx_hashes.hashes.len(), 2);
