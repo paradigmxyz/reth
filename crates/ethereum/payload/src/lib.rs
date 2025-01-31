@@ -380,7 +380,7 @@ where
     let requests_hash = requests.as_ref().map(|requests| requests.requests_hash());
     let execution_outcome = ExecutionOutcome::new(
         db.take_bundle(),
-        vec![receipts].into(),
+        vec![receipts],
         block_number,
         vec![requests.clone().unwrap_or_default()],
     );

@@ -104,11 +104,8 @@ where
         let timestamp = block_env.timestamp.to::<u64>();
 
         let transactions_root = calculate_transaction_root(&transactions);
-        let receipts_root = calculate_receipt_root_no_memo_optimism(
-            &receipts.iter().collect::<Vec<_>>(),
-            &chain_spec,
-            timestamp,
-        );
+        let receipts_root =
+            calculate_receipt_root_no_memo_optimism(receipts, &chain_spec, timestamp);
 
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| r.logs()));
         let is_cancun = chain_spec.is_cancun_active_at_timestamp(timestamp);

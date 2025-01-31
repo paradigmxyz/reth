@@ -217,7 +217,7 @@ mod tests {
     use alloy_consensus::BlockBody;
     use alloy_primitives::{b256, B256};
     use reth_execution_types::ExecutionOutcome;
-    use reth_primitives::{Receipt, Receipts, SealedBlock, TransactionSigned, TxType};
+    use reth_primitives::{Receipt, SealedBlock, TransactionSigned, TxType};
 
     #[test]
     fn test_commit_notification() {
@@ -334,7 +334,7 @@ mod tests {
         };
 
         // Wrap the receipt in a `Receipts` structure, as expected in the `ExecutionOutcome`.
-        let receipts = Receipts { receipt_vec: vec![vec![receipt1.clone()]] };
+        let receipts = vec![vec![receipt1.clone()]];
 
         // Define an `ExecutionOutcome` with the created receipts.
         let execution_outcome = ExecutionOutcome { receipts, ..Default::default() };
@@ -393,7 +393,7 @@ mod tests {
             success: false,
             ..Default::default()
         };
-        let old_receipts = Receipts { receipt_vec: vec![vec![old_receipt.clone()]] };
+        let old_receipts = vec![vec![old_receipt.clone()]];
 
         let old_execution_outcome =
             ExecutionOutcome { receipts: old_receipts, ..Default::default() };
@@ -424,7 +424,7 @@ mod tests {
             success: true,
             ..Default::default()
         };
-        let new_receipts = Receipts { receipt_vec: vec![vec![new_receipt.clone()]] };
+        let new_receipts = vec![vec![new_receipt.clone()]];
 
         let new_execution_outcome =
             ExecutionOutcome { receipts: new_receipts, ..Default::default() };
