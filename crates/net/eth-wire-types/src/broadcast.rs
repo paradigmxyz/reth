@@ -384,9 +384,9 @@ impl NewPooledTransactionHashes68 {
     }
 
     /// Appends the provided transactions
-    pub fn extend<T: SignedTransaction>(&mut self, txs: impl IntoIterator<Item = T>) {
+    pub fn extend<'a, T: SignedTransaction>(&mut self, txs: impl IntoIterator<Item = &'a T>) {
         for tx in txs {
-            self.push(&tx);
+            self.push(tx);
         }
     }
 
@@ -397,9 +397,9 @@ impl NewPooledTransactionHashes68 {
     }
 
     /// Consumes and appends the provided transactions
-    pub fn with_transactions<T: SignedTransaction>(
+    pub fn with_transactions<'a, T: SignedTransaction>(
         mut self,
-        txs: impl IntoIterator<Item = T>,
+        txs: impl IntoIterator<Item = &'a T>,
     ) -> Self {
         self.extend(txs);
         self
