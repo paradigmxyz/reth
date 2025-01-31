@@ -18,8 +18,10 @@ use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_metrics::{metrics, metrics::Gauge, Metrics};
-use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_primitives_traits::{constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock};
+use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{
+    constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock, SealedHeaderFor,
+};
 use reth_provider::{BlockExecutionOutput, BlockReaderIdExt, StateProviderFactory};
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
@@ -144,7 +146,6 @@ where
         }
         self.consensus.validate_header_against_parent(block.sealed_header(), &latest_header)?;
         self.validate_gas_limit(registered_gas_limit, &latest_header, block.sealed_header())?;
-
         let latest_header_hash = latest_header.hash();
         let state_provider = self.provider.state_by_block_hash(latest_header_hash)?;
 
@@ -191,10 +192,10 @@ where
         Ok(())
     }
 
-    /// Ensures that fields of [`BidTrace`] match the fields of the [`SealedHeader`].
+    /// Ensures that fields of [`BidTrace`] match the fields of the [`SealedHeaderFor`].
     fn validate_message_against_header(
         &self,
-        header: &SealedHeader<<E::Primitives as NodePrimitives>::BlockHeader>,
+        header: &SealedHeaderFor<E::Primitives>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
         if header.hash() != message.block_hash {
@@ -229,8 +230,8 @@ where
     fn validate_gas_limit(
         &self,
         registered_gas_limit: u64,
-        parent_header: &SealedHeader<<E::Primitives as NodePrimitives>::BlockHeader>,
-        header: &SealedHeader<<E::Primitives as NodePrimitives>::BlockHeader>,
+        parent_header: &SealedHeaderFor<E::Primitives>,
+        header: &SealedHeaderFor<E::Primitives>,
     ) -> Result<(), ValidationApiError> {
         let max_gas_limit =
             parent_header.gas_limit() + parent_header.gas_limit() / GAS_LIMIT_BOUND_DIVISOR - 1;

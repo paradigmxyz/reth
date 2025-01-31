@@ -17,8 +17,8 @@ use reth_basic_payload_builder::*;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::{
-    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Evm,
-    NextBlockEnvAttributes,
+    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Database, Evm,
+    EvmError, InvalidTxError, NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
@@ -42,8 +42,8 @@ use reth_transaction_pool::{
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
-    primitives::{EVMError, InvalidTransaction, ResultAndState},
-    Database, DatabaseCommit,
+    primitives::ResultAndState,
+    DatabaseCommit,
 };
 use std::{fmt::Display, sync::Arc};
 use tracing::{debug, trace, warn};
@@ -818,16 +818,12 @@ where
             let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    match err {
-                        EVMError::Transaction(err) => {
-                            trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                            continue
-                        }
-                        err => {
-                            // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
-                        }
+                    if err.is_invalid_tx_err() {
+                        trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
+                        continue
                     }
+                    // this is an error that we should treat as fatal for this attempt
+                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
                 }
             };
 
@@ -915,25 +911,21 @@ where
             let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    match err {
-                        EVMError::Transaction(err) => {
-                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                                // if the nonce is too low, we can skip this transaction
-                                trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
-                            } else {
-                                // if the transaction is invalid, we can skip it and all of its
-                                // descendants
-                                trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                                best_txs.mark_invalid(tx.signer(), tx.nonce());
-                            }
+                    if let Some(err) = err.as_invalid_tx_err() {
+                        if err.is_nonce_too_low() {
+                            // if the nonce is too low, we can skip this transaction
+                            trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
+                        } else {
+                            // if the transaction is invalid, we can skip it and all of its
+                            // descendants
+                            trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
+                            best_txs.mark_invalid(tx.signer(), tx.nonce());
+                        }
 
-                            continue
-                        }
-                        err => {
-                            // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
-                        }
+                        continue
                     }
+                    // this is an error that we should treat as fatal for this attempt
+                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
                 }
             };
 

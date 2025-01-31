@@ -17,7 +17,8 @@ use alloy_rpc_types_eth::{
 };
 use futures::Future;
 use reth_chainspec::EthChainSpec;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm, TransactionEnv};
+use reth_errors::ProviderError;
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Database, Evm, TransactionEnv};
 use reth_node_api::BlockBody;
 use reth_primitives_traits::SignedTransaction;
 use reth_provider::{BlockIdReader, ChainSpecProvider, ProviderHeader};
@@ -29,14 +30,14 @@ use reth_revm::{
 };
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
-    error::ensure_success,
+    error::{api::FromEvmHalt, ensure_success},
     revm_utils::{
         apply_block_overrides, apply_state_overrides, caller_gas_allowance, get_precompiles,
     },
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
-use revm::{Database, DatabaseCommit, GetInspector};
+use revm::{DatabaseCommit, GetInspector};
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
 use tracing::trace;
 
@@ -440,7 +441,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
-                    Some(RpcInvalidTransactionError::halt(reason, tx_env.gas_limit()).to_string());
+                    Some(Self::Error::from_evm_halt(reason, tx_env.gas_limit()).to_string());
                 return Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
             }
             ExecutionResult::Revert { output, gas_used } => {
@@ -455,7 +456,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         let res = match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error =
-                    Some(RpcInvalidTransactionError::halt(reason, tx_env.gas_limit()).to_string());
+                    Some(Self::Error::from_evm_halt(reason, tx_env.gas_limit()).to_string());
                 AccessListResult { access_list, gas_used: U256::from(gas_used), error }
             }
             ExecutionResult::Revert { output, gas_used } => {
@@ -473,7 +474,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
 /// Executes code on state.
 pub trait Call:
-    LoadState<Evm: ConfigureEvm<Header = ProviderHeader<Self::Provider>>> + SpawnBlocking
+    LoadState<
+        Evm: ConfigureEvm<Header = ProviderHeader<Self::Provider>>,
+        Error: FromEvmError<Self::Evm>,
+    > + SpawnBlocking
 {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
     ///
@@ -508,8 +512,7 @@ pub trait Call:
         Self::Error,
     >
     where
-        DB: Database,
-        EthApiError: From<DB::Error>,
+        DB: Database<Error = ProviderError>,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env.clone());
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
@@ -534,8 +537,7 @@ pub trait Call:
         Self::Error,
     >
     where
-        DB: Database,
-        EthApiError: From<DB::Error>,
+        DB: Database<Error = ProviderError>,
     {
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env.clone(), inspector);
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
@@ -704,8 +706,7 @@ pub trait Call:
         target_tx_hash: B256,
     ) -> Result<usize, Self::Error>
     where
-        DB: Database + DatabaseCommit,
-        EthApiError: From<DB::Error>,
+        DB: Database<Error = ProviderError> + DatabaseCommit,
         I: IntoIterator<Item = (&'a Address, &'a <Self::Evm as ConfigureEvmEnv>::Transaction)>,
         <Self::Evm as ConfigureEvmEnv>::Transaction: SignedTransaction,
     {

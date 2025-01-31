@@ -22,7 +22,8 @@ use reth_basic_payload_builder::{
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_errors::RethError;
 use reth_evm::{
-    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, NextBlockEnvAttributes,
+    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, EvmError, InvalidTxError,
+    NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
@@ -44,7 +45,7 @@ use reth_transaction_pool::{
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
-    primitives::{EVMError, InvalidTransaction, ResultAndState},
+    primitives::ResultAndState,
     DatabaseCommit,
 };
 use std::sync::Arc;
@@ -276,30 +277,25 @@ where
         let ResultAndState { result, state } = match evm.transact(tx_env) {
             Ok(res) => res,
             Err(err) => {
-                match err {
-                    EVMError::Transaction(err) => {
-                        if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                            // if the nonce is too low, we can skip this transaction
-                            trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
-                        } else {
-                            // if the transaction is invalid, we can skip it and all of its
-                            // descendants
-                            trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(
-                                &pool_tx,
-                                InvalidPoolTransactionError::Consensus(
-                                    InvalidTransactionError::TxTypeNotSupported,
-                                ),
-                            );
-                        }
-
-                        continue
+                if let Some(err) = err.as_invalid_tx_err() {
+                    if err.is_nonce_too_low() {
+                        // if the nonce is too low, we can skip this transaction
+                        trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
+                    } else {
+                        // if the transaction is invalid, we can skip it and all of its
+                        // descendants
+                        trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
+                        best_txs.mark_invalid(
+                            &pool_tx,
+                            InvalidPoolTransactionError::Consensus(
+                                InvalidTransactionError::TxTypeNotSupported,
+                            ),
+                        );
                     }
-                    err => {
-                        // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err))
-                    }
+                    continue
                 }
+                // this is an error that we should treat as fatal for this attempt
+                return Err(PayloadBuilderError::evm(err))
             }
         };
 

@@ -1,8 +1,7 @@
 use crate::{Consensus, ConsensusError, FullConsensus, HeaderValidator, PostExecutionInput};
 use alloc::sync::Arc;
 use alloy_primitives::U256;
-use reth_primitives::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 
 /// A Consensus implementation that does nothing.
 #[derive(Debug, Copy, Clone, Default)]

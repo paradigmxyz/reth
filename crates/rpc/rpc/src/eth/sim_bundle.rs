@@ -14,7 +14,7 @@ use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
-    FromEthApiError,
+    FromEthApiError, FromEvmError,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_tasks::pool::BlockingTaskGuard;
@@ -307,7 +307,7 @@ where
 
                     let ResultAndState { result, state } = evm
                         .transact(eth_api.evm_config().tx_env(&item.tx, item.signer))
-                        .map_err(EthApiError::from_eth_err)?;
+                        .map_err(Eth::Error::from_evm_err)?;
 
                     if !result.is_success() && !item.can_revert {
                         return Err(EthApiError::InvalidParams(

@@ -5,7 +5,7 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockHash, BlockNumber, Sealable, B256};
 use futures::Future;
 use itertools::Either;
-use reth_consensus::{ConsensusError, HeaderValidator};
+use reth_consensus::{Consensus, ConsensusError};
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
@@ -15,7 +15,7 @@ use reth_network_p2p::{
     BlockClient,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::SealedHeader;
+use reth_primitives::{SealedBlock, SealedHeader};
 use reth_primitives_traits::{Block, BlockBody, FullBlock};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
@@ -84,7 +84,7 @@ impl<B: FullBlock> FileClient<B> {
     /// Create a new file client from a file path.
     pub async fn new<P: AsRef<Path>>(
         path: P,
-        consensus: Arc<dyn HeaderValidator<B::Header>>,
+        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
     ) -> Result<Self, FileClientError> {
         let file = File::open(path).await?;
         Self::from_file(file, consensus).await
@@ -93,7 +93,7 @@ impl<B: FullBlock> FileClient<B> {
     /// Initialize the [`FileClient`] with a file directly.
     pub(crate) async fn from_file(
         mut file: File,
-        consensus: Arc<dyn HeaderValidator<B::Header>>,
+        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
     ) -> Result<Self, FileClientError> {
         // get file len from metadata before reading
         let metadata = file.metadata().await?;
@@ -198,7 +198,7 @@ impl<B: FullBlock> FileClient<B> {
 }
 
 struct FileClientBuilder<B: Block = reth_primitives::Block> {
-    pub consensus: Arc<dyn HeaderValidator<B::Header>>,
+    pub consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
     pub parent_header: Option<SealedHeader<B::Header>>,
 }
 
@@ -253,21 +253,26 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
                     }
                     Err(err) => return Err(err),
                 };
-                let block_number = block.header().number();
-                let block_hash = block.header().hash_slow();
 
-                // Validate incoming header
-                let sealed = SealedHeader::new(block.header().clone(), block_hash);
-                self.consensus.validate_header(&sealed)?;
+                let block = SealedBlock::seal_slow(block);
+
+                // Validate standalone header
+                self.consensus.validate_header(block.sealed_header())?;
                 if let Some(parent) = &parent_header {
-                    self.consensus.validate_header_against_parent(&sealed, parent)?;
-                    parent_header = Some(sealed);
+                    self.consensus.validate_header_against_parent(block.sealed_header(), parent)?;
+                    parent_header = Some(block.sealed_header().clone());
                 }
 
+                // Validate block against header
+                self.consensus.validate_block_pre_execution(&block)?;
+
                 // add to the internal maps
-                headers.insert(block.header().number(), block.header().clone());
-                hash_to_number.insert(block_hash, block.header().number());
-                bodies.insert(block_hash, block.body().clone());
+                let block_hash = block.hash();
+                let block_number = block.number();
+                let (header, body) = block.split_sealed_header_body();
+                headers.insert(block_number, header.unseal());
+                hash_to_number.insert(block_hash, block_number);
+                bodies.insert(block_hash, body);
 
                 if log_interval == 0 {
                     trace!(target: "downloaders::file",
@@ -487,7 +492,7 @@ impl ChunkedFileReader {
     /// Read next chunk from file. Returns [`FileClient`] containing decoded chunk.
     pub async fn next_chunk<B: FullBlock>(
         &mut self,
-        consensus: Arc<dyn HeaderValidator<B::Header>>,
+        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
         parent_header: Option<SealedHeader<B::Header>>,
     ) -> Result<Option<FileClient<B>>, FileClientError> {
         let Some(next_chunk_byte_len) = self.read_next_chunk().await? else { return Ok(None) };

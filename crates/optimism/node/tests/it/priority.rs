@@ -191,7 +191,7 @@ async fn test_custom_block_priority_config() {
 
     // Check that last transaction in the block looks like a transfer to a random address.
     let end_of_block_tx = block_payload.body().transactions.last().unwrap();
-    let OpTypedTransaction::Eip1559(end_of_block_tx) = &end_of_block_tx.transaction else {
+    let OpTypedTransaction::Eip1559(end_of_block_tx) = end_of_block_tx.transaction() else {
         panic!("expected EIP-1559 transaction");
     };
     assert_eq!(end_of_block_tx.nonce, 1);

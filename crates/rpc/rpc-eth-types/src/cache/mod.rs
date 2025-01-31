@@ -9,14 +9,14 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{Block, BlockBody};
-use reth_storage_api::{BlockReader, StateProviderFactory, TransactionVariant};
+use reth_storage_api::{BlockReader, TransactionVariant};
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use schnellru::{ByLength, Limiter};
 use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
-    task::{ready, Context, Poll},
+    task::{Context, Poll},
 };
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
@@ -106,8 +106,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     /// See also [`Self::spawn_with`]
     pub fn spawn<Provider>(provider: Provider, config: EthStateCacheConfig) -> Self
     where
-        Provider:
-            StateProviderFactory + BlockReader<Block = B, Receipt = R> + Clone + Unpin + 'static,
+        Provider: BlockReader<Block = B, Receipt = R> + Clone + Unpin + 'static,
     {
         Self::spawn_with(provider, config, TokioTaskExecutor::default())
     }
@@ -122,8 +121,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
         executor: Tasks,
     ) -> Self
     where
-        Provider:
-            StateProviderFactory + BlockReader<Block = B, Receipt = R> + Clone + Unpin + 'static,
+        Provider: BlockReader<Block = B, Receipt = R> + Clone + Unpin + 'static,
         Tasks: TaskSpawner + Clone + 'static,
     {
         let EthStateCacheConfig {
@@ -242,7 +240,7 @@ pub(crate) struct EthStateCacheService<
 
 impl<Provider, Tasks> EthStateCacheService<Provider, Tasks>
 where
-    Provider: StateProviderFactory + BlockReader + Clone + Unpin + 'static,
+    Provider: BlockReader + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
     fn on_new_block(
@@ -326,6 +324,14 @@ where
         }
     }
 
+    /// Shrinks the queues but leaves some space for the next requests
+    fn shrink_queues(&mut self) {
+        let min_capacity = 2;
+        self.full_block_cache.shrink_to(min_capacity);
+        self.receipts_cache.shrink_to(min_capacity);
+        self.headers_cache.shrink_to(min_capacity);
+    }
+
     fn update_cached_metrics(&self) {
         self.full_block_cache.update_cached_metrics();
         self.receipts_cache.update_cached_metrics();
@@ -335,7 +341,7 @@ where
 
 impl<Provider, Tasks> Future for EthStateCacheService<Provider, Tasks>
 where
-    Provider: StateProviderFactory + BlockReader + Clone + Unpin + 'static,
+    Provider: BlockReader + Clone + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
 {
     type Output = ();
@@ -344,7 +350,13 @@ where
         let this = self.get_mut();
 
         loop {
-            match ready!(this.action_rx.poll_next_unpin(cx)) {
+            let Poll::Ready(action) = this.action_rx.poll_next_unpin(cx) else {
+                // shrink queues if we don't have any work to do
+                this.shrink_queues();
+                return Poll::Pending;
+            };
+
+            match action {
                 None => {
                     unreachable!("can't close")
                 }
