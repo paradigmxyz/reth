@@ -136,7 +136,7 @@ impl PoolTransaction for OpPooledTransaction {
     }
 
     fn max_fee_per_gas(&self) -> u128 {
-        self.inner.transaction.transaction.max_fee_per_gas()
+        self.inner.transaction.max_fee_per_gas()
     }
 
     fn access_list(&self) -> Option<&AccessList> {
@@ -144,7 +144,7 @@ impl PoolTransaction for OpPooledTransaction {
     }
 
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        self.inner.transaction.transaction.max_priority_fee_per_gas()
+        self.inner.transaction.max_priority_fee_per_gas()
     }
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
@@ -172,7 +172,7 @@ impl PoolTransaction for OpPooledTransaction {
     }
 
     fn size(&self) -> usize {
-        self.inner.transaction.transaction.input().len()
+        self.inner.transaction.input().len()
     }
 
     fn tx_type(&self) -> u8 {
@@ -220,7 +220,7 @@ impl EthPoolTransaction for OpPooledTransaction {
     }
 
     fn authorization_count(&self) -> usize {
-        match &self.inner.transaction.transaction {
+        match self.inner.transaction.transaction() {
             OpTypedTransaction::Eip7702(tx) => tx.authorization_list.len(),
             _ => 0,
         }

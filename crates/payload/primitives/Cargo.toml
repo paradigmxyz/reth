@@ -18,8 +18,6 @@ reth-errors.workspace = true
 reth-primitives.workspace = true
 reth-chain-state.workspace = true
 
-revm-primitives.workspace = true
-
 # alloy
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
@@ -39,7 +37,6 @@ default = ["std"]
 std = [
     "reth-chainspec/std",
     "reth-primitives/std",
-    "revm-primitives/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-rpc-types-engine/std",

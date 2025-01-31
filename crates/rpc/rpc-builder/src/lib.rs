@@ -57,7 +57,7 @@
 //!         + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Provider::Primitives>,
-//!     Consensus: FullConsensus<Error = ConsensusError> + Clone + 'static,
+//!     Consensus: FullConsensus<Provider::Primitives, Error = ConsensusError> + Clone + 'static,
 //!     Validator: PayloadValidator<Block = reth_primitives::Block>,
 //! {
 //!     // configure the rpc module per transport
@@ -145,7 +145,7 @@
 //!     EngineApi: EngineApiServer<EngineT>,
 //!     EngineT: EngineTypes,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Provider::Primitives>,
-//!     Consensus: FullConsensus<Error = ConsensusError> + Clone + 'static,
+//!     Consensus: FullConsensus<Provider::Primitives, Error = ConsensusError> + Clone + 'static,
 //!     Validator: PayloadValidator<Block = reth_primitives::Block>,
 //! {
 //!     // configure the rpc module per transport

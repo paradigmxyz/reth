@@ -2,9 +2,11 @@
 
 use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
+use metrics::Histogram;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::system_calls::OnStateHook;
+use reth_metrics::Metrics;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider,
@@ -234,6 +236,8 @@ pub struct ProofCalculated {
     /// The source of the proof fetch, whether it was requested as a prefetch or as a result of a
     /// state update.
     source: ProofFetchSource,
+    /// The time taken to calculate the proof.
+    elapsed: Duration,
 }
 
 impl ProofCalculated {
@@ -473,9 +477,10 @@ where
             );
             let start = Instant::now();
             let result = calculate_multiproof(thread_pool, config, proof_targets.clone());
+            let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
-                elapsed = ?start.elapsed(),
+                ?elapsed,
                 "Multiproof calculated",
             );
 
@@ -487,6 +492,7 @@ where
                             targets: proof_targets,
                             multiproof: proof,
                             source,
+                            elapsed,
                         }),
                     ));
                 }
@@ -499,6 +505,29 @@ where
 
         self.inflight += 1;
     }
+}
+
+#[derive(Metrics, Clone)]
+#[metrics(scope = "tree.root")]
+struct StateRootTaskMetrics {
+    /// Histogram of proof calculation durations.
+    pub proof_calculation_duration_histogram: Histogram,
+    /// Histogram of proof calculation account targets.
+    pub proof_calculation_account_targets_histogram: Histogram,
+    /// Histogram of proof calculation storage targets.
+    pub proof_calculation_storage_targets_histogram: Histogram,
+
+    /// Histogram of sparse trie update durations.
+    pub sparse_trie_update_duration_histogram: Histogram,
+    /// Histogram of sparse trie final update durations.
+    pub sparse_trie_final_update_duration_histogram: Histogram,
+
+    /// Histogram of state updates received.
+    pub state_updates_received_histogram: Histogram,
+    /// Histogram of proofs processed.
+    pub proofs_processed_histogram: Histogram,
+    /// Histogram of state root update iterations.
+    pub state_root_iterations_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -525,6 +554,7 @@ pub struct StateRootTask<Factory> {
     thread_pool: Arc<rayon::ThreadPool>,
     /// Manages calculation of multiproofs.
     multiproof_manager: MultiproofManager<Factory>,
+    metrics: StateRootTaskMetrics,
 }
 
 impl<Factory> StateRootTask<Factory>
@@ -547,6 +577,7 @@ where
             state_update_sequencer: StateUpdateSequencer::new(),
             thread_pool: thread_pool.clone(),
             multiproof_manager: MultiproofManager::new(thread_pool, thread_pool_size()),
+            metrics: StateRootTaskMetrics::default(),
         }
     }
 
@@ -568,8 +599,12 @@ where
 
     /// Spawns the state root task and returns a handle to await its result.
     pub fn spawn(self) -> StateRootHandle {
-        let sparse_trie_tx =
-            Self::spawn_sparse_trie(self.thread_pool.clone(), self.config.clone(), self.tx.clone());
+        let sparse_trie_tx = Self::spawn_sparse_trie(
+            self.thread_pool.clone(),
+            self.config.clone(),
+            self.metrics.clone(),
+            self.tx.clone(),
+        );
         let (tx, rx) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("State Root Task".to_string())
@@ -588,12 +623,13 @@ where
     fn spawn_sparse_trie(
         thread_pool: Arc<rayon::ThreadPool>,
         config: StateRootConfig<Factory>,
+        metrics: StateRootTaskMetrics,
         task_tx: Sender<StateRootMessage>,
     ) -> Sender<SparseTrieMessage> {
         let (tx, rx) = mpsc::channel();
         thread_pool.spawn(move || {
             debug!(target: "engine::tree", "Starting sparse trie task");
-            let result = match run_sparse_trie(config, rx) {
+            let result = match run_sparse_trie(config, metrics, rx) {
                 Ok((state_root, trie_updates, iterations)) => {
                     StateRootMessage::RootCalculated { state_root, trie_updates, iterations }
                 }
@@ -722,6 +758,20 @@ where
                             proofs_processed += 1;
                         }
 
+                        self.metrics
+                            .proof_calculation_duration_histogram
+                            .record(proof_calculated.elapsed);
+                        self.metrics
+                            .proof_calculation_account_targets_histogram
+                            .record(proof_calculated.targets.len() as f64);
+                        self.metrics.proof_calculation_storage_targets_histogram.record(
+                            proof_calculated
+                                .targets
+                                .values()
+                                .map(|targets| targets.len() as f64)
+                                .sum::<f64>(),
+                        );
+
                         debug!(
                             target: "engine::root",
                             total_proofs = proofs_processed,
@@ -781,6 +831,13 @@ where
                             ?time_from_last_update,
                             "All proofs processed, ending calculation"
                         );
+
+                        self.metrics
+                            .state_updates_received_histogram
+                            .record(updates_received as f64);
+                        self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
+                        self.metrics.state_root_iterations_histogram.record(iterations as f64);
+
                         return Ok(StateRootComputeOutcome {
                             state_root: (state_root, trie_updates),
                             total_time,
@@ -819,6 +876,7 @@ where
 /// Returns final state root, trie updates and the number of update iterations.
 fn run_sparse_trie<Factory>(
     config: StateRootConfig<Factory>,
+    metrics: StateRootTaskMetrics,
     message_rx: mpsc::Receiver<SparseTrieMessage>,
 ) -> Result<(B256, TrieUpdates, u64), ParallelStateRootError>
 where
@@ -896,6 +954,7 @@ where
         let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
             ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
         })?;
+        metrics.sparse_trie_update_duration_histogram.record(elapsed);
 
         // If we had any reveal proof messages, send a proof revealed message back to the state
         // root task.
@@ -915,7 +974,12 @@ where
     }
 
     debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
+
+    let start = Instant::now();
     let root = trie.root().expect("sparse trie should be revealed");
+    let elapsed = start.elapsed();
+    metrics.sparse_trie_final_update_duration_histogram.record(elapsed);
+
     let trie_updates = trie.take_trie_updates().expect("retention must be enabled");
     Ok((root, trie_updates, num_iterations))
 }
