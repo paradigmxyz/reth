@@ -22,13 +22,13 @@ use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::{Address, U256};
 use core::{convert::Infallible, fmt::Debug};
 use reth_chainspec::ChainSpec;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm, NextBlockEnvAttributes};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Database, Evm, NextBlockEnvAttributes};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::transaction::execute::FillTxEnv;
-use reth_revm::{inspector_handle_register, Database, EvmBuilder};
+use reth_revm::{inspector_handle_register, EvmBuilder};
 use revm_primitives::{
     AnalysisKind, BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, CfgEnvWithHandlerCfg, EVMError,
-    HandlerCfg, ResultAndState, SpecId, TxEnv, TxKind,
+    HaltReason, HandlerCfg, ResultAndState, SpecId, TxEnv, TxKind,
 };
 
 mod config;
@@ -53,6 +53,7 @@ impl<EXT, DB: Database> Evm for EthEvm<'_, EXT, DB> {
     type DB = DB;
     type Tx = TxEnv;
     type Error = EVMError<DB::Error>;
+    type HaltReason = HaltReason;
 
     fn block(&self) -> &BlockEnv {
         self.0.block()
@@ -237,6 +238,8 @@ impl ConfigureEvmEnv for EthEvmConfig {
 
 impl ConfigureEvm for EthEvmConfig {
     type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
+    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type HaltReason = HaltReason;
 
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {

@@ -2,7 +2,10 @@
 
 use reth_evm::ConfigureEvm;
 use reth_provider::{BlockReader, ProviderHeader, ProviderTx};
-use reth_rpc_eth_api::helpers::{LoadState, Trace};
+use reth_rpc_eth_api::{
+    helpers::{LoadState, Trace},
+    FromEvmError,
+};
 
 use crate::EthApi;
 
@@ -14,6 +17,7 @@ where
             Header = ProviderHeader<Self::Provider>,
             Transaction = ProviderTx<Self::Provider>,
         >,
+        Error: FromEvmError<Self::Evm>,
     >,
     Provider: BlockReader,
 {

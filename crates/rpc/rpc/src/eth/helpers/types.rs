@@ -71,7 +71,7 @@ where
 
         let effective_gas_price = base_fee
             .map(|base_fee| {
-                inner.effective_tip_per_gas(base_fee as u64).unwrap_or_default() + base_fee
+                inner.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
             })
             .unwrap_or_else(|| inner.max_fee_per_gas());
 
