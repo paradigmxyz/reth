@@ -20,7 +20,7 @@ use alloy_rpc_types_engine::{
     PayloadValidationError,
 };
 use block_buffer::BlockBuffer;
-use cached_state::ProviderCaches;
+use cached_state::{ProviderCaches, SavedCache};
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
@@ -70,7 +70,7 @@ use std::{
     fmt::Debug,
     ops::Bound,
     sync::{
-        atomic::{AtomicBool, AtomicUsize},
+        atomic::AtomicBool,
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
         Arc, RwLock,
     },
@@ -573,6 +573,8 @@ where
     invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
+    /// The most recent cache used for execution.
+    most_recent_cache: Option<SavedCache>,
     /// state root task thread pool
     state_root_task_pool: Arc<rayon::ThreadPool>,
     /// Parallel prewarming thread pool
@@ -678,6 +680,7 @@ where
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
+            most_recent_cache: None,
             state_root_task_pool,
             prewarming_thread_pool,
         }
@@ -2306,6 +2309,19 @@ where
         Ok(None)
     }
 
+    /// This fetches the most recent saved cache, using the hash of the block we are trying to
+    /// execute on top of.
+    ///
+    /// If the hash does not match the saved cache's hash, then the only saved cache doesn't contain
+    /// state useful for this block's execution, and we return `None`.
+    ///
+    /// If there is no cache saved, this returns `None`.
+    ///
+    /// This `take`s the cache, to avoid cloning the entire cache.
+    fn take_latest_cache(&mut self, parent_hash: B256) -> Option<SavedCache> {
+        self.most_recent_cache.take_if(|cache| cache.executed_block_hash() == parent_hash)
+    }
+
     fn insert_block_without_senders(
         &mut self,
         block: SealedBlock<N::Block>,
@@ -2389,10 +2405,6 @@ where
         // Atomic bool for letting the prewarm tasks know when to stop
         let execution_finished = Arc::new(AtomicBool::new(false));
 
-        // Atomic usize for counting the number of prewarm tasks that have finished (necessary
-        // before we do state updates)
-        let finished_counter = Arc::new(AtomicUsize::new(0));
-
         let (state_root_handle, state_root_task_config, state_root_sender, state_hook) =
             if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
@@ -2420,8 +2432,13 @@ where
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
-        let caches = ProviderCacheBuilder::default().build_caches();
-        let cache_metrics = CachedStateMetrics::zeroed();
+        let (caches, cache_metrics) =
+            if let Some(cache) = self.take_latest_cache(block.parent_hash()) {
+                cache.split()
+            } else {
+                (ProviderCacheBuilder::default().build_caches(), CachedStateMetrics::zeroed())
+            };
+
         let state_provider = CachedStateProvider::new_with_caches(
             state_provider,
             caches.clone(),
@@ -2441,7 +2458,7 @@ where
             let state_root_sender = state_root_sender.clone();
 
             let start = Instant::now();
-            let handle = self.prewarm_transaction(
+            self.prewarm_transaction(
                 block.header().clone(),
                 tx.clone(),
                 *sender,
@@ -2555,6 +2572,12 @@ where
         drop(cache_lock.write().unwrap());
         let cache_lock_wait_elapsed = cache_lock_wait_start.elapsed();
         debug!(target: "engine::tree", ?cache_lock_wait_elapsed, block=?block_num_hash, "Acquired cache lock");
+
+        // apply state updates to cache and save it
+        let Ok(saved_cache) = state_provider.save_cache(sealed_block.hash(), &output.state) else {
+            todo!("error bubbling for save_cache errors")
+        };
+        self.most_recent_cache = Some(saved_cache);
 
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
