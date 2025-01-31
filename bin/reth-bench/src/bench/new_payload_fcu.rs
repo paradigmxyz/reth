@@ -80,7 +80,8 @@ impl Command {
             let versioned_hashes: Vec<B256> =
                 block.body().blob_versioned_hashes_iter().copied().collect();
             let parent_beacon_block_root = block.parent_beacon_block_root;
-            let payload = ExecutionPayload::from(block);
+            let (payload, _) =
+                ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
 
             debug!(?block_number, "Sending payload",);
 

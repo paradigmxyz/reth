@@ -425,7 +425,7 @@ where
     .seal_slow();
 
     Ok((
-        ExecutionPayload::from(reorg_block),
+        ExecutionPayload::from_block_unchecked(reorg_block.hash(), &reorg_block.into_block()).0,
         // todo(onbjerg): how do we support execution requests?
         reorg_target
             .header

@@ -1,12 +1,11 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
-use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, eip7685::RequestsOrHash};
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
     payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2},
-    CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV2, ExecutionPayloadV3, PraguePayloadFields,
+    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
 };
 use reth_primitives::{Block, SealedBlock};
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
