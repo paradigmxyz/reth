@@ -103,15 +103,8 @@ impl BlobStore for InMemoryBlobStore {
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
         let mut result = vec![None; versioned_hashes.len()];
         for (_tx_hash, blob_sidecar) in self.inner.store.read().iter() {
-            for (i, blob_versioned_hash) in blob_sidecar.versioned_hashes().enumerate() {
-                for (j, target_versioned_hash) in versioned_hashes.iter().enumerate() {
-                    if blob_versioned_hash == *target_versioned_hash {
-                        result[j].get_or_insert_with(|| BlobAndProofV1 {
-                            blob: Box::new(blob_sidecar.blobs[i]),
-                            proof: blob_sidecar.proofs[i],
-                        });
-                    }
-                }
+            for (hash_idx, match_result) in blob_sidecar.match_versioned_hashes(versioned_hashes) {
+                result[hash_idx] = Some(match_result);
             }
 
             // Return early if all blobs are found.
