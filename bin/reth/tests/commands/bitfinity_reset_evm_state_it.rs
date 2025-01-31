@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use did::evm_state::EvmGlobalState;
 use did::{block::BlockResult, AccountInfoMap, H256};
 use evm_canister_client::{EvmCanisterClient, IcAgentClient};
 use reth::{
@@ -53,7 +54,8 @@ async fn bitfinity_manual_test_should_reset_evm_state() {
         evm_datasource_url,
     )
     .await;
-    let _ = evm_client.admin_disable_evm(true).await.unwrap();
+
+    let _ = evm_client.admin_set_evm_global_state(EvmGlobalState::Disabled).await.unwrap();
 
     // Act
     {
@@ -85,7 +87,7 @@ async fn bitfinity_manual_test_should_reset_evm_state() {
         assert_eq!(evm_block.state_root.0 .0, reth_block.state_root.0);
     }
 
-    let _ = evm_client.admin_disable_evm(false).await.unwrap();
+    let _ = evm_client.admin_set_evm_global_state(EvmGlobalState::Enabled).await.unwrap();
 }
 
 #[tokio::test]

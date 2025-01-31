@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use alloy_rlp::{Decodable, Encodable};
 use clap::Parser;
-use did::evm_reset_state::EvmResetState;
+use did::evm_state::EvmResetState;
 use did::{AccountInfoMap, RawAccountInfo, H160, H256};
 use evm_canister_client::{CanisterClient, EvmCanisterClient, IcAgentClient};
 use reth_db::cursor::DbCursorRO;
@@ -107,7 +107,13 @@ impl BitfinityResetEvmStateCommand {
         max_request_bytes: usize,
         max_account_request_bytes: usize,
     ) -> Self {
-        Self { provider_factory, executor, parallel_requests: parallel_requests.max(1), max_request_bytes, max_account_request_bytes }
+        Self {
+            provider_factory,
+            executor,
+            parallel_requests: parallel_requests.max(1),
+            max_request_bytes,
+            max_account_request_bytes,
+        }
     }
 
     /// Execute the command
