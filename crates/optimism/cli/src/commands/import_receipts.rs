@@ -119,7 +119,7 @@ where
 ///
 /// Caution! Filter callback must replace completely filtered out receipts for a block, with empty
 /// vectors, rather than `vec!(None)`. This is since the code for writing to static files, expects
-/// indices in the [`Receipts`] list, to map to sequential block numbers.
+/// indices in the receipts list, to map to sequential block numbers.
 pub async fn import_receipts_from_reader<N, F>(
     provider_factory: &ProviderFactory<N>,
     mut reader: ChunkedFileReader,

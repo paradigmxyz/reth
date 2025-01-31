@@ -203,7 +203,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         fork
     }
 
-    /// Gets an [`ExecutedBlockWithTrieUpdates`] with [`BlockNumber`], [`Receipts`] and parent hash.
+    /// Gets an [`ExecutedBlockWithTrieUpdates`] with [`BlockNumber`], receipts and parent hash.
     fn get_executed_block(
         &mut self,
         block_number: BlockNumber,
@@ -226,7 +226,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         )
     }
 
-    /// Generates an [`ExecutedBlockWithTrieUpdates`] that includes the given [`Receipts`].
+    /// Generates an [`ExecutedBlockWithTrieUpdates`] that includes the given receipts.
     pub fn get_executed_block_with_receipts(
         &mut self,
         receipts: Vec<Vec<Receipt>>,
