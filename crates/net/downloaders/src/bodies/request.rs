@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(
             client.times_requested(),
             // div_ceild
-            (headers.into_iter().filter(|h| !h.is_empty()).count() as u64 + 1) / 2
+            (headers.into_iter().filter(|h| !h.is_empty()).count() as u64).div_ceil(2)
         );
     }
 }
