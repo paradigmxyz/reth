@@ -293,7 +293,7 @@ mod test {
             OpTransactionSigned::decode_2718(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
                 .unwrap();
 
-        let block = Block {
+        let block: Block<OpTransactionSigned> = Block {
             body: BlockBody { transactions: [tx_0, tx_1.clone()].to_vec(), ..Default::default() },
             ..Default::default()
         };
@@ -359,7 +359,7 @@ mod test {
         let system = hex!("7ef8f8a0389e292420bcbf9330741f72074e39562a09ff5a00fd22e4e9eee7e34b81bca494deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e20000008dd00101c120000000000000004000000006721035b00000000014189960000000000000000000000000000000000000000000000000000000349b4dcdc000000000000000000000000000000000000000000000000000000004ef9325cc5991ce750960f636ca2ffbb6e209bb3ba91412f21dd78c14ff154d1930f1f9a0000000000000000000000005050f69a9786f081509234f1a7f4684b5e5b76c9");
         let tx_0 = OpTransactionSigned::decode_2718(&mut &system[..]).unwrap();
 
-        let block = Block {
+        let block: alloy_consensus::Block<OpTransactionSigned> = Block {
             body: BlockBody { transactions: vec![tx_0], ..Default::default() },
             ..Default::default()
         };
