@@ -403,6 +403,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-transport",
  "alloy-transport-http",
+ "alloy-transport-ipc",
  "alloy-transport-ws",
  "async-stream",
  "async-trait",
@@ -475,6 +476,7 @@ dependencies = [
  "alloy-pubsub",
  "alloy-transport",
  "alloy-transport-http",
+ "alloy-transport-ipc",
  "alloy-transport-ws",
  "futures",
  "pin-project",
@@ -7266,6 +7268,7 @@ dependencies = [
  "futures",
  "itertools 0.13.0",
  "pin-project",
+ "reth-chainspec",
  "reth-consensus-common",
  "reth-engine-primitives",
  "reth-errors",
@@ -8586,7 +8589,6 @@ dependencies = [
  "arbitrary",
  "c-kzg",
  "codspeed-criterion-compat",
- "derive_more",
  "once_cell",
  "pprof",
  "proptest",
@@ -8596,7 +8598,6 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "reth-static-file-types",
- "serde",
  "serde_json",
 ]
 
@@ -8870,7 +8871,9 @@ name = "reth-rpc-builder"
 version = "1.1.5"
 dependencies = [
  "alloy-eips",
+ "alloy-network",
  "alloy-primitives",
+ "alloy-provider",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "alloy-rpc-types-trace",

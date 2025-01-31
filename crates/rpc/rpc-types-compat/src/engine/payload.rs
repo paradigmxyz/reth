@@ -1,51 +1,13 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
-use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, eip7685::RequestsOrHash};
+use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
-    payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2},
-    CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV2, ExecutionPayloadV3, PraguePayloadFields,
+    payload::ExecutionPayloadBodyV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
 };
 use reth_primitives::{Block, SealedBlock};
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
-
-/// Converts [`SealedBlock`] to [`ExecutionPayload`].
-///
-/// TODO(mattsse): remove after next alloy bump
-pub fn block_to_payload<T: SignedTransaction>(
-    value: SealedBlock<Block<T>>,
-) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-    let cancun =
-        value.parent_beacon_block_root.map(|parent_beacon_block_root| CancunPayloadFields {
-            parent_beacon_block_root,
-            versioned_hashes: value.body().blob_versioned_hashes_iter().copied().collect(),
-        });
-
-    let prague = value
-        .requests_hash
-        .map(|requests_hash| PraguePayloadFields { requests: RequestsOrHash::Hash(requests_hash) });
-
-    let sidecar = match (cancun, prague) {
-        (Some(cancun), Some(prague)) => ExecutionPayloadSidecar::v4(cancun, prague),
-        (Some(cancun), None) => ExecutionPayloadSidecar::v3(cancun),
-        _ => ExecutionPayloadSidecar::none(),
-    };
-
-    let execution_payload = if value.parent_beacon_block_root.is_some() {
-        // block with parent beacon block root: V3
-        ExecutionPayload::V3(block_to_payload_v3(value))
-    } else if value.body().withdrawals.is_some() {
-        // block with withdrawals: V2
-        ExecutionPayload::V2(block_to_payload_v2(value))
-    } else {
-        // otherwise V1
-        ExecutionPayload::V1(block_to_payload_v1(value))
-    };
-
-    (execution_payload, sidecar)
-}
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV1`]
 pub fn block_to_payload_v1<T: SignedTransaction>(
@@ -89,18 +51,6 @@ pub fn block_to_payload_v3<T: SignedTransaction>(
         blob_gas_used: value.blob_gas_used.unwrap_or_default(),
         excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
         payload_inner: block_to_payload_v2(value),
-    }
-}
-
-/// Converts [`SealedBlock`] to [`ExecutionPayloadFieldV2`]
-pub fn convert_block_to_payload_field_v2<T: SignedTransaction>(
-    value: SealedBlock<Block<T>>,
-) -> ExecutionPayloadFieldV2 {
-    // if there are withdrawals, return V2
-    if value.body().withdrawals.is_some() {
-        ExecutionPayloadFieldV2::V2(block_to_payload_v2(value))
-    } else {
-        ExecutionPayloadFieldV2::V1(block_to_payload_v1(value))
     }
 }
 

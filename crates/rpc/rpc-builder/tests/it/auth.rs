@@ -19,7 +19,7 @@ async fn test_basic_engine_calls<C>(client: &C)
 where
     C: ClientT + SubscriptionClientT + Sync + EngineApiClient<EthEngineTypes>,
 {
-    let block = Block::default().seal_slow();
+    let block = Block::<_>::default().seal_slow();
     EngineApiClient::new_payload_v1(client, block_to_payload_v1(block.clone())).await;
     EngineApiClient::new_payload_v2(
         client,
