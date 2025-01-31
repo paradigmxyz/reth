@@ -229,20 +229,6 @@ impl<N: NodePrimitives> FinalizedNotificationStream<N>
 where
     N::Block: Clone + Send + Sync + 'static,
 {
-    /// Creates a new `FinalizedNotificationStream` that combines canonical state notifications with
-    /// finalization events.
-    pub(crate) const fn new(
-        canon_stream: CanonStateNotificationStream<N>,
-        finalized_stream: ForkChoiceStream<SealedHeader<alloy_consensus::Header>>,
-    ) -> Self {
-        Self {
-            canon_stream,
-            finalized_stream,
-            buffered_notification: None,
-            buffered_finalization: None,
-        }
-    }
-
     // Helper method to check if we have a matching pair of notifications
     fn try_match(
         buffered_notification: &Option<CanonStateNotification<N>>,
