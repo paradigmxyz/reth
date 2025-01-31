@@ -589,7 +589,7 @@ impl<P> RevealedSparseTrie<P> {
 
         // Get the nodes that have changed at the given depth.
         let (targets, new_prefix_set) = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
-        // Update the prefix set to the prefix set of the nodes that stil need to be updated.
+        // Update the prefix set to the prefix set of the nodes that still need to be updated.
         self.prefix_set = new_prefix_set;
 
         trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
