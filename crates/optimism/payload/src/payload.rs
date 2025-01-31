@@ -239,7 +239,10 @@ impl From<OpBuiltPayload> for ExecutionPayloadEnvelopeV2 {
 
         Self {
             block_value: fees,
-            execution_payload: ExecutionPayloadFieldV2::from_block_unchecked(block.hash(), &block),
+            execution_payload: ExecutionPayloadFieldV2::from_block_unchecked(
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
+            ),
         }
     }
 }
