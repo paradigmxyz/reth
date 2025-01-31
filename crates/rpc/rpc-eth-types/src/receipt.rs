@@ -5,6 +5,7 @@ use alloy_consensus::{transaction::TransactionMeta, ReceiptEnvelope, TxReceipt};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
+use itertools::multizip;
 use reth_primitives::{Receipt, TransactionSigned, TxType};
 use reth_primitives_traits::SignedTransaction;
 
@@ -38,10 +39,9 @@ where
 
     let blob_gas_used = transaction.blob_gas_used();
     // Blob gas price should only be present if the transaction is a blob transaction
-    let blob_gas_price =
-        blob_gas_used.zip(meta.excess_blob_gas).and_then(|(_, excess_blob_gas)| {
-            blob_params.map(|params| params.calc_blob_fee(excess_blob_gas))
-        });
+    let blob_gas_price = multizip((blob_gas_used, meta.excess_blob_gas, blob_params))
+        .map(|(_, excess_blob_gas, params)| params.calc_blob_fee(excess_blob_gas))
+        .next();
 
     let logs_bloom = receipt.bloom();
 

@@ -3,6 +3,7 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     fmt::Debug,
+    iter::zip,
     sync::{atomic::Ordering::SeqCst, Arc},
 };
 
@@ -14,6 +15,7 @@ use futures::{
     future::{Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
 };
+use itertools::multizip;
 use metrics::atomics::AtomicU64;
 use reth_chain_state::CanonStateNotification;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
@@ -374,10 +376,9 @@ impl FeeHistoryEntry {
         Self {
             base_fee_per_gas: block.header().base_fee_per_gas().unwrap_or_default(),
             gas_used_ratio: block.header().gas_used() as f64 / block.header().gas_limit() as f64,
-            base_fee_per_blob_gas: block
-                .header()
-                .excess_blob_gas()
-                .and_then(|ebg| blob_params.map(|params| params.calc_blob_fee(ebg))),
+            base_fee_per_blob_gas: zip(block.header().excess_blob_gas(), blob_params)
+                .map(|(excess_blob_gas, params)| params.calc_blob_fee(excess_blob_gas))
+                .next(),
             blob_gas_used_ratio: block.body().blob_gas_used() as f64 /
                 alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
             excess_blob_gas: block.header().excess_blob_gas(),
@@ -407,19 +408,19 @@ impl FeeHistoryEntry {
     ///
     /// See also [`Self::next_block_excess_blob_gas`]
     pub fn next_block_blob_fee(&self) -> Option<u128> {
-        self.next_block_excess_blob_gas().and_then(|excess_blob_gas| {
-            self.blob_params.map(|params| params.calc_blob_fee(excess_blob_gas))
-        })
+        zip(self.next_block_excess_blob_gas(), self.blob_params)
+            .map(|(excess_blob_gas, params)| params.calc_blob_fee(excess_blob_gas))
+            .next()
     }
 
     /// Calculate excess blob gas for the next block according to the EIP-4844 spec.
     ///
     /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
     pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
-        self.blob_params.as_ref().and_then(|params| {
-            self.excess_blob_gas.zip(self.blob_gas_used).map(|(excess_blob_gas, blob_gas_used)| {
+        multizip((self.excess_blob_gas, self.blob_gas_used, &self.blob_params))
+            .map(|(excess_blob_gas, blob_gas_used, params)| {
                 params.next_block_excess_blob_gas(excess_blob_gas, blob_gas_used)
             })
-        })
+            .next()
     }
 }
