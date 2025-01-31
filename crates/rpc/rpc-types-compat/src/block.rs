@@ -82,7 +82,7 @@ where
                 hash: Some(tx_hash),
                 block_hash,
                 block_number: Some(block_number),
-                base_fee: base_fee_per_gas.map(u128::from),
+                base_fee: base_fee_per_gas,
                 index: Some(idx as u64),
             };
 

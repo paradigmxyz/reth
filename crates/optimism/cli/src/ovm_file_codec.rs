@@ -5,6 +5,7 @@ use alloy_consensus::{
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
     eip4895::Withdrawals,
+    Typed2718,
 };
 use alloy_primitives::{
     bytes::{Buf, BytesMut},
@@ -214,6 +215,12 @@ impl Decodable for OvmTransactionSigned {
     /// string header if the first byte is less than `0xf7`.
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Self::network_decode(buf).map_err(Into::into)
+    }
+}
+
+impl Typed2718 for OvmTransactionSigned {
+    fn ty(&self) -> u8 {
+        self.transaction.tx_type() as u8
     }
 }
 
