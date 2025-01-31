@@ -8,7 +8,7 @@ use crate::{
     BlockInfo, PoolTransaction, PoolUpdateKind,
 };
 use alloy_consensus::{BlockHeader, Typed2718};
-use alloy_eips::{eip7840::BlobParams, BlockNumberOrTag};
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use alloy_rlp::Encodable;
 use futures_util::{
@@ -119,7 +119,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     chain_spec.base_fee_params_at_timestamp(latest.timestamp() + 12),
                 )
                 .unwrap_or_default(),
-            pending_blob_fee: latest.next_block_blob_fee(BlobParams::cancun()),
+            pending_blob_fee: latest.maybe_next_block_blob_fee(
+                chain_spec.blob_params_at_timestamp(latest.timestamp() + 12),
+            ),
         };
         pool.set_block_info(info);
     }
@@ -277,8 +279,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                         chain_spec.base_fee_params_at_timestamp(new_tip.timestamp() + 12),
                     )
                     .unwrap_or_default();
-                let pending_block_blob_fee =
-                    new_tip.header().next_block_blob_fee(BlobParams::cancun());
+                let pending_block_blob_fee = new_tip.header().maybe_next_block_blob_fee(
+                    chain_spec.blob_params_at_timestamp(new_tip.timestamp() + 12),
+                );
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
@@ -382,7 +385,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                         chain_spec.base_fee_params_at_timestamp(tip.timestamp() + 12),
                     )
                     .unwrap_or_default();
-                let pending_block_blob_fee = tip.header().next_block_blob_fee(BlobParams::cancun());
+                let pending_block_blob_fee = tip.header().maybe_next_block_blob_fee(
+                    chain_spec.blob_params_at_timestamp(tip.timestamp() + 12),
+                );
 
                 let first_block = blocks.first();
                 trace!(

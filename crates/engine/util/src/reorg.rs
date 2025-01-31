@@ -1,12 +1,12 @@
 //! Stream wrapper that simulates reorgs.
 
 use alloy_consensus::{Header, Transaction};
-use alloy_eips::eip7840::BlobParams;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus,
 };
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
+use reth_chainspec::EthChainSpec;
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, OnForkChoiceUpdated,
 };
@@ -109,7 +109,7 @@ where
     Engine: EngineTypes,
     Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
-    Spec: EthereumHardforks,
+    Spec: EthChainSpec + EthereumHardforks,
 {
     type Item = S::Item;
 
@@ -256,7 +256,7 @@ fn create_reorg_head<Provider, Evm, Spec>(
 where
     Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
-    Spec: EthereumHardforks,
+    Spec: EthChainSpec + EthereumHardforks,
 {
     let chain_spec = payload_validator.chain_spec();
 
@@ -380,11 +380,8 @@ where
     let hashed_state = state_provider.hashed_post_state(outcome.state());
 
     let (blob_gas_used, excess_blob_gas) =
-        if chain_spec.is_cancun_active_at_timestamp(reorg_target.timestamp) {
-            (
-                Some(sum_blob_gas_used),
-                reorg_target_parent.next_block_excess_blob_gas(BlobParams::cancun()),
-            )
+        if let Some(blob_params) = chain_spec.blob_params_at_timestamp(reorg_target.timestamp) {
+            (Some(sum_blob_gas_used), reorg_target_parent.next_block_excess_blob_gas(blob_params))
         } else {
             (None, None)
         };
