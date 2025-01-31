@@ -20,18 +20,15 @@ use core::{
     mem,
 };
 use derive_more::{AsRef, Deref};
-#[cfg(not(feature = "std"))]
-use once_cell::sync::OnceCell as OnceLock;
-use op_alloy_consensus::{OpPooledTransaction, OpTypedTransaction, TxDeposit};
+use op_alloy_consensus::{DepositTransaction, OpPooledTransaction, OpTypedTransaction, TxDeposit};
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
-    transaction::error::TransactionConversionError,
+    sync::OnceLock,
+    transaction::{error::TransactionConversionError, signed::RecoveryError},
     InMemorySize, SignedTransaction,
 };
-#[cfg(feature = "std")]
-use std::sync::OnceLock;
 
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
@@ -40,13 +37,13 @@ use std::sync::OnceLock;
 pub struct OpTransactionSigned {
     /// Transaction hash
     #[cfg_attr(feature = "serde", serde(skip))]
-    pub hash: OnceLock<TxHash>,
+    hash: OnceLock<TxHash>,
     /// The transaction signature values
-    pub signature: Signature,
+    signature: Signature,
     /// Raw transaction info
     #[deref]
     #[as_ref]
-    pub transaction: OpTypedTransaction,
+    transaction: OpTypedTransaction,
 }
 
 impl OpTransactionSigned {
@@ -58,6 +55,23 @@ impl OpTransactionSigned {
         }
 
         signed_tx
+    }
+
+    /// Consumes the type and returns the transaction.
+    #[inline]
+    pub fn into_transaction(self) -> OpTypedTransaction {
+        self.transaction
+    }
+
+    /// Returns the transaction.
+    #[inline]
+    pub const fn transaction(&self) -> &OpTypedTransaction {
+        &self.transaction
+    }
+
+    /// Splits the `OpTransactionSigned` into its transaction and signature.
+    pub fn split(self) -> (OpTypedTransaction, Signature) {
+        (self.transaction, self.signature)
     }
 
     /// Creates a new signed transaction from the given transaction and signature without the hash.
@@ -82,11 +96,11 @@ impl SignedTransaction for OpTransactionSigned {
         &self.signature
     }
 
-    fn recover_signer(&self) -> Option<Address> {
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = self.transaction {
-            return Some(from)
+            return Ok(from)
         }
 
         let Self { transaction, signature, .. } = self;
@@ -94,11 +108,11 @@ impl SignedTransaction for OpTransactionSigned {
         recover_signer(signature, signature_hash)
     }
 
-    fn recover_signer_unchecked(&self) -> Option<Address> {
+    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
         if let OpTypedTransaction::Deposit(TxDeposit { from, .. }) = &self.transaction {
-            return Some(*from)
+            return Ok(*from)
         }
 
         let Self { transaction, signature, .. } = self;
@@ -106,11 +120,14 @@ impl SignedTransaction for OpTransactionSigned {
         recover_signer_unchecked(signature, signature_hash)
     }
 
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
         match &self.transaction {
             // Optimism's Deposit transaction does not have a signature. Directly return the
             // `from` address.
-            OpTypedTransaction::Deposit(tx) => return Some(tx.from),
+            OpTypedTransaction::Deposit(tx) => return Ok(tx.from),
             OpTypedTransaction::Legacy(tx) => tx.encode_for_signing(buf),
             OpTypedTransaction::Eip2930(tx) => tx.encode_for_signing(buf),
             OpTypedTransaction::Eip1559(tx) => tx.encode_for_signing(buf),
@@ -121,6 +138,19 @@ impl SignedTransaction for OpTransactionSigned {
 
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
+    }
+}
+
+/// A trait that represents an optimism transaction, mainly used to indicate whether or not the
+/// transaction is a deposit transaction.
+pub trait OpTransaction {
+    /// Whether or not the transaction is a dpeosit transaction.
+    fn is_deposit(&self) -> bool;
+}
+
+impl OpTransaction for OpTransactionSigned {
+    fn is_deposit(&self) -> bool {
+        self.is_deposit()
     }
 }
 
@@ -235,7 +265,7 @@ impl alloy_rlp::Encodable for OpTransactionSigned {
 
     fn length(&self) -> usize {
         let mut payload_length = self.encode_2718_len();
-        if !Encodable2718::is_legacy(self) {
+        if !self.is_legacy() {
             payload_length += Header { list: false, payload_length }.length();
         }
 
@@ -366,6 +396,18 @@ impl Transaction for OpTransactionSigned {
         self.deref().priority_fee_or_price()
     }
 
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.deref().effective_gas_price(base_fee)
+    }
+
+    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
+        self.deref().effective_tip_per_gas(base_fee)
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.deref().is_dynamic_fee()
+    }
+
     fn kind(&self) -> TxKind {
         self.deref().kind()
     }
@@ -392,18 +434,6 @@ impl Transaction for OpTransactionSigned {
 
     fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
         self.deref().authorization_list()
-    }
-
-    fn is_dynamic_fee(&self) -> bool {
-        self.deref().is_dynamic_fee()
-    }
-
-    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        self.deref().effective_gas_price(base_fee)
-    }
-
-    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.deref().effective_tip_per_gas(base_fee)
     }
 }
 
@@ -519,7 +549,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
 
         let secp = secp256k1::Secp256k1::new();
         let key_pair = secp256k1::Keypair::new(&secp, &mut rand::thread_rng());
-        let signature = reth_primitives::transaction::util::secp256k1::sign_message(
+        let signature = reth_primitives_traits::crypto::secp256k1::sign_message(
             B256::from_slice(&key_pair.secret_bytes()[..]),
             signature_hash(&transaction),
         )
@@ -601,6 +631,26 @@ impl TryFrom<OpTransactionSigned> for OpPooledTransaction {
     }
 }
 
+impl DepositTransaction for OpTransactionSigned {
+    fn source_hash(&self) -> Option<B256> {
+        match &self.transaction {
+            OpTypedTransaction::Deposit(tx) => Some(tx.source_hash),
+            _ => None,
+        }
+    }
+
+    fn mint(&self) -> Option<u128> {
+        match &self.transaction {
+            OpTypedTransaction::Deposit(tx) => tx.mint,
+            _ => None,
+        }
+    }
+
+    fn is_system_transaction(&self) -> bool {
+        self.is_deposit()
+    }
+}
+
 /// Bincode-compatible transaction type serde implementations.
 #[cfg(feature = "serde-bincode-compat")]
 pub mod serde_bincode_compat {
@@ -678,5 +728,9 @@ pub mod serde_bincode_compat {
 
     impl SerdeBincodeCompat for super::OpTransactionSigned {
         type BincodeRepr<'a> = OpTransactionSigned<'a>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
     }
 }

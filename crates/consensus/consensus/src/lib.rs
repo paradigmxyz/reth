@@ -15,11 +15,10 @@ use alloc::{fmt::Debug, sync::Arc, vec::Vec};
 use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256, U256};
-use reth_primitives::{
-    BlockBody, BlockWithSenders, EthPrimitives, GotExpected, GotExpectedBoxed,
-    InvalidTransactionError, NodePrimitives, Receipt, SealedBlock, SealedHeader,
+use reth_primitives_traits::{
+    constants::MINIMUM_GAS_LIMIT, transaction::error::InvalidTransactionError, Block, GotExpected,
+    GotExpectedBoxed, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
-use reth_primitives_traits::constants::MINIMUM_GAS_LIMIT;
 
 /// A consensus implementation that does nothing.
 pub mod noop;
@@ -30,7 +29,7 @@ pub mod test_utils;
 
 /// Post execution input passed to [`FullConsensus::validate_block_post_execution`].
 #[derive(Debug)]
-pub struct PostExecutionInput<'a, R = Receipt> {
+pub struct PostExecutionInput<'a, R> {
     /// Receipts of the block.
     pub receipts: &'a [R],
     /// EIP-7685 requests of the block.
@@ -47,9 +46,7 @@ impl<'a, R> PostExecutionInput<'a, R> {
 /// [`Consensus`] implementation which knows full node primitives and is able to validation block's
 /// execution outcome.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait FullConsensus<N: NodePrimitives = EthPrimitives>:
-    AsConsensus<N::BlockHeader, N::BlockBody>
-{
+pub trait FullConsensus<N: NodePrimitives>: AsConsensus<N::Block> {
     /// Validate a block considering world state, i.e. things that can not be checked before
     /// execution.
     ///
@@ -58,20 +55,23 @@ pub trait FullConsensus<N: NodePrimitives = EthPrimitives>:
     /// Note: validating blocks does not include other validations of the Consensus
     fn validate_block_post_execution(
         &self,
-        block: &BlockWithSenders<N::Block>,
+        block: &RecoveredBlock<N::Block>,
         input: PostExecutionInput<'_, N::Receipt>,
     ) -> Result<(), ConsensusError>;
 }
 
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait Consensus<H = Header, B = BlockBody>: AsHeaderValidator<H> {
+pub trait Consensus<B: Block>: AsHeaderValidator<B::Header> {
+    /// The error type related to consensus.
+    type Error;
+
     /// Ensures that body field values match the header.
     fn validate_body_against_header(
         &self,
-        body: &B,
-        header: &SealedHeader<H>,
-    ) -> Result<(), ConsensusError>;
+        body: &B::Body,
+        header: &SealedHeader<B::Header>,
+    ) -> Result<(), Self::Error>;
 
     /// Validate a block disregarding world state, i.e. things that can be checked before sender
     /// recovery and execution.
@@ -82,8 +82,7 @@ pub trait Consensus<H = Header, B = BlockBody>: AsHeaderValidator<H> {
     /// **This should not be called for the genesis block**.
     ///
     /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block_pre_execution(&self, block: &SealedBlock<H, B>)
-        -> Result<(), ConsensusError>;
+    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), Self::Error>;
 }
 
 /// HeaderValidator is a protocol that validates headers and their relationships.
@@ -168,15 +167,15 @@ impl<T: HeaderValidator<H>, H> AsHeaderValidator<H> for T {
 }
 
 /// Helper trait to cast `Arc<dyn FullConsensus>` to `Arc<dyn Consensus>`
-pub trait AsConsensus<H, B>: Consensus<H, B> {
+pub trait AsConsensus<B: Block>: Consensus<B> {
     /// Converts the [`Arc`] of self to [`Arc`] of [`HeaderValidator`]
-    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<H, B> + 'a>
+    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<B, Error = Self::Error> + 'a>
     where
         Self: 'a;
 }
 
-impl<T: Consensus<H, B>, H, B> AsConsensus<H, B> for T {
-    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<H, B> + 'a>
+impl<T: Consensus<B>, B: Block> AsConsensus<B> for T {
+    fn as_consensus<'a>(self: Arc<Self>) -> Arc<dyn Consensus<B, Error = Self::Error> + 'a>
     where
         Self: 'a,
     {

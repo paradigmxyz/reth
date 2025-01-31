@@ -1,12 +1,11 @@
 # Ensures that `Compact` codec changes are backwards compatible.
-# 
+#
 # 1) checkout `main`
 # 2) randomly generate and serialize to disk many different type vectors with `Compact` (eg. Header, Transaction, etc)
 # 3) checkout `pr`
 # 4) deserialize previously generated test vectors
 
 on:
-
   pull_request:
   merge_group:
   push:
@@ -26,6 +25,7 @@ jobs:
           - cargo run --bin reth --features "dev"
           - cargo run --bin op-reth --features "optimism dev" --manifest-path crates/optimism/bin/Cargo.toml
     steps:
+      - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

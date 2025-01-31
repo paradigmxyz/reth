@@ -50,7 +50,6 @@ async fn test_fee_history() -> eyre::Result<()> {
         setup_engine::<EthereumNode>(1, chain_spec.clone(), false, eth_payload_attributes).await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
         .wallet(EthereumWallet::new(wallet.gen().swap_remove(0)))
         .on_http(node.rpc_url());
 
@@ -133,7 +132,6 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
         setup_engine::<EthereumNode>(1, chain_spec.clone(), false, eth_payload_attributes).await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
         .wallet(EthereumWallet::new(wallet.gen().swap_remove(0)))
         .on_http(node.rpc_url());
 
@@ -207,7 +205,6 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
         setup_engine::<EthereumNode>(1, chain_spec.clone(), false, eth_payload_attributes).await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
-        .with_recommended_fillers()
         .wallet(EthereumWallet::new(wallet.gen().swap_remove(0)))
         .on_http(node.rpc_url());
 

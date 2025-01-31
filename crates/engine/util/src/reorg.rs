@@ -8,20 +8,20 @@ use alloy_rpc_types_engine::{
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_engine_primitives::{
-    BeaconEngineMessage, BeaconOnNewPayloadError, EngineApiMessageVersion, EngineTypes,
-    OnForkChoiceUpdated,
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, OnForkChoiceUpdated,
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
-    env::EvmEnv, state_change::post_block_withdrawals_balance_increments,
-    system_calls::SystemCaller, ConfigureEvm,
+    state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
+    ConfigureEvm, Evm, EvmError,
 };
+use reth_payload_primitives::EngineApiMessageVersion;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{
-    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, BlockExt, Receipt,
-    Receipts,
+    transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, Receipt, Receipts,
 };
+use reth_primitives_traits::{block::Block as _, proofs, SignedTransaction};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
@@ -29,7 +29,6 @@ use reth_revm::{
     DatabaseCommit,
 };
 use reth_rpc_types_compat::engine::payload::block_to_payload;
-use revm_primitives::{EVMError, EnvWithHandlerCfg};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -269,7 +268,7 @@ where
 
     // Fetch reorg target block depending on its depth and its parent.
     let mut previous_hash = next_block.parent_hash;
-    let mut candidate_transactions = next_block.body.transactions;
+    let mut candidate_transactions = next_block.into_body().transactions;
     let reorg_target = 'target: {
         loop {
             let reorg_target = provider
@@ -297,15 +296,8 @@ where
         .with_bundle_update()
         .build();
 
-    // Configure environments
-    let EvmEnv { cfg_env_with_handler_cfg, block_env } =
-        evm_config.cfg_and_block_env(&reorg_target.header);
-    let env = EnvWithHandlerCfg::new_with_cfg_env(
-        cfg_env_with_handler_cfg,
-        block_env,
-        Default::default(),
-    );
-    let mut evm = evm_config.evm_with_env(&mut state, env);
+    // Configure EVM
+    let mut evm = evm_config.evm_for_block(&mut state, &reorg_target.header);
 
     // apply eip-4788 pre block contract call
     let mut system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
@@ -329,39 +321,39 @@ where
         }
 
         // Configure the environment for the block.
-        let tx_recovered = tx.clone().try_into_ecrecovered().map_err(|_| {
+        let tx_recovered = tx.try_clone_into_recovered().map_err(|_| {
             BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError)
         })?;
-        evm_config.fill_tx_env(evm.tx_mut(), &tx_recovered, tx_recovered.signer());
-        let exec_result = match evm.transact() {
+        let tx_env = evm_config.tx_env(&tx_recovered, tx_recovered.signer());
+        let exec_result = match evm.transact(tx_env) {
             Ok(result) => result,
-            error @ Err(EVMError::Transaction(_) | EVMError::Header(_)) => {
-                trace!(target: "engine::stream::reorg", hash = %tx.hash(), ?error, "Error executing transaction from next block");
+            Err(err) if err.is_invalid_tx_err() => {
+                trace!(target: "engine::stream::reorg", hash = %tx.tx_hash(), ?err, "Error executing transaction from next block");
                 continue
             }
             // Treat error as fatal
             Err(error) => {
                 return Err(RethError::Execution(BlockExecutionError::Validation(
-                    BlockValidationError::EVM { hash: tx.hash(), error: Box::new(error) },
+                    BlockValidationError::EVM { hash: *tx.tx_hash(), error: Box::new(error) },
                 )))
             }
         };
         evm.db_mut().commit(exec_result.state);
 
-        if let Some(blob_tx) = tx.transaction.as_eip4844() {
+        if let Some(blob_tx) = tx.as_eip4844() {
             sum_blob_gas_used += blob_tx.blob_gas();
             versioned_hashes.extend(blob_tx.blob_versioned_hashes.clone());
         }
 
         cumulative_gas_used += exec_result.result.gas_used();
         #[allow(clippy::needless_update)] // side-effect of optimism fields
-        receipts.push(Some(Receipt {
+        receipts.push(Receipt {
             tx_type: tx.tx_type(),
             success: exec_result.result.is_success(),
             cumulative_gas_used,
             logs: exec_result.result.into_logs().into_iter().collect(),
             ..Default::default()
-        }));
+        });
 
         // append transaction to the list of executed transactions
         transactions.push(tx);

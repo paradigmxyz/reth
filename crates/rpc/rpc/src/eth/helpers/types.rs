@@ -5,7 +5,8 @@ use alloy_network::{Ethereum, Network};
 use alloy_primitives::PrimitiveSignature as Signature;
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
-use reth_primitives::{RecoveredTx, TransactionSigned};
+use reth_primitives::{Recovered, TransactionSigned};
+use reth_primitives_traits::SignedTransaction;
 use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::TransactionCompat;
@@ -39,14 +40,14 @@ where
 
     fn fill(
         &self,
-        tx: RecoveredTx,
+        tx: Recovered<TransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let from = tx.signer();
-        let hash = tx.hash();
-        let TransactionSigned { transaction, signature, .. } = tx.into_signed();
+        let hash = *tx.tx_hash();
+        let signature = *tx.signature();
 
-        let inner: TxEnvelope = match transaction {
+        let inner: TxEnvelope = match tx.into_tx().into_transaction() {
             reth_primitives::Transaction::Legacy(tx) => {
                 Signed::new_unchecked(tx, signature, hash).into()
             }
@@ -62,8 +63,6 @@ where
             reth_primitives::Transaction::Eip7702(tx) => {
                 Signed::new_unchecked(tx, signature, hash).into()
             }
-            #[allow(unreachable_patterns)]
-            _ => unreachable!(),
         };
 
         let TransactionInfo {
@@ -72,7 +71,7 @@ where
 
         let effective_gas_price = base_fee
             .map(|base_fee| {
-                inner.effective_tip_per_gas(base_fee as u64).unwrap_or_default() + base_fee
+                inner.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
             })
             .unwrap_or_else(|| inner.max_fee_per_gas());
 

@@ -17,7 +17,10 @@ use reth_codecs::alloy::{
     withdrawal::Withdrawal,
 };
 use reth_db::{
-    models::{AccountBeforeTx, StoredBlockBodyIndices, StoredBlockOmmers, StoredBlockWithdrawals},
+    models::{
+        AccountBeforeTx, StaticFileBlockWithdrawals, StoredBlockBodyIndices, StoredBlockOmmers,
+        StoredBlockWithdrawals,
+    },
     ClientVersion,
 };
 use reth_fs_util as fs;
@@ -110,6 +113,7 @@ compact_types!(
         StoredBlockOmmers,
         StoredBlockBodyIndices,
         StoredBlockWithdrawals,
+        StaticFileBlockWithdrawals,
         // Manual implementations
         TransactionSigned,
         // Bytecode, // todo revm arbitrary
@@ -195,7 +199,7 @@ where
     let type_name = type_name::<T>();
     print!("{}", &type_name);
 
-    let mut bytes = std::iter::repeat(0u8).take(256).collect::<Vec<u8>>();
+    let mut bytes = std::iter::repeat_n(0u8, 256).collect::<Vec<u8>>();
     let mut compact_buffer = vec![];
 
     let mut values = Vec::with_capacity(VECTOR_SIZE);
@@ -211,7 +215,7 @@ where
                 Err(err) => {
                     if tries < 5 && matches!(err, arbitrary::Error::NotEnoughData) {
                         tries += 1;
-                        bytes.extend(std::iter::repeat(0u8).take(256));
+                        bytes.extend(std::iter::repeat_n(0u8, 256));
                     } else {
                         return Err(err)?
                     }

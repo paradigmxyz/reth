@@ -1,7 +1,6 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
-use alloy_consensus::Header;
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, eip7685::RequestsOrHash};
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
@@ -9,21 +8,20 @@ use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
     ExecutionPayloadV2, ExecutionPayloadV3, PraguePayloadFields,
 };
-use reth_primitives::{BlockBody, SealedBlock};
+use reth_primitives::{Block, SealedBlock};
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 
-/// Converts [`SealedBlock`] to [`ExecutionPayload`]
+/// Converts [`SealedBlock`] to [`ExecutionPayload`].
+///
+/// TODO(mattsse): remove after next alloy bump
 pub fn block_to_payload<T: SignedTransaction>(
-    value: SealedBlock<Header, BlockBody<T>>,
+    value: SealedBlock<Block<T>>,
 ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-    let cancun = if let Some(parent_beacon_block_root) = value.parent_beacon_block_root {
-        Some(CancunPayloadFields {
+    let cancun =
+        value.parent_beacon_block_root.map(|parent_beacon_block_root| CancunPayloadFields {
             parent_beacon_block_root,
-            versioned_hashes: value.body.blob_versioned_hashes_iter().copied().collect(),
-        })
-    } else {
-        None
-    };
+            versioned_hashes: value.body().blob_versioned_hashes_iter().copied().collect(),
+        });
 
     let prague = value
         .requests_hash
@@ -35,10 +33,10 @@ pub fn block_to_payload<T: SignedTransaction>(
         _ => ExecutionPayloadSidecar::none(),
     };
 
-    let execution_payload = if value.header.parent_beacon_block_root.is_some() {
+    let execution_payload = if value.parent_beacon_block_root.is_some() {
         // block with parent beacon block root: V3
         ExecutionPayload::V3(block_to_payload_v3(value))
-    } else if value.body.withdrawals.is_some() {
+    } else if value.body().withdrawals.is_some() {
         // block with withdrawals: V2
         ExecutionPayload::V2(block_to_payload_v2(value))
     } else {
@@ -50,11 +48,11 @@ pub fn block_to_payload<T: SignedTransaction>(
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV1`]
-pub fn block_to_payload_v1<T: Encodable2718>(
-    value: SealedBlock<Header, BlockBody<T>>,
+pub fn block_to_payload_v1<T: SignedTransaction>(
+    value: SealedBlock<Block<T>>,
 ) -> ExecutionPayloadV1 {
     let transactions =
-        value.body.transactions.iter().map(|tx| tx.encoded_2718().into()).collect::<Vec<_>>();
+        value.body().transactions.iter().map(|tx| tx.encoded_2718().into()).collect::<Vec<_>>();
     ExecutionPayloadV1 {
         parent_hash: value.parent_hash,
         fee_recipient: value.beneficiary,
@@ -74,18 +72,18 @@ pub fn block_to_payload_v1<T: Encodable2718>(
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV2`]
-pub fn block_to_payload_v2<T: Encodable2718>(
-    mut value: SealedBlock<Header, BlockBody<T>>,
+pub fn block_to_payload_v2<T: SignedTransaction>(
+    value: SealedBlock<Block<T>>,
 ) -> ExecutionPayloadV2 {
     ExecutionPayloadV2 {
-        withdrawals: value.body.withdrawals.take().unwrap_or_default().into_inner(),
+        withdrawals: value.body().withdrawals.clone().unwrap_or_default().into_inner(),
         payload_inner: block_to_payload_v1(value),
     }
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadV3`], and returns the parent beacon block root.
-pub fn block_to_payload_v3<T: Encodable2718>(
-    value: SealedBlock<Header, BlockBody<T>>,
+pub fn block_to_payload_v3<T: SignedTransaction>(
+    value: SealedBlock<Block<T>>,
 ) -> ExecutionPayloadV3 {
     ExecutionPayloadV3 {
         blob_gas_used: value.blob_gas_used.unwrap_or_default(),
@@ -95,11 +93,11 @@ pub fn block_to_payload_v3<T: Encodable2718>(
 }
 
 /// Converts [`SealedBlock`] to [`ExecutionPayloadFieldV2`]
-pub fn convert_block_to_payload_field_v2<T: Encodable2718>(
-    value: SealedBlock<Header, BlockBody<T>>,
+pub fn convert_block_to_payload_field_v2<T: SignedTransaction>(
+    value: SealedBlock<Block<T>>,
 ) -> ExecutionPayloadFieldV2 {
     // if there are withdrawals, return V2
-    if value.body.withdrawals.is_some() {
+    if value.body().withdrawals.is_some() {
         ExecutionPayloadFieldV2::V2(block_to_payload_v2(value))
     } else {
         ExecutionPayloadFieldV2::V1(block_to_payload_v1(value))
@@ -110,31 +108,10 @@ pub fn convert_block_to_payload_field_v2<T: Encodable2718>(
 pub fn convert_to_payload_body_v1(
     value: impl reth_primitives_traits::Block,
 ) -> ExecutionPayloadBodyV1 {
-    let transactions = value.body().transactions().iter().map(|tx| tx.encoded_2718().into());
+    let transactions = value.body().transactions_iter().map(|tx| tx.encoded_2718().into());
     ExecutionPayloadBodyV1 {
         transactions: transactions.collect(),
         withdrawals: value.body().withdrawals().cloned().map(Withdrawals::into_inner),
-    }
-}
-
-/// Transforms a [`SealedBlock`] into a [`ExecutionPayloadV1`]
-pub fn execution_payload_from_sealed_block(value: SealedBlock) -> ExecutionPayloadV1 {
-    let transactions = value.encoded_2718_transactions();
-    ExecutionPayloadV1 {
-        parent_hash: value.parent_hash,
-        fee_recipient: value.beneficiary,
-        state_root: value.state_root,
-        receipts_root: value.receipts_root,
-        logs_bloom: value.logs_bloom,
-        prev_randao: value.mix_hash,
-        block_number: value.number,
-        gas_limit: value.gas_limit,
-        gas_used: value.gas_used,
-        timestamp: value.timestamp,
-        extra_data: value.extra_data.clone(),
-        base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
-        block_hash: value.hash(),
-        transactions,
     }
 }
 
@@ -146,7 +123,8 @@ mod tests {
         CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
         ExecutionPayloadV2, ExecutionPayloadV3,
     };
-    use reth_primitives::{Block, BlockExt, TransactionSigned};
+    use reth_primitives::{Block, TransactionSigned};
+    use reth_primitives_traits::Block as _;
 
     #[test]
     fn roundtrip_payload_to_block() {

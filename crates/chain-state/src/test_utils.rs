@@ -1,10 +1,12 @@
 use core::marker::PhantomData;
 
 use crate::{
-    in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
+    in_memory::ExecutedBlockWithTrieUpdates, CanonStateNotification, CanonStateNotifications,
     CanonStateSubscriptions,
 };
-use alloy_consensus::{Header, Transaction as _, TxEip1559, EMPTY_ROOT_HASH};
+use alloy_consensus::{
+    Header, SignableTransaction, Transaction as _, TxEip1559, TxReceipt, EMPTY_ROOT_HASH,
+};
 use alloy_eips::{
     eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, INITIAL_BASE_FEE},
     eip7685::Requests,
@@ -16,11 +18,14 @@ use rand::{thread_rng, Rng};
 use reth_chainspec::{ChainSpec, EthereumHardfork, MIN_TRANSACTION_GAS};
 use reth_execution_types::{Chain, ExecutionOutcome};
 use reth_primitives::{
-    proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
-    BlockBody, EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredTx, SealedBlock,
-    SealedBlockWithSenders, SealedHeader, Transaction, TransactionSigned,
+    transaction::SignedTransactionIntoRecoveredExt, BlockBody, EthPrimitives, NodePrimitives,
+    Receipt, Receipts, Recovered, RecoveredBlock, SealedBlock, SealedHeader, Transaction,
+    TransactionSigned,
 };
-use reth_primitives_traits::Account;
+use reth_primitives_traits::{
+    proofs::{calculate_receipt_root, calculate_transaction_root, calculate_withdrawals_root},
+    Account,
+};
 use reth_storage_api::NodePrimitivesProvider;
 use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
 use revm::{db::BundleState, primitives::AccountInfo};
@@ -86,15 +91,15 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         U256::from(INITIAL_BASE_FEE * MIN_TRANSACTION_GAS)
     }
 
-    /// Generates a random [`SealedBlockWithSenders`].
+    /// Generates a random [`RecoveredBlock`].
     pub fn generate_random_block(
         &mut self,
         number: BlockNumber,
         parent_hash: B256,
-    ) -> SealedBlockWithSenders {
+    ) -> RecoveredBlock<reth_primitives::Block> {
         let mut rng = thread_rng();
 
-        let mock_tx = |nonce: u64| -> RecoveredTx {
+        let mock_tx = |nonce: u64| -> Recovered<_> {
             let tx = Transaction::Eip1559(TxEip1559 {
                 chain_id: self.chain_spec.chain.id(),
                 nonce,
@@ -112,7 +117,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let num_txs = rng.gen_range(0..5);
         let signer_balance_decrease = Self::single_tx_cost() * U256::from(num_txs);
-        let transactions: Vec<RecoveredTx> = (0..num_txs)
+        let transactions: Vec<Recovered<_>> = (0..num_txs)
             .map(|_| {
                 let tx = mock_tx(self.signer_build_account_info.nonce);
                 self.signer_build_account_info.nonce += 1;
@@ -131,7 +136,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                     cumulative_gas_used: (idx as u64 + 1) * MIN_TRANSACTION_GAS,
                     ..Default::default()
                 }
-                .with_bloom()
+                .into_with_bloom()
             })
             .collect::<Vec<_>>();
 
@@ -145,7 +150,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
             transactions_root: calculate_transaction_root(
-                &transactions.clone().into_iter().map(|tx| tx.into_signed()).collect::<Vec<_>>(),
+                &transactions.clone().into_iter().map(|tx| tx.into_tx()).collect::<Vec<_>>(),
             ),
             receipts_root: calculate_receipt_root(&receipts),
             beneficiary: Address::random(),
@@ -168,16 +173,17 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             ..Default::default()
         };
 
-        let block = SealedBlock {
-            header: SealedHeader::seal(header),
-            body: BlockBody {
-                transactions: transactions.into_iter().map(|tx| tx.into_signed()).collect(),
+        let block = SealedBlock::from_sealed_parts(
+            SealedHeader::seal_slow(header),
+            BlockBody {
+                transactions: transactions.into_iter().map(|tx| tx.into_tx()).collect(),
                 ommers: Vec::new(),
                 withdrawals: Some(vec![].into()),
             },
-        };
+        );
 
-        SealedBlockWithSenders::new(block, vec![self.signer; num_txs as usize]).unwrap()
+        RecoveredBlock::try_recover_sealed_with_senders(block, vec![self.signer; num_txs as usize])
+            .unwrap()
     }
 
     /// Creates a fork chain with the given base block.
@@ -185,31 +191,31 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         &mut self,
         base_block: &SealedBlock,
         length: u64,
-    ) -> Vec<SealedBlockWithSenders> {
+    ) -> Vec<RecoveredBlock<reth_primitives::Block>> {
         let mut fork = Vec::with_capacity(length as usize);
         let mut parent = base_block.clone();
 
         for _ in 0..length {
             let block = self.generate_random_block(parent.number + 1, parent.hash());
-            parent = block.block.clone();
+            parent = block.clone_sealed_block();
             fork.push(block);
         }
 
         fork
     }
 
-    /// Gets an [`ExecutedBlock`] with [`BlockNumber`], [`Receipts`] and parent hash.
+    /// Gets an [`ExecutedBlockWithTrieUpdates`] with [`BlockNumber`], [`Receipts`] and parent hash.
     fn get_executed_block(
         &mut self,
         block_number: BlockNumber,
         receipts: Receipts,
         parent_hash: B256,
-    ) -> ExecutedBlock {
+    ) -> ExecutedBlockWithTrieUpdates {
         let block_with_senders = self.generate_random_block(block_number, parent_hash);
 
-        ExecutedBlock::new(
-            Arc::new(block_with_senders.block.clone()),
-            Arc::new(block_with_senders.senders),
+        let (block, senders) = block_with_senders.split_sealed();
+        ExecutedBlockWithTrieUpdates::new(
+            Arc::new(RecoveredBlock::new_sealed(block, senders)),
             Arc::new(ExecutionOutcome::new(
                 BundleState::default(),
                 receipts,
@@ -221,22 +227,22 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         )
     }
 
-    /// Generates an [`ExecutedBlock`] that includes the given [`Receipts`].
+    /// Generates an [`ExecutedBlockWithTrieUpdates`] that includes the given [`Receipts`].
     pub fn get_executed_block_with_receipts(
         &mut self,
         receipts: Receipts,
         parent_hash: B256,
-    ) -> ExecutedBlock {
+    ) -> ExecutedBlockWithTrieUpdates {
         let number = rand::thread_rng().gen::<u64>();
         self.get_executed_block(number, receipts, parent_hash)
     }
 
-    /// Generates an [`ExecutedBlock`] with the given [`BlockNumber`].
+    /// Generates an [`ExecutedBlockWithTrieUpdates`] with the given [`BlockNumber`].
     pub fn get_executed_block_with_number(
         &mut self,
         block_number: BlockNumber,
         parent_hash: B256,
-    ) -> ExecutedBlock {
+    ) -> ExecutedBlockWithTrieUpdates {
         self.get_executed_block(block_number, Receipts { receipt_vec: vec![vec![]] }, parent_hash)
     }
 
@@ -244,12 +250,12 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     pub fn get_executed_blocks(
         &mut self,
         range: Range<u64>,
-    ) -> impl Iterator<Item = ExecutedBlock> + '_ {
+    ) -> impl Iterator<Item = ExecutedBlockWithTrieUpdates> + '_ {
         let mut parent_hash = B256::default();
         range.map(move |number| {
             let current_parent_hash = parent_hash;
             let block = self.get_executed_block_with_number(number, current_parent_hash);
-            parent_hash = block.block.hash();
+            parent_hash = block.recovered_block().hash();
             block
         })
     }
@@ -257,9 +263,12 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     /// Returns the execution outcome for a block created with this builder.
     /// In order to properly include the bundle state, the signer balance is
     /// updated.
-    pub fn get_execution_outcome(&mut self, block: SealedBlockWithSenders) -> ExecutionOutcome {
+    pub fn get_execution_outcome(
+        &mut self,
+        block: RecoveredBlock<reth_primitives::Block>,
+    ) -> ExecutionOutcome {
         let receipts = block
-            .body
+            .body()
             .transactions
             .iter()
             .enumerate()
@@ -273,7 +282,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let mut bundle_state_builder = BundleState::builder(block.number..=block.number);
 
-        for tx in &block.body.transactions {
+        for tx in &block.body().transactions {
             self.signer_execute_account_info.balance -= Self::single_tx_cost();
             bundle_state_builder = bundle_state_builder.state_present_account_info(
                 self.signer,
@@ -287,7 +296,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         let execution_outcome = ExecutionOutcome::new(
             bundle_state_builder.build(),
-            vec![vec![None]].into(),
+            vec![vec![]].into(),
             block.number,
             Vec::new(),
         );

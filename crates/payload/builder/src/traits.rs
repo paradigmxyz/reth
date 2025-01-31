@@ -67,6 +67,8 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
 
     /// Resolves the payload as fast as possible.
+    ///
+    /// See also [`PayloadJob::resolve_kind`]
     fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         self.resolve_kind(PayloadKind::Earliest)
     }

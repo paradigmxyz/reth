@@ -1,13 +1,13 @@
 //! Mirrored version of [`ExExContext`](`crate::ExExContext`)
 //! without generic abstraction over [Node](`reth_node_api::FullNodeComponents`)
 
-use std::fmt::Debug;
-
-use reth_chainspec::{EthChainSpec, Head};
-use reth_node_api::{FullNodeComponents, HeaderTy, NodePrimitives, NodeTypes};
+use alloy_eips::BlockNumHash;
+use reth_chainspec::EthChainSpec;
+use reth_node_api::{FullNodeComponents, HeaderTy, NodePrimitives, NodeTypes, PrimitivesTy};
 use reth_node_core::node_config::NodeConfig;
 use reth_primitives::EthPrimitives;
 use reth_provider::BlockReader;
+use std::fmt::Debug;
 use tokio::sync::mpsc;
 
 use crate::{ExExContext, ExExEvent, ExExNotificationsStream};
@@ -16,7 +16,7 @@ use crate::{ExExContext, ExExEvent, ExExNotificationsStream};
 /// Captures the context that an `ExEx` has access to.
 pub struct ExExContextDyn<N: NodePrimitives = EthPrimitives> {
     /// The current head of the blockchain at launch.
-    pub head: Head,
+    pub head: BlockNumHash,
     /// The config of the node
     pub config: NodeConfig<Box<dyn EthChainSpec<Header = N::BlockHeader> + 'static>>,
     /// The loaded node config
@@ -26,7 +26,7 @@ pub struct ExExContextDyn<N: NodePrimitives = EthPrimitives> {
     /// # Important
     ///
     /// The exex should emit a `FinishedHeight` whenever a processed block is safe to prune.
-    /// Additionally, the exex can pre-emptively emit a `FinishedHeight` event to specify what
+    /// Additionally, the exex can preemptively emit a `FinishedHeight` event to specify what
     /// blocks to receive notifications for.
     pub events: mpsc::UnboundedSender<ExExEvent>,
     /// Channel to receive [`ExExNotification`](crate::ExExNotification)s.
@@ -50,7 +50,7 @@ impl<N: NodePrimitives> Debug for ExExContextDyn<N> {
     }
 }
 
-impl<Node> From<ExExContext<Node>> for ExExContextDyn<<Node::Types as NodeTypes>::Primitives>
+impl<Node> From<ExExContext<Node>> for ExExContextDyn<PrimitivesTy<Node::Types>>
 where
     Node: FullNodeComponents<Types: NodeTypes<Primitives: NodePrimitives>>,
     Node::Provider: Debug + BlockReader,

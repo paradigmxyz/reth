@@ -52,10 +52,30 @@ where
     fn build(&self, timestamp: u64) -> op_alloy_rpc_types_engine::OpPayloadAttributes {
         op_alloy_rpc_types_engine::OpPayloadAttributes {
             payload_attributes: self.build(timestamp),
-            transactions: None,
+            // Add dummy system transaction
+            transactions: Some(vec![
+                reth_optimism_chainspec::constants::TX_SET_L1_BLOCK_OP_MAINNET_BLOCK_124665056
+                    .into(),
+            ]),
             no_tx_pool: None,
             gas_limit: None,
             eip_1559_params: None,
         }
+    }
+}
+
+/// A temporary workaround to support local payload engine launcher for arbitrary payload
+/// attributes.
+// TODO(mattsse): This should be reworked so that LocalPayloadAttributesBuilder can be implemented
+// for any
+pub trait UnsupportedLocalAttributes: Send + Sync + 'static {}
+
+impl<T, ChainSpec> PayloadAttributesBuilder<T> for LocalPayloadAttributesBuilder<ChainSpec>
+where
+    ChainSpec: Send + Sync + 'static,
+    T: UnsupportedLocalAttributes,
+{
+    fn build(&self, _: u64) -> T {
+        panic!("Unsupported payload attributes")
     }
 }

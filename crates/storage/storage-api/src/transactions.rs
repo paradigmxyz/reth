@@ -1,7 +1,7 @@
 use crate::{BlockNumReader, BlockReader};
+use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockNumber, TxHash, TxNumber};
-use reth_primitives::TransactionMeta;
 use reth_primitives_traits::SignedTransaction;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::ops::{Range, RangeBounds, RangeInclusive};

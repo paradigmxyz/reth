@@ -16,8 +16,10 @@
 //! Configure only an http server with a selection of [`RethRpcModule`]s
 //!
 //! ```
+//! use reth_consensus::{ConsensusError, FullConsensus};
 //! use reth_engine_primitives::PayloadValidator;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+//! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::{Header, PooledTransaction, TransactionSigned};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
@@ -29,21 +31,11 @@
 //! use reth_transaction_pool::{PoolTransaction, TransactionPool};
 //! use std::sync::Arc;
 //!
-//! pub async fn launch<
-//!     Provider,
-//!     Pool,
-//!     Network,
-//!     Events,
-//!     EvmConfig,
-//!     BlockExecutor,
-//!     Consensus,
-//!     Validator,
-//! >(
+//! pub async fn launch<Provider, Pool, Network, BlockExecutor, Consensus, Validator>(
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
-//!     events: Events,
-//!     evm_config: EvmConfig,
+//!     evm_config: EthEvmConfig,
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //!     validator: Validator,
@@ -54,7 +46,8 @@
 //!             Receipt = reth_primitives::Receipt,
 //!             Header = reth_primitives::Header,
 //!         > + AccountReader
-//!         + ChangeSetReader,
+//!         + ChangeSetReader
+//!         + CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives>,
 //!     Pool: TransactionPool<
 //!             Transaction: PoolTransaction<
 //!                 Consensus = TransactionSigned,
@@ -63,11 +56,8 @@
 //!         > + Unpin
 //!         + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
-//!     Events:
-//!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
-//!     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
-//!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
-//!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
+//!     BlockExecutor: BlockExecutorProvider<Primitives = Provider::Primitives>,
+//!     Consensus: FullConsensus<Provider::Primitives, Error = ConsensusError> + Clone + 'static,
 //!     Validator: PayloadValidator<Block = reth_primitives::Block>,
 //! {
 //!     // configure the rpc module per transport
@@ -82,7 +72,6 @@
 //!         pool,
 //!         network,
 //!         TokioTaskExecutor::default(),
-//!         events,
 //!         evm_config,
 //!         block_executor,
 //!         consensus,
@@ -99,8 +88,10 @@
 //!
 //!
 //! ```
+//! use reth_consensus::{ConsensusError, FullConsensus};
 //! use reth_engine_primitives::{EngineTypes, PayloadValidator};
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
+//! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::{Header, PooledTransaction, TransactionSigned};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
@@ -120,10 +111,8 @@
 //!     Provider,
 //!     Pool,
 //!     Network,
-//!     Events,
 //!     EngineApi,
 //!     EngineT,
-//!     EvmConfig,
 //!     BlockExecutor,
 //!     Consensus,
 //!     Validator,
@@ -131,9 +120,8 @@
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
-//!     events: Events,
 //!     engine_api: EngineApi,
-//!     evm_config: EvmConfig,
+//!     evm_config: EthEvmConfig,
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
 //!     validator: Validator,
@@ -144,7 +132,8 @@
 //!             Receipt = reth_primitives::Receipt,
 //!             Header = reth_primitives::Header,
 //!         > + AccountReader
-//!         + ChangeSetReader,
+//!         + ChangeSetReader
+//!         + CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives>,
 //!     Pool: TransactionPool<
 //!             Transaction: PoolTransaction<
 //!                 Consensus = TransactionSigned,
@@ -153,13 +142,10 @@
 //!         > + Unpin
 //!         + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
-//!     Events:
-//!         CanonStateSubscriptions<Primitives = reth_primitives::EthPrimitives> + Clone + 'static,
 //!     EngineApi: EngineApiServer<EngineT>,
 //!     EngineT: EngineTypes,
-//!     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
-//!     BlockExecutor: BlockExecutorProvider<Primitives = Events::Primitives>,
-//!     Consensus: reth_consensus::FullConsensus + Clone + 'static,
+//!     BlockExecutor: BlockExecutorProvider<Primitives = Provider::Primitives>,
+//!     Consensus: FullConsensus<Provider::Primitives, Error = ConsensusError> + Clone + 'static,
 //!     Validator: PayloadValidator<Block = reth_primitives::Block>,
 //! {
 //!     // configure the rpc module per transport
@@ -174,7 +160,6 @@
 //!         pool,
 //!         network,
 //!         TokioTaskExecutor::default(),
-//!         events,
 //!         evm_config,
 //!         block_executor,
 //!         consensus,
@@ -226,7 +211,7 @@ use jsonrpsee::{
     Methods, RpcModule,
 };
 use reth_chainspec::EthereumHardforks;
-use reth_consensus::FullConsensus;
+use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{EngineTypes, PayloadValidator};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
@@ -287,18 +272,17 @@ pub mod rate_limiter;
 
 /// Convenience function for starting a server in one step.
 #[allow(clippy::too_many_arguments)]
-pub async fn launch<Provider, Pool, Network, Tasks, Events, EvmConfig, EthApi, BlockExecutor>(
+pub async fn launch<Provider, Pool, Network, Tasks, EvmConfig, EthApi, BlockExecutor>(
     provider: Provider,
     pool: Pool,
     network: Network,
     module_config: impl Into<TransportRpcModuleConfig>,
     server_config: impl Into<RpcServerConfig>,
     executor: Tasks,
-    events: Events,
     evm_config: EvmConfig,
-    eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
+    eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
     block_executor: BlockExecutor,
-    consensus: Arc<dyn FullConsensus<BlockExecutor::Primitives>>,
+    consensus: Arc<dyn FullConsensus<BlockExecutor::Primitives, Error = ConsensusError>>,
     payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
 ) -> Result<RpcServerHandle, RpcError>
 where
@@ -306,12 +290,12 @@ where
             Block = ProviderBlock<EthApi::Provider>,
             Receipt = ProviderReceipt<EthApi::Provider>,
             Header = ProviderHeader<EthApi::Provider>,
-        > + AccountReader
+        > + CanonStateSubscriptions<Primitives = BlockExecutor::Primitives>
+        + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Events: CanonStateSubscriptions<Primitives = BlockExecutor::Primitives> + Clone + 'static,
     EvmConfig: ConfigureEvm<
         Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
         Transaction = <BlockExecutor::Primitives as NodePrimitives>::SignedTx,
@@ -321,7 +305,7 @@ where
             Block = <BlockExecutor::Primitives as NodePrimitives>::Block,
             Receipt = <BlockExecutor::Primitives as NodePrimitives>::Receipt,
             Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
-        >,
+        > + CanonStateSubscriptions<Primitives = BlockExecutor::Primitives>,
     >,
     BlockExecutor: BlockExecutorProvider,
 {
@@ -334,7 +318,6 @@ where
                 pool,
                 network,
                 executor,
-                events,
                 evm_config,
                 block_executor,
                 consensus,
@@ -348,16 +331,7 @@ where
 ///
 /// This is the main entrypoint and the easiest way to configure an RPC server.
 #[derive(Debug, Clone)]
-pub struct RpcModuleBuilder<
-    Provider,
-    Pool,
-    Network,
-    Tasks,
-    Events,
-    EvmConfig,
-    BlockExecutor,
-    Consensus,
-> {
+pub struct RpcModuleBuilder<Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus> {
     /// The Provider type to when creating all rpc handlers
     provider: Provider,
     /// The Pool type to when creating all rpc handlers
@@ -366,8 +340,6 @@ pub struct RpcModuleBuilder<
     network: Network,
     /// How additional tasks are spawned, for example in the eth pubsub namespace
     executor: Tasks,
-    /// Provides access to chain events, such as new blocks, required by pubsub.
-    events: Events,
     /// Defines how the EVM should be configured before execution.
     evm_config: EvmConfig,
     /// The provider for getting a block executor that executes blocks
@@ -378,8 +350,8 @@ pub struct RpcModuleBuilder<
 
 // === impl RpcBuilder ===
 
-impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus>
-    RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus>
+impl<Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
+    RpcModuleBuilder<Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
 {
     /// Create a new instance of the builder
     #[allow(clippy::too_many_arguments)]
@@ -388,30 +360,27 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
         pool: Pool,
         network: Network,
         executor: Tasks,
-        events: Events,
         evm_config: EvmConfig,
         block_executor: BlockExecutor,
         consensus: Consensus,
     ) -> Self {
-        Self { provider, pool, network, executor, events, evm_config, block_executor, consensus }
+        Self { provider, pool, network, executor, evm_config, block_executor, consensus }
     }
 
     /// Configure the provider instance.
     pub fn with_provider<P>(
         self,
         provider: P,
-    ) -> RpcModuleBuilder<P, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus>
+    ) -> RpcModuleBuilder<P, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
     where
         P: BlockReader + StateProviderFactory + 'static,
     {
-        let Self { pool, network, executor, events, evm_config, block_executor, consensus, .. } =
-            self;
+        let Self { pool, network, executor, evm_config, block_executor, consensus, .. } = self;
         RpcModuleBuilder {
             provider,
             network,
             pool,
             executor,
-            events,
             evm_config,
             block_executor,
             consensus,
@@ -422,19 +391,16 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
     pub fn with_pool<P>(
         self,
         pool: P,
-    ) -> RpcModuleBuilder<Provider, P, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus>
+    ) -> RpcModuleBuilder<Provider, P, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
     where
         P: TransactionPool + 'static,
     {
-        let Self {
-            provider, network, executor, events, evm_config, block_executor, consensus, ..
-        } = self;
+        let Self { provider, network, executor, evm_config, block_executor, consensus, .. } = self;
         RpcModuleBuilder {
             provider,
             network,
             pool,
             executor,
-            events,
             evm_config,
             block_executor,
             consensus,
@@ -453,18 +419,14 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
         NoopTransactionPool,
         Network,
         Tasks,
-        Events,
         EvmConfig,
         BlockExecutor,
         Consensus,
     > {
-        let Self {
-            provider, executor, events, network, evm_config, block_executor, consensus, ..
-        } = self;
+        let Self { provider, executor, network, evm_config, block_executor, consensus, .. } = self;
         RpcModuleBuilder {
             provider,
             executor,
-            events,
             network,
             evm_config,
             block_executor,
@@ -477,19 +439,16 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
     pub fn with_network<N>(
         self,
         network: N,
-    ) -> RpcModuleBuilder<Provider, Pool, N, Tasks, Events, EvmConfig, BlockExecutor, Consensus>
+    ) -> RpcModuleBuilder<Provider, Pool, N, Tasks, EvmConfig, BlockExecutor, Consensus>
     where
         N: NetworkInfo + Peers + 'static,
     {
-        let Self {
-            provider, pool, executor, events, evm_config, block_executor, consensus, ..
-        } = self;
+        let Self { provider, pool, executor, evm_config, block_executor, consensus, .. } = self;
         RpcModuleBuilder {
             provider,
             network,
             pool,
             executor,
-            events,
             evm_config,
             block_executor,
             consensus,
@@ -503,24 +462,13 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
     /// [`EthApi`](reth_rpc::eth::EthApi) which requires a [`NetworkInfo`] implementation.
     pub fn with_noop_network(
         self,
-    ) -> RpcModuleBuilder<
-        Provider,
-        Pool,
-        NoopNetwork,
-        Tasks,
-        Events,
-        EvmConfig,
-        BlockExecutor,
-        Consensus,
-    > {
-        let Self {
-            provider, pool, executor, events, evm_config, block_executor, consensus, ..
-        } = self;
+    ) -> RpcModuleBuilder<Provider, Pool, NoopNetwork, Tasks, EvmConfig, BlockExecutor, Consensus>
+    {
+        let Self { provider, pool, executor, evm_config, block_executor, consensus, .. } = self;
         RpcModuleBuilder {
             provider,
             pool,
             executor,
-            events,
             network: NoopNetwork::default(),
             evm_config,
             block_executor,
@@ -532,18 +480,16 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
     pub fn with_executor<T>(
         self,
         executor: T,
-    ) -> RpcModuleBuilder<Provider, Pool, Network, T, Events, EvmConfig, BlockExecutor, Consensus>
+    ) -> RpcModuleBuilder<Provider, Pool, Network, T, EvmConfig, BlockExecutor, Consensus>
     where
         T: TaskSpawner + 'static,
     {
-        let Self { pool, network, provider, events, evm_config, block_executor, consensus, .. } =
-            self;
+        let Self { pool, network, provider, evm_config, block_executor, consensus, .. } = self;
         RpcModuleBuilder {
             provider,
             network,
             pool,
             executor,
-            events,
             evm_config,
             block_executor,
             consensus,
@@ -561,42 +507,16 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
         Pool,
         Network,
         TokioTaskExecutor,
-        Events,
         EvmConfig,
         BlockExecutor,
         Consensus,
     > {
-        let Self { pool, network, provider, events, evm_config, block_executor, consensus, .. } =
-            self;
+        let Self { pool, network, provider, evm_config, block_executor, consensus, .. } = self;
         RpcModuleBuilder {
             provider,
             network,
             pool,
-            events,
             executor: TokioTaskExecutor::default(),
-            evm_config,
-            block_executor,
-            consensus,
-        }
-    }
-
-    /// Configure the event subscriber instance
-    pub fn with_events<E>(
-        self,
-        events: E,
-    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, E, EvmConfig, BlockExecutor, Consensus>
-    where
-        E: CanonStateSubscriptions + 'static,
-    {
-        let Self {
-            provider, pool, executor, network, evm_config, block_executor, consensus, ..
-        } = self;
-        RpcModuleBuilder {
-            provider,
-            network,
-            pool,
-            executor,
-            events,
             evm_config,
             block_executor,
             consensus,
@@ -607,18 +527,16 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
     pub fn with_evm_config<E>(
         self,
         evm_config: E,
-    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, E, BlockExecutor, Consensus>
+    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, E, BlockExecutor, Consensus>
     where
         E: ConfigureEvm + 'static,
     {
-        let Self { provider, pool, executor, network, events, block_executor, consensus, .. } =
-            self;
+        let Self { provider, pool, executor, network, block_executor, consensus, .. } = self;
         RpcModuleBuilder {
             provider,
             network,
             pool,
             executor,
-            events,
             evm_config,
             block_executor,
             consensus,
@@ -629,17 +547,16 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
     pub fn with_block_executor<BE>(
         self,
         block_executor: BE,
-    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, BE, Consensus>
+    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, EvmConfig, BE, Consensus>
     where
         BE: BlockExecutorProvider,
     {
-        let Self { provider, network, pool, executor, events, evm_config, consensus, .. } = self;
+        let Self { provider, network, pool, executor, evm_config, consensus, .. } = self;
         RpcModuleBuilder {
             provider,
             network,
             pool,
             executor,
-            events,
             evm_config,
             block_executor,
             consensus,
@@ -650,15 +567,13 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
     pub fn with_consensus<C>(
         self,
         consensus: C,
-    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, C> {
-        let Self { provider, network, pool, executor, events, evm_config, block_executor, .. } =
-            self;
+    ) -> RpcModuleBuilder<Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, C> {
+        let Self { provider, network, pool, executor, evm_config, block_executor, .. } = self;
         RpcModuleBuilder {
             provider,
             network,
             pool,
             executor,
-            events,
             evm_config,
             block_executor,
             consensus,
@@ -666,25 +581,25 @@ impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus>
-    RpcModuleBuilder<Provider, Pool, Network, Tasks, Events, EvmConfig, BlockExecutor, Consensus>
+impl<Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
+    RpcModuleBuilder<Provider, Pool, Network, Tasks, EvmConfig, BlockExecutor, Consensus>
 where
     Provider: FullRpcProvider<
-            Block = <Events::Primitives as NodePrimitives>::Block,
-            Receipt = <Events::Primitives as NodePrimitives>::Receipt,
-            Header = <Events::Primitives as NodePrimitives>::BlockHeader,
-        > + AccountReader
+            Block = <BlockExecutor::Primitives as NodePrimitives>::Block,
+            Receipt = <BlockExecutor::Primitives as NodePrimitives>::Receipt,
+            Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
+        > + CanonStateSubscriptions<Primitives = BlockExecutor::Primitives>
+        + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Events: CanonStateSubscriptions<Primitives = BlockExecutor::Primitives> + Clone + 'static,
     EvmConfig: ConfigureEvm<
         Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
         Transaction = <BlockExecutor::Primitives as NodePrimitives>::SignedTx,
     >,
     BlockExecutor: BlockExecutorProvider,
-    Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
+    Consensus: FullConsensus<BlockExecutor::Primitives, Error = ConsensusError> + Clone + 'static,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
     /// be used to start the transport server(s).
@@ -697,34 +612,26 @@ where
         self,
         module_config: TransportRpcModuleConfig,
         engine: EngineApi,
-        eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
+        eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
         payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
-        RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>,
+        RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>,
     )
     where
         EngineT: EngineTypes,
         EngineApi: EngineApiServer<EngineT>,
         EthApi: FullEthApiServer<
             Provider: BlockReader<
-                Block = <Events::Primitives as NodePrimitives>::Block,
-                Receipt = <Events::Primitives as NodePrimitives>::Receipt,
-                Header = <Events::Primitives as NodePrimitives>::BlockHeader,
-            >,
+                Block = <BlockExecutor::Primitives as NodePrimitives>::Block,
+                Receipt = <BlockExecutor::Primitives as NodePrimitives>::Receipt,
+                Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
+            > + CanonStateSubscriptions<Primitives = BlockExecutor::Primitives>,
         >,
     {
-        let Self {
-            provider,
-            pool,
-            network,
-            executor,
-            events,
-            evm_config,
-            block_executor,
-            consensus,
-        } = self;
+        let Self { provider, pool, network, executor, evm_config, block_executor, consensus } =
+            self;
 
         let config = module_config.config.clone().unwrap_or_default();
 
@@ -733,7 +640,6 @@ where
             pool,
             network,
             executor,
-            events,
             consensus,
             config,
             evm_config,
@@ -780,7 +686,6 @@ where
     ///         .with_pool(NoopTransactionPool::default())
     ///         .with_network(NoopNetwork::default())
     ///         .with_executor(TokioTaskExecutor::default())
-    ///         .with_events(TestCanonStateSubscriptions::default())
     ///         .with_evm_config(evm)
     ///         .with_block_executor(EthExecutorProvider::mainnet())
     ///         .with_consensus(NoopConsensus::default())
@@ -792,28 +697,19 @@ where
     pub fn into_registry<EthApi>(
         self,
         config: RpcModuleConfig,
-        eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
+        eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
         payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
-    ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
+    ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
     where
         EthApi: EthApiTypes + 'static,
     {
-        let Self {
-            provider,
-            pool,
-            network,
-            executor,
-            events,
-            evm_config,
-            block_executor,
-            consensus,
-        } = self;
+        let Self { provider, pool, network, executor, evm_config, block_executor, consensus } =
+            self;
         RpcRegistryInner::new(
             provider,
             pool,
             network,
             executor,
-            events,
             consensus,
             config,
             evm_config,
@@ -828,31 +724,23 @@ where
     pub fn build<EthApi>(
         self,
         module_config: TransportRpcModuleConfig,
-        eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, Events, EthApi>,
+        eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
         payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer<
             Provider: BlockReader<
-                Receipt = <Events::Primitives as NodePrimitives>::Receipt,
-                Block = <Events::Primitives as NodePrimitives>::Block,
-                Header = <Events::Primitives as NodePrimitives>::BlockHeader,
-            >,
+                Receipt = <BlockExecutor::Primitives as NodePrimitives>::Receipt,
+                Block = <BlockExecutor::Primitives as NodePrimitives>::Block,
+                Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
+            > + CanonStateSubscriptions<Primitives = BlockExecutor::Primitives>,
         >,
         Pool: TransactionPool<Transaction = <EthApi::Pool as TransactionPool>::Transaction>,
     {
         let mut modules = TransportRpcModules::default();
 
-        let Self {
-            provider,
-            pool,
-            network,
-            executor,
-            events,
-            evm_config,
-            block_executor,
-            consensus,
-        } = self;
+        let Self { provider, pool, network, executor, evm_config, block_executor, consensus } =
+            self;
 
         if !module_config.is_empty() {
             let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
@@ -862,7 +750,6 @@ where
                 pool,
                 network,
                 executor,
-                events,
                 consensus,
                 config.unwrap_or_default(),
                 evm_config,
@@ -881,9 +768,9 @@ where
     }
 }
 
-impl Default for RpcModuleBuilder<(), (), (), (), (), (), (), ()> {
+impl Default for RpcModuleBuilder<(), (), (), (), (), (), ()> {
     fn default() -> Self {
-        Self::new((), (), (), (), (), (), (), ())
+        Self::new((), (), (), (), (), (), ())
     }
 }
 
@@ -971,7 +858,6 @@ pub struct RpcRegistryInner<
     Pool,
     Network,
     Tasks,
-    Events,
     EthApi: EthApiTypes,
     BlockExecutor,
     Consensus,
@@ -980,14 +866,13 @@ pub struct RpcRegistryInner<
     pool: Pool,
     network: Network,
     executor: Tasks,
-    events: Events,
     block_executor: BlockExecutor,
     consensus: Consensus,
     payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
     /// Holds the configuration for the RPC modules
     config: RpcModuleConfig,
     /// Holds a all `eth_` namespace handlers
-    eth: EthHandlers<Provider, Events, EthApi>,
+    eth: EthHandlers<Provider, EthApi>,
     /// to put trace calls behind semaphore
     blocking_pool_guard: BlockingTaskGuard,
     /// Contains the [Methods] of a module
@@ -996,19 +881,18 @@ pub struct RpcRegistryInner<
 
 // === impl RpcRegistryInner ===
 
-impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
+impl<N, Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
 where
+    N: NodePrimitives,
     Provider: StateProviderFactory
-        + BlockReader<
-            Block = <Events::Primitives as NodePrimitives>::Block,
-            Receipt = <Events::Primitives as NodePrimitives>::Receipt,
-        > + Clone
+        + CanonStateSubscriptions<Primitives = N>
+        + BlockReader<Block = N::Block, Receipt = N::Receipt>
+        + Clone
         + Unpin
         + 'static,
     Pool: Send + Sync + Clone + 'static,
     Network: Clone + 'static,
-    Events: CanonStateSubscriptions + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
     EthApi: EthApiTypes + 'static,
     BlockExecutor: BlockExecutorProvider,
@@ -1020,19 +904,10 @@ where
         pool: Pool,
         network: Network,
         executor: Tasks,
-        events: Events,
         consensus: Consensus,
         config: RpcModuleConfig,
         evm_config: EvmConfig,
-        eth_api_builder: DynEthApiBuilder<
-            Provider,
-            Pool,
-            EvmConfig,
-            Network,
-            Tasks,
-            Events,
-            EthApi,
-        >,
+        eth_api_builder: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
         block_executor: BlockExecutor,
         payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
     ) -> Self
@@ -1048,7 +923,6 @@ where
             evm_config,
             config.eth,
             executor.clone(),
-            events.clone(),
             eth_api_builder,
         );
 
@@ -1062,15 +936,14 @@ where
             config,
             modules: Default::default(),
             blocking_pool_guard,
-            events,
             block_executor,
             payload_validator,
         }
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
+impl<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
 where
     Provider: BlockReader,
     EthApi: EthApiTypes,
@@ -1081,7 +954,7 @@ where
     }
 
     /// Returns a reference to the installed [`EthHandlers`].
-    pub const fn eth_handlers(&self) -> &EthHandlers<Provider, Events, EthApi> {
+    pub const fn eth_handlers(&self) -> &EthHandlers<Provider, EthApi> {
         &self.eth
     }
 
@@ -1096,11 +969,6 @@ where
     /// Returns a reference to the pool
     pub const fn pool(&self) -> &Pool {
         &self.pool
-    }
-
-    /// Returns a reference to the events type
-    pub const fn events(&self) -> &Events {
-        &self.events
     }
 
     /// Returns a reference to the tasks type
@@ -1128,8 +996,8 @@ where
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
+impl<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
 where
     Network: NetworkInfo + Clone + 'static,
     EthApi: EthApiTypes,
@@ -1167,8 +1035,8 @@ where
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
+impl<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
 where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Network: NetworkInfo + Peers + Clone + 'static,
@@ -1275,8 +1143,8 @@ where
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
+impl<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
 where
     Provider: FullRpcProvider + AccountReader + ChangeSetReader,
     Network: NetworkInfo + Peers + Clone + 'static,
@@ -1347,7 +1215,8 @@ where
     /// Instantiates `ValidationApi`
     pub fn validation_api(&self) -> ValidationApi<Provider, BlockExecutor>
     where
-        Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
+        Consensus:
+            FullConsensus<BlockExecutor::Primitives, Error = ConsensusError> + Clone + 'static,
         Provider: BlockReader<Block = <BlockExecutor::Primitives as NodePrimitives>::Block>,
     {
         ValidationApi::new(
@@ -1361,25 +1230,25 @@ where
     }
 }
 
-impl<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, Tasks, Events, EthApi, BlockExecutor, Consensus>
+impl<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
+    RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
 where
     Provider: FullRpcProvider<Block = <BlockExecutor::Primitives as NodePrimitives>::Block>
+        + CanonStateSubscriptions<Primitives = BlockExecutor::Primitives>
         + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Events: CanonStateSubscriptions<Primitives = BlockExecutor::Primitives> + Clone + 'static,
     EthApi: FullEthApiServer<
         Provider: BlockReader<
             Block = <BlockExecutor::Primitives as NodePrimitives>::Block,
             Receipt = <BlockExecutor::Primitives as NodePrimitives>::Receipt,
             Header = <BlockExecutor::Primitives as NodePrimitives>::BlockHeader,
-        >,
+        > + CanonStateSubscriptions<Primitives = BlockExecutor::Primitives>,
     >,
     BlockExecutor: BlockExecutorProvider,
-    Consensus: reth_consensus::FullConsensus<BlockExecutor::Primitives> + Clone + 'static,
+    Consensus: FullConsensus<BlockExecutor::Primitives, Error = ConsensusError> + Clone + 'static,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace
@@ -2107,6 +1976,34 @@ pub struct TransportRpcModules<Context = ()> {
 // === impl TransportRpcModules ===
 
 impl TransportRpcModules {
+    /// Sets a custom [`TransportRpcModuleConfig`] for the configured modules.
+    /// This will overwrite current configuration, if any.
+    pub fn with_config(mut self, config: TransportRpcModuleConfig) -> Self {
+        self.config = config;
+        self
+    }
+
+    /// Sets the [`RpcModule`] for the http transport.
+    /// This will overwrite current module, if any.
+    pub fn with_http(mut self, http: RpcModule<()>) -> Self {
+        self.http = Some(http);
+        self
+    }
+
+    /// Sets the [`RpcModule`] for the ws transport.
+    /// This will overwrite current module, if any.
+    pub fn with_ws(mut self, ws: RpcModule<()>) -> Self {
+        self.ws = Some(ws);
+        self
+    }
+
+    /// Sets the [`RpcModule`] for the http transport.
+    /// This will overwrite current module, if any.
+    pub fn with_ipc(mut self, ipc: RpcModule<()>) -> Self {
+        self.ipc = Some(ipc);
+        self
+    }
+
     /// Returns the [`TransportRpcModuleConfig`] used to configure this instance.
     pub const fn module_config(&self) -> &TransportRpcModuleConfig {
         &self.config

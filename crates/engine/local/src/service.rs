@@ -16,10 +16,9 @@ use std::{
 
 use crate::miner::{LocalMiner, MiningMode};
 use futures_util::{Stream, StreamExt};
-use reth_beacon_consensus::{BeaconConsensusEngineEvent, EngineNodeTypes};
 use reth_chainspec::EthChainSpec;
-use reth_consensus::FullConsensus;
-use reth_engine_primitives::{BeaconEngineMessage, EngineValidator};
+use reth_consensus::{ConsensusError, FullConsensus};
+use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineValidator};
 use reth_engine_service::service::EngineMessageStream;
 use reth_engine_tree::{
     chain::{ChainEvent, HandlerEvent},
@@ -34,7 +33,10 @@ use reth_evm::execute::BlockExecutorProvider;
 use reth_node_types::BlockTy;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{PayloadAttributesBuilder, PayloadTypes};
-use reth_provider::{providers::BlockchainProvider2, ChainSpecProvider, ProviderFactory};
+use reth_provider::{
+    providers::{BlockchainProvider, EngineNodeTypes},
+    ChainSpecProvider, ProviderFactory,
+};
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::MetricEventsSender;
 use tokio::sync::mpsc::UnboundedSender;
@@ -64,10 +66,10 @@ where
     /// Constructor for [`LocalEngineService`].
     #[allow(clippy::too_many_arguments)]
     pub fn new<B, V>(
-        consensus: Arc<dyn FullConsensus<N::Primitives>>,
+        consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
         executor_factory: impl BlockExecutorProvider<Primitives = N::Primitives>,
         provider: ProviderFactory<N>,
-        blockchain_db: BlockchainProvider2<N>,
+        blockchain_db: BlockchainProvider<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         payload_builder: PayloadBuilderHandle<N::Engine>,
         payload_validator: V,

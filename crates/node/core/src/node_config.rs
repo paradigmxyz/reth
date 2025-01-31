@@ -2,7 +2,7 @@
 
 use crate::{
     args::{
-        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, NetworkArgs, PayloadBuilderArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
         PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
@@ -30,6 +30,12 @@ use std::{
     sync::Arc,
 };
 use tracing::*;
+
+/// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
+pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
+
+/// How close to the canonical head we persist blocks.
+pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 2;
 
 /// This includes all necessary configuration to launch the node.
 /// The individual configuration options can be overwritten before launching the node.
@@ -133,6 +139,9 @@ pub struct NodeConfig<ChainSpec> {
 
     /// All pruning related arguments
     pub pruning: PruningArgs,
+
+    /// All engine related arguments
+    pub engine: EngineArgs,
 }
 
 impl NodeConfig<ChainSpec> {
@@ -161,6 +170,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             dev: DevArgs::default(),
             pruning: PruningArgs::default(),
             datadir: DatadirArgs::default(),
+            engine: EngineArgs::default(),
         }
     }
 
@@ -449,6 +459,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             db: self.db,
             dev: self.dev,
             pruning: self.pruning,
+            engine: self.engine,
         }
     }
 }
@@ -475,6 +486,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             dev: self.dev,
             pruning: self.pruning.clone(),
             datadir: self.datadir.clone(),
+            engine: self.engine.clone(),
         }
     }
 }

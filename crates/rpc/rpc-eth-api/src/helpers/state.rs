@@ -210,18 +210,20 @@ pub trait LoadState:
     /// for.
     /// If the [`BlockId`] is pending, this will return the "Pending" tag, otherwise this returns
     /// the hash of the exact block.
+    #[expect(clippy::type_complexity)]
     fn evm_env_at(
         &self,
         at: BlockId,
-    ) -> impl Future<Output = Result<(EvmEnv, BlockId), Self::Error>> + Send
+    ) -> impl Future<
+        Output = Result<(EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>, BlockId), Self::Error>,
+    > + Send
     where
         Self: LoadPendingBlock + SpawnBlocking,
     {
         async move {
             if at.is_pending() {
-                let PendingBlockEnv { cfg, block_env, origin } =
-                    self.pending_block_env_and_cfg()?;
-                Ok(((cfg, block_env).into(), origin.state_block_id()))
+                let PendingBlockEnv { evm_env, origin } = self.pending_block_env_and_cfg()?;
+                Ok((evm_env, origin.state_block_id()))
             } else {
                 // Use cached values if there is no pending block
                 let block_hash = RpcNodeCore::provider(self)
@@ -231,7 +233,7 @@ pub trait LoadState:
 
                 let header =
                     self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
-                let evm_env = self.evm_config().cfg_and_block_env(&header);
+                let evm_env = self.evm_config().evm_env(&header);
 
                 Ok((evm_env, block_hash.into()))
             }

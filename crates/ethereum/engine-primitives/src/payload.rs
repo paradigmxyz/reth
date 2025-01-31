@@ -1,5 +1,6 @@
 //! Contains types required for building a payload.
 
+use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{eip4844::BlobTransactionSidecar, eip4895::Withdrawals, eip7685::Requests};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
@@ -7,13 +8,12 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
     ExecutionPayloadV1, PayloadAttributes, PayloadId,
 };
-use reth_chain_state::ExecutedBlock;
+use core::convert::Infallible;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{EthPrimitives, SealedBlock};
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
-use std::{convert::Infallible, sync::Arc};
 
 /// Contains the built payload.
 ///
@@ -26,8 +26,6 @@ pub struct EthBuiltPayload {
     pub(crate) id: PayloadId,
     /// The built block
     pub(crate) block: Arc<SealedBlock>,
-    /// Block execution data for the payload, if any.
-    pub(crate) executed_block: Option<ExecutedBlock>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
@@ -47,10 +45,9 @@ impl EthBuiltPayload {
         id: PayloadId,
         block: Arc<SealedBlock>,
         fees: U256,
-        executed_block: Option<ExecutedBlock>,
         requests: Option<Requests>,
     ) -> Self {
-        Self { id, block, executed_block, fees, sidecars: Vec::new(), requests }
+        Self { id, block, fees, sidecars: Vec::new(), requests }
     }
 
     /// Returns the identifier of the payload.
@@ -99,10 +96,6 @@ impl BuiltPayload for EthBuiltPayload {
         self.fees
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlock> {
-        self.executed_block.clone()
-    }
-
     fn requests(&self) -> Option<Requests> {
         self.requests.clone()
     }
@@ -117,10 +110,6 @@ impl BuiltPayload for &EthBuiltPayload {
 
     fn fees(&self) -> U256 {
         (**self).fees()
-    }
-
-    fn executed_block(&self) -> Option<ExecutedBlock> {
-        self.executed_block.clone()
     }
 
     fn requests(&self) -> Option<Requests> {
@@ -297,7 +286,7 @@ mod tests {
     use super::*;
     use alloy_eips::eip4895::Withdrawal;
     use alloy_primitives::B64;
-    use std::str::FromStr;
+    use core::str::FromStr;
 
     #[test]
     fn attributes_serde() {
