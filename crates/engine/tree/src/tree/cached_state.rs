@@ -418,15 +418,18 @@ impl Default for ProviderCacheBuilder {
         //   * Per Cache instance: 192 bytes base overhead
         //
         //   Theoretical maximum memory usage:
-        //   Base data (8.9 GB):
-        //   * First level: 150k accounts * 20B = 0.003 GB
-        //   * Second level: 150k accounts * 1000 slots * 64B = 8.941 GB
+        //   Base data (5.4 GB):
+        //   * First level: 90k accounts * 20B = 0.002 GB
+        //   * Second level: 90k accounts * 1000 slots * 64B = 5.364 GB
         //
-        //   Overhead (6.7 GB):
-        //   * First level: 150k accounts * 48B = 0.007 GB
-        //   * Second level: 150k accounts * (192B + 1000 slots * 48B) = 6.732 GB
+        //   Overhead (4.0 GB):
+        //   * First level: 90k accounts * 48B = 0.004 GB
+        //   * Second level: 90k accounts * (192B + 1000 slots * 48B) = 4.039 GB
         //
-        //   Total maximum: 15.7 GB
+        //   Total maximum: 9.4 GB
+        //
+        //   This maximum represents the worst case scenario, not all cached
+        //   addresses will be using 1000 slots.
         //
         // Code cache can be much much larger - this needs to be space instead of element bound.
         // Accounts can be element bound but memory calculation TODO
@@ -434,7 +437,7 @@ impl Default for ProviderCacheBuilder {
         // See: https://github.com/moka-rs/moka/wiki#admission-and-eviction-policies
         Self {
             code_cache_size: 1_000_000,
-            storage_cache_size: 150_000,
+            storage_cache_size: 90_000,
             account_cache_size: 10_000_000,
         }
     }
