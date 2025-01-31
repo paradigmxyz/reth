@@ -70,9 +70,9 @@ use std::{
     fmt::Debug,
     ops::Bound,
     sync::{
-        atomic::AtomicBool,
+        atomic::{AtomicBool, AtomicUsize},
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
-        Arc,
+        Arc, RwLock,
     },
     time::{Duration, Instant},
 };
@@ -2389,6 +2389,10 @@ where
         // Atomic bool for letting the prewarm tasks know when to stop
         let execution_finished = Arc::new(AtomicBool::new(false));
 
+        // Atomic usize for counting the number of prewarm tasks that have finished (necessary
+        // before we do state updates)
+        let finished_counter = Arc::new(AtomicUsize::new(0));
+
         let (state_root_handle, state_root_task_config, state_root_sender, state_hook) =
             if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
@@ -2427,6 +2431,9 @@ where
         info!(target: "engine::tree", "Spawning prewarm threads");
         let prewarm_start = Instant::now();
 
+        // lock for making sure we do not have any dangling prewarm threads
+        let cache_lock = Arc::new(RwLock::new(()));
+
         // Prewarm transactions
         for (tx_idx, (tx, sender)) in
             block.body().transactions().iter().zip(block.senders()).enumerate()
@@ -2434,7 +2441,7 @@ where
             let state_root_sender = state_root_sender.clone();
 
             let start = Instant::now();
-            self.prewarm_transaction(
+            let handle = self.prewarm_transaction(
                 block.header().clone(),
                 tx.clone(),
                 *sender,
@@ -2442,6 +2449,7 @@ where
                 cache_metrics.clone(),
                 state_root_sender,
                 execution_finished.clone(),
+                cache_lock.clone(),
             )?;
             let elapsed = start.elapsed();
             debug!(target: "engine::tree", ?tx_idx, elapsed = ?elapsed, "Spawned transaction prewarm");
@@ -2542,6 +2550,12 @@ where
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
 
+        // we have to wait for all prewarm tasks to finish before we can update the state
+        let cache_lock_wait_start = Instant::now();
+        drop(cache_lock.write().unwrap());
+        let cache_lock_wait_elapsed = cache_lock_wait_start.elapsed();
+        debug!(target: "engine::tree", ?cache_lock_wait_elapsed, block=?block_num_hash, "Acquired cache lock");
+
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
                 recovered_block: Arc::new(block),
@@ -2635,6 +2649,7 @@ where
         cache_metrics: CachedStateMetrics,
         state_root_sender: Option<Sender<StateRootMessage>>,
         execution_finished: Arc<AtomicBool>,
+        cache_lock: Arc<RwLock<()>>,
     ) -> Result<(), InsertBlockErrorKind> {
         let provider_latency = Instant::now();
         let Some(state_provider) = self.state_provider(block.parent_hash())? else {
@@ -2651,8 +2666,10 @@ where
         // clone and copy info required for execution
         let evm_config = self.evm_config.clone();
 
-        // spawn task executing the individual tx
+        // spawn task executing the individual tx.
         self.prewarming_thread_pool.spawn(move || {
+            // TODO: build this into the state provider
+            let cache_lock = cache_lock.read().unwrap();
             let state_provider = StateProviderDatabase::new(&state_provider);
 
             // create a new executor and disable nonce checks in the env
@@ -2674,6 +2691,9 @@ where
                     return
                 }
             };
+
+            // drop cache lock so we can update state outside of this
+            drop(cache_lock);
 
             // if execution is finished there is no point to sending proof targets
             if execution_finished.load(std::sync::atomic::Ordering::SeqCst) {
