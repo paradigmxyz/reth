@@ -1,12 +1,12 @@
 //! Stream wrapper that simulates reorgs.
 
 use alloy_consensus::{Header, Transaction};
-use alloy_eips::eip7840::BlobParams;
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus,
 };
 use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
+use reth_chainspec::EthChainSpec;
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, OnForkChoiceUpdated,
 };
@@ -18,9 +18,7 @@ use reth_evm::{
 };
 use reth_payload_primitives::EngineApiMessageVersion;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, Receipt, Receipts,
-};
+use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, Receipt};
 use reth_primitives_traits::{block::Block as _, proofs, SignedTransaction};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
@@ -28,7 +26,6 @@ use reth_revm::{
     db::{states::bundle_state::BundleRetention, State},
     DatabaseCommit,
 };
-use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::{
     collections::VecDeque,
     future::Future,
@@ -110,7 +107,7 @@ where
     Engine: EngineTypes,
     Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
-    Spec: EthereumHardforks,
+    Spec: EthChainSpec + EthereumHardforks,
 {
     type Item = S::Item;
 
@@ -257,7 +254,7 @@ fn create_reorg_head<Provider, Evm, Spec>(
 where
     Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
-    Spec: EthereumHardforks,
+    Spec: EthChainSpec + EthereumHardforks,
 {
     let chain_spec = payload_validator.chain_spec();
 
@@ -374,18 +371,15 @@ where
 
     let outcome: ExecutionOutcome = ExecutionOutcome::new(
         state.take_bundle(),
-        Receipts::from(vec![receipts]),
+        vec![receipts],
         reorg_target.number,
         Default::default(),
     );
     let hashed_state = state_provider.hashed_post_state(outcome.state());
 
     let (blob_gas_used, excess_blob_gas) =
-        if chain_spec.is_cancun_active_at_timestamp(reorg_target.timestamp) {
-            (
-                Some(sum_blob_gas_used),
-                reorg_target_parent.next_block_excess_blob_gas(BlobParams::cancun()),
-            )
+        if let Some(blob_params) = chain_spec.blob_params_at_timestamp(reorg_target.timestamp) {
+            (Some(sum_blob_gas_used), reorg_target_parent.next_block_excess_blob_gas(blob_params))
         } else {
             (None, None)
         };
@@ -426,7 +420,7 @@ where
     .seal_slow();
 
     Ok((
-        block_to_payload(reorg_block).0,
+        ExecutionPayload::from_block_unchecked(reorg_block.hash(), &reorg_block.into_block()).0,
         // todo(onbjerg): how do we support execution requests?
         reorg_target
             .header

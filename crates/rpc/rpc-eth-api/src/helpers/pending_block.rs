@@ -111,7 +111,7 @@ pub trait LoadPendingBlock:
             .next_evm_env(
                 &latest,
                 NextBlockEnvAttributes {
-                    timestamp: latest.timestamp() + 12,
+                    timestamp: latest.timestamp().saturating_add(12),
                     suggested_fee_recipient: latest.beneficiary(),
                     prev_randao: B256::random(),
                     gas_limit: latest.gas_limit(),

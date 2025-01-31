@@ -12,7 +12,7 @@ use alloy_eips::eip7685::Requests;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredBlock};
+use reth_primitives::{EthPrimitives, NodePrimitives, Receipt, RecoveredBlock};
 use revm::State;
 use std::sync::Arc;
 
@@ -153,7 +153,7 @@ where
     }
 
     /// Accessor for batch executor receipts.
-    pub const fn receipts(&self) -> &Receipts<<S::Primitives as NodePrimitives>::Receipt> {
+    pub const fn receipts(&self) -> &Vec<Vec<<S::Primitives as NodePrimitives>::Receipt>> {
         self.batch_record.receipts()
     }
 }

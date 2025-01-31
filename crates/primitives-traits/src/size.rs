@@ -84,13 +84,13 @@ impl InMemorySize for PooledTransaction {
     }
 }
 
-impl<T: InMemorySize> InMemorySize for alloy_consensus::BlockBody<T> {
+impl<T: InMemorySize, H: InMemorySize> InMemorySize for alloy_consensus::BlockBody<T, H> {
     /// Calculates a heuristic for the in-memory size of the block body
     #[inline]
     fn size(&self) -> usize {
         self.transactions.iter().map(T::size).sum::<usize>() +
             self.transactions.capacity() * core::mem::size_of::<T>() +
-            self.ommers.iter().map(Header::size).sum::<usize>() +
+            self.ommers.iter().map(H::size).sum::<usize>() +
             self.ommers.capacity() * core::mem::size_of::<Header>() +
             self.withdrawals
                 .as_ref()
@@ -98,7 +98,7 @@ impl<T: InMemorySize> InMemorySize for alloy_consensus::BlockBody<T> {
     }
 }
 
-impl<T: InMemorySize> InMemorySize for alloy_consensus::Block<T> {
+impl<T: InMemorySize, H: InMemorySize> InMemorySize for alloy_consensus::Block<T, H> {
     #[inline]
     fn size(&self) -> usize {
         self.header.size() + self.body.size()
