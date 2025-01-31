@@ -69,13 +69,12 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
     let (mut nodes, _tasks, _) =
         setup_engine::<EthereumNode>(2, chain_spec.clone(), false, eth_payload_attributes).await?;
     let mut node = nodes.pop().unwrap();
-    let provider = ProviderBuilder::new().with_recommended_fillers().on_http(node.rpc_url());
+    let provider = ProviderBuilder::new().on_http(node.rpc_url());
 
     advance_with_random_transactions(&mut node, 100, &mut rng, true).await?;
 
     let second_node = nodes.pop().unwrap();
-    let second_provider =
-        ProviderBuilder::new().with_recommended_fillers().on_http(second_node.rpc_url());
+    let second_provider = ProviderBuilder::new().on_http(second_node.rpc_url());
 
     assert_eq!(second_provider.get_block_number().await?, 0);
 
