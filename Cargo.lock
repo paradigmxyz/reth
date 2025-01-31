@@ -2391,28 +2391,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "custom-node"
-version = "0.0.0"
-dependencies = [
- "alloy-consensus",
- "alloy-eips",
- "alloy-network",
- "alloy-primitives",
- "alloy-rlp",
- "alloy-rpc-types",
- "alloy-serde",
- "arbitrary",
- "derive_more",
- "rand 0.8.5",
- "reth-codecs",
- "reth-ethereum-primitives",
- "reth-primitives-traits",
- "revm-primitives",
- "secp256k1",
- "serde",
-]
-
-[[package]]
 name = "darling"
 version = "0.20.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3094,6 +3072,28 @@ dependencies = [
  "reth-evm",
  "reth-node-ethereum",
  "revm-primitives",
+]
+
+[[package]]
+name = "example-custom-node"
+version = "0.0.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types",
+ "alloy-serde",
+ "arbitrary",
+ "derive_more",
+ "rand 0.8.5",
+ "reth-codecs",
+ "reth-ethereum-primitives",
+ "reth-primitives-traits",
+ "revm-primitives",
+ "secp256k1",
+ "serde",
 ]
 
 [[package]]

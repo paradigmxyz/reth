@@ -8,7 +8,7 @@ use reth_primitives_traits::InMemorySize;
 /// The header type of this node
 ///
 /// This type extends the regular ethereum header with an extension.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, derive_more::AsRef, derive_more::Deref)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, derive_more::AsRef, derive_more::Deref, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "reth-codec", derive(reth_codecs::Compact))]
