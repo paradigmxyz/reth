@@ -29,7 +29,7 @@ alloy-consensus.workspace = true
 revm.workspace = true
 
 # async
-tokio = { workspace = true, default-features = false, features = ["sync", "macros", "rt-multi-thread"] }
+tokio = { workspace = true, default-features = false, features = ["sync", "macros"] }
 tokio-stream = { workspace = true, features = ["sync"] }
 
 # tracing
