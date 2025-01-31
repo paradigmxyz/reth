@@ -12,8 +12,8 @@ use alloy_primitives::{
 };
 use itertools::Itertools;
 use reth_execution_errors::{
-    SparseStateTrieError, SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind,
-    StateProofError, TrieWitnessError,
+    SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind, StateProofError,
+    TrieWitnessError,
 };
 use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
@@ -126,9 +126,12 @@ where
         {
             // Update storage trie first.
             let storage = state.storages.get(&hashed_address);
-            let storage_trie = sparse_trie
-                .storage_trie_mut(&hashed_address)
-                .ok_or(SparseStateTrieErrorKind::Sparse(SparseTrieErrorKind::Blind))?;
+            let storage_trie = sparse_trie.storage_trie_mut(&hashed_address).ok_or(
+                SparseStateTrieErrorKind::SparseStorageTrie(
+                    hashed_address,
+                    SparseTrieErrorKind::Blind,
+                ),
+            )?;
             for hashed_slot in hashed_slots.into_iter().sorted_unstable() {
                 let storage_nibbles = Nibbles::unpack(hashed_slot);
                 let maybe_leaf_value = storage
@@ -137,13 +140,13 @@ where
                     .map(|v| alloy_rlp::encode_fixed_size(v).to_vec());
 
                 if let Some(value) = maybe_leaf_value {
-                    storage_trie
-                        .update_leaf(storage_nibbles, value)
-                        .map_err(SparseStateTrieError::from)?;
+                    storage_trie.update_leaf(storage_nibbles, value).map_err(|err| {
+                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
+                    })?;
                 } else {
-                    storage_trie
-                        .remove_leaf(&storage_nibbles)
-                        .map_err(SparseStateTrieError::from)?;
+                    storage_trie.remove_leaf(&storage_nibbles).map_err(|err| {
+                        SparseStateTrieErrorKind::SparseStorageTrie(hashed_address, err.into_kind())
+                    })?;
                 }
             }
 

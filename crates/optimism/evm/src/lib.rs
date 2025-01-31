@@ -18,14 +18,14 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, U256};
 use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm, NextBlockEnvAttributes};
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Database, Evm, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::FillTxEnv;
 use reth_revm::{
     inspector_handle_register,
     primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Database, EvmBuilder, GetInspector,
+    EvmBuilder, GetInspector,
 };
 
 mod config;
@@ -40,8 +40,8 @@ pub use receipts::*;
 mod error;
 pub use error::OpBlockExecutionError;
 use revm_primitives::{
-    BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, EVMError, HandlerCfg, OptimismFields,
-    ResultAndState, SpecId, TxKind,
+    BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, EVMError, HaltReason, HandlerCfg,
+    OptimismFields, ResultAndState, SpecId, TxKind,
 };
 
 /// OP EVM implementation.
@@ -53,6 +53,7 @@ impl<EXT, DB: Database> Evm for OpEvm<'_, EXT, DB> {
     type DB = DB;
     type Tx = TxEnv;
     type Error = EVMError<DB::Error>;
+    type HaltReason = HaltReason;
 
     fn block(&self) -> &BlockEnv {
         self.0.block()
@@ -224,6 +225,8 @@ impl ConfigureEvmEnv for OpEvmConfig {
 
 impl ConfigureEvm for OpEvmConfig {
     type Evm<'a, DB: Database + 'a, I: 'a> = OpEvm<'a, I, DB>;
+    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type HaltReason = HaltReason;
 
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {

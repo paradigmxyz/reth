@@ -1,15 +1,10 @@
 //! Helper type that represents one of two possible executor types
 
-use core::fmt::Display;
-
 use crate::{
     execute::{BatchExecutor, BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
+    Database,
 };
-use alloy_primitives::BlockNumber;
-use reth_prune_types::PruneModes;
-use reth_storage_errors::provider::ProviderError;
-use revm_primitives::db::Database;
 
 // re-export Either
 pub use futures_util::future::Either;
@@ -22,15 +17,13 @@ where
 {
     type Primitives = A::Primitives;
 
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>> =
-        Either<A::Executor<DB>, B::Executor<DB>>;
+    type Executor<DB: Database> = Either<A::Executor<DB>, B::Executor<DB>>;
 
-    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> =
-        Either<A::BatchExecutor<DB>, B::BatchExecutor<DB>>;
+    type BatchExecutor<DB: Database> = Either<A::BatchExecutor<DB>, B::BatchExecutor<DB>>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database,
     {
         match self {
             Self::Left(a) => Either::Left(a.executor(db)),
@@ -40,7 +33,7 @@ where
 
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database,
     {
         match self {
             Self::Left(a) => Either::Left(a.batch_executor(db)),
@@ -53,7 +46,7 @@ impl<A, B, DB> Executor<DB> for Either<A, B>
 where
     A: Executor<DB>,
     B: for<'a> Executor<DB, Input<'a> = A::Input<'a>, Output = A::Output, Error = A::Error>,
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: Database,
 {
     type Input<'a> = A::Input<'a>;
     type Output = A::Output;
@@ -99,7 +92,7 @@ impl<A, B, DB> BatchExecutor<DB> for Either<A, B>
 where
     A: BatchExecutor<DB>,
     B: for<'a> BatchExecutor<DB, Input<'a> = A::Input<'a>, Output = A::Output, Error = A::Error>,
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: Database,
 {
     type Input<'a> = A::Input<'a>;
     type Output = A::Output;
@@ -116,20 +109,6 @@ where
         match self {
             Self::Left(a) => a.finalize(),
             Self::Right(b) => b.finalize(),
-        }
-    }
-
-    fn set_tip(&mut self, tip: BlockNumber) {
-        match self {
-            Self::Left(a) => a.set_tip(tip),
-            Self::Right(b) => b.set_tip(tip),
-        }
-    }
-
-    fn set_prune_modes(&mut self, prune_modes: PruneModes) {
-        match self {
-            Self::Left(a) => a.set_prune_modes(prune_modes),
-            Self::Right(b) => b.set_prune_modes(prune_modes),
         }
     }
 

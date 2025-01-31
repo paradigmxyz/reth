@@ -602,5 +602,9 @@ pub(super) mod serde_bincode_compat {
         SerdeBincodeCompat for super::RecoveredBlock<T>
     {
         type BincodeRepr<'a> = RecoveredBlock<'a, T>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
     }
 }
