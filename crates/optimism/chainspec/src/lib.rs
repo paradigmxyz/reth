@@ -22,7 +22,7 @@ use alloy_chains::Chain;
 use alloy_consensus::{proofs::storage_root_unhashed, BlockHeader, Header};
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{address, B256, U256};
 pub use base::BASE_MAINNET;
 pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, Display, From, Into};
@@ -37,9 +37,7 @@ use reth_chainspec::{
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardfork};
 use reth_network_peers::NodeRecord;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
-use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_primitives_traits::sync::LazyLock;
-use tracing::warn;
 
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
@@ -455,7 +453,7 @@ impl From<ChainSpec> for OpChainSpec {
 
         if inner.hardforks.is_fork_active_at_timestamp(OpHardfork::Isthmus, inner.genesis.timestamp)
         {
-            match inner.genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
+            match inner.genesis.alloc.get(&address!("4200000000000000000000000000000000000016")) {
                 Some(predeploy) => {
                     let header = inner.genesis_header.get_mut().expect("header is set");
                     // update withdrawals root in header
@@ -467,10 +465,7 @@ impl From<ChainSpec> for OpChainSpec {
                     // update header hash
                     *hash = header.hash_slow()
                 }
-                None => warn!(target: "reth::cli",
-                    address=%ADDRESS_L2_TO_L1_MESSAGE_PASSER,
-                    "Predeploy L2ToL1MessagePasser.sol not found in genesis alloc"
-                ),
+                None => (), // Predeploy L2ToL1MessagePasser.sol not found in genesis alloc
             }
         }
 
