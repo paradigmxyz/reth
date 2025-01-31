@@ -214,9 +214,9 @@ impl<F> WitnessBlindedProviderFactory<F> {
 
 impl<F> BlindedProviderFactory for WitnessBlindedProviderFactory<F>
 where
-    F: BlindedProviderFactory,
-    F::AccountNodeProvider: BlindedProvider,
-    F::StorageNodeProvider: BlindedProvider,
+    F: BlindedProviderFactory + Send + Sync,
+    F::AccountNodeProvider: BlindedProvider + Send + Sync,
+    F::StorageNodeProvider: BlindedProvider + Send + Sync,
 {
     type AccountNodeProvider = WitnessBlindedProvider<F::AccountNodeProvider>;
     type StorageNodeProvider = WitnessBlindedProvider<F::StorageNodeProvider>;
