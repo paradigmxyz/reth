@@ -237,7 +237,7 @@ mod tests {
     use futures::poll;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives::SealedHeader;
+    use reth_primitives_traits::SealedHeader;
     use reth_provider::test_utils::MockNodeTypesWithDB;
     use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;
@@ -274,7 +274,7 @@ mod tests {
                 gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
                 ..Default::default()
             };
-            let header = SealedHeader::seal(header);
+            let header = SealedHeader::seal_slow(header);
             insert_headers_into_client(&client, header, 0..total_blocks);
 
             let tip = client.highest_block().expect("there should be blocks here").hash();

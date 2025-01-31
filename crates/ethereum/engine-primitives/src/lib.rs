@@ -7,10 +7,12 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
 
 mod payload;
-use std::sync::Arc;
-
+use alloc::sync::Arc;
 use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError};
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
@@ -18,20 +20,19 @@ pub use alloy_rpc_types_engine::{
 };
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_chainspec::ChainSpec;
-use reth_engine_primitives::{BuiltPayload, EngineTypes, EngineValidator, PayloadValidator};
+use reth_engine_primitives::{EngineTypes, EngineValidator, PayloadValidator};
 use reth_payload_primitives::{
-    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
-    PayloadOrAttributes, PayloadTypes,
+    validate_version_specific_fields, BuiltPayload, EngineApiMessageVersion,
+    EngineObjectValidationError, PayloadOrAttributes, PayloadTypes,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{Block, NodePrimitives, SealedBlock, SealedBlockFor};
-use reth_rpc_types_compat::engine::payload::block_to_payload;
+use reth_primitives::{Block, NodePrimitives, SealedBlock};
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
 pub struct EthEngineTypes<T: PayloadTypes = EthPayloadTypes> {
-    _marker: std::marker::PhantomData<T>,
+    _marker: core::marker::PhantomData<T>,
 }
 
 impl<T: PayloadTypes> PayloadTypes for EthEngineTypes<T> {
@@ -55,11 +56,11 @@ where
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
 
     fn block_to_payload(
-        block: SealedBlockFor<
+        block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-        block_to_payload(block)
+        ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block())
     }
 }
 

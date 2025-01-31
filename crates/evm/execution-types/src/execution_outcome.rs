@@ -1,6 +1,7 @@
 use crate::BlockExecutionOutput;
+use alloc::{vec, vec::Vec};
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::{logs_bloom, Address, BlockNumber, Bloom, Log, B256, U256};
+use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
 use reth_primitives::Receipts;
 use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
 use reth_trie::{HashedPostState, KeyHasher};
@@ -8,7 +9,6 @@ use revm::{
     db::{states::BundleState, BundleAccount},
     primitives::AccountInfo,
 };
-use std::collections::HashMap;
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -199,7 +199,7 @@ impl<T> ExecutionOutcome<T> {
         block_number: BlockNumber,
         f: impl FnOnce(&[&T]) -> B256,
     ) -> Option<B256> {
-        self.receipts.root_slow(self.block_number_to_index(block_number)?, f)
+        Some(self.receipts.root_slow(self.block_number_to_index(block_number)?, f))
     }
 
     /// Returns reference to receipts.
@@ -213,7 +213,7 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Return all block receipts
-    pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[Option<T>] {
+    pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[T] {
         let Some(index) = self.block_number_to_index(block_number) else { return &[] };
         &self.receipts[index]
     }
@@ -231,6 +231,11 @@ impl<T> ExecutionOutcome<T> {
     /// Return first block of the execution outcome
     pub const fn first_block(&self) -> BlockNumber {
         self.first_block
+    }
+
+    /// Return last block of the execution outcome
+    pub fn last_block(&self) -> BlockNumber {
+        (self.first_block + self.len() as u64).saturating_sub(1)
     }
 
     /// Revert the state to the given block number.
@@ -310,13 +315,13 @@ impl<T> ExecutionOutcome<T> {
     pub fn prepend_state(&mut self, mut other: BundleState) {
         let other_len = other.reverts.len();
         // take this bundle
-        let this_bundle = std::mem::take(&mut self.bundle);
+        let this_bundle = core::mem::take(&mut self.bundle);
         // extend other bundle with this
         other.extend(this_bundle);
         // discard other reverts
         other.take_n_reverts(other_len);
         // swap bundles
-        std::mem::swap(&mut self.bundle, &mut other)
+        core::mem::swap(&mut self.bundle, &mut other)
     }
 
     /// Create a new instance with updated receipts.
@@ -347,7 +352,7 @@ impl<T: Receipt<Log = Log>> ExecutionOutcome<T> {
     /// Returns an iterator over all block logs.
     pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> {
         let index = self.block_number_to_index(block_number)?;
-        Some(self.receipts[index].iter().filter_map(|r| Some(r.as_ref()?.logs().iter())).flatten())
+        Some(self.receipts[index].iter().flat_map(|r| r.logs()))
     }
 
     /// Return blocks logs bloom
@@ -362,9 +367,9 @@ impl ExecutionOutcome {
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
     pub fn ethereum_receipts_root(&self, _block_number: BlockNumber) -> Option<B256> {
-        self.receipts.root_slow(self.block_number_to_index(_block_number)?, |receipts| {
-            reth_primitives::proofs::calculate_receipt_root_no_memo(receipts)
-        })
+        Some(self.receipts.root_slow(self.block_number_to_index(_block_number)?, |receipts| {
+            reth_primitives::Receipt::calculate_receipt_root_no_memo(receipts)
+        }))
     }
 }
 
@@ -382,17 +387,11 @@ impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(feature = "optimism"))]
-    use alloy_primitives::bytes;
-    #[cfg(not(feature = "optimism"))]
-    use alloy_primitives::LogData;
-    use alloy_primitives::{Address, B256};
+    use alloy_consensus::TxType;
+    use alloy_primitives::{bytes, Address, LogData, B256};
     use reth_primitives::Receipts;
-    #[cfg(not(feature = "optimism"))]
-    use reth_primitives::TxType;
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_initialisation() {
         // Create a new BundleState object with initial data
         let bundle = BundleState::new(
@@ -403,7 +402,7 @@ mod tests {
 
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
+            receipt_vec: vec![vec![Some(reth_ethereum_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![],
@@ -461,11 +460,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_block_number_to_index() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
+            receipt_vec: vec![vec![Some(reth_ethereum_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![],
@@ -496,16 +494,15 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_get_logs() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
+            receipt_vec: vec![vec![reth_ethereum_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-            })]],
+            }]],
         };
 
         // Define the first block number
@@ -528,11 +525,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_receipts_by_block() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
+            receipt_vec: vec![vec![Some(reth_ethereum_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -558,7 +554,7 @@ mod tests {
         // Assert that the receipts for block number 123 match the expected receipts
         assert_eq!(
             receipts_by_block,
-            vec![&Some(reth_primitives::Receipt {
+            vec![&Some(reth_ethereum_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -568,11 +564,10 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_receipts_len() {
         // Create a Receipts object with a vector of receipt vectors
         let receipts = Receipts {
-            receipt_vec: vec![vec![Some(reth_primitives::Receipt {
+            receipt_vec: vec![vec![Some(reth_ethereum_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
@@ -617,10 +612,9 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_revert_to() {
         // Create a random receipt object
-        let receipt = reth_primitives::Receipt {
+        let receipt = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
@@ -666,10 +660,9 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_extend_execution_outcome() {
         // Create a Receipt object with specific attributes.
-        let receipt = reth_primitives::Receipt {
+        let receipt = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
@@ -710,10 +703,9 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(feature = "optimism"))]
     fn test_split_at_execution_outcome() {
         // Create a random receipt object
-        let receipt = reth_primitives::Receipt {
+        let receipt = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],

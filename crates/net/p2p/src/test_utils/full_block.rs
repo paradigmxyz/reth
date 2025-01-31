@@ -4,6 +4,7 @@ use crate::{
     error::PeerRequestResult,
     headers::client::{HeadersClient, HeadersRequest},
     priority::Priority,
+    BlockClient,
 };
 use alloy_consensus::Header;
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
@@ -134,7 +135,7 @@ impl TestFullBlockClient {
         self.headers.lock().iter().max_by_key(|(_, header)| header.number).and_then(
             |(hash, header)| {
                 self.bodies.lock().get(hash).map(|body| {
-                    SealedBlock::new(SealedHeader::new(header.clone(), *hash), body.clone())
+                    SealedBlock::from_parts_unchecked(header.clone(), body.clone(), *hash)
                 })
             },
         )
@@ -242,4 +243,8 @@ impl BodiesClient for TestFullBlockClient {
                 .collect(),
         )))
     }
+}
+
+impl BlockClient for TestFullBlockClient {
+    type Block = reth_primitives::Block;
 }

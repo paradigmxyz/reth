@@ -5,10 +5,11 @@ use alloy_rpc_types_eth::{
     state::{AccountOverride, StateOverride},
     BlockOverrides,
 };
+use reth_evm::TransactionEnv;
 use revm::{
     db::CacheDB,
     precompile::{PrecompileSpecId, Precompiles},
-    primitives::{db::DatabaseRef, Bytecode, SpecId, TxEnv},
+    primitives::{db::DatabaseRef, Bytecode, SpecId},
     Database,
 };
 use revm_primitives::BlockEnv;
@@ -32,26 +33,26 @@ pub fn get_precompiles(spec_id: SpecId) -> impl IntoIterator<Item = Address> {
 ///
 /// Note: this takes the mut [Database] trait because the loaded sender can be reused for the
 /// following operation like `eth_call`.
-pub fn caller_gas_allowance<DB>(db: &mut DB, env: &TxEnv) -> EthResult<U256>
+pub fn caller_gas_allowance<DB>(db: &mut DB, env: &impl TransactionEnv) -> EthResult<U256>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
 {
     // Get the caller account.
-    let caller = db.basic(env.caller)?;
+    let caller = db.basic(env.caller())?;
     // Get the caller balance.
     let balance = caller.map(|acc| acc.balance).unwrap_or_default();
     // Get transaction value.
-    let value = env.value;
+    let value = env.value();
     // Subtract transferred value from the caller balance. Return error if the caller has
     // insufficient funds.
     let balance = balance
-        .checked_sub(env.value)
+        .checked_sub(env.value())
         .ok_or_else(|| RpcInvalidTransactionError::InsufficientFunds { cost: value, balance })?;
 
     Ok(balance
         // Calculate the amount of gas the caller can afford with the specified gas price.
-        .checked_div(env.gas_price)
+        .checked_div(env.gas_price())
         // This will be 0 if gas price is 0. It is fine, because we check it before.
         .unwrap_or_default())
 }

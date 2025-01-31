@@ -1,5 +1,5 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{bytes, Address, B256};
+use alloy_primitives::{bytes, Address, B256, U256};
 use alloy_provider::{
     network::{
         Ethereum, EthereumWallet, NetworkWallet, TransactionBuilder, TransactionBuilder7702,
@@ -11,10 +11,10 @@ use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use rand::{seq::SliceRandom, Rng};
 use reth_e2e_test_utils::{wallet::Wallet, NodeHelperType, TmpDB};
+use reth_ethereum_primitives::TxType;
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_primitives::TxType;
 use reth_provider::FullProvider;
 use revm::primitives::{AccessListItem, Authorization};
 
@@ -26,8 +26,6 @@ pub(crate) fn eth_payload_attributes(timestamp: u64) -> EthPayloadBuilderAttribu
         suggested_fee_recipient: Address::ZERO,
         withdrawals: Some(vec![]),
         parent_beacon_block_root: Some(B256::ZERO),
-        target_blobs_per_block: None,
-        max_blobs_per_block: None,
     };
     EthPayloadBuilderAttributes::new(B256::ZERO, attributes)
 }
@@ -42,7 +40,7 @@ pub(crate) async fn advance_with_random_transactions<Provider>(
 where
     Provider: FullProvider<NodeTypesWithDBAdapter<EthereumNode, TmpDB>>,
 {
-    let provider = ProviderBuilder::new().with_recommended_fillers().on_http(node.rpc_url());
+    let provider = ProviderBuilder::new().on_http(node.rpc_url());
     let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).gen();
 
     // simple contract which writes to storage on any call
@@ -92,7 +90,7 @@ where
             if tx_type == TxType::Eip7702 {
                 let signer = signers.choose(rng).unwrap();
                 let auth = Authorization {
-                    chain_id: provider.get_chain_id().await?,
+                    chain_id: U256::from(provider.get_chain_id().await?),
                     address: *call_destinations.choose(rng).unwrap(),
                     nonce: provider
                         .get_transaction_count(signer.address())

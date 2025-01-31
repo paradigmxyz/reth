@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 # reth
 reth-db-api.workspace = true
-reth-beacon-consensus.workspace = true
 reth-consensus.workspace = true
 reth-evm.workspace = true
 reth-provider.workspace = true

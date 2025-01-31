@@ -11,13 +11,13 @@ use op_alloy_consensus::{encode_holocene_extra_data, EIP1559ParamError};
 /// Re-export for use in downstream arguments.
 pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_chainspec::EthereumHardforks;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{OpBlock, OpPrimitives, OpTransactionSigned};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives::{transaction::WithEncoded, SealedBlockFor};
+use reth_primitives::{transaction::WithEncoded, SealedBlock};
 use reth_rpc_types_compat::engine::payload::{
     block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
 };
@@ -135,9 +135,9 @@ pub struct OpBuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// The built block
-    pub(crate) block: Arc<SealedBlockFor<OpBlock>>,
+    pub(crate) block: Arc<SealedBlock<OpBlock>>,
     /// Block execution data for the payload, if any.
-    pub(crate) executed_block: Option<ExecutedBlock<OpPrimitives>>,
+    pub(crate) executed_block: Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
@@ -155,11 +155,11 @@ impl OpBuiltPayload {
     /// Initializes the payload with the given initial block.
     pub const fn new(
         id: PayloadId,
-        block: Arc<SealedBlockFor<OpBlock>>,
+        block: Arc<SealedBlock<OpBlock>>,
         fees: U256,
         chain_spec: Arc<OpChainSpec>,
         attributes: OpPayloadBuilderAttributes,
-        executed_block: Option<ExecutedBlock<OpPrimitives>>,
+        executed_block: Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
     ) -> Self {
         Self { id, block, executed_block, fees, sidecars: Vec::new(), chain_spec, attributes }
     }
@@ -170,7 +170,7 @@ impl OpBuiltPayload {
     }
 
     /// Returns the built block(sealed)
-    pub fn block(&self) -> &SealedBlockFor<OpBlock> {
+    pub fn block(&self) -> &SealedBlock<OpBlock> {
         &self.block
     }
 
@@ -188,7 +188,7 @@ impl OpBuiltPayload {
 impl BuiltPayload for OpBuiltPayload {
     type Primitives = OpPrimitives;
 
-    fn block(&self) -> &SealedBlockFor<OpBlock> {
+    fn block(&self) -> &SealedBlock<OpBlock> {
         &self.block
     }
 
@@ -196,7 +196,7 @@ impl BuiltPayload for OpBuiltPayload {
         self.fees
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlock<OpPrimitives>> {
+    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<OpPrimitives>> {
         self.executed_block.clone()
     }
 
@@ -208,7 +208,7 @@ impl BuiltPayload for OpBuiltPayload {
 impl BuiltPayload for &OpBuiltPayload {
     type Primitives = OpPrimitives;
 
-    fn block(&self) -> &SealedBlockFor<OpBlock> {
+    fn block(&self) -> &SealedBlock<OpBlock> {
         (**self).block()
     }
 
@@ -216,7 +216,7 @@ impl BuiltPayload for &OpBuiltPayload {
         (**self).fees()
     }
 
-    fn executed_block(&self) -> Option<ExecutedBlock<OpPrimitives>> {
+    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<OpPrimitives>> {
         self.executed_block.clone()
     }
 
@@ -375,8 +375,6 @@ mod tests {
                 suggested_fee_recipient: address!("4200000000000000000000000000000000000011"),
                 withdrawals: Some([].into()),
                 parent_beacon_block_root: b256!("8fe0193b9bf83cb7e5a08538e494fecc23046aab9a497af3704f4afdae3250ff").into(),
-                target_blobs_per_block: None,
-                max_blobs_per_block: None,
             },
             transactions: Some([bytes!("7ef8f8a0dc19cfa777d90980e4875d0a548a881baaa3f83f14d1bc0d3038bc329350e54194deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e20000f424000000000000000000000000300000000670d6d890000000000000125000000000000000000000000000000000000000000000000000000000000000700000000000000000000000000000000000000000000000000000000000000014bf9181db6e381d4384bbf69c48b0ee0eed23c6ca26143c6d2544f9d39997a590000000000000000000000007f83d659683caf2767fd3c720981d51f5bc365bc")].into()),
             no_tx_pool: None,

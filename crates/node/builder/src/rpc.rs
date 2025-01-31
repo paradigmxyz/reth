@@ -196,7 +196,6 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         Node::Pool,
         Node::Network,
         TaskExecutor,
-        Node::Provider,
         EthApi,
         Node::Executor,
         Node::Consensus,
@@ -213,7 +212,6 @@ where
         Node::Pool,
         Node::Network,
         TaskExecutor,
-        Node::Provider,
         EthApi,
         Node::Executor,
         Node::Consensus,
@@ -452,7 +450,6 @@ where
             .with_provider(node.provider().clone())
             .with_pool(node.pool().clone())
             .with_network(node.network().clone())
-            .with_events(node.provider().clone())
             .with_executor(node.task_executor().clone())
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())

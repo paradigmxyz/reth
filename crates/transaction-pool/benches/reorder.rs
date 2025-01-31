@@ -94,8 +94,7 @@ fn generate_test_data(
     seed_size: usize,
     input_size: usize,
 ) -> (Vec<MockTransaction>, Vec<MockTransaction>, u64) {
-    let config = ProptestConfig::default();
-    let mut runner = TestRunner::new(config);
+    let mut runner = TestRunner::deterministic();
 
     let txs = prop::collection::vec(any::<MockTransaction>(), seed_size)
         .new_tree(&mut runner)

@@ -7,7 +7,7 @@ use crate::{
 use alloy_primitives::Address;
 use core::fmt;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{InvalidTransactionError, RecoveredTx};
+use reth_primitives::{InvalidTransactionError, Recovered};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     sync::Arc,
@@ -130,7 +130,6 @@ impl<T: TransactionOrdering> BestTransactions<T> {
                 Err(TryRecvError::Lagged(_)) => {
                     // Handle the case where the receiver lagged too far behind.
                     // `num_skipped` indicates the number of messages that were skipped.
-                    continue
                 }
 
                 // this case is still better than the existing iterator behavior where no new
@@ -252,7 +251,7 @@ where
 {
     type Transaction = T::Consensus;
 
-    fn next(&mut self, _ctx: ()) -> Option<RecoveredTx<Self::Transaction>> {
+    fn next(&mut self, _ctx: ()) -> Option<Recovered<Self::Transaction>> {
         loop {
             let tx = self.best.next()?;
             if self.invalid.contains(&tx.sender()) {

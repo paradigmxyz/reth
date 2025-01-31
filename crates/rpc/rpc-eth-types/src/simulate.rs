@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{
     Block, BlockTransactionsKind, Header,
 };
 use jsonrpsee_types::ErrorObject;
-use reth_primitives::BlockWithSenders;
+use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::{block::BlockTx, BlockBody as _, SignedTransaction};
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
@@ -15,8 +15,11 @@ use revm::Database;
 use revm_primitives::{Address, Bytes, ExecutionResult, TxKind};
 
 use crate::{
-    error::{api::FromEthApiError, ToRpcError},
-    EthApiError, RevertError, RpcInvalidTransactionError,
+    error::{
+        api::{FromEthApiError, FromEvmHalt},
+        ToRpcError,
+    },
+    EthApiError, RevertError,
 };
 
 /// Errors which may occur during `eth_simulateV1` execution.
@@ -118,7 +121,7 @@ pub fn build_simulated_block<T, B>(
     block: B,
 ) -> Result<SimulatedBlock<Block<T::Transaction, Header<B::Header>>>, T::Error>
 where
-    T: TransactionCompat<BlockTx<B>, Error: FromEthApiError>,
+    T: TransactionCompat<BlockTx<B>, Error: FromEthApiError + FromEvmHalt>,
     B: reth_primitives_traits::Block,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
@@ -127,12 +130,12 @@ where
     for (index, (result, tx)) in results.iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
             ExecutionResult::Halt { reason, gas_used } => {
-                let error = RpcInvalidTransactionError::halt(*reason, tx.gas_limit());
+                let error = T::Error::from_evm_halt(*reason, tx.gas_limit());
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
-                        code: error.error_code(),
                         message: error.to_string(),
+                        code: error.into().code(),
                     }),
                     gas_used: *gas_used,
                     logs: Vec::new(),
@@ -178,11 +181,11 @@ where
         calls.push(call);
     }
 
-    let block = BlockWithSenders::new_unchecked(block, senders);
+    let block = RecoveredBlock::new_unhashed(block, senders);
 
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = from_block(block, txs_kind, None, tx_resp_builder)?;
+    let block = from_block(block, txs_kind, tx_resp_builder)?;
     Ok(SimulatedBlock { inner: block, calls })
 }

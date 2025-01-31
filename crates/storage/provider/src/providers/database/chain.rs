@@ -23,6 +23,7 @@ where
     T: FullSignedTx,
     N: FullNodePrimitives<
         Block = reth_primitives::Block<T>,
+        BlockHeader = alloy_consensus::Header,
         BlockBody = reth_primitives::BlockBody<T>,
         SignedTx = T,
     >,

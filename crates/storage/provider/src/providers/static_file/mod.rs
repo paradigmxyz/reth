@@ -110,7 +110,7 @@ mod tests {
             let hash = header.hash();
 
             tx.put::<CanonicalHeaders>(header.number, hash).unwrap();
-            tx.put::<Headers>(header.number, header.clone().unseal()).unwrap();
+            tx.put::<Headers>(header.number, header.clone_header()).unwrap();
             tx.put::<HeaderTerminalDifficulties>(header.number, td.into()).unwrap();
             tx.put::<HeaderNumbers>(hash, header.number).unwrap();
         }
@@ -330,7 +330,7 @@ mod tests {
                         writer.append_receipt(*next_tx_num, &receipt).unwrap();
                     } else {
                         // Used as ID for validation
-                        tx.transaction.set_nonce(*next_tx_num);
+                        tx.transaction_mut().set_nonce(*next_tx_num);
                         writer.append_transaction(*next_tx_num, &tx).unwrap();
                     }
                     *next_tx_num += 1;

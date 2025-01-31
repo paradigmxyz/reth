@@ -10,6 +10,7 @@ use alloy_primitives::{Address, Bytes, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
+use reth_primitives_traits::transaction::signed::RecoveryError;
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
@@ -285,6 +286,12 @@ where
     }
 }
 
+impl From<RecoveryError> for EthApiError {
+    fn from(_: RecoveryError) -> Self {
+        Self::InvalidTransactionSignature
+    }
+}
+
 /// An error due to invalid transaction.
 ///
 /// The only reason this exists is to maintain compatibility with other clients de-facto standard
@@ -408,10 +415,8 @@ pub enum RpcInvalidTransactionError {
     #[error("blob transaction missing blob hashes")]
     BlobTransactionMissingBlobHashes,
     /// Blob transaction has too many blobs
-    #[error("blob transaction exceeds max blobs per block; got {have}, max {max}")]
+    #[error("blob transaction exceeds max blobs per block; got {have}")]
     TooManyBlobs {
-        /// The maximum number of blobs allowed.
-        max: usize,
         /// The number of blobs in the transaction.
         have: usize,
     },
@@ -522,7 +527,7 @@ impl From<revm::primitives::InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobGasPriceGreaterThanMax => Self::BlobFeeCapTooLow,
             InvalidTransaction::EmptyBlobs => Self::BlobTransactionMissingBlobHashes,
             InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
-            InvalidTransaction::TooManyBlobs { max, have } => Self::TooManyBlobs { max, have },
+            InvalidTransaction::TooManyBlobs { have } => Self::TooManyBlobs { have },
             InvalidTransaction::BlobCreateTransaction => Self::BlobTransactionIsCreate,
             InvalidTransaction::EofCrateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
             InvalidTransaction::AuthorizationListNotSupported => {
@@ -789,7 +794,7 @@ mod tests {
         assert_eq!(err.message(), "block not found: canonical hash 0x1a15e3c30cf094a99826869517b16d185d45831d3a494f01030b0001a9d3ebb9");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::number(100000)).into();
-        assert_eq!(err.message(), "block not found: number 0x186a0");
+        assert_eq!(err.message(), "block not found: 0x186a0");
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::latest()).into();
         assert_eq!(err.message(), "block not found: latest");

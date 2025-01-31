@@ -1,5 +1,14 @@
 //! Engine tree configuration.
 
+use alloy_eips::merge::EPOCH_SLOTS;
+
+/// The largest gap for which the tree will be used for sync. See docs for `pipeline_run_threshold`
+/// for more information.
+///
+/// This is the default threshold, the distance to the head that the tree will be used for sync.
+/// If the distance exceeds this threshold, the pipeline will be used for sync.
+pub(crate) const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = EPOCH_SLOTS;
+
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 
@@ -32,6 +41,13 @@ pub struct TreeConfig {
     /// This is used as a cutoff to prevent long-running sequential block execution when we receive
     /// a batch of downloaded blocks.
     max_execute_block_batch_size: usize,
+    /// Whether to use the new state root task calculation method instead of parallel calculation
+    use_state_root_task: bool,
+    /// Whether to always compare trie updates from the state root task to the trie updates from
+    /// the regular state root calculation.
+    always_compare_trie_updates: bool,
+    /// Whether to use cross-block caching and parallel prewarming
+    use_caching_and_prewarming: bool,
 }
 
 impl Default for TreeConfig {
@@ -42,18 +58,25 @@ impl Default for TreeConfig {
             block_buffer_limit: DEFAULT_BLOCK_BUFFER_LIMIT,
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
+            use_state_root_task: false,
+            always_compare_trie_updates: false,
+            use_caching_and_prewarming: false,
         }
     }
 }
 
 impl TreeConfig {
     /// Create engine tree configuration.
+    #[allow(clippy::too_many_arguments)]
     pub const fn new(
         persistence_threshold: u64,
         memory_block_buffer_target: u64,
         block_buffer_limit: u32,
         max_invalid_header_cache_length: u32,
         max_execute_block_batch_size: usize,
+        use_state_root_task: bool,
+        always_compare_trie_updates: bool,
+        use_caching_and_prewarming: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -61,6 +84,9 @@ impl TreeConfig {
             block_buffer_limit,
             max_invalid_header_cache_length,
             max_execute_block_batch_size,
+            use_state_root_task,
+            always_compare_trie_updates,
+            use_caching_and_prewarming,
         }
     }
 
@@ -87,6 +113,22 @@ impl TreeConfig {
     /// Return the maximum execute block batch size.
     pub const fn max_execute_block_batch_size(&self) -> usize {
         self.max_execute_block_batch_size
+    }
+
+    /// Returns whether to use the state root task calculation method.
+    pub const fn use_state_root_task(&self) -> bool {
+        self.use_state_root_task
+    }
+
+    /// Returns whether or not cross-block caching and parallel prewarming should be used.
+    pub const fn use_caching_and_prewarming(&self) -> bool {
+        self.use_caching_and_prewarming
+    }
+
+    /// Returns whether to always compare trie updates from the state root task to the trie updates
+    /// from the regular state root calculation.
+    pub const fn always_compare_trie_updates(&self) -> bool {
+        self.always_compare_trie_updates
     }
 
     /// Setter for persistence threshold.
@@ -125,6 +167,28 @@ impl TreeConfig {
         max_execute_block_batch_size: usize,
     ) -> Self {
         self.max_execute_block_batch_size = max_execute_block_batch_size;
+        self
+    }
+
+    /// Setter for whether to use the new state root task calculation method.
+    pub const fn with_state_root_task(mut self, use_state_root_task: bool) -> Self {
+        self.use_state_root_task = use_state_root_task;
+        self
+    }
+
+    /// Setter for whether to use the new state root task calculation method.
+    pub const fn with_caching_and_prewarming(mut self, use_caching_and_prewarming: bool) -> Self {
+        self.use_caching_and_prewarming = use_caching_and_prewarming;
+        self
+    }
+
+    /// Setter for whether to always compare trie updates from the state root task to the trie
+    /// updates from the regular state root calculation.
+    pub const fn with_always_compare_trie_updates(
+        mut self,
+        always_compare_trie_updates: bool,
+    ) -> Self {
+        self.always_compare_trie_updates = always_compare_trie_updates;
         self
     }
 }

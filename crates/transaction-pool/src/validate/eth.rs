@@ -24,7 +24,7 @@ use alloy_eips::{
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
 use reth_primitives::{InvalidTransactionError, SealedBlock};
-use reth_primitives_traits::{BlockBody, GotExpected};
+use reth_primitives_traits::{Block, GotExpected};
 use reth_storage_api::{StateProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
@@ -106,10 +106,9 @@ where
         self.validate_all(transactions)
     }
 
-    fn on_new_head_block<H, B>(&self, new_tip_block: &SealedBlock<H, B>)
+    fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
     where
-        H: reth_primitives_traits::BlockHeader,
-        B: BlockBody,
+        B: Block,
     {
         self.inner.on_new_head_block(new_tip_block.header())
     }
@@ -858,7 +857,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         SpecId::MERGE
     };
 
-    let gas_after_merge = revm_interpreter::gas::validate_initial_tx_gas(
+    let gas = revm_interpreter::gas::calculate_initial_tx_gas(
         spec_id,
         transaction.input(),
         transaction.is_create(),
@@ -866,7 +865,8 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         transaction.authorization_count() as u64,
     );
 
-    if transaction.gas_limit() < gas_after_merge {
+    let gas_limit = transaction.gas_limit();
+    if gas_limit < gas.initial_gas || gas_limit < gas.floor_gas {
         Err(InvalidPoolTransactionError::IntrinsicGasTooLow)
     } else {
         Ok(())
@@ -892,7 +892,7 @@ mod tests {
         let data = hex::decode(raw).unwrap();
         let tx = PooledTransaction::decode_2718(&mut data.as_ref()).unwrap();
 
-        tx.try_into_ecrecovered().unwrap().into()
+        tx.try_into_recovered().unwrap().into()
     }
 
     // <https://github.com/paradigmxyz/reth/issues/5178>

@@ -20,8 +20,7 @@ use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpBlock;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::SealedBlockFor;
-use reth_rpc_types_compat::engine::payload::block_to_payload;
+use reth_primitives::SealedBlock;
 use std::sync::Arc;
 
 /// The types used in the optimism beacon consensus engine.
@@ -51,11 +50,11 @@ where
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
 
     fn block_to_payload(
-        block: SealedBlockFor<
+        block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-        block_to_payload(block)
+        ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block())
     }
 }
 
@@ -96,7 +95,7 @@ impl PayloadValidator for OpEngineValidator {
         &self,
         payload: ExecutionPayload,
         sidecar: ExecutionPayloadSidecar,
-    ) -> Result<SealedBlockFor<Self::Block>, PayloadError> {
+    ) -> Result<SealedBlock<Self::Block>, PayloadError> {
         self.inner.ensure_well_formed_payload(payload, sidecar)
     }
 }
@@ -105,6 +104,19 @@ impl<Types> EngineValidator<Types> for OpEngineValidator
 where
     Types: EngineTypes<PayloadAttributes = OpPayloadAttributes>,
 {
+    fn validate_execution_requests(
+        &self,
+        requests: &alloy_eips::eip7685::Requests,
+    ) -> Result<(), EngineObjectValidationError> {
+        // according to op spec, execution requests must be empty
+        if !requests.is_empty() {
+            return Err(EngineObjectValidationError::InvalidParams(
+                "NonEmptyExecutionRequests".to_string().into(),
+            ))
+        }
+        Ok(())
+    }
+
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
@@ -204,13 +216,13 @@ pub fn validate_withdrawals_presence(
 
 #[cfg(test)]
 mod test {
+    use super::*;
 
     use crate::engine;
     use alloy_primitives::{b64, Address, B256, B64};
     use alloy_rpc_types_engine::PayloadAttributes;
+    use reth_node_builder::EngineValidator;
     use reth_optimism_chainspec::BASE_SEPOLIA;
-
-    use super::*;
 
     fn get_chainspec() -> Arc<OpChainSpec> {
         let hardforks = OpHardfork::base_sepolia();
@@ -242,8 +254,6 @@ mod test {
                 suggested_fee_recipient: Address::ZERO,
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
-                target_blobs_per_block: None,
-                max_blobs_per_block: None,
             },
         }
     }
@@ -253,7 +263,7 @@ mod test {
         let validator = OpEngineValidator::new(get_chainspec());
         let attributes = get_attributes(None, 1732633199);
 
-        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -266,7 +276,7 @@ mod test {
         let validator = OpEngineValidator::new(get_chainspec());
         let attributes = get_attributes(None, 1732633200);
 
-        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -279,7 +289,7 @@ mod test {
         let validator = OpEngineValidator::new(get_chainspec());
         let attributes = get_attributes(Some(b64!("0000000000000008")), 1732633200);
 
-        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -292,7 +302,7 @@ mod test {
         let validator = OpEngineValidator::new(get_chainspec());
         let attributes = get_attributes(Some(b64!("0000000800000008")), 1732633200);
 
-        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -305,7 +315,7 @@ mod test {
         let validator = OpEngineValidator::new(get_chainspec());
         let attributes = get_attributes(Some(b64!("0000000000000000")), 1732633200);
 
-        let result = <engine::OpEngineValidator as reth_node_builder::EngineValidator<
+        let result = <engine::OpEngineValidator as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes

@@ -9,7 +9,7 @@ use alloy_rpc_types_txpool::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_rpc_api::TxPoolApiServer;
-use reth_rpc_types_compat::{transaction::from_recovered, TransactionCompat};
+use reth_rpc_types_compat::TransactionCompat;
 use reth_transaction_pool::{
     AllPoolTransactions, PoolConsensusTx, PoolTransaction, TransactionPool,
 };
@@ -50,7 +50,7 @@ where
         {
             content.entry(tx.sender()).or_default().insert(
                 tx.nonce().to_string(),
-                from_recovered(tx.clone_into_consensus(), resp_builder)?,
+                resp_builder.fill_pending(tx.clone_into_consensus())?,
             );
 
             Ok(())
@@ -103,15 +103,7 @@ where
         ) {
             let entry = inspect.entry(tx.sender()).or_default();
             let tx = tx.clone_into_consensus();
-            entry.insert(
-                tx.nonce().to_string(),
-                TxpoolInspectSummary {
-                    to: tx.to(),
-                    value: tx.value(),
-                    gas: tx.gas_limit() as u128,
-                    gas_price: tx.max_fee_per_gas(),
-                },
-            );
+            entry.insert(tx.nonce().to_string(), tx.into_tx().into());
         }
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();

@@ -1,9 +1,9 @@
 //! Error types emitted by types or implementations of this crate.
 
+use alloc::boxed::Box;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceUpdateError;
 use reth_errors::{ProviderError, RethError};
-use revm_primitives::EVMError;
 use tokio::sync::oneshot;
 
 /// Possible error variants during payload building.
@@ -26,13 +26,21 @@ pub enum PayloadBuilderError {
     Internal(#[from] RethError),
     /// Unrecoverable error during evm execution.
     #[error("evm execution error: {0}")]
-    EvmExecutionError(EVMError<ProviderError>),
+    EvmExecutionError(Box<dyn core::error::Error + Send + Sync>),
     /// Any other payload building errors.
     #[error(transparent)]
     Other(Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl PayloadBuilderError {
+    /// Create a new EVM error from a boxed error.
+    pub fn evm<E>(error: E) -> Self
+    where
+        E: core::error::Error + Send + Sync + 'static,
+    {
+        Self::EvmExecutionError(Box::new(error))
+    }
+
     /// Create a new error from a boxed error.
     pub fn other<E>(error: E) -> Self
     where

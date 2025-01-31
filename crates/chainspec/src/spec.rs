@@ -1,7 +1,7 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 
-use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec, LazyLock, OnceLock};
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use crate::{constants::MAINNET_DEPOSIT_CONTRACT, once_cell_set, EthChainSpec};
+use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
@@ -12,10 +12,11 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
-    eip7685::EMPTY_REQUESTS_HASH,
+    eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
+use alloy_trie::root::state_root_ref_unhashed;
 use derive_more::From;
 use reth_ethereum_forks::{
     ChainHardforks, DisplayHardforks, EthereumHardfork, EthereumHardforks, ForkCondition,
@@ -25,8 +26,10 @@ use reth_network_peers::{
     base_nodes, base_testnet_nodes, holesky_nodes, mainnet_nodes, op_nodes, op_testnet_nodes,
     sepolia_nodes, NodeRecord,
 };
-use reth_primitives_traits::SealedHeader;
-use reth_trie_common::root::state_root_ref_unhashed;
+use reth_primitives_traits::{
+    sync::{LazyLock, OnceLock},
+    SealedHeader,
+};
 
 /// The Ethereum mainnet spec
 pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
@@ -50,6 +53,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 20000,
+        blob_params: HardforkBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -74,6 +78,7 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
+        blob_params: HardforkBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -96,6 +101,7 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
+        blob_params: HardforkBlobParams::default(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -154,6 +160,43 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
 
+/// A container for hardforks that use eip-7804 blobs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HardforkBlobParams {
+    /// Configuration for blob-related calculations for the Cancun hardfork.
+    pub cancun: BlobParams,
+    /// Configuration for blob-related calculations for the Prague hardfork.
+    pub prague: BlobParams,
+}
+
+impl HardforkBlobParams {
+    /// Constructs params for chainspec from a provided blob schedule.
+    /// Falls back to defaults if the schedule is empty.
+    pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobParams>) -> Self {
+        let extract = |key: &str, default: fn() -> BlobParams| {
+            blob_schedule
+                .get(key)
+                .map(|item| BlobParams {
+                    target_blob_count: item.target_blob_count,
+                    max_blob_count: item.max_blob_count,
+                    ..default()
+                })
+                .unwrap_or_else(default) // Use default if key is missing
+        };
+
+        Self {
+            cancun: extract("cancun", BlobParams::cancun),
+            prague: extract("prague", BlobParams::prague),
+        }
+    }
+}
+
+impl Default for HardforkBlobParams {
+    fn default() -> Self {
+        Self { cancun: BlobParams::cancun(), prague: BlobParams::prague() }
+    }
+}
+
 impl core::ops::Deref for ChainSpec {
     type Target = ChainHardforks;
 
@@ -204,6 +247,9 @@ pub struct ChainSpec {
 
     /// The delete limit for pruner, per run.
     pub prune_delete_limit: usize,
+
+    /// The settings passed for blob configurations for specific hardforks.
+    pub blob_params: HardforkBlobParams,
 }
 
 impl Default for ChainSpec {
@@ -218,11 +264,17 @@ impl Default for ChainSpec {
             deposit_contract: Default::default(),
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: MAINNET.prune_delete_limit,
+            blob_params: Default::default(),
         }
     }
 }
 
 impl ChainSpec {
+    /// Converts the given [`Genesis`] into a [`ChainSpec`].
+    pub fn from_genesis(genesis: Genesis) -> Self {
+        genesis.into()
+    }
+
     /// Get information about the chain itself
     pub const fn chain(&self) -> Chain {
         self.chain
@@ -277,7 +329,7 @@ impl ChainSpec {
             if self.is_cancun_active_at_timestamp(self.genesis.timestamp) {
                 let blob_gas_used = self.genesis.blob_gas_used.unwrap_or(0);
                 let excess_blob_gas = self.genesis.excess_blob_gas.unwrap_or(0);
-                (Some(B256::ZERO), Some(blob_gas_used as u64), Some(excess_blob_gas as u64))
+                (Some(B256::ZERO), Some(blob_gas_used), Some(excess_blob_gas))
             } else {
                 (None, None, None)
             };
@@ -356,6 +408,17 @@ impl ChainSpec {
 
                 bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
             }
+        }
+    }
+
+    /// Get the [`BlobParams`] for the given timestamp.
+    ///
+    /// Note: This always return [`BlobParams::cancun`] pre prague.
+    pub fn blob_fee_params_at_timestamp(&self, timestamp: u64) -> BlobParams {
+        if self.is_prague_active_at_timestamp(timestamp) {
+            self.blob_params.prague
+        } else {
+            self.blob_params.cancun
         }
     }
 
@@ -557,7 +620,7 @@ impl ChainSpec {
                             return Some(block_num);
                         }
                     }
-                    ForkCondition::Block(_) | ForkCondition::Never => continue,
+                    ForkCondition::Block(_) | ForkCondition::Never => {}
                 }
             }
         }
@@ -590,6 +653,7 @@ impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
         // Block-based hardforks
         let hardfork_opts = [
+            (EthereumHardfork::Frontier.boxed(), Some(0)),
             (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
             (EthereumHardfork::Dao.boxed(), genesis.config.dao_fork_block),
             (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
@@ -664,6 +728,9 @@ impl From<Genesis> for ChainSpec {
         // append the remaining unknown hardforks to ensure we don't filter any out
         ordered_hardforks.append(&mut hardforks);
 
+        // Extract blob parameters directly from blob_schedule
+        let blob_params = HardforkBlobParams::from_schedule(&genesis.config.blob_schedule);
+
         // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
         // have the deployment block in the genesis file, so we use block zero. We use the same
         // deposit topic as the mainnet contract if we have the deposit contract address in the
@@ -679,6 +746,7 @@ impl From<Genesis> for ChainSpec {
             hardforks: ChainHardforks::new(ordered_hardforks),
             paris_block_and_final_difficulty,
             deposit_contract,
+            blob_params,
             ..Default::default()
         }
     }
@@ -707,6 +775,10 @@ impl Hardforks for ChainSpec {
 }
 
 impl EthereumHardforks for ChainSpec {
+    fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
+        self.fork(fork)
+    }
+
     fn get_final_paris_total_difficulty(&self) -> Option<U256> {
         self.get_final_paris_total_difficulty()
     }
@@ -968,17 +1040,14 @@ pub fn test_fork_ids(spec: &ChainSpec, cases: &[(Head, ForkId)]) {
 
 #[cfg(test)]
 mod tests {
-    use core::ops::Deref;
-    use std::{collections::HashMap, str::FromStr};
-
+    use super::*;
     use alloy_chains::Chain;
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
-    use alloy_trie::EMPTY_ROOT_HASH;
+    use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
+    use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
-    use reth_trie_common::TrieAccount;
-
-    use super::*;
+    use std::{collections::HashMap, str::FromStr};
 
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
@@ -2308,6 +2377,7 @@ Post-merge hard forks (timestamp based):
 
         let hardforks: Vec<_> = chain_spec.hardforks.forks_iter().map(|(h, _)| h).collect();
         let expected_hardforks = vec![
+            EthereumHardfork::Frontier.boxed(),
             EthereumHardfork::Homestead.boxed(),
             EthereumHardfork::Dao.boxed(),
             EthereumHardfork::Tangerine.boxed(),

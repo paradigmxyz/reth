@@ -11,20 +11,22 @@
 
 extern crate alloc;
 
-use alloc::{boxed::Box, string::String};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString},
+};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use reth_consensus::ConsensusError;
 use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
-use revm_primitives::EVMError;
 use thiserror::Error;
 
 pub mod trie;
 pub use trie::*;
 
 /// Transaction validation errors
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Error, Debug)]
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
     #[error("EVM reported invalid transaction ({hash}): {error}")]
@@ -32,7 +34,7 @@ pub enum BlockValidationError {
         /// The hash of the transaction
         hash: B256,
         /// The EVM error.
-        error: Box<EVMError<ProviderError>>,
+        error: Box<dyn core::error::Error + Send + Sync>,
     },
     /// Error when recovering the sender for a transaction
     #[error("failed to recover sender for transaction")]
@@ -134,7 +136,6 @@ pub enum BlockExecutionError {
 impl BlockExecutionError {
     /// Create a new [`BlockExecutionError::Internal`] variant, containing a
     /// [`InternalBlockExecutionError::Other`] error.
-    #[cfg(feature = "std")]
     pub fn other<E>(error: E) -> Self
     where
         E: core::error::Error + Send + Sync + 'static,
@@ -144,8 +145,7 @@ impl BlockExecutionError {
 
     /// Create a new [`BlockExecutionError::Internal`] variant, containing a
     /// [`InternalBlockExecutionError::Other`] error with the given message.
-    #[cfg(feature = "std")]
-    pub fn msg(msg: impl std::fmt::Display) -> Self {
+    pub fn msg(msg: impl core::fmt::Display) -> Self {
         Self::Internal(InternalBlockExecutionError::msg(msg))
     }
 
@@ -195,7 +195,6 @@ pub enum InternalBlockExecutionError {
 
 impl InternalBlockExecutionError {
     /// Create a new [`InternalBlockExecutionError::Other`] variant.
-    #[cfg(feature = "std")]
     pub fn other<E>(error: E) -> Self
     where
         E: core::error::Error + Send + Sync + 'static,
@@ -204,8 +203,7 @@ impl InternalBlockExecutionError {
     }
 
     /// Create a new [`InternalBlockExecutionError::Other`] from a given message.
-    #[cfg(feature = "std")]
-    pub fn msg(msg: impl std::fmt::Display) -> Self {
+    pub fn msg(msg: impl core::fmt::Display) -> Self {
         Self::Other(msg.to_string().into())
     }
 }
