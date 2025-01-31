@@ -27,7 +27,7 @@ use reth_trie_sparse::{
 };
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
-    collections::{btree_map::Entry, BTreeMap, VecDeque},
+    collections::{BTreeMap, VecDeque},
     sync::{
         mpsc::{self, channel, Receiver, Sender},
         Arc,
@@ -86,6 +86,10 @@ impl SparseTrieUpdate {
         self.multiproof.extend(other.multiproof);
     }
 
+    /// Extend update with contents of the sparse trie message.
+    ///
+    /// - For [`SparseTrieMessage::RevealProof`] messages, the proofs are added to the update.
+    /// - For [`SparseTrieMessage::UpdateState`] messages, the state is added to the update.
     pub fn extend_with_message(&mut self, message: SparseTrieMessage) {
         match message {
             SparseTrieMessage::RevealProof {
@@ -98,31 +102,41 @@ impl SparseTrieUpdate {
                 extend_multi_proof_targets(&mut self.targets, targets);
                 self.multiproof.extend(multiproof);
             }
-            SparseTrieMessage::Update(state) => {
+            SparseTrieMessage::UpdateState(state) => {
                 self.state.extend(state);
             }
         }
     }
 }
 
+/// Messages used internally when communicating with the sparse trie.
+#[derive(Debug)]
 pub enum SparseTrieMessage {
+    /// Reveal proof message. No state update is needed, only proofs should be revealed.
     RevealProof {
+        /// Sequence number of the proof.
         sequence_number: u64,
+        /// Source of the proof.
         source: ProofFetchSource,
+        /// Targets of the proof.
         targets: MultiProofTargets,
+        /// Proof to be revealed.
         multiproof: MultiProof,
+        /// Used for sending [`StateRootMessage::ProofsRevealed`] messages back.
         state_root_message_sender: mpsc::Sender<StateRootMessage>,
     },
-    Update(HashedPostState),
+    /// Update state message. State update is needed, proofs should not be revealed.
+    UpdateState(HashedPostState),
 }
 
 impl SparseTrieMessage {
+    /// Returns a sender for state root messages, if any.
     pub fn state_root_message_sender(&self) -> Option<mpsc::Sender<StateRootMessage>> {
         match self {
-            SparseTrieMessage::RevealProof { state_root_message_sender, .. } => {
+            Self::RevealProof { state_root_message_sender, .. } => {
                 Some(state_root_message_sender.clone())
             }
-            SparseTrieMessage::Update(_) => None,
+            Self::UpdateState(_) => None,
         }
     }
 }
@@ -252,7 +266,7 @@ pub(crate) struct StateUpdateSequencer {
 }
 
 impl StateUpdateSequencer {
-    /// Creates a new proof sequencer
+    /// Creates a new state update sequencer
     pub(crate) fn new() -> Self {
         Self::default()
     }
@@ -282,10 +296,9 @@ impl StateUpdateSequencer {
 
         // move pending state updates to a list of ready state updates
         for sequence_number in sequence_numbers {
-            self.ready_state_updates.insert(
-                sequence_number,
-                self.pending_state_updates.remove(&sequence_number).expect("missing state update"),
-            );
+            if let Some(state_update) = self.pending_state_updates.remove(&sequence_number) {
+                self.ready_state_updates.insert(sequence_number, state_update);
+            }
         }
 
         // return early if we don't have the next expected state update
@@ -316,9 +329,9 @@ impl StateUpdateSequencer {
         consecutive_state_updates
     }
 
-    /// Returns true if we still have pending state updates
-    pub(crate) fn has_pending(&self) -> bool {
-        !self.pending_state_updates.is_empty()
+    /// Returns true if we still have undelivered state updates
+    pub(crate) fn has_undelivered(&self) -> bool {
+        !self.pending_state_updates.is_empty() || !self.ready_state_updates.is_empty()
     }
 }
 
@@ -691,7 +704,7 @@ where
                         updates_finished = true;
 
                         let all_proofs_received = proofs_processed >= updates_received;
-                        let no_pending = !self.state_update_sequencer.has_pending();
+                        let no_pending = !self.state_update_sequencer.has_undelivered();
                         if all_proofs_received && no_pending {
                             // drop the sender
                             sparse_trie_tx.take();
@@ -728,7 +741,7 @@ where
                         );
                     }
                     StateRootMessage::ProofsRevealed { revealed_state_update_sequence_numbers } => {
-                        trace!(target: "engine::root", "processing StateRootMessage::ProofRevealed");
+                        trace!(target: "engine::root", "processing StateRootMessage::ProofsRevealed");
                         proofs_revealed += revealed_state_update_sequence_numbers.len();
 
                         if let Some(state_update) =
@@ -737,11 +750,11 @@ where
                             let _ = sparse_trie_tx
                                 .as_ref()
                                 .expect("tx not dropped")
-                                .send(SparseTrieMessage::Update(state_update));
+                                .send(SparseTrieMessage::UpdateState(state_update));
                         }
 
                         let all_proofs_revealed = proofs_revealed >= updates_received;
-                        let no_pending = !self.state_update_sequencer.has_pending();
+                        let no_pending = !self.state_update_sequencer.has_undelivered();
                         if all_proofs_revealed && no_pending && updates_finished {
                             // drop the sender
                             sparse_trie_tx.take();
@@ -1193,86 +1206,88 @@ mod tests {
     }
 
     #[test]
-    fn test_add_proof_in_sequence() {
+    fn test_add_state_update_in_sequence() {
         let mut sequencer = StateUpdateSequencer::new();
-        let proof1 = MultiProof::default();
-        let proof2 = MultiProof::default();
         sequencer.next_sequence = 2;
 
-        let ready = sequencer.add_state_update(0, SparseTrieUpdate::from_multiproof(proof1));
-        assert_eq!(ready.len(), 1);
-        assert!(!sequencer.has_pending());
+        sequencer.add_state_update(0, HashedPostState::default());
+        sequencer.add_state_update(1, HashedPostState::default());
+        assert!(sequencer.has_undelivered());
 
-        let ready = sequencer.add_state_update(1, SparseTrieUpdate::from_multiproof(proof2));
-        assert_eq!(ready.len(), 1);
-        assert!(!sequencer.has_pending());
-    }
-
-    #[test]
-    fn test_add_proof_out_of_order() {
-        let mut sequencer = StateUpdateSequencer::new();
-        let proof1 = MultiProof::default();
-        let proof2 = MultiProof::default();
-        let proof3 = MultiProof::default();
-        sequencer.next_sequence = 3;
-
-        let ready = sequencer.add_state_update(2, SparseTrieUpdate::from_multiproof(proof3));
-        assert_eq!(ready.len(), 0);
-        assert!(sequencer.has_pending());
-
-        let ready = sequencer.add_state_update(0, SparseTrieUpdate::from_multiproof(proof1));
-        assert_eq!(ready.len(), 1);
-        assert!(sequencer.has_pending());
-
-        let ready = sequencer.add_state_update(1, SparseTrieUpdate::from_multiproof(proof2));
+        let ready = sequencer.aggregate_state_updates(vec![0, 1]);
         assert_eq!(ready.len(), 2);
-        assert!(!sequencer.has_pending());
+        assert!(!sequencer.has_undelivered());
     }
 
     #[test]
-    fn test_add_proof_with_gaps() {
+    fn test_add_state_update_out_of_order() {
         let mut sequencer = StateUpdateSequencer::new();
-        let proof1 = MultiProof::default();
-        let proof3 = MultiProof::default();
         sequencer.next_sequence = 3;
 
-        let ready = sequencer.add_state_update(0, SparseTrieUpdate::from_multiproof(proof1));
-        assert_eq!(ready.len(), 1);
-
-        let ready = sequencer.add_state_update(2, SparseTrieUpdate::from_multiproof(proof3));
+        sequencer.add_state_update(2, HashedPostState::default());
+        let ready = sequencer.aggregate_state_updates(vec![2]);
         assert_eq!(ready.len(), 0);
-        assert!(sequencer.has_pending());
+        assert!(sequencer.has_undelivered());
+
+        sequencer.add_state_update(0, HashedPostState::default());
+        let ready = sequencer.aggregate_state_updates(vec![0]);
+        assert_eq!(ready.len(), 1);
+        assert!(sequencer.has_undelivered());
+
+        sequencer.add_state_update(1, HashedPostState::default());
+        let ready = sequencer.aggregate_state_updates(vec![1]);
+        assert_eq!(ready.len(), 2);
+        assert!(!sequencer.has_undelivered());
     }
 
     #[test]
-    fn test_add_proof_duplicate_sequence() {
+    fn test_add_state_update_with_gaps() {
         let mut sequencer = StateUpdateSequencer::new();
-        let proof1 = MultiProof::default();
-        let proof2 = MultiProof::default();
+        sequencer.next_sequence = 3;
 
-        let ready = sequencer.add_state_update(0, SparseTrieUpdate::from_multiproof(proof1));
+        sequencer.add_state_update(0, HashedPostState::default());
+        let ready = sequencer.aggregate_state_updates(vec![0]);
         assert_eq!(ready.len(), 1);
+        assert!(!sequencer.has_undelivered());
 
-        let ready = sequencer.add_state_update(0, SparseTrieUpdate::from_multiproof(proof2));
+        sequencer.add_state_update(2, HashedPostState::default());
+        let ready = sequencer.aggregate_state_updates(vec![2]);
         assert_eq!(ready.len(), 0);
-        assert!(!sequencer.has_pending());
+        assert!(sequencer.has_undelivered());
     }
 
     #[test]
-    fn test_add_proof_batch_processing() {
+    fn test_add_state_update_duplicate_sequence() {
         let mut sequencer = StateUpdateSequencer::new();
-        let proofs: Vec<_> = (0..5).map(|_| MultiProof::default()).collect();
+
+        sequencer.add_state_update(0, HashedPostState::default());
+        let ready = sequencer.aggregate_state_updates(vec![0]);
+        assert_eq!(ready.len(), 1);
+        assert!(!sequencer.has_undelivered());
+
+        sequencer.add_state_update(0, HashedPostState::default());
+        let ready = sequencer.aggregate_state_updates(vec![0]);
+        assert_eq!(ready.len(), 0);
+        assert!(!sequencer.has_undelivered());
+    }
+
+    #[test]
+    fn test_add_state_update_batch_processing() {
+        let mut sequencer = StateUpdateSequencer::new();
         sequencer.next_sequence = 5;
 
-        sequencer.add_state_update(4, SparseTrieUpdate::from_multiproof(proofs[4].clone()));
-        sequencer.add_state_update(2, SparseTrieUpdate::from_multiproof(proofs[2].clone()));
-        sequencer.add_state_update(1, SparseTrieUpdate::from_multiproof(proofs[1].clone()));
-        sequencer.add_state_update(3, SparseTrieUpdate::from_multiproof(proofs[3].clone()));
+        sequencer.add_state_update(4, HashedPostState::default());
+        sequencer.add_state_update(2, HashedPostState::default());
+        sequencer.add_state_update(1, HashedPostState::default());
+        sequencer.add_state_update(3, HashedPostState::default());
+        let ready = sequencer.aggregate_state_updates(vec![4, 2, 1, 3]);
+        assert_eq!(ready.len(), 0);
+        assert!(sequencer.has_undelivered());
 
-        let ready =
-            sequencer.add_state_update(0, SparseTrieUpdate::from_multiproof(proofs[0].clone()));
+        sequencer.add_state_update(0, HashedPostState::default());
+        let ready = sequencer.aggregate_state_updates(vec![0]);
         assert_eq!(ready.len(), 5);
-        assert!(!sequencer.has_pending());
+        assert!(!sequencer.has_undelivered());
     }
 
     fn create_get_proof_targets_state() -> HashedPostState {
