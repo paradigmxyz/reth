@@ -11,14 +11,16 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
-    map::{HashMap, HashSet},
-    BlockNumber, B256, U256,
+    keccak256,
+    map::{B256Set, HashMap, HashSet},
+    Address, BlockNumber, B256, U256,
 };
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
     PayloadValidationError,
 };
 use block_buffer::BlockBuffer;
+use cached_state::{ProviderCaches, SavedCache};
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
@@ -36,12 +38,14 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_evm::{
     execute::BlockExecutorProvider,
     system_calls::{NoopHook, OnStateHook},
+    ConfigureEvm, Evm, TransactionEnv,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_primitives_traits::{
-    Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    SignedTransaction,
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -51,19 +55,23 @@ use reth_provider::{
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{
-    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState, TrieInput,
+    trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState, MultiProofAccountStorageTarget, MultiProofTargets, TrieInput
 };
 use reth_trie_db::DatabaseTrieCursorFactory;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use root::{StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootTask};
+use revm_primitives::ResultAndState;
+use root::{
+    StateRootComputeOutcome, StateRootConfig, StateRootHandle, StateRootMessage, StateRootTask,
+};
 use std::{
     cmp::Ordering,
     collections::{btree_map, hash_map, BTreeMap, VecDeque},
     fmt::Debug,
     ops::Bound,
     sync::{
+        atomic::AtomicBool,
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
-        Arc,
+        Arc, RwLock,
     },
     time::{Duration, Instant},
 };
@@ -519,13 +527,14 @@ pub enum TreeAction {
 ///
 /// This type is responsible for processing engine API requests, maintaining the canonical state and
 /// emitting events.
-pub struct EngineApiTreeHandler<N, P, E, T, V>
+pub struct EngineApiTreeHandler<N, P, E, T, V, C>
 where
     N: NodePrimitives,
     T: EngineTypes,
 {
     provider: P,
     executor_provider: E,
+    evm_config: C,
     consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
@@ -563,18 +572,23 @@ where
     invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
+    /// The most recent cache used for execution.
+    most_recent_cache: Option<SavedCache>,
     /// state root task thread pool
     state_root_task_pool: Arc<rayon::ThreadPool>,
+    /// Parallel prewarming thread pool
+    prewarming_thread_pool: rayon::ThreadPool,
 }
 
-impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug> std::fmt::Debug
-    for EngineApiTreeHandler<N, P, E, T, V>
+impl<N, P: Debug, E: Debug, T: EngineTypes + Debug, V: Debug, C: Debug> std::fmt::Debug
+    for EngineApiTreeHandler<N, P, E, T, V, C>
 where
     N: NodePrimitives,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApiTreeHandler")
             .field("provider", &self.provider)
+            .field("evm_config", &self.evm_config)
             .field("executor_provider", &self.executor_provider)
             .field("consensus", &self.consensus)
             .field("payload_validator", &self.payload_validator)
@@ -593,7 +607,7 @@ where
     }
 }
 
-impl<N, P, E, T, V> EngineApiTreeHandler<N, P, E, T, V>
+impl<N, P, E, T, V, C> EngineApiTreeHandler<N, P, E, T, V, C>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory
@@ -607,6 +621,7 @@ where
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     E: BlockExecutorProvider<Primitives = N>,
+    C: ConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>,
     T: EngineTypes,
     V: EngineValidator<T, Block = N::Block>,
 {
@@ -625,6 +640,7 @@ where
         payload_builder: PayloadBuilderHandle<T>,
         config: TreeConfig,
         engine_kind: EngineApiKind,
+        evm_config: C,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
@@ -638,9 +654,16 @@ where
                 .expect("Failed to create proof worker thread pool"),
         );
 
+        let prewarming_thread_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("prewarm-{}", i))
+            .build()
+            .expect("Failed to create prewarming worker thread pool");
+
         Self {
             provider,
             executor_provider,
+            evm_config,
             consensus,
             payload_validator,
             incoming,
@@ -656,7 +679,9 @@ where
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
+            most_recent_cache: None,
             state_root_task_pool,
+            prewarming_thread_pool,
         }
     }
 
@@ -682,6 +707,7 @@ where
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         kind: EngineApiKind,
+        evm_config: C,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -713,6 +739,7 @@ where
             payload_builder,
             config,
             kind,
+            evm_config,
         );
         task.set_invalid_block_hook(invalid_block_hook);
         let incoming = task.incoming_tx.clone();
@@ -1738,7 +1765,7 @@ where
     /// Returns an error if we failed to fetch the state from the database.
     fn state_provider(&self, hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
-            debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory");
+            debug!(target: "engine::tree", ?hash, ?historical, "found canonical state for block in memory");
             // the block leads back to the canonical chain
             let historical = self.provider.state_by_block_hash(historical)?;
             return Ok(Some(Box::new(MemoryOverlayStateProvider::new(historical, blocks))))
@@ -1746,7 +1773,7 @@ where
 
         // the hash could belong to an unknown block or a persisted block
         if let Some(header) = self.provider.header(&hash)? {
-            debug!(target: "engine::tree", %hash, number = %header.number(), "found canonical state for block in database");
+            debug!(target: "engine::tree", ?hash, number = ?header.number(), "found canonical state for block in database");
             // the block is known and persisted
             let historical = self.provider.state_by_block_hash(hash)?;
             return Ok(Some(historical))
@@ -2281,6 +2308,19 @@ where
         Ok(None)
     }
 
+    /// This fetches the most recent saved cache, using the hash of the block we are trying to
+    /// execute on top of.
+    ///
+    /// If the hash does not match the saved cache's hash, then the only saved cache doesn't contain
+    /// state useful for this block's execution, and we return `None`.
+    ///
+    /// If there is no cache saved, this returns `None`.
+    ///
+    /// This `take`s the cache, to avoid cloning the entire cache.
+    fn take_latest_cache(&mut self, parent_hash: B256) -> Option<SavedCache> {
+        self.most_recent_cache.take_if(|cache| cache.executed_block_hash() == parent_hash)
+    }
+
     fn insert_block_without_senders(
         &mut self,
         block: SealedBlock<N::Block>,
@@ -2349,17 +2389,6 @@ where
             return Err(e.into())
         }
 
-        // Use cached state provider before executing, this does nothing currently, will be used in
-        // prewarming
-        let caches = ProviderCacheBuilder::default().build_caches();
-        let cache_metrics = CachedStateMetrics::zeroed();
-        let state_provider =
-            CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
-
-        trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
-
-        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
-
         let sealed_block = Arc::new(block.clone_sealed_block());
 
         // We only run the parallel state root if we are currently persisting blocks that are all
@@ -2372,7 +2401,10 @@ where
         let is_descendant_of_persisting_blocks =
             self.is_descendant_of_persisting_blocks(block.header());
 
-        let (state_root_handle, state_root_task_config, state_hook) =
+        // Atomic bool for letting the prewarm tasks know when to stop
+        let execution_finished = Arc::new(AtomicBool::new(false));
+
+        let (state_root_handle, state_root_task_config, state_root_sender, state_hook) =
             if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
                 let state_root_config = StateRootConfig::new_from_input(
@@ -2385,16 +2417,75 @@ where
                     state_root_config.clone(),
                     self.state_root_task_pool.clone(),
                 );
+                let state_root_sender = state_root_task.state_root_message_sender();
                 let state_hook = Box::new(state_root_task.state_hook()) as Box<dyn OnStateHook>;
-                (Some(state_root_task.spawn()), Some(state_root_config), state_hook)
+                (
+                    Some(state_root_task.spawn()),
+                    Some(state_root_config),
+                    Some(state_root_sender),
+                    state_hook,
+                )
             } else {
-                (None, None, Box::new(NoopHook::default()) as Box<dyn OnStateHook>)
+                (None, None, None, Box::new(NoopHook::default()) as Box<dyn OnStateHook>)
             };
 
+        // Use cached state provider before executing, used in execution after prewarming threads
+        // complete
+        let (caches, cache_metrics) =
+            if let Some(cache) = self.take_latest_cache(block.parent_hash()) {
+                cache.split()
+            } else {
+                (ProviderCacheBuilder::default().build_caches(), CachedStateMetrics::zeroed())
+            };
+
+        let state_provider = CachedStateProvider::new_with_caches(
+            state_provider,
+            caches.clone(),
+            cache_metrics.clone(),
+        );
+
+        info!(target: "engine::tree", "Spawning prewarm threads");
+        let prewarm_start = Instant::now();
+
+        // lock for making sure we do not have any dangling prewarm threads
+        let cache_lock = Arc::new(RwLock::new(()));
+
+        // Prewarm transactions
+        for (tx_idx, (tx, sender)) in
+            block.body().transactions().iter().zip(block.senders()).enumerate()
+        {
+            let state_root_sender = state_root_sender.clone();
+
+            let start = Instant::now();
+            self.prewarm_transaction(
+                block.header().clone(),
+                tx.clone(),
+                *sender,
+                caches.clone(),
+                cache_metrics.clone(),
+                state_root_sender,
+                execution_finished.clone(),
+                cache_lock.clone(),
+            )?;
+            let elapsed = start.elapsed();
+            debug!(target: "engine::tree", ?tx_idx, elapsed = ?elapsed, "Spawned transaction prewarm");
+        }
+
+        drop(state_root_sender);
+        let elapsed = prewarm_start.elapsed();
+
+        info!(target: "engine::tree", ?elapsed, "Done spawning prewarm threads");
+        trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
+
+        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
         let execution_start = Instant::now();
         let output = self.metrics.executor.execute_metered(executor, &block, state_hook)?;
         let execution_time = execution_start.elapsed();
         trace!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
+
+        // Ensure that prewarm tasks don't send proof messages after state hook sender is
+        // dropped
+        execution_finished.store(true, std::sync::atomic::Ordering::SeqCst);
 
         if let Err(err) = self.consensus.validate_block_post_execution(
             &block,
@@ -2474,6 +2565,18 @@ where
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
+
+        // we have to wait for all prewarm tasks to finish before we can update the state
+        let cache_lock_wait_start = Instant::now();
+        drop(cache_lock.write().unwrap());
+        let cache_lock_wait_elapsed = cache_lock_wait_start.elapsed();
+        debug!(target: "engine::tree", ?cache_lock_wait_elapsed, block=?block_num_hash, "Acquired cache lock");
+
+        // apply state updates to cache and save it
+        let Ok(saved_cache) = state_provider.save_cache(sealed_block.hash(), &output.state) else {
+            todo!("error bubbling for save_cache errors")
+        };
+        self.most_recent_cache = Some(saved_cache);
 
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
@@ -2555,6 +2658,98 @@ where
         }
 
         Ok(input)
+    }
+
+    /// Runs execution for a single transaction, spawning it in the prewarm threadpool.
+    #[allow(clippy::too_many_arguments)]
+    fn prewarm_transaction(
+        &self,
+        block: N::BlockHeader,
+        tx: N::SignedTx,
+        sender: Address,
+        caches: ProviderCaches,
+        cache_metrics: CachedStateMetrics,
+        state_root_sender: Option<Sender<StateRootMessage>>,
+        execution_finished: Arc<AtomicBool>,
+        cache_lock: Arc<RwLock<()>>,
+    ) -> Result<(), InsertBlockErrorKind> {
+        let provider_latency = Instant::now();
+        let Some(state_provider) = self.state_provider(block.parent_hash())? else {
+            error!(target: "engine::tree", parent=?block.parent_hash(), "Could not get state provider for prewarm");
+            return Ok(())
+        };
+        let provider_latency = provider_latency.elapsed();
+        info!(target: "engine::tree", ?provider_latency, "Got state provider for prewarm");
+
+        // Use the caches to create a new executor
+        let state_provider =
+            CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
+
+        // clone and copy info required for execution
+        let evm_config = self.evm_config.clone();
+
+        // spawn task executing the individual tx.
+        self.prewarming_thread_pool.spawn(move || {
+            // TODO: build this into the state provider
+            let cache_lock = cache_lock.read().unwrap();
+            let state_provider = StateProviderDatabase::new(&state_provider);
+
+            // create a new executor and disable nonce checks in the env
+            let mut evm = evm_config.evm_for_block(state_provider, &block);
+
+            // create the tx env and reset nonce
+            let mut tx_env = evm_config.tx_env(&tx, sender);
+            tx_env.unset_nonce();
+
+            // exit early if execution is done
+            if execution_finished.load(std::sync::atomic::Ordering::SeqCst) {
+                return
+            }
+
+            let ResultAndState { state, .. } = match evm.transact(tx_env) {
+                Ok(res) => res,
+                Err(err) => {
+                    error!(target: "engine::tree", ?err, tx_hash=?tx.tx_hash(), ?sender, "Error when executing prewarm transaction");
+                    return
+                }
+            };
+
+            // drop cache lock so we can update state outside of this
+            drop(cache_lock);
+
+            // if execution is finished there is no point to sending proof targets
+            if execution_finished.load(std::sync::atomic::Ordering::SeqCst) {
+                return
+            }
+
+            let Some(state_root_sender) = state_root_sender else {
+                return
+            };
+
+            let mut targets = MultiProofTargets::default();
+            for (addr, account) in state {
+                // if account was not touched, do not fetch for it
+                if !account.is_touched() {
+                    continue
+                }
+
+                let mut storage_set = B256Set::default();
+                for (key, slot) in account.storage {
+                    // do nothing if unchanged
+                    if !slot.is_changed() {
+                        continue
+                    }
+
+                    storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
+                }
+
+                targets.insert(keccak256(addr), MultiProofAccountStorageTarget::WithAccountProof(storage_set));
+            }
+
+            let _ = state_root_sender.send(StateRootMessage::PrefetchProofs(targets));
+        });
+
+        Ok(())
     }
 
     /// Handles an error that occurred while inserting a block.
@@ -2912,6 +3107,7 @@ mod tests {
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_ethereum_primitives::{Block, EthPrimitives};
     use reth_evm::test_utils::MockExecutorProvider;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
@@ -2983,6 +3179,7 @@ mod tests {
             MockExecutorProvider,
             EthEngineTypes,
             EthereumEngineValidator,
+            EthEvmConfig,
         >,
         to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
         from_tree_rx: UnboundedReceiver<EngineApiEvent>,
@@ -3029,6 +3226,8 @@ mod tests {
             let (to_payload_service, _payload_command_rx) = unbounded_channel();
             let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
+            let evm_config = EthEvmConfig::new(chain_spec.clone());
+
             let tree = EngineApiTreeHandler::new(
                 provider.clone(),
                 executor_provider.clone(),
@@ -3042,6 +3241,7 @@ mod tests {
                 payload_builder,
                 TreeConfig::default(),
                 EngineApiKind::Ethereum,
+                evm_config,
             );
 
             let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());

@@ -583,6 +583,7 @@ impl TransactionPtr {
         if let Some(lock) = self.lock.try_lock() {
             lock
         } else {
+            #[cfg(debug_assertions)]
             tracing::debug!(
                 target: "libmdbx",
                 txn = %self.txn as usize,
