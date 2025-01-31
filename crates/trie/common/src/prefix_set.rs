@@ -96,6 +96,15 @@ where
     }
 }
 
+impl Extend<Nibbles> for PrefixSetMut {
+    fn extend<T>(&mut self, iter: T)
+    where
+        T: IntoIterator<Item = Nibbles>,
+    {
+        self.keys.extend(iter);
+    }
+}
+
 impl PrefixSetMut {
     /// Create [`PrefixSetMut`] with pre-allocated capacity.
     pub fn with_capacity(capacity: usize) -> Self {

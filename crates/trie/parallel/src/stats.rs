@@ -57,6 +57,10 @@ impl ParallelTrieTracker {
         self.missed_leaves += 1;
     }
 
+    pub fn add_missed_leaves(&mut self, count: u64) {
+        self.missed_leaves += count;
+    }
+
     /// Called when root calculation is finished to return trie statistics.
     pub fn finish(self) -> ParallelTrieStats {
         ParallelTrieStats {

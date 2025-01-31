@@ -1,6 +1,6 @@
 use crate::{root::ParallelStateRootError, stats::ParallelTrieTracker, StorageRootTargets};
 use alloy_primitives::{
-    map::{B256HashMap, HashMap},
+    map::{B256HashMap, B256HashSet, HashMap},
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
@@ -14,15 +14,15 @@ use reth_provider::{
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
-    prefix_set::{PrefixSetMut, TriePrefixSetsMut},
+    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSetsMut},
     proof::StorageProof,
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
     HashBuilder, HashedPostStateSorted, MultiProof, MultiProofTargets, Nibbles, StorageMultiProof,
-    TRIE_ACCOUNT_RLP_MAX_SIZE,
+    TrieMask, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
-use reth_trie_common::proof::ProofRetainer;
+use reth_trie_common::proof::{ProofNodes, ProofRetainer};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{sync::Arc, time::Instant};
 use tracing::{debug, trace};
@@ -210,110 +210,209 @@ where
             storage_proofs.insert(hashed_address, rx);
         }
 
-        let provider_ro = self.view.provider_ro()?;
-        let trie_cursor_factory = InMemoryTrieCursorFactory::new(
-            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-            &self.nodes_sorted,
-        );
-        let hashed_cursor_factory = HashedPostStateCursorFactory::new(
-            DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
-            &self.state_sorted,
-        );
+        if targets.len() > 10 {
+            let (tx, rx) = std::sync::mpsc::sync_channel(targets.len() / 10);
+            for chunk in &prefix_sets
+                .account_prefix_set
+                .into_iter()
+                .cloned()
+                .zip(targets.into_iter().sorted_unstable_by_key(|(k, _)| *k))
+                .chunks(10)
+            {
+                let (prefix_set, targets): (PrefixSetMut, B256HashMap<_>) = chunk.unzip();
 
-        // Create the walker.
-        let walker = TrieWalker::new(
-            trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
-            prefix_sets.account_prefix_set,
-        )
-        .with_deletions_retained(true);
+                let tx = tx.clone();
+                let provider_ro = self.view.provider_ro()?;
+                let nodes_sorted = self.nodes_sorted.clone();
+                let state_sorted = self.state_sorted.clone();
+                let collect_branch_node_masks = self.collect_branch_node_masks;
+                let storage_proofs = targets
+                    .keys()
+                    .filter_map(|address| {
+                        storage_proofs.remove(address).map(|proof| (*address, proof))
+                    })
+                    .collect::<B256HashMap<_>>();
 
-        // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
-        let mut hash_builder = HashBuilder::default()
-            .with_proof_retainer(retainer)
-            .with_updates(self.collect_branch_node_masks);
+                self.thread_pool.spawn_fifo(move || {
+                    let _ = tx.send(fetch_account_proof(
+                        provider_ro,
+                        nodes_sorted,
+                        state_sorted,
+                        prefix_set.freeze(),
+                        targets,
+                        collect_branch_node_masks,
+                        storage_proofs,
+                    ));
+                });
+            }
+            drop(tx);
 
-        // Initialize all storage multiproofs as empty.
-        // Storage multiproofs for non empty tries will be overwritten if necessary.
-        let mut storages: B256HashMap<_> =
-            targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
-        let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
-        let mut account_node_iter = TrieNodeIter::new(
-            walker,
-            hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
-        );
-        while let Some(account_node) =
-            account_node_iter.try_next().map_err(ProviderError::Database)?
-        {
-            match account_node {
-                TrieElement::Branch(node) => {
-                    hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
-                }
-                TrieElement::Leaf(hashed_address, account) => {
-                    let storage_multiproof = match storage_proofs.remove(&hashed_address) {
-                        Some(rx) => rx.recv().map_err(|_| {
+            let mut multiproof = MultiProof::default();
+            for result in rx {
+                let (
+                    account_subtree,
+                    branch_node_hash_masks,
+                    branch_node_tree_masks,
+                    storages,
+                    missed_leaves,
+                ) = result?;
+                multiproof.account_subtree.extend(account_subtree.into_inner());
+                multiproof.branch_node_hash_masks.extend(branch_node_hash_masks);
+                multiproof.branch_node_tree_masks.extend(branch_node_tree_masks);
+                multiproof.storages.extend(storages);
+                tracker.add_missed_leaves(missed_leaves);
+            }
+            Ok(multiproof)
+        } else {
+            let (
+                account_subtree,
+                branch_node_hash_masks,
+                branch_node_tree_masks,
+                storages,
+                missed_leaves,
+            ) = fetch_account_proof(
+                self.view.provider_ro()?,
+                self.nodes_sorted.clone(),
+                self.state_sorted.clone(),
+                prefix_sets.account_prefix_set,
+                targets,
+                self.collect_branch_node_masks,
+                Default::default(),
+            )?;
+            tracker.add_missed_leaves(missed_leaves);
+
+            Ok(MultiProof {
+                account_subtree,
+                branch_node_hash_masks,
+                branch_node_tree_masks,
+                storages,
+            })
+        }
+    }
+}
+
+fn fetch_account_proof(
+    provider_ro: impl DBProvider,
+    nodes_sorted: Arc<TrieUpdatesSorted>,
+    state_sorted: Arc<HashedPostStateSorted>,
+    prefix_set: PrefixSet,
+    targets: B256HashMap<B256HashSet>,
+    collect_branch_node_masks: bool,
+    mut storage_proofs: B256HashMap<
+        std::sync::mpsc::Receiver<Result<StorageMultiProof, ParallelStateRootError>>,
+    >,
+) -> Result<
+    (
+        ProofNodes,
+        HashMap<Nibbles, TrieMask>,
+        HashMap<Nibbles, TrieMask>,
+        B256HashMap<StorageMultiProof>,
+        u64,
+    ),
+    ParallelStateRootError,
+> {
+    let trie_cursor_factory = InMemoryTrieCursorFactory::new(
+        DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+        &nodes_sorted,
+    );
+    let hashed_cursor_factory = HashedPostStateCursorFactory::new(
+        DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+        &state_sorted,
+    );
+
+    // Create the walker.
+    let walker = TrieWalker::new(
+        trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
+        prefix_set,
+    )
+    .with_deletions_retained(true);
+
+    // Initialize all storage multiproofs as empty.
+    // Storage multiproofs for non empty tries will be overwritten if necessary.
+    let mut storages: B256HashMap<_> =
+        targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
+
+    // Create a hash builder to rebuild the root node since it is not available in
+    // the database.
+    let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
+    let mut hash_builder = HashBuilder::default()
+        .with_proof_retainer(retainer)
+        .with_updates(collect_branch_node_masks);
+
+    let mut missed_leaves = 0;
+
+    let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+    let mut account_node_iter = TrieNodeIter::new(
+        walker,
+        hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
+    );
+    while let Some(account_node) = account_node_iter.try_next().map_err(ProviderError::Database)? {
+        match account_node {
+            TrieElement::Branch(node) => {
+                hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
+            }
+            TrieElement::Leaf(hashed_address, account) => {
+                let storage_multiproof = match storage_proofs.remove(&hashed_address) {
+                    Some(rx) => rx.recv().map_err(|_| {
+                        ParallelStateRootError::StorageRoot(StorageRootError::Database(
+                            DatabaseError::Other(format!("channel closed for {hashed_address}")),
+                        ))
+                    })??,
+                    // Since we do not store all intermediate nodes in the database,
+                    // there might be a possibility of
+                    // re-adding a non-modified leaf to
+                    // the hash builder.
+                    None => {
+                        missed_leaves += 1;
+                        StorageProof::new_hashed(
+                            trie_cursor_factory.clone(),
+                            hashed_cursor_factory.clone(),
+                            hashed_address,
+                        )
+                        .with_prefix_set_mut(Default::default())
+                        .storage_multiproof(
+                            targets.get(&hashed_address).cloned().unwrap_or_default(),
+                        )
+                        .map_err(|e| {
                             ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                DatabaseError::Other(format!(
-                                    "channel closed for {hashed_address}"
-                                )),
+                                DatabaseError::Other(e.to_string()),
                             ))
-                        })??,
-                        // Since we do not store all intermediate nodes in the database, there might
-                        // be a possibility of re-adding a non-modified leaf to the hash builder.
-                        None => {
-                            tracker.inc_missed_leaves();
-                            StorageProof::new_hashed(
-                                trie_cursor_factory.clone(),
-                                hashed_cursor_factory.clone(),
-                                hashed_address,
-                            )
-                            .with_prefix_set_mut(Default::default())
-                            .storage_multiproof(
-                                targets.get(&hashed_address).cloned().unwrap_or_default(),
-                            )
-                            .map_err(|e| {
-                                ParallelStateRootError::StorageRoot(StorageRootError::Database(
-                                    DatabaseError::Other(e.to_string()),
-                                ))
-                            })?
-                        }
-                    };
-
-                    // Encode account
-                    account_rlp.clear();
-                    let account = account.into_trie_account(storage_multiproof.root);
-                    account.encode(&mut account_rlp as &mut dyn BufMut);
-
-                    hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
-
-                    // We might be adding leaves that are not necessarily our proof targets.
-                    if targets.contains_key(&hashed_address) {
-                        storages.insert(hashed_address, storage_multiproof);
+                        })?
                     }
+                };
+
+                // Encode account
+                account_rlp.clear();
+                let account = account.into_trie_account(storage_multiproof.root);
+                account.encode(&mut account_rlp as &mut dyn BufMut);
+
+                hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
+
+                // We might be adding leaves that are not necessarily our proof
+                // targets.
+                if targets.contains_key(&hashed_address) {
+                    storages.insert(hashed_address, storage_multiproof);
                 }
             }
         }
-        let _ = hash_builder.root();
-
-        let account_subtree = hash_builder.take_proof_nodes();
-        let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
-            let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
-            (
-                updated_branch_nodes
-                    .iter()
-                    .map(|(path, node)| (path.clone(), node.hash_mask))
-                    .collect(),
-                updated_branch_nodes
-                    .into_iter()
-                    .map(|(path, node)| (path, node.tree_mask))
-                    .collect(),
-            )
-        } else {
-            (HashMap::default(), HashMap::default())
-        };
-
-        Ok(MultiProof { account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages })
     }
+    let _ = hash_builder.root();
+
+    let account_subtree = hash_builder.take_proof_nodes();
+    let (branch_node_hash_masks, branch_node_tree_masks) = if collect_branch_node_masks {
+        let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
+        (
+            updated_branch_nodes
+                .iter()
+                .map(|(path, node)| (path.clone(), node.hash_mask))
+                .collect(),
+            updated_branch_nodes.into_iter().map(|(path, node)| (path, node.tree_mask)).collect(),
+        )
+    } else {
+        (HashMap::default(), HashMap::default())
+    };
+
+    Ok((account_subtree, branch_node_hash_masks, branch_node_tree_masks, storages, missed_leaves))
 }
 
 #[cfg(test)]
