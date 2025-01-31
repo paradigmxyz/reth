@@ -12,7 +12,7 @@
 
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::Address;
-use alloy_rpc_types_eth::state::EvmOverrides;
+use alloy_rpc_types_eth::{state::EvmOverrides, TransactionRequest};
 use clap::Parser;
 use futures_util::StreamExt;
 use reth::{
@@ -25,7 +25,7 @@ use reth::{
         primitives::{Env, EnvWithHandlerCfg},
         Database, Evm, EvmContext, Inspector,
     },
-    rpc::{api::eth::helpers::Call, compat::transaction::transaction_to_call_request},
+    rpc::api::eth::helpers::Call,
     transaction_pool::TransactionPool,
 };
 use reth_evm::EvmEnv;
@@ -57,7 +57,8 @@ fn main() {
                     if let Some(recipient) = tx.to() {
                         if args.is_match(&recipient) {
                             // convert the pool transaction
-                            let call_request = transaction_to_call_request(tx.to_consensus());
+                            let call_request =
+                                TransactionRequest::from_recovered_transaction(tx.to_consensus());
 
                             let result = eth_api
                                 .spawn_with_call_at(
