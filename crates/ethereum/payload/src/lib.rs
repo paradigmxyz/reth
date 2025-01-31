@@ -424,7 +424,7 @@ where
         } else {
             // for the first post-fork block, both parent.blob_gas_used and
             // parent.excess_blob_gas are evaluated as 0
-            Some(alloy_eips::eip4844::calc_excess_blob_gas(0, 0))
+            Some(alloy_eips::eip7840::BlobParams::cancun().next_block_excess_blob_gas(0, 0))
         };
 
         blob_gas_used = Some(sum_blob_gas_used);
