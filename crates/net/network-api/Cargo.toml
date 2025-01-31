@@ -22,7 +22,7 @@ reth-tokio-util.workspace = true
 reth-ethereum-forks.workspace = true
 
 # ethereum
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["getrandom"] }
 
 # eth
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }

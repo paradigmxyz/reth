@@ -45,7 +45,7 @@ pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
 ///
 /// NOTE: Prefer calculate receipt root optimism if you have log blooms memoized.
 pub fn calculate_receipt_root_no_memo_optimism(
-    receipts: &[&OpReceipt],
+    receipts: &[OpReceipt],
     chain_spec: impl OpHardforks,
     timestamp: u64,
 ) -> B256 {
