@@ -7947,6 +7947,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
  "aquamarine",
+ "eyre",
  "fdlimit",
  "futures",
  "jsonrpsee",
