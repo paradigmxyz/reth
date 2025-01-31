@@ -1,3 +1,11 @@
+//! Implements Ethereum SNAP message types.
+//! Snap protocol runs on top of `RLPx`
+//! facilitating the exchange of Ethereum state snapshots between peers
+//! Reference: [Ethereum Snapshot Protocol](https://github.com/ethereum/devp2p/blob/master/caps/snap.md#protocol-messages)
+//!
+//! Current version: snap/1
+
+use alloc::vec::Vec;
 use alloy_primitives::{Bytes, B256};
 
 /// Message IDs for the snap sync protocol
@@ -22,8 +30,8 @@ pub enum SnapMessageId {
     TrieNodes = 0x07,
 }
 
-/// Request for a range of accounts from the state trie
-/// https://github.com/ethereum/devp2p/blob/master/caps/snap.md#getaccountrange-0x00
+/// Request for a range of accounts from the state trie.
+// https://github.com/ethereum/devp2p/blob/master/caps/snap.md#getaccountrange-0x00
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GetAccountRangeMessage {
     /// Request ID to match up responses with
@@ -34,11 +42,11 @@ pub struct GetAccountRangeMessage {
     pub starting_hash: B256,
     /// Account hash after which to stop serving data
     pub limit_hash: B256,
-    /// Soft limit at which to stop returning data (in bytes)
+    /// Soft limit at which to stop returning data
     pub response_bytes: u64,
 }
 
-/// Account data in the response
+/// Account data in the response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountData {
     /// Hash of the account address (trie path)
@@ -47,7 +55,8 @@ pub struct AccountData {
     pub body: Bytes,
 }
 
-/// Response containing a range of accounts and their proofs
+/// Response containing a number of consecutive accounts and the Merkle proofs for the entire range.
+// http://github.com/ethereum/devp2p/blob/master/caps/snap.md#accountrange-0x01
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountRangeMessage {
     /// ID of the request this is a response for
@@ -58,7 +67,8 @@ pub struct AccountRangeMessage {
     pub proof: Vec<Bytes>,
 }
 
-/// Request for storage slots from multiple accounts
+/// Request for the storage slots of multiple accounts' storage tries.
+// https://github.com/ethereum/devp2p/blob/master/caps/snap.md#getstorageranges-0x02
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GetStorageRangesMessage {
     /// Request ID to match up responses with
@@ -71,11 +81,11 @@ pub struct GetStorageRangesMessage {
     pub starting_hash: B256,
     /// Storage slot hash after which to stop serving
     pub limit_hash: B256,
-    /// Soft limit at which to stop returning data (in bytes)
+    /// Soft limit at which to stop returning data
     pub response_bytes: u64,
 }
 
-/// Storage slot data in the response
+/// Storage slot data in the response.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageData {
     /// Hash of the storage slot key (trie path)
@@ -85,6 +95,9 @@ pub struct StorageData {
 }
 
 /// Response containing a number of consecutive storage slots for the requested account
+/// and optionally the merkle proofs for the last range (boundary proofs) if it only partially
+/// covers the storage trie.
+// https://github.com/ethereum/devp2p/blob/master/caps/snap.md#storageranges-0x03
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageRangesMessage {
     /// ID of the request this is a response for
@@ -95,7 +108,8 @@ pub struct StorageRangesMessage {
     pub proof: Vec<Bytes>,
 }
 
-/// Request for contract bytecodes
+/// Request to get a number of requested contract codes.
+// https://github.com/ethereum/devp2p/blob/master/caps/snap.md#getbytecodes-0x04
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GetByteCodesMessage {
     /// Request ID to match up responses with
@@ -106,7 +120,8 @@ pub struct GetByteCodesMessage {
     pub response_bytes: u64,
 }
 
-/// Response containing requested contract bytecodes
+/// Response containing a number of requested contract codes.
+// https://github.com/ethereum/devp2p/blob/master/caps/snap.md#bytecodes-0x05
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ByteCodesMessage {
     /// ID of the request this is a response for
@@ -125,7 +140,7 @@ pub struct TriePath {
 }
 
 /// Request a number of state (either account or storage) Merkle trie nodes by path
-/// https://github.com/ethereum/devp2p/blob/master/caps/snap.md#gettrienodes-0x06
+// https://github.com/ethereum/devp2p/blob/master/caps/snap.md#gettrienodes-0x06
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GetTrieNodesMessage {
     /// Request ID to match up responses with
@@ -138,7 +153,8 @@ pub struct GetTrieNodesMessage {
     pub response_bytes: u64,
 }
 
-/// Response containing requested trie nodes
+/// Response containing a number of requested state trie nodes
+// https://github.com/ethereum/devp2p/blob/master/caps/snap.md#trienodes-0x07
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrieNodesMessage {
     /// ID of the request this is a response for
@@ -147,21 +163,31 @@ pub struct TrieNodesMessage {
     pub nodes: Vec<Bytes>,
 }
 
-/// Represents all possible snap sync protocol messages
+/// Represents all types of messages in the snap sync protocol.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SnapProtocolMessage {
+    /// Request for an account range - see [`GetAccountRangeMessage`]
     GetAccountRange(GetAccountRangeMessage),
+    /// Response with accounts and proofs - see [`AccountRangeMessage`]
     AccountRange(AccountRangeMessage),
+    /// Request for storage slots - see [`GetStorageRangesMessage`]
     GetStorageRanges(GetStorageRangesMessage),
+    /// Response with storage slots - see [`StorageRangesMessage`]
     StorageRanges(StorageRangesMessage),
+    /// Request for contract bytecodes - see [`GetByteCodesMessage`]
     GetByteCodes(GetByteCodesMessage),
+    /// Response with contract codes - see [`ByteCodesMessage`]
     ByteCodes(ByteCodesMessage),
+    /// Request for trie nodes - see [`GetTrieNodesMessage`]
     GetTrieNodes(GetTrieNodesMessage),
+    /// Response with trie nodes - see [`TrieNodesMessage`]
     TrieNodes(TrieNodesMessage),
 }
 
 impl SnapProtocolMessage {
-    /// Get the message ID for this message type
+    /// Returns the protocol message ID for this message type.
+    ///
+    /// The message ID is used in the `RLPx` protocol to identify different types of messages.
     pub const fn message_id(&self) -> SnapMessageId {
         match self {
             Self::GetAccountRange(_) => SnapMessageId::GetAccountRange,
