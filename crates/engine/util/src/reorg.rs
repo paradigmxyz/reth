@@ -14,7 +14,7 @@ use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResu
 use reth_ethereum_forks::EthereumHardforks;
 use reth_evm::{
     state_change::post_block_withdrawals_balance_increments, system_calls::SystemCaller,
-    ConfigureEvm, Evm,
+    ConfigureEvm, Evm, EvmError,
 };
 use reth_payload_primitives::EngineApiMessageVersion;
 use reth_payload_validator::ExecutionPayloadValidator;
@@ -28,8 +28,6 @@ use reth_revm::{
     db::{states::bundle_state::BundleRetention, State},
     DatabaseCommit,
 };
-use reth_rpc_types_compat::engine::payload::block_to_payload;
-use revm_primitives::EVMError;
 use std::{
     collections::VecDeque,
     future::Future,
@@ -328,8 +326,8 @@ where
         let tx_env = evm_config.tx_env(&tx_recovered, tx_recovered.signer());
         let exec_result = match evm.transact(tx_env) {
             Ok(result) => result,
-            error @ Err(EVMError::Transaction(_) | EVMError::Header(_)) => {
-                trace!(target: "engine::stream::reorg", hash = %tx.tx_hash(), ?error, "Error executing transaction from next block");
+            Err(err) if err.is_invalid_tx_err() => {
+                trace!(target: "engine::stream::reorg", hash = %tx.tx_hash(), ?err, "Error executing transaction from next block");
                 continue
             }
             // Treat error as fatal
@@ -427,7 +425,7 @@ where
     .seal_slow();
 
     Ok((
-        block_to_payload(reorg_block).0,
+        ExecutionPayload::from_block_unchecked(reorg_block.hash(), &reorg_block.into_block()).0,
         // todo(onbjerg): how do we support execution requests?
         reorg_target
             .header

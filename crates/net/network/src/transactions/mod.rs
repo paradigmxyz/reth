@@ -1998,7 +1998,7 @@ mod tests {
 
         let client = NoopProvider::default();
         let pool = testing_pool();
-        let config = NetworkConfigBuilder::<EthNetworkPrimitives>::new(secret_key)
+        let config = NetworkConfigBuilder::eth(secret_key)
             .disable_discovery()
             .listener_port(0)
             .build(client);

@@ -21,7 +21,6 @@ use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use reth_optimism_primitives::OpBlock;
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::SealedBlock;
-use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::sync::Arc;
 
 /// The types used in the optimism beacon consensus engine.
@@ -55,7 +54,7 @@ where
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-        block_to_payload(block)
+        ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block())
     }
 }
 
