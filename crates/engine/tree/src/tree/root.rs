@@ -838,12 +838,14 @@ where
         config.prefix_sets.clone(),
     );
 
-    let mut num_iterations = 0;
     let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
 
+    let mut num_iterations = 0;
     while let Ok(message) = message_rx.recv() {
         num_iterations += 1;
 
+        // Collect the sequence number and the state root message sender, if the message is the
+        // [`SparseTrieMessage::RevealProof`].
         let mut reveal_proof_data = None;
         if let SparseTrieMessage::RevealProof {
             sequence_number,
@@ -862,7 +864,10 @@ where
         update.extend_with_message(message);
 
         let mut num_messages = 1;
+        // Drain the message channel until it's empty.
         while let Ok(message) = message_rx.try_recv() {
+            // Keep updating the list of sequence numbers of reveal proof messages, along with the
+            // state root message sender.
             if let SparseTrieMessage::RevealProof {
                 sequence_number,
                 source: ProofFetchSource::StateUpdate,
@@ -892,6 +897,8 @@ where
             ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
         })?;
 
+        // If we had any reveal proof messages, send a proof revealed message back to the state
+        // root task.
         if let Some((revealed_state_update_sequence_numbers, state_root_message_sender)) =
             reveal_proof_data
         {
