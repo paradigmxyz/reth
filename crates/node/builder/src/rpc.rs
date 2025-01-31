@@ -1,5 +1,12 @@
 //! Builder support for rpc components.
 
+use std::{
+    fmt::{self, Debug},
+    future::Future,
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
+
 use alloy_rpc_types::engine::ClientVersionV1;
 use futures::TryFutureExt;
 use reth_node_api::{
@@ -25,13 +32,7 @@ use reth_rpc_builder::{
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
-use std::{
-    fmt::{self, Debug},
-    future::Future,
-    marker::PhantomData,
-    ops::{Deref, DerefMut},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use crate::EthApiBuilderCtx;
 

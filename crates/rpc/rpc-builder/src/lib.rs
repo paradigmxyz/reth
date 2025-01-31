@@ -199,15 +199,9 @@ use std::{
 };
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
-use alloy_provider::{
-    fillers::{FillProvider, JoinFill, RecommendedFillers, TxFiller},
-    IpcConnect, ProviderBuilder, RootProvider, WsConnect,
-};
-use alloy_pubsub::PubSubFrontend;
-use alloy_transport_http::{reqwest, Http};
+use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use error::{ConflictingModules, RpcError, ServerKind};
 use eth::DynEthApiBuilder;
-use eyre::eyre;
 use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
@@ -2339,69 +2333,76 @@ impl RpcServerHandle {
         Some(client)
     }
 
-    /// Returns an http provider (with recommended fillers) from the rpc server handle for the
-    /// specified network
-    #[allow(clippy::type_complexity)]
-    pub fn new_http_provider_for<N: alloy_network::Network + RecommendedFillers + TxFiller>(
+    /// Returns a new [`alloy_network::Ethereum`] http provider with its recommended fillers.
+    pub fn eth_http_provider(
         &self,
-    ) -> Result<
-        FillProvider<
-            JoinFill<alloy_provider::Identity, <N as RecommendedFillers>::RecommendedFillers>,
-            RootProvider<Http<reqwest::Client>, N>,
-            Http<reqwest::Client>,
-            N,
-        >,
-        eyre::Error,
-    > {
-        let rpc_url = self.http_url().unwrap().parse()?;
-        Ok(ProviderBuilder::<alloy_provider::Identity, alloy_provider::Identity, N>::default()
-            .with_recommended_fillers()
-            .on_http(rpc_url))
+    ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static> {
+        self.new_http_provider_for()
     }
 
-    /// Returns an ipc provider (with recommended fillers) from the rpc server handle for the
-    /// specified network
-    #[allow(clippy::type_complexity)]
-    pub async fn new_ipc_provider_for<N: alloy_network::Network + RecommendedFillers + TxFiller>(
-        &self,
-    ) -> Result<
-        FillProvider<
-            JoinFill<alloy_provider::Identity, <N as RecommendedFillers>::RecommendedFillers>,
-            RootProvider<PubSubFrontend, N>,
-            PubSubFrontend,
-            N,
-        >,
-        eyre::Error,
-    > {
-        let ipc_endpoint =
-            self.ipc_endpoint().ok_or_else(|| eyre!("ipc endpoint not available"))?;
-        let ipc = IpcConnect::new(ipc_endpoint.to_string());
-        Ok(ProviderBuilder::<alloy_provider::Identity, alloy_provider::Identity, N>::default()
+    /// Returns an http provider from the rpc server handle for the
+    /// specified [`alloy_network::Network`].
+    ///
+    /// This installs the recommended fillers: [`RecommendedFillers`]
+    pub fn new_http_provider_for<N>(&self) -> Option<impl Provider<N> + Clone + Unpin + 'static>
+    where
+        N: RecommendedFillers<RecommendedFillers: Unpin>,
+    {
+        let rpc_url = self.http_url()?;
+        let provider = ProviderBuilder::default()
             .with_recommended_fillers()
-            .on_ipc(ipc)
-            .await?)
+            .on_http(rpc_url.parse().expect("valid url"));
+        Some(provider)
     }
 
-    /// Returns a ws provider (with recommended fillers) from the rpc server handle for the
-    /// specified network
-    #[allow(clippy::type_complexity)]
-    pub async fn new_ws_provider_for<N: alloy_network::Network + RecommendedFillers + TxFiller>(
+    /// Returns a new [`alloy_network::Ethereum`] websocket provider with its recommended fillers.
+    pub async fn eth_ws_provider(
         &self,
-    ) -> Result<
-        FillProvider<
-            JoinFill<alloy_provider::Identity, <N as RecommendedFillers>::RecommendedFillers>,
-            RootProvider<PubSubFrontend, N>,
-            PubSubFrontend,
-            N,
-        >,
-        eyre::Error,
-    > {
-        let rpc_url = self.ws_url().ok_or_else(|| eyre!("ws url not available"))?;
-        let ws = WsConnect::new(rpc_url);
-        Ok(ProviderBuilder::<alloy_provider::Identity, alloy_provider::Identity, N>::default()
+    ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static> {
+        self.new_ws_provider_for().await
+    }
+
+    /// Returns an ws provider from the rpc server handle for the
+    /// specified [`alloy_network::Network`].
+    ///
+    /// This installs the recommended fillers: [`RecommendedFillers`]
+    pub async fn new_ws_provider_for<N>(&self) -> Option<impl Provider<N> + Clone + Unpin + 'static>
+    where
+        N: RecommendedFillers<RecommendedFillers: Unpin>,
+    {
+        let rpc_url = self.ws_url()?;
+        let provider = ProviderBuilder::default()
             .with_recommended_fillers()
-            .on_ws(ws)
-            .await?)
+            .on_builtin(&rpc_url)
+            .await
+            .expect("failed to create ws client");
+        Some(provider)
+    }
+
+    /// Returns a new [`alloy_network::Ethereum`] ipc provider with its recommended fillers.
+    pub async fn eth_ipc_provider(
+        &self,
+    ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static> {
+        self.new_ws_provider_for().await
+    }
+
+    /// Returns an ipc provider from the rpc server handle for the
+    /// specified [`alloy_network::Network`].
+    ///
+    /// This installs the recommended fillers: [`RecommendedFillers`]
+    pub async fn new_ipc_provider_for<N>(
+        &self,
+    ) -> Option<impl Provider<N> + Clone + Unpin + 'static>
+    where
+        N: RecommendedFillers<RecommendedFillers: Unpin>,
+    {
+        let rpc_url = self.ipc_endpoint()?;
+        let provider = ProviderBuilder::default()
+            .with_recommended_fillers()
+            .on_builtin(&rpc_url)
+            .await
+            .expect("failed to create ipc client");
+        Some(provider)
     }
 }
 
