@@ -10,6 +10,7 @@ use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
 use indexmap::IndexSet;
 use parking_lot::{Mutex, MutexGuard};
 use std::{
+    backtrace::Backtrace,
     ffi::{c_uint, c_void},
     fmt::{self, Debug},
     mem::size_of,
@@ -549,6 +550,7 @@ pub(crate) struct TransactionPtr {
     #[cfg(feature = "read-tx-timeouts")]
     timed_out: Arc<AtomicBool>,
     lock: Arc<Mutex<()>>,
+    lock_backtrace: Arc<Mutex<Backtrace>>,
 }
 
 impl TransactionPtr {
@@ -558,6 +560,7 @@ impl TransactionPtr {
             #[cfg(feature = "read-tx-timeouts")]
             timed_out: Arc::new(AtomicBool::new(false)),
             lock: Arc::new(Mutex::new(())),
+            lock_backtrace: Arc::new(Mutex::new(Backtrace::disabled())),
         }
     }
 
@@ -580,16 +583,23 @@ impl TransactionPtr {
     }
 
     fn lock(&self) -> MutexGuard<'_, ()> {
+        // Do not force capture the backtrace every time, as it can be expensive. Instead, it is
+        // captured only if `RUST_LIB_BACKTRACE` or `RUST_BACKTRACE` env variables are set.
+        let backtrace = Backtrace::capture();
         if let Some(lock) = self.lock.try_lock() {
+            *self.lock_backtrace.lock() = backtrace;
             lock
         } else {
             tracing::debug!(
                 target: "libmdbx",
                 txn = %self.txn as usize,
                 backtrace = %std::backtrace::Backtrace::force_capture(),
+                lock_backtrace = ?self.lock_backtrace.lock(),
                 "Transaction lock is already acquired, blocking..."
             );
-            self.lock.lock()
+            let lock = self.lock.lock();
+            *self.lock_backtrace.lock() = backtrace;
+            lock
         }
     }
 
