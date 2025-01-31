@@ -402,14 +402,31 @@ impl ProviderCacheBuilder {
 impl Default for ProviderCacheBuilder {
     fn default() -> Self {
         // moka caches have been benchmarked up to 800k entries, so we just use 10M on account and
-        // code cache, and 100M for storage cache, optimizing for hitrate over memory consumption.
+        // code cache, and 150K-1k for storage cache, optimizing for hitrate over memory
+        // consumption.
         //
         // Heuristic for storage cache memory consumption:
-        // * the keys are addr (20 bytes) + storage key (32 bytes)
-        // * the values are 32 bytes
-        // So this means roughly 84 bytes per entry.
+        //   Base data sizes:
+        //   * First level keys (Address): 20 bytes
+        //   * Second level per entry:
+        //     - StorageKey: 32 bytes
+        //     - StorageValue: 32 bytes
+        //     Total: 64 bytes per storage slot
         //
-        // 100M * 84 = 8.4 GB
+        //   Cache implementation overhead:
+        //   * Per entry in any Cache: 48 bytes (key/value refs, timestamps, etc.)
+        //   * Per Cache instance: 192 bytes base overhead
+        //
+        //   Theoretical maximum memory usage:
+        //   Base data (8.9 GB):
+        //   * First level: 150k accounts * 20B = 0.003 GB
+        //   * Second level: 150k accounts * 1000 slots * 64B = 8.941 GB
+        //
+        //   Overhead (6.7 GB):
+        //   * First level: 150k accounts * 48B = 0.007 GB
+        //   * Second level: 150k accounts * (192B + 1000 slots * 48B) = 6.732 GB
+        //
+        //   Total maximum: 15.7 GB
         //
         // Code cache can be much much larger - this needs to be space instead of element bound.
         // Accounts can be element bound but memory calculation TODO
@@ -417,7 +434,7 @@ impl Default for ProviderCacheBuilder {
         // See: https://github.com/moka-rs/moka/wiki#admission-and-eviction-policies
         Self {
             code_cache_size: 1_000_000,
-            storage_cache_size: 10_000_000,
+            storage_cache_size: 150_000,
             account_cache_size: 10_000_000,
         }
     }
@@ -482,6 +499,6 @@ impl AccountStorageCache {
 
 impl Default for AccountStorageCache {
     fn default() -> Self {
-        Self::new(10000)
+        Self::new(1000)
     }
 }
