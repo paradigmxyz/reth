@@ -8,9 +8,9 @@ use alloy_rpc_types_engine::{
     PayloadError,
 };
 use assert_matches::assert_matches;
-use reth_primitives::{Block, SealedBlock, SealedHeader, TransactionSigned};
+use reth_primitives::{Block, SealedBlock, TransactionSigned};
 use reth_primitives_traits::proofs;
-use reth_rpc_types_compat::engine::payload::{block_to_payload, block_to_payload_v1};
+use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
 use reth_testing_utils::generators::{
     self, random_block, random_block_range, BlockParams, BlockRangeParams, Rng,
 };
@@ -22,11 +22,8 @@ fn transform_block<F: FnOnce(Block) -> Block>(src: SealedBlock, f: F) -> Executi
     transformed.header.transactions_root =
         proofs::calculate_transaction_root(&transformed.body.transactions);
     transformed.header.ommers_hash = proofs::calculate_ommers_root(&transformed.body.ommers);
-    block_to_payload(SealedBlock::from_sealed_parts(
-        SealedHeader::seal_slow(transformed.header),
-        transformed.body,
-    ))
-    .0
+
+    ExecutionPayload::from_block_slow(&transformed).0
 }
 
 #[test]

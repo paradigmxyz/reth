@@ -27,7 +27,6 @@ use reth_payload_primitives::{
 };
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Block, NodePrimitives, SealedBlock};
-use reth_rpc_types_compat::engine::payload::block_to_payload;
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -61,7 +60,7 @@ where
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-        block_to_payload(block)
+        ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block())
     }
 }
 
