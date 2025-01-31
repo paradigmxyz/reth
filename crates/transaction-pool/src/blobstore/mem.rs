@@ -1,6 +1,4 @@
-use crate::blobstore::{
-    helpers::match_versioned_hashes, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
-};
+use crate::blobstore::{BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize};
 use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
 use alloy_primitives::B256;
 use parking_lot::RwLock;
@@ -105,11 +103,8 @@ impl BlobStore for InMemoryBlobStore {
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
         let mut result = vec![None; versioned_hashes.len()];
         for (_tx_hash, blob_sidecar) in self.inner.store.read().iter() {
-            let matches = match_versioned_hashes(blob_sidecar, versioned_hashes);
-            for (i, match_result) in matches.into_iter().enumerate() {
-                if match_result.is_some() {
-                    result[i] = match_result;
-                }
+            for (hash_idx, match_result) in blob_sidecar.match_versioned_hashes(versioned_hashes) {
+                result[hash_idx] = Some(match_result);
             }
 
             // Return early if all blobs are found.

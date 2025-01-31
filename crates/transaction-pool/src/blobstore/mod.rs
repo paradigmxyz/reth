@@ -15,7 +15,6 @@ use std::{
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
 pub mod disk;
-mod helpers;
 mod mem;
 mod noop;
 mod tracker;
