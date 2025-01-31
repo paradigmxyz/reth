@@ -54,7 +54,7 @@ pub enum TransactionValidationOutcome<T: PoolTransaction, E = InvalidPoolTransac
     Error(TxHash, Box<dyn core::error::Error + Send + Sync>),
 }
 
-impl<T: PoolTransaction> TransactionValidationOutcome<T> {
+impl<T: PoolTransaction, E> TransactionValidationOutcome<T, E> {
     /// Returns the hash of the transactions
     pub fn tx_hash(&self) -> TxHash {
         match self {
