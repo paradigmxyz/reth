@@ -68,7 +68,10 @@ impl FullConsensus<OpPrimitives> for OpBeaconConsensus {
     }
 }
 
-impl<B: Block> Consensus<B> for OpBeaconConsensus {
+impl<B> Consensus<B> for OpBeaconConsensus
+where
+    B: Block<Body: BlockBody>,
+{
     type Error = ConsensusError;
 
     fn validate_body_against_header(
@@ -98,7 +101,7 @@ impl<B: Block> Consensus<B> for OpBeaconConsensus {
         }
 
         // Check empty shanghai-withdrawals
-        if self.chain_spec.is_canyon_active_at_timestamp(block.timestamp) {
+        if self.chain_spec.is_canyon_active_at_timestamp(block.timestamp()) {
             canyon::verify_empty_shanghai_withdrawals(block.body()).map_err(|err| {
                 trace!(target: "op::consensus",
                     block_number=block.number(),
@@ -119,9 +122,9 @@ impl<B: Block> Consensus<B> for OpBeaconConsensus {
         }
 
         // Check withdrawals root field in header
-        if self.chain_spec.is_isthmus_active_at_timestamp(block.timestamp) {
+        if self.chain_spec.is_isthmus_active_at_timestamp(block.timestamp()) {
             // storage root of withdrawals pre-deploy is verified post-execution
-            isthmus::verify_withdrawals_storage_root_is_some(&block.header).map_err(|err| {
+            isthmus::verify_withdrawals_storage_root_is_some(block.header()).map_err(|err| {
                 trace!(target: "op::consensus",
                     block_number=block.number(),
                     %err,
@@ -132,7 +135,7 @@ impl<B: Block> Consensus<B> for OpBeaconConsensus {
             })?
         } else {
             // canyon is active, else would have returned already
-            canyon::verify_empty_withdrawals_root(&block.header)?
+            canyon::verify_empty_withdrawals_root(block.header())?
         }
 
         Ok(())

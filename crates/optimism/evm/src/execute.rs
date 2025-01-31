@@ -18,7 +18,7 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvmFor, Database, Evm,
+    ConfigureEvmFor, Evm,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::{validate_block_post_execution, validation::isthmus};
@@ -82,8 +82,11 @@ where
     where
         DB: StateProvider,
     {
-        let state =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
+        let state = State::builder()
+            .with_database(StateProviderDatabase(db))
+            .with_bundle_update()
+            .without_state_clear()
+            .build();
         OpExecutionStrategy::new(
             state,
             self.chain_spec.clone(),
@@ -276,7 +279,7 @@ where
             isthmus::verify_withdrawals_storage_root(
                 &state_updates,
                 &*self.state.database,
-                &block.header,
+                block.header(),
             )
             .map_err(OpBlockExecutionError::Consensus)?;
         }

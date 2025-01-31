@@ -8271,6 +8271,8 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-storage-api",
+ "reth-storage-errors",
+ "reth-trie",
  "reth-trie-db",
  "revm",
  "tracing",

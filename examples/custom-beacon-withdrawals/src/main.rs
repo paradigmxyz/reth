@@ -14,7 +14,7 @@ use reth::{
     providers::StateProvider,
     revm::{
         primitives::{address, Address},
-        DatabaseCommit, State,
+        DatabaseCommit, State, StateProviderDatabase,
     },
 };
 use reth_chainspec::{ChainSpec, EthereumHardforks};
@@ -23,7 +23,7 @@ use reth_evm::{
         BlockExecutionError, BlockExecutionStrategy, BlockExecutionStrategyFactory, ExecuteOutput,
         InternalBlockExecutionError,
     },
-    Database, Evm,
+    Evm,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_node_ethereum::{node::EthereumAddOns, BasicBlockExecutorProvider, EthereumNode};

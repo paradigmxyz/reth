@@ -19,6 +19,8 @@ reth-consensus.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
+reth-trie.workspace = true
+reth-storage-errors.workspace = true
 
 # op-reth
 reth-optimism-forks.workspace = true

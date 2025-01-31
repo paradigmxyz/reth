@@ -6,7 +6,6 @@ use crate::{
         BlockExecutionStrategy, BlockExecutorProvider, Executor,
     },
     system_calls::OnStateHook,
-    Database,
 };
 use alloy_eips::eip7685::Requests;
 use parking_lot::Mutex;

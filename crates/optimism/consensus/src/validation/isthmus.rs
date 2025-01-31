@@ -1,6 +1,6 @@
 //! Block verification w.r.t. consensus rules new in Isthmus hardfork.
 
-use alloy_consensus::Header;
+use alloy_consensus::BlockHeader;
 use reth_optimism_primitives::predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_storage_api::StorageRootProvider;
 use reth_trie::{test_utils::storage_root_prehashed, HashedStorage};
@@ -10,21 +10,23 @@ use crate::OpConsensusError;
 
 /// Verifies that `withdrawals_root` (i.e. `l2tol1-msg-passer` storage root since Isthmus) field is
 /// set in block header.
-pub fn verify_withdrawals_storage_root_is_some(header: &Header) -> Result<(), OpConsensusError> {
-    header.withdrawals_root.as_ref().ok_or(OpConsensusError::StorageRootMissing)?;
+pub fn verify_withdrawals_storage_root_is_some<H: BlockHeader>(
+    header: H,
+) -> Result<(), OpConsensusError> {
+    header.withdrawals_root().as_ref().ok_or(OpConsensusError::StorageRootMissing)?;
 
     Ok(())
 }
 
 /// Verifies block header field `withdrawals_root` against storage root of
 /// `l2tol1-message-passer` predeploy post block execution.
-pub fn verify_withdrawals_storage_root<DB: StorageRootProvider>(
+pub fn verify_withdrawals_storage_root<DB: StorageRootProvider, H: BlockHeader>(
     state_updates: &BundleState,
     state: DB,
-    header: &Header,
+    header: H,
 ) -> Result<(), OpConsensusError> {
     let header_storage_root =
-        header.withdrawals_root.expect("should be dropped in pre-exec verification");
+        header.withdrawals_root().ok_or(OpConsensusError::StorageRootMissing)?;
 
     let storage_root = match state_updates.state().get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
         Some(account) => {
@@ -67,7 +69,7 @@ mod test {
     use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_optimism_node::OpNode;
     use reth_provider::{
-        providers::BlockchainProvider2, test_utils::create_test_provider_factory_with_node_types,
+        providers::BlockchainProvider, test_utils::create_test_provider_factory_with_node_types,
         StateWriter,
     };
     use reth_storage_api::StateProviderFactory;
@@ -113,7 +115,7 @@ mod test {
         };
 
         // create state provider factory
-        let state_provider_factory = BlockchainProvider2::new(provider_factory).unwrap();
+        let state_provider_factory = BlockchainProvider::new(provider_factory).unwrap();
 
         // validate block against existing state by passing empty state updates
         let block_execution_state_updates = BundleState::default();
