@@ -6,14 +6,12 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-    ExecutionPayloadV1, PayloadAttributes, PayloadId,
+    ExecutionPayloadFieldV2, ExecutionPayloadV1, PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{EthPrimitives, SealedBlock};
-use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
-};
+use reth_rpc_types_compat::engine::payload::{block_to_payload_v1, block_to_payload_v3};
 
 /// Contains the built payload.
 ///
@@ -131,7 +129,10 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
 
         Self {
             block_value: fees,
-            execution_payload: convert_block_to_payload_field_v2(Arc::unwrap_or_clone(block)),
+            execution_payload: ExecutionPayloadFieldV2::from_block_unchecked(
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
+            ),
         }
     }
 }

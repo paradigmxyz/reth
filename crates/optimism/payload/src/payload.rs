@@ -6,7 +6,9 @@ use alloy_eips::{
 };
 use alloy_primitives::{keccak256, Address, Bytes, B256, B64, U256};
 use alloy_rlp::Encodable;
-use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadId};
+use alloy_rpc_types_engine::{
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2, ExecutionPayloadV1, PayloadId,
+};
 use op_alloy_consensus::{encode_holocene_extra_data, EIP1559ParamError};
 /// Re-export for use in downstream arguments.
 pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
@@ -18,9 +20,7 @@ use reth_optimism_primitives::{OpBlock, OpPrimitives, OpTransactionSigned};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{transaction::WithEncoded, SealedBlock};
-use reth_rpc_types_compat::engine::payload::{
-    block_to_payload_v1, block_to_payload_v3, convert_block_to_payload_field_v2,
-};
+use reth_rpc_types_compat::engine::payload::{block_to_payload_v1, block_to_payload_v3};
 use std::sync::Arc;
 
 /// Optimism Payload Builder Attributes
@@ -239,7 +239,10 @@ impl From<OpBuiltPayload> for ExecutionPayloadEnvelopeV2 {
 
         Self {
             block_value: fees,
-            execution_payload: convert_block_to_payload_field_v2(Arc::unwrap_or_clone(block)),
+            execution_payload: ExecutionPayloadFieldV2::from_block_unchecked(
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
+            ),
         }
     }
 }
