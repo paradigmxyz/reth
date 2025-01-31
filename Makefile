@@ -394,7 +394,11 @@ lint-op-reth:
 	--tests \
 	--benches \
 	--features "optimism $(BIN_OTHER_FEATURES)" \
-	-- -D warnings
+	-- -D warnings \
+	-A clippy::needless-continue \
+	-A clippy::missing_const_for_fn \
+	-A clippy::len_zero \
+	-A clippy::double_ended_iterator_last
 
 lint-other-targets:
 	cargo +nightly clippy \
@@ -468,7 +472,11 @@ fix-lint-op-reth:
 	--fix \
 	--allow-staged \
 	--allow-dirty \
-	-- -D warnings
+	-- -D warnings \
+	-A clippy::needless-continue \
+	-A clippy::missing_const_for_fn \
+	-A clippy::len_zero \
+	-A clippy::double_ended_iterator_last
 
 fix-lint-other-targets:
 	cargo +nightly clippy \

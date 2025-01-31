@@ -59,10 +59,14 @@ std = [
     "reth-optimism-forks/std",
     "reth-optimism-chainspec/std",
     "reth-optimism-primitives/std",
+    "alloy-chains/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "alloy-consensus/std",
     "alloy-trie/std",
     "op-alloy-consensus/std",
+    "reth-revm/std",
+    "revm/std",
+    "derive_more/std",
 ]
 optimism = ["reth-optimism-primitives/optimism"]
