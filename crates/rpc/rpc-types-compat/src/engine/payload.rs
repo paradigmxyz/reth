@@ -4,8 +4,7 @@
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
-    payload::{ExecutionPayloadBodyV1, ExecutionPayloadFieldV2},
-    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    payload::ExecutionPayloadBodyV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
 };
 use reth_primitives::{Block, SealedBlock};
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
@@ -52,18 +51,6 @@ pub fn block_to_payload_v3<T: SignedTransaction>(
         blob_gas_used: value.blob_gas_used.unwrap_or_default(),
         excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
         payload_inner: block_to_payload_v2(value),
-    }
-}
-
-/// Converts [`SealedBlock`] to [`ExecutionPayloadFieldV2`]
-pub fn convert_block_to_payload_field_v2<T: SignedTransaction>(
-    value: SealedBlock<Block<T>>,
-) -> ExecutionPayloadFieldV2 {
-    // if there are withdrawals, return V2
-    if value.body().withdrawals.is_some() {
-        ExecutionPayloadFieldV2::V2(block_to_payload_v2(value))
-    } else {
-        ExecutionPayloadFieldV2::V1(block_to_payload_v1(value))
     }
 }
 
