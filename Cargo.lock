@@ -6538,7 +6538,6 @@ dependencies = [
  "alloy-signer",
  "alloy-signer-local",
  "derive_more",
- "futures",
  "metrics",
  "parking_lot",
  "pin-project",
