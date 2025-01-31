@@ -796,23 +796,23 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         hash: B256,
         source: BlockSource,
     ) -> ProviderResult<Option<Self::Block>> {
-        if matches!(source, BlockSource::Any | BlockSource::Pending) {
+        if matches!(source, BlockSource::Canonical | BlockSource::Any) {
+            return self.get_in_memory_or_storage_by_block(
+                hash.into(),
+                |db_provider| db_provider.find_block_by_hash(hash, BlockSource::Canonical),
+                |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
+            )
+        }
+
+        if matches!(source, BlockSource::Pending | BlockSource::Any) {
             if let Some(block) = self
                 .canonical_in_memory_state
                 .pending_block()
                 .filter(|b| b.hash() == hash)
                 .map(|b| b.into_block())
             {
-                return Ok(Some(block));
+                return Ok(Some(block))
             }
-        }
-
-        if matches!(source, BlockSource::Any | BlockSource::Canonical) {
-            return self.get_in_memory_or_storage_by_block(
-                hash.into(),
-                |db_provider| db_provider.find_block_by_hash(hash, BlockSource::Canonical),
-                |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
-            );
         }
 
         Ok(None)
