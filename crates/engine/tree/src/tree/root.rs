@@ -575,16 +575,59 @@ where
 
     /// Handles request for proof prefetch.
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
-        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &targets);
+        let proof_targets = self.get_prefetch_proof_targets(targets);
+        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
             hashed_state_update: Default::default(),
-            proof_targets: targets,
+            proof_targets,
             proof_sequence_number: self.proof_sequencer.next_sequence(),
             state_root_message_sender: self.tx.clone(),
             source: ProofFetchSource::Prefetch,
         });
+    }
+
+    /// Calls `get_proof_targets` with existing proof targets for prefetching.
+    fn get_prefetch_proof_targets(&self, mut targets: MultiProofTargets) -> MultiProofTargets {
+        // Here we want to filter out any targets that are already fetched
+        //
+        // This means we need to remove any storage slots that have already been fetched
+        let mut duplicates = 0;
+
+        // First remove all exactly equal account / storage targets
+        targets.retain(|hashed_address, target_storage| {
+            self.fetched_proof_targets
+                .get(hashed_address)
+                .map_or(true, |fetched_storage| fetched_storage == target_storage)
+        });
+
+        // For all non-equal remaining targets, we have to calculate the difference
+        for (hashed_address, target_storage) in &mut targets {
+            let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
+                // this means the account has not been fetched yet, so we must fetch everything
+                // associated with this account
+                continue
+            };
+
+            // if both storages are empty, then we can skip this account altogether
+            if target_storage.is_empty() && fetched_storage.is_empty() {
+                continue
+            }
+
+            let prev_target_storage_len = target_storage.len();
+
+            // keep only the storage slots that have not been fetched yet
+            target_storage.retain(|slot| !fetched_storage.contains(slot));
+
+            duplicates += prev_target_storage_len - target_storage.len();
+        }
+
+        if duplicates > 0 {
+            tracing::info!(target: "engine::root", duplicates, "Removed duplicate proof targets");
+        }
+
+        targets
     }
 
     /// Handles state updates.

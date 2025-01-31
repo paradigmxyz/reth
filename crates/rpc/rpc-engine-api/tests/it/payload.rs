@@ -10,7 +10,6 @@ use alloy_rpc_types_engine::{
 use assert_matches::assert_matches;
 use reth_primitives::{Block, SealedBlock, TransactionSigned};
 use reth_primitives_traits::proofs;
-use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
 use reth_testing_utils::generators::{
     self, random_block, random_block_range, BlockParams, BlockRangeParams, Rng,
 };
@@ -99,7 +98,8 @@ fn payload_validation_conversion() {
     );
 
     // Invalid encoded transactions
-    let mut payload_with_invalid_txs: ExecutionPayloadV1 = block_to_payload_v1(block);
+    let mut payload_with_invalid_txs =
+        ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.into_block());
 
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
         *tx = Bytes::new();

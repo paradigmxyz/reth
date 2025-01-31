@@ -62,8 +62,7 @@ where
         let chain_spec = self.provider().chain_spec();
 
         let transactions_root = calculate_transaction_root(&transactions);
-        let receipts_root =
-            Receipt::calculate_receipt_root_no_memo(&receipts.iter().collect::<Vec<_>>());
+        let receipts_root = Receipt::calculate_receipt_root_no_memo(receipts);
 
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| &r.logs));
 

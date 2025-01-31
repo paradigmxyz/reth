@@ -18,9 +18,7 @@ use reth_evm::{
 };
 use reth_payload_primitives::EngineApiMessageVersion;
 use reth_payload_validator::ExecutionPayloadValidator;
-use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, Receipt, Receipts,
-};
+use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, Receipt};
 use reth_primitives_traits::{block::Block as _, proofs, SignedTransaction};
 use reth_provider::{BlockReader, ExecutionOutcome, ProviderError, StateProviderFactory};
 use reth_revm::{
@@ -373,7 +371,7 @@ where
 
     let outcome: ExecutionOutcome = ExecutionOutcome::new(
         state.take_bundle(),
-        Receipts::from(vec![receipts]),
+        vec![receipts],
         reorg_target.number,
         Default::default(),
     );

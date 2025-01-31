@@ -380,7 +380,7 @@ where
     let requests_hash = requests.as_ref().map(|requests| requests.requests_hash());
     let execution_outcome = ExecutionOutcome::new(
         db.take_bundle(),
-        vec![receipts].into(),
+        vec![receipts],
         block_number,
         vec![requests.clone().unwrap_or_default()],
     );
@@ -424,7 +424,7 @@ where
         } else {
             // for the first post-fork block, both parent.blob_gas_used and
             // parent.excess_blob_gas are evaluated as 0
-            Some(alloy_eips::eip4844::calc_excess_blob_gas(0, 0))
+            Some(alloy_eips::eip7840::BlobParams::cancun().next_block_excess_blob_gas(0, 0))
         };
 
         blob_gas_used = Some(sum_blob_gas_used);

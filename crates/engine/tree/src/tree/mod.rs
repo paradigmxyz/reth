@@ -20,7 +20,7 @@ use alloy_rpc_types_engine::{
     PayloadValidationError,
 };
 use block_buffer::BlockBuffer;
-use cached_state::ProviderCaches;
+use cached_state::{ProviderCaches, SavedCache};
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
@@ -72,7 +72,7 @@ use std::{
     sync::{
         atomic::AtomicBool,
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
-        Arc,
+        Arc, RwLock,
     },
     time::{Duration, Instant},
 };
@@ -573,6 +573,8 @@ where
     invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
+    /// The most recent cache used for execution.
+    most_recent_cache: Option<SavedCache>,
     /// Thread pool used for the state root task and prewarming
     thread_pool: Arc<rayon::ThreadPool>,
 }
@@ -670,6 +672,7 @@ where
             incoming_tx,
             invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
+            most_recent_cache: None,
             thread_pool,
         }
     }
@@ -2297,6 +2300,19 @@ where
         Ok(None)
     }
 
+    /// This fetches the most recent saved cache, using the hash of the block we are trying to
+    /// execute on top of.
+    ///
+    /// If the hash does not match the saved cache's hash, then the only saved cache doesn't contain
+    /// state useful for this block's execution, and we return `None`.
+    ///
+    /// If there is no cache saved, this returns `None`.
+    ///
+    /// This `take`s the cache, to avoid cloning the entire cache.
+    fn take_latest_cache(&mut self, parent_hash: B256) -> Option<SavedCache> {
+        self.most_recent_cache.take_if(|cache| cache.executed_block_hash() == parent_hash)
+    }
+
     fn insert_block_without_senders(
         &mut self,
         block: SealedBlock<N::Block>,
@@ -2383,11 +2399,29 @@ where
         let (state_root_handle, state_root_task_config, state_root_sender, state_hook) =
             if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-                let state_root_config = StateRootConfig::new_from_input(
-                    consistent_view.clone(),
-                    self.compute_trie_input(consistent_view, block.header().parent_hash())
-                        .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
-                );
+
+                // Compute trie input
+                let trie_input_start = Instant::now();
+                let trie_input = self
+                    .compute_trie_input(consistent_view.clone(), block.header().parent_hash())
+                    .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+
+                // Create state root config
+                let config_start = Instant::now();
+                let state_root_config =
+                    StateRootConfig::new_from_input(consistent_view, trie_input);
+
+                let trie_input_elapsed = config_start - trie_input_start;
+                self.metrics
+                    .block_validation
+                    .trie_input_duration
+                    .set(trie_input_elapsed.as_secs_f64());
+
+                let config_elapsed = config_start.elapsed();
+                self.metrics
+                    .block_validation
+                    .state_root_config_duration
+                    .set(config_elapsed.as_secs_f64());
 
                 let state_root_task =
                     StateRootTask::new(state_root_config.clone(), self.thread_pool.clone());
@@ -2405,13 +2439,21 @@ where
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
-        let caches = ProviderCacheBuilder::default().build_caches();
-        let cache_metrics = CachedStateMetrics::zeroed();
+        let (caches, cache_metrics) =
+            if let Some(cache) = self.take_latest_cache(block.parent_hash()) {
+                cache.split()
+            } else {
+                (ProviderCacheBuilder::default().build_caches(), CachedStateMetrics::zeroed())
+            };
+
         let state_provider = CachedStateProvider::new_with_caches(
             state_provider,
             caches.clone(),
             cache_metrics.clone(),
         );
+
+        // Lock for state updates
+        let cache_lock = Arc::new(RwLock::new(()));
 
         if self.config.use_caching_and_prewarming() {
             debug!(target: "engine::tree", "Spawning prewarm threads");
@@ -2432,6 +2474,7 @@ where
                     cache_metrics.clone(),
                     state_root_sender,
                     execution_finished.clone(),
+                    cache_lock.clone(),
                 )?;
                 let elapsed = start.elapsed();
                 debug!(target: "engine::tree", ?tx_idx, elapsed = ?elapsed, "Spawned transaction prewarm");
@@ -2447,7 +2490,7 @@ where
         let execution_start = Instant::now();
         let output = self.metrics.executor.execute_metered(executor, &block, state_hook)?;
         let execution_time = execution_start.elapsed();
-        trace!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
+        info!(target: "engine::tree", elapsed = ?execution_time, number=?block_num_hash.number, "Executed block");
 
         // Ensure that prewarm tasks don't send proof messages after state hook sender is
         // dropped
@@ -2530,7 +2573,23 @@ where
         }
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
-        debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
+        info!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
+
+        // we have to wait for all prewarm tasks to finish before we can update the state
+        let cache_lock_wait_start = Instant::now();
+        drop(cache_lock.write().unwrap());
+        let cache_lock_wait_elapsed = cache_lock_wait_start.elapsed();
+        debug!(target: "engine::tree", ?cache_lock_wait_elapsed, block=?block_num_hash, "Acquired cache lock");
+
+        let save_cache_start = Instant::now();
+
+        // apply state updates to cache and save it
+        let Ok(saved_cache) = state_provider.save_cache(sealed_block.hash(), &output.state) else {
+            todo!("error bubbling for save_cache errors")
+        };
+        self.most_recent_cache = Some(saved_cache);
+        let save_cache_elapsed = save_cache_start.elapsed();
+        info!(target: "engine::tree", ?save_cache_elapsed, block=?block_num_hash, "Saved cache");
 
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
@@ -2625,6 +2684,7 @@ where
         cache_metrics: CachedStateMetrics,
         state_root_sender: Option<Sender<StateRootMessage>>,
         execution_finished: Arc<AtomicBool>,
+        cache_lock: Arc<RwLock<()>>,
     ) -> Result<(), InsertBlockErrorKind> {
         let Some(state_provider) = self.state_provider(block.parent_hash())? else {
             error!(target: "engine::tree", parent=?block.parent_hash(), "Could not get state provider for prewarm");
@@ -2640,6 +2700,7 @@ where
 
         // spawn task executing the individual tx
         self.thread_pool.spawn(move || {
+            let read = cache_lock.read().unwrap();
             let state_provider = StateProviderDatabase::new(&state_provider);
 
             // create a new executor and disable nonce checks in the env
@@ -2661,6 +2722,9 @@ where
                     return
                 }
             };
+
+            // drop reader so we can update the state and save the cache
+            drop(read);
 
             // if execution is finished there is no point to sending proof targets
             if execution_finished.load(std::sync::atomic::Ordering::Relaxed) {
@@ -3043,7 +3107,9 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
-    use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar};
+    use alloy_rpc_types_engine::{
+        CancunPayloadFields, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+    };
     use assert_matches::assert_matches;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
@@ -3055,7 +3121,6 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
     use reth_trie::{updates::TrieUpdates, HashedPostState};
     use std::{
         str::FromStr,
@@ -3328,7 +3393,10 @@ mod tests {
             &mut self,
             block: RecoveredBlock<reth_ethereum_primitives::Block>,
         ) {
-            let payload = block_to_payload_v3(block.clone_sealed_block());
+            let payload = ExecutionPayloadV3::from_block_unchecked(
+                block.hash(),
+                &block.clone_sealed_block().into_block(),
+            );
             self.tree
                 .on_new_payload(
                     payload.into(),
@@ -3595,7 +3663,7 @@ mod tests {
         let block = Block::decode(&mut data.as_ref()).unwrap();
         let sealed = block.seal_slow();
         let hash = sealed.hash();
-        let payload = block_to_payload_v1(sealed.clone());
+        let payload = ExecutionPayloadV1::from_block_unchecked(hash, &sealed.clone().into_block());
 
         let mut test_harness = TestHarness::new(HOLESKY.clone());
 
@@ -3635,7 +3703,8 @@ mod tests {
         let data = Bytes::from_str(s).unwrap();
         let block: Block = Block::decode(&mut data.as_ref()).unwrap();
         let sealed = block.seal_slow();
-        let payload = block_to_payload_v1(sealed);
+        let payload =
+            ExecutionPayloadV1::from_block_unchecked(sealed.hash(), &sealed.clone().into_block());
 
         let mut test_harness =
             TestHarness::new(HOLESKY.clone()).with_backfill_state(BackfillSyncState::Active);
