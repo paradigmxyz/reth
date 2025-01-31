@@ -23,7 +23,7 @@ use revm_inspectors::{
     tracing::{types::CallTraceNode, TracingInspectorConfig},
     transfer::{TransferInspector, TransferKind},
 };
-use revm_primitives::{ExecutionResult, SignedAuthorization};
+use revm_primitives::ExecutionResult;
 
 const API_LEVEL: u64 = 8;
 
@@ -277,9 +277,6 @@ where
                     from: receipt.from(),
                     to: receipt.to(),
                     contract_address: receipt.contract_address(),
-                    authorization_list: receipt
-                        .authorization_list()
-                        .map(<[SignedAuthorization]>::to_vec),
                 };
 
                 OtsTransactionReceipt { receipt, timestamp }
