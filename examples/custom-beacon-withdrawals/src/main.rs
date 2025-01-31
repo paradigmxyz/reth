@@ -11,6 +11,7 @@ use reth::{
     api::{ConfigureEvm, NodeTypesWithEngine},
     builder::{components::ExecutorBuilder, BuilderContext, FullNodeTypes},
     cli::Cli,
+    providers::StateProvider,
     revm::{
         primitives::{address, Address},
         DatabaseCommit, State,
@@ -89,14 +90,17 @@ pub struct CustomExecutorStrategyFactory {
 
 impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
     type Primitives = EthPrimitives;
-    type Strategy<DB: Database> = CustomExecutorStrategy<DB>;
+    type Strategy<DB: StateProvider> = CustomExecutorStrategy<DB>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
-        DB: Database,
+        DB: StateProvider,
     {
-        let state =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
+        let state = State::builder()
+            .with_database(StateProviderDatabase(db))
+            .with_bundle_update()
+            .without_state_clear()
+            .build();
         CustomExecutorStrategy {
             state,
             chain_spec: self.chain_spec.clone(),
@@ -107,19 +111,19 @@ impl BlockExecutionStrategyFactory for CustomExecutorStrategyFactory {
 
 pub struct CustomExecutorStrategy<DB>
 where
-    DB: Database,
+    DB: StateProvider,
 {
     /// The chainspec
     chain_spec: Arc<ChainSpec>,
     /// How to create an EVM.
     evm_config: EthEvmConfig,
     /// Current state for block execution.
-    state: State<DB>,
+    state: State<StateProviderDatabase<DB>>,
 }
 
 impl<DB> BlockExecutionStrategy for CustomExecutorStrategy<DB>
 where
-    DB: Database,
+    DB: StateProvider,
 {
     type DB = DB;
     type Primitives = EthPrimitives;
@@ -158,11 +162,11 @@ where
         Ok(Requests::default())
     }
 
-    fn state_ref(&self) -> &State<DB> {
+    fn state_ref(&self) -> &State<StateProviderDatabase<DB>> {
         &self.state
     }
 
-    fn state_mut(&mut self) -> &mut State<DB> {
+    fn state_mut(&mut self) -> &mut State<StateProviderDatabase<DB>> {
         &mut self.state
     }
 }

@@ -11,7 +11,7 @@ use reth_static_file_types::StaticFileSegment;
 pub type ProviderResult<Ok> = Result<Ok, ProviderError>;
 
 /// Bundled errors variants thrown by various providers.
-#[derive(Clone, Debug, thiserror::Error)]
+#[derive(Clone, PartialEq, Eq, Debug, thiserror::Error)]
 pub enum ProviderError {
     /// Database error.
     #[error(transparent)]

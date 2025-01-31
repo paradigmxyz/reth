@@ -7,6 +7,7 @@ use crate::{
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Eip658Value, Receipt, Transaction as _};
 use alloy_eips::eip7685::Requests;
+use core::mem;
 use op_alloy_consensus::OpDepositReceipt;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
@@ -20,14 +21,15 @@ use reth_evm::{
     ConfigureEvmFor, Database, Evm,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_consensus::validate_block_post_execution;
-use reth_optimism_forks::OpHardfork;
+use reth_optimism_consensus::{validate_block_post_execution, validation::isthmus};
+use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_primitives::{
     transaction::signed::OpTransaction, DepositReceipt, OpPrimitives, OpReceipt,
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
-use reth_revm::State;
+use reth_revm::{State, StateProviderDatabase};
+use reth_storage_api::StateProvider;
 use revm_primitives::{db::DatabaseCommit, ResultAndState};
 use tracing::trace;
 
@@ -74,11 +76,11 @@ where
     EvmConfig: ConfigureEvmFor<N> + Clone + Unpin + Sync + Send + 'static,
 {
     type Primitives = N;
-    type Strategy<DB: Database> = OpExecutionStrategy<DB, N, EvmConfig>;
+    type Strategy<DB: StateProvider> = OpExecutionStrategy<DB, N, EvmConfig>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
-        DB: Database,
+        DB: StateProvider,
     {
         let state =
             State::builder().with_database(db).with_bundle_update().without_state_clear().build();
@@ -102,7 +104,7 @@ where
     /// How to create an EVM.
     evm_config: EvmConfig,
     /// Current state for block execution.
-    state: State<DB>,
+    state: State<StateProviderDatabase<DB>>,
     /// Utility to call system smart contracts.
     system_caller: SystemCaller<EvmConfig, OpChainSpec>,
     /// Receipt builder.
@@ -116,7 +118,7 @@ where
 {
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(
-        state: State<DB>,
+        state: State<StateProviderDatabase<DB>>,
         chain_spec: Arc<OpChainSpec>,
         evm_config: EvmConfig,
         receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
@@ -128,7 +130,7 @@ where
 
 impl<DB, N, EvmConfig> BlockExecutionStrategy for OpExecutionStrategy<DB, N, EvmConfig>
 where
-    DB: Database,
+    DB: StateProvider,
     N: NodePrimitives<
         BlockHeader = alloy_consensus::Header,
         SignedTx: OpTransaction,
@@ -267,6 +269,18 @@ where
             );
         }
 
+        // isthmus verification
+        if self.chain_spec.is_isthmus_active_at_timestamp(block.timestamp) {
+            let state_updates = mem::take(&mut evm.db_mut().bundle_state);
+            drop(evm);
+            isthmus::verify_withdrawals_storage_root(
+                &state_updates,
+                &*self.state.database,
+                &block.header,
+            )
+            .map_err(OpBlockExecutionError::Consensus)?;
+        }
+
         Ok(ExecuteOutput { receipts, gas_used: cumulative_gas_used })
     }
 
@@ -287,11 +301,11 @@ where
         Ok(Requests::default())
     }
 
-    fn state_ref(&self) -> &State<DB> {
+    fn state_ref(&self) -> &State<StateProviderDatabase<DB>> {
         &self.state
     }
 
-    fn state_mut(&mut self) -> &mut State<DB> {
+    fn state_mut(&mut self) -> &mut State<StateProviderDatabase<DB>> {
         &mut self.state
     }
 
@@ -336,9 +350,7 @@ mod tests {
     use reth_optimism_chainspec::OpChainSpecBuilder;
     use reth_optimism_primitives::OpTransactionSigned;
     use reth_primitives::{Account, Block, BlockBody};
-    use reth_revm::{
-        database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
-    };
+    use reth_revm::{test_utils::StateProviderTest, L1_BLOCK_CONTRACT};
     use std::{collections::HashMap, str::FromStr};
 
     fn create_op_state_provider() -> StateProviderTest {
@@ -419,7 +431,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.batch_executor(&db);
 
         // make sure the L1 block contract state is preloaded.
         executor.with_state_mut(|state| {
@@ -495,7 +507,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.batch_executor(&db);
 
         // make sure the L1 block contract state is preloaded.
         executor.with_state_mut(|state| {

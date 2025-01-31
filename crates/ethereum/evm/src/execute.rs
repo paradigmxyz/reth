@@ -17,11 +17,12 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvm, Database, Evm,
+    ConfigureEvm, Evm,
 };
 use reth_primitives::{EthPrimitives, Receipt, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
-use reth_revm::db::State;
+use reth_revm::{db::State, StateProviderDatabase};
+use reth_storage_api::StateProvider;
 use revm_primitives::{db::DatabaseCommit, ResultAndState};
 
 /// Factory for [`EthExecutionStrategy`].
@@ -66,14 +67,17 @@ where
 {
     type Primitives = EthPrimitives;
 
-    type Strategy<DB: Database> = EthExecutionStrategy<DB, EvmConfig>;
+    type Strategy<DB: StateProvider> = EthExecutionStrategy<DB, EvmConfig>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
-        DB: Database,
+        DB: StateProvider,
     {
-        let state =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
+        let state = State::builder()
+            .with_database(StateProviderDatabase(db))
+            .with_bundle_update()
+            .without_state_clear()
+            .build();
         EthExecutionStrategy::new(state, self.chain_spec.clone(), self.evm_config.clone())
     }
 }
@@ -89,7 +93,7 @@ where
     /// How to create an EVM.
     evm_config: EvmConfig,
     /// Current state for block execution.
-    state: State<DB>,
+    state: State<StateProviderDatabase<DB>>,
     /// Utility to call system smart contracts.
     system_caller: SystemCaller<EvmConfig, ChainSpec>,
 }
@@ -99,7 +103,11 @@ where
     EvmConfig: Clone,
 {
     /// Creates a new [`EthExecutionStrategy`]
-    pub fn new(state: State<DB>, chain_spec: Arc<ChainSpec>, evm_config: EvmConfig) -> Self {
+    pub fn new(
+        state: State<StateProviderDatabase<DB>>,
+        chain_spec: Arc<ChainSpec>,
+        evm_config: EvmConfig,
+    ) -> Self {
         let system_caller = SystemCaller::new(evm_config.clone(), chain_spec.clone());
         Self { state, chain_spec, evm_config, system_caller }
     }
@@ -107,7 +115,7 @@ where
 
 impl<DB, EvmConfig> BlockExecutionStrategy for EthExecutionStrategy<DB, EvmConfig>
 where
-    DB: Database,
+    DB: StateProvider,
     EvmConfig: ConfigureEvm<
         Header = alloy_consensus::Header,
         Transaction = reth_primitives::TransactionSigned,
@@ -239,11 +247,11 @@ where
         Ok(requests)
     }
 
-    fn state_ref(&self) -> &State<DB> {
+    fn state_ref(&self) -> &State<StateProviderDatabase<DB>> {
         &self.state
     }
 
-    fn state_mut(&mut self) -> &mut State<DB> {
+    fn state_mut(&mut self) -> &mut State<StateProviderDatabase<DB>> {
         &mut self.state
     }
 
@@ -299,9 +307,7 @@ mod tests {
     use reth_execution_types::BlockExecutionOutput;
     use reth_primitives::{Account, Block, BlockBody, Transaction};
     use reth_primitives_traits::{crypto::secp256k1::public_key_to_address, Block as _};
-    use reth_revm::{
-        database::StateProviderDatabase, test_utils::StateProviderTest, Database, TransitionState,
-    };
+    use reth_revm::{test_utils::StateProviderTest, Database, TransitionState};
     use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
     use revm_primitives::{address, EvmState, BLOCKHASH_SERVE_WINDOW};
     use secp256k1::{Keypair, Secp256k1};
@@ -370,7 +376,7 @@ mod tests {
 
         let provider = executor_provider(chain_spec);
 
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.batch_executor(&db);
 
         // attempt to execute a block without parent beacon block root, expect err
         let err = executor
@@ -454,7 +460,7 @@ mod tests {
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         provider
-            .batch_executor(StateProviderDatabase::new(&db))
+            .batch_executor(&db)
             .execute_and_verify_one(&RecoveredBlock::new_unhashed(
                 Block {
                     header,
@@ -495,7 +501,7 @@ mod tests {
             ..Header::default()
         };
 
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.batch_executor(&db);
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
         executor
@@ -530,7 +536,7 @@ mod tests {
 
         let mut header = chain_spec.genesis_header().clone();
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.batch_executor(&db);
 
         // attempt to execute the genesis block with non-zero parent beacon block root, expect err
         header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
@@ -594,7 +600,7 @@ mod tests {
         let provider = executor_provider(chain_spec);
 
         // execute header
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.batch_executor(&db);
 
         // Now execute a block with the fixed header, ensure that it does not fail
         executor
@@ -661,7 +667,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.batch_executor(&db);
 
         // construct the header for block one
         let header = Header { timestamp: 1, number: 1, ..Header::default() };
@@ -702,7 +708,7 @@ mod tests {
 
         let header = chain_spec.genesis_header().clone();
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.batch_executor(&db);
 
         // attempt to execute genesis block, this should not fail
         executor
@@ -749,7 +755,7 @@ mod tests {
             ..Header::default()
         };
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.batch_executor(&db);
 
         // attempt to execute the fork activation block, this should not fail
         executor
@@ -793,7 +799,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.batch_executor(&db);
 
         let header = Header {
             parent_hash: B256::random(),
@@ -836,7 +842,7 @@ mod tests {
         let header_hash = header.hash_slow();
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.batch_executor(&db);
 
         // attempt to execute the genesis block, this should not fail
         executor
@@ -986,7 +992,7 @@ mod tests {
 
         let provider = executor_provider(chain_spec);
 
-        let executor = provider.executor(StateProviderDatabase::new(&db));
+        let executor = provider.executor(&db);
 
         let BlockExecutionOutput { receipts, requests, .. } = executor
             .execute(
@@ -1062,7 +1068,7 @@ mod tests {
         );
 
         // Create an executor from the state provider
-        let executor = executor_provider(chain_spec).executor(StateProviderDatabase::new(&db));
+        let executor = executor_provider(chain_spec).executor(&db);
 
         // Execute the block and capture the result
         let exec_result = executor.execute(
@@ -1129,7 +1135,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let executor = provider.executor(StateProviderDatabase::new(&db));
+        let executor = provider.executor(&db);
 
         let (tx, rx) = mpsc::channel();
         let tx_clone = tx.clone();

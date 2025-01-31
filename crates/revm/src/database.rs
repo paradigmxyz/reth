@@ -64,7 +64,8 @@ impl<T: StateProvider> EvmStateProvider for T {
 }
 
 /// A [Database] and [`DatabaseRef`] implementation that uses [`EvmStateProvider`] as the underlying
-/// data source.
+/// data source. All [`StateProvider`](reth_storage_api::StateProvider) types also implement
+/// [`EvmStateProvider`].
 #[derive(Debug, Clone)]
 pub struct StateProviderDatabase<DB>(pub DB);
 

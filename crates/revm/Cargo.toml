@@ -16,7 +16,7 @@ workspace = true
 reth-primitives.workspace = true
 reth-storage-errors.workspace = true
 reth-storage-api.workspace = true
-reth-trie = { workspace = true, optional = true }
+reth-trie.workspace = true
 
 # alloy
 alloy-eips.workspace = true
@@ -41,11 +41,10 @@ std = [
     "alloy-consensus/std",
     "reth-ethereum-forks/std",
 ]
-witness = ["dep:reth-trie"]
+witness = []
 test-utils = [
-    "dep:reth-trie",
     "reth-primitives/test-utils",
-    "reth-trie?/test-utils",
+    "reth-trie/test-utils",
     "revm/test-utils",
 ]
 serde = [
@@ -53,6 +52,6 @@ serde = [
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "alloy-consensus/serde",
-    "reth-trie?/serde",
+    "reth-trie/serde",
     "reth-ethereum-forks/serde",
 ]

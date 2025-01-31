@@ -22,6 +22,7 @@ reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-revm.workspace = true
 reth-storage-errors.workspace = true
+reth-storage-api.workspace = true
 
 revm.workspace = true
 revm-primitives.workspace = true

@@ -28,7 +28,6 @@ use reth_provider::{
     HashedPostStateProvider, HashingWriter, LatestStateProviderRef, OriginalValuesKnown,
     ProviderFactory, StageCheckpointReader, StateWriter, StorageLocation, StorageReader,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
 use reth_tasks::TaskExecutor;
 use reth_trie::StateRoot;
@@ -145,9 +144,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         .await?;
 
         let state_provider = LatestStateProviderRef::new(&provider);
-        let db = StateProviderDatabase::new(&state_provider);
 
-        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
+        let executor =
+            EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(&state_provider);
         let block_execution_output = executor.execute(&block.clone().try_recover()?)?;
         let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number()));
 

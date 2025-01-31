@@ -2,6 +2,7 @@
 
 use alloc::string::String;
 use reth_evm::execute::BlockExecutionError;
+use reth_optimism_consensus::OpConsensusError;
 
 /// Optimism Block Executor Errors
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -21,6 +22,9 @@ pub enum OpBlockExecutionError {
     /// Thrown when a database account could not be loaded.
     #[error("failed to load account {_0}")]
     AccountLoadFailed(alloy_primitives::Address),
+    /// Consensus error.
+    #[error(transparent)]
+    Consensus(#[from] OpConsensusError),
 }
 
 impl From<OpBlockExecutionError> for BlockExecutionError {

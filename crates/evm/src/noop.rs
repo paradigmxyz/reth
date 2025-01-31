@@ -3,12 +3,13 @@
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives::{NodePrimitives, RecoveredBlock};
+use reth_revm::database::StateProviderDatabase;
+use reth_storage_api::StateProvider;
 use revm::State;
 
 use crate::{
     execute::{BatchExecutor, BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
-    Database,
 };
 
 const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
@@ -21,20 +22,20 @@ pub struct NoopBlockExecutorProvider<P>(core::marker::PhantomData<P>);
 impl<P: NodePrimitives> BlockExecutorProvider for NoopBlockExecutorProvider<P> {
     type Primitives = P;
 
-    type Executor<DB: Database> = Self;
+    type Executor<DB: StateProvider> = Self;
 
-    type BatchExecutor<DB: Database> = Self;
+    type BatchExecutor<DB: StateProvider> = Self;
 
     fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
     where
-        DB: Database,
+        DB: StateProvider,
     {
         Self::default()
     }
 
     fn batch_executor<DB>(&self, _: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database,
+        DB: StateProvider,
     {
         Self::default()
     }
@@ -55,7 +56,7 @@ impl<DB, P: NodePrimitives> Executor<DB> for NoopBlockExecutorProvider<P> {
         _: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        F: FnMut(&State<DB>),
+        F: FnMut(&State<StateProviderDatabase<DB>>),
     {
         Err(BlockExecutionError::msg(UNAVAILABLE_FOR_NOOP))
     }

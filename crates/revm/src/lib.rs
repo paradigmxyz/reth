@@ -33,3 +33,5 @@ pub mod either;
 /// Helper types for execution witness generation.
 #[cfg(feature = "witness")]
 pub mod witness;
+
+pub use database::StateProviderDatabase;
