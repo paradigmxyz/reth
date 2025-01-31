@@ -466,7 +466,7 @@ impl ChunkedFileReader {
 
         // read new bytes from file
         let prev_read_bytes_len = self.chunk.len();
-        self.chunk.extend(std::iter::repeat(0).take(new_read_bytes_target_len as usize));
+        self.chunk.extend(std::iter::repeat_n(0, new_read_bytes_target_len as usize));
         let reader = &mut self.chunk[prev_read_bytes_len..];
 
         // actual bytes that have been read

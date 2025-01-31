@@ -87,7 +87,6 @@ where
         // EIP-4844 fields
         blob_gas_price,
         blob_gas_used,
-        authorization_list: transaction.authorization_list().map(|l| l.to_vec()),
     })
 }
 

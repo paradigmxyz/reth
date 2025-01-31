@@ -171,3 +171,6 @@ pub use transactions::{FilterAnnouncement, MessageFilter, ValidateTx68};
 
 /// re-export p2p interfaces
 pub use reth_network_p2p as p2p;
+
+/// re-export types crate
+pub use reth_eth_wire_types as types;

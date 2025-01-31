@@ -14,8 +14,9 @@ use futures::StreamExt;
 use reth_chainspec::DEV;
 use reth_network::{
     config::rng_secret_key, eth_requests::IncomingEthRequest, p2p::HeadersClient,
-    transactions::NetworkTransactionEvent, BlockDownloaderProvider, FetchClient, NetworkConfig,
-    NetworkEventListenerProvider, NetworkHandle, NetworkInfo, NetworkManager, Peers,
+    transactions::NetworkTransactionEvent, types::NewPooledTransactionHashes68,
+    BlockDownloaderProvider, FetchClient, NetworkConfig, NetworkEventListenerProvider,
+    NetworkHandle, NetworkInfo, NetworkManager, Peers,
 };
 
 #[tokio::main]
@@ -64,10 +65,10 @@ async fn main() -> eyre::Result<()> {
         // receive incoming eth requests and transaction messages
         tokio::select! {
               eth_request = requests_rx.recv() => {
-                     let Some(eth_request) = eth_request else {break};
-                     match eth_request {
+                    let Some(eth_request) = eth_request else {break};
+                    match eth_request {
                         IncomingEthRequest::GetBlockHeaders { peer_id, request, response } => {
-                            println!("Received block headers request: {:?}, {:?}", peer_id, request);
+                            println!("Received block headers request: {peer_id:?}, {request:?}");
                             response.send(Ok(vec![DEV.genesis_header().clone()].into())).unwrap();
                         }
                         IncomingEthRequest::GetBlockBodies { .. } => {}
@@ -78,11 +79,13 @@ async fn main() -> eyre::Result<()> {
              transaction_message = transactions_rx.recv() => {
                 let Some(transaction_message) = transaction_message else {break};
                 match transaction_message {
-                    NetworkTransactionEvent::IncomingTransactions{ .. } => {}
-                    NetworkTransactionEvent::IncomingPooledTransactionHashes{ .. } => {}
-                    NetworkTransactionEvent::GetPooledTransactions{ .. } => {}
+                    NetworkTransactionEvent::IncomingTransactions { .. } => {}
+                    NetworkTransactionEvent::IncomingPooledTransactionHashes { peer_id, msg } => {
+                        println!("Received incoming tx hashes broadcast: {peer_id:?}, {msg:?}");
+                    }
+                    NetworkTransactionEvent::GetPooledTransactions { .. } => {}
                     NetworkTransactionEvent::GetTransactionsHandle(_) => {}
-               }
+                }
             }
         }
     }
@@ -110,6 +113,14 @@ async fn run_peer(handle: NetworkHandle) -> eyre::Result<()> {
 
     let header = client.get_header(0.into()).await.unwrap();
     println!("Got header: {:?}", header);
+
+    // send a (bogus) hashes message
+    let hashes = NewPooledTransactionHashes68 {
+        types: vec![1],
+        sizes: vec![2],
+        hashes: vec![Default::default()],
+    };
+    peer.send_transactions_hashes(*handle.peer_id(), hashes.into());
 
     Ok(())
 }
