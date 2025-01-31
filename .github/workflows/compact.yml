@@ -17,12 +17,11 @@ env:
 name: compact-codec
 jobs:
   compact-codec:
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         bin:
-          - cargo run --bin reth --features "dev"
+          #- cargo run --bin reth --features "dev"
           - cargo run --bin op-reth --features "optimism dev" --manifest-path crates/optimism/bin/Cargo.toml
     steps:
       - uses: rui314/setup-mold@v1

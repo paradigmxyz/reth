@@ -3,9 +3,7 @@
 name: stale issues
 
 on:
-  workflow_dispatch: {}
-  schedule:
-    - cron: "30 1 * * *"
+  workflow_dispatch:
 
 jobs:
   close-issues:

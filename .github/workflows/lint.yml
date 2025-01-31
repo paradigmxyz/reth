@@ -17,9 +17,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - type: ethereum
-            args: --bin reth --workspace --lib --examples --tests --benches --locked
-            features: "ethereum asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+          #- type: ethereum
+          #  args: --bin reth --workspace --lib --examples --tests --benches --locked
+          #  features: "ethereum asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
           - type: optimism
             args: --bin op-reth --workspace --lib --examples --tests --benches --locked
             features: "optimism asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
@@ -120,8 +120,8 @@ jobs:
     strategy:
       matrix:
         include:
-          - binary: reth
-            network: ethereum
+          #- binary: reth
+          #  network: ethereum
           - binary: op-reth
             network: optimism
     steps:
@@ -209,17 +209,6 @@ jobs:
       - uses: codespell-project/actions-codespell@v2
         with:
           skip: "*.json"
-
-  check-toml:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Run dprint
-        uses: dprint/check@v2.2
-        with:
-          config-path: dprint.json
 
   grafana:
     runs-on: ubuntu-latest

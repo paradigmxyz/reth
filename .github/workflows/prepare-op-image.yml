@@ -1,0 +1,81 @@
+name: Prepare an OP image
+
+on:
+  workflow_call:
+    inputs:
+      repo:
+        type: string
+        description: "Source repository"
+        required: true
+      ref:
+        type: string
+        description: "Source repository git ref"
+        required: true
+      context:
+        type: string
+        description: "Docker context"
+        required: false
+        default: "."
+      dockerfile:
+        type: string
+        description: "Dockerfile"
+        required: false
+        default: "Dockerfile"
+      target:
+        type: string
+        description: "Docker target stage"
+        required: false
+      image_tag:
+        type: string
+        description: "Docker image tag"
+        required: true
+      artifact_name:
+        type: string
+        description: "Docker image artifact filename (without the .tar extension)"
+        required: true
+
+jobs:
+  prepare-op-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Prepare artifacts directory
+        shell: bash
+        run: mkdir ./artifacts
+
+      - name: Clone ${{ inputs.repo }}
+        shell: bash
+        run: git clone --recurse-submodules 'https://github.com/${{ inputs.repo }}.git' ./tmp/submodule
+
+      - name: Checkout ${{ inputs.ref }}
+        shell: bash
+        run: git checkout ${{ inputs.ref }}
+        working-directory: ./tmp/submodule
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./tmp/submodule/${{ inputs.context }}
+          file: ./tmp/submodule/${{ inputs.dockerfile }}
+          target: ${{ inputs.target }}
+          tags: ${{ inputs.image_tag }}
+          outputs: type=docker,dest=./artifacts/${{ inputs.artifact_name }}.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts--${{ inputs.artifact_name }}
+          path: ./artifacts/${{ inputs.artifact_name }}.tar
+
+      - name: Clean up
+        shell: bash
+        run: rm -rf ./tmp/submodule ./artifacts

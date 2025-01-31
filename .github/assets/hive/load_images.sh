@@ -11,7 +11,7 @@ IMAGES=(
     "/tmp/smoke_genesis.tar"
     "/tmp/smoke_network.tar"
     "/tmp/ethereum_sync.tar"
-    "/tmp/reth_image.tar"
+    "/tmp/op_reth_image.tar"
 )
 
 # Loop through the images and load them

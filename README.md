@@ -1,4 +1,6 @@
-# reth
+# op-reth development lab
+
+## For production op-reth code visit: https://github.com/paradigmxyz/reth
 
 [![CI status](https://github.com/paradigmxyz/reth/workflows/unit/badge.svg)][gh-ci]
 [![cargo-deny status](https://github.com/paradigmxyz/reth/workflows/deny/badge.svg)][gh-deny]
