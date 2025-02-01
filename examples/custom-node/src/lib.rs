@@ -11,7 +11,8 @@
 
 use chainspec::CustomChainSpec;
 use primitives::CustomNodePrimitives;
-use reth_node_api::NodeTypes;
+use reth_node_api::{NodeTypes, NodeTypesWithEngine};
+use reth_optimism_node::OpNode;
 use reth_storage_api::EthStorage;
 use reth_trie_db::MerklePatriciaTrie;
 
@@ -23,6 +24,10 @@ pub struct CustomNode;
 impl NodeTypes for CustomNode {
     type Primitives = CustomNodePrimitives;
     type ChainSpec = CustomChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
-    type Storage = EthStorage;
+    type StateCommitment = <OpNode as NodeTypes>::StateCommitment;
+    type Storage = <OpNode as NodeTypes>::Storage;
+}
+
+impl NodeTypesWithEngine for CustomNode {
+    type Engine = <OpNode as NodeTypesWithEngine>::Engine;
 }
