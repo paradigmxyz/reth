@@ -1,10 +1,9 @@
 //! A signed Optimism transaction.
 
-use crate::OpTxType;
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::RlpEcdsaTx, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930,
-    TxEip7702, TxLegacy, Typed2718,
+    transaction::RlpEcdsaTx, Sealed, SignableTransaction, Signed, Transaction, TxEip1559,
+    TxEip2930, TxEip7702, TxLegacy, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -20,7 +19,9 @@ use core::{
     mem,
 };
 use derive_more::{AsRef, Deref};
-use op_alloy_consensus::{DepositTransaction, OpPooledTransaction, OpTypedTransaction, TxDeposit};
+use op_alloy_consensus::{
+    DepositTransaction, OpPooledTransaction, OpTxEnvelope, OpTypedTransaction, TxDeposit,
+};
 #[cfg(any(test, feature = "reth-codec"))]
 use proptest as _;
 use reth_primitives_traits::{
@@ -47,14 +48,9 @@ pub struct OpTransactionSigned {
 }
 
 impl OpTransactionSigned {
-    /// Calculates hash of given transaction and signature and returns new instance.
-    pub fn new(transaction: OpTypedTransaction, signature: Signature) -> Self {
-        let signed_tx = Self::new_unhashed(transaction, signature);
-        if signed_tx.ty() != OpTxType::Deposit {
-            signed_tx.hash.get_or_init(|| signed_tx.recalculate_hash());
-        }
-
-        signed_tx
+    /// Creates a new signed transaction from the given transaction, signature and hash.
+    pub fn new(transaction: OpTypedTransaction, signature: Signature, hash: B256) -> Self {
+        Self { hash: hash.into(), signature, transaction }
     }
 
     /// Consumes the type and returns the transaction.
@@ -84,6 +80,12 @@ impl OpTransactionSigned {
     /// Returns whether this transaction is a deposit.
     pub const fn is_deposit(&self) -> bool {
         matches!(self.transaction, OpTypedTransaction::Deposit(_))
+    }
+
+    /// Splits the transaction into parts.
+    pub fn into_parts(self) -> (OpTypedTransaction, Signature, B256) {
+        let hash = *self.hash.get_or_init(|| self.recalculate_hash());
+        (self.transaction, self.signature, hash)
     }
 }
 
@@ -138,6 +140,48 @@ impl SignedTransaction for OpTransactionSigned {
 
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
+    }
+}
+
+macro_rules! impl_from_signed {
+    ($($tx:ident),*) => {
+        $(
+            impl From<Signed<$tx>> for OpTransactionSigned {
+                fn from(value: Signed<$tx>) -> Self {
+                    let(tx,sig,hash) = value.into_parts();
+                    Self::new(tx.into(), sig, hash)
+                }
+            }
+        )*
+    };
+}
+
+impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, OpTypedTransaction);
+
+impl From<OpTxEnvelope> for OpTransactionSigned {
+    fn from(value: OpTxEnvelope) -> Self {
+        match value {
+            OpTxEnvelope::Legacy(tx) => tx.into(),
+            OpTxEnvelope::Eip2930(tx) => tx.into(),
+            OpTxEnvelope::Eip1559(tx) => tx.into(),
+            OpTxEnvelope::Eip7702(tx) => tx.into(),
+            OpTxEnvelope::Deposit(tx) => tx.into(),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<OpTransactionSigned> for Signed<OpTypedTransaction> {
+    fn from(value: OpTransactionSigned) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new_unchecked(tx, sig, hash)
+    }
+}
+
+impl From<Sealed<TxDeposit>> for OpTransactionSigned {
+    fn from(value: Sealed<TxDeposit>) -> Self {
+        let (tx, hash) = value.into_parts();
+        Self::new(OpTypedTransaction::Deposit(tx), TxDeposit::signature(), hash)
     }
 }
 
@@ -566,7 +610,7 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
 
         let signature = if is_deposit(&transaction) { TxDeposit::signature() } else { signature };
 
-        Ok(Self::new(transaction, signature))
+        Ok(Self::new_unhashed(transaction, signature))
     }
 }
 
@@ -594,15 +638,6 @@ impl From<OpPooledTransaction> for OpTransactionSigned {
             OpPooledTransaction::Eip1559(tx) => tx.into(),
             OpPooledTransaction::Eip7702(tx) => tx.into(),
         }
-    }
-}
-
-impl<T: Into<OpTypedTransaction>> From<Signed<T>> for OpTransactionSigned {
-    fn from(value: Signed<T>) -> Self {
-        let (tx, sig, hash) = value.into_parts();
-        let this = Self::new(tx.into(), sig);
-        this.hash.get_or_init(|| hash);
-        this
     }
 }
 
