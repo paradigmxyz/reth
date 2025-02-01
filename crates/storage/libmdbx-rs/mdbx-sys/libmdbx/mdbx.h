@@ -1283,7 +1283,7 @@ enum MDBX_env_flags_t {
    * to several times in a best case scenario.
    *
    * LIFO recycling policy means that for reuse pages will be taken which became
-   * unused the latest (i.e. just now or most recently). Therefore the loop of
+   * unused the lastest (i.e. just now or most recently). Therefore the loop of
    * database pages circulation becomes as short as possible. In other words,
    * the number of pages, that are overwritten in memory and on disk during a
    * series of write transactions, will be as small as possible. Thus creates
