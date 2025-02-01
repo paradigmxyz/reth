@@ -11,6 +11,8 @@
 // The `optimism` feature must be enabled to use this crate.
 #![cfg(feature = "optimism")]
 
+use reth_rpc_types_compat as _;
+
 pub mod builder;
 pub use builder::OpPayloadBuilder;
 pub mod error;
