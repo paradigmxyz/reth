@@ -19,7 +19,6 @@ reth-primitives-traits.workspace = true
 reth-revm = { workspace = true, features = ["witness"] }
 reth-transaction-pool.workspace = true
 reth-provider.workspace = true
-reth-rpc-types-compat.workspace = true
 reth-evm.workspace = true
 reth-execution-types.workspace = true
 reth-payload-builder.workspace = true
