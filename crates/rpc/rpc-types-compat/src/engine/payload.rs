@@ -33,16 +33,6 @@ pub fn block_to_payload_v1<T: SignedTransaction>(
     }
 }
 
-/// Converts [`SealedBlock`] to [`ExecutionPayloadV2`]
-pub fn block_to_payload_v2<T: SignedTransaction>(
-    value: SealedBlock<Block<T>>,
-) -> ExecutionPayloadV2 {
-    ExecutionPayloadV2 {
-        withdrawals: value.body().withdrawals.clone().unwrap_or_default().into_inner(),
-        payload_inner: block_to_payload_v1(value),
-    }
-}
-
 /// Converts a [`reth_primitives_traits::Block`] to [`ExecutionPayloadBodyV1`]
 pub fn convert_to_payload_body_v1(
     value: impl reth_primitives_traits::Block,
