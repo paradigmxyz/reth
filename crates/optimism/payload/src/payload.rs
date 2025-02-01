@@ -6,8 +6,7 @@ use alloy_eips::{
 use alloy_primitives::{keccak256, Address, Bytes, B256, B64, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
-    BlobsBundleV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2, ExecutionPayloadV1,
-    PayloadId,
+    BlobsBundleV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, PayloadId
 };
 use op_alloy_consensus::{encode_holocene_extra_data, EIP1559ParamError};
 /// Re-export for use in downstream arguments.
@@ -18,7 +17,6 @@ use reth_optimism_primitives::{OpBlock, OpPrimitives, OpTransactionSigned};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{transaction::WithEncoded, SealedBlock};
-use reth_rpc_types_compat::engine::payload::{block_to_payload_v1, block_to_payload_v3};
 
 /// Optimism Payload Builder Attributes
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -210,7 +208,7 @@ impl From<OpBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: OpBuiltPayload) -> Self {
         Self::from_block_unchecked(
             value.block().hash(),
-            value.block.into_sealed_block().into_block(),
+            &value.block.into_sealed_block().into_block(),
         )
     }
 }
@@ -240,8 +238,8 @@ impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
 
         Self {
             execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                value.block().hash(),
-                value.block.into_sealed_block().into_block(),
+                block.sealed_block().hash(),
+                &block.into_sealed_block().into_block(),
             ),
             block_value: fees,
             // From the engine API spec:
@@ -268,8 +266,8 @@ impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
 
         Self {
             execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                value.block().hash(),
-                value.block.into_sealed_block().into_block(),
+                block.sealed_block().hash(),
+                &block.into_sealed_block().into_block(),
             ),
             block_value: fees,
             // From the engine API spec:
