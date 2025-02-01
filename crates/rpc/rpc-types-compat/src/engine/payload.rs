@@ -4,7 +4,7 @@
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::U256;
 use alloy_rpc_types_engine::{
-    payload::ExecutionPayloadBodyV1, ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3,
+    payload::ExecutionPayloadBodyV1, ExecutionPayloadV1, ExecutionPayloadV2,
 };
 use reth_primitives::{Block, SealedBlock};
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
@@ -43,17 +43,6 @@ pub fn block_to_payload_v2<T: SignedTransaction>(
     }
 }
 
-/// Converts [`SealedBlock`] to [`ExecutionPayloadV3`], and returns the parent beacon block root.
-pub fn block_to_payload_v3<T: SignedTransaction>(
-    value: SealedBlock<Block<T>>,
-) -> ExecutionPayloadV3 {
-    ExecutionPayloadV3 {
-        blob_gas_used: value.blob_gas_used.unwrap_or_default(),
-        excess_blob_gas: value.excess_blob_gas.unwrap_or_default(),
-        payload_inner: block_to_payload_v2(value),
-    }
-}
-
 /// Converts a [`reth_primitives_traits::Block`] to [`ExecutionPayloadBodyV1`]
 pub fn convert_to_payload_body_v1(
     value: impl reth_primitives_traits::Block,
@@ -67,14 +56,12 @@ pub fn convert_to_payload_body_v1(
 
 #[cfg(test)]
 mod tests {
-    use super::block_to_payload_v3;
     use alloy_primitives::{b256, hex, Bytes, U256};
     use alloy_rpc_types_engine::{
         CancunPayloadFields, ExecutionPayload, ExecutionPayloadSidecar, ExecutionPayloadV1,
         ExecutionPayloadV2, ExecutionPayloadV3,
     };
     use reth_primitives::{Block, TransactionSigned};
-    use reth_primitives_traits::Block as _;
 
     #[test]
     fn roundtrip_payload_to_block() {
@@ -113,7 +100,7 @@ mod tests {
             b256!("531cd53b8e68deef0ea65edfa3cda927a846c307b0907657af34bc3f313b5871");
         block.header.parent_beacon_block_root = Some(parent_beacon_block_root);
 
-        let converted_payload = block_to_payload_v3(block.seal_slow());
+        let converted_payload = ExecutionPayloadV3::from_block_unchecked(block.hash_slow(), &block);
 
         // ensure the payloads are the same
         assert_eq!(new_payload, converted_payload);

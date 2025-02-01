@@ -2903,7 +2903,9 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
-    use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar};
+    use alloy_rpc_types_engine::{
+        CancunPayloadFields, ExecutionPayloadSidecar, ExecutionPayloadV3,
+    };
     use assert_matches::assert_matches;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
@@ -2914,7 +2916,7 @@ mod tests {
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
+    use reth_rpc_types_compat::engine::block_to_payload_v1;
     use reth_trie::{updates::TrieUpdates, HashedPostState};
     use std::{
         str::FromStr,
@@ -3183,7 +3185,10 @@ mod tests {
             &mut self,
             block: RecoveredBlock<reth_ethereum_primitives::Block>,
         ) {
-            let payload = block_to_payload_v3(block.clone_sealed_block());
+            let payload = ExecutionPayloadV3::from_block_unchecked(
+                block.hash(),
+                &block.clone_sealed_block().into_block(),
+            );
             self.tree
                 .on_new_payload(
                     payload.into(),
