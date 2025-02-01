@@ -1,10 +1,6 @@
 //! Optimism Node types config.
 
-use crate::{
-    args::RollupArgs,
-    engine::OpEngineValidator,
-    OpEngineTypes,
-};
+use crate::{args::RollupArgs, engine::OpEngineValidator, OpEngineTypes};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvmEnv, ConfigureEvmFor};
@@ -27,11 +23,13 @@ use reth_optimism_payload_builder::{
     config::{OpBuilderConfig, OpDAConfig},
 };
 use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
-use reth_optimism_transaction_pool::{OpPooledTransaction, OpTransactionPool, OpTransactionValidator};
 use reth_optimism_rpc::{
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi, SequencerClient,
+};
+use reth_optimism_transaction_pool::{
+    OpPooledTransaction, OpTransactionPool, OpTransactionValidator,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{CanonStateSubscriptions, EthStorage};
@@ -483,9 +481,7 @@ where
                 Primitives = OpPrimitives,
             >,
         >,
-        Pool: TransactionPool<Transaction = OpPooledTransaction>
-            + Unpin
-            + 'static,
+        Pool: TransactionPool<Transaction = OpPooledTransaction> + Unpin + 'static,
         Evm: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
@@ -526,9 +522,7 @@ where
             Primitives = OpPrimitives,
         >,
     >,
-    Pool: TransactionPool<Transaction = OpPooledTransaction>
-        + Unpin
-        + 'static,
+    Pool: TransactionPool<Transaction = OpPooledTransaction> + Unpin + 'static,
     Txs: OpPayloadTransactions,
 {
     async fn spawn_payload_service(
@@ -600,9 +594,7 @@ impl OpNetworkBuilder {
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
-    Pool: TransactionPool<Transaction = OpPooledTransaction>
-        + Unpin
-        + 'static,
+    Pool: TransactionPool<Transaction = OpPooledTransaction> + Unpin + 'static,
 {
     type Primitives = OpNetworkPrimitives;
 

@@ -895,11 +895,11 @@ mod tests {
             priority_pool.add_transaction(Arc::new(valid_prioritized_tx), 0);
         }
 
-
         let mut block = PayloadTransactionsChain::new(
-            PayloadTransactionsFixed::single(
-                Recovered::new_unchecked(MockTransaction::eip1559().with_sender(address_top_of_block), address_top_of_block),
-            ),
+            PayloadTransactionsFixed::single(Recovered::new_unchecked(
+                MockTransaction::eip1559().with_sender(address_top_of_block),
+                address_top_of_block,
+            )),
             Some(100),
             PayloadTransactionsChain::new(
                 BestPayloadTransactions::new(priority_pool.best()),

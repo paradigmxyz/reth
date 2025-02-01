@@ -492,9 +492,7 @@ where
 pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
     /// Returns an iterator that yields the transaction in the order they should get included in the
     /// new payload.
-    fn best_transactions<
-        Pool: TransactionPool<Transaction = OpPooledTransaction>,
-    >(
+    fn best_transactions<Pool: TransactionPool<Transaction = OpPooledTransaction>>(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
@@ -502,9 +500,7 @@ pub trait OpPayloadTransactions: Clone + Send + Sync + Unpin + 'static {
 }
 
 impl OpPayloadTransactions for () {
-    fn best_transactions<
-        Pool: TransactionPool<Transaction = OpPooledTransaction>,
-    >(
+    fn best_transactions<Pool: TransactionPool<Transaction = OpPooledTransaction>>(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
