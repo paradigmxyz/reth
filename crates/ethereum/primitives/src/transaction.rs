@@ -544,6 +544,19 @@ impl From<TxEnvelope> for TransactionSigned {
     }
 }
 
+impl From<TransactionSigned> for TxEnvelope {
+    fn from(value: TransactionSigned) -> Self {
+        let (tx, signature, hash) = value.into_parts();
+        match tx {
+            Transaction::Legacy(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip2930(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip1559(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip4844(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip7702(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+        }
+    }
+}
+
 impl From<TransactionSigned> for Signed<Transaction> {
     fn from(value: TransactionSigned) -> Self {
         let (tx, sig, hash) = value.into_parts();
