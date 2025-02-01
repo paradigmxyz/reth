@@ -3,9 +3,7 @@
 
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::U256;
-use alloy_rpc_types_engine::{
-    payload::ExecutionPayloadBodyV1, ExecutionPayloadV1, ExecutionPayloadV2,
-};
+use alloy_rpc_types_engine::{payload::ExecutionPayloadBodyV1, ExecutionPayloadV1};
 use reth_primitives::{Block, SealedBlock};
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 
@@ -30,16 +28,6 @@ pub fn block_to_payload_v1<T: SignedTransaction>(
         base_fee_per_gas: U256::from(value.base_fee_per_gas.unwrap_or_default()),
         block_hash: value.hash(),
         transactions,
-    }
-}
-
-/// Converts [`SealedBlock`] to [`ExecutionPayloadV2`]
-pub fn block_to_payload_v2<T: SignedTransaction>(
-    value: SealedBlock<Block<T>>,
-) -> ExecutionPayloadV2 {
-    ExecutionPayloadV2 {
-        withdrawals: value.body().withdrawals.clone().unwrap_or_default().into_inner(),
-        payload_inner: block_to_payload_v1(value),
     }
 }
 
