@@ -98,22 +98,6 @@ impl BuiltPayload for EthBuiltPayload {
     }
 }
 
-impl BuiltPayload for &EthBuiltPayload {
-    type Primitives = EthPrimitives;
-
-    fn block(&self) -> &SealedBlock {
-        (**self).block()
-    }
-
-    fn fees(&self) -> U256 {
-        (**self).fees()
-    }
-
-    fn requests(&self) -> Option<Requests> {
-        self.requests.clone()
-    }
-}
-
 // V1 engine_getPayloadV1 response
 impl From<EthBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: EthBuiltPayload) -> Self {
