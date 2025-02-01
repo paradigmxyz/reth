@@ -3,9 +3,7 @@
 
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::U256;
-use alloy_rpc_types_engine::{
-    payload::ExecutionPayloadBodyV1, ExecutionPayloadV1,
-};
+use alloy_rpc_types_engine::{payload::ExecutionPayloadBodyV1, ExecutionPayloadV1};
 use reth_primitives::{Block, SealedBlock};
 use reth_primitives_traits::{BlockBody as _, SignedTransaction};
 
