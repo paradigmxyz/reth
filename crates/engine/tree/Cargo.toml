@@ -125,4 +125,5 @@ test-utils = [
     "reth-trie-db/test-utils",
     "reth-trie-parallel/test-utils",
     "reth-ethereum-primitives/test-utils",
+    "revm/test-utils",
 ]
