@@ -1,7 +1,7 @@
 /* mdbx_chk.c - memory-mapped database check tool */
 
 /*
- * Copyright 2015-2024 Leonid Yuriev <leo@yuriev.ru>
+ * Copyright 2015-2025 Leonid Yuriev <leo@yuriev.ru>
  * and other libmdbx authors: please see AUTHORS file.
  * All rights reserved.
  *
@@ -2977,7 +2977,7 @@ typedef struct MDBX_page {
 
 #define PAGETYPE_WHOLE(p) ((uint8_t)(p)->mp_flags)
 
-/* Drop legacy P_DIRTY flag for sub-pages for compatilibity */
+/* Drop legacy P_DIRTY flag for sub-pages for compatibility */
 #define PAGETYPE_COMPAT(p)                                                     \
   (unlikely(PAGETYPE_WHOLE(p) & P_SUBP)                                        \
        ? PAGETYPE_WHOLE(p) & ~(P_SUBP | P_LEGACY_DIRTY)                        \
