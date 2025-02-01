@@ -21,7 +21,6 @@ use reth_optimism_primitives::{OpBlock, OpPrimitives, OpTransactionSigned};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{transaction::WithEncoded, SealedBlock};
-use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
 use std::sync::Arc;
 
 /// Optimism Payload Builder Attributes
@@ -229,7 +228,7 @@ impl BuiltPayload for &OpBuiltPayload {
 // V1 engine_getPayloadV1 response
 impl From<OpBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: OpBuiltPayload) -> Self {
-        block_to_payload_v1(Arc::unwrap_or_clone(value.block))
+        ExecutionPayloadV1::from_block_unchecked(value.block().hash(), &Arc::unwrap_or_clone(value.block).into_block())
     }
 }
 
