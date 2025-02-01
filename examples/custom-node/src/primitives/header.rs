@@ -2,23 +2,38 @@ use alloy_consensus::Header;
 use alloy_primitives::{
     private::derive_more, Address, BlockNumber, Bloom, Bytes, Sealable, B256, B64, U256,
 };
-use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
+use reth_codecs::Compact;
 use reth_primitives_traits::InMemorySize;
+use revm_primitives::keccak256;
+use serde::{Deserialize, Serialize};
 
 /// The header type of this node
 ///
 /// This type extends the regular ethereum header with an extension.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, derive_more::AsRef, derive_more::Deref, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
-#[cfg_attr(feature = "reth-codec", derive(reth_codecs::Compact))]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    derive_more::AsRef,
+    derive_more::Deref,
+    Default,
+    RlpEncodable,
+    RlpDecodable,
+    Serialize,
+    Deserialize,
+)]
+#[serde(rename_all = "camelCase")]
 pub struct CustomHeader {
     /// The regular eth header
     #[as_ref]
     #[deref]
+    #[serde(flatten)]
     pub eth_header: Header,
     /// The extended header
-    pub extension: HeaderExtension,
+    pub extension: U256,
 }
 
 impl CustomHeader {}
@@ -31,7 +46,9 @@ impl AsRef<Self> for CustomHeader {
 
 impl Sealable for CustomHeader {
     fn hash_slow(&self) -> B256 {
-        self.eth_header.hash_slow()
+        let mut out = Vec::new();
+        self.encode(&mut out);
+        keccak256(&out)
     }
 }
 
@@ -121,41 +138,26 @@ impl alloy_consensus::BlockHeader for CustomHeader {
     }
 }
 
-impl Encodable for CustomHeader {
-    fn encode(&self, out: &mut dyn alloy_rlp::bytes::BufMut) {
-        self.eth_header.encode(out);
-        self.extra_data.encode(out);
-    }
-
-    fn length(&self) -> usize {
-        self.eth_header.length() + self.extra_data.length()
-    }
-}
-
-impl Decodable for CustomHeader {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(Self { eth_header: Header::decode(buf)?, extension: HeaderExtension::decode(buf)? })
-    }
-}
-
 impl InMemorySize for CustomHeader {
     fn size(&self) -> usize {
         self.eth_header.size() + self.extension.size()
     }
 }
 
-/// Extension to header
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, RlpEncodable, RlpDecodable)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "reth-codec", derive(reth_codecs::Compact))]
-pub struct HeaderExtension {
-    /// Some extension
-    pub extension: U256,
-}
+impl reth_codecs::Compact for CustomHeader {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
+    {
+        let identifier = self.eth_header.to_compact(buf);
+        self.extension.to_compact(buf);
 
-impl InMemorySize for HeaderExtension {
-    fn size(&self) -> usize {
-        core::mem::size_of::<Self>()
+        identifier
+    }
+
+    fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
+        let (eth_header, buf) = Compact::from_compact(buf, identifier);
+        let (extension, buf) = Compact::from_compact(buf, buf.len());
+        (Self { eth_header, extension }, buf)
     }
 }
