@@ -6,19 +6,28 @@ use crate::{
     txpool::{OpTransactionPool, OpTransactionValidator},
     OpEngineTypes,
 };
+use alloy_rpc_types_engine::PayloadAttributes;
 use op_alloy_consensus::OpPooledTransaction;
+use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
-use reth_chainspec::{EthChainSpec, Hardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
+use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvmEnv, ConfigureEvmFor};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
-use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, PrimitivesTy, TxTy};
+use reth_node_api::{
+    AddOnsContext, FullNodeComponents, NodeAddOns, PayloadAttributesBuilder, PayloadTypes,
+    PrimitivesTy, TxTy,
+};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
         PayloadServiceBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
     node::{FullNodeTypes, NodeTypes, NodeTypesWithEngine},
-    rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
+    rpc::{
+        EngineValidatorAddOn, EngineValidatorBuilder, PayloadAttributesBuilderAddOn, RethRpcAddOns,
+        RpcAddOns, RpcHandle,
+    },
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
 };
 use reth_optimism_chainspec::OpChainSpec;
@@ -44,7 +53,7 @@ use reth_transaction_pool::{
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::primitives::TxEnv;
-use std::sync::Arc;
+use std::{any::TypeId, sync::Arc};
 
 /// Storage implementation for Optimism.
 pub type OpStorage = EthStorage<OpTransactionSigned>;
@@ -265,6 +274,50 @@ where
 
     async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         OpEngineValidatorBuilder::default().build(ctx).await
+    }
+}
+
+impl<N> PayloadAttributesBuilderAddOn<N> for OpAddOns<N>
+where
+    N: FullNodeComponents,
+    <<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
+    LocalPayloadAttributesBuilder<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>:
+        PayloadAttributesBuilder<
+            <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+        >,
+{
+    fn maybe_payload_attributes_builder(
+        &self,
+        ctx: &AddOnsContext<'_, N>,
+    ) -> eyre::Result<
+        Option<
+            Box<
+                dyn PayloadAttributesBuilder<
+                    <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+                >,
+            >,
+        >,
+    > {
+        if !ctx.config.dev.dev {
+            return Ok(None);
+        }
+
+        println!(
+            "Left type: {}\nRight type: {}",
+            std::any::type_name::<
+                <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+            >(),
+            std::any::type_name::<OpPayloadAttributes>()
+        );
+
+        if TypeId::of::<
+            <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+        >() == TypeId::of::<OpPayloadAttributes>()
+        {
+            Ok(Some(Box::new(LocalPayloadAttributesBuilder::new(ctx.config.chain.clone()))))
+        } else {
+            Ok(None)
+        }
     }
 }
 

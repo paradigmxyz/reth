@@ -4,8 +4,9 @@
 use alloy_primitives::{Address, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
+use reth_node_api::{AddOnsContext, FullNodeComponents, NodeTypesWithEngine, PayloadTypes};
 use reth_payload_primitives::PayloadAttributesBuilder;
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 /// The attributes builder for local Ethereum payload.
 #[derive(Debug)]
@@ -66,12 +67,12 @@ where
 // for any
 pub trait UnsupportedLocalAttributes: Send + Sync + 'static {}
 
-impl<T, ChainSpec> PayloadAttributesBuilder<T> for LocalPayloadAttributesBuilder<ChainSpec>
-where
-    ChainSpec: Send + Sync + 'static,
-    T: UnsupportedLocalAttributes,
-{
-    fn build(&self, _: u64) -> T {
-        panic!("Unsupported payload attributes")
-    }
-}
+// impl<T, ChainSpec> PayloadAttributesBuilder<T> for LocalPayloadAttributesBuilder<ChainSpec>
+// where
+//     ChainSpec: Send + Sync + 'static,
+//     T: UnsupportedLocalAttributes,
+// {
+//     fn build(&self, _: u64) -> T {
+//         panic!("Unsupported payload attributes")
+//     }
+// }

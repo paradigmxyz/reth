@@ -37,7 +37,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
-    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
+    rpc::{EngineValidatorAddOn, PayloadAttributesBuilderAddOn, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
     AddOns, AddOnsContext, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
@@ -76,7 +76,8 @@ where
     >,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
+        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
+        + PayloadAttributesBuilderAddOn<NodeAdapter<T, CB::Components>>,
     LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
         <<Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
     >,
@@ -212,6 +213,10 @@ where
         let engine_payload_validator = add_ons.engine_validator(&add_ons_ctx).await?;
 
         let mut engine_service = if ctx.is_dev() {
+            info!(target: "reth::cli", "LocalEngineService");
+            let payload_attributes_builder = add_ons
+                .maybe_payload_attributes_builder(&add_ons_ctx)?
+                .expect("custom payload attributes builder must be set for dev mode");
             let eth_service = LocalEngineService::new(
                 consensus.clone(),
                 ctx.components().block_executor().clone(),
@@ -226,7 +231,7 @@ where
                 consensus_engine_tx.clone(),
                 Box::pin(consensus_engine_stream),
                 ctx.dev_mining_mode(ctx.components().pool()),
-                LocalPayloadAttributesBuilder::new(ctx.chain_spec()),
+                payload_attributes_builder,
             );
 
             Either::Left(eth_service)

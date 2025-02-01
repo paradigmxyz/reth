@@ -466,8 +466,12 @@ async fn main() -> eyre::Result<()> {
         .build();
 
     // create node config
-    let node_config =
+    let mut node_config =
         NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
+
+    node_config = node_config.dev();
+
+    println!("node_config: {:?}", node_config.dev.dev);
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
