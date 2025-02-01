@@ -11383,7 +11383,7 @@ retry_gc_refresh_oldest:;
   txnid_t oldest = txn_oldest_reader(txn);
 retry_gc_have_oldest:
   if (unlikely(oldest >= txn->mt_txnid)) {
-    ERROR("unexpected/invalid oldest-read txnid %" PRIaTXN
+    ERROR("unexpected/invalid oldest-readed txnid %" PRIaTXN
           " for current-txnid %" PRIaTXN,
           oldest, txn->mt_txnid);
     ret.err = MDBX_PROBLEM;
@@ -11512,7 +11512,7 @@ next_gc:;
     }
   }
 
-  /* Remember ID of read GC record */
+  /* Remember ID of readed GC record */
   txn->tw.last_reclaimed = id;
   if (flags & MDBX_ALLOC_LIFO) {
     ret.err = txl_append(&txn->tw.lifo_reclaimed, id);
@@ -11526,7 +11526,7 @@ next_gc:;
     goto fail;
 
   if (LOG_ENABLED(MDBX_LOG_EXTRA)) {
-    DEBUG_EXTRA("read GC-pnl txn %" PRIaTXN " root %" PRIaPGNO
+    DEBUG_EXTRA("readed GC-pnl txn %" PRIaTXN " root %" PRIaPGNO
                 " len %zu, PNL",
                 id, txn->mt_dbs[FREE_DBI].md_root, gc_len);
     for (size_t i = gc_len; i; i--)
