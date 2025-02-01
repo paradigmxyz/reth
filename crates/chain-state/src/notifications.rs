@@ -553,4 +553,66 @@ mod tests {
         // Confirm this is from the committed segment.
         assert!(!block_receipts[1].1);
     }
+
+    #[test]
+    fn test_finalized_notification_stream() {
+        // Create a default block for testing
+        let block: RecoveredBlock<reth_primitives::Block> = Default::default();
+
+        // Create the header first so we can use its hash
+        let header = alloy_consensus::Header { number: 1u64, ..Default::default() };
+        let sealed_header = SealedHeader::seal_slow(header);
+        let block_hash = sealed_header.hash();
+
+        // Now create the block with the matching hash
+        let mut test_block = block;
+        test_block.set_block_number(1);
+        test_block.set_hash(block_hash);
+
+        // Create the chain with our test block
+        let chain: Arc<Chain> =
+            Arc::new(Chain::new(vec![test_block.clone()], ExecutionOutcome::default(), None));
+
+        // Create channels for both streams
+        let (canon_tx, canon_rx) = broadcast::channel(10);
+        let (finalized_tx, finalized_rx) = watch::channel(None);
+
+        // Create the notification stream
+        let mut stream = FinalizedNotificationStream {
+            canon_stream: CanonStateNotificationStream { st: BroadcastStream::new(canon_rx) },
+            finalized_stream: ForkChoiceStream::new(finalized_rx),
+            buffered_notification: None,
+            buffered_finalization: None,
+        };
+
+        // Create a notification
+        let notification = CanonStateNotification::Commit { new: chain };
+
+        // Send the canonical notification
+        canon_tx.send(notification).unwrap();
+
+        // Create a waker and context for polling
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+
+        // First poll should be pending since we haven't received finalization yet
+        assert!(matches!(Pin::new(&mut stream).poll_next(&mut cx), Poll::Pending));
+
+        // Send the finalization notification
+        finalized_tx.send(Some(sealed_header)).unwrap();
+
+        // Now polling should return the notification since we have both events
+        match Pin::new(&mut stream).poll_next(&mut cx) {
+            Poll::Ready(Some(received)) => {
+                assert_eq!(received.tip().hash(), block_hash);
+                match received {
+                    CanonStateNotification::Commit { new } => {
+                        assert_eq!(new.tip().hash(), block_hash);
+                    }
+                    _ => panic!("Expected Commit notification"),
+                }
+            }
+            other => panic!("Expected Ready(Some), got: {:?}", other),
+        }
+    }
 }

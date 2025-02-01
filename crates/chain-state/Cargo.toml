@@ -53,6 +53,7 @@ alloy-signer.workspace = true
 alloy-signer-local.workspace = true
 alloy-consensus.workspace = true
 rand.workspace = true
+futures.workspace = true
 
 [features]
 test-utils = [
