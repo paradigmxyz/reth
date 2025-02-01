@@ -98,7 +98,8 @@ fn payload_validation_conversion() {
     );
 
     // Invalid encoded transactions
-    let mut payload_with_invalid_txs = ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.into_block());
+    let mut payload_with_invalid_txs =
+        ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.into_block());
 
     payload_with_invalid_txs.transactions.iter_mut().for_each(|tx| {
         *tx = Bytes::new();

@@ -19,7 +19,11 @@ where
     C: ClientT + SubscriptionClientT + Sync + EngineApiClient<EthEngineTypes>,
 {
     let block = Block::<_>::default().seal_slow();
-    EngineApiClient::new_payload_v1(client, ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.clone().into_block())).await;
+    EngineApiClient::new_payload_v1(
+        client,
+        ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.clone().into_block()),
+    )
+    .await;
     EngineApiClient::new_payload_v2(
         client,
         ExecutionPayloadInputV2 {

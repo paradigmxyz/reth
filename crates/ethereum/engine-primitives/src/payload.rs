@@ -117,7 +117,10 @@ impl BuiltPayload for &EthBuiltPayload {
 // V1 engine_getPayloadV1 response
 impl From<EthBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: EthBuiltPayload) -> Self {
-        ExecutionPayloadV1::from_block_unchecked(value.block().hash(), &Arc::unwrap_or_clone(value.block).into_block())
+        Self::from_block_unchecked(
+            value.block().hash(),
+            &Arc::unwrap_or_clone(value.block).into_block(),
+        )
     }
 }
 

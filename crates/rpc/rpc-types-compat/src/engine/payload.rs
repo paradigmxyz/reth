@@ -2,10 +2,8 @@
 //! Ethereum's Engine
 
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
-use alloy_rpc_types_engine::{
-    payload::ExecutionPayloadBodyV1,
-};
-use reth_primitives_traits::{BlockBody as _};
+use alloy_rpc_types_engine::payload::ExecutionPayloadBodyV1;
+use reth_primitives_traits::BlockBody as _;
 
 /// Converts a [`reth_primitives_traits::Block`] to [`ExecutionPayloadBodyV1`]
 pub fn convert_to_payload_body_v1(
