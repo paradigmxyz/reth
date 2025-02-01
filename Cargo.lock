@@ -7443,7 +7443,6 @@ dependencies = [
  "bincode",
  "derive_more",
  "modular-bitfield",
- "once_cell",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",

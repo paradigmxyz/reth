@@ -31,7 +31,6 @@ revm-primitives.workspace = true
 arbitrary = { workspace = true, optional = true, features = ["derive"] }
 derive_more.workspace = true
 modular-bitfield = { workspace = true, optional = true }
-once_cell.workspace = true
 rand = { workspace = true, optional = true }
 secp256k1 = { workspace = true, optional = true, features = ["rand"] }
 serde.workspace = true
@@ -66,7 +65,6 @@ std = [
     "alloy-eips/std",
     "derive_more/std",
     "secp256k1?/std",
-    "once_cell/std",
     "revm-primitives/std",
     "alloy-serde?/std",
 ]
