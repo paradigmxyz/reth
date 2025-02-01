@@ -3185,8 +3185,10 @@ mod tests {
             &mut self,
             block: RecoveredBlock<reth_ethereum_primitives::Block>,
         ) {
-            let payload =
-                ExecutionPayloadV3::from_block_unchecked(block.hash(), &block.clone().into_block());
+            let payload = ExecutionPayloadV3::from_block_unchecked(
+                block.hash(),
+                &block.clone_sealed_block().into_block(),
+            );
             self.tree
                 .on_new_payload(
                     payload.into(),
