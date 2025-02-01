@@ -16,28 +16,24 @@ use clap::Parser;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth::{chainspec::EthereumChainSpecParser, cli::Cli};
 use reth_node_ethereum::EthereumNode;
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{TransactionPool, PoolSize};
+use tracing_subscriber;
 
 fn main() {
+    tracing_subscriber::fmt::init(); // Improved logging
+
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             let handle = builder
                 .node(EthereumNode::default())
                 .extend_rpc_modules(move |ctx| {
-                    if !args.enable_ext {
-                        return Ok(())
+                    if args.enable_ext {
+                        let pool = ctx.pool().clone();
+                        let ext = TxpoolExt { pool };
+
+                        ctx.modules.merge_configured(ext.into_rpc())?;
+                        tracing::info!("txpool extension enabled"); // Improved logging
                     }
-
-                    // here we get the configured pool.
-                    let pool = ctx.pool().clone();
-
-                    let ext = TxpoolExt { pool };
-
-                    // now we merge our extension namespace into all configured transports
-                    ctx.modules.merge_configured(ext.into_rpc())?;
-
-                    println!("txpool extension enabled");
-
                     Ok(())
                 })
                 .launch()
@@ -48,7 +44,7 @@ fn main() {
         .unwrap();
 }
 
-/// Our custom cli args extension that adds one flag to reth default CLI.
+/// Custom CLI arguments extension to enable the txpool extension namespace
 #[derive(Debug, Clone, Copy, Default, clap::Args)]
 struct RethCliTxpoolExt {
     /// CLI flag to enable the txpool extension namespace
@@ -56,18 +52,16 @@ struct RethCliTxpoolExt {
     pub enable_ext: bool,
 }
 
-/// trait interface for a custom rpc namespace: `txpool`
-///
-/// This defines an additional namespace where all methods are configured as trait functions.
+/// Trait interface for a custom RPC namespace: `txpoolExt`
 #[cfg_attr(not(test), rpc(server, namespace = "txpoolExt"))]
 #[cfg_attr(test, rpc(server, client, namespace = "txpoolExt"))]
 pub trait TxpoolExtApi {
     /// Returns the number of transactions in the pool.
     #[method(name = "transactionCount")]
-    fn transaction_count(&self) -> RpcResult<usize>;
+    fn transaction_count(&self) -> RpcResult<u64>; // Changed usize to u64 for better JSON-RPC compatibility
 }
 
-/// The type that implements the `txpool` rpc namespace trait
+/// The type that implements the `txpoolExt` RPC namespace trait
 pub struct TxpoolExt<Pool> {
     pool: Pool,
 }
@@ -76,8 +70,8 @@ impl<Pool> TxpoolExtApiServer for TxpoolExt<Pool>
 where
     Pool: TransactionPool + Clone + 'static,
 {
-    fn transaction_count(&self) -> RpcResult<usize> {
-        Ok(self.pool.pool_size().total)
+    fn transaction_count(&self) -> RpcResult<u64> {
+        Ok(self.pool.pool_size().total as u64) // Improved data type handling
     }
 }
 
@@ -87,19 +81,27 @@ mod tests {
     use jsonrpsee::{http_client::HttpClientBuilder, server::ServerBuilder};
     use reth_transaction_pool::noop::NoopTransactionPool;
 
+    struct MockTransactionPool;
+
+    impl TransactionPool for MockTransactionPool {
+        fn pool_size(&self) -> PoolSize {
+            PoolSize { total: 5 } // Mocked pool size
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn test_call_transaction_count_http() {
         let server_addr = start_server().await;
         let uri = format!("http://{}", server_addr);
         let client = HttpClientBuilder::default().build(&uri).unwrap();
         let count = TxpoolExtApiClient::transaction_count(&client).await.unwrap();
-        assert_eq!(count, 0);
+        assert_eq!(count, 5); // Now tests a mocked value instead of a fixed one
     }
 
     async fn start_server() -> std::net::SocketAddr {
         let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
         let addr = server.local_addr().unwrap();
-        let pool = NoopTransactionPool::default();
+        let pool = MockTransactionPool; // Use mocked pool
         let api = TxpoolExt { pool };
         let server_handle = server.start(api.into_rpc());
 
