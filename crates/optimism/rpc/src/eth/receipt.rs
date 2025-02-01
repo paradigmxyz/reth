@@ -203,7 +203,7 @@ impl OpReceiptBuilder {
     ) -> Result<Self, OpEthApiError> {
         let timestamp = meta.timestamp;
         let core_receipt =
-            build_receipt(transaction, meta, receipt, all_receipts, |receipt_with_bloom| {
+            build_receipt(transaction, meta, receipt, all_receipts, None, |receipt_with_bloom| {
                 match receipt {
                     OpReceipt::Legacy(_) => OpReceiptEnvelope::<Log>::Legacy(receipt_with_bloom),
                     OpReceipt::Eip2930(_) => OpReceiptEnvelope::<Log>::Eip2930(receipt_with_bloom),
