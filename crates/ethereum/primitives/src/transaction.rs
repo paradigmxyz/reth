@@ -15,18 +15,14 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
-use once_cell as _;
-#[cfg(not(feature = "std"))]
-use once_cell::sync::OnceCell as OnceLock;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
+    sync::OnceLock,
     transaction::{error::TransactionConversionError, signed::RecoveryError},
     FillTxEnv, InMemorySize, SignedTransaction,
 };
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "std")]
-use std::sync::OnceLock;
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
