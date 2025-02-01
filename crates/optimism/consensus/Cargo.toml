@@ -69,4 +69,8 @@ std = [
     "revm/std",
     "derive_more/std",
 ]
-optimism = ["reth-optimism-primitives/optimism"]
+optimism = [
+    "reth-optimism-primitives/optimism",
+    "reth-optimism-node/optimism",
+    "revm/optimism",
+]
