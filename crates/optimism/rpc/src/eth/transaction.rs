@@ -1,14 +1,13 @@
 //! Loads and formats OP transaction RPC response.
 
-use alloy_consensus::{Signed, Transaction as _};
+use alloy_consensus::Transaction as _;
 use alloy_primitives::{Bytes, PrimitiveSignature as Signature, Sealable, Sealed, B256};
 use alloy_rpc_types_eth::TransactionInfo;
-use op_alloy_consensus::{OpTxEnvelope, OpTypedTransaction};
+use op_alloy_consensus::OpTxEnvelope;
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
 use reth_node_api::FullNodeComponents;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_primitives::Recovered;
-use reth_primitives_traits::transaction::signed::SignedTransaction;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ProviderTx, ReceiptProvider, TransactionsProvider,
 };
@@ -87,39 +86,32 @@ where
         tx: Recovered<OpTransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
-        let from = tx.signer();
-        let hash = *tx.tx_hash();
-        let (transaction, signature) = tx.into_tx().split();
+        let (tx, from) = tx.into_parts();
         let mut deposit_receipt_version = None;
         let mut deposit_nonce = None;
 
-        let inner = match transaction {
-            OpTypedTransaction::Legacy(tx) => Signed::new_unchecked(tx, signature, hash).into(),
-            OpTypedTransaction::Eip2930(tx) => Signed::new_unchecked(tx, signature, hash).into(),
-            OpTypedTransaction::Eip1559(tx) => Signed::new_unchecked(tx, signature, hash).into(),
-            OpTypedTransaction::Eip7702(tx) => Signed::new_unchecked(tx, signature, hash).into(),
-            OpTypedTransaction::Deposit(tx) => {
-                self.inner
-                    .eth_api
-                    .provider()
-                    .receipt_by_hash(hash)
-                    .map_err(Self::Error::from_eth_err)?
-                    .inspect(|receipt| {
-                        if let OpReceipt::Deposit(receipt) = receipt {
-                            deposit_receipt_version = receipt.deposit_receipt_version;
-                            deposit_nonce = receipt.deposit_nonce;
-                        }
-                    });
+        let inner: OpTxEnvelope = tx.into();
 
-                OpTxEnvelope::Deposit(tx.seal_unchecked(hash))
-            }
-        };
+        if inner.is_deposit() {
+            // for depost tx we need to fetch the receipt
+            self.inner
+                .eth_api
+                .provider()
+                .receipt_by_hash(inner.tx_hash())
+                .map_err(Self::Error::from_eth_err)?
+                .inspect(|receipt| {
+                    if let OpReceipt::Deposit(receipt) = receipt {
+                        deposit_receipt_version = receipt.deposit_receipt_version;
+                        deposit_nonce = receipt.deposit_nonce;
+                    }
+                });
+        }
 
         let TransactionInfo {
             block_hash, block_number, index: transaction_index, base_fee, ..
         } = tx_info;
 
-        let effective_gas_price = if matches!(inner, OpTxEnvelope::Deposit(_)) {
+        let effective_gas_price = if inner.is_deposit() {
             // For deposits, we must always set the `gasPrice` field to 0 in rpc
             // deposit tx don't have a gas price field, but serde of `Transaction` will take care of
             // it
