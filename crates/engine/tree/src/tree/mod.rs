@@ -2904,7 +2904,7 @@ mod tests {
     use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
     use alloy_rpc_types_engine::{
-        CancunPayloadFields, ExecutionPayloadSidecar, ExecutionPayloadV3,
+        CancunPayloadFields, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
     };
     use assert_matches::assert_matches;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
@@ -2916,7 +2916,6 @@ mod tests {
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_rpc_types_compat::engine::block_to_payload_v1;
     use reth_trie::{updates::TrieUpdates, HashedPostState};
     use std::{
         str::FromStr,
@@ -3455,7 +3454,7 @@ mod tests {
         let block = Block::decode(&mut data.as_ref()).unwrap();
         let sealed = block.seal_slow();
         let hash = sealed.hash();
-        let payload = block_to_payload_v1(sealed.clone());
+        let payload = ExecutionPayloadV1::from_block_unchecked(hash, &sealed.clone().into_block());
 
         let mut test_harness = TestHarness::new(HOLESKY.clone());
 
@@ -3495,7 +3494,8 @@ mod tests {
         let data = Bytes::from_str(s).unwrap();
         let block: Block = Block::decode(&mut data.as_ref()).unwrap();
         let sealed = block.seal_slow();
-        let payload = block_to_payload_v1(sealed);
+        let payload =
+            ExecutionPayloadV1::from_block_unchecked(sealed.hash(), &sealed.clone().into_block());
 
         let mut test_harness =
             TestHarness::new(HOLESKY.clone()).with_backfill_state(BackfillSyncState::Active);

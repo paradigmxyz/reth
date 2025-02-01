@@ -11,7 +11,6 @@ use alloy_rpc_types_engine::{
 use core::convert::Infallible;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{EthPrimitives, SealedBlock};
-use reth_rpc_types_compat::engine::payload::block_to_payload_v1;
 
 /// Contains the built payload.
 ///
@@ -118,7 +117,10 @@ impl BuiltPayload for &EthBuiltPayload {
 // V1 engine_getPayloadV1 response
 impl From<EthBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: EthBuiltPayload) -> Self {
-        block_to_payload_v1(Arc::unwrap_or_clone(value.block))
+        Self::from_block_unchecked(
+            value.block().hash(),
+            &Arc::unwrap_or_clone(value.block).into_block(),
+        )
     }
 }
 
