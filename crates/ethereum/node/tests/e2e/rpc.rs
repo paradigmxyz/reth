@@ -6,12 +6,11 @@ use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
     SignedBidSubmissionV3, SignedBidSubmissionV4,
 };
-use alloy_rpc_types_engine::BlobsBundleV1;
+use alloy_rpc_types_engine::{BlobsBundleV1, ExecutionPayloadV3};
 use alloy_rpc_types_eth::TransactionRequest;
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::setup_engine;
-use reth_node_core::rpc::compat::engine::payload::block_to_payload_v3;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
 use std::sync::Arc;
@@ -161,7 +160,10 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
                 gas_limit: payload.block().gas_limit,
                 ..Default::default()
             },
-            execution_payload: block_to_payload_v3(payload.block().clone()),
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(
+                payload.block().hash(),
+                &payload.block().clone().into_block(),
+            ),
             blobs_bundle: BlobsBundleV1::new([]),
             signature: Default::default(),
         },
@@ -234,7 +236,10 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
                 gas_limit: payload.block().gas_limit,
                 ..Default::default()
             },
-            execution_payload: block_to_payload_v3(payload.block().clone()),
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(
+                payload.block().hash(),
+                &payload.block().clone().into_block(),
+            ),
             blobs_bundle: BlobsBundleV1::new([]),
             execution_requests: payload.requests().unwrap().try_into().unwrap(),
             signature: Default::default(),
