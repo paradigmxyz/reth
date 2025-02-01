@@ -449,14 +449,7 @@ where
 
         let no_tx_pool = ctx.attributes().no_tx_pool;
 
-        let payload = OpBuiltPayload::new(
-            ctx.payload_id(),
-            sealed_block,
-            info.total_fees,
-            ctx.chain_spec.clone(),
-            ctx.config.attributes,
-            Some(executed),
-        );
+        let payload = OpBuiltPayload::new(ctx.payload_id(), info.total_fees, executed);
 
         if no_tx_pool {
             // if `no_tx_pool` is set only transactions from the payload attributes will be included
