@@ -11512,7 +11512,7 @@ next_gc:;
     }
   }
 
-  /* Remember ID of readed GC record */
+  /* Remember ID of read GC record */
   txn->tw.last_reclaimed = id;
   if (flags & MDBX_ALLOC_LIFO) {
     ret.err = txl_append(&txn->tw.lifo_reclaimed, id);
@@ -11526,7 +11526,7 @@ next_gc:;
     goto fail;
 
   if (LOG_ENABLED(MDBX_LOG_EXTRA)) {
-    DEBUG_EXTRA("readed GC-pnl txn %" PRIaTXN " root %" PRIaPGNO
+    DEBUG_EXTRA("read GC-pnl txn %" PRIaTXN " root %" PRIaPGNO
                 " len %zu, PNL",
                 id, txn->mt_dbs[FREE_DBI].md_root, gc_len);
     for (size_t i = gc_len; i; i--)
