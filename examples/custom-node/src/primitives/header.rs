@@ -31,7 +31,7 @@ pub struct CustomHeader {
     #[as_ref]
     #[deref]
     #[serde(flatten)]
-    pub eth_header: Header,
+    pub inner: Header,
     /// The extended header
     pub extension: U256,
 }
@@ -54,93 +54,93 @@ impl Sealable for CustomHeader {
 
 impl alloy_consensus::BlockHeader for CustomHeader {
     fn parent_hash(&self) -> B256 {
-        self.eth_header.parent_hash()
+        self.inner.parent_hash()
     }
 
     fn ommers_hash(&self) -> B256 {
-        self.eth_header.ommers_hash()
+        self.inner.ommers_hash()
     }
 
     fn beneficiary(&self) -> Address {
-        self.eth_header.beneficiary()
+        self.inner.beneficiary()
     }
 
     fn state_root(&self) -> B256 {
-        self.eth_header.state_root()
+        self.inner.state_root()
     }
 
     fn transactions_root(&self) -> B256 {
-        self.eth_header.transactions_root()
+        self.inner.transactions_root()
     }
 
     fn receipts_root(&self) -> B256 {
-        self.eth_header.receipts_root()
+        self.inner.receipts_root()
     }
 
     fn withdrawals_root(&self) -> Option<B256> {
-        self.eth_header.withdrawals_root()
+        self.inner.withdrawals_root()
     }
 
     fn logs_bloom(&self) -> Bloom {
-        self.eth_header.logs_bloom()
+        self.inner.logs_bloom()
     }
 
     fn difficulty(&self) -> U256 {
-        self.eth_header.difficulty()
+        self.inner.difficulty()
     }
 
     fn number(&self) -> BlockNumber {
-        self.eth_header.number()
+        self.inner.number()
     }
 
     fn gas_limit(&self) -> u64 {
-        self.eth_header.gas_limit()
+        self.inner.gas_limit()
     }
 
     fn gas_used(&self) -> u64 {
-        self.eth_header.gas_used()
+        self.inner.gas_used()
     }
 
     fn timestamp(&self) -> u64 {
-        self.eth_header.timestamp()
+        self.inner.timestamp()
     }
 
     fn mix_hash(&self) -> Option<B256> {
-        self.eth_header.mix_hash()
+        self.inner.mix_hash()
     }
 
     fn nonce(&self) -> Option<B64> {
-        self.eth_header.nonce()
+        self.inner.nonce()
     }
 
     fn base_fee_per_gas(&self) -> Option<u64> {
-        self.eth_header.base_fee_per_gas()
+        self.inner.base_fee_per_gas()
     }
 
     fn blob_gas_used(&self) -> Option<u64> {
-        self.eth_header.blob_gas_used()
+        self.inner.blob_gas_used()
     }
 
     fn excess_blob_gas(&self) -> Option<u64> {
-        self.eth_header.excess_blob_gas()
+        self.inner.excess_blob_gas()
     }
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
-        self.eth_header.parent_beacon_block_root()
+        self.inner.parent_beacon_block_root()
     }
 
     fn requests_hash(&self) -> Option<B256> {
-        self.eth_header.requests_hash()
+        self.inner.requests_hash()
     }
 
     fn extra_data(&self) -> &Bytes {
-        self.eth_header.extra_data()
+        self.inner.extra_data()
     }
 }
 
 impl InMemorySize for CustomHeader {
     fn size(&self) -> usize {
-        self.eth_header.size() + self.extension.size()
+        self.inner.size() + self.extension.size()
     }
 }
 
@@ -149,7 +149,7 @@ impl reth_codecs::Compact for CustomHeader {
     where
         B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
     {
-        let identifier = self.eth_header.to_compact(buf);
+        let identifier = self.inner.to_compact(buf);
         self.extension.to_compact(buf);
 
         identifier
@@ -158,6 +158,33 @@ impl reth_codecs::Compact for CustomHeader {
     fn from_compact(buf: &[u8], identifier: usize) -> (Self, &[u8]) {
         let (eth_header, buf) = Compact::from_compact(buf, identifier);
         let (extension, buf) = Compact::from_compact(buf, buf.len());
-        (Self { eth_header, extension }, buf)
+        (Self { inner: eth_header, extension }, buf)
+    }
+}
+
+mod serde_bincode_compat {
+    use alloy_consensus::serde_bincode_compat::Header;
+    use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
+    use revm_primitives::U256;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct CustomHeader<'a> {
+        inner: Header<'a>,
+        extension: U256,
+    }
+
+    impl From<CustomHeader<'_>> for super::CustomHeader {
+        fn from(value: CustomHeader) -> Self {
+            Self { inner: value.inner.into(), extension: value.extension }
+        }
+    }
+
+    impl SerdeBincodeCompat for super::CustomHeader {
+        type BincodeRepr<'a> = CustomHeader<'a>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            CustomHeader { inner: self.inner.as_repr(), extension: self.extension }
+        }
     }
 }

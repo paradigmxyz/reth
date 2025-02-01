@@ -3273,6 +3273,7 @@ version = "0.0.0"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-genesis",
  "alloy-network",
  "alloy-primitives",
  "alloy-rlp",
@@ -3283,8 +3284,10 @@ dependencies = [
  "rand 0.8.5",
  "reth-chainspec",
  "reth-codecs",
+ "reth-network-peers",
  "reth-node-api",
  "reth-optimism-chainspec",
+ "reth-optimism-node",
  "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-storage-api",
