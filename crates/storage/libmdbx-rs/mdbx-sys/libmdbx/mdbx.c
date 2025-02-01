@@ -11383,7 +11383,7 @@ retry_gc_refresh_oldest:;
   txnid_t oldest = txn_oldest_reader(txn);
 retry_gc_have_oldest:
   if (unlikely(oldest >= txn->mt_txnid)) {
-    ERROR("unexpected/invalid oldest-readed txnid %" PRIaTXN
+    ERROR("unexpected/invalid oldest-read txnid %" PRIaTXN
           " for current-txnid %" PRIaTXN,
           oldest, txn->mt_txnid);
     ret.err = MDBX_PROBLEM;
