@@ -7,9 +7,16 @@ license.workspace = true
 
 [dependencies]
 # reth
-reth-codecs = { workspace = true, optional = true }
+reth-codecs.workspace = true
+reth-chainspec.workspace = true
 reth-primitives-traits.workspace = true
-reth-ethereum-primitives.workspace = true
+reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
+reth-optimism-chainspec.workspace = true
+reth-node-api.workspace = true
+reth-trie-db.workspace = true
+reth-storage-api.workspace = true
+
+revm.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -26,10 +33,26 @@ arbitrary = { workspace = true, optional = true, features = ["derive"] }
 derive_more.workspace = true
 rand = { workspace = true, optional = true }
 secp256k1 = { workspace = true, optional = true, features = ["rand"] }
-serde = { workspace = true, optional = true }
+serde.workspace = true
 
 [features]
 default = []
-serde = ["dep:serde"]
-arbitrary = ["dep:arbitrary"]
-reth-codec = ["dep:reth-codecs"]
+optimism = [
+	"reth-optimism-primitives/optimism",
+	"revm-primitives/optimism",
+	"revm/optimism"
+]
+arbitrary = [
+	"dep:arbitrary",
+	"alloy-consensus/arbitrary",
+	"alloy-eips/arbitrary",
+	"alloy-primitives/arbitrary",
+	"alloy-rpc-types?/arbitrary",
+	"alloy-serde?/arbitrary",
+	"reth-codecs/arbitrary",
+	"reth-optimism-primitives/arbitrary",
+	"reth-primitives-traits/arbitrary",
+	"revm-primitives/arbitrary",
+	"revm/arbitrary"
+]
+
