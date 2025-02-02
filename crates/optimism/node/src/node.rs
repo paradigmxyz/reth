@@ -362,7 +362,7 @@ where
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
 
         let validator = TransactionValidationTaskExecutor::eth_builder(Arc::new(
-            ctx.chain_spec().inner.clone(),
+            ctx.chain_spec().clone_inner(),
         ))
         .no_eip4844()
         .with_head_timestamp(ctx.head().timestamp)
