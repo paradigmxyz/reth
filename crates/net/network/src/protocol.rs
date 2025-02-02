@@ -6,7 +6,6 @@ use alloy_primitives::bytes::BytesMut;
 use futures::Stream;
 use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
-    HelloMessageWithProtocols,
 };
 use reth_network_api::{Direction, PeerId};
 use std::{
@@ -151,12 +150,6 @@ impl RlpxSubProtocols {
 pub(crate) struct RlpxSubProtocolHandlers(Vec<Box<dyn DynConnectionHandler>>);
 
 impl RlpxSubProtocolHandlers {
-    /// Tries to add the hello message to the handlers.
-    pub(crate) fn try_add_hello(mut self, hello_msg: &mut HelloMessageWithProtocols) -> Self {
-        self.retain(|handler| hello_msg.try_add_protocol(handler.protocol()).is_ok());
-        self
-    }
-
     /// Returns all handlers.
     pub(crate) fn into_iter(self) -> impl Iterator<Item = Box<dyn DynConnectionHandler>> {
         self.0.into_iter()
