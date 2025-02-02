@@ -10,16 +10,16 @@
 #![cfg(feature = "optimism")]
 
 use chainspec::CustomChainSpec;
+use engine::CustomEngineTypes;
 use primitives::CustomNodePrimitives;
 use reth_node_api::{NodeTypes, NodeTypesWithEngine};
-use reth_optimism_node::{OpEngineTypes, OpNode};
+use reth_optimism_node::{engine::OpPayloadTypes, OpEngineTypes, OpNode};
 use reth_storage_api::EthStorage;
-use reth_optimism_node::engine::OpPayloadTypes;
 use reth_trie_db::MerklePatriciaTrie;
 
 pub mod chainspec;
-pub mod primitives;
 pub mod engine;
+pub mod primitives;
 
 pub struct CustomNode;
 
@@ -31,5 +31,6 @@ impl NodeTypes for CustomNode {
 }
 
 impl NodeTypesWithEngine for CustomNode {
-    type Engine = OpEngineTypes<OpPayloadTypes<CustomNodePrimitives>>;
+    type Engine = CustomEngineTypes;
 }
+

@@ -48,13 +48,11 @@ pub use config::*;
 /// payload job. Hence this trait is also [`PayloadTypes`].
 pub trait EngineTypes:
     PayloadTypes<
-        BuiltPayload: TryInto<Self::ExecutionPayloadEnvelopeV1>
-                          + TryInto<Self::ExecutionPayloadEnvelopeV2>
-                          + TryInto<Self::ExecutionPayloadEnvelopeV3>
-                          + TryInto<Self::ExecutionPayloadEnvelopeV4>,
-    > + DeserializeOwned
-    + Serialize
-    + 'static
+    BuiltPayload: TryInto<Self::ExecutionPayloadEnvelopeV1>
+                      + TryInto<Self::ExecutionPayloadEnvelopeV2>
+                      + TryInto<Self::ExecutionPayloadEnvelopeV3>
+                      + TryInto<Self::ExecutionPayloadEnvelopeV4>,
+>
 {
     /// Execution Payload V1 envelope type.
     type ExecutionPayloadEnvelopeV1: DeserializeOwned
