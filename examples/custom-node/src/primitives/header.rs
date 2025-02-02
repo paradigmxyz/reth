@@ -169,7 +169,7 @@ mod serde_bincode_compat {
     use serde::{Deserialize, Serialize};
 
     #[derive(Serialize, Deserialize, Debug)]
-    struct CustomHeader<'a> {
+    pub struct CustomHeader<'a> {
         inner: Header<'a>,
         extension: U256,
     }

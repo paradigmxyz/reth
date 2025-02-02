@@ -1,9 +1,9 @@
-use reth_chainspec::EthChainSpec;
-use reth_optimism_chainspec::OpChainSpec;
-use reth_network_peers::NodeRecord;
-use reth_primitives_traits::SealedHeader;
 use crate::primitives::CustomHeader;
 use alloy_genesis::Genesis;
+use reth_chainspec::EthChainSpec;
+use reth_network_peers::NodeRecord;
+use reth_optimism_chainspec::OpChainSpec;
+use reth_primitives_traits::SealedHeader;
 
 #[derive(Debug)]
 pub struct CustomChainSpec {
@@ -54,7 +54,7 @@ impl EthChainSpec for CustomChainSpec {
         self.genesis_header.hash()
     }
 
-    fn genesis_header(&self) ->  &Self::Header {
+    fn genesis_header(&self) -> &Self::Header {
         &self.genesis_header
     }
 }
