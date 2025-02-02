@@ -20,6 +20,11 @@ impl<ChainSpec> LocalPayloadAttributesBuilder<ChainSpec> {
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
+
+    /// Returns the chain spec.
+    pub fn chain_spec(&self) -> &ChainSpec {
+        &self.chain_spec
+    }
 }
 
 impl<ChainSpec> PayloadAttributesBuilder<EthPayloadAttributes>
@@ -61,11 +66,11 @@ where
     }
 }
 
-/// A temporary workaround to support local payload engine launcher for arbitrary payload
-/// attributes.
+// / A temporary workaround to support local payload engine launcher for arbitrary payload
+// / attributes.
 // TODO(mattsse): This should be reworked so that LocalPayloadAttributesBuilder can be implemented
 // for any
-pub trait UnsupportedLocalAttributes: Send + Sync + 'static {}
+// pub trait UnsupportedLocalAttributes: Send + Sync + 'static {}
 
 // impl<T, ChainSpec> PayloadAttributesBuilder<T> for LocalPayloadAttributesBuilder<ChainSpec>
 // where

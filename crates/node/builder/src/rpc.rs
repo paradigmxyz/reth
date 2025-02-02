@@ -653,14 +653,15 @@ where
             std::any::type_name::<PayloadAttributes>()
         );
 
-        if TypeId::of::<
-            <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
-        >() == TypeId::of::<PayloadAttributes>()
-        {
-            Ok(Some(Box::new(LocalPayloadAttributesBuilder::new(ctx.config.chain.clone()))))
-        } else {
-            Ok(None)
-        }
+        Ok(Some(Box::new(LocalPayloadAttributesBuilder::new(ctx.config.chain.clone()))))
+        // if TypeId::of::<
+        //     <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
+        // >() == TypeId::of::<PayloadAttributes>()
+        // {
+        //     // Ok(None)
+        // } else {
+        //     Ok(None)
+        // }
     }
 }
 

@@ -8,10 +8,12 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+// pub mod engine;
 pub mod miner;
 pub mod payload;
 pub mod service;
 
+// pub use engine::LocalEngineNodeLauncher;
 pub use miner::MiningMode;
 pub use payload::LocalPayloadAttributesBuilder;
 pub use service::LocalEngineService;
