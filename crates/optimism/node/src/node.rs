@@ -1,19 +1,13 @@
 //! Optimism Node types config.
 
-use crate::{
-    args::RollupArgs,
-    engine::OpEngineValidator,
-    txpool::{OpTransactionPool, OpTransactionValidator},
-    OpEngineTypes,
-};
-use op_alloy_consensus::OpPooledTransaction;
+use crate::{args::RollupArgs, engine::OpEngineValidator, OpEngineTypes};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{
     execute::BasicBlockExecutorProvider, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor,
 };
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
-use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, PrimitivesTy, TxTy};
+use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, PrimitivesTy};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
@@ -36,13 +30,16 @@ use reth_optimism_rpc::{
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi, OpEthApiError, SequencerClient,
 };
+use reth_optimism_transaction_pool::{
+    OpPooledTransaction, OpTransactionPool, OpTransactionValidator,
+};
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{CanonStateSubscriptions, EthStorage};
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, PoolTransaction, TransactionPool,
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, TransactionPool,
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
@@ -489,9 +486,7 @@ where
                 Primitives = OpPrimitives,
             >,
         >,
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
-            + Unpin
-            + 'static,
+        Pool: TransactionPool<Transaction = OpPooledTransaction> + Unpin + 'static,
         Evm: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
@@ -532,9 +527,7 @@ where
             Primitives = OpPrimitives,
         >,
     >,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
-        + Unpin
-        + 'static,
+    Pool: TransactionPool<Transaction = OpPooledTransaction> + Unpin + 'static,
     Txs: OpPayloadTransactions,
 {
     async fn spawn_payload_service(
@@ -606,13 +599,7 @@ impl OpNetworkBuilder {
 impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
-    Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = TxTy<Node::Types>,
-                Pooled = OpPooledTransaction,
-            >,
-        > + Unpin
-        + 'static,
+    Pool: TransactionPool<Transaction = OpPooledTransaction> + Unpin + 'static,
 {
     type Primitives = OpNetworkPrimitives;
 
@@ -677,6 +664,6 @@ impl NetworkPrimitives for OpNetworkPrimitives {
     type BlockBody = reth_primitives::BlockBody<OpTransactionSigned>;
     type Block = reth_primitives::Block<OpTransactionSigned>;
     type BroadcastedTransaction = OpTransactionSigned;
-    type PooledTransaction = OpPooledTransaction;
+    type PooledTransaction = op_alloy_consensus::OpPooledTransaction;
     type Receipt = OpReceipt;
 }

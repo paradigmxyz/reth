@@ -249,7 +249,7 @@ where
     T: PoolTransaction,
     I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
 {
-    type Transaction = T::Consensus;
+    type Transaction = T;
 
     fn next(&mut self, _ctx: ()) -> Option<Recovered<Self::Transaction>> {
         loop {
@@ -257,7 +257,8 @@ where
             if self.invalid.contains(&tx.sender()) {
                 continue
             }
-            return Some(tx.to_consensus())
+
+            return Some(Recovered::new_unchecked(tx.transaction.clone(), tx.sender()))
         }
     }
 
@@ -895,9 +896,10 @@ mod tests {
         }
 
         let mut block = PayloadTransactionsChain::new(
-            PayloadTransactionsFixed::single(
-                MockTransaction::eip1559().with_sender(address_top_of_block).into(),
-            ),
+            PayloadTransactionsFixed::single(Recovered::new_unchecked(
+                MockTransaction::eip1559().with_sender(address_top_of_block),
+                address_top_of_block,
+            )),
             Some(100),
             PayloadTransactionsChain::new(
                 BestPayloadTransactions::new(priority_pool.best()),

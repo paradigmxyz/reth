@@ -10,26 +10,26 @@ use reth_primitives::Recovered;
 /// and compose it with the rest of the transactions.
 #[derive(Debug)]
 pub struct PayloadTransactionsFixed<T> {
-    transactions: Vec<T>,
+    transactions: Vec<Recovered<T>>,
     index: usize,
 }
 
 impl<T> PayloadTransactionsFixed<T> {
     /// Constructs a new [`PayloadTransactionsFixed`].
-    pub fn new(transactions: Vec<T>) -> Self {
+    pub fn new(transactions: Vec<Recovered<T>>) -> Self {
         Self { transactions, index: Default::default() }
     }
 
     /// Constructs a new [`PayloadTransactionsFixed`] with a single transaction.
-    pub fn single(transaction: T) -> Self {
+    pub fn single(transaction: Recovered<T>) -> Self {
         Self { transactions: vec![transaction], index: Default::default() }
     }
 }
 
-impl<T: Clone> PayloadTransactions for PayloadTransactionsFixed<Recovered<T>> {
+impl<T: Clone> PayloadTransactions for PayloadTransactionsFixed<T> {
     type Transaction = T;
 
-    fn next(&mut self, _ctx: ()) -> Option<Recovered<T>> {
+    fn next(&mut self, _ctx: ()) -> Option<Recovered<Self::Transaction>> {
         (self.index < self.transactions.len()).then(|| {
             let tx = self.transactions[self.index].clone();
             self.index += 1;
