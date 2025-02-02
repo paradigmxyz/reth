@@ -953,6 +953,21 @@ async fn authenticate<N: NetworkPrimitives>(
     }
 }
 
+/// Returns an [`ECIESStream`] if it can be built. If not, send a
+/// [`PendingSessionEvent::EciesAuthError`] and returns `None`
+async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
+    stream: Io,
+    secret_key: SecretKey,
+    direction: Direction,
+) -> Result<ECIESStream<Io>, ECIESError> {
+    match direction {
+        Direction::Incoming => ECIESStream::incoming(stream, secret_key).await,
+        Direction::Outgoing(remote_peer_id) => {
+            ECIESStream::connect(stream, secret_key, remote_peer_id).await
+        }
+    }
+}
+
 /// Authenticate the stream via handshake
 ///
 /// On Success return the authenticated stream as [`PendingSessionEvent`].
@@ -1059,20 +1074,5 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         conn,
         direction,
         client_id: their_hello.client_version,
-    }
-}
-
-/// Returns an [`ECIESStream`] if it can be built. If not, send a
-/// [`PendingSessionEvent::EciesAuthError`] and returns `None`
-async fn get_ecies_stream<Io: AsyncRead + AsyncWrite + Unpin>(
-    stream: Io,
-    secret_key: SecretKey,
-    direction: Direction,
-) -> Result<ECIESStream<Io>, ECIESError> {
-    match direction {
-        Direction::Incoming => ECIESStream::incoming(stream, secret_key).await,
-        Direction::Outgoing(remote_peer_id) => {
-            ECIESStream::connect(stream, secret_key, remote_peer_id).await
-        }
     }
 }
