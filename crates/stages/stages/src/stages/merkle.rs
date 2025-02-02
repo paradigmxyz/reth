@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockNumber, Sealable, B256};
+use alloy_primitives::{BlockNumber, B256};
 use reth_codecs::Compact;
 use reth_consensus::ConsensusError;
 use reth_db::tables;
@@ -277,7 +277,7 @@ where
         // Reset the checkpoint
         self.save_execution_checkpoint(provider, None)?;
 
-        validate_state_root(trie_root, SealedHeader::seal_slow(target_block), to_block)?;
+        validate_state_root(trie_root, SealedHeader::seal(target_block), to_block)?;
 
         Ok(ExecOutput {
             checkpoint: StageCheckpoint::new(to_block)
@@ -330,21 +330,27 @@ where
                 .header_by_number(input.unwind_to)?
                 .ok_or_else(|| ProviderError::HeaderNotFound(input.unwind_to.into()))?;
 
-            validate_state_root(block_root, SealedHeader::seal_slow(target), input.unwind_to)?;
+            validate_state_root(block_root, SealedHeader::seal(target), input.unwind_to)?;
 
             // Validation passed, apply unwind changes to the database.
             provider.write_trie_updates(&updates)?;
 
-            // TODO(alexey): update entities checkpoint
+            // Update entities checkpoint to reflect unwound state
+            entities_checkpoint.processed = (tx.entries::<tables::HashedAccounts>()? +
+                tx.entries::<tables::HashedStorages>()?) as u64;
+            entities_checkpoint.total = entities_checkpoint.processed;
         }
 
-        Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+        Ok(UnwindOutput {
+            checkpoint: StageCheckpoint::new(input.unwind_to)
+                .with_entities_stage_checkpoint(entities_checkpoint),
+        })
     }
 }
 
 /// Check that the computed state root matches the root in the expected header.
 #[inline]
-fn validate_state_root<H: BlockHeader + Sealable + Debug>(
+fn validate_state_root<H: BlockHeader + Debug>(
     got: B256,
     expected: SealedHeader<H>,
     target_block: BlockNumber,
@@ -360,6 +366,34 @@ fn validate_state_root<H: BlockHeader + Sealable + Debug>(
             block: Box::new(expected.block_with_parent()),
         })
     }
+}
+
+/// Helper function to collect debugging information for state root errors
+pub fn collect_state_root_debug_info(
+    provider: &impl StatsReader,
+    block_number: BlockNumber,
+    state_root: B256,
+) -> Result<String, StageError> {
+    // Get database stats with checksum
+    let db_stats = provider.stats()?.to_string();
+
+    // Format the debug report
+    let debug_report = format!(
+        r#"State Root Debug Report
+Block Number: {block_number}
+State Root: {state_root:?}
+
+Database Stats:
+{db_stats}
+
+Note: Please include 50-100 lines of logs before and after this error message.
+Debug logs can be found by running: `reth --help | grep -A 4 'log.file.directory'`
+
+Please submit this information at: https://github.com/paradigmxyz/reth/issues/new
+"#
+    );
+
+    Ok(debug_report)
 }
 
 #[cfg(test)]
@@ -520,12 +554,11 @@ mod tests {
                 accounts.iter().map(|(addr, acc)| (*addr, (*acc, std::iter::empty()))),
             )?;
 
-            let (header, body) = random_block(
+            let SealedBlock { header, body } = random_block(
                 &mut rng,
                 stage_progress,
                 BlockParams { parent: preblocks.last().map(|b| b.hash()), ..Default::default() },
-            )
-            .split_sealed_header_body();
+            );
             let mut header = header.unseal();
 
             header.state_root = state_root(
@@ -534,10 +567,7 @@ mod tests {
                     .into_iter()
                     .map(|(address, account)| (address, (account, std::iter::empty()))),
             );
-            let sealed_head = SealedBlock::<reth_primitives::Block>::from_sealed_parts(
-                SealedHeader::seal_slow(header),
-                body,
-            );
+            let sealed_head = SealedBlock { header: SealedHeader::seal(header), body };
 
             let head_hash = sealed_head.hash();
             let mut blocks = vec![sealed_head];
@@ -587,8 +617,8 @@ mod tests {
             let static_file_provider = self.db.factory.static_file_provider();
             let mut writer =
                 static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
-            let mut last_header = last_block.clone_sealed_header();
-            last_header.set_state_root(root);
+            let mut last_header = last_block.header().clone();
+            last_header.state_root = root;
 
             let hash = last_header.hash_slow();
             writer.prune_headers(1).unwrap();
@@ -651,7 +681,7 @@ mod tests {
 
                             if !value.is_zero() {
                                 let storage_entry = StorageEntry { key: hashed_slot, value };
-                                storage_cursor.upsert(hashed_address, &storage_entry).unwrap();
+                                storage_cursor.upsert(hashed_address, storage_entry).unwrap();
                             }
                         }
                     }
