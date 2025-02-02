@@ -15,7 +15,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use revm_primitives::map::DefaultHashBuilder;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 type Cache<K, V> = mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
 
@@ -388,56 +388,82 @@ pub(crate) struct ProviderCacheBuilder {
 impl ProviderCacheBuilder {
     /// Build a [`ProviderCaches`] struct, so that provider caches can be easily cloned.
     pub(crate) fn build_caches(self) -> ProviderCaches {
-        ProviderCaches {
-            code_cache: CacheBuilder::new(self.code_cache_size)
-                .build_with_hasher(DefaultHashBuilder::default()),
-            storage_cache: CacheBuilder::new(self.storage_cache_size)
-                .build_with_hasher(DefaultHashBuilder::default()),
-            account_cache: CacheBuilder::new(self.account_cache_size)
-                .build_with_hasher(DefaultHashBuilder::default()),
-        }
+        const STORAGE_MAX_WEIGHT: u64 = 6 * 1024 * 1024 * 1024; // 6Gb
+        const ACCOUNT_MAX_WEIGHT: u64 = 1024 * 1024 * 1024; // 1Gb
+        const CODE_MAX_WEIGHT: u64 = 1024 * 1024 * 1024; // 1Gb
+
+        const EXPIRY_TIME: Duration = Duration::from_secs(7200); // 2 hours
+        const TIME_TO_IDLE: Duration = Duration::from_secs(3600); // 1 hour
+
+        let storage_cache = CacheBuilder::new(self.storage_cache_size)
+            .weigher(|_key: &Address, value: &AccountStorageCache| -> u32 {
+                // values based on results from measure_storage_cache_overhead test
+                let base_weight = 40_000;
+                let slots_weight = value.len() * 320;
+                (base_weight + slots_weight) as u32
+            })
+            .max_capacity(STORAGE_MAX_WEIGHT)
+            .time_to_live(EXPIRY_TIME)
+            .time_to_idle(TIME_TO_IDLE)
+            .build_with_hasher(DefaultHashBuilder::default());
+
+        let account_cache = CacheBuilder::new(self.account_cache_size)
+            .weigher(|_key: &Address, value: &Option<Account>| -> u32 {
+                match value {
+                    Some(account) => {
+                        let mut weight = 40;
+                        if account.nonce != 0 {
+                            weight += 32;
+                        }
+                        if !account.balance.is_zero() {
+                            weight += 32;
+                        }
+                        if account.bytecode_hash.is_some() {
+                            weight += 40; // size of Option<B256>
+                        } else {
+                            weight += 8; // size of None variant
+                        }
+                        weight as u32
+                    }
+                    None => 8, // size of None variant
+                }
+            })
+            .max_capacity(ACCOUNT_MAX_WEIGHT)
+            .time_to_live(EXPIRY_TIME)
+            .time_to_idle(TIME_TO_IDLE)
+            .build_with_hasher(DefaultHashBuilder::default());
+
+        let code_cache = CacheBuilder::new(self.code_cache_size)
+            .weigher(|_key: &B256, value: &Option<Bytecode>| -> u32 {
+                match value {
+                    Some(bytecode) => {
+                        // base weight + actual bytecode size
+                        (40 + bytecode.len()) as u32
+                    }
+                    None => 8, // size of None variant
+                }
+            })
+            .max_capacity(CODE_MAX_WEIGHT)
+            .time_to_live(EXPIRY_TIME)
+            .time_to_idle(TIME_TO_IDLE)
+            .build_with_hasher(DefaultHashBuilder::default());
+
+        ProviderCaches { code_cache, storage_cache, account_cache }
     }
 }
 
 impl Default for ProviderCacheBuilder {
     fn default() -> Self {
-        // moka caches have been benchmarked up to 800k entries, so we just use 10M on account and
-        // code cache, and 150K-1k for storage cache, optimizing for hitrate over memory
-        // consumption.
+        // With weigher and max_capacity in place, these numbers represent
+        // the maximum number of entries that can be stored, not the actual
+        // memory usage which is controlled by max_capacity.
         //
-        // Heuristic for storage cache memory consumption:
-        //   Base data sizes:
-        //   * First level keys (Address): 20 bytes
-        //   * Second level per entry:
-        //     - StorageKey: 32 bytes
-        //     - StorageValue: 32 bytes
-        //     Total: 64 bytes per storage slot
-        //
-        //   Cache implementation overhead:
-        //   * Per entry in any Cache: 48 bytes (key/value refs, timestamps, etc.)
-        //   * Per Cache instance: 192 bytes base overhead
-        //
-        //   Theoretical maximum memory usage:
-        //   Base data (5.4 GB):
-        //   * First level: 90k accounts * 20B = 0.002 GB
-        //   * Second level: 90k accounts * 1000 slots * 64B = 5.364 GB
-        //
-        //   Overhead (4.0 GB):
-        //   * First level: 90k accounts * 48B = 0.004 GB
-        //   * Second level: 90k accounts * (192B + 1000 slots * 48B) = 4.039 GB
-        //
-        //   Total maximum: 9.4 GB
-        //
-        //   This maximum represents the worst case scenario, not all cached
-        //   addresses will be using 1000 slots.
-        //
-        // Code cache can be much much larger - this needs to be space instead of element bound.
-        // Accounts can be element bound but memory calculation TODO
-        //
-        // See: https://github.com/moka-rs/moka/wiki#admission-and-eviction-policies
+        // Code cache: up to 1M entries but limited to 1GB
+        // Storage cache: up to 1M accounts but limited to 6GB
+        // Account cache: up to 10M accounts but limited to 1GB
         Self {
             code_cache_size: 1_000_000,
-            storage_cache_size: 90_000,
+            storage_cache_size: 1_000_000,
             account_cache_size: 10_000_000,
         }
     }
@@ -502,6 +528,108 @@ impl AccountStorageCache {
 
 impl Default for AccountStorageCache {
     fn default() -> Self {
-        Self::new(1000)
+        // With weigher and max_capacity in place, this numbers represent
+        // the maximum number of entries that can be stored, not the actual
+        // memory usage which is controlled by storage cache's max_capacity.
+        Self::new(10000)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::Rng;
+    use std::mem::size_of;
+
+    mod tracking_allocator {
+        use std::{
+            alloc::{GlobalAlloc, Layout, System},
+            sync::atomic::{AtomicUsize, Ordering},
+        };
+
+        #[derive(Debug)]
+        pub(crate) struct TrackingAllocator {
+            allocated: AtomicUsize,
+            total_allocated: AtomicUsize,
+            inner: System,
+        }
+
+        impl TrackingAllocator {
+            pub(crate) const fn new() -> Self {
+                Self {
+                    allocated: AtomicUsize::new(0),
+                    total_allocated: AtomicUsize::new(0),
+                    inner: System,
+                }
+            }
+
+            pub(crate) fn reset(&self) {
+                self.allocated.store(0, Ordering::SeqCst);
+                self.total_allocated.store(0, Ordering::SeqCst);
+            }
+
+            pub(crate) fn total_allocated(&self) -> usize {
+                self.total_allocated.load(Ordering::SeqCst)
+            }
+        }
+
+        unsafe impl GlobalAlloc for TrackingAllocator {
+            unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+                let ret = self.inner.alloc(layout);
+                if !ret.is_null() {
+                    self.allocated.fetch_add(layout.size(), Ordering::SeqCst);
+                    self.total_allocated.fetch_add(layout.size(), Ordering::SeqCst);
+                }
+                ret
+            }
+
+            unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+                self.allocated.fetch_sub(layout.size(), Ordering::SeqCst);
+                self.inner.dealloc(ptr, layout)
+            }
+        }
+    }
+
+    use tracking_allocator::TrackingAllocator;
+
+    #[global_allocator]
+    static ALLOCATOR: TrackingAllocator = TrackingAllocator::new();
+
+    fn measure_allocation<T, F>(f: F) -> (usize, T)
+    where
+        F: FnOnce() -> T,
+    {
+        ALLOCATOR.reset();
+        let result = f();
+        let total = ALLOCATOR.total_allocated();
+        (total, result)
+    }
+
+    #[test]
+    fn measure_storage_cache_overhead() {
+        let (base_overhead, cache) = measure_allocation(|| AccountStorageCache::new(1000));
+        println!("Base AccountStorageCache overhead: {} bytes", base_overhead);
+        let mut rng = rand::thread_rng();
+
+        let key = StorageKey::random();
+        let value = StorageValue::from(rng.gen::<u128>());
+        let (first_slot, _) = measure_allocation(|| {
+            cache.insert_storage(key, Some(value));
+        });
+        println!("First slot insertion overhead: {} bytes", first_slot);
+
+        let (hundred_slots, _) = measure_allocation(|| {
+            for _ in 0..100 {
+                let key = StorageKey::random();
+                let value = StorageValue::from(rng.gen::<u128>());
+                cache.insert_storage(key, Some(value));
+            }
+        });
+        println!("Average overhead over 100 slots: {} bytes", hundred_slots / 100);
+
+        println!("\nTheoretical sizes:");
+        println!("StorageKey size: {} bytes", size_of::<StorageKey>());
+        println!("StorageValue size: {} bytes", size_of::<StorageValue>());
+        println!("Option<StorageValue> size: {} bytes", size_of::<Option<StorageValue>>());
     }
 }
