@@ -34,7 +34,7 @@ pub use reth_optimism_txpool as txpool;
 pub mod utils;
 
 pub use reth_optimism_payload_builder::{
-    OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes,
+    OpBuiltPayload, OpPayloadBuilder, OpPayloadBuilderAttributes, OpPayloadAttributes
 };
 
 pub use reth_optimism_evm::*;
