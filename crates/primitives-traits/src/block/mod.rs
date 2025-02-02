@@ -114,10 +114,7 @@ pub trait Block:
     }
 
     /// Returns the rlp length of the block with the given header and body.
-    fn rlp_length(header: &Self::Header, body: &Self::Body) -> usize {
-        // TODO(mattsse): replace default impl with <https://github.com/alloy-rs/alloy/pull/1906>
-        header.length() + body.length()
-    }
+    fn rlp_length(header: &Self::Header, body: &Self::Body) -> usize;
 
     /// Expensive operation that recovers transaction signer.
     fn recover_signers(&self) -> Result<Vec<Address>, RecoveryError>
@@ -199,6 +196,10 @@ where
 
     fn split(self) -> (Self::Header, Self::Body) {
         (self.header, self.body)
+    }
+
+    fn rlp_length(header: &Self::Header, body: &Self::Body) -> usize {
+        Self::rlp_length_for(header, body)
     }
 }
 
