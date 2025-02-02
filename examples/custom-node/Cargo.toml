@@ -30,6 +30,10 @@ alloy-serde = { workspace = true, optional = true }
 alloy-rlp.workspace = true
 alloy-rpc-types = { workspace = true, optional = true }
 revm-primitives.workspace = true
+reth-chain-state.workspace = true
+
+op-alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # misc
 arbitrary = { workspace = true, optional = true, features = ["derive"] }
