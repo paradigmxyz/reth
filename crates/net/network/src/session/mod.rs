@@ -5,6 +5,7 @@ mod conn;
 mod counter;
 mod handle;
 mod pending;
+mod protocol;
 
 use active::QueuedOutgoingMessages;
 pub use conn::EthRlpxConnection;
