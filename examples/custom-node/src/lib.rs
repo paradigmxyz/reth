@@ -12,8 +12,9 @@
 use chainspec::CustomChainSpec;
 use engine::CustomEngineTypes;
 use primitives::CustomNodePrimitives;
-use reth_node_api::{NodeTypes, NodeTypesWithEngine};
-use reth_optimism_node::{engine::OpPayloadTypes, OpEngineTypes, OpNode};
+use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
+use reth_node_builder::{components::ComponentsBuilder, Node, NodeAdapter, NodeComponentsBuilder};
+use reth_optimism_node::{engine::OpPayloadTypes, node::{OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpPayloadBuilder, OpPoolBuilder}, OpEngineTypes, OpNode};
 use reth_storage_api::EthStorage;
 use reth_trie_db::MerklePatriciaTrie;
 
@@ -21,7 +22,8 @@ pub mod chainspec;
 pub mod engine;
 pub mod primitives;
 
-pub struct CustomNode;
+#[derive(Debug, Clone)]
+pub struct CustomNode(OpNode);
 
 impl NodeTypes for CustomNode {
     type Primitives = CustomNodePrimitives;
@@ -34,3 +36,24 @@ impl NodeTypesWithEngine for CustomNode {
     type Engine = CustomEngineTypes;
 }
 
+// impl<N: FullNodeTypes<Types = Self>> Node<N> for CustomNode {
+//     type ComponentsBuilder = ComponentsBuilder<
+//         N,
+//         OpPoolBuilder,
+//         OpPayloadBuilder,
+//         OpNetworkBuilder,
+//         OpExecutorBuilder,
+//         OpConsensusBuilder,
+//     >;
+
+//     type AddOns =
+//         OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
+
+//     fn components_builder(&self) -> Self::ComponentsBuilder {
+//         self.0.components()
+//     }
+
+//     fn add_ons(&self) -> Self::AddOns {
+//         self.0.add_ons()
+//     }
+// }

@@ -3096,6 +3096,7 @@ dependencies = [
  "reth-codecs",
  "reth-network-peers",
  "reth-node-api",
+ "reth-node-builder",
  "reth-optimism-chainspec",
  "reth-optimism-node",
  "reth-optimism-primitives",
