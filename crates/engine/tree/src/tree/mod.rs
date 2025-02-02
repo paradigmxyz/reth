@@ -2375,11 +2375,29 @@ where
         let (state_root_handle, state_root_task_config, state_hook) =
             if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-                let state_root_config = StateRootConfig::new_from_input(
-                    consistent_view.clone(),
-                    self.compute_trie_input(consistent_view, block.header().parent_hash())
-                        .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
-                );
+
+                // Compute trie input
+                let trie_input_start = Instant::now();
+                let trie_input = self
+                    .compute_trie_input(consistent_view.clone(), block.header().parent_hash())
+                    .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+
+                // Create state root config
+                let config_start = Instant::now();
+                let state_root_config =
+                    StateRootConfig::new_from_input(consistent_view, trie_input);
+
+                let trie_input_elapsed = config_start - trie_input_start;
+                self.metrics
+                    .block_validation
+                    .trie_input_duration
+                    .set(trie_input_elapsed.as_secs_f64());
+
+                let config_elapsed = config_start.elapsed();
+                self.metrics
+                    .block_validation
+                    .state_root_config_duration
+                    .set(config_elapsed.as_secs_f64());
 
                 let state_root_task = StateRootTask::new(
                     state_root_config.clone(),
