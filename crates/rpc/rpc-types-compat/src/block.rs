@@ -2,7 +2,6 @@
 
 use crate::transaction::TransactionCompat;
 use alloy_consensus::{BlockHeader, Sealable};
-use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::{
     Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
@@ -106,11 +105,8 @@ fn from_block_with_transactions<T, B: BlockTrait>(
     body: B::Body,
     transactions: BlockTransactions<T>,
 ) -> Block<T, Header<B::Header>> {
-    let withdrawals = header
-        .withdrawals_root()
-        .is_some()
-        .then(|| body.withdrawals().cloned().map(Withdrawals::into_inner).map(Into::into))
-        .flatten();
+    let withdrawals =
+        header.withdrawals_root().is_some().then(|| body.withdrawals().cloned()).flatten();
 
     let uncles =
         body.ommers().map(|o| o.iter().map(|h| h.hash_slow()).collect()).unwrap_or_default();
