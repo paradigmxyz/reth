@@ -921,9 +921,9 @@ mod tests {
 
             tokio::task::spawn(start_pending_incoming_session(
                 disconnect_rx,
-                pending_sessions_tx,
-                stream,
                 session_id,
+                stream,
+                pending_sessions_tx,
                 remote_addr,
                 self.secret_key,
                 self.hello.clone(),
