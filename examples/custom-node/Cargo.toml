@@ -13,6 +13,7 @@ reth-primitives-traits.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde", "reth-codec"] }
 reth-optimism-chainspec.workspace = true
 reth-node-api.workspace = true
+reth-node-builder.workspace = true
 reth-trie-db.workspace = true
 reth-storage-api.workspace = true
 reth-network-peers.workspace = true
