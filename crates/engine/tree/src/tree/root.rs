@@ -555,15 +555,66 @@ where
 
     /// Handles request for proof prefetch.
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
-        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &targets);
+        let proof_targets = self.get_prefetch_proof_targets(targets);
+        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
             hashed_state_update: Default::default(),
-            proof_targets: targets,
+            proof_targets,
             proof_sequence_number: self.proof_sequencer.next_sequence(),
             state_root_message_sender: self.tx.clone(),
         });
+    }
+
+    /// Calls `get_proof_targets` with existing proof targets for prefetching.
+    fn get_prefetch_proof_targets(&self, mut targets: MultiProofTargets) -> MultiProofTargets {
+        // Here we want to filter out any targets that are already fetched
+        //
+        // This means we need to remove any storage slots that have already been fetched
+        let mut duplicates = 0;
+
+        // First remove all storage targets that are subsets of already fetched storage slots
+        targets.retain(|hashed_address, target_storage| {
+            let keep = self
+                .fetched_proof_targets
+                .get(hashed_address)
+                // do NOT remove if None, because that means the account has not been fetched yet
+                .is_none_or(|fetched_storage| {
+                    // remove if a subset
+                    !target_storage.is_subset(fetched_storage)
+                });
+
+            if !keep {
+                duplicates += target_storage.len();
+            }
+
+            keep
+        });
+
+        // For all non-subset remaining targets, we have to calculate the difference
+        for (hashed_address, target_storage) in &mut targets {
+            let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
+                // this means the account has not been fetched yet, so we must fetch everything
+                // associated with this account
+                continue
+            };
+
+            let prev_target_storage_len = target_storage.len();
+
+            // keep only the storage slots that have not been fetched yet
+            //
+            // we already removed subsets, so this should only remove duplicates
+            target_storage.retain(|slot| !fetched_storage.contains(slot));
+
+            duplicates += prev_target_storage_len - target_storage.len();
+        }
+
+        if duplicates > 0 {
+            trace!(target: "engine::root", duplicates, "Removed duplicate proof targets");
+        }
+
+        targets
     }
 
     /// Handles state updates.
