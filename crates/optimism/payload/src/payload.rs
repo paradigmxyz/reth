@@ -1,28 +1,23 @@
 //! Payload related types
 
 use alloy_eips::{
-    eip1559::BaseFeeParams, eip2718::Decodable2718, eip4844::BlobTransactionSidecar,
-    eip4895::Withdrawals, eip7685::Requests,
+    eip1559::BaseFeeParams, eip2718::Decodable2718, eip4895::Withdrawals, eip7685::Requests,
 };
 use alloy_primitives::{keccak256, Address, Bytes, B256, B64, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3,
-    PayloadId,
+    BlobsBundleV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2, ExecutionPayloadV1,
+    ExecutionPayloadV3, PayloadId,
 };
 use op_alloy_consensus::{encode_holocene_extra_data, EIP1559ParamError};
 /// Re-export for use in downstream arguments.
 pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use op_alloy_rpc_types_engine::{OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_chainspec::EthereumHardforks;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{OpBlock, OpPrimitives, OpTransactionSigned};
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{transaction::WithEncoded, SealedBlock};
-
-use std::sync::Arc;
 
 /// Optimism Payload Builder Attributes
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -135,19 +130,10 @@ impl PayloadBuilderAttributes for OpPayloadBuilderAttributes {
 pub struct OpBuiltPayload {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
-    /// The built block
-    pub(crate) block: Arc<SealedBlock<OpBlock>>,
     /// Block execution data for the payload, if any.
-    pub(crate) executed_block: Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
+    pub(crate) block: ExecutedBlockWithTrieUpdates<OpPrimitives>,
     /// The fees of the block
     pub(crate) fees: U256,
-    /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
-    /// empty.
-    pub(crate) sidecars: Vec<BlobTransactionSidecar>,
-    /// The rollup's chainspec.
-    pub(crate) chain_spec: Arc<OpChainSpec>,
-    /// The payload attributes.
-    pub(crate) attributes: OpPayloadBuilderAttributes,
 }
 
 // === impl BuiltPayload ===
@@ -156,13 +142,10 @@ impl OpBuiltPayload {
     /// Initializes the payload with the given initial block.
     pub const fn new(
         id: PayloadId,
-        block: Arc<SealedBlock<OpBlock>>,
         fees: U256,
-        chain_spec: Arc<OpChainSpec>,
-        attributes: OpPayloadBuilderAttributes,
-        executed_block: Option<ExecutedBlockWithTrieUpdates<OpPrimitives>>,
+        block: ExecutedBlockWithTrieUpdates<OpPrimitives>,
     ) -> Self {
-        Self { id, block, executed_block, fees, sidecars: Vec::new(), chain_spec, attributes }
+        Self { id, block, fees }
     }
 
     /// Returns the identifier of the payload.
@@ -172,17 +155,12 @@ impl OpBuiltPayload {
 
     /// Returns the built block(sealed)
     pub fn block(&self) -> &SealedBlock<OpBlock> {
-        &self.block
+        self.block.sealed_block()
     }
 
     /// Fees of the block
     pub const fn fees(&self) -> U256 {
         self.fees
-    }
-
-    /// Adds sidecars to the payload.
-    pub fn extend_sidecars(&mut self, sidecars: Vec<BlobTransactionSidecar>) {
-        self.sidecars.extend(sidecars)
     }
 }
 
@@ -190,7 +168,7 @@ impl BuiltPayload for OpBuiltPayload {
     type Primitives = OpPrimitives;
 
     fn block(&self) -> &SealedBlock<OpBlock> {
-        &self.block
+        self.block()
     }
 
     fn fees(&self) -> U256 {
@@ -198,7 +176,7 @@ impl BuiltPayload for OpBuiltPayload {
     }
 
     fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<OpPrimitives>> {
-        self.executed_block.clone()
+        Some(self.block.clone())
     }
 
     fn requests(&self) -> Option<Requests> {
@@ -218,7 +196,7 @@ impl BuiltPayload for &OpBuiltPayload {
     }
 
     fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<OpPrimitives>> {
-        self.executed_block.clone()
+        Some(self.block.clone())
     }
 
     fn requests(&self) -> Option<Requests> {
@@ -231,7 +209,7 @@ impl From<OpBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: OpBuiltPayload) -> Self {
         Self::from_block_unchecked(
             value.block().hash(),
-            &Arc::unwrap_or_clone(value.block).into_block(),
+            &value.block.into_sealed_block().into_block(),
         )
     }
 }
@@ -241,11 +219,12 @@ impl From<OpBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     fn from(value: OpBuiltPayload) -> Self {
         let OpBuiltPayload { block, fees, .. } = value;
 
+        let block = block.into_sealed_block();
         Self {
             block_value: fees,
             execution_payload: ExecutionPayloadFieldV2::from_block_unchecked(
                 block.hash(),
-                &Arc::unwrap_or_clone(block).into_block(),
+                &block.into_block(),
             ),
         }
     }
@@ -253,18 +232,15 @@ impl From<OpBuiltPayload> for ExecutionPayloadEnvelopeV2 {
 
 impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
     fn from(value: OpBuiltPayload) -> Self {
-        let OpBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
+        let OpBuiltPayload { block, fees, .. } = value;
 
         let parent_beacon_block_root =
-            if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp()) {
-                attributes.parent_beacon_block_root().unwrap_or(B256::ZERO)
-            } else {
-                B256::ZERO
-            };
+            block.sealed_block().parent_beacon_block_root.unwrap_or_default();
+
         Self {
             execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                block.hash(),
-                &Arc::unwrap_or_clone(block).into_block(),
+                block.sealed_block().hash(),
+                &block.into_sealed_block().into_block(),
             ),
             block_value: fees,
             // From the engine API spec:
@@ -276,25 +252,23 @@ impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV3 {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
-            blobs_bundle: sidecars.into_iter().collect::<Vec<_>>().into(),
+            // No blobs for OP.
+            blobs_bundle: BlobsBundleV1 { blobs: vec![], commitments: vec![], proofs: vec![] },
             parent_beacon_block_root,
         }
     }
 }
 impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
     fn from(value: OpBuiltPayload) -> Self {
-        let OpBuiltPayload { block, fees, sidecars, chain_spec, attributes, .. } = value;
+        let OpBuiltPayload { block, fees, .. } = value;
 
         let parent_beacon_block_root =
-            if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp()) {
-                attributes.parent_beacon_block_root().unwrap_or(B256::ZERO)
-            } else {
-                B256::ZERO
-            };
+            block.sealed_block().parent_beacon_block_root.unwrap_or_default();
+
         Self {
             execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                block.hash(),
-                &Arc::unwrap_or_clone(block).into_block(),
+                block.sealed_block().hash(),
+                &block.into_sealed_block().into_block(),
             ),
             block_value: fees,
             // From the engine API spec:
@@ -306,7 +280,8 @@ impl From<OpBuiltPayload> for OpExecutionPayloadEnvelopeV4 {
             // Spec:
             // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
             should_override_builder: false,
-            blobs_bundle: sidecars.into_iter().collect::<Vec<_>>().into(),
+            // No blobs for OP.
+            blobs_bundle: BlobsBundleV1 { blobs: vec![], commitments: vec![], proofs: vec![] },
             parent_beacon_block_root,
             execution_requests: vec![],
         }
