@@ -7,7 +7,7 @@ use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::ConfigureEvmFor;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_payload_builder::{builder::OpPayloadPrimitives, OpPayloadBuilder};
+use reth_optimism_payload_builder::{OpPayloadBuilder, OpPayloadPrimitives};
 use reth_primitives::SealedHeader;
 use reth_provider::{
     BlockReaderIdExt, NodePrimitivesProvider, ProviderError, ProviderResult, StateProviderFactory,

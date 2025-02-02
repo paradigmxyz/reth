@@ -4,6 +4,7 @@ use crate::{
     config::{OpBuilderConfig, OpDAConfig},
     error::OpPayloadBuilderError,
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
+    OpPayloadPrimitives,
 };
 use alloy_consensus::{Eip658Value, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4895::Withdrawals, merge::BEACON_NONCE};
@@ -25,16 +26,14 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_evm::{OpReceiptBuilder, ReceiptBuilderCtx};
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{
-    transaction::signed::OpTransaction, DepositReceipt, OpTransactionSigned,
-};
+use reth_optimism_primitives::{transaction::signed::OpTransaction, OpTransactionSigned};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{
     transaction::SignedTransactionIntoRecoveredExt, BlockBody, NodePrimitives, SealedHeader,
 };
-use reth_primitives_traits::{block::Block as _, proofs, RecoveredBlock, SignedTransaction};
+use reth_primitives_traits::{block::Block as _, proofs, RecoveredBlock};
 use reth_provider::{
     HashedPostStateProvider, ProviderError, StateProofProvider, StateProviderFactory,
     StateRootProvider,
@@ -50,32 +49,6 @@ use revm::{
 };
 use std::{fmt::Display, sync::Arc};
 use tracing::{debug, trace, warn};
-
-/// Helper trait to encapsulate common bounds on [`NodePrimitives`] for OP payload builder.
-pub trait OpPayloadPrimitives:
-    NodePrimitives<
-    Receipt: DepositReceipt,
-    SignedTx = Self::_TX,
-    BlockHeader = Header,
-    BlockBody = BlockBody<Self::_TX>,
->
-{
-    /// Helper AT to bound [`NodePrimitives::Block`] type without causing bound cycle.
-    type _TX: SignedTransaction + OpTransaction;
-}
-
-impl<Tx, T> OpPayloadPrimitives for T
-where
-    Tx: SignedTransaction + OpTransaction,
-    T: NodePrimitives<
-        SignedTx = Tx,
-        Receipt: DepositReceipt,
-        BlockHeader = Header,
-        BlockBody = BlockBody<Tx>,
-    >,
-{
-    type _TX = Tx;
-}
 
 /// Optimism's payload builder
 #[derive(Debug, Clone)]
