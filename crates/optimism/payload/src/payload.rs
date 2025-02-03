@@ -1,6 +1,6 @@
 //! Payload related types
 
-use std::fmt::Debug;
+use std::{fmt::Debug, sync::Arc};
 
 use alloy_eips::{
     eip1559::BaseFeeParams, eip2718::Decodable2718, eip4895::Withdrawals, eip7685::Requests,
@@ -147,8 +147,10 @@ impl<T: Decodable2718 + Send + Sync + Debug> PayloadBuilderAttributes
 pub struct OpBuiltPayload<N: NodePrimitives = OpPrimitives> {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
+    /// Sealed block
+    pub(crate) block: Arc<SealedBlock<N::Block>>,
     /// Block execution data for the payload, if any.
-    pub(crate) block: ExecutedBlockWithTrieUpdates<N>,
+    pub(crate) executed_block: Option<ExecutedBlockWithTrieUpdates<N>>,
     /// The fees of the block
     pub(crate) fees: U256,
 }
@@ -157,8 +159,13 @@ pub struct OpBuiltPayload<N: NodePrimitives = OpPrimitives> {
 
 impl<N: NodePrimitives> OpBuiltPayload<N> {
     /// Initializes the payload with the given initial block.
-    pub const fn new(id: PayloadId, fees: U256, block: ExecutedBlockWithTrieUpdates<N>) -> Self {
-        Self { id, block, fees }
+    pub const fn new(
+        id: PayloadId,
+        block: Arc<SealedBlock<N::Block>>,
+        fees: U256,
+        executed_block: Option<ExecutedBlockWithTrieUpdates<N>>,
+    ) -> Self {
+        Self { id, block, fees, executed_block }
     }
 
     /// Returns the identifier of the payload.
@@ -168,7 +175,7 @@ impl<N: NodePrimitives> OpBuiltPayload<N> {
 
     /// Returns the built block(sealed)
     pub fn block(&self) -> &SealedBlock<N::Block> {
-        self.block.sealed_block()
+        &self.block
     }
 
     /// Fees of the block
@@ -189,7 +196,7 @@ impl<N: NodePrimitives> BuiltPayload for OpBuiltPayload<N> {
     }
 
     fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<N>> {
-        Some(self.block.clone())
+        self.executed_block.clone()
     }
 
     fn requests(&self) -> Option<Requests> {
@@ -206,7 +213,7 @@ where
     fn from(value: OpBuiltPayload<N>) -> Self {
         Self::from_block_unchecked(
             value.block().hash(),
-            &value.block.into_sealed_block().into_block(),
+            &Arc::unwrap_or_clone(value.block).into_block(),
         )
     }
 }
@@ -220,12 +227,11 @@ where
     fn from(value: OpBuiltPayload<N>) -> Self {
         let OpBuiltPayload { block, fees, .. } = value;
 
-        let block = block.into_sealed_block();
         Self {
             block_value: fees,
             execution_payload: ExecutionPayloadFieldV2::from_block_unchecked(
                 block.hash(),
-                &block.into_block(),
+                &Arc::unwrap_or_clone(block).into_block(),
             ),
         }
     }
@@ -239,13 +245,12 @@ where
     fn from(value: OpBuiltPayload<N>) -> Self {
         let OpBuiltPayload { block, fees, .. } = value;
 
-        let parent_beacon_block_root =
-            block.sealed_block().parent_beacon_block_root.unwrap_or_default();
+        let parent_beacon_block_root = block.parent_beacon_block_root.unwrap_or_default();
 
         Self {
             execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                block.sealed_block().hash(),
-                &block.into_sealed_block().into_block(),
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
             ),
             block_value: fees,
             // From the engine API spec:
@@ -272,13 +277,12 @@ where
     fn from(value: OpBuiltPayload<N>) -> Self {
         let OpBuiltPayload { block, fees, .. } = value;
 
-        let parent_beacon_block_root =
-            block.sealed_block().parent_beacon_block_root.unwrap_or_default();
+        let parent_beacon_block_root = block.parent_beacon_block_root.unwrap_or_default();
 
         Self {
             execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                block.sealed_block().hash(),
-                &block.into_sealed_block().into_block(),
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
             ),
             block_value: fees,
             // From the engine API spec:
