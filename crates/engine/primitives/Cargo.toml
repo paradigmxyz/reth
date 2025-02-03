@@ -50,5 +50,5 @@ std = [
 ]
 scroll = [
     "reth-execution-types/scroll",
-    "reth-trie/scroll"
+    "reth-trie/scroll",
 ]

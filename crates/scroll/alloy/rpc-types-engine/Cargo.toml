@@ -28,10 +28,10 @@ std = [
     "alloy-primitives/std",
     "alloy-rpc-types-engine/std",
     "serde?/std",
-    "serde_json/std"
+    "serde_json/std",
 ]
 serde = [
     "dep:serde",
     "alloy-primitives/serde",
-    "alloy-rpc-types-engine/serde"
+    "alloy-rpc-types-engine/serde",
 ]

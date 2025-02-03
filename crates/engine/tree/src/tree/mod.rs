@@ -40,9 +40,7 @@ use reth_evm::{
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
-use reth_primitives_traits::{
-    Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-};
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
@@ -2472,7 +2470,8 @@ where
             }
         } else {
             debug!(target: "engine::tree", block=?block_num_hash, ?is_descendant_of_persisting_blocks, "Failed to compute state root in parallel");
-            let (root, updates) = state_provider.state_root_from_state_with_updates(hashed_state.clone())?;
+            let (root, updates) =
+                state_provider.state_root_from_state_with_updates(hashed_state.clone())?;
             (root, updates, root_time.elapsed())
         };
 
@@ -2488,7 +2487,7 @@ where
                 Some((&trie_output, state_root)),
             );
             return Err(ConsensusError::BodyStateRootDiff(
-                reth_primitives::GotExpected {
+                reth_primitives_traits::GotExpected {
                     got: state_root,
                     expected: block.header().state_root(),
                 }

@@ -1,16 +1,17 @@
+use crate::{ScrollEngineValidator, ScrollEngineValidatorBuilder, ScrollStorage};
+use reth_evm::{ConfigureEvm, ConfigureEvmEnv};
 use reth_node_api::{AddOnsContext, NodeAddOns};
 use reth_node_builder::{
     rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcAddOns, RpcHandle},
     FullNodeComponents,
 };
 use reth_node_types::{NodeTypes, NodeTypesWithEngine};
-
+use reth_rpc_eth_types::error::FromEvmError;
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_engine_primitives::ScrollEngineTypes;
 use reth_scroll_primitives::ScrollPrimitives;
-use reth_scroll_rpc::ScrollEthApi;
-
-use crate::{ScrollEngineValidator, ScrollEngineValidatorBuilder, ScrollStorage};
+use reth_scroll_rpc::{ScrollEthApi, ScrollEthApiError};
+use revm::primitives::TxEnv;
 
 /// Add-ons for the Scroll follower node.
 #[derive(Debug)]
@@ -44,7 +45,9 @@ where
             Storage = ScrollStorage,
             Engine = ScrollEngineTypes,
         >,
+        Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
     >,
+    ScrollEthApiError: FromEvmError<N::Evm>,
 {
     type Handle = RpcHandle<N, ScrollEthApi<N>>;
 
@@ -66,7 +69,9 @@ where
             Storage = ScrollStorage,
             Engine = ScrollEngineTypes,
         >,
+        Evm: ConfigureEvm<TxEnv = TxEnv>,
     >,
+    ScrollEthApiError: FromEvmError<N::Evm>,
 {
     type EthApi = ScrollEthApi<N>;
 

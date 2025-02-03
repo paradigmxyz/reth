@@ -2,7 +2,10 @@
 
 use crate::ScrollTxType;
 use alloy_consensus::{Eip658Value, Receipt, ReceiptWithBloom, TxReceipt};
-use alloy_eips::eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718};
+use alloy_eips::{
+    eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
+    Typed2718,
+};
 use alloy_primitives::{logs_bloom, Bloom, Log};
 use alloy_rlp::{length_of_length, BufMut, Decodable, Encodable};
 
@@ -234,6 +237,18 @@ impl Encodable2718 for ScrollReceiptEnvelope {
                 t.encode(out)
             }
         }
+    }
+}
+
+impl Typed2718 for ScrollReceiptEnvelope {
+    fn ty(&self) -> u8 {
+        let ty = match self {
+            Self::Legacy(_) => ScrollTxType::Legacy,
+            Self::Eip2930(_) => ScrollTxType::Eip2930,
+            Self::Eip1559(_) => ScrollTxType::Eip1559,
+            Self::L1Message(_) => ScrollTxType::L1Message,
+        };
+        ty as u8
     }
 }
 

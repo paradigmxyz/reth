@@ -18,4 +18,3 @@ reth-payload-primitives.workspace = true
 
 # misc
 futures-util.workspace = true
-

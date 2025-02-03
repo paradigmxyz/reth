@@ -56,7 +56,4 @@ serde = [
     "reth-trie?/serde",
     "reth-ethereum-forks/serde",
 ]
-scroll = [
-    "reth-primitives-traits/scroll",
-    "reth-trie?/scroll"
-]
+scroll = ["reth-trie?/scroll"]

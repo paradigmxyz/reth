@@ -70,7 +70,11 @@ exceptions = [
 # Skip the poseidon-bn254, bn254 and zktrie crates for license verification. We should at some point publish a license for them.
 [licenses.private]
 ignore = true
-ignore-sources = ["https://github.com/scroll-tech/poseidon-bn254", "https://github.com/scroll-tech/bn254", "https://github.com/scroll-tech/zktrie.git"]
+ignore-sources = [
+    "https://github.com/scroll-tech/poseidon-bn254",
+    "https://github.com/scroll-tech/bn254",
+    "https://github.com/scroll-tech/zktrie.git",
+]
 
 [[licenses.clarify]]
 name = "ring"
@@ -106,5 +110,5 @@ allow-git = [
     "https://github.com/scroll-tech/alloy-eips",
     "https://github.com/scroll-tech/ff",
     "https://github.com/scroll-tech/revm.git",
-    "https://github.com/scroll-tech/alloy-core.git"
+    "https://github.com/scroll-tech/alloy-core.git",
 ]

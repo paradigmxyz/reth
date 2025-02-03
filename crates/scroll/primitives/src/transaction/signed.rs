@@ -28,7 +28,7 @@ use once_cell::sync::OnceCell as OnceLock;
 use proptest as _;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
-    transaction::error::TransactionConversionError,
+    transaction::{error::TransactionConversionError, signed::RecoveryError},
     InMemorySize, SignedTransaction,
 };
 use scroll_alloy_consensus::{ScrollPooledTransaction, ScrollTypedTransaction, TxL1Message};
@@ -84,10 +84,10 @@ impl SignedTransaction for ScrollTransactionSigned {
         &self.signature
     }
 
-    fn recover_signer(&self) -> Option<Address> {
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
         // Scroll's L1 message does not have a signature. Directly return the `sender` address.
         if let ScrollTypedTransaction::L1Message(TxL1Message { sender, .. }) = self.transaction {
-            return Some(sender)
+            return Ok(sender);
         }
 
         let Self { transaction, signature, .. } = self;
@@ -95,10 +95,10 @@ impl SignedTransaction for ScrollTransactionSigned {
         recover_signer(signature, signature_hash)
     }
 
-    fn recover_signer_unchecked(&self) -> Option<Address> {
+    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
         // Scroll's L1 message does not have a signature. Directly return the `sender` address.
         if let ScrollTypedTransaction::L1Message(TxL1Message { sender, .. }) = &self.transaction {
-            return Some(*sender)
+            return Ok(*sender);
         }
 
         let Self { transaction, signature, .. } = self;
@@ -106,10 +106,13 @@ impl SignedTransaction for ScrollTransactionSigned {
         recover_signer_unchecked(signature, signature_hash)
     }
 
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
         match &self.transaction {
             // Scroll's L1 message does not have a signature. Directly return the `sender` address.
-            ScrollTypedTransaction::L1Message(tx) => return Some(tx.sender),
+            ScrollTypedTransaction::L1Message(tx) => return Ok(tx.sender),
             ScrollTypedTransaction::Legacy(tx) => tx.encode_for_signing(buf),
             ScrollTypedTransaction::Eip2930(tx) => tx.encode_for_signing(buf),
             ScrollTypedTransaction::Eip1559(tx) => tx.encode_for_signing(buf),
@@ -211,7 +214,7 @@ impl alloy_rlp::Encodable for ScrollTransactionSigned {
 
     fn length(&self) -> usize {
         let mut payload_length = self.encode_2718_len();
-        if !Encodable2718::is_legacy(self) {
+        if !self.is_legacy() {
             payload_length += Header { list: false, payload_length }.length();
         }
 
@@ -629,5 +632,9 @@ pub mod serde_bincode_compat {
 
     impl SerdeBincodeCompat for super::ScrollTransactionSigned {
         type BincodeRepr<'a> = ScrollTransactionSigned<'a>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
     }
 }

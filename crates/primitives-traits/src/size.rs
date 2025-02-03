@@ -138,37 +138,41 @@ mod op {
         }
     }
 
-#[cfg(feature = "scroll-alloy-traits")]
-impl InMemorySize for scroll_alloy_consensus::ScrollTypedTransaction {
-    fn size(&self) -> usize {
-        match self {
-            Self::Legacy(tx) => tx.size(),
-            Self::Eip2930(tx) => tx.size(),
-            Self::Eip1559(tx) => tx.size(),
-            Self::L1Message(tx) => tx.size(),
+    impl InMemorySize for op_alloy_consensus::OpPooledTransaction {
+        fn size(&self) -> usize {
+            match self {
+                Self::Legacy(tx) => tx.size(),
+                Self::Eip2930(tx) => tx.size(),
+                Self::Eip1559(tx) => tx.size(),
+                Self::Eip7702(tx) => tx.size(),
+            }
         }
     }
 }
 
-#[cfg(feature = "op")]
-impl InMemorySize for op_alloy_consensus::OpPooledTransaction {
-    fn size(&self) -> usize {
-        match self {
-            Self::Legacy(tx) => tx.size(),
-            Self::Eip2930(tx) => tx.size(),
-            Self::Eip1559(tx) => tx.size(),
-            Self::Eip7702(tx) => tx.size(),
+/// Implementations for scroll types.
+#[cfg(feature = "scroll-alloy-traits")]
+mod scroll {
+    use super::*;
+
+    impl InMemorySize for scroll_alloy_consensus::ScrollTypedTransaction {
+        fn size(&self) -> usize {
+            match self {
+                Self::Legacy(tx) => tx.size(),
+                Self::Eip2930(tx) => tx.size(),
+                Self::Eip1559(tx) => tx.size(),
+                Self::L1Message(tx) => tx.size(),
+            }
         }
     }
-}
 
-#[cfg(feature = "scroll-alloy-traits")]
-impl InMemorySize for scroll_alloy_consensus::ScrollPooledTransaction {
-    fn size(&self) -> usize {
-        match self {
-            Self::Legacy(tx) => tx.size(),
-            Self::Eip2930(tx) => tx.size(),
-            Self::Eip1559(tx) => tx.size(),
+    impl InMemorySize for scroll_alloy_consensus::ScrollPooledTransaction {
+        fn size(&self) -> usize {
+            match self {
+                Self::Legacy(tx) => tx.size(),
+                Self::Eip2930(tx) => tx.size(),
+                Self::Eip1559(tx) => tx.size(),
+            }
         }
     }
 }

@@ -22,7 +22,7 @@ scroll = [
     "reth-revm/scroll",
     "reth-provider/scroll",
     "reth-db/scroll",
-    "reth-stages/scroll"
+    "reth-stages/scroll",
 ]
 
 [dependencies]

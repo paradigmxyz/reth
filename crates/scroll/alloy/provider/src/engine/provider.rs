@@ -4,23 +4,17 @@ use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_engine::JwtSecret;
 use alloy_transport::utils::guess_local_url;
 use alloy_transport_http::{
-    hyper_util,
-    hyper_util::{client::legacy::connect::HttpConnector, rt::TokioExecutor},
-    AuthLayer, AuthService, Http, HyperClient,
+    hyper_util, hyper_util::rt::TokioExecutor, AuthLayer, Http, HyperClient,
 };
 use derive_more::Deref;
 use http_body_util::Full;
 use reqwest::Url;
 use scroll_alloy_network::Scroll;
 
-/// A JWT authenticated Http hyper client.
-type JwtAuthHttpClient<B = Full<Bytes>> =
-    Http<HyperClient<B, AuthService<hyper_util::client::legacy::Client<HttpConnector, B>>>>;
-
 /// An authenticated [`alloy_provider::Provider`] to the [`super::ScrollEngineApi`].
 #[derive(Debug, Clone, Deref)]
 pub struct ScrollAuthEngineApiProvider<N: Network = Scroll> {
-    auth_provider: RootProvider<JwtAuthHttpClient, N>,
+    auth_provider: RootProvider<N>,
 }
 
 impl ScrollAuthEngineApiProvider {
@@ -48,15 +42,17 @@ mod tests {
     use super::*;
     use crate::engine::ScrollEngineApi;
     use alloy_primitives::U64;
-    use alloy_rpc_types_engine::{ClientCode, ClientVersionV1, ForkchoiceState, PayloadId};
-    use reth_engine_primitives::{BeaconConsensusEngineHandle, PayloadTypes};
+    use alloy_rpc_types_engine::{
+        ClientCode, ClientVersionV1, ExecutionPayloadV1, ForkchoiceState, PayloadId,
+    };
+    use reth_engine_primitives::BeaconConsensusEngineHandle;
     use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
+    use reth_payload_primitives::PayloadTypes;
     use reth_primitives::{Block, TransactionSigned};
     use reth_primitives_traits::block::Block as _;
     use reth_provider::{test_utils::NoopProvider, CanonStateNotification};
     use reth_rpc_builder::auth::{AuthRpcModule, AuthServerConfig, AuthServerHandle};
     use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
-    use reth_rpc_types_compat::engine::block_to_payload_v1;
     use reth_scroll_chainspec::SCROLL_MAINNET;
     use reth_scroll_engine_primitives::{
         ScrollBuiltPayload, ScrollEngineTypes, ScrollPayloadBuilderAttributes,
@@ -123,7 +119,9 @@ mod tests {
         let provider = ScrollAuthEngineApiProvider::new(secret, url);
 
         let block = Block::<TransactionSigned>::default().seal_slow();
-        provider.new_payload_v1(block_to_payload_v1(block.clone())).await;
+        let execution_payload =
+            ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.clone().into_block());
+        provider.new_payload_v1(execution_payload).await;
         provider.fork_choice_updated_v1(ForkchoiceState::default(), None).await;
         provider.get_payload_v1(PayloadId::new([0, 0, 0, 0, 0, 0, 0, 0])).await;
         provider.get_payload_bodies_by_hash_v1(vec![]).await;

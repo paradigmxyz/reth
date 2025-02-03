@@ -202,12 +202,15 @@ impl SignedTransaction for scroll_alloy_consensus::ScrollPooledTransaction {
         }
     }
 
-    fn recover_signer(&self) -> Option<Address> {
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
         let signature_hash = self.signature_hash();
         recover_signer(self.signature(), signature_hash)
     }
 
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
         match self {
             Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
             Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),

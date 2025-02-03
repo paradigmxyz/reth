@@ -21,7 +21,6 @@ reth-trie-sparse.workspace = true
 reth-trie-common.workspace = true
 
 # revm re-export scroll
-reth-primitives-traits.workspace = true
 revm.workspace = true
 
 # alloy
@@ -80,7 +79,7 @@ test-utils = [
     "reth-ethereum-primitives/test-utils",
     "reth-trie-sparse/test-utils",
     "reth-stages-types/test-utils",
-    "reth-primitives-traits/test-utils"
+    "reth-primitives-traits/test-utils",
 ]
 scroll = ["revm/scroll"]
 

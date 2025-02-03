@@ -80,12 +80,12 @@ serde = [
     "reth-primitives-traits/serde",
 ]
 scroll = [
-	"reth-node-core/scroll",
-	"reth-evm/scroll",
-	"reth-provider/scroll",
-	"reth-evm-ethereum/scroll",
-	"reth-testing-utils/scroll",
-	"reth-revm/scroll",
-	"reth-primitives-traits/scroll",
-	"reth-node-api/scroll",
+    "reth-node-core/scroll",
+    "reth-evm/scroll",
+    "reth-provider/scroll",
+    "reth-evm-ethereum/scroll",
+    "reth-testing-utils/scroll",
+    "reth-revm/scroll",
+    "reth-primitives-traits/scroll",
+    "reth-node-api/scroll",
 ]

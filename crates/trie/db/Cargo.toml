@@ -88,7 +88,7 @@ test-utils = [
     "reth-trie/test-utils",
 ]
 scroll = [
-	"reth-db/scroll",
-	"reth-provider/scroll",
-	"revm/scroll"
+    "reth-db/scroll",
+    "reth-provider/scroll",
+    "revm/scroll",
 ]

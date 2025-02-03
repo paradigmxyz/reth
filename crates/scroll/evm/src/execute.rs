@@ -12,9 +12,10 @@ use reth_consensus::ConsensusError;
 use reth_evm::{
     execute::{
         BasicBlockExecutorProvider, BlockExecutionError, BlockExecutionStrategy,
-        BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput, ProviderError,
+        BlockExecutionStrategyFactory, BlockValidationError, ExecuteOutput,
+        InternalBlockExecutionError,
     },
-    Evm,
+    Database, Evm,
 };
 use reth_primitives::{gas_spent_by_transactions, GotExpected, InvalidTransactionError};
 use reth_primitives_traits::{BlockBody, NodePrimitives, RecoveredBlock, SignedTransaction};
@@ -25,12 +26,9 @@ use reth_scroll_forks::{ScrollHardfork, ScrollHardforks};
 use reth_scroll_primitives::{transaction::signed::IsL1Message, ScrollPrimitives, ScrollReceipt};
 use revm::{
     primitives::{ExecutionResult, ResultAndState},
-    Database, DatabaseCommit, State,
+    DatabaseCommit, State,
 };
-use std::{
-    fmt::{Debug, Display},
-    sync::Arc,
-};
+use std::{fmt::Debug, sync::Arc};
 use tracing::trace;
 
 /// The Scroll block execution strategy.
@@ -60,7 +58,7 @@ where
 
 impl<DB, N, EvmConfig> BlockExecutionStrategy for ScrollExecutionStrategy<DB, N, EvmConfig>
 where
-    DB: Database<Error: Into<ProviderError> + Display>,
+    DB: Database,
     N: NodePrimitives<BlockHeader = Header, Receipt = ScrollReceipt, SignedTx: IsL1Message>,
     EvmConfig: ScrollConfigureEvm<Header = N::BlockHeader, Transaction = N::SignedTx>
         + ChainSpecProvider<ChainSpec = ScrollChainSpec>,
@@ -79,8 +77,9 @@ where
         self.state.set_state_clear_flag(state_clear_flag);
 
         // load the l1 gas oracle contract in cache
-        let _ =
-            self.state.load_cache_account(L1_GAS_PRICE_ORACLE_ADDRESS).map_err(|err| err.into())?;
+        let _ = self.state.load_cache_account(L1_GAS_PRICE_ORACLE_ADDRESS).map_err(|err| {
+            BlockExecutionError::Internal(InternalBlockExecutionError::other(err))
+        })?;
 
         if self
             .evm_config
@@ -154,7 +153,7 @@ where
             let ResultAndState { result, state } =
                 evm.transact(tx_env).map_err(|err| BlockValidationError::EVM {
                     hash: transaction.recalculate_hash(),
-                    error: Box::new(err.map_db_err(|e| e.into())),
+                    error: Box::new(err),
                 })?;
             evm.db_mut().commit(state);
 
@@ -284,13 +283,12 @@ where
         + ChainSpecProvider<ChainSpec = ScrollChainSpec>,
 {
     type Primitives = N;
-    type Strategy<DB: Database<Error: Into<ProviderError> + Display>> =
-        ScrollExecutionStrategy<DB, N, EvmConfig>;
+    type Strategy<DB: Database> = ScrollExecutionStrategy<DB, N, EvmConfig>;
 
     /// Creates a strategy using the give database.
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database,
     {
         let state =
             State::builder().with_database(db).without_state_clear().with_bundle_update().build();
@@ -322,7 +320,7 @@ mod tests {
     use super::*;
     use crate::{ScrollEvmConfig, ScrollExecutionStrategy, ScrollExecutionStrategyFactory};
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_evm::execute::ExecuteOutput;
+    use reth_evm::execute::{ExecuteOutput, ProviderError};
     use reth_primitives::{Block, BlockBody};
     use reth_primitives_traits::transaction::signed::SignedTransaction;
     use reth_scroll_chainspec::{ScrollChainConfig, ScrollChainSpecBuilder};

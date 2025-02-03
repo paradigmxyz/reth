@@ -484,7 +484,7 @@ mod tests {
     use reth_chainspec::{ChainSpec, MAINNET};
     use reth_primitives::EthPrimitives;
     use revm::db::{CacheDB, EmptyDBTyped};
-    use revm_primitives::{address, bytes, AccountInfo, KECCAK_EMPTY};
+    use revm_primitives::{address, bytes, AccountInfo};
     use std::sync::Arc;
 
     #[derive(Clone, Default)]

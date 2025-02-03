@@ -17,7 +17,7 @@ use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
     EthApiTypes, RpcNodeCore,
 };
-use reth_rpc_eth_types::PendingBlock;
+use reth_rpc_eth_types::{error::FromEvmError, PendingBlock};
 use reth_scroll_forks::ScrollHardforks;
 use reth_scroll_primitives::{ScrollBlock, ScrollReceipt, ScrollTransactionSigned};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -34,6 +34,7 @@ where
             NetworkTypes: Network<
                 HeaderResponse = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
             >,
+            Error: FromEvmError<Self::Evm>,
         >,
     N: RpcNodeCore<
         Provider: BlockReaderIdExt<

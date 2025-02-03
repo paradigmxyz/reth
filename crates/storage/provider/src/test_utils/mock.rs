@@ -608,7 +608,7 @@ impl<T: Transaction> StageCheckpointReader for MockEthProvider<T> {
 }
 
 impl<T: Transaction> StateRootProvider for MockEthProvider<T> {
-    fn state_root(&self, _state: HashedPostState) -> ProviderResult<B256> {
+    fn state_root_from_state(&self, _state: HashedPostState) -> ProviderResult<B256> {
         Ok(self.state_roots.lock().pop().unwrap_or_default())
     }
 

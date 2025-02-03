@@ -88,7 +88,7 @@ arbitrary = [
     "reth-stages-types/arbitrary",
     "alloy-consensus/arbitrary",
     "reth-optimism-primitives?/arbitrary",
-    "reth-scroll-primitives?/arbitrary"
+    "reth-scroll-primitives?/arbitrary",
 ]
 optimism = [
     "reth-codecs/op",

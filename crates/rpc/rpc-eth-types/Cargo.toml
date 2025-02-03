@@ -70,5 +70,5 @@ scroll = [
     "revm/scroll",
     "reth-execution-types/scroll",
     "reth-revm/scroll",
-    "reth-trie/scroll"
+    "reth-trie/scroll",
 ]

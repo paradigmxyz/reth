@@ -48,59 +48,59 @@ test-fuzz.workspace = true
 
 [features]
 default = [
-	"reth-codec",
-	"std",
+    "reth-codec",
+    "std",
 ]
 std = [
-	"serde/std",
-	"alloy-primitives/std",
-	"reth-codecs/std",
-	"alloy-consensus/std",
-	"alloy-eips/std",
-	"alloy-rlp/std",
-	"alloy-serde/std",
-	"proptest/std",
-	"rand/std",
-	"derive_more/std",
-	"serde_json/std",
-	"serde_with/std",
+    "serde/std",
+    "alloy-primitives/std",
+    "reth-codecs/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-rlp/std",
+    "alloy-serde/std",
+    "proptest/std",
+    "rand/std",
+    "derive_more/std",
+    "serde_json/std",
+    "serde_with/std",
 ]
 k256 = [
-	"alloy-primitives/k256",
-	"alloy-consensus/k256"
+    "alloy-primitives/k256",
+    "alloy-consensus/k256",
 ]
 kzg = [
-	"alloy-eips/kzg",
-	"alloy-consensus/kzg",
-	"std"
+    "alloy-eips/kzg",
+    "alloy-consensus/kzg",
+    "std",
 ]
 reth-codec = [
-	"dep:reth-codecs",
-	"dep:reth-codecs-derive",
-	"modular-bitfield",
-	"std"
+    "dep:reth-codecs",
+    "dep:reth-codecs-derive",
+    "modular-bitfield",
+    "std",
 ]
 arbitrary = [
-	"std",
-	"dep:arbitrary",
-	"alloy-primitives/arbitrary",
-	"alloy-consensus/arbitrary",
-	"alloy-eips/arbitrary",
-	"alloy-serde/arbitrary",
-	"reth-codecs/arbitrary",
-	"alloy-primitives/rand"
+    "std",
+    "dep:arbitrary",
+    "alloy-primitives/arbitrary",
+    "alloy-consensus/arbitrary",
+    "alloy-eips/arbitrary",
+    "alloy-serde/arbitrary",
+    "reth-codecs/arbitrary",
+    "alloy-primitives/rand",
 ]
 serde = [
-	"dep:serde",
-	"dep:alloy-serde",
-	"alloy-primitives/serde",
-	"alloy-consensus/serde",
-	"alloy-eips/serde",
-	"rand/serde",
-	"reth-codecs/serde"
+    "dep:serde",
+    "dep:alloy-serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-eips/serde",
+    "rand/serde",
+    "reth-codecs/serde",
 ]
 serde-bincode-compat = [
-	"serde_with",
-	"alloy-consensus/serde-bincode-compat",
-	"alloy-eips/serde-bincode-compat"
+    "serde_with",
+    "alloy-consensus/serde-bincode-compat",
+    "alloy-eips/serde-bincode-compat",
 ]

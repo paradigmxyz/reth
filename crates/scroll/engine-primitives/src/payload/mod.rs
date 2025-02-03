@@ -18,7 +18,6 @@ use alloy_rpc_types_engine::{
 use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
-use reth_rpc_types_compat::engine::payload::block_to_payload;
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_forks::ScrollHardfork;
 use reth_scroll_primitives::ScrollBlock;
@@ -56,7 +55,7 @@ where
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-        block_to_payload(block)
+        ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block())
     }
 }
 

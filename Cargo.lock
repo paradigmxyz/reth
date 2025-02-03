@@ -9126,7 +9126,6 @@ dependencies = [
 name = "reth-scroll-cli"
 version = "1.1.5"
 dependencies = [
- "alloy-consensus",
  "clap",
  "eyre",
  "proptest",
@@ -9134,11 +9133,9 @@ dependencies = [
  "reth-cli-commands",
  "reth-cli-runner",
  "reth-db",
- "reth-eth-wire",
  "reth-node-builder",
  "reth-node-core",
  "reth-node-metrics",
- "reth-primitives",
  "reth-scroll-chainspec",
  "reth-scroll-evm",
  "reth-scroll-node",
@@ -9172,7 +9169,6 @@ dependencies = [
  "reth-payload-primitives",
  "reth-primitives",
  "reth-primitives-traits",
- "reth-rpc-types-compat",
  "reth-scroll-chainspec",
  "reth-scroll-forks",
  "reth-scroll-primitives",
@@ -9187,7 +9183,6 @@ version = "1.1.5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "auto_impl",
  "derive_more",
  "eyre",
  "reth-chainspec",
@@ -9232,8 +9227,6 @@ dependencies = [
  "reth-db",
  "reth-engine-local",
  "reth-eth-wire-types",
- "reth-ethereum-engine-primitives",
- "reth-ethereum-forks",
  "reth-evm",
  "reth-network",
  "reth-node-api",
@@ -9243,8 +9236,7 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
- "reth-rpc",
- "reth-rpc-server-types",
+ "reth-rpc-eth-types",
  "reth-scroll-chainspec",
  "reth-scroll-engine-primitives",
  "reth-scroll-evm",
@@ -9303,32 +9295,20 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
- "alloy-rpc-types-debug",
  "alloy-rpc-types-eth",
- "derive_more",
- "jsonrpsee-core",
  "jsonrpsee-types",
- "op-alloy-consensus",
- "op-alloy-network",
- "op-alloy-rpc-types",
- "op-alloy-rpc-types-engine",
  "parking_lot",
- "reqwest",
  "reth-chainspec",
- "reth-ethereum-primitives",
  "reth-evm",
  "reth-network-api",
  "reth-node-api",
  "reth-node-builder",
- "reth-optimism-chainspec",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-rpc",
- "reth-rpc-api",
  "reth-rpc-eth-api",
  "reth-rpc-eth-types",
- "reth-rpc-server-types",
  "reth-scroll-chainspec",
  "reth-scroll-evm",
  "reth-scroll-forks",
@@ -9339,10 +9319,8 @@ dependencies = [
  "scroll-alloy-consensus",
  "scroll-alloy-network",
  "scroll-alloy-rpc-types",
- "serde_json",
  "thiserror 2.0.11",
  "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -9352,7 +9330,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-trie",
  "poseidon-bn254",
- "proptest-arbitrary-interop",
  "reth-trie",
  "tracing",
 ]
@@ -9786,8 +9763,7 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "19.3.0"
-source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v54#467ffa62439a95f4e977950cb645a035586f90cf"
+version = "19.4.0"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -9822,7 +9798,6 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "15.1.0"
-source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v54#467ffa62439a95f4e977950cb645a035586f90cf"
 dependencies = [
  "cfg-if",
  "revm-primitives",
@@ -9832,7 +9807,6 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "16.0.0"
-source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v54#467ffa62439a95f4e977950cb645a035586f90cf"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -9851,7 +9825,6 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "15.1.0"
-source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v54#467ffa62439a95f4e977950cb645a035586f90cf"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10318,7 +10291,6 @@ dependencies = [
 name = "scroll-alloy-provider"
 version = "1.1.5"
 dependencies = [
- "alloy-json-rpc",
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-client",
@@ -10333,12 +10305,12 @@ dependencies = [
  "reqwest",
  "reth-engine-primitives",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-rpc-builder",
  "reth-rpc-engine-api",
- "reth-rpc-types-compat",
  "reth-scroll-chainspec",
  "reth-scroll-engine-primitives",
  "reth-scroll-node",

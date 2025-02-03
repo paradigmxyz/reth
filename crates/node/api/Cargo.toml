@@ -34,5 +34,5 @@ scroll = [
     "reth-provider/scroll",
     "reth-evm/scroll",
     "reth-node-core/scroll",
-    "reth-engine-primitives/scroll"
+    "reth-engine-primitives/scroll",
 ]
