@@ -185,12 +185,12 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
 }
 
 /// An extension trait for [`L1BlockInfo`] that allows us to calculate the L1 cost of a transaction
-/// based off of the [`ChainSpec`]'s activated hardfork.
+/// based off of the chain spec's activated hardfork.
 pub trait RethL1BlockInfo {
     /// Forwards an L1 transaction calculation to revm and returns the gas cost.
     ///
     /// ### Takes
-    /// - `chain_spec`: The [`ChainSpec`] for the node.
+    /// - `chain_spec`: The chain spec for the node.
     /// - `timestamp`: The timestamp of the current block.
     /// - `input`: The calldata of the transaction.
     /// - `is_deposit`: Whether or not the transaction is a deposit.
@@ -206,7 +206,7 @@ pub trait RethL1BlockInfo {
     /// Computes the data gas cost for an L2 transaction.
     ///
     /// ### Takes
-    /// - `chain_spec`: The [`ChainSpec`] for the node.
+    /// - `chain_spec`: The chain spec for the node.
     /// - `timestamp`: The timestamp of the current block.
     /// - `input`: The calldata of the transaction.
     fn l1_data_gas(
