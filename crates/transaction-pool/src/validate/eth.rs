@@ -571,7 +571,7 @@ pub struct EthTransactionValidatorBuilder<Client> {
 }
 
 impl<Client> EthTransactionValidatorBuilder<Client> {
-    /// Creates a new builder for the given [`ChainSpec`]
+    /// Creates a new builder for the given client
     ///
     /// By default this assumes the network is on the `Cancun` hardfork and the following
     /// transactions are allowed:
