@@ -8,7 +8,7 @@ use crate::{
     BlockInfo, PoolTransaction, PoolUpdateKind,
 };
 use alloy_consensus::{BlockHeader, Typed2718};
-use alloy_eips::{eip7840::BlobParams, BlockNumberOrTag};
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber};
 use alloy_rlp::Encodable;
 use futures_util::{
@@ -116,10 +116,12 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
             last_seen_block_number: latest.number(),
             pending_basefee: latest
                 .next_block_base_fee(
-                    chain_spec.base_fee_params_at_timestamp(latest.timestamp() + 12),
+                    chain_spec.base_fee_params_at_timestamp(latest.timestamp().saturating_add(12)),
                 )
                 .unwrap_or_default(),
-            pending_blob_fee: latest.next_block_blob_fee(BlobParams::cancun()),
+            pending_blob_fee: latest.maybe_next_block_blob_fee(
+                chain_spec.blob_params_at_timestamp(latest.timestamp().saturating_add(12)),
+            ),
         };
         pool.set_block_info(info);
     }
@@ -274,11 +276,13 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let pending_block_base_fee = new_tip
                     .header()
                     .next_block_base_fee(
-                        chain_spec.base_fee_params_at_timestamp(new_tip.timestamp() + 12),
+                        chain_spec
+                            .base_fee_params_at_timestamp(new_tip.timestamp().saturating_add(12)),
                     )
                     .unwrap_or_default();
-                let pending_block_blob_fee =
-                    new_tip.header().next_block_blob_fee(BlobParams::cancun());
+                let pending_block_blob_fee = new_tip.header().maybe_next_block_blob_fee(
+                    chain_spec.blob_params_at_timestamp(new_tip.timestamp().saturating_add(12)),
+                );
 
                 // we know all changed account in the new chain
                 let new_changed_accounts: HashSet<_> =
@@ -379,10 +383,12 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let pending_block_base_fee = tip
                     .header()
                     .next_block_base_fee(
-                        chain_spec.base_fee_params_at_timestamp(tip.timestamp() + 12),
+                        chain_spec.base_fee_params_at_timestamp(tip.timestamp().saturating_add(12)),
                     )
                     .unwrap_or_default();
-                let pending_block_blob_fee = tip.header().next_block_blob_fee(BlobParams::cancun());
+                let pending_block_blob_fee = tip.header().maybe_next_block_blob_fee(
+                    chain_spec.blob_params_at_timestamp(tip.timestamp().saturating_add(12)),
+                );
 
                 let first_block = blocks.first();
                 trace!(
@@ -671,7 +677,6 @@ mod tests {
     };
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
-    use reth_chainspec::MAINNET;
     use reth_fs_util as fs;
     use reth_primitives::{PooledTransaction, TransactionSigned};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
@@ -700,8 +705,7 @@ mod tests {
         let sender = hex!("1f9090aaE28b8a3dCeaDf281B0F12828e676c326").into();
         provider.add_account(sender, ExtendedAccount::new(42, U256::MAX));
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
-            .build(provider, blob_store.clone());
+        let validator = EthTransactionValidatorBuilder::new(provider).build(blob_store.clone());
 
         let txpool = Pool::new(
             validator.clone(),

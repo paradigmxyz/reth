@@ -232,7 +232,6 @@ where
 
             receipts.push(
                 match self.receipt_builder.build_receipt(ReceiptBuilderCtx {
-                    header: block.header(),
                     tx: transaction,
                     result,
                     cumulative_gas_used,

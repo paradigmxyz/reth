@@ -13,21 +13,20 @@ extern crate alloc;
 
 mod payload;
 use alloc::sync::Arc;
-use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError};
+use alloy_rpc_types_engine::{ExecutionPayload, PayloadError};
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
     ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
 };
 pub use payload::{EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_chainspec::ChainSpec;
-use reth_engine_primitives::{EngineTypes, EngineValidator, PayloadValidator};
+use reth_engine_primitives::{EngineTypes, EngineValidator, ExecutionData, PayloadValidator};
 use reth_payload_primitives::{
     validate_version_specific_fields, BuiltPayload, EngineApiMessageVersion,
     EngineObjectValidationError, PayloadOrAttributes, PayloadTypes,
 };
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::{Block, NodePrimitives, SealedBlock};
-use reth_rpc_types_compat::engine::payload::block_to_payload;
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -60,8 +59,10 @@ where
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-        block_to_payload(block)
+    ) -> ExecutionData {
+        let (payload, sidecar) =
+            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+        ExecutionData { payload, sidecar }
     }
 }
 
@@ -100,10 +101,9 @@ impl PayloadValidator for EthereumEngineValidator {
 
     fn ensure_well_formed_payload(
         &self,
-        payload: ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
+        payload: ExecutionData,
     ) -> Result<SealedBlock, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload, sidecar)
+        self.inner.ensure_well_formed_payload(payload)
     }
 }
 

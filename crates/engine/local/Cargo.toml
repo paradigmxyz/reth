@@ -28,7 +28,7 @@ reth-stages-api.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
-alloy-primitives.workspace = true
+alloy-primitives = { workspace = true, features = ["getrandom"] }
 alloy-rpc-types-engine.workspace = true
 
 # async

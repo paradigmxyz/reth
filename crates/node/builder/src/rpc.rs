@@ -19,6 +19,7 @@ use reth_node_core::{
 };
 use reth_payload_builder::PayloadStore;
 use reth_primitives::EthPrimitives;
+use reth_provider::ChainSpecProvider;
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
     EthApi,
@@ -571,8 +572,12 @@ pub trait EthApiBuilder<N: FullNodeComponents>: 'static {
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self;
 }
 
-impl<N: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> EthApiBuilder<N>
-    for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
+impl<
+        N: FullNodeComponents<
+            Provider: ChainSpecProvider,
+            Types: NodeTypes<Primitives = EthPrimitives>,
+        >,
+    > EthApiBuilder<N> for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
 {
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self {
         Self::with_spawner(ctx)

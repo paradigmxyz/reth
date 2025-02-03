@@ -2,7 +2,7 @@
 
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::U256;
-use alloy_rpc_types_eth::BlockId;
+use alloy_rpc_types_eth::{BlockId, BlockOverrides};
 use alloy_rpc_types_mev::{
     BundleItem, Inclusion, Privacy, RefundConfig, SendBundleRequest, SimBundleLogs,
     SimBundleOverrides, SimBundleResponse, Validity,
@@ -227,15 +227,8 @@ where
         overrides: SimBundleOverrides,
         logs: bool,
     ) -> Result<SimBundleResponse, Eth::Error> {
-        let SimBundleOverrides {
-            parent_block,
-            block_number,
-            coinbase,
-            timestamp,
-            gas_limit,
-            base_fee,
-            ..
-        } = overrides;
+        let SimBundleOverrides { parent_block, block_overrides, .. } = overrides;
+        let BlockOverrides { number, coinbase, time, gas_limit, base_fee, .. } = block_overrides;
 
         // Parse and validate bundle
         // Also, flatten the bundle here so that its easier to process
@@ -245,7 +238,7 @@ where
         let (mut evm_env, current_block) = self.eth_api().evm_env_at(block_id).await?;
 
         // apply overrides
-        if let Some(block_number) = block_number {
+        if let Some(block_number) = number {
             evm_env.block_env.number = U256::from(block_number);
         }
 
@@ -253,7 +246,7 @@ where
             evm_env.block_env.coinbase = coinbase;
         }
 
-        if let Some(timestamp) = timestamp {
+        if let Some(timestamp) = time {
             evm_env.block_env.timestamp = U256::from(timestamp);
         }
 

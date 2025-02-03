@@ -10,7 +10,7 @@ use crate::{
 };
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
-use reth_chainspec::{ChainSpecProvider, Hardforks, MAINNET};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks, Hardforks};
 use reth_eth_wire::{
     protocol::Protocol, DisconnectReason, EthNetworkPrimitives, HelloMessageWithProtocols,
 };
@@ -175,7 +175,12 @@ where
 
 impl<C, Pool> Testnet<C, Pool>
 where
-    C: StateProviderFactory + BlockReaderIdExt + HeaderProvider + Clone + 'static,
+    C: ChainSpecProvider<ChainSpec: EthereumHardforks>
+        + StateProviderFactory
+        + BlockReaderIdExt
+        + HeaderProvider
+        + Clone
+        + 'static,
     Pool: TransactionPool,
 {
     /// Installs an eth pool on each peer
@@ -184,7 +189,6 @@ where
             let blob_store = InMemoryBlobStore::default();
             let pool = TransactionValidationTaskExecutor::eth(
                 peer.client.clone(),
-                MAINNET.clone(),
                 blob_store.clone(),
                 TokioTaskExecutor::default(),
             );
@@ -205,7 +209,6 @@ where
             let blob_store = InMemoryBlobStore::default();
             let pool = TransactionValidationTaskExecutor::eth(
                 peer.client.clone(),
-                MAINNET.clone(),
                 blob_store.clone(),
                 TokioTaskExecutor::default(),
             );

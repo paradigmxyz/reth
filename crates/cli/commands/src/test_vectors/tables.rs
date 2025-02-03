@@ -124,19 +124,19 @@ where
     // We want to control our repeated keys
     let mut seen_keys = HashSet::new();
 
-    let strat_values = proptest::collection::vec(arb::<T::Value>(), 100..300).no_shrink().boxed();
+    let start_values = proptest::collection::vec(arb::<T::Value>(), 100..300).no_shrink().boxed();
 
-    let strat_keys = arb::<T::Key>().no_shrink().boxed();
+    let start_keys = arb::<T::Key>().no_shrink().boxed();
 
     while rows.len() < per_table {
-        let key: T::Key = strat_keys.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
+        let key: T::Key = start_keys.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
 
         if !seen_keys.insert(key.clone()) {
             continue
         }
 
         let mut values: Vec<T::Value> =
-            strat_values.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
+            start_values.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
 
         values.sort();
 

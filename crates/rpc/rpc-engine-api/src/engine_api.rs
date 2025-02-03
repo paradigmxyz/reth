@@ -17,7 +17,9 @@ use async_trait::async_trait;
 use jsonrpsee_core::RpcResult;
 use parking_lot::Mutex;
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
-use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes, EngineValidator};
+use reth_engine_primitives::{
+    BeaconConsensusEngineHandle, EngineTypes, EngineValidator, ExecutionData,
+};
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes,
@@ -148,7 +150,7 @@ where
         Ok(self
             .inner
             .beacon_consensus
-            .new_payload(payload, ExecutionPayloadSidecar::none())
+            .new_payload(ExecutionData { payload, sidecar: ExecutionPayloadSidecar::none() })
             .await
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
@@ -183,7 +185,7 @@ where
         Ok(self
             .inner
             .beacon_consensus
-            .new_payload(payload, ExecutionPayloadSidecar::none())
+            .new_payload(ExecutionData { payload, sidecar: ExecutionPayloadSidecar::none() })
             .await
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
@@ -222,13 +224,13 @@ where
         Ok(self
             .inner
             .beacon_consensus
-            .new_payload(
+            .new_payload(ExecutionData {
                 payload,
-                ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
                     versioned_hashes,
                     parent_beacon_block_root,
                 }),
-            )
+            })
             .await
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
@@ -272,13 +274,13 @@ where
         Ok(self
             .inner
             .beacon_consensus
-            .new_payload(
+            .new_payload(ExecutionData {
                 payload,
-                ExecutionPayloadSidecar::v4(
+                sidecar: ExecutionPayloadSidecar::v4(
                     CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
                     PraguePayloadFields { requests: RequestsOrHash::Requests(execution_requests) },
                 ),
-            )
+            })
             .await
             .inspect(|_| self.inner.on_new_payload_response())?)
     }

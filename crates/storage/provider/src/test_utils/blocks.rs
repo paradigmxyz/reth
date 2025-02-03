@@ -220,8 +220,7 @@ fn block1(number: BlockNumber) -> (RecoveredBlock<reth_primitives::Block>, Execu
                 )],
                 ..Default::default()
             },
-        ]]
-        .into(),
+        ]],
         number,
         Vec::new(),
     );
@@ -279,8 +278,7 @@ fn block2(
                 )],
                 ..Default::default()
             },
-        ]]
-        .into(),
+        ]],
         number,
         Vec::new(),
     );
@@ -347,8 +345,7 @@ fn block3(
                 )],
                 ..Default::default()
             },
-        ]]
-        .into(),
+        ]],
         number,
         Vec::new(),
     );
@@ -435,8 +432,7 @@ fn block4(
                 )],
                 ..Default::default()
             },
-        ]]
-        .into(),
+        ]],
         number,
         Vec::new(),
     );
@@ -520,8 +516,7 @@ fn block5(
                 )],
                 ..Default::default()
             },
-        ]]
-        .into(),
+        ]],
         number,
         Vec::new(),
     );
