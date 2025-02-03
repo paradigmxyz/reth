@@ -2201,7 +2201,7 @@ mod tests {
         match a {
             Ok(_) => panic!(),
             Err(err) => match err {
-                InboundConnectionError::IpBanned {} => {
+                InboundConnectionError::IpBanned => {
                     assert_eq!(peer_manager.connection_info.num_pending_in, 0)
                 }
                 _ => unreachable!(),
