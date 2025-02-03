@@ -847,6 +847,12 @@ impl<N: NodePrimitives> ExecutedBlockWithTrieUpdates<N> {
     pub fn trie_updates(&self) -> &TrieUpdates {
         &self.trie
     }
+
+    /// Converts the value into [`SealedBlock`].
+    pub fn into_sealed_block(self) -> SealedBlock<N::Block> {
+        let block = Arc::unwrap_or_clone(self.block.recovered_block);
+        block.into_sealed_block()
+    }
 }
 
 /// Non-empty chain of blocks.

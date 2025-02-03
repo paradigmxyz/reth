@@ -18,7 +18,7 @@ use reth_node_api::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpBuiltPayload, OpPayloadBuilderAttributes};
-use reth_optimism_primitives::OpBlock;
+use reth_optimism_primitives::{OpBlock, OpPrimitives};
 use reth_payload_validator::ExecutionPayloadValidator;
 use reth_primitives::SealedBlock;
 use std::sync::Arc;
@@ -61,12 +61,12 @@ where
 /// A default payload type for [`OpEngineTypes`]
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
 #[non_exhaustive]
-pub struct OpPayloadTypes;
+pub struct OpPayloadTypes<N: NodePrimitives = OpPrimitives>(core::marker::PhantomData<N>);
 
-impl PayloadTypes for OpPayloadTypes {
-    type BuiltPayload = OpBuiltPayload;
+impl<N: NodePrimitives> PayloadTypes for OpPayloadTypes<N> {
+    type BuiltPayload = OpBuiltPayload<N>;
     type PayloadAttributes = OpPayloadAttributes;
-    type PayloadBuilderAttributes = OpPayloadBuilderAttributes;
+    type PayloadBuilderAttributes = OpPayloadBuilderAttributes<N::SignedTx>;
 }
 
 /// Validator for Optimism engine API.

@@ -171,6 +171,19 @@ impl From<OpTxEnvelope> for OpTransactionSigned {
     }
 }
 
+impl From<OpTransactionSigned> for OpTxEnvelope {
+    fn from(value: OpTransactionSigned) -> Self {
+        let (tx, signature, hash) = value.into_parts();
+        match tx {
+            OpTypedTransaction::Legacy(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            OpTypedTransaction::Eip2930(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            OpTypedTransaction::Eip1559(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            OpTypedTransaction::Deposit(tx) => Sealed::new_unchecked(tx, hash).into(),
+            OpTypedTransaction::Eip7702(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+        }
+    }
+}
+
 impl From<OpTransactionSigned> for Signed<OpTypedTransaction> {
     fn from(value: OpTransactionSigned) -> Self {
         let (tx, sig, hash) = value.into_parts();

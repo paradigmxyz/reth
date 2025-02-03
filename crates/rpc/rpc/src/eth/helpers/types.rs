@@ -1,12 +1,11 @@
 //! L1 `eth` API types.
 
-use alloy_consensus::{Signed, Transaction as _, TxEip4844Variant, TxEnvelope};
+use alloy_consensus::{Transaction as _, TxEip4844Variant, TxEnvelope};
 use alloy_network::{Ethereum, Network};
 use alloy_primitives::PrimitiveSignature as Signature;
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
 use reth_primitives::{Recovered, TransactionSigned};
-use reth_primitives_traits::SignedTransaction;
 use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::TransactionCompat;
@@ -43,27 +42,8 @@ where
         tx: Recovered<TransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
-        let from = tx.signer();
-        let hash = *tx.tx_hash();
-        let signature = *tx.signature();
-
-        let inner: TxEnvelope = match tx.into_tx().into_transaction() {
-            reth_primitives::Transaction::Legacy(tx) => {
-                Signed::new_unchecked(tx, signature, hash).into()
-            }
-            reth_primitives::Transaction::Eip2930(tx) => {
-                Signed::new_unchecked(tx, signature, hash).into()
-            }
-            reth_primitives::Transaction::Eip1559(tx) => {
-                Signed::new_unchecked(tx, signature, hash).into()
-            }
-            reth_primitives::Transaction::Eip4844(tx) => {
-                Signed::new_unchecked(tx, signature, hash).into()
-            }
-            reth_primitives::Transaction::Eip7702(tx) => {
-                Signed::new_unchecked(tx, signature, hash).into()
-            }
-        };
+        let (tx, from) = tx.into_parts();
+        let inner: TxEnvelope = tx.into();
 
         let TransactionInfo {
             block_hash, block_number, index: transaction_index, base_fee, ..
