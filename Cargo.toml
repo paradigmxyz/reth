@@ -516,7 +516,7 @@ tracing-appender = "0.2"
 url = { version = "2.3", default-features = false }
 zstd = "0.13"
 byteorder = "1"
-moka = "0.12"
+mini-moka = "0.10"
 
 # metrics
 metrics = "0.24.0"
