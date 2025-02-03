@@ -388,9 +388,9 @@ pub(crate) struct ProviderCacheBuilder {
 impl ProviderCacheBuilder {
     /// Build a [`ProviderCaches`] struct, so that provider caches can be easily cloned.
     pub(crate) fn build_caches(self) -> ProviderCaches {
-        const STORAGE_MAX_WEIGHT: u64 = 6 * 1024 * 1024 * 1024; // 6Gb
-        const ACCOUNT_MAX_WEIGHT: u64 = 1024 * 1024 * 1024; // 1Gb
-        const CODE_MAX_WEIGHT: u64 = 1024 * 1024 * 1024; // 1Gb
+        const STORAGE_MAX_WEIGHT: u64 = 8 * 1024 * 1024 * 1024; // 8Gb
+        const ACCOUNT_MAX_WEIGHT: u64 = 512 * 1024 * 1024; // 512Mb
+        const CODE_MAX_WEIGHT: u64 = 512 * 1024 * 1024; // 512Mb
 
         const EXPIRY_TIME: Duration = Duration::from_secs(7200); // 2 hours
         const TIME_TO_IDLE: Duration = Duration::from_secs(3600); // 1 hour
@@ -458,12 +458,12 @@ impl Default for ProviderCacheBuilder {
         // the maximum number of entries that can be stored, not the actual
         // memory usage which is controlled by max_capacity.
         //
-        // Code cache: up to 1M entries but limited to 1GB
-        // Storage cache: up to 1M accounts but limited to 6GB
-        // Account cache: up to 10M accounts but limited to 1GB
+        // Code cache: up to 10M entries but limited to 0.5GB
+        // Storage cache: up to 10M accounts but limited to 8GB
+        // Account cache: up to 10M accounts but limited to 0.5GB
         Self {
-            code_cache_size: 1_000_000,
-            storage_cache_size: 1_000_000,
+            code_cache_size: 10_000_000,
+            storage_cache_size: 10_000_000,
             account_cache_size: 10_000_000,
         }
     }
@@ -528,10 +528,10 @@ impl AccountStorageCache {
 
 impl Default for AccountStorageCache {
     fn default() -> Self {
-        // With weigher and max_capacity in place, this numbers represent
+        // With weigher and max_capacity in place, this number represents
         // the maximum number of entries that can be stored, not the actual
         // memory usage which is controlled by storage cache's max_capacity.
-        Self::new(10000)
+        Self::new(1_000_000)
     }
 }
 
