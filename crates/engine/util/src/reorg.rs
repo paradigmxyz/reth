@@ -8,7 +8,8 @@ use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_chainspec::EthChainSpec;
 use reth_engine_primitives::{
-    BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, ExecutionData, OnForkChoiceUpdated,
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, ExecutionData,
+    ExecutionPayload as _, OnForkChoiceUpdated,
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
@@ -104,7 +105,7 @@ impl<S, Engine: EngineTypes, Provider, Evm, Spec> EngineReorg<S, Engine, Provide
 impl<S, Engine, Provider, Evm, Spec> Stream for EngineReorg<S, Engine, Provider, Evm, Spec>
 where
     S: Stream<Item = BeaconEngineMessage<Engine>>,
-    Engine: EngineTypes,
+    Engine: EngineTypes<ExecutionData = ExecutionData>,
     Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
     Spec: EthChainSpec + EthereumHardforks,

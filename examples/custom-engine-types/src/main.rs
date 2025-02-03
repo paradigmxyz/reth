@@ -174,6 +174,7 @@ impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
+    type ExecutionData = ExecutionData;
 
     fn block_to_payload(
         block: SealedBlock<
@@ -207,6 +208,7 @@ impl CustomEngineValidator {
 
 impl PayloadValidator for CustomEngineValidator {
     type Block = Block;
+    type ExecutionData = ExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
@@ -218,7 +220,7 @@ impl PayloadValidator for CustomEngineValidator {
 
 impl<T> EngineValidator<T> for CustomEngineValidator
 where
-    T: EngineTypes<PayloadAttributes = CustomPayloadAttributes>,
+    T: EngineTypes<PayloadAttributes = CustomPayloadAttributes, ExecutionData = ExecutionData>,
 {
     fn validate_version_specific_fields(
         &self,

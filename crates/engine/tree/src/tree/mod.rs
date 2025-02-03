@@ -28,7 +28,7 @@ use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
 pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes,
-    EngineValidator, ExecutionData, ForkchoiceStateTracker, OnForkChoiceUpdated,
+    EngineValidator, ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
@@ -803,7 +803,7 @@ where
     #[instrument(level = "trace", skip_all, fields(block_hash = %payload.block_hash(), block_num = %payload.block_number(),), target = "engine::tree")]
     fn on_new_payload(
         &mut self,
-        payload: ExecutionData,
+        payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
         trace!(target: "engine::tree", "invoked new payload");
         self.metrics.engine.new_payload_messages.increment(1);
@@ -2925,7 +2925,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-    use reth_engine_primitives::ForkchoiceStatus;
+    use reth_engine_primitives::{ExecutionData, ForkchoiceStatus};
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_ethereum_primitives::{Block, EthPrimitives};

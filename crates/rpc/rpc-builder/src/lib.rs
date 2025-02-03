@@ -213,7 +213,7 @@ use jsonrpsee::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::{EngineTypes, PayloadValidator};
+use reth_engine_primitives::{EngineTypes, ExecutionData, PayloadValidator};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::NodePrimitives;
@@ -284,7 +284,9 @@ pub async fn launch<Provider, Pool, Network, Tasks, EvmConfig, EthApi, BlockExec
     eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
     block_executor: BlockExecutor,
     consensus: Arc<dyn FullConsensus<BlockExecutor::Primitives, Error = ConsensusError>>,
-    payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
+    payload_validator: Arc<
+        dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
+    >,
 ) -> Result<RpcServerHandle, RpcError>
 where
     Provider: FullRpcProvider<
@@ -614,7 +616,9 @@ where
         module_config: TransportRpcModuleConfig,
         engine: EngineApi,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
-        payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
+        payload_validator: Arc<
+            dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
+        >,
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
@@ -699,7 +703,9 @@ where
         self,
         config: RpcModuleConfig,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
-        payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
+        payload_validator: Arc<
+            dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
+        >,
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
     where
         EthApi: EthApiTypes + 'static,
@@ -726,7 +732,9 @@ where
         self,
         module_config: TransportRpcModuleConfig,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
-        payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
+        payload_validator: Arc<
+            dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
+        >,
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer<
@@ -869,7 +877,8 @@ pub struct RpcRegistryInner<
     executor: Tasks,
     block_executor: BlockExecutor,
     consensus: Consensus,
-    payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
+    payload_validator:
+        Arc<dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>>,
     /// Holds the configuration for the RPC modules
     config: RpcModuleConfig,
     /// Holds a all `eth_` namespace handlers
@@ -910,7 +919,9 @@ where
         evm_config: EvmConfig,
         eth_api_builder: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
         block_executor: BlockExecutor,
-        payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
+        payload_validator: Arc<
+            dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
+        >,
     ) -> Self
     where
         EvmConfig: ConfigureEvm<Header = Provider::Header>,
