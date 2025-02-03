@@ -175,7 +175,7 @@ pub enum InternalBlockExecutionError {
     LatestBlock(#[from] ProviderError),
     /// Arbitrary Block Executor Errors
     #[error(transparent)]
-    Other(Box<dyn core::error::Error + Send + Sync>),
+    Other(Box<dyn core::error::Error + Send + Sync + 'static>),
 }
 
 impl InternalBlockExecutionError {
@@ -190,5 +190,52 @@ impl InternalBlockExecutionError {
     /// Create a new [`InternalBlockExecutionError::Other`] from a given message.
     pub fn msg(msg: impl core::fmt::Display) -> Self {
         Self::Other(msg.to_string().into())
+    }
+
+    /// Returns the arbitrary error if it is [`InternalBlockExecutionError::Other`]
+    pub fn as_other(&self) -> Option<&(dyn core::error::Error + Send + Sync + 'static)> {
+        match self {
+            Self::Other(err) => Some(&**err),
+            _ => None,
+        }
+    }
+
+    /// Attempts to downcast the [`InternalBlockExecutionError::Other`] variant to a concrete type
+    pub fn downcast<T: core::error::Error + 'static>(self) -> Result<Box<T>, Self> {
+        match self {
+            Self::Other(err) => err.downcast().map_err(Self::Other),
+            err => Err(err),
+        }
+    }
+
+    /// Returns a reference to the [`InternalBlockExecutionError::Other`] value if this type is a
+    /// [`InternalBlockExecutionError::Other`] of that type. Returns None otherwise.
+    pub fn downcast_other<T: core::error::Error + 'static>(&self) -> Option<&T> {
+        let other = self.as_other()?;
+        other.downcast_ref()
+    }
+
+    /// Returns true if the this type is a [`InternalBlockExecutionError::Other`] of that error
+    /// type. Returns false otherwise.
+    pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
+        self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(thiserror::Error, Debug)]
+    #[error("err")]
+    struct E;
+
+    #[test]
+    fn other_downcast() {
+        let err = InternalBlockExecutionError::other(E);
+        assert!(err.is_other::<E>());
+
+        assert!(err.downcast_other::<E>().is_some());
+        assert!(err.downcast::<E>().is_ok());
     }
 }
