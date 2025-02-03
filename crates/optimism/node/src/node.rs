@@ -13,7 +13,9 @@ use reth_evm::{
     execute::BasicBlockExecutorProvider, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor,
 };
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
-use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, PrimitivesTy, TxTy};
+use reth_node_api::{
+    AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
+};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
@@ -26,6 +28,7 @@ use reth_node_builder::{
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{BasicOpReceiptBuilder, OpEvmConfig, OpExecutionStrategyFactory};
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
@@ -357,7 +360,12 @@ pub struct OpPoolBuilder {
 
 impl<Node> PoolBuilder<Node> for OpPoolBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+    Node: FullNodeTypes<
+        Types: NodeTypes<
+            ChainSpec: OpHardforks,
+            Primitives: NodePrimitives<SignedTx = OpTransactionSigned>,
+        >,
+    >,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
 
@@ -366,24 +374,22 @@ where
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
 
-        let validator = TransactionValidationTaskExecutor::eth_builder(Arc::new(
-            ctx.chain_spec().inner.clone(),
-        ))
-        .no_eip4844()
-        .with_head_timestamp(ctx.head().timestamp)
-        .kzg_settings(ctx.kzg_settings()?)
-        .with_additional_tasks(
-            pool_config_overrides
-                .additional_validation_tasks
-                .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
-        )
-        .build_with_tasks(ctx.provider().clone(), ctx.task_executor().clone(), blob_store.clone())
-        .map(|validator| {
-            OpTransactionValidator::new(validator)
-                // In --dev mode we can't require gas fees because we're unable to decode
-                // the L1 block info
-                .require_l1_data_gas_fee(!ctx.config().dev.dev)
-        });
+        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
+            .no_eip4844()
+            .with_head_timestamp(ctx.head().timestamp)
+            .kzg_settings(ctx.kzg_settings()?)
+            .with_additional_tasks(
+                pool_config_overrides
+                    .additional_validation_tasks
+                    .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
+            )
+            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
+            .map(|validator| {
+                OpTransactionValidator::new(validator)
+                    // In --dev mode we can't require gas fees because we're unable to decode
+                    // the L1 block info
+                    .require_l1_data_gas_fee(!ctx.config().dev.dev)
+            });
 
         let transaction_pool = reth_transaction_pool::Pool::new(
             validator,

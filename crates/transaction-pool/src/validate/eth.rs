@@ -22,7 +22,7 @@ use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT,
     eip4844::{env_settings::EnvKzgSettings, MAX_BLOBS_PER_BLOCK},
 };
-use reth_chainspec::{ChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives::{InvalidTransactionError, SealedBlock};
 use reth_primitives_traits::{Block, GotExpected};
 use reth_storage_api::{StateProvider, StateProviderFactory};
@@ -45,8 +45,11 @@ pub struct EthTransactionValidator<Client, T> {
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     /// Returns the configured chain spec
-    pub fn chain_spec(&self) -> &Arc<ChainSpec> {
-        &self.inner.chain_spec
+    pub fn chain_spec(&self) -> Arc<Client::ChainSpec>
+    where
+        Client: ChainSpecProvider,
+    {
+        self.client().chain_spec()
     }
 
     /// Returns the configured client
@@ -57,7 +60,7 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory,
+    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
 {
     /// Validates a single transaction.
@@ -86,7 +89,7 @@ where
 
 impl<Client, Tx> TransactionValidator for EthTransactionValidator<Client, Tx>
 where
-    Client: StateProviderFactory,
+    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
 {
     type Transaction = Tx;
@@ -130,8 +133,6 @@ where
 /// And adheres to the configured [`LocalTransactionConfig`].
 #[derive(Debug)]
 pub(crate) struct EthTransactionValidatorInner<Client, T> {
-    /// Spec of the chain
-    chain_spec: Arc<ChainSpec>,
     /// This type fetches account info from the db
     client: Client,
     /// Blobstore used for fetching re-injected blob transactions.
@@ -162,18 +163,23 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
 
 // === impl EthTransactionValidatorInner ===
 
-impl<Client, Tx> EthTransactionValidatorInner<Client, Tx> {
+impl<Client: ChainSpecProvider, Tx> EthTransactionValidatorInner<Client, Tx> {
     /// Returns the configured chain id
     pub(crate) fn chain_id(&self) -> u64 {
-        self.chain_spec.chain().id()
+        self.client.chain_spec().chain().id()
     }
 }
 
 impl<Client, Tx> EthTransactionValidatorInner<Client, Tx>
 where
-    Client: StateProviderFactory,
+    Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
 {
+    /// Returns the configured chain spec
+    fn chain_spec(&self) -> Arc<Client::ChainSpec> {
+        self.client.chain_spec()
+    }
+
     /// Validates a single transaction using an optional cached state provider.
     /// If no provider is passed, a new one will be created. This allows reusing
     /// the same provider across multiple txs.
@@ -509,15 +515,15 @@ where
 
     fn on_new_head_block<T: BlockHeader>(&self, new_tip_block: &T) {
         // update all forks
-        if self.chain_spec.is_cancun_active_at_timestamp(new_tip_block.timestamp()) {
+        if self.chain_spec().is_cancun_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if self.chain_spec.is_shanghai_active_at_timestamp(new_tip_block.timestamp()) {
+        if self.chain_spec().is_shanghai_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
-        if self.chain_spec.is_prague_active_at_timestamp(new_tip_block.timestamp()) {
+        if self.chain_spec().is_prague_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.prague.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
@@ -531,8 +537,8 @@ where
 
 /// A builder for [`TransactionValidationTaskExecutor`]
 #[derive(Debug)]
-pub struct EthTransactionValidatorBuilder {
-    chain_spec: Arc<ChainSpec>,
+pub struct EthTransactionValidatorBuilder<Client> {
+    client: Client,
     /// Fork indicator whether we are in the Shanghai stage.
     shanghai: bool,
     /// Fork indicator whether we are in the Cancun hardfork.
@@ -564,8 +570,8 @@ pub struct EthTransactionValidatorBuilder {
     max_tx_input_bytes: usize,
 }
 
-impl EthTransactionValidatorBuilder {
-    /// Creates a new builder for the given [`ChainSpec`]
+impl<Client> EthTransactionValidatorBuilder<Client> {
+    /// Creates a new builder for the given client
     ///
     /// By default this assumes the network is on the `Cancun` hardfork and the following
     /// transactions are allowed:
@@ -573,10 +579,10 @@ impl EthTransactionValidatorBuilder {
     ///  - EIP-2718
     ///  - EIP-1559
     ///  - EIP-4844
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
+    pub fn new(client: Client) -> Self {
         Self {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT.into(),
-            chain_spec,
+            client,
             minimum_priority_fee: None,
             additional_tasks: 1,
             kzg_settings: EnvKzgSettings::Default,
@@ -696,10 +702,13 @@ impl EthTransactionValidatorBuilder {
     /// Configures validation rules based on the head block's timestamp.
     ///
     /// For example, whether the Shanghai and Cancun hardfork is activated at launch.
-    pub fn with_head_timestamp(mut self, timestamp: u64) -> Self {
-        self.cancun = self.chain_spec.is_cancun_active_at_timestamp(timestamp);
-        self.shanghai = self.chain_spec.is_shanghai_active_at_timestamp(timestamp);
-        self.prague = self.chain_spec.is_prague_active_at_timestamp(timestamp);
+    pub fn with_head_timestamp(mut self, timestamp: u64) -> Self
+    where
+        Client: ChainSpecProvider<ChainSpec: EthereumHardforks>,
+    {
+        self.cancun = self.client.chain_spec().is_cancun_active_at_timestamp(timestamp);
+        self.shanghai = self.client.chain_spec().is_shanghai_active_at_timestamp(timestamp);
+        self.prague = self.client.chain_spec().is_prague_active_at_timestamp(timestamp);
         self
     }
 
@@ -718,16 +727,12 @@ impl EthTransactionValidatorBuilder {
     }
 
     /// Builds a the [`EthTransactionValidator`] without spawning validator tasks.
-    pub fn build<Client, Tx, S>(
-        self,
-        client: Client,
-        blob_store: S,
-    ) -> EthTransactionValidator<Client, Tx>
+    pub fn build<Tx, S>(self, blob_store: S) -> EthTransactionValidator<Client, Tx>
     where
         S: BlobStore,
     {
         let Self {
-            chain_spec,
+            client,
             shanghai,
             cancun,
             prague,
@@ -750,7 +755,6 @@ impl EthTransactionValidatorBuilder {
         };
 
         let inner = EthTransactionValidatorInner {
-            chain_spec,
             client,
             eip2718,
             eip1559,
@@ -775,9 +779,8 @@ impl EthTransactionValidatorBuilder {
     /// The validator will spawn `additional_tasks` additional tasks for validation.
     ///
     /// By default this will spawn 1 additional task.
-    pub fn build_with_tasks<Client, Tx, T, S>(
+    pub fn build_with_tasks<Tx, T, S>(
         self,
-        client: Client,
         tasks: T,
         blob_store: S,
     ) -> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>>
@@ -786,7 +789,7 @@ impl EthTransactionValidatorBuilder {
         S: BlobStore,
     {
         let additional_tasks = self.additional_tasks;
-        let validator = self.build(client, blob_store);
+        let validator = self.build(blob_store);
 
         let (tx, task) = ValidationTask::new();
 
@@ -882,7 +885,6 @@ mod tests {
     };
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
-    use reth_chainspec::MAINNET;
     use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, PooledTransaction};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
@@ -915,8 +917,7 @@ mod tests {
             ExtendedAccount::new(transaction.nonce(), U256::MAX),
         );
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
-            .build(provider, blob_store.clone());
+        let validator = EthTransactionValidatorBuilder::new(provider).build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
 
@@ -943,9 +944,9 @@ mod tests {
         );
 
         let blob_store = InMemoryBlobStore::default();
-        let validator = EthTransactionValidatorBuilder::new(MAINNET.clone())
+        let validator = EthTransactionValidatorBuilder::new(provider)
             .set_block_gas_limit(1_000_000) // tx gas limit is 1_015_288
-            .build(provider, blob_store.clone());
+            .build(blob_store.clone());
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
 

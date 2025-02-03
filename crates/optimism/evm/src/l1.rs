@@ -4,10 +4,9 @@ use crate::OpBlockExecutionError;
 use alloc::{string::ToString, sync::Arc};
 use alloy_consensus::Transaction;
 use alloy_primitives::{address, b256, hex, Address, Bytes, B256, U256};
-use reth_chainspec::ChainSpec;
 use reth_execution_errors::BlockExecutionError;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_forks::OpHardfork;
+use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_primitives_traits::BlockBody;
 use revm::{
     primitives::{Bytecode, HashMap, SpecId},
@@ -186,19 +185,20 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
 }
 
 /// An extension trait for [`L1BlockInfo`] that allows us to calculate the L1 cost of a transaction
-/// based off of the [`ChainSpec`]'s activated hardfork.
+/// based off of the chain spec's activated hardfork.
 pub trait RethL1BlockInfo {
     /// Forwards an L1 transaction calculation to revm and returns the gas cost.
     ///
     /// ### Takes
-    /// - `chain_spec`: The [`ChainSpec`] for the node.
+    /// - `chain_spec`: The chain spec for the node.
     /// - `timestamp`: The timestamp of the current block.
     /// - `input`: The calldata of the transaction.
     /// - `is_deposit`: Whether or not the transaction is a deposit.
     fn l1_tx_data_fee(
         &mut self,
-        chain_spec: &ChainSpec,
+        chain_spec: impl OpHardforks,
         timestamp: u64,
+        block: u64,
         input: &[u8],
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError>;
@@ -206,13 +206,14 @@ pub trait RethL1BlockInfo {
     /// Computes the data gas cost for an L2 transaction.
     ///
     /// ### Takes
-    /// - `chain_spec`: The [`ChainSpec`] for the node.
+    /// - `chain_spec`: The chain spec for the node.
     /// - `timestamp`: The timestamp of the current block.
     /// - `input`: The calldata of the transaction.
     fn l1_data_gas(
         &self,
-        chain_spec: &ChainSpec,
+        chain_spec: impl OpHardforks,
         timestamp: u64,
+        block_number: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError>;
 }
@@ -220,8 +221,9 @@ pub trait RethL1BlockInfo {
 impl RethL1BlockInfo for L1BlockInfo {
     fn l1_tx_data_fee(
         &mut self,
-        chain_spec: &ChainSpec,
+        chain_spec: impl OpHardforks,
         timestamp: u64,
+        block_number: u64,
         input: &[u8],
         is_deposit: bool,
     ) -> Result<U256, BlockExecutionError> {
@@ -229,13 +231,13 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Ok(U256::ZERO)
         }
 
-        let spec_id = if chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, timestamp) {
+        let spec_id = if chain_spec.is_fjord_active_at_timestamp(timestamp) {
             SpecId::FJORD
-        } else if chain_spec.is_fork_active_at_timestamp(OpHardfork::Ecotone, timestamp) {
+        } else if chain_spec.is_ecotone_active_at_timestamp(timestamp) {
             SpecId::ECOTONE
-        } else if chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, timestamp) {
+        } else if chain_spec.is_regolith_active_at_timestamp(timestamp) {
             SpecId::REGOLITH
-        } else if chain_spec.is_fork_active_at_timestamp(OpHardfork::Bedrock, timestamp) {
+        } else if chain_spec.is_bedrock_active_at_block(block_number) {
             SpecId::BEDROCK
         } else {
             return Err(OpBlockExecutionError::L1BlockInfoError {
@@ -248,15 +250,16 @@ impl RethL1BlockInfo for L1BlockInfo {
 
     fn l1_data_gas(
         &self,
-        chain_spec: &ChainSpec,
+        chain_spec: impl OpHardforks,
         timestamp: u64,
+        block_number: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError> {
-        let spec_id = if chain_spec.is_fork_active_at_timestamp(OpHardfork::Fjord, timestamp) {
+        let spec_id = if chain_spec.is_fjord_active_at_timestamp(timestamp) {
             SpecId::FJORD
-        } else if chain_spec.is_fork_active_at_timestamp(OpHardfork::Regolith, timestamp) {
+        } else if chain_spec.is_regolith_active_at_timestamp(timestamp) {
             SpecId::REGOLITH
-        } else if chain_spec.is_fork_active_at_timestamp(OpHardfork::Bedrock, timestamp) {
+        } else if chain_spec.is_bedrock_active_at_block(block_number) {
             SpecId::BEDROCK
         } else {
             return Err(OpBlockExecutionError::L1BlockInfoError {
