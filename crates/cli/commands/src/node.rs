@@ -1,7 +1,7 @@
 //! Main node command for launching a node
 
 use clap::{value_parser, Args, Parser};
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
@@ -17,6 +17,7 @@ use reth_node_core::{
     version,
 };
 use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
+use tracing::warn;
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -36,7 +37,6 @@ pub struct NodeCommand<
         value_name = "CHAIN_OR_PATH",
         long_help = C::help_message(),
         default_value = C::SUPPORTED_CHAINS[0],
-        default_value_if("dev", "true", "dev"),
         value_parser = C::parser(),
         required = false,
     )]
@@ -151,7 +151,7 @@ impl<
         let Self {
             datadir,
             config,
-            chain,
+            mut chain,
             metrics,
             instance,
             with_unused_ports,
@@ -166,6 +166,16 @@ impl<
             ext,
             engine,
         } = self;
+
+        if dev.dev && chain.chain() != Chain::dev() {
+            warn!(target: "reth::cli",
+                chain_id=%chain.chain().id(),
+                dev_chain_id=%Chain::dev().id(),
+                "Custom dev genesis file must still use dev chain id",
+            );
+
+            chain = C::parse("dev").expect("should parse standard dev config");
+        }
 
         // set up node config
         let mut node_config = NodeConfig {
