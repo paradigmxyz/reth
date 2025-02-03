@@ -8530,6 +8530,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "assert_matches",
+ "auto_impl",
  "op-alloy-rpc-types-engine",
  "reth-chain-state",
  "reth-chainspec",
