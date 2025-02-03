@@ -181,7 +181,7 @@ where
     where
         Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
     {
-        // If thre's any receipts pruning configured, receipts are written directly to database and
+        // If there's any receipts pruning configured, receipts are written directly to database and
         // inconsistencies are expected.
         if provider.prune_modes_ref().has_receipts_pruning() {
             return Ok(())
