@@ -17,8 +17,8 @@ use reth_trie::{
     proof::ProofBlindedProviderFactory,
     trie_cursor::InMemoryTrieCursorFactory,
     updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, Nibbles,
-    TrieInput,
+    HashedPostState, HashedPostStateSorted, HashedStorage, MultiProof,
+    MultiProofAccountStorageTarget, MultiProofTargets, Nibbles, TrieInput,
 };
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_parallel::{proof::ParallelProof, root::ParallelStateRootError};
@@ -29,7 +29,7 @@ use reth_trie_sparse::{
 };
 use revm_primitives::{keccak256, EvmState, B256};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::{hash_map::Entry, BTreeMap, VecDeque},
     sync::{
         mpsc::{self, channel, Receiver, Sender},
         Arc,
@@ -440,10 +440,10 @@ where
 struct StateRootTaskMetrics {
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
-    /// Histogram of proof calculation account targets.
-    pub proof_calculation_account_targets_histogram: Histogram,
-    /// Histogram of proof calculation storage targets.
-    pub proof_calculation_storage_targets_histogram: Histogram,
+    /// Histogram of proof calculation targets with a ccounts.
+    pub proof_calculation_with_account_targets_histogram: Histogram,
+    /// Histogram of proof calculation targets with only storage slots.
+    pub proof_calculation_only_storage_targets_histogram: Histogram,
 
     /// Histogram of sparse trie update durations.
     pub sparse_trie_update_duration_histogram: Histogram,
@@ -689,21 +689,35 @@ where
                         self.metrics
                             .proof_calculation_duration_histogram
                             .record(proof_calculated.elapsed);
+
+                        let mut with_account_accounts = 0;
+                        let mut with_account_slots = 0;
+                        let mut only_storage_accounts = 0;
+                        let mut only_storage_slots = 0;
+                        for slots in proof_calculated.update.targets.values() {
+                            if slots.is_with_account_proof() {
+                                with_account_accounts += 1;
+                                with_account_slots += slots.len();
+                            } else if slots.is_only_storage_proofs() {
+                                only_storage_accounts += 1;
+                                only_storage_slots += slots.len();
+                            }
+                        }
+
                         self.metrics
-                            .proof_calculation_account_targets_histogram
-                            .record(proof_calculated.update.targets.len() as f64);
-                        self.metrics.proof_calculation_storage_targets_histogram.record(
-                            proof_calculated
-                                .update
-                                .targets
-                                .values()
-                                .map(|targets| targets.len() as f64)
-                                .sum::<f64>(),
-                        );
+                            .proof_calculation_with_account_targets_histogram
+                            .record(with_account_accounts as f64);
+                        self.metrics
+                            .proof_calculation_only_storage_targets_histogram
+                            .record(only_storage_accounts as f64);
 
                         debug!(
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
+                            ?with_account_accounts,
+                            ?with_account_slots,
+                            ?only_storage_accounts,
+                            ?only_storage_slots,
                             total_proofs = proofs_processed,
                             "Processing calculated proof"
                         );
@@ -859,7 +873,10 @@ fn get_proof_targets(
     // first collect all new accounts (not previously fetched)
     for &hashed_address in state_update.accounts.keys() {
         if !fetched_proof_targets.contains_key(&hashed_address) {
-            targets.insert(hashed_address, HashSet::default());
+            targets.insert(
+                hashed_address,
+                MultiProofAccountStorageTarget::WithAccountProof(HashSet::default()),
+            );
         }
     }
 
@@ -870,10 +887,21 @@ fn get_proof_targets(
             .storage
             .keys()
             .filter(|slot| !fetched.is_some_and(|f| f.contains(*slot)))
+            .copied()
             .peekable();
 
         if changed_slots.peek().is_some() {
-            targets.entry(*hashed_address).or_default().extend(changed_slots);
+            if fetched.is_some() {
+                targets.insert(
+                    *hashed_address,
+                    MultiProofAccountStorageTarget::OnlyStorageProofs(changed_slots.collect()),
+                );
+            } else {
+                targets.insert(
+                    *hashed_address,
+                    MultiProofAccountStorageTarget::WithAccountProof(changed_slots.collect()),
+                );
+            }
         }
     }
 
@@ -972,13 +1000,27 @@ where
 
 fn extend_multi_proof_targets(targets: &mut MultiProofTargets, other: MultiProofTargets) {
     for (address, slots) in other {
-        targets.entry(address).or_default().extend(slots);
+        match targets.entry(address) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().into_only_storage_proofs_mut().extend(slots);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(slots.into_with_account_proof());
+            }
+        }
     }
 }
 
 fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {
     for (address, slots) in other {
-        targets.entry(*address).or_default().extend(slots);
+        match targets.entry(*address) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().into_only_storage_proofs_mut().extend(slots.clone());
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(slots.clone().into_with_account_proof());
+            }
+        }
     }
 }
 
@@ -1284,7 +1326,10 @@ mod tests {
             .expect("Should have an account without storage");
 
         // mark the account as already fetched
-        fetched.insert(*fetched_addr, HashSet::default());
+        fetched.insert(
+            *fetched_addr,
+            MultiProofAccountStorageTarget::WithAccountProof(HashSet::default()),
+        );
 
         let targets = get_proof_targets(&state, &fetched);
 
@@ -1304,7 +1349,7 @@ mod tests {
         let mut fetched_slots = HashSet::default();
         let fetched_slot = *storage.storage.keys().next().unwrap();
         fetched_slots.insert(fetched_slot);
-        fetched.insert(*addr, fetched_slots);
+        fetched.insert(*addr, MultiProofAccountStorageTarget::WithAccountProof(fetched_slots));
 
         let targets = get_proof_targets(&state, &fetched);
 
@@ -1344,7 +1389,7 @@ mod tests {
 
         let mut fetched_slots = HashSet::default();
         fetched_slots.insert(slot1);
-        fetched.insert(addr1, fetched_slots);
+        fetched.insert(addr1, MultiProofAccountStorageTarget::WithAccountProof(fetched_slots));
 
         let targets = get_proof_targets(&state, &fetched);
 

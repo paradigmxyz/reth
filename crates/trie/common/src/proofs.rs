@@ -1,5 +1,7 @@
 //! Merkle trie proofs.
 
+use core::ops::{Deref, DerefMut};
+
 use crate::{Nibbles, TrieAccount};
 use alloc::vec::Vec;
 use alloy_consensus::constants::KECCAK_EMPTY;
@@ -18,7 +20,73 @@ use itertools::Itertools;
 use reth_primitives_traits::Account;
 
 /// Proof targets map.
-pub type MultiProofTargets = B256HashMap<B256HashSet>;
+pub type MultiProofTargets = B256HashMap<MultiProofAccountStorageTarget>;
+
+/// Proof target for account with storage slots.
+#[derive(Debug, Clone)]
+pub enum MultiProofAccountStorageTarget {
+    /// Fetch both account proof and storage slot proofs.
+    WithAccountProof(B256HashSet),
+    /// Fetch only storage slot proofs.
+    OnlyStorageProofs(B256HashSet),
+}
+
+impl IntoIterator for MultiProofAccountStorageTarget {
+    type Item = B256;
+    type IntoIter = alloy_primitives::map::hash_set::IntoIter<B256>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            Self::WithAccountProof(set) | Self::OnlyStorageProofs(set) => set.into_iter(),
+        }
+    }
+}
+
+impl Deref for MultiProofAccountStorageTarget {
+    type Target = B256HashSet;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::WithAccountProof(set) | Self::OnlyStorageProofs(set) => set,
+        }
+    }
+}
+
+impl DerefMut for MultiProofAccountStorageTarget {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::WithAccountProof(set) | Self::OnlyStorageProofs(set) => set,
+        }
+    }
+}
+
+impl MultiProofAccountStorageTarget {
+    /// Returns `true` if the target is fetching both account and storage slot proofs.
+    pub const fn is_with_account_proof(&self) -> bool {
+        matches!(self, Self::WithAccountProof(_))
+    }
+
+    /// Returns `true` if the target is fetching only storage slot proofs.
+    pub const fn is_only_storage_proofs(&self) -> bool {
+        matches!(self, Self::OnlyStorageProofs(_))
+    }
+
+    /// Converts the target into [`Self::WithAccountProof`].
+    pub fn into_with_account_proof(self) -> Self {
+        match self {
+            Self::OnlyStorageProofs(set) => Self::WithAccountProof(set),
+            Self::WithAccountProof(_) => self,
+        }
+    }
+
+    /// Converts the target into a mutable reference to [`Self::OnlyStorageProofs`].
+    pub fn into_only_storage_proofs_mut(&mut self) -> &mut Self {
+        if let Self::OnlyStorageProofs(set) = self {
+            *self = Self::OnlyStorageProofs(core::mem::take(set));
+        }
+        self
+    }
+}
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
