@@ -6,12 +6,11 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-    ExecutionPayloadFieldV2, ExecutionPayloadV1, PayloadAttributes, PayloadId,
+    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives::{EthPrimitives, SealedBlock};
-use reth_rpc_types_compat::engine::payload::{block_to_payload_v1, block_to_payload_v3};
 
 /// Contains the built payload.
 ///
@@ -99,26 +98,13 @@ impl BuiltPayload for EthBuiltPayload {
     }
 }
 
-impl BuiltPayload for &EthBuiltPayload {
-    type Primitives = EthPrimitives;
-
-    fn block(&self) -> &SealedBlock {
-        (**self).block()
-    }
-
-    fn fees(&self) -> U256 {
-        (**self).fees()
-    }
-
-    fn requests(&self) -> Option<Requests> {
-        self.requests.clone()
-    }
-}
-
 // V1 engine_getPayloadV1 response
 impl From<EthBuiltPayload> for ExecutionPayloadV1 {
     fn from(value: EthBuiltPayload) -> Self {
-        block_to_payload_v1(Arc::unwrap_or_clone(value.block))
+        Self::from_block_unchecked(
+            value.block().hash(),
+            &Arc::unwrap_or_clone(value.block).into_block(),
+        )
     }
 }
 
@@ -142,7 +128,10 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
         let EthBuiltPayload { block, fees, sidecars, .. } = value;
 
         Self {
-            execution_payload: block_to_payload_v3(Arc::unwrap_or_clone(block)),
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
+            ),
             block_value: fees,
             // From the engine API spec:
             //

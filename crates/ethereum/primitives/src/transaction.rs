@@ -15,18 +15,14 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
-use once_cell as _;
-#[cfg(not(feature = "std"))]
-use once_cell::sync::OnceCell as OnceLock;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
+    sync::OnceLock,
     transaction::{error::TransactionConversionError, signed::RecoveryError},
     FillTxEnv, InMemorySize, SignedTransaction,
 };
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "std")]
-use std::sync::OnceLock;
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -544,6 +540,19 @@ impl From<TxEnvelope> for TransactionSigned {
             TxEnvelope::Eip1559(tx) => tx.into(),
             TxEnvelope::Eip4844(tx) => tx.into(),
             TxEnvelope::Eip7702(tx) => tx.into(),
+        }
+    }
+}
+
+impl From<TransactionSigned> for TxEnvelope {
+    fn from(value: TransactionSigned) -> Self {
+        let (tx, signature, hash) = value.into_parts();
+        match tx {
+            Transaction::Legacy(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip2930(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip1559(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip4844(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip7702(tx) => Signed::new_unchecked(tx, signature, hash).into(),
         }
     }
 }

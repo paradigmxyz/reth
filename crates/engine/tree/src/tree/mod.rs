@@ -15,8 +15,7 @@ use alloy_primitives::{
     BlockNumber, B256, U256,
 };
 use alloy_rpc_types_engine::{
-    ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState, PayloadStatus, PayloadStatusEnum,
-    PayloadValidationError,
+    ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use block_buffer::BlockBuffer;
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
@@ -29,7 +28,7 @@ use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
 pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes,
-    EngineValidator, ForkchoiceStateTracker, OnForkChoiceUpdated,
+    EngineValidator, ExecutionData, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
@@ -790,7 +789,7 @@ where
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
     /// the transactions in the block are sent to the execution layer in the form of a
-    /// [`ExecutionPayload`]. The Execution layer executes the transactions and validates the
+    /// [`ExecutionData`]. The Execution layer executes the transactions and validates the
     /// state in the block header, then passes validation data back to Consensus layer, that
     /// adds the block to the head of its own blockchain and attests to it. The block is then
     /// broadcast over the consensus p2p network in the form of a "Beacon block".
@@ -803,8 +802,7 @@ where
     #[instrument(level = "trace", skip_all, fields(block_hash = %payload.block_hash(), block_num = %payload.block_number(),), target = "engine::tree")]
     fn on_new_payload(
         &mut self,
-        payload: ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
+        payload: ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
         trace!(target: "engine::tree", "invoked new payload");
         self.metrics.engine.new_payload_messages.increment(1);
@@ -835,7 +833,7 @@ where
         //
         // This validation **MUST** be instantly run in all cases even during active sync process.
         let parent_hash = payload.parent_hash();
-        let block = match self.payload_validator.ensure_well_formed_payload(payload, sidecar) {
+        let block = match self.payload_validator.ensure_well_formed_payload(payload) {
             Ok(block) => block,
             Err(error) => {
                 error!(target: "engine::tree", %error, "Invalid payload");
@@ -1391,8 +1389,8 @@ where
                                     error!(target: "engine::tree", "Failed to send event: {err:?}");
                                 }
                             }
-                            BeaconEngineMessage::NewPayload { payload, sidecar, tx } => {
-                                let output = self.on_new_payload(payload, sidecar);
+                            BeaconEngineMessage::NewPayload { payload, tx } => {
+                                let output = self.on_new_payload(payload);
                                 if let Err(err) =
                                     tx.send(output.map(|o| o.outcome).map_err(|e| {
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
@@ -2374,11 +2372,29 @@ where
         let (state_root_handle, state_root_task_config, state_hook) =
             if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
                 let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
-                let state_root_config = StateRootConfig::new_from_input(
-                    consistent_view.clone(),
-                    self.compute_trie_input(consistent_view, block.header().parent_hash())
-                        .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?,
-                );
+
+                // Compute trie input
+                let trie_input_start = Instant::now();
+                let trie_input = self
+                    .compute_trie_input(consistent_view.clone(), block.header().parent_hash())
+                    .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+
+                // Create state root config
+                let config_start = Instant::now();
+                let state_root_config =
+                    StateRootConfig::new_from_input(consistent_view, trie_input);
+
+                let trie_input_elapsed = config_start - trie_input_start;
+                self.metrics
+                    .block_validation
+                    .trie_input_duration
+                    .set(trie_input_elapsed.as_secs_f64());
+
+                let config_elapsed = config_start.elapsed();
+                self.metrics
+                    .block_validation
+                    .state_root_config_duration
+                    .set(config_elapsed.as_secs_f64());
 
                 let state_root_task = StateRootTask::new(
                     state_root_config.clone(),
@@ -2902,7 +2918,9 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::Bytes;
     use alloy_rlp::Decodable;
-    use alloy_rpc_types_engine::{CancunPayloadFields, ExecutionPayloadSidecar};
+    use alloy_rpc_types_engine::{
+        CancunPayloadFields, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
+    };
     use assert_matches::assert_matches;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
@@ -2913,7 +2931,6 @@ mod tests {
     use reth_evm::test_utils::MockExecutorProvider;
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_rpc_types_compat::engine::{block_to_payload_v1, payload::block_to_payload_v3};
     use reth_trie::{updates::TrieUpdates, HashedPostState};
     use std::{
         str::FromStr,
@@ -3182,15 +3199,18 @@ mod tests {
             &mut self,
             block: RecoveredBlock<reth_ethereum_primitives::Block>,
         ) {
-            let payload = block_to_payload_v3(block.clone_sealed_block());
+            let payload = ExecutionPayloadV3::from_block_unchecked(
+                block.hash(),
+                &block.clone_sealed_block().into_block(),
+            );
             self.tree
-                .on_new_payload(
-                    payload.into(),
-                    ExecutionPayloadSidecar::v3(CancunPayloadFields {
+                .on_new_payload(ExecutionData {
+                    payload: payload.into(),
+                    sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
                         parent_beacon_block_root: block.parent_beacon_block_root.unwrap(),
                         versioned_hashes: vec![],
                     }),
-                )
+                })
                 .unwrap();
         }
 
@@ -3449,13 +3469,16 @@ mod tests {
         let block = Block::decode(&mut data.as_ref()).unwrap();
         let sealed = block.seal_slow();
         let hash = sealed.hash();
-        let payload = block_to_payload_v1(sealed.clone());
+        let payload = ExecutionPayloadV1::from_block_unchecked(hash, &sealed.clone().into_block());
 
         let mut test_harness = TestHarness::new(HOLESKY.clone());
 
         let outcome = test_harness
             .tree
-            .on_new_payload(payload.into(), ExecutionPayloadSidecar::none())
+            .on_new_payload(ExecutionData {
+                payload: payload.into(),
+                sidecar: ExecutionPayloadSidecar::none(),
+            })
             .unwrap();
         assert!(outcome.outcome.is_syncing());
 
@@ -3489,7 +3512,8 @@ mod tests {
         let data = Bytes::from_str(s).unwrap();
         let block: Block = Block::decode(&mut data.as_ref()).unwrap();
         let sealed = block.seal_slow();
-        let payload = block_to_payload_v1(sealed);
+        let payload =
+            ExecutionPayloadV1::from_block_unchecked(sealed.hash(), &sealed.clone().into_block());
 
         let mut test_harness =
             TestHarness::new(HOLESKY.clone()).with_backfill_state(BackfillSyncState::Active);
@@ -3499,8 +3523,10 @@ mod tests {
             .tree
             .on_engine_message(FromEngine::Request(
                 BeaconEngineMessage::NewPayload {
-                    payload: payload.clone().into(),
-                    sidecar: ExecutionPayloadSidecar::none(),
+                    payload: ExecutionData {
+                        payload: payload.clone().into(),
+                        sidecar: ExecutionPayloadSidecar::none(),
+                    },
                     tx,
                 }
                 .into(),

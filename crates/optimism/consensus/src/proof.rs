@@ -1,13 +1,12 @@
 //! Helper function for Receipt root calculation for Optimism hardforks.
 
 use alloc::vec::Vec;
-use alloy_consensus::TxReceipt;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::B256;
 use alloy_trie::root::ordered_trie_root_with_encoder;
 use reth_chainspec::ChainSpec;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
-use reth_optimism_primitives::{DepositReceipt, OpReceipt};
+use reth_optimism_primitives::DepositReceipt;
 use reth_primitives::ReceiptWithBloom;
 
 /// Calculates the receipt root for a header.
@@ -41,11 +40,11 @@ pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_2718(buf))
 }
 
-/// Calculates the receipt root for a header for the reference type of [`OpReceipt`].
+/// Calculates the receipt root for a header for the reference type of an OP receipt.
 ///
 /// NOTE: Prefer calculate receipt root optimism if you have log blooms memoized.
-pub fn calculate_receipt_root_no_memo_optimism(
-    receipts: &[OpReceipt],
+pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
+    receipts: &[R],
     chain_spec: impl OpHardforks,
     timestamp: u64,
 ) -> B256 {
@@ -61,8 +60,8 @@ pub fn calculate_receipt_root_no_memo_optimism(
             .iter()
             .map(|r| {
                 let mut r = (*r).clone();
-                if let OpReceipt::Deposit(r) = &mut r {
-                    r.deposit_nonce = None;
+                if let Some(receipt) = r.as_deposit_receipt_mut() {
+                    receipt.deposit_nonce = None;
                 }
                 r
             })
@@ -85,6 +84,7 @@ mod tests {
     use alloy_primitives::{b256, bloom, hex, Address, Bloom, Bytes, Log, LogData};
     use op_alloy_consensus::OpDepositReceipt;
     use reth_optimism_chainspec::BASE_SEPOLIA;
+    use reth_optimism_primitives::OpReceipt;
     use reth_primitives::ReceiptWithBloom;
 
     /// Tests that the receipt root is computed correctly for the regolith block.

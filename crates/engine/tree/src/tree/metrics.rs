@@ -67,6 +67,16 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_histogram: Histogram,
     /// Latest state root duration
     pub(crate) state_root_duration: Gauge,
+    /// Trie input computation duration
+    pub(crate) trie_input_duration: Gauge,
+    /// Prewarm spawn duration
+    #[allow(dead_code)]
+    pub(crate) prewarm_spawn_duration: Gauge,
+    /// Cache saving duration
+    #[allow(dead_code)]
+    pub(crate) cache_saving_duration: Gauge,
+    /// State root config creation duration
+    pub(crate) state_root_config_duration: Gauge,
 }
 
 impl BlockValidationMetrics {
