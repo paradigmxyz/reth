@@ -9764,6 +9764,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "19.4.0"
+source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v55#8e3fd7b8640a776bd28cc421f33b1f38949490d6"
 dependencies = [
  "auto_impl",
  "cfg-if",
@@ -9798,6 +9799,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "15.1.0"
+source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v55#8e3fd7b8640a776bd28cc421f33b1f38949490d6"
 dependencies = [
  "cfg-if",
  "revm-primitives",
@@ -9807,6 +9809,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "16.0.0"
+source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v55#8e3fd7b8640a776bd28cc421f33b1f38949490d6"
 dependencies = [
  "aurora-engine-modexp",
  "blst",
@@ -9825,6 +9828,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "15.1.0"
+source = "git+https://github.com/scroll-tech/revm.git?branch=scroll-evm-executor/reth/v55#8e3fd7b8640a776bd28cc421f33b1f38949490d6"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
