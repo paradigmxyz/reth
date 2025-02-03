@@ -8,7 +8,7 @@ use futures::{stream::FuturesUnordered, Stream, StreamExt, TryFutureExt};
 use itertools::Either;
 use reth_chainspec::EthChainSpec;
 use reth_engine_primitives::{
-    BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, OnForkChoiceUpdated,
+    BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes, ExecutionData, OnForkChoiceUpdated,
 };
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError, RethResult};
 use reth_ethereum_forks::EthereumHardforks;
@@ -147,7 +147,7 @@ where
             let next = ready!(this.stream.poll_next_unpin(cx));
             let item = match (next, &this.last_forkchoice_state) {
                 (
-                    Some(BeaconEngineMessage::NewPayload { payload, sidecar, tx }),
+                    Some(BeaconEngineMessage::NewPayload { payload, tx }),
                     Some(last_forkchoice_state),
                 ) if this.forkchoice_states_forwarded > this.frequency &&
                         // Only enter reorg state if new payload attaches to current head.
@@ -162,13 +162,12 @@ where
                     // forkchoice state. We will rely on CL to reorg us back to canonical chain.
                     // TODO: This is an expensive blocking operation, ideally it's spawned as a task
                     // so that the stream could yield the control back.
-                    let (reorg_payload, reorg_sidecar) = match create_reorg_head(
+                    let reorg_payload = match create_reorg_head(
                         this.provider,
                         this.evm_config,
                         this.payload_validator,
                         *this.depth,
                         payload.clone(),
-                        sidecar.clone(),
                     ) {
                         Ok(result) => result,
                         Err(error) => {
@@ -177,7 +176,6 @@ where
                             // the next one
                             return Poll::Ready(Some(BeaconEngineMessage::NewPayload {
                                 payload,
-                                sidecar,
                                 tx,
                             }))
                         }
@@ -197,11 +195,10 @@ where
 
                     let queue = VecDeque::from([
                         // Current payload
-                        BeaconEngineMessage::NewPayload { payload, sidecar, tx },
+                        BeaconEngineMessage::NewPayload { payload, tx },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
                             payload: reorg_payload,
-                            sidecar: reorg_sidecar,
                             tx: reorg_payload_tx,
                         },
                         // Reorg forkchoice state
@@ -248,9 +245,8 @@ fn create_reorg_head<Provider, Evm, Spec>(
     evm_config: &Evm,
     payload_validator: &ExecutionPayloadValidator<Spec>,
     mut depth: usize,
-    next_payload: ExecutionPayload,
-    next_sidecar: ExecutionPayloadSidecar,
-) -> RethResult<(ExecutionPayload, ExecutionPayloadSidecar)>
+    next_payload: ExecutionData,
+) -> RethResult<ExecutionData>
 where
     Provider: BlockReader<Block = reth_primitives::Block> + StateProviderFactory,
     Evm: ConfigureEvm<Header = Header, Transaction = reth_primitives::TransactionSigned>,
@@ -259,9 +255,8 @@ where
     let chain_spec = payload_validator.chain_spec();
 
     // Ensure next payload is valid.
-    let next_block = payload_validator
-        .ensure_well_formed_payload(next_payload, next_sidecar)
-        .map_err(RethError::msg)?;
+    let next_block =
+        payload_validator.ensure_well_formed_payload(next_payload).map_err(RethError::msg)?;
 
     // Fetch reorg target block depending on its depth and its parent.
     let mut previous_hash = next_block.parent_hash;
@@ -419,10 +414,14 @@ where
     }
     .seal_slow();
 
-    Ok((
-        ExecutionPayload::from_block_unchecked(reorg_block.hash(), &reorg_block.into_block()).0,
+    Ok(ExecutionData {
+        payload: ExecutionPayload::from_block_unchecked(
+            reorg_block.hash(),
+            &reorg_block.into_block(),
+        )
+        .0,
         // todo(onbjerg): how do we support execution requests?
-        reorg_target
+        sidecar: reorg_target
             .header
             .parent_beacon_block_root
             .map(|root| {
@@ -432,5 +431,5 @@ where
                 })
             })
             .unwrap_or_else(ExecutionPayloadSidecar::none),
-    ))
+    })
 }

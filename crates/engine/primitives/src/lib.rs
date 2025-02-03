@@ -11,6 +11,7 @@
 
 extern crate alloc;
 
+use alloy_primitives::B256;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes};
 mod error;
 
@@ -32,15 +33,61 @@ pub use event::*;
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 
+use alloy_eips::{eip7685::Requests, Decodable2718};
 use reth_payload_primitives::{
     validate_execution_requests, EngineApiMessageVersion, EngineObjectValidationError,
     InvalidPayloadAttributesError, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives::{NodePrimitives, SealedBlock};
 use reth_primitives_traits::Block;
-use serde::{de::DeserializeOwned, ser::Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use alloy_eips::eip7685::Requests;
+/// Struct aggregating [`ExecutionPayload`] and [`ExecutionPayloadSidecar`] and encapsulating
+/// complete payload supplied for execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionData {
+    /// Execution payload.
+    pub payload: ExecutionPayload,
+    /// Additional fork-specific fields.
+    pub sidecar: ExecutionPayloadSidecar,
+}
+
+impl ExecutionData {
+    /// Creates new instance of [`ExecutionData`].
+    pub const fn new(payload: ExecutionPayload, sidecar: ExecutionPayloadSidecar) -> Self {
+        Self { payload, sidecar }
+    }
+
+    /// Returns the parent hash of the block.
+    pub fn parent_hash(&self) -> B256 {
+        self.payload.parent_hash()
+    }
+
+    /// Returns the hash of the block.
+    pub fn block_hash(&self) -> B256 {
+        self.payload.block_hash()
+    }
+
+    /// Returns the number of the block.
+    pub fn block_number(&self) -> u64 {
+        self.payload.block_number()
+    }
+
+    /// Tries to create a new unsealed block from the given payload and payload sidecar.
+    ///
+    /// Performs additional validation of `extra_data` and `base_fee_per_gas` fields.
+    ///
+    /// # Note
+    ///
+    /// The log bloom is assumed to be validated during serialization.
+    ///
+    /// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
+    pub fn try_into_block<T: Decodable2718>(
+        self,
+    ) -> Result<alloy_consensus::Block<T>, PayloadError> {
+        self.payload.try_into_block_with_sidecar(&self.sidecar)
+    }
+}
 
 /// This type defines the versioned types of the engine API.
 ///
@@ -94,7 +141,7 @@ pub trait EngineTypes:
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> (ExecutionPayload, ExecutionPayloadSidecar);
+    ) -> ExecutionData;
 }
 
 /// Type that validates an [`ExecutionPayload`].
@@ -112,8 +159,7 @@ pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
     /// engine-API specification.
     fn ensure_well_formed_payload(
         &self,
-        payload: ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
+        payload: ExecutionData,
     ) -> Result<SealedBlock<Self::Block>, PayloadError>;
 }
 
