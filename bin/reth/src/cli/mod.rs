@@ -233,13 +233,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     Prune(prune::PruneCommand<C>),
 }
 
-/// A provider for chain specifications.
-pub trait ChainSpecProvider<C: ChainSpecParser> {
-    /// Returns an optional chain specification.
-    fn chain_spec(&self) -> Option<&C::ChainSpec>;
-}
-
-impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> ChainSpecProvider<C> for Commands<C, Ext> {
+impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
     fn chain_spec(&self) -> Option<&C::ChainSpec> {
         match self {
             Commands::Node(cmd) => Some(&cmd.chain),
