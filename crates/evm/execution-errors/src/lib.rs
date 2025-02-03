@@ -36,9 +36,6 @@ pub enum BlockValidationError {
         /// The EVM error.
         error: Box<dyn core::error::Error + Send + Sync>,
     },
-    /// Error when recovering the sender for a transaction
-    #[error("failed to recover sender for transaction")]
-    SenderRecoveryError,
     /// Error when incrementing balance in post execution
     #[error("incrementing balance in post execution failed")]
     IncrementBalanceFailed,
@@ -54,18 +51,6 @@ pub enum BlockValidationError {
         transaction_gas_limit: u64,
         /// The available block gas
         block_available_gas: u64,
-    },
-    /// Error for pre-merge block
-    #[error("block {hash} is pre merge")]
-    BlockPreMerge {
-        /// The hash of the block
-        hash: B256,
-    },
-    /// Error for missing total difficulty
-    #[error("missing total difficulty for block {hash}")]
-    MissingTotalDifficulty {
-        /// The hash of the block
-        hash: B256,
     },
     /// Error for EIP-4788 when parent beacon block root is missing
     #[error("EIP-4788 parent beacon block root missing for active Cancun block")]
