@@ -295,7 +295,10 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             }
         }
 
-        for (account, slots) in targets {
+        for account in targets.accounts {
+            self.revealed.entry(account).or_default();
+        }
+        for (account, slots) in targets.storages {
             self.revealed.entry(account).or_default().extend(slots);
         }
 
@@ -565,9 +568,7 @@ mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_primitives_traits::Account;
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, EMPTY_ROOT_HASH};
-    use reth_trie_common::{
-        proof::ProofRetainer, MultiProofAccountStorageTarget, StorageMultiProof, TrieMask,
-    };
+    use reth_trie_common::{proof::ProofRetainer, StorageMultiProof, TrieMask};
 
     #[test]
     fn validate_root_node_first_node_not_root() {
@@ -685,20 +686,13 @@ mod tests {
         let mut sparse = SparseStateTrie::default().with_updates(true);
         sparse
             .reveal_multiproof(
-                HashMap::from_iter([
-                    (
-                        address_1,
-                        MultiProofAccountStorageTarget::WithAccountProof(HashSet::from_iter([
-                            slot_1, slot_2,
-                        ])),
-                    ),
-                    (
-                        address_2,
-                        MultiProofAccountStorageTarget::WithAccountProof(HashSet::from_iter([
-                            slot_1, slot_2,
-                        ])),
-                    ),
-                ]),
+                MultiProofTargets {
+                    accounts: B256HashSet::from_iter([address_1, address_2]),
+                    storages: B256HashMap::from_iter([
+                        (address_1, HashSet::from_iter([slot_1, slot_2])),
+                        (address_2, HashSet::from_iter([slot_1, slot_2])),
+                    ]),
+                },
                 MultiProof {
                     account_subtree: proof_nodes,
                     branch_node_hash_masks: HashMap::from_iter([(

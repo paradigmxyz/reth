@@ -15,7 +15,7 @@ use reth_execution_errors::{
     SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind, StateProofError,
     TrieWitnessError,
 };
-use reth_trie_common::{MultiProofAccountStorageTarget, MultiProofTargets, Nibbles};
+use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory, RevealedNode},
     SparseStateTrie,
@@ -122,7 +122,7 @@ where
 
         // Attempt to update state trie to gather additional information for the witness.
         for (hashed_address, hashed_slots) in
-            proof_targets.into_iter().sorted_unstable_by_key(|(ha, _)| *ha)
+            proof_targets.into_iter_combined().sorted_unstable_by_key(|(hash, _)| *hash)
         {
             // Update storage trie first.
             let storage = state.storages.get(&hashed_address);
@@ -177,10 +177,7 @@ where
     ) -> Result<MultiProofTargets, StateProofError> {
         let mut proof_targets = MultiProofTargets::default();
         for hashed_address in state.accounts.keys() {
-            proof_targets.insert(
-                *hashed_address,
-                MultiProofAccountStorageTarget::WithAccountProof(B256HashSet::default()),
-            );
+            proof_targets.accounts.insert(*hashed_address);
         }
         for (hashed_address, storage) in &state.storages {
             let mut storage_keys = storage.storage.keys().copied().collect::<B256HashSet>();
@@ -195,10 +192,7 @@ where
                     current_entry = storage_cursor.next()?;
                 }
             }
-            proof_targets.insert(
-                *hashed_address,
-                MultiProofAccountStorageTarget::WithAccountProof(storage_keys),
-            );
+            proof_targets.storages.insert(*hashed_address, storage_keys);
         }
         Ok(proof_targets)
     }
