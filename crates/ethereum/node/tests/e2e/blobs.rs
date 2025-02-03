@@ -1,5 +1,4 @@
 use crate::utils::eth_payload_attributes;
-use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 use alloy_genesis::Genesis;
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
@@ -27,6 +26,7 @@ async fn can_handle_blobs() -> eyre::Result<()> {
             .cancun_activated()
             .build(),
     );
+    let genesis_hash = chain_spec.genesis_hash();
     let node_config = NodeConfig::test()
         .with_chain(chain_spec)
         .with_unused_ports()
@@ -69,15 +69,12 @@ async fn can_handle_blobs() -> eyre::Result<()> {
     let blob_block_hash =
         node.engine_api.submit_payload(blob_payload, blob_attr, PayloadStatusEnum::Valid).await?;
 
-    let (_, _) = tokio::join!(
-        // send fcu with blob hash
-        node.engine_api.update_forkchoice(MAINNET_GENESIS_HASH, blob_block_hash),
-        // send fcu with normal hash
-        node.engine_api.update_forkchoice(MAINNET_GENESIS_HASH, payload.block().hash())
-    );
+    node.engine_api.update_forkchoice(genesis_hash, blob_block_hash).await?;
 
-    // submit normal payload
-    node.engine_api.submit_payload(payload, attributes, PayloadStatusEnum::Valid).await?;
+    // submit normal payload (reorg)
+    let block_hash =
+        node.engine_api.submit_payload(payload, attributes, PayloadStatusEnum::Valid).await?;
+    node.engine_api.update_forkchoice(genesis_hash, block_hash).await?;
 
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 

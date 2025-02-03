@@ -1,6 +1,6 @@
 //! System contract call functions.
 
-use crate::{ConfigureEvm, Evm, EvmEnv};
+use crate::{ConfigureEvm, Database, Evm, EvmEnv};
 use alloc::{boxed::Box, sync::Arc};
 use alloy_consensus::BlockHeader;
 use alloy_eips::{
@@ -10,7 +10,7 @@ use alloy_primitives::Bytes;
 use core::fmt::Display;
 use reth_chainspec::EthereumHardforks;
 use reth_execution_errors::BlockExecutionError;
-use revm::{Database, DatabaseCommit};
+use revm::DatabaseCommit;
 use revm_primitives::{EvmState, B256};
 
 mod eip2935;
@@ -123,7 +123,7 @@ where
     pub fn pre_block_blockhashes_contract_call<DB>(
         &mut self,
         db: &mut DB,
-        evm_env: &EvmEnv,
+        evm_env: &EvmEnv<EvmConfig::Spec>,
         parent_block_hash: B256,
     ) -> Result<(), BlockExecutionError>
     where
@@ -173,7 +173,7 @@ where
     pub fn pre_block_beacon_root_contract_call<DB>(
         &mut self,
         db: &mut DB,
-        evm_env: &EvmEnv,
+        evm_env: &EvmEnv<EvmConfig::Spec>,
         parent_beacon_block_root: Option<B256>,
     ) -> Result<(), BlockExecutionError>
     where
@@ -223,7 +223,7 @@ where
     pub fn post_block_withdrawal_requests_contract_call<DB>(
         &mut self,
         db: &mut DB,
-        evm_env: &EvmEnv,
+        evm_env: &EvmEnv<EvmConfig::Spec>,
     ) -> Result<Bytes, BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
@@ -256,11 +256,10 @@ where
     pub fn post_block_consolidation_requests_contract_call<DB>(
         &mut self,
         db: &mut DB,
-        evm_env: &EvmEnv,
+        evm_env: &EvmEnv<EvmConfig::Spec>,
     ) -> Result<Bytes, BlockExecutionError>
     where
         DB: Database + DatabaseCommit,
-        DB::Error: Display,
     {
         let evm_config = self.evm_config.clone();
         let mut evm = evm_config.evm_with_env(db, evm_env.clone());

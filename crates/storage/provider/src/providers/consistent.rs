@@ -198,7 +198,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
                 let receipt = receipt_iter
                     .next()
                     .ok_or_else(|| ProviderError::ReceiptNotFound(tx_num.into()))?;
-                block_receipts.push(Some(receipt));
+                block_receipts.push(receipt);
             }
             receipts.push(block_receipts);
         }
@@ -208,7 +208,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             reverts,
             // We skip new contracts since we never delete them from the database
             Vec::new(),
-            receipts.into(),
+            receipts,
             start_block_number,
             Vec::new(),
         )))
@@ -796,20 +796,26 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
         hash: B256,
         source: BlockSource,
     ) -> ProviderResult<Option<Self::Block>> {
-        match source {
-            BlockSource::Any | BlockSource::Canonical => {
-                // Note: it's fine to return the unsealed block because the caller already has
-                // the hash
-                self.get_in_memory_or_storage_by_block(
-                    hash.into(),
-                    |db_provider| db_provider.find_block_by_hash(hash, source),
-                    |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
-                )
-            }
-            BlockSource::Pending => {
-                Ok(self.canonical_in_memory_state.pending_block().map(|block| block.into_block()))
+        if matches!(source, BlockSource::Canonical | BlockSource::Any) {
+            return self.get_in_memory_or_storage_by_block(
+                hash.into(),
+                |db_provider| db_provider.find_block_by_hash(hash, BlockSource::Canonical),
+                |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
+            )
+        }
+
+        if matches!(source, BlockSource::Pending | BlockSource::Any) {
+            if let Some(block) = self
+                .canonical_in_memory_state
+                .pending_block()
+                .filter(|b| b.hash() == hash)
+                .map(|b| b.into_block())
+            {
+                return Ok(Some(block))
             }
         }
+
+        Ok(None)
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
@@ -1479,7 +1485,7 @@ mod tests {
     use alloy_primitives::B256;
     use itertools::Itertools;
     use rand::Rng;
-    use reth_chain_state::{ExecutedBlock, NewCanonicalChain};
+    use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, NewCanonicalChain};
     use reth_db::models::AccountBeforeTx;
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives::{RecoveredBlock, SealedBlock};
@@ -1581,7 +1587,7 @@ mod tests {
         let in_memory_block_senders =
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
-            new: vec![ExecutedBlock::new(
+            new: vec![ExecutedBlockWithTrieUpdates::new(
                 Arc::new(RecoveredBlock::new_sealed(
                     first_in_mem_block.clone(),
                     in_memory_block_senders,
@@ -1623,13 +1629,15 @@ mod tests {
         );
 
         // Insert the last block into the pending state
-        provider.canonical_in_memory_state.set_pending_block(ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                last_in_mem_block.clone(),
-                Default::default(),
-            )),
-            execution_output: Default::default(),
-            hashed_state: Default::default(),
+        provider.canonical_in_memory_state.set_pending_block(ExecutedBlockWithTrieUpdates {
+            block: ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                    last_in_mem_block.clone(),
+                    Default::default(),
+                )),
+                execution_output: Default::default(),
+                hashed_state: Default::default(),
+            },
             trie: Default::default(),
         });
 
@@ -1689,7 +1697,7 @@ mod tests {
         let in_memory_block_senders =
             first_in_mem_block.senders().expect("failed to recover senders");
         let chain = NewCanonicalChain::Commit {
-            new: vec![ExecutedBlock::new(
+            new: vec![ExecutedBlockWithTrieUpdates::new(
                 Arc::new(RecoveredBlock::new_sealed(
                     first_in_mem_block.clone(),
                     in_memory_block_senders,
@@ -1795,7 +1803,7 @@ mod tests {
                 .first()
                 .map(|block| {
                     let senders = block.senders().expect("failed to recover senders");
-                    ExecutedBlock::new(
+                    ExecutedBlockWithTrieUpdates::new(
                         Arc::new(RecoveredBlock::new_sealed(block.clone(), senders)),
                         Arc::new(ExecutionOutcome {
                             bundle: BundleState::new(

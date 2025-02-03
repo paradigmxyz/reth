@@ -7,7 +7,10 @@ use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
 use reth_chainspec::ChainSpecProvider;
-use reth_evm::{env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Evm};
+use reth_errors::ProviderError;
+use reth_evm::{
+    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Database, Evm,
+};
 use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_provider::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
@@ -16,9 +19,9 @@ use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     EthApiError,
 };
-use revm::{db::CacheDB, Database, DatabaseCommit, GetInspector, Inspector};
+use revm::{db::CacheDB, DatabaseCommit, GetInspector, Inspector};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
-use revm_primitives::{EvmState, ExecutionResult, ResultAndState, TxEnv};
+use revm_primitives::{EvmState, ExecutionResult, ResultAndState};
 use std::{fmt::Display, sync::Arc};
 
 /// Executes CPU heavy tasks.
@@ -29,25 +32,31 @@ pub trait Trace:
         Header = ProviderHeader<Self::Provider>,
         Transaction = ProviderTx<Self::Provider>,
     >,
+    Error: FromEvmError<Self::Evm>,
 >
 {
     /// Executes the [`EvmEnv`] against the given [Database] without committing state
     /// changes.
+    #[expect(clippy::type_complexity)]
     fn inspect<DB, I>(
         &self,
         db: DB,
-        evm_env: EvmEnv,
-        tx_env: TxEnv,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         inspector: I,
-    ) -> Result<(ResultAndState, (EvmEnv, TxEnv)), Self::Error>
+    ) -> Result<
+        (
+            ResultAndState,
+            (EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>, <Self::Evm as ConfigureEvmEnv>::TxEnv),
+        ),
+        Self::Error,
+    >
     where
-        DB: Database,
-        EthApiError: From<DB::Error>,
+        DB: Database<Error = ProviderError>,
         I: GetInspector<DB>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env.clone(), inspector);
         let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
-        let evm_env = evm.into_env();
         Ok((res, (evm_env, tx_env)))
     }
 
@@ -60,8 +69,8 @@ pub trait Trace:
     /// Caution: this is blocking
     fn trace_at<F, R>(
         &self,
-        evm_env: EvmEnv,
-        tx_env: TxEnv,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
@@ -87,8 +96,8 @@ pub trait Trace:
     /// the configured [`EvmEnv`] was inspected.
     fn spawn_trace_at_with_state<F, R>(
         &self,
-        evm_env: EvmEnv,
-        tx_env: TxEnv,
+        evm_env: EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
+        tx_env: <Self::Evm as ConfigureEvmEnv>::TxEnv,
         config: TracingInspectorConfig,
         at: BlockId,
         f: F,
@@ -298,7 +307,7 @@ pub trait Trace:
                 let block_hash = block.hash();
 
                 let block_number = evm_env.block_env.number.saturating_to::<u64>();
-                let base_fee = evm_env.block_env.basefee.saturating_to::<u128>();
+                let base_fee = evm_env.block_env.basefee.saturating_to::<u64>();
 
                 // now get the state
                 let state = this.state_at_block_id(state_at.into())?;
@@ -443,7 +452,7 @@ pub trait Trace:
         &self,
         block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
         db: &mut DB,
-        evm_env: &EvmEnv,
+        evm_env: &EvmEnv<<Self::Evm as ConfigureEvmEnv>::Spec>,
     ) -> Result<(), Self::Error> {
         let mut system_caller =
             SystemCaller::new(self.evm_config().clone(), self.provider().chain_spec());

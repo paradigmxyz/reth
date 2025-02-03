@@ -2,6 +2,7 @@
 
 use crate::{
     block::{error::BlockRecoveryError, RecoveredBlock},
+    transaction::signed::RecoveryError,
     Block, BlockBody, GotExpected, InMemorySize, SealedHeader,
 };
 use alloc::vec::Vec;
@@ -179,7 +180,7 @@ impl<B: Block> SealedBlock<B> {
     /// Recovers all senders from the transactions in the block.
     ///
     /// Returns `None` if any of the transactions fail to recover the sender.
-    pub fn senders(&self) -> Option<Vec<Address>> {
+    pub fn senders(&self) -> Result<Vec<Address>, RecoveryError> {
         self.body().recover_signers()
     }
 
@@ -420,7 +421,7 @@ pub(super) mod serde_bincode_compat {
         From<&'a super::SealedBlock<T>> for SealedBlock<'a, T>
     {
         fn from(value: &'a super::SealedBlock<T>) -> Self {
-            Self { header: (&value.header).into(), body: (&value.body).into() }
+            Self { header: value.header.as_repr(), body: value.body.as_repr() }
         }
     }
 
@@ -458,5 +459,9 @@ pub(super) mod serde_bincode_compat {
         SerdeBincodeCompat for super::SealedBlock<T>
     {
         type BincodeRepr<'a> = SealedBlock<'a, T>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
     }
 }

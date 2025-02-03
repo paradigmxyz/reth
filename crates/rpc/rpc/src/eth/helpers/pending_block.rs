@@ -5,14 +5,15 @@ use alloy_eips::{eip7685::EMPTY_REQUESTS_HASH, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
-use reth_primitives::{logs_bloom, proofs::calculate_transaction_root, BlockBody, Receipt};
+use reth_primitives::{logs_bloom, BlockBody, Receipt};
+use reth_primitives_traits::proofs::calculate_transaction_root;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderReceipt, ProviderTx,
     StateProviderFactory,
 };
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
-    RpcNodeCore,
+    FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::PendingBlock;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -25,6 +26,7 @@ impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
 where
     Self: SpawnBlocking<
             NetworkTypes: alloy_network::Network<HeaderResponse = alloy_rpc_types_eth::Header>,
+            Error: FromEvmError<Self::Evm>,
         > + RpcNodeCore<
             Provider: BlockReaderIdExt<
                 Transaction = reth_primitives::TransactionSigned,
@@ -60,8 +62,7 @@ where
         let chain_spec = self.provider().chain_spec();
 
         let transactions_root = calculate_transaction_root(&transactions);
-        let receipts_root =
-            Receipt::calculate_receipt_root_no_memo(&receipts.iter().collect::<Vec<_>>());
+        let receipts_root = Receipt::calculate_receipt_root_no_memo(receipts);
 
         let logs_bloom = logs_bloom(receipts.iter().flat_map(|r| &r.logs));
 

@@ -19,7 +19,7 @@ pub fn recover_raw_transaction<T: SignedTransaction>(mut data: &[u8]) -> EthResu
     let transaction =
         T::decode_2718(&mut data).map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
 
-    transaction.try_into_ecrecovered().or(Err(EthApiError::InvalidTransactionSignature))
+    transaction.try_into_recovered().or(Err(EthApiError::InvalidTransactionSignature))
 }
 
 /// Performs a binary search within a given block range to find the desired block number.

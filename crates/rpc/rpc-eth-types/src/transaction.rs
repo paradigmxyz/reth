@@ -51,7 +51,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
                     index: Some(index),
                     block_hash: Some(block_hash),
                     block_number: Some(block_number),
-                    base_fee: base_fee.map(u128::from),
+                    base_fee,
                 };
 
                 resp_builder.fill(transaction, tx_info)
@@ -75,7 +75,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
                         index: Some(index),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
-                        base_fee: base_fee.map(u128::from),
+                        base_fee,
                     },
                 )
             }

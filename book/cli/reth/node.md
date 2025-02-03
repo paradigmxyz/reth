@@ -695,6 +695,9 @@ Engine:
       --engine.state-root-task
           Enable state root task
 
+      --engine.caching-and-prewarming
+          Enable cross-block caching and parallel prewarming
+
       --engine.state-root-task-compare-updates
           Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation
 

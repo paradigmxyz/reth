@@ -2,15 +2,27 @@
   "__inputs": [
     {
       "name": "DS_PROMETHEUS",
-      "label": "prometheus",
+      "label": "Prometheus",
       "description": "",
       "type": "datasource",
       "pluginId": "prometheus",
       "pluginName": "Prometheus"
+    },
+    {
+      "name": "DS_EXPRESSION",
+      "label": "Expression",
+      "description": "",
+      "type": "datasource",
+      "pluginId": "__expr__"
     }
   ],
   "__elements": {},
   "__requires": [
+    {
+      "type": "datasource",
+      "id": "__expr__",
+      "version": "1.0.0"
+    },
     {
       "type": "panel",
       "id": "bargauge",
@@ -27,7 +39,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "11.2.0"
+      "version": "11.4.0"
     },
     {
       "type": "panel",
@@ -93,7 +105,6 @@
   "graphTooltip": 0,
   "id": null,
   "links": [],
-  "liveNow": false,
   "panels": [
     {
       "collapsed": false,
@@ -106,7 +117,6 @@
       "id": 96,
       "panels": [],
       "repeat": "instance",
-      "repeatDirection": "h",
       "title": "Overview",
       "type": "row"
     },
@@ -160,7 +170,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -230,7 +240,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -300,7 +310,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -370,7 +380,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -440,7 +450,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -510,7 +520,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -589,7 +599,7 @@
         "showThresholdMarkers": true,
         "sizing": "auto"
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -643,6 +653,12 @@
       "id": 20,
       "options": {
         "displayMode": "lcd",
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": false
+        },
         "maxVizHeight": 300,
         "minVizHeight": 10,
         "minVizWidth": 0,
@@ -659,7 +675,7 @@
         "sizing": "auto",
         "valueMode": "color"
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -761,7 +777,7 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -896,6 +912,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -991,6 +1008,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -1088,6 +1106,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -1200,6 +1219,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -1247,7 +1267,6 @@
       "id": 38,
       "panels": [],
       "repeat": "instance",
-      "repeatDirection": "h",
       "title": "Database",
       "type": "row"
     },
@@ -1329,7 +1348,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "9.3.6",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -1419,7 +1438,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -1517,7 +1536,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "9.3.6",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -1614,7 +1633,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -1649,7 +1668,7 @@
             "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "",
+            "axisLabel": "txs",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "barWidthFactor": 0.6,
@@ -1663,7 +1682,10 @@
             },
             "insertNulls": false,
             "lineInterpolation": "linear",
-            "lineWidth": 1,
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 3,
             "pointSize": 5,
             "scaleDistribution": {
               "type": "linear"
@@ -1694,7 +1716,34 @@
           },
           "unit": "none"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "Diff(opened-closed)"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    0,
+                    10
+                  ],
+                  "fill": "dot"
+                }
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "diff"
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -1715,21 +1764,25 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(reth_database_transaction_opened_total{instance=~\"$instance\"}) by (mode)",
+          "expr": "sum(reth_database_transaction_opened_total{instance=~\"$instance\", mode=\"read-write\"})",
           "format": "time_series",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Opened {{mode}}",
+          "legendFormat": "Opened",
           "range": true,
-          "refId": "A"
+          "refId": "A",
+          "useBackend": false
         },
         {
           "datasource": {
@@ -1738,16 +1791,262 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(reth_database_transaction_closed_total{instance=~\"$instance\"}) by (mode)",
+          "expr": "sum(reth_database_transaction_closed_total{instance=~\"$instance\", mode=\"read-write\"})",
           "format": "time_series",
           "instant": false,
           "legendFormat": "Closed {{mode}}",
           "range": true,
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "__expr__",
+            "uid": "${DS_EXPRESSION}"
+          },
+          "expression": "${A} - ${B}",
+          "hide": false,
+          "refId": "Diff(opened-closed)",
+          "type": "math"
         }
       ],
-      "title": "Number of transactions",
+      "title": "Number of read-write transactions",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "txs",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 3,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "Diff(opened, closed)"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    0,
+                    10
+                  ],
+                  "fill": "dot"
+                }
+              },
+              {
+                "id": "custom.axisLabel",
+                "value": "diff"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 45
+      },
+      "id": 250,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "reth_database_transaction_opened_total{instance=~\"$instance\", mode=\"read-only\"}",
+          "format": "time_series",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Opened",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "exemplar": false,
+          "expr": "sum(reth_database_transaction_closed_total{instance=~\"$instance\", mode=\"read-only\"})",
+          "format": "time_series",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Closed {{mode}}",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "__expr__",
+            "uid": "${DS_EXPRESSION}"
+          },
+          "expression": "${A} - ${B}",
+          "hide": false,
+          "refId": "Diff(opened, closed)",
+          "type": "math"
+        }
+      ],
+      "title": "Number of read-only transactions",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "The size of tables in the database",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          },
+          "mappings": [],
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 53
+      },
+      "id": 48,
+      "options": {
+        "displayLabels": [
+          "name"
+        ],
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value"
+          ]
+        },
+        "pieType": "pie",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.4.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_db_table_size{instance=~\"$instance\"}",
+          "interval": "",
+          "legendFormat": "{{table}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Database tables",
+      "type": "piechart"
     },
     {
       "datasource": {
@@ -1815,7 +2114,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 45
+        "y": 53
       },
       "id": 118,
       "options": {
@@ -1830,7 +2129,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "10.1.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -1855,7 +2154,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "The size of tables in the database",
+      "description": "The type of the pages in the database:\n\n- **Leaf** pages contain KV pairs.\n- **Branch** pages contain information about keys in the leaf pages\n- **Overflow** pages store large values and should generally be avoided if possible",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1869,7 +2168,7 @@
             }
           },
           "mappings": [],
-          "unit": "bytes"
+          "unit": "short"
         },
         "overrides": []
       },
@@ -1877,13 +2176,10 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 53
+        "y": 61
       },
-      "id": 48,
+      "id": 50,
       "options": {
-        "displayLabels": [
-          "name"
-        ],
         "legend": {
           "displayMode": "table",
           "placement": "right",
@@ -1905,7 +2201,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "9.3.6",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -1913,14 +2209,13 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_db_table_size{instance=~\"$instance\"}",
-          "interval": "",
-          "legendFormat": "{{table}}",
+          "expr": "sum by (type) ( reth_db_table_pages{instance=~\"$instance\"} )",
+          "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Database tables",
+      "title": "Database pages",
       "type": "piechart"
     },
     {
@@ -1990,7 +2285,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 53
+        "y": 61
       },
       "id": 52,
       "options": {
@@ -2005,6 +2300,7 @@
           "sort": "none"
         }
       },
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -2026,21 +2322,60 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "The type of the pages in the database:\n\n- **Leaf** pages contain KV pairs.\n- **Branch** pages contain information about keys in the leaf pages\n- **Overflow** pages store large values and should generally be avoided if possible",
+      "description": "The number of pages on the MDBX freelist",
       "fieldConfig": {
         "defaults": {
           "color": {
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
             "hideFrom": {
               "legend": false,
               "tooltip": false,
               "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
             }
           },
           "mappings": [],
-          "unit": "short"
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
         },
         "overrides": []
       },
@@ -2048,25 +2383,15 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 61
+        "y": 69
       },
-      "id": 50,
+      "id": 113,
       "options": {
         "legend": {
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true,
-          "values": [
-            "value"
-          ]
-        },
-        "pieType": "pie",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
         },
         "tooltip": {
           "mode": "single",
@@ -2079,15 +2404,15 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "editorMode": "builder",
-          "expr": "sum by (type) ( reth_db_table_pages{instance=~\"$instance\"} )",
-          "legendFormat": "__auto",
+          "editorMode": "code",
+          "expr": "sum(reth_db_freelist{instance=~\"$instance\"}) by (job)",
+          "legendFormat": "Pages ({{job}})",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Database pages",
-      "type": "piechart"
+      "title": "Freelist",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -2216,7 +2541,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 61
+        "y": 69
       },
       "id": 58,
       "options": {
@@ -2231,7 +2556,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -2250,103 +2575,6 @@
       ],
       "title": "Overflow pages by table",
       "type": "table"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "The number of pages on the MDBX freelist",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 69
-      },
-      "id": 113,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "sum(reth_db_freelist{instance=~\"$instance\"}) by (job)",
-          "legendFormat": "Pages ({{job}})",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Freelist",
-      "type": "timeseries"
     },
     {
       "collapsed": false,
@@ -2564,7 +2792,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -2714,7 +2942,7 @@
         },
         "showHeader": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -2939,7 +3167,6 @@
       "id": 46,
       "panels": [],
       "repeat": "instance",
-      "repeatDirection": "h",
       "title": "Execution",
       "type": "row"
     },
@@ -3033,100 +3260,100 @@
           "refId": "A"
         },
         {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "builder",
-            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[1m])",
-            "fullMetaSearch": false,
-            "hide": false,
-            "includeNullMetadata": true,
-            "legendFormat": "Avg Gas/s (1m)",
-            "range": true,
-            "refId": "B",
-            "useBackend": false
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[1m])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "Avg Gas/s (1m)",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
         },
         {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "builder",
-            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[5m])",
-            "fullMetaSearch": false,
-            "hide": false,
-            "includeNullMetadata": true,
-            "legendFormat": "Avg Gas/s (5m)",
-            "range": true,
-            "refId": "C",
-            "useBackend": false
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[5m])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "Avg Gas/s (5m)",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
         },
         {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "builder",
-            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[10m])",
-            "fullMetaSearch": false,
-            "hide": false,
-            "includeNullMetadata": true,
-            "legendFormat": "Avg Gas/s (10m)",
-            "range": true,
-            "refId": "D",
-            "useBackend": false
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[10m])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "Avg Gas/s (10m)",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
         },
         {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "builder",
-            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[30m])",
-            "fullMetaSearch": false,
-            "hide": false,
-            "includeNullMetadata": true,
-            "legendFormat": "Avg Gas/s (30m)",
-            "range": true,
-            "refId": "E",
-            "useBackend": false
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[30m])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "Avg Gas/s (30m)",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
         },
         {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "builder",
-            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[1h])",
-            "fullMetaSearch": false,
-            "hide": false,
-            "includeNullMetadata": true,
-            "legendFormat": "Avg Gas/s (1h)",
-            "range": true,
-            "refId": "F",
-            "useBackend": false
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[1h])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "Avg Gas/s (1h)",
+          "range": true,
+          "refId": "F",
+          "useBackend": false
         },
         {
-            "datasource": {
-                "type": "prometheus",
-                "uid": "${DS_PROMETHEUS}"
-            },
-            "disableTextWrap": false,
-            "editorMode": "builder",
-            "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[24h])",
-            "fullMetaSearch": false,
-            "hide": false,
-            "includeNullMetadata": true,
-            "legendFormat": "Avg Gas/s (24h)",
-            "range": true,
-            "refId": "G",
-            "useBackend": false
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "avg_over_time(reth_sync_execution_gas_per_second{instance=~\"$instance\"}[24h])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "Avg Gas/s (24h)",
+          "range": true,
+          "refId": "G",
+          "useBackend": false
         }
       ],
       "title": "Execution throughput",
@@ -3251,17 +3478,152 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 11,
+        "w": 24,
+        "x": 0,
+        "y": 114
+      },
+      "id": 251,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "hidden",
+          "placement": "right",
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "reth_sync_caching_account_cache_hits{instance=\"$instance\"} / (reth_sync_caching_account_cache_hits{instance=\"$instance\"} + reth_sync_caching_account_cache_misses{instance=\"$instance\"})",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Account cache hits",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "reth_sync_caching_storage_cache_hits{instance=\"$instance\"} / (reth_sync_caching_storage_cache_hits{instance=\"$instance\"} + reth_sync_caching_storage_cache_misses{instance=\"$instance\"})",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Storage cache hits",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "reth_sync_caching_code_cache_hits{instance=\"$instance\"} / (reth_sync_caching_code_cache_hits{instance=\"$instance\"} + reth_sync_caching_code_cache_misses{instance=\"$instance\"})",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Code cache hits",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        }
+      ],
+      "title": "Execution cache hitrate",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 114
+        "y": 125
       },
       "id": 24,
       "panels": [],
       "repeat": "instance",
-      "repeatDirection": "h",
       "title": "Downloader: Headers",
       "type": "row"
     },
@@ -3354,7 +3716,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 115
+        "y": 126
       },
       "id": 26,
       "options": {
@@ -3488,7 +3850,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 115
+        "y": 126
       },
       "id": 33,
       "options": {
@@ -3608,7 +3970,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 123
+        "y": 134
       },
       "id": 36,
       "options": {
@@ -3657,12 +4019,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 131
+        "y": 142
       },
       "id": 32,
       "panels": [],
       "repeat": "instance",
-      "repeatDirection": "h",
       "title": "Downloader: Bodies",
       "type": "row"
     },
@@ -3765,7 +4126,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 132
+        "y": 143
       },
       "id": 30,
       "options": {
@@ -3931,7 +4292,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 132
+        "y": 143
       },
       "id": 28,
       "options": {
@@ -4051,7 +4412,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 140
+        "y": 151
       },
       "id": 35,
       "options": {
@@ -4177,7 +4538,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 140
+        "y": 151
       },
       "id": 73,
       "options": {
@@ -4304,7 +4665,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 148
+        "y": 159
       },
       "id": 102,
       "options": {
@@ -4367,12 +4728,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 156
+        "y": 167
       },
       "id": 79,
       "panels": [],
       "repeat": "instance",
-      "repeatDirection": "h",
       "title": "Blockchain Tree",
       "type": "row"
     },
@@ -4441,7 +4801,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 157
+        "y": 168
       },
       "id": 74,
       "options": {
@@ -4538,7 +4898,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 157
+        "y": 168
       },
       "id": 80,
       "options": {
@@ -4635,7 +4995,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 165
+        "y": 176
       },
       "id": 81,
       "options": {
@@ -4732,7 +5092,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 165
+        "y": 176
       },
       "id": 114,
       "options": {
@@ -4829,7 +5189,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 173
+        "y": 184
       },
       "id": 190,
       "options": {
@@ -4867,12 +5227,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 181
+        "y": 192
       },
       "id": 87,
       "panels": [],
       "repeat": "instance",
-      "repeatDirection": "h",
       "title": "Engine API",
       "type": "row"
     },
@@ -4941,7 +5300,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 182
+        "y": 193
       },
       "id": 83,
       "options": {
@@ -5037,7 +5396,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 182
+        "y": 193
       },
       "id": 84,
       "options": {
@@ -5085,7 +5444,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Total pipeline runs triggered by the sync controller",
+      "description": "Latency histogram for the engine_newPayload to Forkchoice Update",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -5114,7 +5473,7 @@
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "auto",
+            "showPoints": "never",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -5137,79 +5496,6 @@
                 "value": 80
               }
             ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 190
-      },
-      "id": 85,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "builder",
-          "expr": "reth_consensus_engine_beacon_pipeline_runs{instance=~\"$instance\"}",
-          "legendFormat": "Pipeline runs",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "Pipeline runs",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Latency histogram for the engine_newPayload to Forkchoice Update",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "mode": "none"
-            }
           },
           "unit": "s"
         },
@@ -5219,7 +5505,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 188
+        "y": 201
       },
       "id": 213,
       "options": {
@@ -5316,7 +5602,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 190
+        "y": 201
       },
       "id": 210,
       "options": {
@@ -5580,6 +5866,348 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
+      "description": "Total pipeline runs triggered by the sync controller",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 209
+      },
+      "id": 85,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "builder",
+          "expr": "reth_consensus_engine_beacon_pipeline_runs{instance=~\"$instance\"}",
+          "legendFormat": "Pipeline runs",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Pipeline runs",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Latency histograms for the engine_getPayloadBodiesByHashV1 and engine_getPayloadBodiesByRangeV1 RPC APIs",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 209
+      },
+      "id": 212,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{instance=~\"$instance\", quantile=\"0\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getPayloadBodiesByHashV1 min",
+          "range": true,
+          "refId": "O",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{instance=~\"$instance\", quantile=\"0.5\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getPayloadBodiesByHashV1 p50",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{instance=~\"$instance\", quantile=\"0.9\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getPayloadBodiesByHashV1 p90",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{instance=~\"$instance\", quantile=\"0.95\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getPayloadBodiesByHashV1 p95",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{instance=~\"$instance\", quantile=\"0.99\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getPayloadBodiesByHashV1 p99",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{instance=~\"$instance\", quantile=\"0\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getPayloadBodiesByRangeV1 min",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{instance=~\"$instance\", quantile=\"0.5\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getPayloadBodiesByRangeV1 p50",
+          "range": true,
+          "refId": "F",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{instance=~\"$instance\", quantile=\"0.9\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getPayloadBodiesByRangeV1 p90",
+          "range": true,
+          "refId": "G",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{instance=~\"$instance\", quantile=\"0.95\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getPayloadBodiesByRangeV1 p95",
+          "range": true,
+          "refId": "H",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{instance=~\"$instance\", quantile=\"0.99\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "legendFormat": "engine_getPayloadBodiesByRangeV1 p99",
+          "range": true,
+          "refId": "I",
+          "useBackend": false
+        }
+      ],
+      "title": "Engine API getPayloadBodies Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "description": "Latency histogram for the engine_forkchoiceUpdated RPC API",
       "fieldConfig": {
         "defaults": {
@@ -5641,7 +6269,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 198
+        "y": 217
       },
       "id": 211,
       "options": {
@@ -5905,7 +6533,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Latency histograms for the engine_getPayloadBodiesByHashV1 and engine_getPayloadBodiesByRangeV1 RPC APIs",
+      "description": "Counts the number of failed response deliveries due to client request termination.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -5934,7 +6562,7 @@
             "scaleDistribution": {
               "type": "linear"
             },
-            "showPoints": "auto",
+            "showPoints": "never",
             "spanNulls": false,
             "stacking": {
               "group": "A",
@@ -5958,229 +6586,6 @@
               }
             ]
           },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 198
-      },
-      "id": 212,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{instance=~\"$instance\", quantile=\"0\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_getPayloadBodiesByHashV1 min",
-          "range": true,
-          "refId": "O",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{instance=~\"$instance\", quantile=\"0.5\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_getPayloadBodiesByHashV1 p50",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{instance=~\"$instance\", quantile=\"0.9\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_getPayloadBodiesByHashV1 p90",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{instance=~\"$instance\", quantile=\"0.95\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_getPayloadBodiesByHashV1 p95",
-          "range": true,
-          "refId": "C",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{instance=~\"$instance\", quantile=\"0.99\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_getPayloadBodiesByHashV1 p99",
-          "range": true,
-          "refId": "D",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{instance=~\"$instance\", quantile=\"0\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_getPayloadBodiesByRangeV1 min",
-          "range": true,
-          "refId": "E",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{instance=~\"$instance\", quantile=\"0.5\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_getPayloadBodiesByRangeV1 p50",
-          "range": true,
-          "refId": "F",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{instance=~\"$instance\", quantile=\"0.9\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_getPayloadBodiesByRangeV1 p90",
-          "range": true,
-          "refId": "G",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{instance=~\"$instance\", quantile=\"0.95\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_getPayloadBodiesByRangeV1 p95",
-          "range": true,
-          "refId": "H",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{instance=~\"$instance\", quantile=\"0.99\"}",
-          "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": true,
-          "legendFormat": "engine_getPayloadBodiesByRangeV1 p99",
-          "range": true,
-          "refId": "I",
-          "useBackend": false
-        }
-      ],
-      "title": "Engine API getPayloadBodies Latency",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "description": "Counts the number of failed response deliveries due to client request termination.",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "mode": "none"
-            }
-          },
           "unit": "none"
         },
         "overrides": []
@@ -6189,9 +6594,9 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 206
+        "y": 225
       },
-      "id": 213,
+      "id": 249,
       "options": {
         "legend": {
           "calcs": [],
@@ -6206,11 +6611,19 @@
       },
       "targets": [
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "consensus_engine_beacon_failed_new_payload_response_deliveries{instance=~\"$instance\"}",
           "legendFormat": "Failed NewPayload Deliveries",
           "refId": "A"
         },
         {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
           "expr": "consensus_engine_beacon_failed_forkchoice_updated_response_deliveries{instance=~\"$instance\"}",
           "legendFormat": "Failed ForkchoiceUpdated Deliveries",
           "refId": "B"
@@ -6225,7 +6638,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 214
+        "y": 233
       },
       "id": 214,
       "panels": [],
@@ -6297,7 +6710,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 215
+        "y": 234
       },
       "id": 215,
       "options": {
@@ -6393,7 +6806,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 215
+        "y": 234
       },
       "id": 216,
       "options": {
@@ -6444,12 +6857,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 223
+        "y": 242
       },
       "id": 68,
       "panels": [],
       "repeat": "instance",
-      "repeatDirection": "h",
       "title": "Payload Builder",
       "type": "row"
     },
@@ -6518,7 +6930,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 224
+        "y": 243
       },
       "id": 60,
       "options": {
@@ -6614,7 +7026,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 224
+        "y": 243
       },
       "id": 62,
       "options": {
@@ -6710,7 +7122,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 232
+        "y": 251
       },
       "id": 64,
       "options": {
@@ -6747,7 +7159,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 240
+        "y": 259
       },
       "id": 97,
       "panels": [],
@@ -6832,7 +7244,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 241
+        "y": 260
       },
       "id": 98,
       "options": {
@@ -6995,7 +7407,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 241
+        "y": 260
       },
       "id": 101,
       "options": {
@@ -7093,7 +7505,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 249
+        "y": 268
       },
       "id": 99,
       "options": {
@@ -7191,7 +7603,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 249
+        "y": 268
       },
       "id": 100,
       "options": {
@@ -7229,7 +7641,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 257
+        "y": 276
       },
       "id": 105,
       "panels": [],
@@ -7302,7 +7714,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 258
+        "y": 277
       },
       "id": 106,
       "options": {
@@ -7400,7 +7812,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 258
+        "y": 277
       },
       "id": 107,
       "options": {
@@ -7497,7 +7909,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 266
+        "y": 285
       },
       "id": 217,
       "options": {
@@ -7535,7 +7947,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 274
+        "y": 293
       },
       "id": 108,
       "panels": [],
@@ -7633,7 +8045,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 275
+        "y": 294
       },
       "id": 109,
       "options": {
@@ -7695,7 +8107,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 275
+        "y": 294
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -7740,7 +8152,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -7825,7 +8237,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 283
+        "y": 302
       },
       "id": 120,
       "options": {
@@ -7883,7 +8295,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 283
+        "y": 302
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -7928,7 +8340,7 @@
           "unit": "percentunit"
         }
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8030,6 +8442,18 @@
                 "value": "Queued consumers"
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "/.memory usage*/"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "decbytes"
+              }
+            ]
           }
         ]
       },
@@ -8037,7 +8461,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 291
+        "y": 310
       },
       "id": 198,
       "options": {
@@ -8060,11 +8484,11 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_cached_count{instance=\"$instance\", cache=\"evm_env\"}",
+          "expr": "reth_rpc_eth_cache_cached_count{instance=\"$instance\", cache=\"headers\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "EVM environment cache cached items",
+          "legendFormat": "Headers cache cached items",
           "range": true,
           "refId": "A",
           "useBackend": false
@@ -8093,12 +8517,12 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_queued_consumers_count{instance=\"$instance\", cache=\"evm_env\"}",
+          "expr": "reth_rpc_eth_cache_queued_consumers_count{instance=\"$instance\", cache=\"headers\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "EVM environment cache queued consumers",
+          "legendFormat": "Headers cache queued consumers",
           "range": true,
           "refId": "C",
           "useBackend": false
@@ -8127,12 +8551,12 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_cached_count{instance=\"$instance\", cache=\"blocks\"}",
+          "expr": "reth_rpc_eth_cache_memory_usage{instance=\"$instance\", cache=\"blocks\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Block cache cached items",
+          "legendFormat": "Blocks cache memory usage",
           "range": true,
           "refId": "E",
           "useBackend": false
@@ -8152,6 +8576,40 @@
           "legendFormat": "Receipts cache cached items",
           "range": true,
           "refId": "F",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_memory_usage{instance=\"$instance\", cache=\"receipts\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Receipts cache memory usage",
+          "range": true,
+          "refId": "G",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_rpc_eth_cache_cached_count{instance=\"$instance\", cache=\"blocks\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Block cache cached items",
+          "range": true,
+          "refId": "H",
           "useBackend": false
         }
       ],
@@ -8223,7 +8681,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 291
+        "y": 310
       },
       "id": 246,
       "options": {
@@ -8262,7 +8720,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 299
+        "y": 318
       },
       "id": 236,
       "panels": [],
@@ -8334,7 +8792,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 300
+        "y": 319
       },
       "id": 237,
       "options": {
@@ -8431,7 +8889,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 300
+        "y": 319
       },
       "id": 238,
       "options": {
@@ -8528,7 +8986,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 308
+        "y": 327
       },
       "id": 239,
       "options": {
@@ -8637,7 +9095,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 308
+        "y": 327
       },
       "id": 219,
       "options": {
@@ -8685,8 +9143,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8702,7 +9159,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 316
+        "y": 335
       },
       "id": 220,
       "options": {
@@ -8722,7 +9179,7 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "11.2.0",
+      "pluginVersion": "11.4.0",
       "targets": [
         {
           "datasource": {
@@ -8746,7 +9203,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 324
+        "y": 343
       },
       "id": 241,
       "panels": [],
@@ -8803,8 +9260,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8819,7 +9275,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 325
+        "y": 344
       },
       "id": 243,
       "options": {
@@ -8915,8 +9371,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8931,7 +9386,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 325
+        "y": 344
       },
       "id": 244,
       "options": {
@@ -9027,8 +9482,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9044,7 +9498,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 333
+        "y": 352
       },
       "id": 245,
       "options": {
@@ -9083,7 +9537,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 341
+        "y": 360
       },
       "id": 226,
       "panels": [],
@@ -9139,8 +9593,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9181,7 +9634,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 342
+        "y": 361
       },
       "id": 225,
       "options": {
@@ -9268,8 +9721,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9310,7 +9762,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 342
+        "y": 361
       },
       "id": 227,
       "options": {
@@ -9397,8 +9849,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9439,7 +9890,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 350
+        "y": 369
       },
       "id": 235,
       "options": {
@@ -9526,8 +9977,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9568,7 +10018,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 350
+        "y": 369
       },
       "id": 234,
       "options": {
@@ -9608,7 +10058,6 @@
     }
   ],
   "refresh": "30s",
-  "revision": 1,
   "schemaVersion": 39,
   "tags": [],
   "templating": {
@@ -9645,6 +10094,6 @@
   "timezone": "",
   "title": "Reth",
   "uid": "2k8BXz24x",
-  "version": 8,
+  "version": 1,
   "weekStart": ""
 }

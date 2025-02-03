@@ -1,29 +1,27 @@
 //! `Eth` Sim bundle implementation and helpers.
 
-use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::U256;
-use alloy_rpc_types_eth::BlockId;
+use alloy_rpc_types_eth::{BlockId, BlockOverrides};
 use alloy_rpc_types_mev::{
     BundleItem, Inclusion, Privacy, RefundConfig, SendBundleRequest, SimBundleLogs,
     SimBundleOverrides, SimBundleResponse, Validity,
 };
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, ConfigureEvmEnv, Evm};
-use reth_provider::{ChainSpecProvider, HeaderProvider, ProviderTx};
+use reth_provider::ProviderTx;
 use reth_revm::database::StateProviderDatabase;
 use reth_rpc_api::MevSimApiServer;
 use reth_rpc_eth_api::{
     helpers::{Call, EthTransactions, LoadPendingBlock},
-    FromEthApiError, RpcNodeCore,
+    FromEthApiError, FromEvmError,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolConsensusTx, PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::{
     db::CacheDB,
-    primitives::{Address, ResultAndState, SpecId},
+    primitives::{Address, ResultAndState},
     DatabaseCommit, DatabaseRef,
 };
 use std::{sync::Arc, time::Duration};
@@ -230,15 +228,8 @@ where
         overrides: SimBundleOverrides,
         logs: bool,
     ) -> Result<SimBundleResponse, Eth::Error> {
-        let SimBundleOverrides {
-            parent_block,
-            block_number,
-            coinbase,
-            timestamp,
-            gas_limit,
-            base_fee,
-            ..
-        } = overrides;
+        let SimBundleOverrides { parent_block, block_overrides, .. } = overrides;
+        let BlockOverrides { number, coinbase, time, gas_limit, base_fee, .. } = block_overrides;
 
         // Parse and validate bundle
         // Also, flatten the bundle here so that its easier to process
@@ -247,17 +238,8 @@ where
         let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Pending));
         let (mut evm_env, current_block) = self.eth_api().evm_env_at(block_id).await?;
 
-        let parent_header = RpcNodeCore::provider(&self.inner.eth_api)
-            .header_by_number(evm_env.block_env.number.saturating_to::<u64>())
-            .map_err(EthApiError::from_eth_err)? // Explicitly map the error
-            .ok_or_else(|| {
-                EthApiError::HeaderNotFound(
-                    (evm_env.block_env.number.saturating_to::<u64>()).into(),
-                )
-            })?;
-
         // apply overrides
-        if let Some(block_number) = block_number {
+        if let Some(block_number) = number {
             evm_env.block_env.number = U256::from(block_number);
         }
 
@@ -265,7 +247,7 @@ where
             evm_env.block_env.coinbase = coinbase;
         }
 
-        if let Some(timestamp) = timestamp {
+        if let Some(timestamp) = time {
             evm_env.block_env.timestamp = U256::from(timestamp);
         }
 
@@ -275,15 +257,6 @@ where
 
         if let Some(base_fee) = base_fee {
             evm_env.block_env.basefee = U256::from(base_fee);
-        } else if evm_env.cfg_env_with_handler_cfg.handler_cfg.spec_id.is_enabled_in(SpecId::LONDON)
-        {
-            if let Some(base_fee) = parent_header.next_block_base_fee(
-                RpcNodeCore::provider(&self.inner.eth_api)
-                    .chain_spec()
-                    .base_fee_params_at_block(evm_env.block_env.number.saturating_to::<u64>()),
-            ) {
-                evm_env.block_env.basefee = U256::from(base_fee);
-            }
         }
 
         let eth_api = self.inner.eth_api.clone();
@@ -328,7 +301,7 @@ where
 
                     let ResultAndState { result, state } = evm
                         .transact(eth_api.evm_config().tx_env(&item.tx, item.signer))
-                        .map_err(EthApiError::from_eth_err)?;
+                        .map_err(Eth::Error::from_evm_err)?;
 
                     if !result.is_success() && !item.can_revert {
                         return Err(EthApiError::InvalidParams(

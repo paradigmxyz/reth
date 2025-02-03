@@ -19,6 +19,7 @@ use reth_node_core::{
 };
 use reth_payload_builder::PayloadStore;
 use reth_primitives::EthPrimitives;
+use reth_provider::ChainSpecProvider;
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
     EthApi,
@@ -197,7 +198,6 @@ pub struct RpcRegistry<Node: FullNodeComponents, EthApi: EthApiTypes> {
         Node::Pool,
         Node::Network,
         TaskExecutor,
-        Node::Provider,
         EthApi,
         Node::Executor,
         Node::Consensus,
@@ -214,7 +214,6 @@ where
         Node::Pool,
         Node::Network,
         TaskExecutor,
-        Node::Provider,
         EthApi,
         Node::Executor,
         Node::Consensus,
@@ -453,7 +452,6 @@ where
             .with_provider(node.provider().clone())
             .with_pool(node.pool().clone())
             .with_network(node.network().clone())
-            .with_events(node.provider().clone())
             .with_executor(node.task_executor().clone())
             .with_evm_config(node.evm_config().clone())
             .with_block_executor(node.block_executor().clone())
@@ -574,8 +572,12 @@ pub trait EthApiBuilder<N: FullNodeComponents>: 'static {
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self;
 }
 
-impl<N: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> EthApiBuilder<N>
-    for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
+impl<
+        N: FullNodeComponents<
+            Provider: ChainSpecProvider,
+            Types: NodeTypes<Primitives = EthPrimitives>,
+        >,
+    > EthApiBuilder<N> for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
 {
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self {
         Self::with_spawner(ctx)

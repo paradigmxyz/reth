@@ -6,18 +6,15 @@ use crate::{
         BlockExecutionStrategy, BlockExecutorProvider, Executor,
     },
     system_calls::OnStateHook,
+    Database,
 };
 use alloy_eips::eip7685::Requests;
-use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives::{EthPrimitives, NodePrimitives, Receipt, Receipts, RecoveredBlock};
-use reth_prune_types::PruneModes;
-use reth_storage_errors::provider::ProviderError;
+use reth_primitives::{EthPrimitives, NodePrimitives, Receipt, RecoveredBlock};
 use revm::State;
-use revm_primitives::db::Database;
-use std::{fmt::Display, sync::Arc};
+use std::sync::Arc;
 
 /// A [`BlockExecutorProvider`] that returns mocked execution results.
 #[derive(Clone, Debug, Default)]
@@ -35,20 +32,20 @@ impl MockExecutorProvider {
 impl BlockExecutorProvider for MockExecutorProvider {
     type Primitives = EthPrimitives;
 
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
+    type Executor<DB: Database> = Self;
 
-    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
+    type BatchExecutor<DB: Database> = Self;
 
     fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database,
     {
         self.clone()
     }
 
     fn batch_executor<DB>(&self, _: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database,
     {
         self.clone()
     }
@@ -64,7 +61,7 @@ impl<DB> Executor<DB> for MockExecutorProvider {
             self.exec_results.lock().pop().unwrap();
         Ok(BlockExecutionOutput {
             state: bundle,
-            receipts: receipts.into_iter().flatten().flatten().collect(),
+            receipts: receipts.into_iter().flatten().collect(),
             requests: requests.into_iter().fold(Requests::default(), |mut reqs, req| {
                 reqs.extend(req);
                 reqs
@@ -108,10 +105,6 @@ impl<DB> BatchExecutor<DB> for MockExecutorProvider {
     fn finalize(self) -> Self::Output {
         self.exec_results.lock().pop().unwrap()
     }
-
-    fn set_tip(&mut self, _: BlockNumber) {}
-
-    fn set_prune_modes(&mut self, _: PruneModes) {}
 
     fn size_hint(&self) -> Option<usize> {
         None
@@ -160,7 +153,7 @@ where
     }
 
     /// Accessor for batch executor receipts.
-    pub const fn receipts(&self) -> &Receipts<<S::Primitives as NodePrimitives>::Receipt> {
+    pub const fn receipts(&self) -> &Vec<Vec<<S::Primitives as NodePrimitives>::Receipt>> {
         self.batch_record.receipts()
     }
 }

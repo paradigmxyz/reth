@@ -16,7 +16,7 @@ use reth_node_builder::ReceiptTy;
 use reth_node_core::version::SHORT_VERSION;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{bedrock::is_dup_tx, OpPrimitives, OpReceipt};
-use reth_primitives::{NodePrimitives, Receipts};
+use reth_primitives::NodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, writer::UnifiedStorageWriter, DatabaseProviderFactory,
     OriginalValuesKnown, ProviderFactory, StageCheckpointReader, StageCheckpointWriter,
@@ -90,7 +90,7 @@ pub async fn import_receipts_from_file<N, P, F>(
 where
     N: ProviderNodeTypes<ChainSpec = OpChainSpec, Primitives: NodePrimitives<Receipt = OpReceipt>>,
     P: AsRef<Path>,
-    F: FnMut(u64, &mut Receipts<OpReceipt>) -> usize,
+    F: FnMut(u64, &mut Vec<Vec<OpReceipt>>) -> usize,
 {
     for stage in StageId::ALL {
         let checkpoint = provider_factory.database_provider_ro()?.get_stage_checkpoint(stage)?;
@@ -119,7 +119,7 @@ where
 ///
 /// Caution! Filter callback must replace completely filtered out receipts for a block, with empty
 /// vectors, rather than `vec!(None)`. This is since the code for writing to static files, expects
-/// indices in the [`Receipts`] list, to map to sequential block numbers.
+/// indices in the receipts list, to map to sequential block numbers.
 pub async fn import_receipts_from_reader<N, F>(
     provider_factory: &ProviderFactory<N>,
     mut reader: ChunkedFileReader,
@@ -127,7 +127,7 @@ pub async fn import_receipts_from_reader<N, F>(
 ) -> eyre::Result<ImportReceiptsResult>
 where
     N: ProviderNodeTypes<Primitives: NodePrimitives<Receipt = OpReceipt>>,
-    F: FnMut(u64, &mut Receipts<ReceiptTy<N>>) -> usize,
+    F: FnMut(u64, &mut Vec<Vec<ReceiptTy<N>>>) -> usize,
 {
     let static_file_provider = provider_factory.static_file_provider();
 
@@ -207,7 +207,7 @@ where
             highest_block_receipts -= excess;
 
             // Remove the last `excess` blocks
-            receipts.receipt_vec.truncate(receipts.len() - excess as usize);
+            receipts.truncate(receipts.len() - excess as usize);
 
             warn!(target: "reth::cli", highest_block_receipts, "Too many decoded blocks, ignoring the last {excess}.");
         }

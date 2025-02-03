@@ -318,27 +318,23 @@ where
     PruneStage: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
-        ExecutionStages::new(
-            self.executor_factory,
-            self.stages_config.clone(),
-            self.prune_modes.clone(),
-        )
-        .builder()
-        // If sender recovery prune mode is set, add the prune sender recovery stage.
-        .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
-            PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
-        }))
-        .add_set(HashingStages { stages_config: self.stages_config.clone() })
-        .add_set(HistoryIndexingStages {
-            stages_config: self.stages_config.clone(),
-            prune_modes: self.prune_modes.clone(),
-        })
-        // If any prune modes are set, add the prune stage.
-        .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
-            // Prune stage should be added after all hashing stages, because otherwise it will
-            // delete
-            PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
-        }))
+        ExecutionStages::new(self.executor_factory, self.stages_config.clone())
+            .builder()
+            // If sender recovery prune mode is set, add the prune sender recovery stage.
+            .add_stage_opt(self.prune_modes.sender_recovery.map(|prune_mode| {
+                PruneSenderRecoveryStage::new(prune_mode, self.stages_config.prune.commit_threshold)
+            }))
+            .add_set(HashingStages { stages_config: self.stages_config.clone() })
+            .add_set(HistoryIndexingStages {
+                stages_config: self.stages_config.clone(),
+                prune_modes: self.prune_modes.clone(),
+            })
+            // If any prune modes are set, add the prune stage.
+            .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
+                // Prune stage should be added after all hashing stages, because otherwise it will
+                // delete
+                PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
+            }))
     }
 }
 
@@ -350,18 +346,12 @@ pub struct ExecutionStages<E> {
     executor_factory: E,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
-    /// Prune configuration for every segment that can be pruned
-    prune_modes: PruneModes,
 }
 
 impl<E> ExecutionStages<E> {
     /// Create a new set of execution stages with default values.
-    pub const fn new(
-        executor_factory: E,
-        stages_config: StageConfig,
-        prune_modes: PruneModes,
-    ) -> Self {
-        Self { executor_factory, stages_config, prune_modes }
+    pub const fn new(executor_factory: E, stages_config: StageConfig) -> Self {
+        Self { executor_factory, stages_config }
     }
 }
 
@@ -378,7 +368,6 @@ where
                 self.executor_factory,
                 self.stages_config.execution,
                 self.stages_config.execution_external_clean_threshold(),
-                self.prune_modes,
             ))
     }
 }

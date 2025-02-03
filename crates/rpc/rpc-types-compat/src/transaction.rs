@@ -50,11 +50,3 @@ pub trait TransactionCompat<T = TransactionSigned>:
     // <https://github.com/alloy-rs/alloy/issues/1315>.
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction);
 }
-
-/// Convert [`Recovered`] to [`TransactionRequest`]
-pub fn transaction_to_call_request<T: alloy_consensus::Transaction>(
-    tx: Recovered<T>,
-) -> TransactionRequest {
-    let from = tx.signer();
-    TransactionRequest::from_transaction_with_sender(tx.into_tx(), from)
-}
