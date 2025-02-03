@@ -6542,7 +6542,6 @@ dependencies = [
  "reth-node-core",
  "reth-primitives",
  "reth-primitives-traits",
- "reth-rpc-types-compat",
  "reth-tracing",
  "serde",
  "thiserror 2.0.11",
