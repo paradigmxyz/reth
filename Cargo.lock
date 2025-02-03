@@ -2258,9 +2258,9 @@ dependencies = [
 
 [[package]]
 name = "crunchy"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
+checksum = "43da5946c66ffcc7745f48db692ffbb10a83bfe0afd96235c5c2a4fb23994929"
 
 [[package]]
 name = "crypto-bigint"
@@ -7237,7 +7237,6 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
- "reth-revm",
  "reth-rpc-types-compat",
  "reth-stages",
  "reth-stages-api",
@@ -7249,6 +7248,7 @@ dependencies = [
  "reth-trie-db",
  "reth-trie-parallel",
  "reth-trie-sparse",
+ "revm",
  "revm-primitives",
  "schnellru",
  "thiserror 2.0.11",
@@ -7507,6 +7507,7 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-revm",
+ "reth-storage-api",
  "reth-storage-errors",
  "revm",
  "revm-primitives",
@@ -7531,6 +7532,7 @@ dependencies = [
  "reth-primitives",
  "reth-primitives-traits",
  "reth-revm",
+ "reth-storage-api",
  "reth-testing-utils",
  "revm-primitives",
  "secp256k1",
@@ -8249,19 +8251,30 @@ dependencies = [
 name = "reth-optimism-consensus"
 version = "1.1.5"
 dependencies = [
+ "alloy-chains",
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
  "alloy-trie",
+ "derive_more",
  "op-alloy-consensus",
  "reth-chainspec",
  "reth-consensus",
  "reth-consensus-common",
+ "reth-db-common",
  "reth-optimism-chainspec",
  "reth-optimism-forks",
+ "reth-optimism-node",
  "reth-optimism-primitives",
  "reth-primitives",
  "reth-primitives-traits",
+ "reth-provider",
+ "reth-revm",
+ "reth-storage-api",
+ "reth-storage-errors",
+ "reth-trie",
+ "reth-trie-db",
+ "revm",
  "tracing",
 ]
 
@@ -8290,6 +8303,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-revm",
+ "reth-storage-api",
  "revm",
  "revm-primitives",
  "thiserror 2.0.11",
@@ -9112,7 +9126,6 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
- "reth-revm",
  "reth-stages-api",
  "reth-static-file",
  "reth-storage-errors",

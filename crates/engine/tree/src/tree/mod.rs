@@ -48,7 +48,6 @@ use reth_provider::{
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
-use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState, TrieInput,
@@ -2358,7 +2357,7 @@ where
 
         trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
 
-        let executor = self.executor_provider.executor(StateProviderDatabase::new(&state_provider));
+        let executor = self.executor_provider.executor(&state_provider);
 
         let sealed_block = Arc::new(block.clone_sealed_block());
 

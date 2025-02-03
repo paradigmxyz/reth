@@ -13,6 +13,7 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
+use revm::db::BundleState;
 use revm_primitives::map::DefaultHashBuilder;
 
 type Cache<K, V> = moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
@@ -232,7 +233,7 @@ impl<S: BlockHashReader> BlockHashReader for CachedStateProvider<S> {
 }
 
 impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider<S> {
-    fn hashed_post_state(&self, bundle_state: &reth_revm::db::BundleState) -> HashedPostState {
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
         self.state_provider.hashed_post_state(bundle_state)
     }
 }

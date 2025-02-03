@@ -3,8 +3,9 @@
 use crate::{
     execute::{BatchExecutor, BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
-    Database,
 };
+use reth_revm::database::StateProviderDatabase;
+use reth_storage_api::StateProvider;
 
 // re-export Either
 pub use futures_util::future::Either;
@@ -17,13 +18,13 @@ where
 {
     type Primitives = A::Primitives;
 
-    type Executor<DB: Database> = Either<A::Executor<DB>, B::Executor<DB>>;
+    type Executor<DB: StateProvider> = Either<A::Executor<DB>, B::Executor<DB>>;
 
-    type BatchExecutor<DB: Database> = Either<A::BatchExecutor<DB>, B::BatchExecutor<DB>>;
+    type BatchExecutor<DB: StateProvider> = Either<A::BatchExecutor<DB>, B::BatchExecutor<DB>>;
 
     fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
     where
-        DB: Database,
+        DB: StateProvider,
     {
         match self {
             Self::Left(a) => Either::Left(a.executor(db)),
@@ -33,7 +34,7 @@ where
 
     fn batch_executor<DB>(&self, db: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database,
+        DB: StateProvider,
     {
         match self {
             Self::Left(a) => Either::Left(a.batch_executor(db)),
@@ -46,7 +47,7 @@ impl<A, B, DB> Executor<DB> for Either<A, B>
 where
     A: Executor<DB>,
     B: for<'a> Executor<DB, Input<'a> = A::Input<'a>, Output = A::Output, Error = A::Error>,
-    DB: Database,
+    DB: StateProvider,
 {
     type Input<'a> = A::Input<'a>;
     type Output = A::Output;
@@ -65,7 +66,7 @@ where
         witness: F,
     ) -> Result<Self::Output, Self::Error>
     where
-        F: FnMut(&State<DB>),
+        F: FnMut(&State<StateProviderDatabase<DB>>),
     {
         match self {
             Self::Left(a) => a.execute_with_state_closure(input, witness),
@@ -92,7 +93,7 @@ impl<A, B, DB> BatchExecutor<DB> for Either<A, B>
 where
     A: BatchExecutor<DB>,
     B: for<'a> BatchExecutor<DB, Input<'a> = A::Input<'a>, Output = A::Output, Error = A::Error>,
-    DB: Database,
+    DB: StateProvider,
 {
     type Input<'a> = A::Input<'a>;
     type Output = A::Output;

@@ -1,12 +1,26 @@
 //! Database adapters for payload building.
+use alloc::{vec, vec::Vec};
 use alloy_primitives::{
-    map::{Entry, HashMap},
-    Address, B256, U256,
+    map::{B256HashMap, Entry, HashMap},
+    Address, BlockNumber, Bytes, StorageKey, StorageValue, B256, U256,
 };
 use core::cell::RefCell;
-use revm::primitives::{
-    db::{Database, DatabaseRef},
-    AccountInfo, Bytecode,
+use reth_primitives::Account;
+use reth_storage_api::{
+    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
+    StateRootProvider, StorageRootProvider,
+};
+use reth_storage_errors::provider::ProviderResult;
+use reth_trie::{
+    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+};
+use revm::{
+    db::BundleState,
+    primitives::{
+        db::{Database, DatabaseRef},
+        AccountInfo, Bytecode,
+    },
 };
 
 /// A container type that caches reads from an underlying [`DatabaseRef`].
@@ -152,6 +166,221 @@ impl<DB: DatabaseRef> Database for CachedReadsDbMut<'_, DB> {
     }
 }
 
+impl<DB: AccountReader> AccountReader for CachedReadsDbMut<'_, DB> {
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
+        if let Some(hit) = self.cached.accounts.get(address) {
+            if let Some(acc) = &hit.info {
+                return Ok(Some(acc.into()))
+            }
+        }
+
+        let db_read = self.db.basic_account(address)?;
+        if db_read.is_some() {
+            let acc = db_read.map(|info| info.into());
+            let cache = &self.cached;
+            // safe because CachedReadsDbMut ensure exclusive write access to cache
+            unsafe {
+                let cache_entry = (*(*cache as *const CachedReads as *mut CachedReads))
+                    .accounts
+                    .entry(*address)
+                    .or_default();
+                cache_entry.info = acc;
+            }
+        }
+
+        Ok(db_read)
+    }
+}
+
+impl<DB: BlockHashReader> BlockHashReader for CachedReadsDbMut<'_, DB> {
+    fn block_hash(&self, number: BlockNumber) -> ProviderResult<Option<B256>> {
+        let hit = self.cached.block_hashes.get(&number);
+        if hit.is_some() {
+            return Ok(hit.copied())
+        }
+
+        let db_read = self.db.block_hash(number)?;
+        if let Some(hash) = db_read {
+            let cache = &self.cached;
+            // safe because CachedReadsDbMut ensure exclusive write access to cache
+            unsafe {
+                _ = (*(*cache as *const CachedReads as *mut CachedReads))
+                    .block_hashes
+                    .insert(number, hash)
+            }
+        }
+
+        Ok(db_read)
+    }
+
+    fn canonical_hashes_range(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+    ) -> ProviderResult<Vec<B256>> {
+        let range = start..end;
+        if range.is_empty() {
+            return Ok(vec![])
+        }
+
+        if self.block_hash(start)?.is_some() && self.block_hash(end)?.is_some() {
+            // optimistically collect hashes
+            let hashes = range
+                .into_iter()
+                .map_while(|block_num| self.block_hash(block_num).ok().flatten())
+                .collect::<Vec<B256>>();
+            // safe subtraction, already checked end is higher than start with call to
+            // `ops::Range::is_empty`
+            if hashes.len() as u64 == end - start {
+                return Ok(hashes)
+            }
+        }
+
+        Ok(vec![])
+    }
+}
+
+impl<DB: StateRootProvider> StateRootProvider for CachedReadsDbMut<'_, DB> {
+    fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
+        self.db.state_root(hashed_state)
+    }
+
+    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
+        self.db.state_root_from_nodes(input)
+    }
+
+    fn state_root_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        self.db.state_root_with_updates(hashed_state)
+    }
+
+    fn state_root_from_nodes_with_updates(
+        &self,
+        input: TrieInput,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        self.db.state_root_from_nodes_with_updates(input)
+    }
+}
+
+impl<DB: StorageRootProvider> StorageRootProvider for CachedReadsDbMut<'_, DB> {
+    fn storage_root(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<B256> {
+        self.db.storage_root(address, hashed_storage)
+    }
+
+    fn storage_proof(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageProof> {
+        self.db.storage_proof(address, slot, hashed_storage)
+    }
+
+    fn storage_multiproof(
+        &self,
+        address: Address,
+        slots: &[B256],
+        hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageMultiProof> {
+        self.db.storage_multiproof(address, slots, hashed_storage)
+    }
+}
+
+impl<DB: StateProofProvider> StateProofProvider for CachedReadsDbMut<'_, DB> {
+    fn proof(
+        &self,
+        input: TrieInput,
+        address: Address,
+        slots: &[B256],
+    ) -> ProviderResult<AccountProof> {
+        self.db.proof(input, address, slots)
+    }
+
+    fn multiproof(
+        &self,
+        input: TrieInput,
+        targets: MultiProofTargets,
+    ) -> ProviderResult<MultiProof> {
+        self.db.multiproof(input, targets)
+    }
+
+    fn witness(
+        &self,
+        input: TrieInput,
+        target: HashedPostState,
+    ) -> ProviderResult<B256HashMap<Bytes>> {
+        self.db.witness(input, target)
+    }
+}
+
+impl<DB: HashedPostStateProvider> HashedPostStateProvider for CachedReadsDbMut<'_, DB> {
+    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
+        self.db.hashed_post_state(bundle_state)
+    }
+}
+
+impl<DB: StateProvider> StateProvider for CachedReadsDbMut<'_, DB> {
+    fn storage(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        if let Some(hit) = self.cached.accounts.get(&account) {
+            let val = hit.storage.get(&storage_key.into());
+            if val.is_some() {
+                return Ok(val.copied())
+            }
+        }
+
+        let db_read = self.db.storage(account, storage_key)?;
+        if let Some(val) = db_read {
+            let cache = &self.cached;
+            // safe because CachedReadsDbMut ensure exclusive write access to cache
+            unsafe {
+                let cache_entry = (*(*cache as *const CachedReads as *mut CachedReads))
+                    .accounts
+                    .entry(account)
+                    .or_default();
+                cache_entry.storage.insert(storage_key.into(), val);
+            }
+        }
+
+        Ok(db_read)
+    }
+
+    fn bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> ProviderResult<Option<reth_primitives::Bytecode>> {
+        let hit = self.cached.contracts.get(code_hash);
+        if hit.is_some() {
+            return Ok(hit.map(|bytecode| bytecode.clone().into()))
+        }
+
+        let db_read = self.db.bytecode_by_hash(code_hash)?;
+        if let Some(ref bytecode) = db_read {
+            let bytecode = bytecode.clone().into();
+            let cache = &self.cached;
+            // safe because CachedReadsDbMut ensure exclusive write access to cache
+            unsafe {
+                let cache_entry = (*(*cache as *const CachedReads as *mut CachedReads))
+                    .contracts
+                    .entry(*code_hash)
+                    .or_default();
+                *cache_entry = bytecode;
+            }
+        }
+
+        Ok(db_read)
+    }
+}
+
 /// A [`DatabaseRef`] that caches reads inside [`CachedReads`].
 ///
 /// This is intended to be used as the [`DatabaseRef`] for
@@ -182,7 +411,7 @@ impl<DB: DatabaseRef> DatabaseRef for CachedReadsDBRef<'_, DB> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct CachedAccount {
     info: Option<AccountInfo>,
     storage: HashMap<U256, U256>,
