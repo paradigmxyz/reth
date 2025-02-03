@@ -1,21 +1,6 @@
 //! Standalone Conversion Functions for Handling Different Versions of Execution Payloads in
 //! Ethereum's Engine
 
-use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
-use alloy_rpc_types_engine::payload::ExecutionPayloadBodyV1;
-use reth_primitives_traits::BlockBody as _;
-
-/// Converts a [`reth_primitives_traits::Block`] to [`ExecutionPayloadBodyV1`]
-pub fn convert_to_payload_body_v1(
-    value: impl reth_primitives_traits::Block,
-) -> ExecutionPayloadBodyV1 {
-    let transactions = value.body().transactions_iter().map(|tx| tx.encoded_2718().into());
-    ExecutionPayloadBodyV1 {
-        transactions: transactions.collect(),
-        withdrawals: value.body().withdrawals().cloned().map(Withdrawals::into_inner),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{b256, hex, Bytes, U256};
