@@ -1,4 +1,4 @@
-use alloy_consensus::{Eip658Value, Header, Receipt};
+use alloy_consensus::{Eip658Value, Receipt};
 use core::fmt;
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
@@ -7,8 +7,6 @@ use revm_primitives::ExecutionResult;
 /// Context for building a receipt.
 #[derive(Debug)]
 pub struct ReceiptBuilderCtx<'a, T> {
-    /// Block header.
-    pub header: &'a Header,
     /// Transaction
     pub tx: &'a T,
     /// Result of transaction execution.

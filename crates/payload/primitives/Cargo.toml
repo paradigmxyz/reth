@@ -25,6 +25,7 @@ alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
 op-alloy-rpc-types-engine = { workspace = true, optional = true }
 
 # misc
+auto_impl.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, default-features = false, features = ["sync"] }

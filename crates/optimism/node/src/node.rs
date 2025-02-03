@@ -25,7 +25,7 @@ use reth_node_builder::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_evm::{OpEvmConfig, OpExecutionStrategyFactory};
+use reth_optimism_evm::{BasicOpReceiptBuilder, OpEvmConfig, OpExecutionStrategyFactory};
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
@@ -205,11 +205,16 @@ where
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
         let Self { rpc_add_ons, da_config } = self;
+
+        let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
+            ctx.node.evm_config().clone(),
+            BasicOpReceiptBuilder::default(),
+        );
         // install additional OP specific rpc methods
         let debug_ext = OpDebugWitnessApi::new(
             ctx.node.provider().clone(),
-            ctx.node.evm_config().clone(),
             Box::new(ctx.node.task_executor().clone()),
+            builder,
         );
         let miner_ext = OpMinerExtApi::new(da_config);
 
@@ -493,9 +498,11 @@ where
             + Unpin
             + 'static,
         Evm: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
+        Txs: OpPayloadTransactions<TxTy<Node::Types>>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
             evm_config,
+            BasicOpReceiptBuilder::default(),
             OpBuilderConfig { da_config: self.da_config },
         )
         .with_transactions(self.best_transactions)
@@ -535,7 +542,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    Txs: OpPayloadTransactions,
+    Txs: OpPayloadTransactions<TxTy<Node::Types>>,
 {
     async fn spawn_payload_service(
         self,
