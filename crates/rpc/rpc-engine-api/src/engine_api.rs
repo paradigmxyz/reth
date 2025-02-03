@@ -3,7 +3,6 @@ use crate::{
 };
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
-    eip2718::Encodable2718,
     eip4844::BlobAndProofV1,
     eip4895::Withdrawals,
     eip7685::{Requests, RequestsOrHash},
@@ -553,13 +552,9 @@ where
         start: BlockNumber,
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
-        self.get_payload_bodies_by_range_with(start, count, |block| {
-            let transactions =
-                block.body().transactions().iter().map(|tx| tx.encoded_2718().into());
-            ExecutionPayloadBodyV1 {
-                transactions: transactions.collect(),
-                withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-            }
+        self.get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV1 {
+            transactions: block.body().encoded_2718_transactions(),
+            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
         })
         .await
     }
@@ -607,13 +602,9 @@ where
         &self,
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
-        self.get_payload_bodies_by_hash_with(hashes, |block| {
-            let transactions =
-                block.body().transactions().iter().map(|tx| tx.encoded_2718().into());
-            ExecutionPayloadBodyV1 {
-                transactions: transactions.collect(),
-                withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
-            }
+        self.get_payload_bodies_by_hash_with(hashes, |block| ExecutionPayloadBodyV1 {
+            transactions: block.body().encoded_2718_transactions(),
+            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
         })
         .await
     }
