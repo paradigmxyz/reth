@@ -227,6 +227,7 @@ where
                 Box::pin(consensus_engine_stream),
                 ctx.dev_mining_mode(ctx.components().pool()),
                 LocalPayloadAttributesBuilder::new(ctx.chain_spec()),
+                ctx.components().evm_config().clone(),
             );
 
             Either::Left(eth_service)
@@ -247,6 +248,7 @@ where
                 engine_tree_config,
                 ctx.invalid_block_hook()?,
                 ctx.sync_metrics_tx(),
+                ctx.components().evm_config().clone(),
             );
 
             Either::Right(eth_service)

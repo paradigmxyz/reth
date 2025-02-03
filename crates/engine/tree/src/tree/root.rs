@@ -509,6 +509,11 @@ where
         }
     }
 
+    /// Returns a [`Sender`] that can be used to send arbitrary [`StateRootMessage`]s to this task.
+    pub fn state_root_message_sender(&self) -> Sender<StateRootMessage> {
+        self.tx.clone()
+    }
+
     /// Returns a [`StateHookSender`] that can be used to send state updates to this task.
     pub fn state_hook_sender(&self) -> StateHookSender {
         StateHookSender::new(self.tx.clone())
