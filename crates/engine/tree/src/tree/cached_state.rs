@@ -398,8 +398,8 @@ impl ProviderCacheBuilder {
         let storage_cache = CacheBuilder::new(self.storage_cache_size)
             .weigher(|_key: &Address, value: &AccountStorageCache| -> u32 {
                 // values based on results from measure_storage_cache_overhead test
-                let base_weight = 40_000;
-                let slots_weight = value.len() * 320;
+                let base_weight = 39_000;
+                let slots_weight = value.len() * 218;
                 (base_weight + slots_weight) as u32
             })
             .max_capacity(STORAGE_MAX_WEIGHT)
@@ -419,7 +419,7 @@ impl ProviderCacheBuilder {
                             weight += 32;
                         }
                         if account.bytecode_hash.is_some() {
-                            weight += 40; // size of Option<B256>
+                            weight += 33; // size of Option<B256>
                         } else {
                             weight += 8; // size of None variant
                         }
@@ -618,18 +618,20 @@ mod tests {
         });
         println!("First slot insertion overhead: {} bytes", first_slot);
 
-        let (hundred_slots, _) = measure_allocation(|| {
-            for _ in 0..100 {
+        const TOTAL_SLOTS: usize = 10_000;
+        let (test_slots, _) = measure_allocation(|| {
+            for _ in 0..TOTAL_SLOTS {
                 let key = StorageKey::random();
                 let value = StorageValue::from(rng.gen::<u128>());
                 cache.insert_storage(key, Some(value));
             }
         });
-        println!("Average overhead over 100 slots: {} bytes", hundred_slots / 100);
+        println!("Average overhead over {} slots: {} bytes", TOTAL_SLOTS, test_slots / TOTAL_SLOTS);
 
         println!("\nTheoretical sizes:");
         println!("StorageKey size: {} bytes", size_of::<StorageKey>());
         println!("StorageValue size: {} bytes", size_of::<StorageValue>());
         println!("Option<StorageValue> size: {} bytes", size_of::<Option<StorageValue>>());
+        println!("Option<B256> size: {} bytes", size_of::<Option<B256>>());
     }
 }
