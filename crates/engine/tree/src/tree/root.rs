@@ -997,10 +997,10 @@ fn extend_multi_proof_targets(targets: &mut MultiProofTargets, other: MultiProof
 }
 
 fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {
-    targets.accounts.extend(other.accounts.iter().copied());
+    targets.accounts.extend(&other.accounts);
 
     for (address, slots) in &other.storages {
-        targets.storages.entry(*address).or_default().extend(slots.iter().copied());
+        targets.storages.entry(*address).or_default().extend(slots);
     }
 }
 
