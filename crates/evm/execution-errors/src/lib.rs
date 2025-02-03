@@ -204,7 +204,8 @@ impl InternalBlockExecutionError {
 
     /// Create a new [`InternalBlockExecutionError::Other`] from a given message.
     pub fn msg(msg: impl core::fmt::Display) -> Self {
-        Self::Other(msg.to_string().into())
+        let err = msg.to_string().into();
+        Self::Other(err)
     }
 
     /// Returns the arbitrary error if it is [`InternalBlockExecutionError::Other`]
@@ -234,5 +235,23 @@ impl InternalBlockExecutionError {
     /// type. Returns false otherwise.
     pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
         self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(thiserror::Error, Debug)]
+    #[error("err")]
+    struct E;
+
+    #[test]
+    fn other_downcast() {
+        let err = InternalBlockExecutionError::other(E);
+        assert!(err.is_other::<E>());
+
+        assert!(err.downcast_other::<E>().is_some());
+        assert!(err.downcast::<E>().is_ok());
     }
 }
