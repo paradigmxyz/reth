@@ -111,7 +111,7 @@ impl<V> TransactionValidationTaskExecutor<V> {
 }
 
 impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>> {
-    /// Creates a new instance for the given [`ChainSpec`]
+    /// Creates a new instance for the given client
     ///
     /// This will spawn a single validation tasks that performs the actual validation.
     /// See [`TransactionValidationTaskExecutor::eth_with_additional_tasks`]
@@ -122,7 +122,7 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
         Self::eth_with_additional_tasks(client, blob_store, tasks, 0)
     }
 
-    /// Creates a new instance for the given [`ChainSpec`]
+    /// Creates a new instance for the given client
     ///
     /// By default this will enable support for:
     ///   - shanghai

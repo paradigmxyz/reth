@@ -82,9 +82,11 @@
 //! use reth_chainspec::MAINNET;
 //! use reth_storage_api::StateProviderFactory;
 //! use reth_tasks::TokioTaskExecutor;
+//! use reth_chainspec::ChainSpecProvider;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool, TransactionPool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
-//! async fn t<C>(client: C)  where C: StateProviderFactory + Clone + 'static{
+//! use reth_chainspec::EthereumHardforks;
+//! async fn t<C>(client: C)  where C: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static{
 //!     let blob_store = InMemoryBlobStore::default();
 //!     let pool = Pool::eth_pool(
 //!         TransactionValidationTaskExecutor::eth(client, MAINNET.clone(), blob_store.clone(), TokioTaskExecutor::default()),
