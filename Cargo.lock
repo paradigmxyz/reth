@@ -7545,7 +7545,6 @@ dependencies = [
  "alloy-rlp",
  "nybbles",
  "reth-consensus",
- "reth-prune-types",
  "reth-storage-errors",
  "thiserror 2.0.11",
 ]

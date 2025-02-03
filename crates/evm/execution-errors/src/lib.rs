@@ -18,7 +18,6 @@ use alloc::{
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use reth_consensus::ConsensusError;
-use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
 use thiserror::Error;
 
@@ -157,9 +156,6 @@ impl From<ProviderError> for BlockExecutionError {
 /// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
 #[derive(Error, Debug)]
 pub enum InternalBlockExecutionError {
-    /// Pruning error, transparently wrapping [`PruneSegmentError`]
-    #[error(transparent)]
-    Pruning(#[from] PruneSegmentError),
     /// Error when appending chain on fork is not possible
     #[error(
         "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
@@ -170,9 +166,9 @@ pub enum InternalBlockExecutionError {
         /// The fork on the other chain
         other_chain_fork: Box<BlockNumHash>,
     },
-    /// Error when fetching latest block state.
+    /// Error when fetching data from the db.
     #[error(transparent)]
-    LatestBlock(#[from] ProviderError),
+    Provider(#[from] ProviderError),
     /// Arbitrary Block Executor Errors
     #[error(transparent)]
     Other(Box<dyn core::error::Error + Send + Sync + 'static>),
