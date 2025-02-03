@@ -204,8 +204,7 @@ impl InternalBlockExecutionError {
 
     /// Create a new [`InternalBlockExecutionError::Other`] from a given message.
     pub fn msg(msg: impl core::fmt::Display) -> Self {
-        let err = msg.to_string().into();
-        Self::Other(err)
+        Self::Other(msg.to_string().into())
     }
 
     /// Returns the arbitrary error if it is [`InternalBlockExecutionError::Other`]
