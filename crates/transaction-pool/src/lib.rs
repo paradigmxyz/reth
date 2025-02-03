@@ -174,6 +174,7 @@ use crate::{identifier::TransactionId, pool::PoolInner};
 use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::Recovered;
@@ -280,7 +281,8 @@ where
 
 impl<Client, S> EthTransactionPool<Client, S>
 where
-    Client: StateProviderFactory + Clone + 'static,
+    Client:
+        ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory + Clone + 'static,
     S: BlobStore,
 {
     /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when

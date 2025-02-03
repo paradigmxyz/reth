@@ -59,6 +59,8 @@ where
 /// deposit transaction.
 #[derive(Debug, Clone)]
 pub struct OpReceiptFieldsBuilder {
+    /// Block number.
+    pub block_number: u64,
     /// Block timestamp.
     pub block_timestamp: u64,
     /// The L1 fee for transaction.
@@ -87,8 +89,9 @@ pub struct OpReceiptFieldsBuilder {
 
 impl OpReceiptFieldsBuilder {
     /// Returns a new builder.
-    pub const fn new(block_timestamp: u64) -> Self {
+    pub const fn new(block_timestamp: u64, block_number: u64) -> Self {
         Self {
+            block_number,
             block_timestamp,
             l1_fee: None,
             l1_data_gas: None,
@@ -110,18 +113,19 @@ impl OpReceiptFieldsBuilder {
         l1_block_info: &mut revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
         let raw_tx = tx.encoded_2718();
+        let block_number = self.block_number;
         let timestamp = self.block_timestamp;
 
         self.l1_fee = Some(
             l1_block_info
-                .l1_tx_data_fee(chain_spec, timestamp, &raw_tx, tx.is_deposit())
+                .l1_tx_data_fee(chain_spec, timestamp, block_number, &raw_tx, tx.is_deposit())
                 .map_err(|_| OpEthApiError::L1BlockFeeError)?
                 .saturating_to(),
         );
 
         self.l1_data_gas = Some(
             l1_block_info
-                .l1_data_gas(chain_spec, timestamp, &raw_tx)
+                .l1_data_gas(chain_spec, timestamp, block_number, &raw_tx)
                 .map_err(|_| OpEthApiError::L1BlockGasError)?
                 .saturating_add(l1_block_info.l1_fee_overhead.unwrap_or_default())
                 .saturating_to(),
@@ -154,6 +158,7 @@ impl OpReceiptFieldsBuilder {
     /// Builds the [`OpTransactionReceiptFields`] object.
     pub const fn build(self) -> OpTransactionReceiptFields {
         let Self {
+            block_number: _,    // used to compute other fields
             block_timestamp: _, // used to compute other fields
             l1_fee,
             l1_data_gas: l1_gas_used,
@@ -202,6 +207,7 @@ impl OpReceiptBuilder {
         l1_block_info: &mut revm::L1BlockInfo,
     ) -> Result<Self, OpEthApiError> {
         let timestamp = meta.timestamp;
+        let block_number = meta.block_number;
         let core_receipt =
             build_receipt(transaction, meta, receipt, all_receipts, None, |receipt_with_bloom| {
                 match receipt {
@@ -222,7 +228,7 @@ impl OpReceiptBuilder {
                 }
             })?;
 
-        let op_receipt_fields = OpReceiptFieldsBuilder::new(timestamp)
+        let op_receipt_fields = OpReceiptFieldsBuilder::new(timestamp, block_number)
             .l1_block_info(chain_spec, transaction, l1_block_info)?
             .build();
 
@@ -304,7 +310,7 @@ mod test {
         // test
         assert!(OP_MAINNET.is_fjord_active_at_timestamp(BLOCK_124665056_TIMESTAMP));
 
-        let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP)
+        let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP, 124665056)
             .l1_block_info(&OP_MAINNET, &tx_1, &mut l1_block_info)
             .expect("should parse revm l1 info")
             .build();
@@ -370,7 +376,7 @@ mod test {
         let tx = hex!("02f86c8221058034839a4ae283021528942f16386bb37709016023232523ff6d9daf444be380841249c58bc080a001b927eda2af9b00b52a57be0885e0303c39dd2831732e14051c2336470fd468a0681bf120baf562915841a48601c2b54a6742511e535cf8f71c95115af7ff63bd");
         let tx_1 = OpTransactionSigned::decode_2718(&mut &tx[..]).unwrap();
 
-        let receipt_meta = OpReceiptFieldsBuilder::new(1730216981)
+        let receipt_meta = OpReceiptFieldsBuilder::new(1730216981, 21713817)
             .l1_block_info(&BASE_MAINNET, &tx_1, &mut l1_block_info)
             .expect("should parse revm l1 info")
             .build();
