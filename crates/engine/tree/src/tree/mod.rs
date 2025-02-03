@@ -2592,12 +2592,7 @@ where
         // invalid headers cache and `Ok` with [PayloadStatusEnum::Invalid] is
         // returned.
         warn!(target: "engine::tree", invalid_hash=?block.hash(), invalid_number=?block.number(), %validation_err, "Invalid block error on new payload");
-        let latest_valid_hash = if validation_err.is_block_pre_merge() {
-            // zero hash must be returned if block is pre-merge
-            Some(B256::ZERO)
-        } else {
-            self.latest_valid_hash_for_invalid_payload(block.parent_hash())?
-        };
+        let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(block.parent_hash())?;
 
         // keep track of the invalid header
         self.state.invalid_headers.insert(block.block_with_parent());
