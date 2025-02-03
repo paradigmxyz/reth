@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
-use reth_engine_primitives::PayloadValidator;
+use reth_engine_primitives::{ExecutionData, PayloadValidator};
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_metrics::{metrics, metrics::Gauge, Metrics};
@@ -348,13 +348,13 @@ where
     ) -> Result<(), ValidationApiError> {
         let block = self
             .payload_validator
-            .ensure_well_formed_payload(
-                ExecutionPayload::V3(request.request.execution_payload),
-                ExecutionPayloadSidecar::v3(CancunPayloadFields {
+            .ensure_well_formed_payload(ExecutionData {
+                payload: ExecutionPayload::V3(request.request.execution_payload),
+                sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
                     versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
                 }),
-            )?
+            })?
             .try_recover()
             .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
 
@@ -373,9 +373,9 @@ where
     ) -> Result<(), ValidationApiError> {
         let block = self
             .payload_validator
-            .ensure_well_formed_payload(
-                ExecutionPayload::V3(request.request.execution_payload),
-                ExecutionPayloadSidecar::v4(
+            .ensure_well_formed_payload(ExecutionData {
+                payload: ExecutionPayload::V3(request.request.execution_payload),
+                sidecar: ExecutionPayloadSidecar::v4(
                     CancunPayloadFields {
                         parent_beacon_block_root: request.parent_beacon_block_root,
                         versioned_hashes: self
@@ -387,7 +387,7 @@ where
                         ),
                     },
                 ),
-            )?
+            })?
             .try_recover()
             .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
 

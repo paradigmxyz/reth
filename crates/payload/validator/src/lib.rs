@@ -8,10 +8,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use alloy_rpc_types::engine::{
-    ExecutionPayload, ExecutionPayloadSidecar, MaybeCancunPayloadFields, PayloadError,
-};
+use alloy_rpc_types::engine::{MaybeCancunPayloadFields, PayloadError};
 use reth_chainspec::EthereumHardforks;
+use reth_engine_primitives::ExecutionData;
 use reth_primitives::SealedBlock;
 use reth_primitives_traits::{Block, SignedTransaction};
 use std::sync::Arc;
@@ -114,10 +113,11 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
     /// <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification>
     pub fn ensure_well_formed_payload<T: SignedTransaction>(
         &self,
-        payload: ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
+        payload: ExecutionData,
     ) -> Result<SealedBlock<reth_primitives::Block<T>>, PayloadError> {
         let expected_hash = payload.block_hash();
+
+        let ExecutionData { payload, sidecar } = payload;
 
         // First parse the block
         let sealed_block = payload.try_into_block_with_sidecar(&sidecar)?.seal_slow();

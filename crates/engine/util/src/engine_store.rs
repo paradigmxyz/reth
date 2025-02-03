@@ -1,8 +1,8 @@
 //! Stores engine API messages to disk for later inspection and replay.
 
-use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, ForkchoiceState};
+use alloy_rpc_types_engine::ForkchoiceState;
 use futures::{Stream, StreamExt};
-use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
+use reth_engine_primitives::{BeaconEngineMessage, EngineTypes, ExecutionData};
 use reth_fs_util as fs;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -27,11 +27,9 @@ pub enum StoredEngineApiMessage<Attributes> {
     },
     /// The on-disk representation of an `engine_newPayload` method call.
     NewPayload {
-        /// The [`ExecutionPayload`] sent in the persisted call.
-        payload: ExecutionPayload,
-        /// The execution payload sidecar with additional version-specific fields received by
-        /// engine API.
-        sidecar: ExecutionPayloadSidecar,
+        /// The [`ExecutionData`] sent in the persisted call.
+        #[serde(flatten)]
+        payload: ExecutionData,
     },
 }
 
@@ -78,14 +76,13 @@ impl EngineMessageStore {
                     })?,
                 )?;
             }
-            BeaconEngineMessage::NewPayload { payload, sidecar, tx: _tx } => {
+            BeaconEngineMessage::NewPayload { payload, tx: _tx } => {
                 let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
                 fs::write(
                     self.path.join(filename),
                     serde_json::to_vec(
                         &StoredEngineApiMessage::<Engine::PayloadAttributes>::NewPayload {
                             payload: payload.clone(),
-                            sidecar: sidecar.clone(),
                         },
                     )?,
                 )?;
