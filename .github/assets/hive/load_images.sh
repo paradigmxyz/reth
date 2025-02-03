@@ -11,6 +11,8 @@ IMAGES=(
     "/tmp/smoke_genesis.tar"
     "/tmp/smoke_network.tar"
     "/tmp/ethereum_sync.tar"
+    "/tmp/eest_engine.tar"
+    "/tmp/eest_rlp.tar"
     "/tmp/reth_image.tar"
 )
 
