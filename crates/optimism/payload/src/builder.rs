@@ -371,8 +371,6 @@ where
             }
         }
 
-        debug_assert!(ctx.attributes().payload_attributes.withdrawals.is_empty());
-
         // merge all transitions into bundle state, this would apply the withdrawal balance changes
         // and 4788 contract call
         state.merge_transitions(BundleRetention::Reverts);
