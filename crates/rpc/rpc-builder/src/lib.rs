@@ -17,7 +17,7 @@
 //!
 //! ```
 //! use reth_consensus::{ConsensusError, FullConsensus};
-//! use reth_engine_primitives::PayloadValidator;
+//! use reth_engine_primitives::{ExecutionData, PayloadValidator};
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
@@ -58,7 +58,7 @@
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Provider::Primitives>,
 //!     Consensus: FullConsensus<Provider::Primitives, Error = ConsensusError> + Clone + 'static,
-//!     Validator: PayloadValidator<Block = reth_primitives::Block>,
+//!     Validator: PayloadValidator<Block = reth_primitives::Block, ExecutionData = ExecutionData>,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -89,7 +89,7 @@
 //!
 //! ```
 //! use reth_consensus::{ConsensusError, FullConsensus};
-//! use reth_engine_primitives::{EngineTypes, PayloadValidator};
+//! use reth_engine_primitives::{EngineTypes, ExecutionData, PayloadValidator};
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
@@ -146,7 +146,7 @@
 //!     EngineT: EngineTypes,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Provider::Primitives>,
 //!     Consensus: FullConsensus<Provider::Primitives, Error = ConsensusError> + Clone + 'static,
-//!     Validator: PayloadValidator<Block = reth_primitives::Block>,
+//!     Validator: PayloadValidator<Block = reth_primitives::Block, ExecutionData = ExecutionData>,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -669,7 +669,7 @@ where
     ///
     /// ```no_run
     /// use reth_consensus::noop::NoopConsensus;
-    /// use reth_engine_primitives::PayloadValidator;
+    /// use reth_engine_primitives::{ExecutionData, PayloadValidator};
     /// use reth_evm::ConfigureEvm;
     /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;
@@ -684,7 +684,8 @@ where
     /// fn init<Evm, Validator>(evm: Evm, validator: Validator)
     /// where
     ///     Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned> + 'static,
-    ///     Validator: PayloadValidator<Block = reth_primitives::Block> + 'static,
+    ///     Validator: PayloadValidator<Block = reth_primitives::Block, ExecutionData = ExecutionData>
+    ///         + 'static,
     /// {
     ///     let mut registry = RpcModuleBuilder::default()
     ///         .with_provider(NoopProvider::default())
