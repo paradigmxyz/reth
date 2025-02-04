@@ -878,7 +878,7 @@ fn get_proof_targets(
 
     // then process storage slots for all accounts in the state update
     for (hashed_address, storage) in &state_update.storages {
-        let account_already_fetched = targets.accounts.contains(hashed_address);
+        let account_already_fetched = fetched_proof_targets.accounts.contains(hashed_address);
         let fetched_slots = fetched_proof_targets.storages.get(hashed_address);
         let mut changed_slots = storage
             .storage
