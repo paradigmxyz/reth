@@ -20,9 +20,6 @@ pub use rayon::*;
 #[cfg(feature = "rayon")]
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
-#[cfg(not(feature = "rayon"))]
-pub use std::iter::*;
-
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct HashedPostState {
