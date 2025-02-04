@@ -766,19 +766,6 @@ impl<EvmConfig: ConfigureEvmEnv, N: NodePrimitives> OpPayloadBuilderCtx<EvmConfi
         is_better_payload(self.best_payload.as_ref(), total_fees)
     }
 
-    /// Commits the withdrawals from the payload attributes to the state.
-    pub fn commit_withdrawals<DB>(&self, db: &mut State<DB>) -> Result<Option<B256>, ProviderError>
-    where
-        DB: Database<Error = ProviderError>,
-    {
-        commit_withdrawals(
-            db,
-            &self.chain_spec,
-            self.attributes().payload_attributes.timestamp,
-            &self.attributes().payload_attributes.withdrawals,
-        )
-    }
-
     /// Ensure that the create2deployer is force-deployed at the canyon transition. Optimism
     /// blocks will always have at least a single transaction in them (the L1 info transaction),
     /// so we can safely assume that this will always be triggered upon the transition and that
