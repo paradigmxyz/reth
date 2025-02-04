@@ -169,7 +169,6 @@ where
                 std::mem::swap(tx, &mut deposit);
                 return
             }
-            _ => return,
         };
         *input = input.slice(..4);
     }
