@@ -113,7 +113,8 @@ mod tests {
                 PruneMode::Before(tip - MINIMUM_PRUNING_DISTANCE - 1),
                 Ok(Some(tip - MINIMUM_PRUNING_DISTANCE - 2)),
             ),
-            (PruneMode::Before(tip - 1), Err(PruneSegmentError::Configuration(segment))),
+            // Nothing to prune
+            (PruneMode::Before(tip - 1), Ok(None)),
         ];
 
         for (index, (mode, expected_result)) in tests.into_iter().enumerate() {
