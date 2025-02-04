@@ -522,6 +522,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 EMPTY_ROOT_HASH
             }
         } else {
+            trace!(target: "trie::sparse", ?address, "Storage trie is blinded");
             return Err(SparseTrieErrorKind::Blind.into())
         };
 
