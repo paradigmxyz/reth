@@ -265,10 +265,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         remote_addr: SocketAddr,
         remote_peer_id: PeerId,
         secret_key: SecretKey,
-        hello: HelloMessageWithProtocols,
-        status: Status,
-        fork_filter: ForkFilter,
-        extra_handlers: RlpxSubProtocolHandlers,
+        handshake_info: HandshakeInfo,
     ) {
         let stream = match TcpStream::connect(remote_addr).await {
             Ok(stream) => {
@@ -296,8 +293,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             secret_key,
             local_addr: stream.local_addr().ok(),
         };
-        let handshake_info =
-            HandshakeInfo { hello_msg: hello, status_msg: status, fork_filter, extra_handlers };
 
         let connection = eth_protocol_handler.on_outgoing(
             stream,
@@ -394,9 +389,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             let (disconnect_tx, disconnect_rx) = oneshot::channel();
             let pending_events = self.pending_sessions_tx.clone();
             let secret_key = self.secret_key;
-            let hello_message = self.hello_message.clone();
+            let hello_msg = self.hello_message.clone();
             let fork_filter = self.fork_filter.clone();
-            let status = self.status;
+            let status_msg = self.status;
             let extra_handlers = self.extra_protocols.on_outgoing(remote_addr, remote_peer_id);
 
             self.spawn(pending_session_with_timeout(
@@ -413,10 +408,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     remote_addr,
                     remote_peer_id,
                     secret_key,
-                    hello_message,
-                    status,
-                    fork_filter,
-                    extra_handlers,
+                    HandshakeInfo { hello_msg, status_msg, fork_filter, extra_handlers },
                 ),
             ));
 
