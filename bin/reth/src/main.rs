@@ -19,7 +19,13 @@ fn main() {
 
     if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(|builder, _| async move {
         info!(target: "reth::cli", "Launching node");
-        let handle = builder.launch_node(EthereumNode::default()).await?;
+        let handle = builder
+
+            .launch_node(EthereumNode::default()).await?;
+
+        let pool = handle.node.pool();
+        let store = pool.blob_store();
+
         handle.node_exit_future.await
     }) {
         eprintln!("Error: {err:?}");
