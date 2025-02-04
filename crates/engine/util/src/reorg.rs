@@ -313,9 +313,8 @@ where
         }
 
         // Configure the environment for the block.
-        let tx_recovered = tx.try_clone_into_recovered().map_err(|_| {
-            BlockExecutionError::Validation(BlockValidationError::SenderRecoveryError)
-        })?;
+        let tx_recovered =
+            tx.try_clone_into_recovered().map_err(|_| ProviderError::SenderRecoveryError)?;
         let tx_env = evm_config.tx_env(&tx_recovered, tx_recovered.signer());
         let exec_result = match evm.transact(tx_env) {
             Ok(result) => result,
