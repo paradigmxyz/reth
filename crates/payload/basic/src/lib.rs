@@ -22,7 +22,7 @@ use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKin
 use reth_primitives::{NodePrimitives, SealedHeader};
 use reth_primitives_traits::proofs;
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
-use reth_revm::{cached::CachedReads, cancelled::Cancelled};
+use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
 use revm::{Database, State};
@@ -356,7 +356,7 @@ where
         let (tx, rx) = oneshot::channel();
         let client = self.client.clone();
         let pool = self.pool.clone();
-        let cancel = Cancelled::default();
+        let cancel = CancelOnDrop::default();
         let _cancel = cancel.clone();
         let guard = self.payload_task_guard.clone();
         let payload_config = self.config.clone();
@@ -501,7 +501,7 @@ where
                 pool: self.pool.clone(),
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
                 config: self.config.clone(),
-                cancel: Cancelled::default(),
+                cancel: CancelOnDrop::default(),
                 best_payload: None,
             };
 
@@ -657,7 +657,7 @@ where
 #[derive(Debug)]
 pub struct PendingPayload<P> {
     /// The marker to cancel the job on drop
-    _cancel: Cancelled,
+    _cancel: CancelOnDrop,
     /// The channel to send the result to.
     payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
 }
@@ -665,7 +665,7 @@ pub struct PendingPayload<P> {
 impl<P> PendingPayload<P> {
     /// Constructs a `PendingPayload` future.
     pub const fn new(
-        cancel: Cancelled,
+        cancel: CancelOnDrop,
         payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
     ) -> Self {
         Self { _cancel: cancel, payload }
@@ -818,7 +818,7 @@ pub struct BuildArguments<Pool, Client, Attributes, Payload> {
     /// How to configure the payload.
     pub config: PayloadConfig<Attributes>,
     /// A marker that can be used to cancel the job.
-    pub cancel: Cancelled,
+    pub cancel: CancelOnDrop,
     /// The best payload achieved so far.
     pub best_payload: Option<Payload>,
 }
@@ -830,7 +830,7 @@ impl<Pool, Client, Attributes, Payload> BuildArguments<Pool, Client, Attributes,
         pool: Pool,
         cached_reads: CachedReads,
         config: PayloadConfig<Attributes>,
-        cancel: Cancelled,
+        cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
         Self { client, pool, cached_reads, config, cancel, best_payload }
