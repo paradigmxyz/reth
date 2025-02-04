@@ -129,9 +129,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
         Fut: Future<Output = eyre::Result<()>>,
     {
         // Add network name to logs dir (only set when using `Node` command)
-        let chain = self.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or(String::new());
-        self.logs.log_file_directory =
-            self.logs.log_file_directory.join(chain);
+        let chain = self.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or_default();
+        self.logs.log_file_directory = self.logs.log_file_directory.join(chain);
 
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
@@ -236,7 +235,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
 impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
     fn chain_spec(&self) -> Option<&C::ChainSpec> {
         match self {
-            Commands::Node(cmd) => Some(&cmd.chain),
+            Self::Node(cmd) => Some(&cmd.chain),
             // For other subcommands that do not provide a chain, return None.
             _ => None,
         }
@@ -281,8 +280,7 @@ mod tests {
     fn parse_logs_path() {
         let mut reth = Cli::try_parse_args_from(["reth", "node"]).unwrap();
         let chain = reth.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or(String::new());
-        reth.logs.log_file_directory =
-            reth.logs.log_file_directory.join(chain);
+        reth.logs.log_file_directory = reth.logs.log_file_directory.join(chain);
         let log_dir = reth.logs.log_file_directory;
         let end = format!("reth/logs/{}", SUPPORTED_CHAINS[0]);
         assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
@@ -291,9 +289,9 @@ mod tests {
         iter.next();
         for chain in iter {
             let mut reth = Cli::try_parse_args_from(["reth", "node", "--chain", chain]).unwrap();
-            let chain = reth.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or(String::new());
-            reth.logs.log_file_directory =
-                reth.logs.log_file_directory.join(chain.clone());
+            let chain =
+                reth.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or(String::new());
+            reth.logs.log_file_directory = reth.logs.log_file_directory.join(chain.clone());
             let log_dir = reth.logs.log_file_directory;
             let end = format!("reth/logs/{}", chain);
             assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
@@ -306,10 +304,9 @@ mod tests {
     fn parse_empty_logs_path() {
         let mut reth = Cli::try_parse_args_from(["reth", "init"]).unwrap();
         let chain = reth.command.chain_spec().map(|c| c.chain.to_string()).unwrap_or(String::new());
-        reth.logs.log_file_directory =
-            reth.logs.log_file_directory.join(chain);
+        reth.logs.log_file_directory = reth.logs.log_file_directory.join(chain);
         let log_dir = reth.logs.log_file_directory;
-        let end = format!("reth/logs");
+        let end = "reth/logs".to_string();
         assert!(log_dir.as_ref().ends_with(end), "{log_dir:?}");
     }
 
