@@ -229,8 +229,7 @@ where
         .with_deletions_retained(true);
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer: ProofRetainer =
-            targets.accounts.iter().chain(targets.storages.keys()).map(Nibbles::unpack).collect();
+        let retainer: ProofRetainer = targets.accounts.iter().map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
