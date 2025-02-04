@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+use core::ops::{Bound, RangeBounds};
 use reth_db_api::{
     common::KeyValue,
     cursor::DbCursorRO,
@@ -8,7 +10,6 @@ use reth_db_api::{
 };
 use reth_prune_types::PruneModes;
 use reth_storage_errors::provider::ProviderResult;
-use std::ops::{Bound, RangeBounds};
 
 /// Database provider.
 pub trait DBProvider: Send + Sync + Sized + 'static {

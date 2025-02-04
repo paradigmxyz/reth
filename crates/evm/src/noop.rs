@@ -1,16 +1,14 @@
 //! A no operation block executor implementation.
 
-use core::fmt::Display;
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives::{NodePrimitives, RecoveredBlock};
-use reth_storage_errors::provider::ProviderError;
 use revm::State;
-use revm_primitives::db::Database;
 
 use crate::{
     execute::{BatchExecutor, BlockExecutorProvider, Executor},
     system_calls::OnStateHook,
+    Database,
 };
 
 const UNAVAILABLE_FOR_NOOP: &str = "execution unavailable for noop";
@@ -23,20 +21,20 @@ pub struct NoopBlockExecutorProvider<P>(core::marker::PhantomData<P>);
 impl<P: NodePrimitives> BlockExecutorProvider for NoopBlockExecutorProvider<P> {
     type Primitives = P;
 
-    type Executor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
+    type Executor<DB: Database> = Self;
 
-    type BatchExecutor<DB: Database<Error: Into<ProviderError> + Display>> = Self;
+    type BatchExecutor<DB: Database> = Self;
 
     fn executor<DB>(&self, _: DB) -> Self::Executor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database,
     {
         Self::default()
     }
 
     fn batch_executor<DB>(&self, _: DB) -> Self::BatchExecutor<DB>
     where
-        DB: Database<Error: Into<ProviderError> + Display>,
+        DB: Database,
     {
         Self::default()
     }

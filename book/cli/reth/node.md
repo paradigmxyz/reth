@@ -443,6 +443,16 @@ TxPool:
 
           [default: 20]
 
+      --txpool.blobpool-max-count <BLOBPOOL_MAX_COUNT>
+          Max number of transaction in the blobpool
+
+          [default: 10000]
+
+      --txpool.blobpool-max-size <BLOBPOOL_MAX_SIZE>
+          Max size of the blobpool in megabytes
+
+          [default: 20]
+
       --txpool.max-account-slots <MAX_ACCOUNT_SLOTS>
           Max number of executable transaction slots guaranteed per account
 
@@ -694,6 +704,9 @@ Engine:
 
       --engine.state-root-task
           Enable state root task
+
+      --engine.caching-and-prewarming
+          Enable cross-block caching and parallel prewarming
 
       --engine.state-root-task-compare-updates
           Enable comparing trie updates from the state root task to the trie updates from the regular state root calculation

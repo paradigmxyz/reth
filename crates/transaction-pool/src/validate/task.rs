@@ -7,7 +7,6 @@ use crate::{
     TransactionValidator,
 };
 use futures_util::{lock::Mutex, StreamExt};
-use reth_chainspec::ChainSpec;
 use reth_primitives::SealedBlock;
 use reth_primitives_traits::Block;
 use reth_tasks::TaskSpawner;
@@ -93,8 +92,8 @@ pub struct TransactionValidationTaskExecutor<V> {
 
 impl TransactionValidationTaskExecutor<()> {
     /// Convenience method to create a [`EthTransactionValidatorBuilder`]
-    pub fn eth_builder(chain_spec: Arc<ChainSpec>) -> EthTransactionValidatorBuilder {
-        EthTransactionValidatorBuilder::new(chain_spec)
+    pub fn eth_builder<Client>(client: Client) -> EthTransactionValidatorBuilder<Client> {
+        EthTransactionValidatorBuilder::new(client)
     }
 }
 
@@ -112,23 +111,18 @@ impl<V> TransactionValidationTaskExecutor<V> {
 }
 
 impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>> {
-    /// Creates a new instance for the given [`ChainSpec`]
+    /// Creates a new instance for the given client
     ///
     /// This will spawn a single validation tasks that performs the actual validation.
     /// See [`TransactionValidationTaskExecutor::eth_with_additional_tasks`]
-    pub fn eth<T, S: BlobStore>(
-        client: Client,
-        chain_spec: Arc<ChainSpec>,
-        blob_store: S,
-        tasks: T,
-    ) -> Self
+    pub fn eth<T, S: BlobStore>(client: Client, blob_store: S, tasks: T) -> Self
     where
         T: TaskSpawner,
     {
-        Self::eth_with_additional_tasks(client, chain_spec, blob_store, tasks, 0)
+        Self::eth_with_additional_tasks(client, blob_store, tasks, 0)
     }
 
-    /// Creates a new instance for the given [`ChainSpec`]
+    /// Creates a new instance for the given client
     ///
     /// By default this will enable support for:
     ///   - shanghai
@@ -139,7 +133,6 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
     /// `num_additional_tasks` additional tasks.
     pub fn eth_with_additional_tasks<T, S: BlobStore>(
         client: Client,
-        chain_spec: Arc<ChainSpec>,
         blob_store: S,
         tasks: T,
         num_additional_tasks: usize,
@@ -147,9 +140,9 @@ impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Clien
     where
         T: TaskSpawner,
     {
-        EthTransactionValidatorBuilder::new(chain_spec)
+        EthTransactionValidatorBuilder::new(client)
             .with_additional_tasks(num_additional_tasks)
-            .build_with_tasks::<Client, Tx, T, S>(client, tasks, blob_store)
+            .build_with_tasks::<Tx, T, S>(tasks, blob_store)
     }
 }
 

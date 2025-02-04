@@ -14,18 +14,20 @@ extern crate alloc;
 
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, U256};
 use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
-use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Evm, NextBlockEnvAttributes};
+use reth_chainspec::EthChainSpec;
+use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Database, Evm, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_consensus::next_block_base_fee;
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::FillTxEnv;
 use reth_revm::{
     inspector_handle_register,
     primitives::{AnalysisKind, CfgEnvWithHandlerCfg, TxEnv},
-    Database, EvmBuilder, GetInspector,
+    EvmBuilder, GetInspector,
 };
 
 mod config;
@@ -40,8 +42,8 @@ pub use receipts::*;
 mod error;
 pub use error::OpBlockExecutionError;
 use revm_primitives::{
-    BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, EVMError, HandlerCfg, OptimismFields,
-    ResultAndState, SpecId, TxKind,
+    BlobExcessGasAndPrice, BlockEnv, Bytes, CfgEnv, EVMError, HaltReason, HandlerCfg,
+    OptimismFields, ResultAndState, SpecId, TxKind,
 };
 
 /// OP EVM implementation.
@@ -53,6 +55,7 @@ impl<EXT, DB: Database> Evm for OpEvm<'_, EXT, DB> {
     type DB = DB;
     type Tx = TxEnv;
     type Error = EVMError<DB::Error>;
+    type HaltReason = HaltReason;
 
     fn block(&self) -> &BlockEnv {
         self.0.block()
@@ -125,24 +128,30 @@ impl<EXT, DB: Database> Evm for OpEvm<'_, EXT, DB> {
 }
 
 /// Optimism-related EVM configuration.
-#[derive(Debug, Clone)]
-pub struct OpEvmConfig {
-    chain_spec: Arc<OpChainSpec>,
+#[derive(Debug)]
+pub struct OpEvmConfig<ChainSpec = OpChainSpec> {
+    chain_spec: Arc<ChainSpec>,
 }
 
-impl OpEvmConfig {
+impl<ChainSpec> Clone for OpEvmConfig<ChainSpec> {
+    fn clone(&self) -> Self {
+        Self { chain_spec: self.chain_spec.clone() }
+    }
+}
+
+impl<ChainSpec> OpEvmConfig<ChainSpec> {
     /// Creates a new [`OpEvmConfig`] with the given chain spec.
-    pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
 
     /// Returns the chain spec associated with this configuration.
-    pub const fn chain_spec(&self) -> &Arc<OpChainSpec> {
+    pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
     }
 }
 
-impl ConfigureEvmEnv for OpEvmConfig {
+impl<ChainSpec: EthChainSpec + OpHardforks + 'static> ConfigureEvmEnv for OpEvmConfig<ChainSpec> {
     type Header = Header;
     type Transaction = OpTransactionSigned;
     type Error = EIP1559ParamError;
@@ -193,7 +202,9 @@ impl ConfigureEvmEnv for OpEvmConfig {
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
         // cancun now, we need to set the excess blob gas to the default value(0)
         let blob_excess_gas_and_price = parent
-            .next_block_excess_blob_gas(BlobParams::cancun())
+            .maybe_next_block_excess_blob_gas(
+                self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
+            )
             .or_else(|| (spec_id.is_enabled_in(SpecId::CANCUN)).then_some(0))
             .map(|gas| BlobExcessGasAndPrice::new(gas, false));
 
@@ -205,7 +216,11 @@ impl ConfigureEvmEnv for OpEvmConfig {
             prevrandao: Some(attributes.prev_randao),
             gas_limit: U256::from(attributes.gas_limit),
             // calculate basefee based on parent block's gas usage
-            basefee: self.chain_spec.next_block_base_fee(parent, attributes.timestamp)?,
+            basefee: U256::from(next_block_base_fee(
+                &self.chain_spec,
+                parent,
+                attributes.timestamp,
+            )?),
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };
@@ -222,8 +237,10 @@ impl ConfigureEvmEnv for OpEvmConfig {
     }
 }
 
-impl ConfigureEvm for OpEvmConfig {
+impl<ChainSpec: EthChainSpec + OpHardforks + 'static> ConfigureEvm for OpEvmConfig<ChainSpec> {
     type Evm<'a, DB: Database + 'a, I: 'a> = OpEvm<'a, I, DB>;
+    type EvmError<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type HaltReason = HaltReason;
 
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {
@@ -279,7 +296,7 @@ mod tests {
     };
     use reth_optimism_chainspec::BASE_MAINNET;
     use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
-    use reth_primitives::{Account, Log, Receipts, RecoveredBlock};
+    use reth_primitives::{Account, Log, RecoveredBlock};
     use reth_revm::{
         db::{BundleState, CacheDB, EmptyDBTyped},
         inspectors::NoOpInspector,
@@ -528,7 +545,7 @@ mod tests {
         });
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts { receipt_vec: vec![vec![receipt1.clone()], vec![receipt2]] };
+        let receipts = vec![vec![receipt1.clone()], vec![receipt2]];
 
         // Create an ExecutionOutcome object with the created bundle, receipts, an empty requests
         // vector, and first_block set to 10
@@ -550,7 +567,7 @@ mod tests {
         // Create an ExecutionOutcome object with a single receipt vector containing receipt1
         let execution_outcome1 = ExecutionOutcome {
             bundle: Default::default(),
-            receipts: Receipts { receipt_vec: vec![vec![receipt1]] },
+            receipts: vec![vec![receipt1]],
             requests: vec![],
             first_block: 10,
         };
@@ -572,13 +589,11 @@ mod tests {
         );
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(OpReceipt::Legacy(Receipt {
-                cumulative_gas_used: 46913,
-                logs: vec![],
-                status: true.into(),
-            }))]],
-        };
+        let receipts = vec![vec![Some(OpReceipt::Legacy(Receipt {
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            status: true.into(),
+        }))]];
 
         // Create a Requests object with a vector of requests
         let requests = vec![Requests::new(vec![bytes!("dead"), bytes!("beef"), bytes!("beebee")])];
@@ -632,13 +647,11 @@ mod tests {
     #[test]
     fn test_block_number_to_index() {
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(OpReceipt::Legacy(Receipt {
-                cumulative_gas_used: 46913,
-                logs: vec![],
-                status: true.into(),
-            }))]],
-        };
+        let receipts = vec![vec![Some(OpReceipt::Legacy(Receipt {
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            status: true.into(),
+        }))]];
 
         // Define the first block number
         let first_block = 123;
@@ -665,13 +678,11 @@ mod tests {
     #[test]
     fn test_get_logs() {
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![OpReceipt::Legacy(Receipt {
-                cumulative_gas_used: 46913,
-                logs: vec![Log::<LogData>::default()],
-                status: true.into(),
-            })]],
-        };
+        let receipts = vec![vec![OpReceipt::Legacy(Receipt {
+            cumulative_gas_used: 46913,
+            logs: vec![Log::<LogData>::default()],
+            status: true.into(),
+        })]];
 
         // Define the first block number
         let first_block = 123;
@@ -695,13 +706,11 @@ mod tests {
     #[test]
     fn test_receipts_by_block() {
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(OpReceipt::Legacy(Receipt {
-                cumulative_gas_used: 46913,
-                logs: vec![Log::<LogData>::default()],
-                status: true.into(),
-            }))]],
-        };
+        let receipts = vec![vec![Some(OpReceipt::Legacy(Receipt {
+            cumulative_gas_used: 46913,
+            logs: vec![Log::<LogData>::default()],
+            status: true.into(),
+        }))]];
 
         // Define the first block number
         let first_block = 123;
@@ -732,16 +741,14 @@ mod tests {
     #[test]
     fn test_receipts_len() {
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(OpReceipt::Legacy(Receipt {
-                cumulative_gas_used: 46913,
-                logs: vec![Log::<LogData>::default()],
-                status: true.into(),
-            }))]],
-        };
+        let receipts = vec![vec![Some(OpReceipt::Legacy(Receipt {
+            cumulative_gas_used: 46913,
+            logs: vec![Log::<LogData>::default()],
+            status: true.into(),
+        }))]];
 
         // Create an empty Receipts object
-        let receipts_empty = Receipts::<Receipt> { receipt_vec: vec![] };
+        let receipts_empty = vec![];
 
         // Define the first block number
         let first_block = 123;
@@ -762,7 +769,7 @@ mod tests {
         assert!(!exec_res.is_empty());
 
         // Create a ExecutionOutcome object with an empty Receipts object
-        let exec_res_empty_receipts = ExecutionOutcome {
+        let exec_res_empty_receipts: ExecutionOutcome<OpReceipt> = ExecutionOutcome {
             bundle: Default::default(), // Default value for bundle
             receipts: receipts_empty,   // Include the empty receipts
             requests: vec![],           // Empty vector for requests
@@ -786,9 +793,7 @@ mod tests {
         });
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt.clone())]],
-        };
+        let receipts = vec![vec![Some(receipt.clone())], vec![Some(receipt.clone())]];
 
         // Define the first block number
         let first_block = 123;
@@ -809,7 +814,7 @@ mod tests {
         assert!(exec_res.revert_to(123));
 
         // Assert that the receipts are properly cut after reverting to the initial block number.
-        assert_eq!(exec_res.receipts, Receipts { receipt_vec: vec![vec![Some(receipt)]] });
+        assert_eq!(exec_res.receipts, vec![vec![Some(receipt)]]);
 
         // Assert that the requests are properly cut after reverting to the initial block number.
         assert_eq!(exec_res.requests, vec![Requests::new(vec![request])]);
@@ -833,7 +838,7 @@ mod tests {
         });
 
         // Create a Receipts object containing the receipt.
-        let receipts = Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] };
+        let receipts = vec![vec![Some(receipt.clone())]];
 
         // Create a request.
         let request = bytes!("deadbeef");
@@ -856,9 +861,7 @@ mod tests {
             exec_res,
             ExecutionOutcome {
                 bundle: Default::default(),
-                receipts: Receipts {
-                    receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]]
-                },
+                receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
                 requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
                 first_block: 123,
             }
@@ -875,13 +878,11 @@ mod tests {
         });
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![
-                vec![Some(receipt.clone())],
-                vec![Some(receipt.clone())],
-                vec![Some(receipt.clone())],
-            ],
-        };
+        let receipts = vec![
+            vec![Some(receipt.clone())],
+            vec![Some(receipt.clone())],
+            vec![Some(receipt.clone())],
+        ];
 
         // Define the first block number
         let first_block = 123;
@@ -907,7 +908,7 @@ mod tests {
         // Define the expected lower ExecutionOutcome after splitting
         let lower_execution_outcome = ExecutionOutcome {
             bundle: Default::default(),
-            receipts: Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] },
+            receipts: vec![vec![Some(receipt.clone())]],
             requests: vec![Requests::new(vec![request.clone()])],
             first_block,
         };
@@ -915,9 +916,7 @@ mod tests {
         // Define the expected higher ExecutionOutcome after splitting
         let higher_execution_outcome = ExecutionOutcome {
             bundle: Default::default(),
-            receipts: Receipts {
-                receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
-            },
+            receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
             requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
             first_block: 124,
         };

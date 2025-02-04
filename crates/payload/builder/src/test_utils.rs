@@ -88,7 +88,7 @@ impl PayloadJob for TestPayloadJob {
     fn best_payload(&self) -> Result<EthBuiltPayload, PayloadBuilderError> {
         Ok(EthBuiltPayload::new(
             self.attr.payload_id(),
-            Arc::new(Block::default().seal_slow()),
+            Arc::new(Block::<_>::default().seal_slow()),
             U256::ZERO,
             Some(Default::default()),
         ))

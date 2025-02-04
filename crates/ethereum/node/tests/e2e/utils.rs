@@ -40,7 +40,7 @@ pub(crate) async fn advance_with_random_transactions<Provider>(
 where
     Provider: FullProvider<NodeTypesWithDBAdapter<EthereumNode, TmpDB>>,
 {
-    let provider = ProviderBuilder::new().with_recommended_fillers().on_http(node.rpc_url());
+    let provider = ProviderBuilder::new().on_http(node.rpc_url());
     let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).gen();
 
     // simple contract which writes to storage on any call

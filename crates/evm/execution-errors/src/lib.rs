@@ -18,16 +18,14 @@ use alloc::{
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use reth_consensus::ConsensusError;
-use reth_prune_types::PruneSegmentError;
 use reth_storage_errors::provider::ProviderError;
-use revm_primitives::EVMError;
 use thiserror::Error;
 
 pub mod trie;
 pub use trie::*;
 
 /// Transaction validation errors
-#[derive(Error, Clone, Debug)]
+#[derive(Error, Debug)]
 pub enum BlockValidationError {
     /// EVM error with transaction hash and message
     #[error("EVM reported invalid transaction ({hash}): {error}")]
@@ -35,11 +33,8 @@ pub enum BlockValidationError {
         /// The hash of the transaction
         hash: B256,
         /// The EVM error.
-        error: Box<EVMError<ProviderError>>,
+        error: Box<dyn core::error::Error + Send + Sync>,
     },
-    /// Error when recovering the sender for a transaction
-    #[error("failed to recover sender for transaction")]
-    SenderRecoveryError,
     /// Error when incrementing balance in post execution
     #[error("incrementing balance in post execution failed")]
     IncrementBalanceFailed,
@@ -55,18 +50,6 @@ pub enum BlockValidationError {
         transaction_gas_limit: u64,
         /// The available block gas
         block_available_gas: u64,
-    },
-    /// Error for pre-merge block
-    #[error("block {hash} is pre merge")]
-    BlockPreMerge {
-        /// The hash of the block
-        hash: B256,
-    },
-    /// Error for missing total difficulty
-    #[error("missing total difficulty for block {hash}")]
-    MissingTotalDifficulty {
-        /// The hash of the block
-        hash: B256,
     },
     /// Error for EIP-4788 when parent beacon block root is missing
     #[error("EIP-4788 parent beacon block root missing for active Cancun block")]
@@ -173,9 +156,6 @@ impl From<ProviderError> for BlockExecutionError {
 /// Internal (i.e., not validation or consensus related) `BlockExecutor` Errors
 #[derive(Error, Debug)]
 pub enum InternalBlockExecutionError {
-    /// Pruning error, transparently wrapping [`PruneSegmentError`]
-    #[error(transparent)]
-    Pruning(#[from] PruneSegmentError),
     /// Error when appending chain on fork is not possible
     #[error(
         "appending chain on fork (other_chain_fork:?) is not possible as the tip is {chain_tip:?}"
@@ -186,12 +166,12 @@ pub enum InternalBlockExecutionError {
         /// The fork on the other chain
         other_chain_fork: Box<BlockNumHash>,
     },
-    /// Error when fetching latest block state.
+    /// Error when fetching data from the db.
     #[error(transparent)]
-    LatestBlock(#[from] ProviderError),
+    Provider(#[from] ProviderError),
     /// Arbitrary Block Executor Errors
     #[error(transparent)]
-    Other(Box<dyn core::error::Error + Send + Sync>),
+    Other(Box<dyn core::error::Error + Send + Sync + 'static>),
 }
 
 impl InternalBlockExecutionError {
@@ -206,5 +186,52 @@ impl InternalBlockExecutionError {
     /// Create a new [`InternalBlockExecutionError::Other`] from a given message.
     pub fn msg(msg: impl core::fmt::Display) -> Self {
         Self::Other(msg.to_string().into())
+    }
+
+    /// Returns the arbitrary error if it is [`InternalBlockExecutionError::Other`]
+    pub fn as_other(&self) -> Option<&(dyn core::error::Error + Send + Sync + 'static)> {
+        match self {
+            Self::Other(err) => Some(&**err),
+            _ => None,
+        }
+    }
+
+    /// Attempts to downcast the [`InternalBlockExecutionError::Other`] variant to a concrete type
+    pub fn downcast<T: core::error::Error + 'static>(self) -> Result<Box<T>, Self> {
+        match self {
+            Self::Other(err) => err.downcast().map_err(Self::Other),
+            err => Err(err),
+        }
+    }
+
+    /// Returns a reference to the [`InternalBlockExecutionError::Other`] value if this type is a
+    /// [`InternalBlockExecutionError::Other`] of that type. Returns None otherwise.
+    pub fn downcast_other<T: core::error::Error + 'static>(&self) -> Option<&T> {
+        let other = self.as_other()?;
+        other.downcast_ref()
+    }
+
+    /// Returns true if the this type is a [`InternalBlockExecutionError::Other`] of that error
+    /// type. Returns false otherwise.
+    pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
+        self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(thiserror::Error, Debug)]
+    #[error("err")]
+    struct E;
+
+    #[test]
+    fn other_downcast() {
+        let err = InternalBlockExecutionError::other(E);
+        assert!(err.is_other::<E>());
+
+        assert!(err.downcast_other::<E>().is_some());
+        assert!(err.downcast::<E>().is_ok());
     }
 }

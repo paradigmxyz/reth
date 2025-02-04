@@ -2,7 +2,8 @@ use alloc::vec::Vec;
 pub use alloy_consensus::{transaction::PooledTransaction, TxType};
 use alloy_consensus::{
     transaction::RlpEcdsaTx, BlobTransactionSidecar, SignableTransaction, Signed, TxEip1559,
-    TxEip2930, TxEip4844, TxEip4844WithSidecar, TxEip7702, TxLegacy, Typed2718, TypedTransaction,
+    TxEip2930, TxEip4844, TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy,
+    Typed2718, TypedTransaction,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -14,18 +15,14 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
-use once_cell as _;
-#[cfg(not(feature = "std"))]
-use once_cell::sync::OnceCell as OnceLock;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
+    sync::OnceLock,
     transaction::{error::TransactionConversionError, signed::RecoveryError},
     FillTxEnv, InMemorySize, SignedTransaction,
 };
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "std")]
-use std::sync::OnceLock;
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -36,6 +33,19 @@ macro_rules! delegate {
             Transaction::Eip4844($tx) => $tx.$method($($arg),*),
             Transaction::Eip7702($tx) => $tx.$method($($arg),*),
         }
+    };
+}
+
+macro_rules! impl_from_signed {
+    ($($tx:ident),*) => {
+        $(
+            impl From<Signed<$tx>> for TransactionSigned {
+                fn from(value: Signed<$tx>) -> Self {
+                    let(tx,sig,hash) = value.into_parts();
+                    Self::new(tx.into(), sig, hash)
+                }
+            }
+        )*
     };
 }
 
@@ -404,6 +414,12 @@ impl TransactionSigned {
     pub fn transaction_mut(&mut self) -> &mut Transaction {
         &mut self.transaction
     }
+
+    /// Splits the transaction into parts.
+    pub fn into_parts(self) -> (Transaction, Signature, B256) {
+        let hash = *self.hash.get_or_init(|| self.recalculate_hash());
+        (self.transaction, self.signature, hash)
+    }
 }
 
 impl Typed2718 for TransactionSigned {
@@ -479,6 +495,72 @@ impl alloy_consensus::Transaction for TransactionSigned {
 
     fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
         self.transaction.authorization_list()
+    }
+}
+
+impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844, TypedTransaction);
+
+impl From<Signed<Transaction>> for TransactionSigned {
+    fn from(value: Signed<Transaction>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new(tx, sig, hash)
+    }
+}
+
+impl From<Signed<TxEip4844WithSidecar>> for TransactionSigned {
+    fn from(value: Signed<TxEip4844WithSidecar>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new(tx.tx.into(), sig, hash)
+    }
+}
+
+impl From<TxEip4844Variant> for Transaction {
+    fn from(variant: TxEip4844Variant) -> Self {
+        match variant {
+            TxEip4844Variant::TxEip4844(tx) => Self::Eip4844(tx),
+            TxEip4844Variant::TxEip4844WithSidecar(tx_with_sidecar) => {
+                Self::Eip4844(tx_with_sidecar.tx)
+            }
+        }
+    }
+}
+
+impl From<Signed<TxEip4844Variant>> for TransactionSigned {
+    fn from(value: Signed<TxEip4844Variant>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new(tx.into(), sig, hash)
+    }
+}
+
+impl From<TxEnvelope> for TransactionSigned {
+    fn from(value: TxEnvelope) -> Self {
+        match value {
+            TxEnvelope::Legacy(tx) => tx.into(),
+            TxEnvelope::Eip2930(tx) => tx.into(),
+            TxEnvelope::Eip1559(tx) => tx.into(),
+            TxEnvelope::Eip4844(tx) => tx.into(),
+            TxEnvelope::Eip7702(tx) => tx.into(),
+        }
+    }
+}
+
+impl From<TransactionSigned> for TxEnvelope {
+    fn from(value: TransactionSigned) -> Self {
+        let (tx, signature, hash) = value.into_parts();
+        match tx {
+            Transaction::Legacy(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip2930(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip1559(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip4844(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip7702(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+        }
+    }
+}
+
+impl From<TransactionSigned> for Signed<Transaction> {
+    fn from(value: TransactionSigned) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new_unchecked(tx, sig, hash)
     }
 }
 
@@ -794,16 +876,6 @@ impl TryFrom<TransactionSigned> for PooledTransaction {
                 Err(TransactionConversionError::UnsupportedForP2P)
             }
         }
-    }
-}
-
-impl<T> From<Signed<T>> for TransactionSigned
-where
-    T: Into<Transaction>,
-{
-    fn from(value: Signed<T>) -> Self {
-        let (tx, signature, hash) = value.into_parts();
-        Self { transaction: tx.into(), signature, hash: hash.into() }
     }
 }
 

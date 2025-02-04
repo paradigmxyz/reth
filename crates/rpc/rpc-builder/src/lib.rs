@@ -17,7 +17,7 @@
 //!
 //! ```
 //! use reth_consensus::{ConsensusError, FullConsensus};
-//! use reth_engine_primitives::PayloadValidator;
+//! use reth_engine_primitives::{ExecutionData, PayloadValidator};
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
@@ -58,7 +58,7 @@
 //!     Network: NetworkInfo + Peers + Clone + 'static,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Provider::Primitives>,
 //!     Consensus: FullConsensus<Provider::Primitives, Error = ConsensusError> + Clone + 'static,
-//!     Validator: PayloadValidator<Block = reth_primitives::Block>,
+//!     Validator: PayloadValidator<Block = reth_primitives::Block, ExecutionData = ExecutionData>,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -89,14 +89,14 @@
 //!
 //! ```
 //! use reth_consensus::{ConsensusError, FullConsensus};
-//! use reth_engine_primitives::{EngineTypes, PayloadValidator};
+//! use reth_engine_primitives::{ExecutionData, PayloadValidator};
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::{Header, PooledTransaction, TransactionSigned};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
-//! use reth_rpc_api::EngineApiServer;
+//! use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 //! use reth_rpc_builder::{
 //!     auth::AuthServerConfig, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
 //!     TransportRpcModuleConfig,
@@ -120,7 +120,7 @@
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
-//!     engine_api: EngineApi,
+//!     engine_api: impl IntoEngineApiRpcModule,
 //!     evm_config: EthEvmConfig,
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
@@ -142,11 +142,9 @@
 //!         > + Unpin
 //!         + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
-//!     EngineApi: EngineApiServer<EngineT>,
-//!     EngineT: EngineTypes,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Provider::Primitives>,
 //!     Consensus: FullConsensus<Provider::Primitives, Error = ConsensusError> + Clone + 'static,
-//!     Validator: PayloadValidator<Block = reth_primitives::Block>,
+//!     Validator: PayloadValidator<Block = reth_primitives::Block, ExecutionData = ExecutionData>,
 //! {
 //!     // configure the rpc module per transport
 //!     let transports = TransportRpcModuleConfig::default().with_http(vec![
@@ -199,6 +197,7 @@ use std::{
 };
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
+use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use error::{ConflictingModules, RpcError, ServerKind};
 use eth::DynEthApiBuilder;
 use http::{header::AUTHORIZATION, HeaderMap};
@@ -212,7 +211,7 @@ use jsonrpsee::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::{EngineTypes, PayloadValidator};
+use reth_engine_primitives::{ExecutionData, PayloadValidator};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::NodePrimitives;
@@ -283,7 +282,9 @@ pub async fn launch<Provider, Pool, Network, Tasks, EvmConfig, EthApi, BlockExec
     eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
     block_executor: BlockExecutor,
     consensus: Arc<dyn FullConsensus<BlockExecutor::Primitives, Error = ConsensusError>>,
-    payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
+    payload_validator: Arc<
+        dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
+    >,
 ) -> Result<RpcServerHandle, RpcError>
 where
     Provider: FullRpcProvider<
@@ -608,20 +609,20 @@ where
     /// also configures the auth (engine api) server, which exposes a subset of the `eth_`
     /// namespace.
     #[allow(clippy::type_complexity)]
-    pub fn build_with_auth_server<EngineApi, EngineT, EthApi>(
+    pub fn build_with_auth_server<EthApi>(
         self,
         module_config: TransportRpcModuleConfig,
-        engine: EngineApi,
+        engine: impl IntoEngineApiRpcModule,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
-        payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
+        payload_validator: Arc<
+            dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
+        >,
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
         RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>,
     )
     where
-        EngineT: EngineTypes,
-        EngineApi: EngineApiServer<EngineT>,
         EthApi: FullEthApiServer<
             Provider: BlockReader<
                 Block = <BlockExecutor::Primitives as NodePrimitives>::Block,
@@ -664,7 +665,7 @@ where
     ///
     /// ```no_run
     /// use reth_consensus::noop::NoopConsensus;
-    /// use reth_engine_primitives::PayloadValidator;
+    /// use reth_engine_primitives::{ExecutionData, PayloadValidator};
     /// use reth_evm::ConfigureEvm;
     /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;
@@ -679,7 +680,8 @@ where
     /// fn init<Evm, Validator>(evm: Evm, validator: Validator)
     /// where
     ///     Evm: ConfigureEvm<Header = Header, Transaction = TransactionSigned> + 'static,
-    ///     Validator: PayloadValidator<Block = reth_primitives::Block> + 'static,
+    ///     Validator: PayloadValidator<Block = reth_primitives::Block, ExecutionData = ExecutionData>
+    ///         + 'static,
     /// {
     ///     let mut registry = RpcModuleBuilder::default()
     ///         .with_provider(NoopProvider::default())
@@ -698,7 +700,9 @@ where
         self,
         config: RpcModuleConfig,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
-        payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
+        payload_validator: Arc<
+            dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
+        >,
     ) -> RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>
     where
         EthApi: EthApiTypes + 'static,
@@ -725,7 +729,9 @@ where
         self,
         module_config: TransportRpcModuleConfig,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
-        payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
+        payload_validator: Arc<
+            dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
+        >,
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer<
@@ -868,7 +874,8 @@ pub struct RpcRegistryInner<
     executor: Tasks,
     block_executor: BlockExecutor,
     consensus: Consensus,
-    payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
+    payload_validator:
+        Arc<dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>>,
     /// Holds the configuration for the RPC modules
     config: RpcModuleConfig,
     /// Holds a all `eth_` namespace handlers
@@ -909,7 +916,9 @@ where
         evm_config: EvmConfig,
         eth_api_builder: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
         block_executor: BlockExecutor,
-        payload_validator: Arc<dyn PayloadValidator<Block = Provider::Block>>,
+        payload_validator: Arc<
+            dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
+        >,
     ) -> Self
     where
         EvmConfig: ConfigureEvm<Header = Provider::Header>,
@@ -1255,14 +1264,8 @@ where
     ///   * `api_` namespace
     ///
     /// Note: This does _not_ register the `engine_` in this registry.
-    pub fn create_auth_module<EngineApi, EngineT>(&self, engine_api: EngineApi) -> AuthRpcModule
-    where
-        EngineT: EngineTypes,
-        EngineApi: EngineApiServer<EngineT>,
-    {
-        let mut module = RpcModule::new(());
-
-        module.merge(engine_api.into_rpc()).expect("No conflicting methods");
+    pub fn create_auth_module(&self, engine_api: impl IntoEngineApiRpcModule) -> AuthRpcModule {
+        let mut module = engine_api.into_rpc_module();
 
         // also merge a subset of `eth_` handlers
         let eth_handlers = self.eth_handlers();
@@ -2330,6 +2333,78 @@ impl RpcServerHandle {
 
         let client = builder.build(url).await.expect("failed to create ws client");
         Some(client)
+    }
+
+    /// Returns a new [`alloy_network::Ethereum`] http provider with its recommended fillers.
+    pub fn eth_http_provider(
+        &self,
+    ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static> {
+        self.new_http_provider_for()
+    }
+
+    /// Returns an http provider from the rpc server handle for the
+    /// specified [`alloy_network::Network`].
+    ///
+    /// This installs the recommended fillers: [`RecommendedFillers`]
+    pub fn new_http_provider_for<N>(&self) -> Option<impl Provider<N> + Clone + Unpin + 'static>
+    where
+        N: RecommendedFillers<RecommendedFillers: Unpin>,
+    {
+        let rpc_url = self.http_url()?;
+        let provider = ProviderBuilder::default()
+            .with_recommended_fillers()
+            .on_http(rpc_url.parse().expect("valid url"));
+        Some(provider)
+    }
+
+    /// Returns a new [`alloy_network::Ethereum`] websocket provider with its recommended fillers.
+    pub async fn eth_ws_provider(
+        &self,
+    ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static> {
+        self.new_ws_provider_for().await
+    }
+
+    /// Returns an ws provider from the rpc server handle for the
+    /// specified [`alloy_network::Network`].
+    ///
+    /// This installs the recommended fillers: [`RecommendedFillers`]
+    pub async fn new_ws_provider_for<N>(&self) -> Option<impl Provider<N> + Clone + Unpin + 'static>
+    where
+        N: RecommendedFillers<RecommendedFillers: Unpin>,
+    {
+        let rpc_url = self.ws_url()?;
+        let provider = ProviderBuilder::default()
+            .with_recommended_fillers()
+            .on_builtin(&rpc_url)
+            .await
+            .expect("failed to create ws client");
+        Some(provider)
+    }
+
+    /// Returns a new [`alloy_network::Ethereum`] ipc provider with its recommended fillers.
+    pub async fn eth_ipc_provider(
+        &self,
+    ) -> Option<impl Provider<alloy_network::Ethereum> + Clone + Unpin + 'static> {
+        self.new_ws_provider_for().await
+    }
+
+    /// Returns an ipc provider from the rpc server handle for the
+    /// specified [`alloy_network::Network`].
+    ///
+    /// This installs the recommended fillers: [`RecommendedFillers`]
+    pub async fn new_ipc_provider_for<N>(
+        &self,
+    ) -> Option<impl Provider<N> + Clone + Unpin + 'static>
+    where
+        N: RecommendedFillers<RecommendedFillers: Unpin>,
+    {
+        let rpc_url = self.ipc_endpoint()?;
+        let provider = ProviderBuilder::default()
+            .with_recommended_fillers()
+            .on_builtin(&rpc_url)
+            .await
+            .expect("failed to create ipc client");
+        Some(provider)
     }
 }
 

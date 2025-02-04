@@ -9,9 +9,7 @@ use alloy_rlp::Decodable;
 use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
 use eyre::Context;
-use reth_basic_payload_builder::{
-    BuildArguments, BuildOutcome, Cancelled, PayloadBuilder, PayloadConfig,
-};
+use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
@@ -34,7 +32,10 @@ use reth_provider::{
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
     StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::{cached::CachedReads, database::StateProviderDatabase, primitives::KzgSettings};
+use reth_revm::{
+    cached::CachedReads, cancelled::Cancelled, database::StateProviderDatabase,
+    primitives::KzgSettings,
+};
 use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -136,16 +137,11 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
         let blob_store = InMemoryBlobStore::default();
 
-        let validator =
-            TransactionValidationTaskExecutor::eth_builder(provider_factory.chain_spec())
-                .with_head_timestamp(best_block.timestamp)
-                .kzg_settings(self.kzg_settings()?)
-                .with_additional_tasks(1)
-                .build_with_tasks(
-                    blockchain_db.clone(),
-                    ctx.task_executor.clone(),
-                    blob_store.clone(),
-                );
+        let validator = TransactionValidationTaskExecutor::eth_builder(blockchain_db.clone())
+            .with_head_timestamp(best_block.timestamp)
+            .kzg_settings(self.kzg_settings()?)
+            .with_additional_tasks(1)
+            .build_with_tasks(ctx.task_executor.clone(), blob_store.clone());
 
         let transaction_pool = reth_transaction_pool::Pool::eth_pool(
             validator,

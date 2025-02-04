@@ -209,6 +209,13 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     nat: Option<NatResolver>,
 }
 
+impl NetworkConfigBuilder<EthNetworkPrimitives> {
+    /// Creates the `NetworkConfigBuilder` with [`EthNetworkPrimitives`] types.
+    pub fn eth(secret_key: SecretKey) -> Self {
+        Self::new(secret_key)
+    }
+}
+
 // === impl NetworkConfigBuilder ===
 
 #[allow(missing_docs)]

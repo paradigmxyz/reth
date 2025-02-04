@@ -6,7 +6,7 @@ use reth_evm::ConfigureEvm;
 use reth_provider::ProviderHeader;
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadBlock, LoadState, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, IntoEthApiError,
+    FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError,
 };
 use reth_rpc_eth_types::{revm_utils::CallFees, RpcInvalidTransactionError};
 use revm::primitives::{BlockEnv, OptimismFields, TxEnv};
@@ -28,8 +28,10 @@ where
 
 impl<N> Call for OpEthApi<N>
 where
-    Self: LoadState<Evm: ConfigureEvm<Header = ProviderHeader<Self::Provider>, TxEnv = TxEnv>>
-        + SpawnBlocking,
+    Self: LoadState<
+            Evm: ConfigureEvm<Header = ProviderHeader<Self::Provider>, TxEnv = TxEnv>,
+            Error: FromEvmError<Self::Evm>,
+        > + SpawnBlocking,
     Self::Error: From<OpEthApiError>,
     N: OpNodeCore,
 {

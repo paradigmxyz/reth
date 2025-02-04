@@ -255,9 +255,29 @@ impl<T> WithPeerId<T> {
 }
 
 impl<T> WithPeerId<Option<T>> {
-    /// returns `None` if the inner value is `None`, otherwise returns `Some(WithPeerId<T>)`.
+    /// Returns `None` if the inner value is `None`, otherwise returns `Some(WithPeerId<T>)`.
     pub fn transpose(self) -> Option<WithPeerId<T>> {
         self.1.map(|v| WithPeerId(self.0, v))
+    }
+
+    /// Returns the contained Some value, consuming the self value.
+    ///
+    /// See also [`Option::unwrap`]
+    ///
+    /// # Panics
+    ///
+    /// Panics if the value is a None
+    pub fn unwrap(self) -> T {
+        self.1.unwrap()
+    }
+
+    /// Returns the transposed [`WithPeerId`] type with the contained Some value
+    ///
+    /// # Panics
+    ///
+    /// Panics if the value is a None
+    pub fn unwrapped(self) -> WithPeerId<T> {
+        self.transpose().unwrap()
     }
 }
 

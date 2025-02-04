@@ -13,14 +13,13 @@ use crate::{
 };
 use alloy_primitives::B256;
 use alloy_provider::{network::AnyRpcBlock, Provider};
-use alloy_rpc_types_engine::ForkchoiceState;
+use alloy_rpc_types_engine::{ExecutionPayload, ForkchoiceState};
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
 use reth_primitives::SealedBlock;
 use reth_primitives_traits::SealedHeader;
-use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
 use tracing::{debug, info};
 
@@ -81,9 +80,10 @@ impl Command {
             let versioned_hashes: Vec<B256> =
                 block.body().blob_versioned_hashes_iter().copied().collect();
             let parent_beacon_block_root = block.parent_beacon_block_root;
-            let payload = block_to_payload(block).0;
+            let (payload, _) =
+                ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
 
-            debug!(?block_number, "Sending payload",);
+            debug!(target: "reth-bench", ?block_number, "Sending payload",);
 
             // construct fcu to call
             let forkchoice_state = ForkchoiceState {
