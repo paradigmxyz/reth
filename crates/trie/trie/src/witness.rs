@@ -192,6 +192,7 @@ where
                     current_entry = storage_cursor.next()?;
                 }
             }
+            proof_targets.accounts.insert(*hashed_address);
             proof_targets.storages.insert(*hashed_address, storage_keys);
         }
         Ok(proof_targets)
