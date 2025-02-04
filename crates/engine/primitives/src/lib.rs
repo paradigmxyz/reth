@@ -15,10 +15,10 @@ use alloy_primitives::B256;
 use reth_payload_primitives::{BuiltPayload, PayloadAttributes};
 mod error;
 
-use core::fmt;
+use core::fmt::{self, Debug};
 
 use alloy_consensus::BlockHeader;
-use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError};
+use alloy_rpc_types_engine::{ExecutionPayloadSidecar, PayloadError};
 pub use error::*;
 
 mod forkchoice;
@@ -42,35 +42,23 @@ use reth_primitives::{NodePrimitives, SealedBlock};
 use reth_primitives_traits::Block;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-/// Struct aggregating [`ExecutionPayload`] and [`ExecutionPayloadSidecar`] and encapsulating
-/// complete payload supplied for execution.
+/// Struct aggregating [`alloy_rpc_types_engine::ExecutionPayload`] and [`ExecutionPayloadSidecar`]
+/// and encapsulating complete payload supplied for execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionData {
     /// Execution payload.
-    pub payload: ExecutionPayload,
+    pub payload: alloy_rpc_types_engine::ExecutionPayload,
     /// Additional fork-specific fields.
     pub sidecar: ExecutionPayloadSidecar,
 }
 
 impl ExecutionData {
     /// Creates new instance of [`ExecutionData`].
-    pub const fn new(payload: ExecutionPayload, sidecar: ExecutionPayloadSidecar) -> Self {
+    pub const fn new(
+        payload: alloy_rpc_types_engine::ExecutionPayload,
+        sidecar: ExecutionPayloadSidecar,
+    ) -> Self {
         Self { payload, sidecar }
-    }
-
-    /// Returns the parent hash of the block.
-    pub fn parent_hash(&self) -> B256 {
-        self.payload.parent_hash()
-    }
-
-    /// Returns the hash of the block.
-    pub fn block_hash(&self) -> B256 {
-        self.payload.block_hash()
-    }
-
-    /// Returns the number of the block.
-    pub fn block_number(&self) -> u64 {
-        self.payload.block_number()
     }
 
     /// Tries to create a new unsealed block from the given payload and payload sidecar.
@@ -86,6 +74,34 @@ impl ExecutionData {
         self,
     ) -> Result<alloy_consensus::Block<T>, PayloadError> {
         self.payload.try_into_block_with_sidecar(&self.sidecar)
+    }
+}
+
+/// An execution payload.
+pub trait ExecutionPayload:
+    Serialize + DeserializeOwned + Debug + Clone + Send + Sync + 'static
+{
+    /// Returns the parent hash of the block.
+    fn parent_hash(&self) -> B256;
+
+    /// Returns the hash of the block.
+    fn block_hash(&self) -> B256;
+
+    /// Returns the number of the block.
+    fn block_number(&self) -> u64;
+}
+
+impl ExecutionPayload for ExecutionData {
+    fn parent_hash(&self) -> B256 {
+        self.payload.parent_hash()
+    }
+
+    fn block_hash(&self) -> B256 {
+        self.payload.block_hash()
+    }
+
+    fn block_number(&self) -> u64 {
+        self.payload.block_number()
     }
 }
 
@@ -135,19 +151,25 @@ pub trait EngineTypes:
         + Send
         + Sync
         + 'static;
+    /// Execution data.
+    type ExecutionData: ExecutionPayload;
 
     /// Converts a [`BuiltPayload`] into an [`ExecutionPayload`] and [`ExecutionPayloadSidecar`].
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> ExecutionData;
+    ) -> Self::ExecutionData;
 }
 
 /// Type that validates an [`ExecutionPayload`].
+#[auto_impl::auto_impl(&, Arc)]
 pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
     /// The block type used by the engine.
     type Block: Block;
+
+    /// The execution payload type used by the engine.
+    type ExecutionData;
 
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout.
@@ -159,12 +181,14 @@ pub trait PayloadValidator: fmt::Debug + Send + Sync + Unpin + 'static {
     /// engine-API specification.
     fn ensure_well_formed_payload(
         &self,
-        payload: ExecutionData,
+        payload: Self::ExecutionData,
     ) -> Result<SealedBlock<Self::Block>, PayloadError>;
 }
 
 /// Type that validates the payloads processed by the engine.
-pub trait EngineValidator<Types: EngineTypes>: PayloadValidator {
+pub trait EngineValidator<Types: EngineTypes>:
+    PayloadValidator<ExecutionData = Types::ExecutionData>
+{
     /// Validates the execution requests according to [EIP-7685](https://eips.ethereum.org/EIPS/eip-7685).
     fn validate_execution_requests(
         &self,

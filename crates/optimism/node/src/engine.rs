@@ -47,6 +47,7 @@ where
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
+    type ExecutionData = ExecutionData;
 
     fn block_to_payload(
         block: SealedBlock<
@@ -91,6 +92,7 @@ impl OpEngineValidator {
 
 impl PayloadValidator for OpEngineValidator {
     type Block = OpBlock;
+    type ExecutionData = ExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
@@ -102,7 +104,7 @@ impl PayloadValidator for OpEngineValidator {
 
 impl<Types> EngineValidator<Types> for OpEngineValidator
 where
-    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes>,
+    Types: EngineTypes<PayloadAttributes = OpPayloadAttributes, ExecutionData = ExecutionData>,
 {
     fn validate_execution_requests(
         &self,

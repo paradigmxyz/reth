@@ -2,7 +2,7 @@
 
 use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
 use futures::{Stream, StreamExt};
-use reth_engine_primitives::{BeaconEngineMessage, EngineTypes};
+use reth_engine_primitives::{BeaconEngineMessage, EngineTypes, ExecutionPayload};
 use std::{
     pin::Pin,
     task::{ready, Context, Poll},
