@@ -6,7 +6,6 @@ use crate::{
     AllTransactionsEvents,
 };
 use alloy_consensus::{
-    constants::{EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
     BlockHeader, Signed, Typed2718,
 };
 use alloy_eips::{
@@ -21,7 +20,7 @@ use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 use reth_primitives::{
     kzg::KzgSettings,
-    transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
+    transaction::{SignedTransactionIntoRecoveredExt, TransactionConversionError},
     PooledTransaction, Recovered, SealedBlock, TransactionSigned,
 };
 use reth_primitives_traits::{Block, InMemorySize, SignedTransaction};
@@ -971,9 +970,7 @@ pub trait PoolTransaction:
     + Send
     + Sync
     + Clone
-    + TryFrom<Recovered<Self::Consensus>, Error = Self::TryFromConsensusError>
-    + Into<Recovered<Self::Consensus>>
-    + From<Recovered<Self::Pooled>>
+    + Into<Recovered<Self::Consensus>> + From<Recovered<Self::Pooled>>
 {
     /// Associated error type for the `try_from_consensus` method.
     type TryFromConsensusError: fmt::Display;
@@ -982,13 +979,14 @@ pub trait PoolTransaction:
     type Consensus: SignedTransaction + From<Self::Pooled>;
 
     /// Associated type representing the recovered pooled variant of the transaction.
-    type Pooled: SignedTransaction;
+    type Pooled: TryFrom<Self::Consensus, Error = Self::TryFromConsensusError> + SignedTransaction;
 
     /// Define a method to convert from the `Consensus` type to `Self`
     fn try_from_consensus(
         tx: Recovered<Self::Consensus>,
     ) -> Result<Self, Self::TryFromConsensusError> {
-        tx.try_into()
+        let (tx, signer) = tx.into_parts();
+        Ok(Self::from_pooled(Recovered::new_unchecked(tx.try_into()?, signer)))
     }
 
     /// Clone the transaction into a consensus variant.
@@ -1010,13 +1008,10 @@ pub trait PoolTransaction:
 
     /// Tries to convert the `Consensus` type into the `Pooled` type.
     fn try_into_pooled(self) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
-        Self::try_consensus_into_pooled(self.into_consensus())
+        let consensus = self.into_consensus();
+        let (tx, signer) = consensus.into_parts();
+        Ok(Recovered::new_unchecked(tx.try_into()?, signer))
     }
-
-    /// Tries to convert the `Consensus` type into the `Pooled` type.
-    fn try_consensus_into_pooled(
-        tx: Recovered<Self::Consensus>,
-    ) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError>;
 
     /// Converts the `Pooled` type into the `Consensus` type.
     fn pooled_into_consensus(tx: Self::Pooled) -> Self::Consensus {
@@ -1184,7 +1179,7 @@ impl From<Recovered<PooledTransaction>> for EthPooledTransaction {
 }
 
 impl PoolTransaction for EthPooledTransaction {
-    type TryFromConsensusError = TryFromRecoveredTransactionError;
+    type TryFromConsensusError = TransactionConversionError;
 
     type Consensus = TransactionSigned;
 
@@ -1192,15 +1187,6 @@ impl PoolTransaction for EthPooledTransaction {
 
     fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.transaction().clone()
-    }
-
-    fn try_consensus_into_pooled(
-        tx: Recovered<Self::Consensus>,
-    ) -> Result<Recovered<Self::Pooled>, Self::TryFromConsensusError> {
-        let (tx, signer) = tx.into_parts();
-        let pooled =
-            tx.try_into().map_err(|_| TryFromRecoveredTransactionError::BlobSidecarMissing)?;
-        Ok(Recovered::new_unchecked(pooled, signer))
     }
 
     /// Returns hash of the transaction.
@@ -1356,33 +1342,6 @@ impl EthPoolTransaction for EthPooledTransaction {
             reth_primitives::Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
             _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.ty())),
         }
-    }
-}
-
-impl TryFrom<Recovered<TransactionSigned>> for EthPooledTransaction {
-    type Error = TryFromRecoveredTransactionError;
-
-    fn try_from(tx: Recovered<TransactionSigned>) -> Result<Self, Self::Error> {
-        // ensure we can handle the transaction type and its format
-        match tx.ty() {
-            0..=EIP1559_TX_TYPE_ID | EIP7702_TX_TYPE_ID => {
-                // supported
-            }
-            EIP4844_TX_TYPE_ID => {
-                // doesn't have a blob sidecar
-                return Err(TryFromRecoveredTransactionError::BlobSidecarMissing);
-            }
-            unsupported => {
-                // unsupported transaction type
-                return Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(
-                    unsupported,
-                ))
-            }
-        };
-
-        let encoded_length = tx.encode_2718_len();
-        let transaction = Self::new(tx, encoded_length);
-        Ok(transaction)
     }
 }
 
