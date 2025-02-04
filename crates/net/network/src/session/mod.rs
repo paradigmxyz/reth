@@ -5,7 +5,7 @@ mod conn;
 mod counter;
 mod handle;
 mod pending;
-mod protocol;
+pub(crate) mod protocol;
 
 use active::QueuedOutgoingMessages;
 pub use conn::EthRlpxConnection;
@@ -13,7 +13,8 @@ pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
     SessionCommand,
 };
-
+use pending::{HandshakeInfo, SessionInfo};
+use protocol::DynEthProtocolHandler;
 pub use reth_network_api::{Direction, PeerInfo};
 
 use std::{
@@ -115,6 +116,8 @@ pub struct SessionManager<N: NetworkPrimitives> {
     disconnections_counter: DisconnectionsCounter,
     /// Metrics for the session manager.
     metrics: SessionManagerMetrics,
+    /// The eth protocol handler
+    eth_protocol_handler: Arc<Box<dyn DynEthProtocolHandler<N>>>,
 }
 
 // === impl SessionManager ===
@@ -130,12 +133,14 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         hello_message: HelloMessageWithProtocols,
         fork_filter: ForkFilter,
         extra_protocols: RlpxSubProtocols,
+        eth_protocol_handler: Box<dyn DynEthProtocolHandler<N>>,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
         let active_session_tx = PollSender::new(active_session_tx);
 
         Self {
+            eth_protocol_handler: Arc::new(eth_protocol_handler),
             next_id: 0,
             counter: SessionCounter::new(config.limits),
             initial_internal_request_timeout: config.initial_internal_request_timeout,
@@ -224,6 +229,100 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         transition
     }
 
+    pub(crate) async fn handle_incoming_session(
+        eth_protocol_handler: Arc<Box<dyn DynEthProtocolHandler<N>>>,
+        disconnect_rx: oneshot::Receiver<()>,
+        events: mpsc::Sender<PendingSessionEvent<N>>,
+        stream: TcpStream,
+        session_info: SessionInfo,
+        handshake_info: HandshakeInfo,
+    ) {
+        let connection =
+            eth_protocol_handler.on_incoming(stream, session_info.clone(), handshake_info);
+
+        match futures::future::select(disconnect_rx, connection).await {
+            Either::Left((_, _)) => {
+                let _ = events
+                    .send(PendingSessionEvent::Disconnected {
+                        remote_addr: session_info.remote_addr,
+                        session_id: session_info.session_id,
+                        direction: Direction::Incoming,
+                        error: None,
+                    })
+                    .await;
+            }
+            Either::Right((res, _)) => {
+                let _ = events.send(res).await;
+            }
+        }
+    }
+
+    pub(crate) async fn handle_outgoing_session(
+        eth_protocol_handler: Arc<Box<dyn DynEthProtocolHandler<N>>>,
+        disconnect_rx: oneshot::Receiver<()>,
+        events: mpsc::Sender<PendingSessionEvent<N>>,
+        session_id: SessionId,
+        remote_addr: SocketAddr,
+        remote_peer_id: PeerId,
+        secret_key: SecretKey,
+        hello: HelloMessageWithProtocols,
+        status: Status,
+        fork_filter: ForkFilter,
+        extra_handlers: RlpxSubProtocolHandlers,
+    ) {
+        let stream = match TcpStream::connect(remote_addr).await {
+            Ok(stream) => {
+                if let Err(err) = stream.set_nodelay(true) {
+                    tracing::warn!(target: "net::session", "set nodelay failed: {:?}", err);
+                }
+                stream
+            }
+            Err(error) => {
+                let _ = events
+                    .send(PendingSessionEvent::OutgoingConnectionError {
+                        remote_addr,
+                        session_id,
+                        peer_id: remote_peer_id,
+                        error,
+                    })
+                    .await;
+                return
+            }
+        };
+
+        let session_info = SessionInfo {
+            session_id,
+            remote_addr,
+            secret_key,
+            local_addr: stream.local_addr().ok(),
+        };
+        let handshake_info =
+            HandshakeInfo { hello_msg: hello, status_msg: status, fork_filter, extra_handlers };
+
+        let connection = eth_protocol_handler.on_outgoing(
+            stream,
+            session_info.clone(),
+            handshake_info,
+            remote_peer_id,
+        );
+
+        match futures::future::select(disconnect_rx, connection).await {
+            Either::Left((_, _)) => {
+                let _ = events
+                    .send(PendingSessionEvent::Disconnected {
+                        remote_addr: session_info.remote_addr,
+                        session_id: session_info.session_id,
+                        direction: Direction::Outgoing(remote_peer_id),
+                        error: None,
+                    })
+                    .await;
+            }
+            Either::Right((res, _)) => {
+                let _ = events.send(res).await;
+            }
+        }
+    }
+
     /// An incoming TCP connection was received. This starts the authentication process to turn this
     /// stream into an active peer session.
     ///
@@ -247,27 +346,34 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         let (disconnect_tx, disconnect_rx) = oneshot::channel();
         let pending_events = self.pending_sessions_tx.clone();
         let secret_key = self.secret_key;
+
         let hello_message = self.hello_message.clone();
         let status = self.status;
         let fork_filter = self.fork_filter.clone();
+
         let extra_handlers = self.extra_protocols.on_incoming(remote_addr);
+        let local_addr = stream.local_addr().ok();
+
+        let protocol_handler = self.eth_protocol_handler.clone();
+
         self.spawn(pending_session_with_timeout(
             self.pending_session_timeout,
             session_id,
             remote_addr,
             Direction::Incoming,
             pending_events.clone(),
-            start_pending_incoming_session(
+            Self::handle_incoming_session(
+                protocol_handler,
                 disconnect_rx,
-                session_id,
-                stream,
                 pending_events,
-                remote_addr,
-                secret_key,
-                hello_message,
-                status,
-                fork_filter,
-                extra_handlers,
+                stream,
+                SessionInfo { session_id, remote_addr, secret_key, local_addr },
+                HandshakeInfo {
+                    hello_msg: hello_message,
+                    status_msg: status,
+                    fork_filter,
+                    extra_handlers,
+                },
             ),
         ));
 
@@ -292,13 +398,15 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             let fork_filter = self.fork_filter.clone();
             let status = self.status;
             let extra_handlers = self.extra_protocols.on_outgoing(remote_addr, remote_peer_id);
+
             self.spawn(pending_session_with_timeout(
                 self.pending_session_timeout,
                 session_id,
                 remote_addr,
                 Direction::Outgoing(remote_peer_id),
                 pending_events.clone(),
-                start_pending_outbound_session(
+                Self::handle_outgoing_session(
+                    self.eth_protocol_handler.clone(),
                     disconnect_rx,
                     pending_events,
                     session_id,

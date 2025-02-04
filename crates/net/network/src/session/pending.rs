@@ -9,7 +9,7 @@ use reth_eth_wire::{
 };
 use reth_network_api::Direction;
 use secp256k1::SecretKey;
-use std::{future::Future, net::SocketAddr, pin::Pin, sync::Arc};
+use std::{fmt, future::Future, net::SocketAddr, pin::Pin, sync::Arc};
 use tokio::net::TcpStream;
 
 /// A type alias for a future that resolves to a `PendingSessionEvent`.
@@ -135,16 +135,27 @@ impl<N: NetworkPrimitives> EthConnectionHandler<N> for EthConnection {
     }
 }
 
-pub(crate) struct SessionInfo {
+#[derive(Clone, Debug)]
+pub struct SessionInfo {
     pub(crate) session_id: SessionId,
     pub(crate) remote_addr: SocketAddr,
     pub(crate) secret_key: SecretKey,
     pub(crate) local_addr: Option<SocketAddr>,
 }
 
-pub(crate) struct HandshakeInfo {
+pub struct HandshakeInfo {
     pub(crate) hello_msg: HelloMessageWithProtocols,
     pub(crate) status_msg: Status,
     pub(crate) fork_filter: ForkFilter,
     pub(crate) extra_handlers: RlpxSubProtocolHandlers,
+}
+
+impl fmt::Debug for HandshakeInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HandshakeInfo")
+            .field("hello_msg", &self.hello_msg)
+            .field("status_msg", &self.status_msg)
+            .field("fork_filter", &self.fork_filter)
+            .finish()
+    }
 }
