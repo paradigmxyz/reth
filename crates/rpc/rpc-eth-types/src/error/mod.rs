@@ -618,6 +618,7 @@ impl std::fmt::Display for RevertError {
         if let Some(reason) = self.output.as_ref().and_then(|out| RevertReason::decode(out)) {
             let msg = reason.to_string();
             // we strip redundant `revert: ` prefix from the revert reason
+            // TODO: check for revert: <https://github.com/alloy-rs/core/pull/867>
             let reason = msg.trim_start_matches("revert: ");
             write!(f, ": {reason}")?;
         }
