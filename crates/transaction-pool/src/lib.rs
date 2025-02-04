@@ -281,7 +281,7 @@ where
     }
 
     /// Returns the configured blob store.
-    pub const fn blob_store(&self) -> &S {
+    pub fn blob_store(&self) -> &S {
         self.pool.blob_store()
     }
 }
