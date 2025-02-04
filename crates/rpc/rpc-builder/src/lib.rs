@@ -89,14 +89,14 @@
 //!
 //! ```
 //! use reth_consensus::{ConsensusError, FullConsensus};
-//! use reth_engine_primitives::{EngineTypes, ExecutionData, PayloadValidator};
+//! use reth_engine_primitives::{ExecutionData, PayloadValidator};
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
 //! use reth_primitives::{Header, PooledTransaction, TransactionSigned};
 //! use reth_provider::{AccountReader, CanonStateSubscriptions, ChangeSetReader, FullRpcProvider};
 //! use reth_rpc::EthApi;
-//! use reth_rpc_api::EngineApiServer;
+//! use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 //! use reth_rpc_builder::{
 //!     auth::AuthServerConfig, RethRpcModule, RpcModuleBuilder, RpcServerConfig,
 //!     TransportRpcModuleConfig,
@@ -120,7 +120,7 @@
 //!     provider: Provider,
 //!     pool: Pool,
 //!     network: Network,
-//!     engine_api: EngineApi,
+//!     engine_api: impl IntoEngineApiRpcModule,
 //!     evm_config: EthEvmConfig,
 //!     block_executor: BlockExecutor,
 //!     consensus: Consensus,
@@ -142,8 +142,6 @@
 //!         > + Unpin
 //!         + 'static,
 //!     Network: NetworkInfo + Peers + Clone + 'static,
-//!     EngineApi: EngineApiServer<EngineT>,
-//!     EngineT: EngineTypes,
 //!     BlockExecutor: BlockExecutorProvider<Primitives = Provider::Primitives>,
 //!     Consensus: FullConsensus<Provider::Primitives, Error = ConsensusError> + Clone + 'static,
 //!     Validator: PayloadValidator<Block = reth_primitives::Block, ExecutionData = ExecutionData>,
@@ -213,7 +211,7 @@ use jsonrpsee::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::{EngineTypes, ExecutionData, PayloadValidator};
+use reth_engine_primitives::{ExecutionData, PayloadValidator};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::NodePrimitives;
@@ -611,10 +609,10 @@ where
     /// also configures the auth (engine api) server, which exposes a subset of the `eth_`
     /// namespace.
     #[allow(clippy::type_complexity)]
-    pub fn build_with_auth_server<EngineApi, EngineT, EthApi>(
+    pub fn build_with_auth_server<EthApi>(
         self,
         module_config: TransportRpcModuleConfig,
-        engine: EngineApi,
+        engine: impl IntoEngineApiRpcModule,
         eth: DynEthApiBuilder<Provider, Pool, EvmConfig, Network, Tasks, EthApi>,
         payload_validator: Arc<
             dyn PayloadValidator<Block = Provider::Block, ExecutionData = ExecutionData>,
@@ -625,8 +623,6 @@ where
         RpcRegistryInner<Provider, Pool, Network, Tasks, EthApi, BlockExecutor, Consensus>,
     )
     where
-        EngineT: EngineTypes,
-        EngineApi: EngineApiServer<EngineT>,
         EthApi: FullEthApiServer<
             Provider: BlockReader<
                 Block = <BlockExecutor::Primitives as NodePrimitives>::Block,
@@ -1268,14 +1264,8 @@ where
     ///   * `api_` namespace
     ///
     /// Note: This does _not_ register the `engine_` in this registry.
-    pub fn create_auth_module<EngineApi, EngineT>(&self, engine_api: EngineApi) -> AuthRpcModule
-    where
-        EngineT: EngineTypes,
-        EngineApi: EngineApiServer<EngineT>,
-    {
-        let mut module = RpcModule::new(());
-
-        module.merge(engine_api.into_rpc()).expect("No conflicting methods");
+    pub fn create_auth_module(&self, engine_api: impl IntoEngineApiRpcModule) -> AuthRpcModule {
+        let mut module = engine_api.into_rpc_module();
 
         // also merge a subset of `eth_` handlers
         let eth_handlers = self.eth_handlers();
