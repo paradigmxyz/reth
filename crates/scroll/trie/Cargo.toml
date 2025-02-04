@@ -23,8 +23,5 @@ alloy-trie = { workspace = true, features = ["serde"] }
 poseidon-bn254 = { workspace = true, features = ["bn254"] }
 tracing.workspace = true
 
-[dev-dependencies]
-proptest-arbitrary-interop.workspace = true
-
 [features]
 scroll = ["reth-trie/scroll"]

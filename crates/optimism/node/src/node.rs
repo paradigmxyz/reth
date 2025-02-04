@@ -9,9 +9,11 @@ use crate::{
 use op_alloy_consensus::OpPooledTransaction;
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
-use reth_evm::{execute::BasicBlockExecutorProvider, ConfigureEvmFor};
+use reth_evm::{
+    execute::BasicBlockExecutorProvider, ConfigureEvm, ConfigureEvmEnv, ConfigureEvmFor,
+};
 use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
-use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, TxTy};
+use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, PrimitivesTy, TxTy};
 use reth_node_builder::{
     components::{
         ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NetworkBuilder,
@@ -32,10 +34,11 @@ use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_rpc::{
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
-    OpEthApi, SequencerClient,
+    OpEthApi, OpEthApiError, SequencerClient,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{CanonStateSubscriptions, EthStorage};
+use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -43,6 +46,7 @@ use reth_transaction_pool::{
     TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
+use revm::primitives::TxEnv;
 use std::sync::Arc;
 
 /// Storage implementation for Optimism.
@@ -190,7 +194,9 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
+        Evm: ConfigureEvmEnv<TxEnv = TxEnv>,
     >,
+    OpEthApiError: FromEvmError<N::Evm>,
 {
     type Handle = RpcHandle<N, OpEthApi<N>>;
 
@@ -239,7 +245,9 @@ where
             Storage = OpStorage,
             Engine = OpEngineTypes,
         >,
+        Evm: ConfigureEvm<TxEnv = TxEnv>,
     >,
+    OpEthApiError: FromEvmError<N::Evm>,
 {
     type EthApi = OpEthApi<N>;
 
@@ -484,7 +492,7 @@ where
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
             + Unpin
             + 'static,
-        Evm: ConfigureEvmFor<<Node::Types as NodeTypes>::Primitives>,
+        Evm: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
             evm_config,

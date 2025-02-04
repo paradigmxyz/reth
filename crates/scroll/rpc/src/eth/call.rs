@@ -1,3 +1,5 @@
+use super::ScrollNodeCore;
+use crate::{ScrollEthApi, ScrollEthApiError};
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::transaction::TransactionRequest;
 use reth_evm::ConfigureEvm;
@@ -6,11 +8,8 @@ use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadBlock, LoadState, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, IntoEthApiError,
 };
-use reth_rpc_eth_types::{revm_utils::CallFees, RpcInvalidTransactionError};
+use reth_rpc_eth_types::{error::FromEvmError, revm_utils::CallFees, RpcInvalidTransactionError};
 use revm::primitives::{BlockEnv, ScrollFields, TxEnv};
-
-use super::ScrollNodeCore;
-use crate::{ScrollEthApi, ScrollEthApiError};
 
 impl<N> EthCall for ScrollEthApi<N>
 where
@@ -29,7 +28,10 @@ where
 
 impl<N> Call for ScrollEthApi<N>
 where
-    Self: LoadState<Evm: ConfigureEvm<Header = ProviderHeader<Self::Provider>>> + SpawnBlocking,
+    Self: LoadState<
+            Evm: ConfigureEvm<Header = ProviderHeader<Self::Provider>, TxEnv = TxEnv>,
+            Error: FromEvmError<Self::Evm>,
+        > + SpawnBlocking,
     Self::Error: From<ScrollEthApiError>,
     N: ScrollNodeCore,
 {

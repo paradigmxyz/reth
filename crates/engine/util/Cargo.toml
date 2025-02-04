@@ -15,9 +15,9 @@ workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-errors.workspace = true
+reth-chainspec.workspace = true
 reth-consensus-common.workspace = true
 reth-fs-util.workspace = true
-reth-rpc-types-compat.workspace = true
 reth-engine-primitives.workspace = true
 reth-payload-validator.workspace = true
 reth-evm.workspace = true
@@ -26,6 +26,7 @@ reth-provider.workspace = true
 reth-ethereum-forks.workspace = true
 revm-primitives.workspace = true
 reth-trie.workspace = true
+reth-payload-primitives.workspace = true
 
 # alloy
 alloy-eips.workspace = true
@@ -52,6 +53,5 @@ tracing.workspace = true
 
 [features]
 optimism = [
-    "reth-provider/optimism",
     "revm-primitives/optimism",
 ]

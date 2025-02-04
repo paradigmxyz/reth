@@ -29,6 +29,7 @@ use reth_tasks::{
 use reth_transaction_pool::TransactionPool;
 
 pub use receipt::ScrollReceiptBuilder;
+use reth_rpc_eth_types::error::FromEvmError;
 use reth_scroll_primitives::ScrollPrimitives;
 use scroll_alloy_network::Scroll;
 
@@ -247,6 +248,7 @@ where
                 Header = ProviderHeader<Self::Provider>,
                 Transaction = ProviderTx<Self::Provider>,
             >,
+            Error: FromEvmError<Self::Evm>,
         >,
     N: ScrollNodeCore,
 {
@@ -321,7 +323,7 @@ impl ScrollEthApiBuilder {
             blocking_task_pool,
             ctx.new_fee_history_cache(),
             ctx.evm_config.clone(),
-            ctx.executor.clone(),
+            Box::new(ctx.executor.clone()),
             ctx.config.proof_permits,
         );
 

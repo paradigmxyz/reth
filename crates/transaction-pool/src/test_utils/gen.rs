@@ -101,12 +101,12 @@ impl<R: Rng> TransactionGenerator<R> {
 
     /// Generates and returns a pooled EIP-1559 transaction with a random signer.
     pub fn gen_eip1559_pooled(&mut self) -> EthPooledTransaction {
-        self.gen_eip1559().try_into_ecrecovered().unwrap().try_into().unwrap()
+        self.gen_eip1559().try_into_recovered().unwrap().try_into().unwrap()
     }
 
     /// Generates and returns a pooled EIP-4844 transaction with a random signer.
     pub fn gen_eip4844_pooled(&mut self) -> EthPooledTransaction {
-        let tx = self.gen_eip4844().try_into_ecrecovered().unwrap();
+        let tx = self.gen_eip4844().try_into_recovered().unwrap();
         let encoded_length = tx.encode_2718_len();
         EthPooledTransaction::new(tx, encoded_length)
     }

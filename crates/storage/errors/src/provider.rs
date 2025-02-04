@@ -3,7 +3,8 @@ use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
 use derive_more::Display;
-use reth_primitives_traits::GotExpected;
+use reth_primitives_traits::{transaction::signed::RecoveryError, GotExpected};
+use reth_prune_types::PruneSegmentError;
 use reth_static_file_types::StaticFileSegment;
 
 /// Provider result type.
@@ -15,6 +16,9 @@ pub enum ProviderError {
     /// Database error.
     #[error(transparent)]
     Database(#[from] DatabaseError),
+    /// Pruning error.
+    #[error(transparent)]
+    Pruning(#[from] PruneSegmentError),
     /// RLP error.
     #[error("{_0}")]
     Rlp(alloy_rlp::Error),
@@ -147,6 +151,12 @@ impl From<alloy_rlp::Error> for ProviderError {
     }
 }
 
+impl From<RecoveryError> for ProviderError {
+    fn from(_: RecoveryError) -> Self {
+        Self::SenderRecoveryError
+    }
+}
+
 /// A root mismatch error at a given block height.
 #[derive(Clone, Debug, PartialEq, Eq, Display)]
 #[display("root mismatch at #{block_number} ({block_hash}): {root}")]
@@ -173,6 +183,12 @@ pub enum ConsistentViewError {
     Inconsistent {
         /// The tip diff.
         tip: GotExpected<Option<B256>>,
+    },
+    /// Error thrown when the database does not contain a block from the previous database view.
+    #[display("database view no longer contains block: {block:?}")]
+    Reorged {
+        /// The previous block
+        block: B256,
     },
 }
 

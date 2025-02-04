@@ -2,7 +2,8 @@ use alloc::vec::Vec;
 pub use alloy_consensus::{transaction::PooledTransaction, TxType};
 use alloy_consensus::{
     transaction::RlpEcdsaTx, BlobTransactionSidecar, SignableTransaction, Signed, TxEip1559,
-    TxEip2930, TxEip4844, TxEip4844WithSidecar, TxEip7702, TxLegacy, Typed2718, TypedTransaction,
+    TxEip2930, TxEip4844, TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy,
+    Typed2718, TypedTransaction,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -14,18 +15,14 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
-use once_cell as _;
-#[cfg(not(feature = "std"))]
-use once_cell::sync::OnceCell as OnceLock;
 use reth_primitives_traits::{
     crypto::secp256k1::{recover_signer, recover_signer_unchecked},
-    transaction::error::TransactionConversionError,
+    sync::OnceLock,
+    transaction::{error::TransactionConversionError, signed::RecoveryError},
     FillTxEnv, InMemorySize, SignedTransaction,
 };
 use revm_primitives::{AuthorizationList, TxEnv};
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "std")]
-use std::sync::OnceLock;
 
 macro_rules! delegate {
     ($self:expr => $tx:ident.$method:ident($($arg:expr),*)) => {
@@ -36,6 +33,19 @@ macro_rules! delegate {
             Transaction::Eip4844($tx) => $tx.$method($($arg),*),
             Transaction::Eip7702($tx) => $tx.$method($($arg),*),
         }
+    };
+}
+
+macro_rules! impl_from_signed {
+    ($($tx:ident),*) => {
+        $(
+            impl From<Signed<$tx>> for TransactionSigned {
+                fn from(value: Signed<$tx>) -> Self {
+                    let(tx,sig,hash) = value.into_parts();
+                    Self::new(tx.into(), sig, hash)
+                }
+            }
+        )*
     };
 }
 
@@ -282,17 +292,19 @@ impl From<TypedTransaction> for Transaction {
 /// Signed Ethereum transaction.
 #[derive(Debug, Clone, Eq, Serialize, Deserialize, derive_more::AsRef, derive_more::Deref)]
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
+#[cfg_attr(feature = "test-utils", derive(derive_more::DerefMut))]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionSigned {
     /// Transaction hash
     #[serde(skip)]
-    pub hash: OnceLock<TxHash>,
+    hash: OnceLock<TxHash>,
     /// The transaction signature values
-    pub signature: Signature,
+    signature: Signature,
     /// Raw transaction info
     #[deref]
     #[as_ref]
-    pub transaction: Transaction,
+    #[cfg_attr(feature = "test-utils", deref_mut)]
+    transaction: Transaction,
 }
 
 impl Default for TransactionSigned {
@@ -328,11 +340,40 @@ impl TransactionSigned {
         Self { hash: hash.into(), signature, transaction }
     }
 
+    /// Consumes the type and returns the transaction.
+    #[inline]
+    pub fn into_transaction(self) -> Transaction {
+        self.transaction
+    }
+
+    /// Returns the transaction.
+    #[inline]
+    pub const fn transaction(&self) -> &Transaction {
+        &self.transaction
+    }
+
+    /// Returns the transaction hash.
+    #[inline]
+    pub fn hash(&self) -> &B256 {
+        self.hash.get_or_init(|| self.recalculate_hash())
+    }
+
+    /// Returns the transaction signature.
+    #[inline]
+    pub const fn signature(&self) -> &Signature {
+        &self.signature
+    }
+
     /// Creates a new signed transaction from the given transaction and signature without the hash.
     ///
     /// Note: this only calculates the hash on the first [`TransactionSigned::hash`] call.
     pub fn new_unhashed(transaction: Transaction, signature: Signature) -> Self {
         Self { hash: Default::default(), signature, transaction }
+    }
+
+    /// Splits the `TransactionSigned` into its transaction and signature.
+    pub fn split(self) -> (Transaction, Signature) {
+        (self.transaction, self.signature)
     }
 
     /// Converts from an EIP-4844 transaction to a [`PooledTransaction`] with the given sidecar.
@@ -366,6 +407,18 @@ impl TransactionSigned {
             Transaction::Eip4844(tx) => Some(tx),
             _ => None,
         }
+    }
+
+    /// Provides mutable access to the transaction.
+    #[cfg(feature = "test-utils")]
+    pub fn transaction_mut(&mut self) -> &mut Transaction {
+        &mut self.transaction
+    }
+
+    /// Splits the transaction into parts.
+    pub fn into_parts(self) -> (Transaction, Signature, B256) {
+        let hash = *self.hash.get_or_init(|| self.recalculate_hash());
+        (self.transaction, self.signature, hash)
     }
 }
 
@@ -442,6 +495,72 @@ impl alloy_consensus::Transaction for TransactionSigned {
 
     fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
         self.transaction.authorization_list()
+    }
+}
+
+impl_from_signed!(TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844, TypedTransaction);
+
+impl From<Signed<Transaction>> for TransactionSigned {
+    fn from(value: Signed<Transaction>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new(tx, sig, hash)
+    }
+}
+
+impl From<Signed<TxEip4844WithSidecar>> for TransactionSigned {
+    fn from(value: Signed<TxEip4844WithSidecar>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new(tx.tx.into(), sig, hash)
+    }
+}
+
+impl From<TxEip4844Variant> for Transaction {
+    fn from(variant: TxEip4844Variant) -> Self {
+        match variant {
+            TxEip4844Variant::TxEip4844(tx) => Self::Eip4844(tx),
+            TxEip4844Variant::TxEip4844WithSidecar(tx_with_sidecar) => {
+                Self::Eip4844(tx_with_sidecar.tx)
+            }
+        }
+    }
+}
+
+impl From<Signed<TxEip4844Variant>> for TransactionSigned {
+    fn from(value: Signed<TxEip4844Variant>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new(tx.into(), sig, hash)
+    }
+}
+
+impl From<TxEnvelope> for TransactionSigned {
+    fn from(value: TxEnvelope) -> Self {
+        match value {
+            TxEnvelope::Legacy(tx) => tx.into(),
+            TxEnvelope::Eip2930(tx) => tx.into(),
+            TxEnvelope::Eip1559(tx) => tx.into(),
+            TxEnvelope::Eip4844(tx) => tx.into(),
+            TxEnvelope::Eip7702(tx) => tx.into(),
+        }
+    }
+}
+
+impl From<TransactionSigned> for TxEnvelope {
+    fn from(value: TransactionSigned) -> Self {
+        let (tx, signature, hash) = value.into_parts();
+        match tx {
+            Transaction::Legacy(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip2930(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip1559(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip4844(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+            Transaction::Eip7702(tx) => Signed::new_unchecked(tx, signature, hash).into(),
+        }
+    }
+}
+
+impl From<TransactionSigned> for Signed<Transaction> {
+    fn from(value: TransactionSigned) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        Self::new_unchecked(tx, sig, hash)
     }
 }
 
@@ -534,12 +653,12 @@ impl Decodable2718 for TransactionSigned {
 }
 
 impl Encodable for TransactionSigned {
-    fn length(&self) -> usize {
-        self.network_len()
-    }
-
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.network_encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.network_len()
     }
 }
 
@@ -719,12 +838,15 @@ impl SignedTransaction for TransactionSigned {
         &self.signature
     }
 
-    fn recover_signer(&self) -> Option<Address> {
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
         let signature_hash = self.signature_hash();
         recover_signer(&self.signature, signature_hash)
     }
 
-    fn recover_signer_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Option<Address> {
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
         self.encode_for_signing(buf);
         let signature_hash = keccak256(buf);
         recover_signer_unchecked(&self.signature, signature_hash)
@@ -754,16 +876,6 @@ impl TryFrom<TransactionSigned> for PooledTransaction {
                 Err(TransactionConversionError::UnsupportedForP2P)
             }
         }
-    }
-}
-
-impl<T> From<Signed<T>> for TransactionSigned
-where
-    T: Into<Transaction>,
-{
-    fn from(value: Signed<T>) -> Self {
-        let (tx, signature, hash) = value.into_parts();
-        Self { transaction: tx.into(), signature, hash: hash.into() }
     }
 }
 
@@ -858,6 +970,10 @@ pub mod serde_bincode_compat {
     }
     impl SerdeBincodeCompat for super::TransactionSigned {
         type BincodeRepr<'a> = TransactionSigned<'a>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
     }
 
     #[cfg(test)]
@@ -940,10 +1056,10 @@ mod tests {
 
         // recover signer, expect failure
         let hash = *tx.tx_hash();
-        assert!(recover_signer(signature, hash).is_none());
+        assert!(recover_signer(signature, hash).is_err());
 
         // use unchecked, ensure it succeeds (the signature is valid if not for EIP-2)
-        assert!(recover_signer_unchecked(signature, hash).is_some());
+        assert!(recover_signer_unchecked(signature, hash).is_ok());
     }
 
     #[test]
@@ -1002,8 +1118,8 @@ mod tests {
 
         let decoded = TransactionSigned::decode_2718(&mut &tx_bytes[..]).unwrap();
         assert_eq!(
-            decoded.recover_signer(),
-            Some(Address::from_str("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5").unwrap())
+            decoded.recover_signer().unwrap(),
+            Address::from_str("0x95222290DD7278Aa3Ddd389Cc1E1d165CC4BAfe5").unwrap()
         );
     }
 
@@ -1018,8 +1134,10 @@ mod tests {
         let decoded = TransactionSigned::decode_2718(&mut raw_tx.as_slice()).unwrap();
         assert!(alloy_consensus::Typed2718::is_eip4844(&decoded));
 
-        let from = decoded.recover_signer();
-        assert_eq!(from, Some(address!("A83C816D4f9b2783761a22BA6FADB0eB0606D7B2")));
+        assert_eq!(
+            decoded.recover_signer().ok(),
+            Some(address!("A83C816D4f9b2783761a22BA6FADB0eB0606D7B2"))
+        );
 
         let tx = decoded.transaction;
 
@@ -1182,7 +1300,8 @@ mod tests {
         let mut pointer = raw.as_ref();
         let tx = TransactionSigned::decode(&mut pointer).unwrap();
         assert_eq!(*tx.tx_hash(), hash, "Expected same hash");
-        assert_eq!(tx.recover_signer(), Some(signer), "Recovering signer should pass.");
+        let recovered = tx.recover_signer().expect("Recovering signer should pass");
+        assert_eq!(recovered, signer);
     }
 
     #[test]
@@ -1252,7 +1371,7 @@ mod tests {
         let data = hex!("f8ea0c850ba43b7400832dc6c0942935aa0a2d2fbb791622c29eb1c117b65b7a908580b884590528a9000000000000000000000001878ace42092b7f1ae1f28d16c1272b1aa80ca4670000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000d02ab486cedc0000000000000000000000000000000000000000000000000000557fe293cabc08cf1ca05bfaf3fda0a56b49cc78b22125feb5ae6a99d2b4781f00507d8b02c173771c85a0b5da0dbe6c5bc53740d0071fc83eb17ba0f709e49e9ae7df60dee625ef51afc5");
         let tx = TransactionSigned::decode_2718(&mut data.as_slice()).unwrap();
         let sender = tx.recover_signer();
-        assert!(sender.is_none());
+        assert!(sender.is_err());
         let sender = tx.recover_signer_unchecked().unwrap();
 
         assert_eq!(sender, address!("7e9e359edf0dbacf96a9952fa63092d919b0842b"));

@@ -70,7 +70,7 @@ std = [
     "serde?/std",
     "rand?/std",
     "secp256k1?/std",
-    "revm-primitives?/std"
+    "revm-primitives?/std",
 ]
 reth-codec = [
     "dep:reth-codecs",
@@ -81,7 +81,7 @@ reth-codec = [
     "scroll-alloy-consensus/reth-codec",
     "dep:bytes",
     "dep:modular-bitfield",
-    "dep:reth-zstd-compressors"
+    "dep:reth-zstd-compressors",
 ]
 serde = [
     "dep:serde",
@@ -93,14 +93,14 @@ serde = [
     "bytes?/serde",
     "rand?/serde",
     "reth-codecs?/serde",
-    "reth-primitives-traits/serde" ,
+    "reth-primitives-traits/serde",
     "revm-primitives?/serde",
 ]
 serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
-    "scroll-alloy-consensus/serde-bincode-compat"
+    "scroll-alloy-consensus/serde-bincode-compat",
 ]
 arbitrary = [
     "dep:arbitrary",
@@ -113,10 +113,10 @@ arbitrary = [
     "reth-codecs?/arbitrary",
     "reth-primitives-traits/arbitrary",
     "revm-primitives?/arbitrary",
-    "scroll-alloy-consensus/arbitrary"
+    "scroll-alloy-consensus/arbitrary",
 ]
 scroll = [
     "dep:revm-primitives",
     "revm-primitives/scroll",
-    "reth-primitives-traits/scroll"
+    "reth-primitives-traits/scroll",
 ]

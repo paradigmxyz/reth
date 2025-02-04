@@ -15,11 +15,9 @@ pub use reth_primitives_traits::{
 };
 
 use reth_chainspec::EthChainSpec;
-use reth_db_api::{
-    database_metrics::{DatabaseMetadata, DatabaseMetrics},
-    Database,
-};
-use reth_engine_primitives::{BuiltPayload, EngineTypes};
+use reth_db_api::{database_metrics::DatabaseMetrics, Database};
+use reth_engine_primitives::EngineTypes;
+use reth_payload_primitives::BuiltPayload;
 use reth_trie_db::StateCommitment;
 
 /// The type that configures the essential types of an Ethereum-like node.
@@ -50,7 +48,7 @@ pub trait NodeTypesWithEngine: NodeTypes {
 /// Its types are configured by node internally and are not intended to be user configurable.
 pub trait NodeTypesWithDB: NodeTypes {
     /// Underlying database type used by the node to store and retrieve data.
-    type DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static;
+    type DB: Database + DatabaseMetrics + Clone + Unpin + 'static;
 }
 
 /// An adapter type combining [`NodeTypes`] and db into [`NodeTypesWithDB`].
@@ -101,7 +99,7 @@ where
 impl<Types, DB> NodeTypesWithDB for NodeTypesWithDBAdapter<Types, DB>
 where
     Types: NodeTypes,
-    DB: Database + DatabaseMetrics + DatabaseMetadata + Clone + Unpin + 'static,
+    DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
 {
     type DB = DB;
 }
@@ -234,16 +232,19 @@ where
 }
 
 /// Helper adapter type for accessing [`NodePrimitives::Block`] on [`NodeTypes`].
-pub type BlockTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::Block;
+pub type BlockTy<N> = <PrimitivesTy<N> as NodePrimitives>::Block;
 
 /// Helper adapter type for accessing [`NodePrimitives::BlockHeader`] on [`NodeTypes`].
-pub type HeaderTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockHeader;
+pub type HeaderTy<N> = <PrimitivesTy<N> as NodePrimitives>::BlockHeader;
 
 /// Helper adapter type for accessing [`NodePrimitives::BlockBody`] on [`NodeTypes`].
-pub type BodyTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::BlockBody;
+pub type BodyTy<N> = <PrimitivesTy<N> as NodePrimitives>::BlockBody;
 
 /// Helper adapter type for accessing [`NodePrimitives::SignedTx`] on [`NodeTypes`].
-pub type TxTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::SignedTx;
+pub type TxTy<N> = <PrimitivesTy<N> as NodePrimitives>::SignedTx;
 
 /// Helper adapter type for accessing [`NodePrimitives::Receipt`] on [`NodeTypes`].
-pub type ReceiptTy<N> = <<N as NodeTypes>::Primitives as NodePrimitives>::Receipt;
+pub type ReceiptTy<N> = <PrimitivesTy<N> as NodePrimitives>::Receipt;
+
+/// Helper type for getting the `Primitives` associated type from a [`NodeTypes`].
+pub type PrimitivesTy<N> = <N as NodeTypes>::Primitives;

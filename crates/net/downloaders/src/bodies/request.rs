@@ -25,7 +25,7 @@ use std::{
 /// If the response arrived with insufficient number of bodies, the future
 /// will issue another request until all bodies are collected.
 ///
-/// It then proceeds to verify the downloaded bodies. In case of an validation error,
+/// It then proceeds to verify the downloaded bodies. In case of a validation error,
 /// the future will start over.
 ///
 /// The future will filter out any empty headers (see [`alloy_consensus::Header::is_empty`]) from
@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(
             client.times_requested(),
             // div_ceild
-            (headers.into_iter().filter(|h| !h.is_empty()).count() as u64 + 1) / 2
+            (headers.into_iter().filter(|h| !h.is_empty()).count() as u64).div_ceil(2)
         );
     }
 }

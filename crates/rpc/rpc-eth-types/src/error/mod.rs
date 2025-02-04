@@ -10,6 +10,7 @@ use alloy_primitives::{Address, Bytes, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::decode_revert_reason;
 use reth_errors::RethError;
+use reth_primitives_traits::transaction::signed::RecoveryError;
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
@@ -282,6 +283,12 @@ where
             EVMError::Custom(err) => Self::EvmCustom(err),
             EVMError::Precompile(err) => Self::EvmPrecompile(err),
         }
+    }
+}
+
+impl From<RecoveryError> for EthApiError {
+    fn from(_: RecoveryError) -> Self {
+        Self::InvalidTransactionSignature
     }
 }
 

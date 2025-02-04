@@ -39,7 +39,6 @@ reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode
 scroll-alloy-consensus.workspace = true
 
 # misc
-auto_impl.workspace = true
 derive_more.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -49,14 +48,14 @@ eyre.workspace = true
 
 [features]
 optimism = [
-	"revm/optimism",
-	"revm-primitives/optimism"
+    "revm/optimism",
+    "revm-primitives/optimism",
 ]
 scroll = [
-	"reth-evm/scroll",
-	"reth-revm/scroll",
-	"reth-scroll-consensus/scroll",
-	"revm/scroll",
-	"revm-primitives/scroll",
-	"reth-scroll-primitives/scroll"
+    "reth-evm/scroll",
+    "reth-revm/scroll",
+    "reth-scroll-consensus/scroll",
+    "revm/scroll",
+    "revm-primitives/scroll",
+    "reth-scroll-primitives/scroll",
 ]

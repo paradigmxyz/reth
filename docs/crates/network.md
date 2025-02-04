@@ -8,8 +8,6 @@ Reth's P2P networking consists primarily of 4 ongoing tasks:
 - **ETH Requests**: Responds to incoming requests for headers and bodies
 - **Network Management**: Handles incoming & outgoing connections with peers, and routes requests between peers and the other tasks
 
-We'll leave most of the discussion of the discovery task for the [discv4](./discv4.md) chapter, and will focus on the other three here.
-
 Let's take a look at how the main Reth CLI (i.e., a default-configured full node) makes use of the P2P layer to explore the primary interfaces and entrypoints into the `network` crate.
 
 ---
@@ -167,8 +165,6 @@ pub(crate) struct Swarm<C> {
 The `Swarm` struct glues together incoming connections from peers, managing sessions with peers, and recording the network's state (e.g. number of active peers, genesis hash of the network, etc.). It emits these as `SwarmEvent`s to the `NetworkManager`, and routes commands and events between the `SessionManager` and `NetworkState` structs that it holds.
 
 We'll touch more on the `NetworkManager` shortly! It's perhaps the most important struct in this crate.
-
-More information about the discovery task can be found in the [discv4](./discv4.md) chapter.
 
 The ETH requests and transactions task will be explained in their own sections, following this one.
 

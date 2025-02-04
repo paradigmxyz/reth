@@ -26,17 +26,16 @@ tracing.workspace = true
 
 [features]
 scroll = [
-	"reth-provider/scroll",
-	"reth-scroll-cli/scroll",
+    "reth-provider/scroll",
+    "reth-scroll-cli/scroll",
 ]
 skip-state-root-validation = [
-	"reth-scroll-node/skip-state-root-validation",
-	"reth-provider/skip-state-root-validation"
+    "reth-scroll-node/skip-state-root-validation",
+    "reth-provider/skip-state-root-validation",
 ]
 optimism = [
-	"reth-provider/optimism",
-	"reth-scroll-cli/optimism",
-	"reth-scroll-node/optimism"
+    "reth-scroll-cli/optimism",
+    "reth-scroll-node/optimism",
 ]
 dev = ["reth-scroll-cli/dev"]
 

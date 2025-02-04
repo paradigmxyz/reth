@@ -7,14 +7,14 @@ use alloy_rpc_types_engine::{
     ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadV1, ForkchoiceState,
     ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
-use alloy_transport::{Transport, TransportResult};
+use alloy_transport::TransportResult;
 use scroll_alloy_rpc_types_engine::ScrollPayloadAttributes;
 
 /// Engine API trait for Scroll. Only exposes versions of the API that are supported.
 /// Note:
 /// > The provider should use a JWT authentication layer.
 #[async_trait::async_trait]
-pub trait ScrollEngineApi<N, T> {
+pub trait ScrollEngineApi<N> {
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
     /// Caution: This should not accept the `withdrawals` field
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> TransportResult<PayloadStatus>;
@@ -91,11 +91,10 @@ pub trait ScrollEngineApi<N, T> {
 }
 
 #[async_trait::async_trait]
-impl<N, T, P> ScrollEngineApi<N, T> for P
+impl<N, P> ScrollEngineApi<N> for P
 where
     N: Network,
-    T: Transport + Clone,
-    P: Provider<T, N>,
+    P: Provider<N>,
 {
     async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> TransportResult<PayloadStatus> {
         self.client().request("engine_newPayloadV1", (payload,)).await

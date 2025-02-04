@@ -61,11 +61,7 @@ shellexpand.workspace = true
 tracing.workspace = true
 
 # crypto
-secp256k1 = { workspace = true, features = [
-    "global-context",
-    "rand-std",
-    "recovery",
-] }
+secp256k1 = { workspace = true, features = ["global-context", "rand-std", "recovery"] }
 
 # async
 futures.workspace = true

@@ -92,14 +92,14 @@ impl PayloadValidator for ScrollEngineValidator {
         block.header.difficulty = CLIQUE_IN_TURN_DIFFICULTY;
         let block_hash_in_turn = block.hash_slow();
         if block_hash_in_turn == expected_hash {
-            return Ok(block.seal(block_hash_in_turn));
+            return Ok(block.seal_unchecked(block_hash_in_turn));
         }
 
         // Seal the block with the no-turn difficulty and return if hashes match
         block.header.difficulty = CLIQUE_NO_TURN_DIFFICULTY;
         let block_hash_no_turn = block.hash_slow();
         if block_hash_no_turn == expected_hash {
-            return Ok(block.seal(block_hash_no_turn));
+            return Ok(block.seal_unchecked(block_hash_no_turn));
         }
 
         Err(PayloadError::BlockHash { execution: block_hash_no_turn, consensus: expected_hash })

@@ -41,7 +41,6 @@ use reth::{
     primitives::{Block, EthPrimitives, SealedBlock, TransactionSigned},
     providers::{CanonStateSubscriptions, EthStorage, StateProviderFactory},
     rpc::{
-        compat::engine::payload::block_to_payload,
         eth::EthApi,
         types::engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError},
     },
@@ -181,7 +180,7 @@ impl EngineTypes for CustomEngineTypes {
                 <<Self::BuiltPayload as reth_node_api::BuiltPayload>::Primitives as reth_node_api::NodePrimitives>::Block,
             >,
     ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-        block_to_payload(block)
+        ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block())
     }
 }
 

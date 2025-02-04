@@ -59,7 +59,7 @@ impl ScrollReceiptBuilder {
         all_receipts: &[ScrollReceipt],
     ) -> Result<Self, ScrollEthApiError> {
         let core_receipt =
-            build_receipt(transaction, meta, receipt, all_receipts, |receipt_with_bloom| {
+            build_receipt(transaction, meta, receipt, all_receipts, None, |receipt_with_bloom| {
                 match receipt {
                     ScrollReceipt::Legacy(_) => {
                         ScrollReceiptEnvelope::<Log>::Legacy(receipt_with_bloom)

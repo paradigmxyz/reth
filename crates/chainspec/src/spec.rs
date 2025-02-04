@@ -11,10 +11,8 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::{
-    eip1559::INITIAL_BASE_FEE,
-    eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
-    eip7685::EMPTY_REQUESTS_HASH,
-    eip7840::{BlobParams, BlobScheduleItem},
+    eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
+    eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -174,7 +172,7 @@ pub struct HardforkBlobParams {
 impl HardforkBlobParams {
     /// Constructs params for chainspec from a provided blob schedule.
     /// Falls back to defaults if the schedule is empty.
-    pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobScheduleItem>) -> Self {
+    pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobParams>) -> Self {
         let extract = |key: &str, default: fn() -> BlobParams| {
             blob_schedule
                 .get(key)
@@ -646,6 +644,7 @@ impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
         // Block-based hardforks
         let hardfork_opts = [
+            (EthereumHardfork::Frontier.boxed(), Some(0)),
             (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
             (EthereumHardfork::Dao.boxed(), genesis.config.dao_fork_block),
             (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
@@ -2369,6 +2368,7 @@ Post-merge hard forks (timestamp based):
 
         let hardforks: Vec<_> = chain_spec.hardforks.forks_iter().map(|(h, _)| h).collect();
         let expected_hardforks = vec![
+            EthereumHardfork::Frontier.boxed(),
             EthereumHardfork::Homestead.boxed(),
             EthereumHardfork::Dao.boxed(),
             EthereumHardfork::Tangerine.boxed(),

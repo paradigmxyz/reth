@@ -22,6 +22,7 @@ use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition, Hardf
 use reth_network_peers::NodeRecord;
 use reth_scroll_forks::{ScrollHardfork, ScrollHardforks};
 
+use alloy_eips::eip7840::BlobParams;
 #[cfg(not(feature = "std"))]
 use once_cell::sync::Lazy as LazyLock;
 #[cfg(feature = "std")]
@@ -195,6 +196,10 @@ impl EthChainSpec for ScrollChainSpec {
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         // TODO(scroll): need to implement Scroll L2 formula related to https://github.com/scroll-tech/reth/issues/60
         self.inner.base_fee_params_at_timestamp(timestamp)
+    }
+
+    fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
+        self.inner.blob_params_at_timestamp(timestamp)
     }
 
     fn deposit_contract(&self) -> Option<&DepositContract> {

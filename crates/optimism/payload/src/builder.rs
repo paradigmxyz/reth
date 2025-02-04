@@ -14,10 +14,11 @@ use alloy_rpc_types_engine::PayloadId;
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_basic_payload_builder::*;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::{
-    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, NextBlockEnvAttributes,
+    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Database, Evm,
+    EvmError, InvalidTxError, NextBlockEnvAttributes,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_chainspec::OpChainSpec;
@@ -28,9 +29,9 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{
-    proofs, transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, SealedHeader,
+    transaction::SignedTransactionIntoRecoveredExt, Block, BlockBody, SealedHeader,
 };
-use reth_primitives_traits::{block::Block as _, RecoveredBlock};
+use reth_primitives_traits::{block::Block as _, proofs, RecoveredBlock};
 use reth_provider::{
     HashedPostStateProvider, ProviderError, StateProofProvider, StateProviderFactory,
     StateRootProvider,
@@ -41,8 +42,8 @@ use reth_transaction_pool::{
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
-    primitives::{EVMError, InvalidTransaction, ResultAndState},
-    Database, DatabaseCommit,
+    primitives::ResultAndState,
+    DatabaseCommit,
 };
 use std::{fmt::Display, sync::Arc};
 use tracing::{debug, trace, warn};
@@ -125,7 +126,7 @@ where
         Txs: PayloadTransactions<Transaction = OpTransactionSigned>,
     {
         let evm_env = self
-            .cfg_and_block_env(&args.config.attributes, &args.config.parent_header)
+            .evm_env(&args.config.attributes, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
         let BuildArguments { client, pool: _, mut cached_reads, config, cancel, best_payload } =
@@ -162,18 +163,18 @@ where
 
     /// Returns the configured [`EvmEnv`] for the targeted payload
     /// (that has the `parent` as its parent).
-    pub fn cfg_and_block_env(
+    pub fn evm_env(
         &self,
         attributes: &OpPayloadBuilderAttributes,
         parent: &Header,
-    ) -> Result<EvmEnv, EvmConfig::Error> {
+    ) -> Result<EvmEnv<EvmConfig::Spec>, EvmConfig::Error> {
         let next_attributes = NextBlockEnvAttributes {
             timestamp: attributes.timestamp(),
             suggested_fee_recipient: attributes.suggested_fee_recipient(),
             prev_randao: attributes.prev_randao(),
             gas_limit: attributes.gas_limit.unwrap_or(parent.gas_limit),
         };
-        self.evm_config.next_cfg_and_block_env(parent, next_attributes)
+        self.evm_config.next_evm_env(parent, next_attributes)
     }
 
     /// Computes the witness for the payload.
@@ -189,8 +190,7 @@ where
         let attributes = OpPayloadBuilderAttributes::try_new(parent.hash(), attributes, 3)
             .map_err(PayloadBuilderError::other)?;
 
-        let evm_env =
-            self.cfg_and_block_env(&attributes, &parent).map_err(PayloadBuilderError::other)?;
+        let evm_env = self.evm_env(&attributes, &parent).map_err(PayloadBuilderError::other)?;
 
         let config = PayloadConfig { parent_header: Arc::new(parent), attributes };
         let ctx = OpPayloadBuilderCtx {
@@ -359,7 +359,7 @@ where
         let block_number = ctx.block_number();
         let execution_outcome = ExecutionOutcome::new(
             state.take_bundle(),
-            info.receipts.into(),
+            vec![info.receipts],
             block_number,
             Vec::new(),
         );
@@ -437,26 +437,21 @@ where
         debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
 
         // create the executed block data
-        let executed: ExecutedBlock<OpPrimitives> = ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                sealed_block.as_ref().clone(),
-                info.executed_senders,
-            )),
-            execution_output: Arc::new(execution_outcome),
-            hashed_state: Arc::new(hashed_state),
+        let executed: ExecutedBlockWithTrieUpdates<OpPrimitives> = ExecutedBlockWithTrieUpdates {
+            block: ExecutedBlock {
+                recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                    sealed_block.as_ref().clone(),
+                    info.executed_senders,
+                )),
+                execution_output: Arc::new(execution_outcome),
+                hashed_state: Arc::new(hashed_state),
+            },
             trie: Arc::new(trie_output),
         };
 
         let no_tx_pool = ctx.attributes().no_tx_pool;
 
-        let payload = OpBuiltPayload::new(
-            ctx.payload_id(),
-            sealed_block,
-            info.total_fees,
-            ctx.chain_spec.clone(),
-            ctx.config.attributes,
-            Some(executed),
-        );
+        let payload = OpBuiltPayload::new(ctx.payload_id(), info.total_fees, executed);
 
         if no_tx_pool {
             // if `no_tx_pool` is set only transactions from the payload attributes will be included
@@ -580,7 +575,7 @@ impl ExecutionInfo {
 
 /// Container type that holds all necessities to build a new payload.
 #[derive(Debug)]
-pub struct OpPayloadBuilderCtx<EvmConfig> {
+pub struct OpPayloadBuilderCtx<EvmConfig: ConfigureEvmEnv> {
     /// The type that knows how to perform system calls and configure the evm.
     pub evm_config: EvmConfig,
     /// The DA config for the payload builder
@@ -590,14 +585,14 @@ pub struct OpPayloadBuilderCtx<EvmConfig> {
     /// How to build the payload.
     pub config: PayloadConfig<OpPayloadBuilderAttributes>,
     /// Evm Settings
-    pub evm_env: EvmEnv,
+    pub evm_env: EvmEnv<EvmConfig::Spec>,
     /// Marker to check whether the job has been cancelled.
     pub cancel: Cancelled,
     /// The currently best payload.
     pub best_payload: Option<OpBuiltPayload>,
 }
 
-impl<EvmConfig> OpPayloadBuilderCtx<EvmConfig> {
+impl<EvmConfig: ConfigureEvmEnv> OpPayloadBuilderCtx<EvmConfig> {
     /// Returns the parent block the payload will be build on.
     #[allow(clippy::missing_const_for_fn)]
     pub fn parent(&self) -> &SealedHeader {
@@ -792,10 +787,9 @@ where
             // purely for the purposes of utilizing the `evm_config.tx_env`` function.
             // Deposit transactions do not have signatures, so if the tx is a deposit, this
             // will just pull in its `from` address.
-            let sequencer_tx =
-                sequencer_tx.value().clone().try_into_ecrecovered().map_err(|_| {
-                    PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
-                })?;
+            let sequencer_tx = sequencer_tx.value().try_clone_into_recovered().map_err(|_| {
+                PayloadBuilderError::other(OpPayloadBuilderError::TransactionEcRecoverFailed)
+            })?;
 
             // Cache the depositor account prior to the state transition for the deposit nonce.
             //
@@ -820,16 +814,12 @@ where
             let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    match err {
-                        EVMError::Transaction(err) => {
-                            trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                            continue
-                        }
-                        err => {
-                            // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
-                        }
+                    if err.is_invalid_tx_err() {
+                        trace!(target: "payload_builder", %err, ?sequencer_tx, "Error in sequencer transaction, skipping.");
+                        continue
                     }
+                    // this is an error that we should treat as fatal for this attempt
+                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
                 }
             };
 
@@ -917,25 +907,21 @@ where
             let ResultAndState { result, state } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    match err {
-                        EVMError::Transaction(err) => {
-                            if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                                // if the nonce is too low, we can skip this transaction
-                                trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
-                            } else {
-                                // if the transaction is invalid, we can skip it and all of its
-                                // descendants
-                                trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                                best_txs.mark_invalid(tx.signer(), tx.nonce());
-                            }
+                    if let Some(err) = err.as_invalid_tx_err() {
+                        if err.is_nonce_too_low() {
+                            // if the nonce is too low, we can skip this transaction
+                            trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
+                        } else {
+                            // if the transaction is invalid, we can skip it and all of its
+                            // descendants
+                            trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
+                            best_txs.mark_invalid(tx.signer(), tx.nonce());
+                        }
 
-                            continue
-                        }
-                        err => {
-                            // this is an error that we should treat as fatal for this attempt
-                            return Err(PayloadBuilderError::EvmExecutionError(err))
-                        }
+                        continue
                     }
+                    // this is an error that we should treat as fatal for this attempt
+                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
                 }
             };
 
