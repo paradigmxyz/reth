@@ -14,7 +14,7 @@ use reth::{
         inspector_handle_register,
         precompile::{Precompile, PrecompileSpecId},
         primitives::{
-            CfgEnvWithHandlerCfg, EVMError, Env, HandlerCfg, PrecompileResult, SpecId,
+            CfgEnvWithHandlerCfg, EVMError, Env, HaltReason, HandlerCfg, PrecompileResult, SpecId,
             StatefulPrecompileMut, TxEnv,
         },
         ContextPrecompile, ContextPrecompiles, EvmBuilder, GetInspector,
@@ -174,6 +174,7 @@ impl ConfigureEvmEnv for MyEvmConfig {
 impl ConfigureEvm for MyEvmConfig {
     type Evm<'a, DB: Database + 'a, I: 'a> = EthEvm<'a, I, DB>;
     type EvmError<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
+    type HaltReason = HaltReason;
 
     fn evm_with_env<DB: Database>(&self, db: DB, evm_env: EvmEnv) -> Self::Evm<'_, DB, ()> {
         let cfg_env_with_handler_cfg = CfgEnvWithHandlerCfg {

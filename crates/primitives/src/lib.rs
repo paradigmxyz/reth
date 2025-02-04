@@ -19,8 +19,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
-extern crate alloc;
-
 mod block;
 mod receipt;
 pub use reth_static_file_types as static_file;
@@ -31,7 +29,7 @@ pub use block::{Block, BlockBody, SealedBlock};
 #[allow(deprecated)]
 pub use block::{BlockWithSenders, SealedBlockFor, SealedBlockWithSenders};
 
-pub use receipt::{gas_spent_by_transactions, Receipt, Receipts};
+pub use receipt::{gas_spent_by_transactions, Receipt};
 pub use reth_primitives_traits::{
     logs_bloom, Account, Bytecode, GotExpected, GotExpectedBoxed, Header, HeaderError, Log,
     LogData, NodePrimitives, RecoveredBlock, SealedHeader, StorageEntry,

@@ -307,7 +307,7 @@ pub trait Trace:
                 let block_hash = block.hash();
 
                 let block_number = evm_env.block_env.number.saturating_to::<u64>();
-                let base_fee = evm_env.block_env.basefee.saturating_to::<u128>();
+                let base_fee = evm_env.block_env.basefee.saturating_to::<u64>();
 
                 // now get the state
                 let state = this.state_at_block_id(state_at.into())?;

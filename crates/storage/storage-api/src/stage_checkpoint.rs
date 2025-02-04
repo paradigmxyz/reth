@@ -1,3 +1,4 @@
+use alloc::{string::String, vec::Vec};
 use alloy_primitives::BlockNumber;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::ProviderResult;

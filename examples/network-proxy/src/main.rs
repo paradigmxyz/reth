@@ -13,8 +13,11 @@
 use futures::StreamExt;
 use reth_chainspec::DEV;
 use reth_network::{
-    config::rng_secret_key, eth_requests::IncomingEthRequest, p2p::HeadersClient,
-    transactions::NetworkTransactionEvent, types::NewPooledTransactionHashes68,
+    config::rng_secret_key,
+    eth_requests::IncomingEthRequest,
+    p2p::HeadersClient,
+    transactions::NetworkTransactionEvent,
+    types::{BlockHashOrNumber, NewPooledTransactionHashes68},
     BlockDownloaderProvider, FetchClient, NetworkConfig, NetworkEventListenerProvider,
     NetworkHandle, NetworkInfo, NetworkManager, Peers,
 };
@@ -62,7 +65,7 @@ async fn main() -> eyre::Result<()> {
     });
 
     loop {
-        // receive incoming eth requests and transaction messages
+        // receive incoming eth requests and transaction messages from the second peer
         tokio::select! {
               eth_request = requests_rx.recv() => {
                     let Some(eth_request) = eth_request else {break};
@@ -93,7 +96,8 @@ async fn main() -> eyre::Result<()> {
     Ok(())
 }
 
-/// Launches another network/peer, connects to the first peer and sends a header request.
+/// Launches another network/peer, connects to the first peer and sends requests/messages to the
+/// first peer.
 async fn run_peer(handle: NetworkHandle) -> eyre::Result<()> {
     // create another peer
     let config = NetworkConfig::builder(rng_secret_key())
@@ -106,12 +110,13 @@ async fn run_peer(handle: NetworkHandle) -> eyre::Result<()> {
     tokio::task::spawn(network);
 
     // add the other peer as trusted
+    // this will establish a connection to the first peer
     peer.add_trusted_peer(*handle.peer_id(), handle.local_addr());
 
     // obtain the client that can emit requests
     let client: FetchClient = peer.fetch_client().await?;
 
-    let header = client.get_header(0.into()).await.unwrap();
+    let header = client.get_header(BlockHashOrNumber::Number(0)).await.unwrap();
     println!("Got header: {:?}", header);
 
     // send a (bogus) hashes message

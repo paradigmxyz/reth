@@ -2,11 +2,12 @@ use crate::{
     BlockBodyIndicesProvider, BlockNumReader, HeaderProvider, OmmersProvider, ReceiptProvider,
     ReceiptProviderIdExt, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
+use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
+use core::ops::RangeInclusive;
 use reth_primitives::{RecoveredBlock, SealedBlock, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
-use std::ops::RangeInclusive;
 
 /// A helper enum that represents the origin of the requested block.
 ///
@@ -153,7 +154,7 @@ pub trait BlockReader:
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>>;
 }
 
-impl<T: BlockReader> BlockReader for std::sync::Arc<T> {
+impl<T: BlockReader> BlockReader for Arc<T> {
     type Block = T::Block;
 
     fn find_block_by_hash(

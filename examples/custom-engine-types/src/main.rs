@@ -41,9 +41,8 @@ use reth::{
     primitives::{Block, EthPrimitives, SealedBlock, TransactionSigned},
     providers::{CanonStateSubscriptions, EthStorage, StateProviderFactory},
     rpc::{
-        compat::engine::payload::block_to_payload,
         eth::EthApi,
-        types::engine::{ExecutionPayload, ExecutionPayloadSidecar, PayloadError},
+        types::engine::{ExecutionPayload, PayloadError},
     },
     tasks::TaskManager,
     transaction_pool::{PoolTransaction, TransactionPool},
@@ -58,7 +57,7 @@ use reth_engine_local::payload::UnsupportedLocalAttributes;
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
-    validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
+    validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator, ExecutionData,
     FullNodeComponents, PayloadAttributes, PayloadBuilderAttributes, PayloadValidator,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
@@ -175,13 +174,16 @@ impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
+    type ExecutionData = ExecutionData;
 
     fn block_to_payload(
         block: SealedBlock<
                 <<Self::BuiltPayload as reth_node_api::BuiltPayload>::Primitives as reth_node_api::NodePrimitives>::Block,
             >,
-    ) -> (ExecutionPayload, ExecutionPayloadSidecar) {
-        block_to_payload(block)
+    ) -> ExecutionData {
+        let (payload, sidecar) =
+            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+        ExecutionData { payload, sidecar }
     }
 }
 
@@ -206,19 +208,19 @@ impl CustomEngineValidator {
 
 impl PayloadValidator for CustomEngineValidator {
     type Block = Block;
+    type ExecutionData = ExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
-        payload: ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
+        payload: ExecutionData,
     ) -> Result<SealedBlock<Self::Block>, PayloadError> {
-        self.inner.ensure_well_formed_payload(payload, sidecar)
+        self.inner.ensure_well_formed_payload(payload)
     }
 }
 
 impl<T> EngineValidator<T> for CustomEngineValidator
 where
-    T: EngineTypes<PayloadAttributes = CustomPayloadAttributes>,
+    T: EngineTypes<PayloadAttributes = CustomPayloadAttributes, ExecutionData = ExecutionData>,
 {
     fn validate_version_specific_fields(
         &self,
