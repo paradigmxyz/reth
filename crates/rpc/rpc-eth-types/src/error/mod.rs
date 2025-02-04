@@ -8,7 +8,7 @@ use core::time::Duration;
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
-use alloy_sol_types::RevertReason;
+use alloy_sol_types::{ContractError, RevertReason};
 use reth_errors::RethError;
 use reth_primitives_traits::transaction::signed::RecoveryError;
 use reth_rpc_server_types::result::{
@@ -616,11 +616,13 @@ impl std::fmt::Display for RevertError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("execution reverted")?;
         if let Some(reason) = self.output.as_ref().and_then(|out| RevertReason::decode(out)) {
-            let msg = reason.to_string();
-            // we strip redundant `revert: ` prefix from the revert reason
-            // TODO: check for revert: <https://github.com/alloy-rs/core/pull/867>
-            let reason = msg.trim_start_matches("revert: ");
-            write!(f, ": {reason}")?;
+            let error = reason.to_string();
+            let mut error = error.as_str();
+            if matches!(reason, RevertReason::ContractError(ContractError::Revert(_))) {
+                // we strip redundant `revert: ` prefix from the revert reason
+                error = error.trim_start_matches("revert: ");
+            }
+            write!(f, ": {error}")?;
         }
         Ok(())
     }
