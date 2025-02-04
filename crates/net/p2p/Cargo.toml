@@ -52,13 +52,13 @@ test-utils = [
     "reth-primitives-traits/test-utils",
 ]
 std = [
-	"reth-consensus/std",
-	"reth-primitives/std",
-	"alloy-eips/std",
-	"alloy-primitives/std",
-	"reth-primitives-traits/std",
-	"alloy-consensus/std",
-	"derive_more/std",
-	"reth-network-peers/std",
-	"tracing/std",
+    "reth-consensus/std",
+    "reth-primitives/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "reth-primitives-traits/std",
+    "alloy-consensus/std",
+    "derive_more/std",
+    "reth-network-peers/std",
+    "tracing/std",
 ]
