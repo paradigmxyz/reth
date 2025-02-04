@@ -92,12 +92,13 @@ where
         address: Address,
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError> {
+        let hashed_address = keccak256(address);
         Ok(self
             .multiproof(MultiProofTargets {
-                accounts: HashSet::from_iter([keccak256(address)]),
+                accounts: HashSet::from_iter([hashed_address]),
                 storages: HashMap::from_iter([(
-                    keccak256(address),
-                    slots.iter().copied().collect(),
+                    hashed_address,
+                    slots.iter().map(keccak256).collect(),
                 )]),
             })?
             .account_proof(address, slots)?)
