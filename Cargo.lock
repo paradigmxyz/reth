@@ -7156,6 +7156,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
+ "auto_impl",
  "futures",
  "reth-errors",
  "reth-execution-types",

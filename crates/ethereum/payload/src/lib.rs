@@ -10,9 +10,7 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use alloy_consensus::{BlockHeader, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
-use alloy_eips::{
-    eip4844::MAX_DATA_GAS_PER_BLOCK, eip6110, eip7685::Requests, merge::BEACON_NONCE,
-};
+use alloy_eips::{eip6110, eip7685::Requests, eip7840::BlobParams, merge::BEACON_NONCE};
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
@@ -228,6 +226,7 @@ where
     let mut evm = evm_config.evm_with_env(&mut db, evm_env);
 
     let mut receipts = Vec::new();
+    let mut blob_txn_count = 0;
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
@@ -251,19 +250,19 @@ where
 
         // There's only limited amount of blob space available per block, so we need to check if
         // the EIP-4844 can still fit in the block
-        if let Some(blob_tx) = tx.as_eip4844() {
-            let tx_blob_gas = blob_tx.blob_gas();
-            if sum_blob_gas_used + tx_blob_gas > MAX_DATA_GAS_PER_BLOCK {
+        if let Some(_blob_tx) = tx.as_eip4844() {
+            blob_txn_count += 1;
+            if blob_txn_count > BlobParams::cancun().max_blob_count {
                 // we can't fit this _blob_ transaction into the block, so we mark it as
                 // invalid, which removes its dependent transactions from
                 // the iterator. This is similar to the gas limit condition
                 // for regular transactions above.
-                trace!(target: "payload_builder", tx=?tx.hash(), ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
+                trace!(target: "payload_builder", tx=?tx.hash(), ?blob_txn_count, "skipping blob transaction because it would exceed the max blob count");
                 best_txs.mark_invalid(
                     &pool_tx,
                     InvalidPoolTransactionError::ExceedsGasLimit(
-                        tx_blob_gas,
-                        MAX_DATA_GAS_PER_BLOCK,
+                        blob_txn_count,
+                        BlobParams::cancun().max_blob_count,
                     ),
                 );
                 continue
@@ -307,7 +306,7 @@ where
             sum_blob_gas_used += tx_blob_gas;
 
             // if we've reached the max data gas per block, we can skip blob txs entirely
-            if sum_blob_gas_used == MAX_DATA_GAS_PER_BLOCK {
+            if blob_txn_count > BlobParams::cancun().max_blob_count {
                 best_txs.skip_blobs();
             }
         }

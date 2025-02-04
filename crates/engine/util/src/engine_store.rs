@@ -2,7 +2,7 @@
 
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::{Stream, StreamExt};
-use reth_engine_primitives::{BeaconEngineMessage, EngineTypes, ExecutionData};
+use reth_engine_primitives::{BeaconEngineMessage, EngineTypes, ExecutionPayload};
 use reth_fs_util as fs;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -17,19 +17,19 @@ use tracing::*;
 /// A message from the engine API that has been stored to disk.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum StoredEngineApiMessage<Attributes> {
+pub enum StoredEngineApiMessage<EngineT: EngineTypes> {
     /// The on-disk representation of an `engine_forkchoiceUpdated` method call.
     ForkchoiceUpdated {
         /// The [`ForkchoiceState`] sent in the persisted call.
         state: ForkchoiceState,
         /// The payload attributes sent in the persisted call, if any.
-        payload_attrs: Option<Attributes>,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
     },
     /// The on-disk representation of an `engine_newPayload` method call.
     NewPayload {
-        /// The [`ExecutionData`] sent in the persisted call.
+        /// The [`EngineTypes::ExecutionData`] sent in the persisted call.
         #[serde(flatten)]
-        payload: ExecutionData,
+        payload: EngineT::ExecutionData,
     },
 }
 
@@ -70,7 +70,7 @@ impl EngineMessageStore {
                 let filename = format!("{}-fcu-{}.json", timestamp, state.head_block_hash);
                 fs::write(
                     self.path.join(filename),
-                    serde_json::to_vec(&StoredEngineApiMessage::ForkchoiceUpdated {
+                    serde_json::to_vec(&StoredEngineApiMessage::<Engine>::ForkchoiceUpdated {
                         state: *state,
                         payload_attrs: payload_attrs.clone(),
                     })?,
@@ -80,11 +80,9 @@ impl EngineMessageStore {
                 let filename = format!("{}-new_payload-{}.json", timestamp, payload.block_hash());
                 fs::write(
                     self.path.join(filename),
-                    serde_json::to_vec(
-                        &StoredEngineApiMessage::<Engine::PayloadAttributes>::NewPayload {
-                            payload: payload.clone(),
-                        },
-                    )?,
+                    serde_json::to_vec(&StoredEngineApiMessage::<Engine>::NewPayload {
+                        payload: payload.clone(),
+                    })?,
                 )?;
             }
             // noop
