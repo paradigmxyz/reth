@@ -16,8 +16,19 @@ use alloy_rpc_types_eth::{
     EIP1186AccountProofResponse, Filter, Log, SyncStatus,
 };
 use alloy_serde::JsonStorageKey;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
 use reth_engine_primitives::EngineTypes;
+
+/// Helper trait for the engine api server.
+///
+/// This type-erases the concrete [`jsonrpsee`] server implementation and only returns the
+/// [`RpcModule`] that contains all the endpoints of the server.
+pub trait IntoEngineApiRpcModule {
+    /// Consumes the type and returns all the methods and subscriptions defined in the trait and
+    /// returns them as a single [`RpcModule`]
+    fn into_rpc_module(self) -> RpcModule<()>;
+}
+
 // NOTE: We can't use associated types in the `EngineApi` trait because of jsonrpsee, so we use a
 // generic here. It would be nice if the rpc macro would understand which types need to have serde.
 // By default, if the trait has a generic, the rpc macro will add e.g. `Engine: DeserializeOwned` to
