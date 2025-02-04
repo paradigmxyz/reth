@@ -136,7 +136,6 @@ where
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     let proof_targets = targets.storages.remove(&hashed_address);
-                    let leaf_is_proof_target = proof_targets.is_some();
                     let storage_prefix_set = self
                         .prefix_sets
                         .storage_prefix_sets
@@ -159,7 +158,7 @@ where
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 
                     // We might be adding leaves that are not necessarily our proof targets.
-                    if leaf_is_proof_target {
+                    if storages.contains_key(&hashed_address) {
                         // Overwrite storage multiproof.
                         storages.insert(hashed_address, storage_multiproof);
                     }
