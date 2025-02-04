@@ -12,6 +12,13 @@ use nybbles::Nibbles;
     derive(arbitrary::Arbitrary),
     reth_codecs::add_arbitrary_tests(compact)
 )]
+pub struct HashedPostState {
+    /// Mapping of hashed address to account info, `None` if destroyed.
+    pub accounts: B256HashMap<Option<Account>>,
+    /// Mapping of hashed address to hashed storage.
+    pub storages: B256HashMap<HashedStorage>,
+}
+
 pub struct HashBuilderState {
     /// The current key.
     pub key: Vec<u8>,

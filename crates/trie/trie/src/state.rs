@@ -16,12 +16,6 @@ use std::borrow::Cow;
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
-pub struct HashedPostState {
-    /// Mapping of hashed address to account info, `None` if destroyed.
-    pub accounts: B256HashMap<Option<Account>>,
-    /// Mapping of hashed address to hashed storage.
-    pub storages: B256HashMap<HashedStorage>,
-}
 
 impl HashedPostState {
     /// Initialize [`HashedPostState`] from bundle state.
