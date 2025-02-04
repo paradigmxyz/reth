@@ -326,7 +326,7 @@ impl InvalidPoolTransactionError {
     /// Returns the arbitrary error if it is [`InvalidPoolTransactionError::Other`]
     pub fn as_other(&self) -> Option<&(dyn core::error::Error + Send + Sync + 'static)> {
         match self {
-            Self::Other(err) => Some(&**err),
+            Self::Other(err) => Some(err),
             _ => None,
         }
     }
