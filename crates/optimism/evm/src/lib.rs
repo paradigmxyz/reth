@@ -20,6 +20,8 @@ use op_alloy_consensus::EIP1559ParamError;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Database, Evm, NextBlockEnvAttributes};
 use reth_optimism_chainspec::OpChainSpec;
+use reth_optimism_consensus::next_block_base_fee;
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::FillTxEnv;
 use reth_revm::{
@@ -126,24 +128,30 @@ impl<EXT, DB: Database> Evm for OpEvm<'_, EXT, DB> {
 }
 
 /// Optimism-related EVM configuration.
-#[derive(Debug, Clone)]
-pub struct OpEvmConfig {
-    chain_spec: Arc<OpChainSpec>,
+#[derive(Debug)]
+pub struct OpEvmConfig<ChainSpec = OpChainSpec> {
+    chain_spec: Arc<ChainSpec>,
 }
 
-impl OpEvmConfig {
+impl<ChainSpec> Clone for OpEvmConfig<ChainSpec> {
+    fn clone(&self) -> Self {
+        Self { chain_spec: self.chain_spec.clone() }
+    }
+}
+
+impl<ChainSpec> OpEvmConfig<ChainSpec> {
     /// Creates a new [`OpEvmConfig`] with the given chain spec.
-    pub const fn new(chain_spec: Arc<OpChainSpec>) -> Self {
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
     }
 
     /// Returns the chain spec associated with this configuration.
-    pub const fn chain_spec(&self) -> &Arc<OpChainSpec> {
+    pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         &self.chain_spec
     }
 }
 
-impl ConfigureEvmEnv for OpEvmConfig {
+impl<ChainSpec: EthChainSpec + OpHardforks + 'static> ConfigureEvmEnv for OpEvmConfig<ChainSpec> {
     type Header = Header;
     type Transaction = OpTransactionSigned;
     type Error = EIP1559ParamError;
@@ -208,7 +216,11 @@ impl ConfigureEvmEnv for OpEvmConfig {
             prevrandao: Some(attributes.prev_randao),
             gas_limit: U256::from(attributes.gas_limit),
             // calculate basefee based on parent block's gas usage
-            basefee: self.chain_spec.next_block_base_fee(parent, attributes.timestamp)?,
+            basefee: U256::from(next_block_base_fee(
+                &self.chain_spec,
+                parent,
+                attributes.timestamp,
+            )?),
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };
@@ -225,7 +237,7 @@ impl ConfigureEvmEnv for OpEvmConfig {
     }
 }
 
-impl ConfigureEvm for OpEvmConfig {
+impl<ChainSpec: EthChainSpec + OpHardforks + 'static> ConfigureEvm for OpEvmConfig<ChainSpec> {
     type Evm<'a, DB: Database + 'a, I: 'a> = OpEvm<'a, I, DB>;
     type EvmError<DBError: core::error::Error + Send + Sync + 'static> = EVMError<DBError>;
     type HaltReason = HaltReason;

@@ -28,7 +28,7 @@ use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
 pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineTypes,
-    EngineValidator, ExecutionData, ForkchoiceStateTracker, OnForkChoiceUpdated,
+    EngineValidator, ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
@@ -790,8 +790,8 @@ where
 
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
     /// the transactions in the block are sent to the execution layer in the form of a
-    /// [`ExecutionData`]. The Execution layer executes the transactions and validates the
-    /// state in the block header, then passes validation data back to Consensus layer, that
+    /// [`EngineTypes::ExecutionData`]. The Execution layer executes the transactions and validates
+    /// the state in the block header, then passes validation data back to Consensus layer, that
     /// adds the block to the head of its own blockchain and attests to it. The block is then
     /// broadcast over the consensus p2p network in the form of a "Beacon block".
     ///
@@ -803,7 +803,7 @@ where
     #[instrument(level = "trace", skip_all, fields(block_hash = %payload.block_hash(), block_num = %payload.block_number(),), target = "engine::tree")]
     fn on_new_payload(
         &mut self,
-        payload: ExecutionData,
+        payload: T::ExecutionData,
     ) -> Result<TreeOutcome<PayloadStatus>, InsertBlockFatalError> {
         trace!(target: "engine::tree", "invoked new payload");
         self.metrics.engine.new_payload_messages.increment(1);
@@ -2592,12 +2592,7 @@ where
         // invalid headers cache and `Ok` with [PayloadStatusEnum::Invalid] is
         // returned.
         warn!(target: "engine::tree", invalid_hash=?block.hash(), invalid_number=?block.number(), %validation_err, "Invalid block error on new payload");
-        let latest_valid_hash = if validation_err.is_block_pre_merge() {
-            // zero hash must be returned if block is pre-merge
-            Some(B256::ZERO)
-        } else {
-            self.latest_valid_hash_for_invalid_payload(block.parent_hash())?
-        };
+        let latest_valid_hash = self.latest_valid_hash_for_invalid_payload(block.parent_hash())?;
 
         // keep track of the invalid header
         self.state.invalid_headers.insert(block.block_with_parent());
@@ -2925,7 +2920,7 @@ mod tests {
     use assert_matches::assert_matches;
     use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
     use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-    use reth_engine_primitives::ForkchoiceStatus;
+    use reth_engine_primitives::{ExecutionData, ForkchoiceStatus};
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
     use reth_ethereum_primitives::{Block, EthPrimitives};

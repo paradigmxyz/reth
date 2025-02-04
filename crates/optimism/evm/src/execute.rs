@@ -304,7 +304,7 @@ where
         receipts: &[N::Receipt],
         _requests: &Requests,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block.header(), &self.chain_spec.clone(), receipts)
+        validate_block_post_execution(block.header(), self.chain_spec.clone(), receipts)
     }
 }
 

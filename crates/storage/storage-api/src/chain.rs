@@ -1,6 +1,8 @@
 use crate::{DBProvider, OmmersProvider, StorageLocation};
+use alloc::vec::Vec;
 use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
+use core::marker::PhantomData;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -83,7 +85,7 @@ impl<T, Provider, Primitives: FullNodePrimitives> ChainStorageReader<Provider, P
 
 /// Ethereum storage implementation.
 #[derive(Debug, Clone, Copy)]
-pub struct EthStorage<T = TransactionSigned, H = Header>(std::marker::PhantomData<(T, H)>);
+pub struct EthStorage<T = TransactionSigned, H = Header>(PhantomData<(T, H)>);
 
 impl<T, H> Default for EthStorage<T, H> {
     fn default() -> Self {

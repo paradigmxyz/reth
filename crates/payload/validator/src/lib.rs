@@ -115,9 +115,9 @@ impl<ChainSpec: EthereumHardforks> ExecutionPayloadValidator<ChainSpec> {
         &self,
         payload: ExecutionData,
     ) -> Result<SealedBlock<reth_primitives::Block<T>>, PayloadError> {
-        let expected_hash = payload.block_hash();
-
         let ExecutionData { payload, sidecar } = payload;
+
+        let expected_hash = payload.block_hash();
 
         // First parse the block
         let sealed_block = payload.try_into_block_with_sidecar(&sidecar)?.seal_slow();

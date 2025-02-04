@@ -50,6 +50,7 @@ where
         + TryInto<ExecutionPayloadEnvelopeV3>
         + TryInto<ExecutionPayloadEnvelopeV4>,
 {
+    type ExecutionData = ExecutionData;
     type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
@@ -98,6 +99,7 @@ impl EthereumEngineValidator {
 
 impl PayloadValidator for EthereumEngineValidator {
     type Block = Block;
+    type ExecutionData = ExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
@@ -109,7 +111,7 @@ impl PayloadValidator for EthereumEngineValidator {
 
 impl<Types> EngineValidator<Types> for EthereumEngineValidator
 where
-    Types: EngineTypes<PayloadAttributes = EthPayloadAttributes>,
+    Types: EngineTypes<PayloadAttributes = EthPayloadAttributes, ExecutionData = ExecutionData>,
 {
     fn validate_version_specific_fields(
         &self,

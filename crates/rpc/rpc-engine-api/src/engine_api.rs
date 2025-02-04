@@ -4,17 +4,18 @@ use crate::{
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
     eip4844::BlobAndProofV1,
+    eip4895::Withdrawals,
     eip7685::{Requests, RequestsOrHash},
 };
 use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
 use alloy_rpc_types_engine::{
     CancunPayloadFields, ClientVersionV1, ExecutionPayload, ExecutionPayloadBodiesV1,
-    ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3,
-    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus, PraguePayloadFields,
-    TransitionConfiguration,
+    ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
+    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    PraguePayloadFields, TransitionConfiguration,
 };
 use async_trait::async_trait;
-use jsonrpsee_core::RpcResult;
+use jsonrpsee_core::{server::RpcModule, RpcResult};
 use parking_lot::Mutex;
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::{
@@ -25,8 +26,8 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, PayloadBuilderAttributes,
     PayloadOrAttributes,
 };
-use reth_rpc_api::EngineApiServer;
-use reth_rpc_types_compat::engine::payload::convert_to_payload_body_v1;
+use reth_primitives_traits::{Block, BlockBody};
+use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -78,7 +79,7 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec>
     EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
-    EngineT: EngineTypes,
+    EngineT: EngineTypes<ExecutionData = ExecutionData>,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
@@ -553,7 +554,11 @@ where
         start: BlockNumber,
         count: u64,
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
-        self.get_payload_bodies_by_range_with(start, count, convert_to_payload_body_v1).await
+        self.get_payload_bodies_by_range_with(start, count, |block| ExecutionPayloadBodyV1 {
+            transactions: block.body().encoded_2718_transactions(),
+            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+        })
+        .await
     }
 
     /// Called to retrieve execution payload bodies by hashes.
@@ -599,7 +604,11 @@ where
         &self,
         hashes: Vec<BlockHash>,
     ) -> EngineApiResult<ExecutionPayloadBodiesV1> {
-        self.get_payload_bodies_by_hash_with(hashes, convert_to_payload_body_v1).await
+        self.get_payload_bodies_by_hash_with(hashes, |block| ExecutionPayloadBodyV1 {
+            transactions: block.body().encoded_2718_transactions(),
+            withdrawals: block.body().withdrawals().cloned().map(Withdrawals::into_inner),
+        })
+        .await
     }
 
     /// Called to verify network configuration parameters and ensure that Consensus and Execution
@@ -739,7 +748,7 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
     for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
-    EngineT: EngineTypes,
+    EngineT: EngineTypes<ExecutionData = ExecutionData>,
     Pool: TransactionPool + 'static,
     Validator: EngineValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
@@ -1008,6 +1017,17 @@ where
             .tx_pool
             .get_blobs_for_versioned_hashes(&versioned_hashes)
             .map_err(|err| EngineApiError::Internal(Box::new(err)))?)
+    }
+}
+
+impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
+    for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
+where
+    EngineT: EngineTypes,
+    Self: EngineApiServer<EngineT>,
+{
+    fn into_rpc_module(self) -> RpcModule<()> {
+        self.into_rpc().remove_context()
     }
 }
 
