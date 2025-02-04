@@ -703,7 +703,6 @@ mod tests {
     use alloy_consensus::TxType;
     use alloy_primitives::{Address, B256};
     use reth_ethereum_primitives::Receipt;
-    use reth_primitives::Receipts;
     use revm::primitives::{AccountInfo, HashMap};
 
     // TODO: this is temporary, until we fully switch over to `reth_ethereum_primitives` for the
@@ -765,7 +764,7 @@ mod tests {
                 vec![vec![(Address::new([2; 20]), None, vec![])]],
                 vec![],
             ),
-            vec![vec![]].into(),
+            vec![vec![]],
             1,
             vec![],
         );
@@ -781,7 +780,7 @@ mod tests {
                 vec![vec![(Address::new([3; 20]), None, vec![])]],
                 vec![],
             ),
-            vec![vec![]].into(),
+            vec![vec![]],
             2,
             vec![],
         );
@@ -884,7 +883,7 @@ mod tests {
         };
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts { receipt_vec: vec![vec![receipt1.clone()], vec![receipt2]] };
+        let receipts = vec![vec![receipt1.clone()], vec![receipt2]];
 
         // Create an ExecutionOutcome object with the created bundle, receipts, an empty requests
         // vector, and first_block set to 10
@@ -909,7 +908,7 @@ mod tests {
         // Create an ExecutionOutcome object with a single receipt vector containing receipt1
         let execution_outcome1 = ExecutionOutcome {
             bundle: Default::default(),
-            receipts: Receipts { receipt_vec: vec![vec![receipt1]] },
+            receipts: vec![vec![receipt1]],
             requests: vec![],
             first_block: 10,
         };

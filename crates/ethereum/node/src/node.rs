@@ -9,6 +9,7 @@ pub use reth_ethereum_engine_primitives::EthereumEngineValidator;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
+use reth_ethereum_primitives::{EthPrimitives, PooledTransaction};
 use reth_evm::execute::BasicBlockExecutorProvider;
 use reth_evm_ethereum::execute::EthExecutionStrategyFactory;
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
@@ -21,8 +22,7 @@ use reth_node_builder::{
     rpc::{EngineValidatorBuilder, RpcAddOns},
     BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadTypes,
 };
-use reth_primitives::{EthPrimitives, PooledTransaction};
-use reth_provider::{CanonStateSubscriptions, EthStorage};
+use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
 use reth_rpc::EthApi;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -62,6 +62,41 @@ impl EthereumNode {
             .network(EthereumNetworkBuilder::default())
             .executor(EthereumExecutorBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
+    }
+
+    /// Instantiates the [`ProviderFactoryBuilder`] for an ethereum node.
+    ///
+    /// # Open a Providerfactory in read-only mode from a datadir
+    ///
+    /// See also: [`ProviderFactoryBuilder`] and
+    /// [`ReadOnlyConfig`](reth_provider::providers::ReadOnlyConfig).
+    ///
+    /// ```no_run
+    /// use reth_chainspec::MAINNET;
+    /// use reth_node_ethereum::EthereumNode;
+    ///
+    /// let factory = EthereumNode::provider_factory_builder()
+    ///     .open_read_only(MAINNET.clone(), "datadir")
+    ///     .unwrap();
+    /// ```
+    ///
+    /// # Open a Providerfactory manually with with all required components
+    ///
+    /// ```no_run
+    /// use reth_chainspec::ChainSpecBuilder;
+    /// use reth_db::open_db_read_only;
+    /// use reth_node_ethereum::EthereumNode;
+    /// use reth_provider::providers::StaticFileProvider;
+    /// use std::{path::Path, sync::Arc};
+    ///
+    /// let factory = EthereumNode::provider_factory_builder()
+    ///     .db(Arc::new(open_db_read_only(Path::new("db"), Default::default()).unwrap()))
+    ///     .chainspec(ChainSpecBuilder::mainnet().build().into())
+    ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
+    ///     .build_provider_factory();
+    /// ```
+    pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
+        ProviderFactoryBuilder::default()
     }
 }
 
@@ -161,16 +196,12 @@ where
         let data_dir = ctx.config().datadir();
         let pool_config = ctx.pool_config();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
-        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.chain_spec())
+        let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
             .with_local_transactions_config(pool_config.local_transactions_config.clone())
             .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-            .build_with_tasks(
-                ctx.provider().clone(),
-                ctx.task_executor().clone(),
-                blob_store.clone(),
-            );
+            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
         let transaction_pool =
             reth_transaction_pool::Pool::eth_pool(validator, blob_store, pool_config);
@@ -252,7 +283,7 @@ impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type Consensus = Arc<dyn FullConsensus<Error = ConsensusError>>;
+    type Consensus = Arc<dyn FullConsensus<EthPrimitives, Error = ConsensusError>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
         Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))

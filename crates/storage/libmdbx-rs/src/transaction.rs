@@ -586,8 +586,9 @@ impl TransactionPtr {
             tracing::debug!(
                 target: "libmdbx",
                 txn = %self.txn as usize,
-                backtrace = %std::backtrace::Backtrace::force_capture(),
-                "Transaction lock is already acquired, blocking..."
+                backtrace = %std::backtrace::Backtrace::capture(),
+                "Transaction lock is already acquired, blocking...
+                To display the full backtrace, run with `RUST_BACKTRACE=full` env variable."
             );
             self.lock.lock()
         }

@@ -9,20 +9,20 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
-use alloy_consensus::{Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{BlockHeader, Header, Transaction, Typed2718, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{
-    eip4844::MAX_DATA_GAS_PER_BLOCK, eip6110, eip7685::Requests, eip7840::BlobParams,
-    merge::BEACON_NONCE,
+    eip4844::MAX_DATA_GAS_PER_BLOCK, eip6110, eip7685::Requests, merge::BEACON_NONCE,
 };
 use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     commit_withdrawals, is_better_payload, BuildArguments, BuildOutcome, PayloadBuilder,
     PayloadConfig,
 };
-use reth_chainspec::{ChainSpec, ChainSpecProvider};
+use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec};
 use reth_errors::RethError;
 use reth_evm::{
-    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, NextBlockEnvAttributes,
+    env::EvmEnv, system_calls::SystemCaller, ConfigureEvm, Evm, EvmError, InvalidTxError,
+    NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::{eip6110::parse_deposits_from_receipts, EthEvmConfig};
 use reth_execution_types::ExecutionOutcome;
@@ -44,7 +44,7 @@ use reth_transaction_pool::{
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
-    primitives::{EVMError, InvalidTransaction, ResultAndState},
+    primitives::ResultAndState,
     DatabaseCommit,
 };
 use std::sync::Arc;
@@ -258,7 +258,7 @@ where
                 // invalid, which removes its dependent transactions from
                 // the iterator. This is similar to the gas limit condition
                 // for regular transactions above.
-                trace!(target: "payload_builder", tx=?tx.hash, ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
+                trace!(target: "payload_builder", tx=?tx.hash(), ?sum_blob_gas_used, ?tx_blob_gas, "skipping blob transaction because it would exceed the max data gas per block");
                 best_txs.mark_invalid(
                     &pool_tx,
                     InvalidPoolTransactionError::ExceedsGasLimit(
@@ -276,30 +276,25 @@ where
         let ResultAndState { result, state } = match evm.transact(tx_env) {
             Ok(res) => res,
             Err(err) => {
-                match err {
-                    EVMError::Transaction(err) => {
-                        if matches!(err, InvalidTransaction::NonceTooLow { .. }) {
-                            // if the nonce is too low, we can skip this transaction
-                            trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
-                        } else {
-                            // if the transaction is invalid, we can skip it and all of its
-                            // descendants
-                            trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(
-                                &pool_tx,
-                                InvalidPoolTransactionError::Consensus(
-                                    InvalidTransactionError::TxTypeNotSupported,
-                                ),
-                            );
-                        }
-
-                        continue
+                if let Some(err) = err.as_invalid_tx_err() {
+                    if err.is_nonce_too_low() {
+                        // if the nonce is too low, we can skip this transaction
+                        trace!(target: "payload_builder", %err, ?tx, "skipping nonce too low transaction");
+                    } else {
+                        // if the transaction is invalid, we can skip it and all of its
+                        // descendants
+                        trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
+                        best_txs.mark_invalid(
+                            &pool_tx,
+                            InvalidPoolTransactionError::Consensus(
+                                InvalidTransactionError::TxTypeNotSupported,
+                            ),
+                        );
                     }
-                    err => {
-                        // this is an error that we should treat as fatal for this attempt
-                        return Err(PayloadBuilderError::EvmExecutionError(err))
-                    }
+                    continue
                 }
+                // this is an error that we should treat as fatal for this attempt
+                return Err(PayloadBuilderError::evm(err))
             }
         };
 
@@ -385,7 +380,7 @@ where
     let requests_hash = requests.as_ref().map(|requests| requests.requests_hash());
     let execution_outcome = ExecutionOutcome::new(
         db.take_bundle(),
-        vec![receipts].into(),
+        vec![receipts],
         block_number,
         vec![requests.clone().unwrap_or_default()],
     );
@@ -423,17 +418,13 @@ where
             .map_err(PayloadBuilderError::other)?;
 
         excess_blob_gas = if chain_spec.is_cancun_active_at_timestamp(parent_header.timestamp) {
-            let blob_params = if chain_spec.is_prague_active_at_timestamp(attributes.timestamp) {
-                BlobParams::prague()
-            } else {
-                // cancun
-                BlobParams::cancun()
-            };
-            parent_header.next_block_excess_blob_gas(blob_params)
+            parent_header.maybe_next_block_excess_blob_gas(
+                chain_spec.blob_params_at_timestamp(attributes.timestamp),
+            )
         } else {
             // for the first post-fork block, both parent.blob_gas_used and
             // parent.excess_blob_gas are evaluated as 0
-            Some(alloy_eips::eip4844::calc_excess_blob_gas(0, 0))
+            Some(alloy_eips::eip7840::BlobParams::cancun().next_block_excess_blob_gas(0, 0))
         };
 
         blob_gas_used = Some(sum_blob_gas_used);

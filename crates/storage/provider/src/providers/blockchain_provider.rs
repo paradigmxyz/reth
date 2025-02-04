@@ -928,7 +928,7 @@ mod tests {
                     let senders = block.senders().expect("failed to recover senders");
                     let block_receipts = receipts.get(block.number as usize).unwrap().clone();
                     let execution_outcome =
-                        ExecutionOutcome { receipts: block_receipts.into(), ..Default::default() };
+                        ExecutionOutcome { receipts: vec![block_receipts], ..Default::default() };
 
                     ExecutedBlockWithTrieUpdates::new(
                         Arc::new(RecoveredBlock::new_sealed(block.clone(), senders)),

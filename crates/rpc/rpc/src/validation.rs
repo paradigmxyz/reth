@@ -14,11 +14,14 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus, PostExecutionInput};
-use reth_engine_primitives::PayloadValidator;
+use reth_engine_primitives::{ExecutionData, PayloadValidator};
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
-use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_primitives_traits::{constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock};
+use reth_metrics::{metrics, metrics::Gauge, Metrics};
+use reth_primitives::{GotExpected, NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{
+    constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, SealedBlock, SealedHeaderFor,
+};
 use reth_provider::{BlockExecutionOutput, BlockReaderIdExt, StateProviderFactory};
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase};
 use reth_rpc_api::BlockSubmissionValidationApiServer;
@@ -48,7 +51,10 @@ where
         config: ValidationApiConfig,
         task_spawner: Box<dyn TaskSpawner>,
         payload_validator: Arc<
-            dyn PayloadValidator<Block = <E::Primitives as NodePrimitives>::Block>,
+            dyn PayloadValidator<
+                Block = <E::Primitives as NodePrimitives>::Block,
+                ExecutionData = ExecutionData,
+            >,
         >,
     ) -> Self {
         let ValidationApiConfig { disallow, validation_window } = config;
@@ -62,8 +68,10 @@ where
             validation_window,
             cached_state: Default::default(),
             task_spawner,
+            metrics: Default::default(),
         });
 
+        inner.metrics.disallow_size.set(inner.disallow.len() as f64);
         Self { inner }
     }
 
@@ -141,7 +149,6 @@ where
         }
         self.consensus.validate_header_against_parent(block.sealed_header(), &latest_header)?;
         self.validate_gas_limit(registered_gas_limit, &latest_header, block.sealed_header())?;
-
         let latest_header_hash = latest_header.hash();
         let state_provider = self.provider.state_by_block_hash(latest_header_hash)?;
 
@@ -188,10 +195,10 @@ where
         Ok(())
     }
 
-    /// Ensures that fields of [`BidTrace`] match the fields of the [`SealedHeader`].
+    /// Ensures that fields of [`BidTrace`] match the fields of the [`SealedHeaderFor`].
     fn validate_message_against_header(
         &self,
-        header: &SealedHeader<<E::Primitives as NodePrimitives>::BlockHeader>,
+        header: &SealedHeaderFor<E::Primitives>,
         message: &BidTrace,
     ) -> Result<(), ValidationApiError> {
         if header.hash() != message.block_hash {
@@ -226,8 +233,8 @@ where
     fn validate_gas_limit(
         &self,
         registered_gas_limit: u64,
-        parent_header: &SealedHeader<<E::Primitives as NodePrimitives>::BlockHeader>,
-        header: &SealedHeader<<E::Primitives as NodePrimitives>::BlockHeader>,
+        parent_header: &SealedHeaderFor<E::Primitives>,
+        header: &SealedHeaderFor<E::Primitives>,
     ) -> Result<(), ValidationApiError> {
         let max_gas_limit =
             parent_header.gas_limit() + parent_header.gas_limit() / GAS_LIMIT_BOUND_DIVISOR - 1;
@@ -344,13 +351,13 @@ where
     ) -> Result<(), ValidationApiError> {
         let block = self
             .payload_validator
-            .ensure_well_formed_payload(
-                ExecutionPayload::V3(request.request.execution_payload),
-                ExecutionPayloadSidecar::v3(CancunPayloadFields {
+            .ensure_well_formed_payload(ExecutionData {
+                payload: ExecutionPayload::V3(request.request.execution_payload),
+                sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
                     versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
                 }),
-            )?
+            })?
             .try_recover()
             .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
 
@@ -369,9 +376,9 @@ where
     ) -> Result<(), ValidationApiError> {
         let block = self
             .payload_validator
-            .ensure_well_formed_payload(
-                ExecutionPayload::V3(request.request.execution_payload),
-                ExecutionPayloadSidecar::v4(
+            .ensure_well_formed_payload(ExecutionData {
+                payload: ExecutionPayload::V3(request.request.execution_payload),
+                sidecar: ExecutionPayloadSidecar::v4(
                     CancunPayloadFields {
                         parent_beacon_block_root: request.parent_beacon_block_root,
                         versioned_hashes: self
@@ -383,7 +390,7 @@ where
                         ),
                     },
                 ),
-            )?
+            })?
             .try_recover()
             .map_err(|_| ValidationApiError::InvalidTransactionSignature)?;
 
@@ -464,7 +471,12 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     /// Consensus implementation.
     consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
     /// Execution payload validator.
-    payload_validator: Arc<dyn PayloadValidator<Block = <E::Primitives as NodePrimitives>::Block>>,
+    payload_validator: Arc<
+        dyn PayloadValidator<
+            Block = <E::Primitives as NodePrimitives>::Block,
+            ExecutionData = ExecutionData,
+        >,
+    >,
     /// Block executor factory.
     executor_provider: E,
     /// Set of disallowed addresses
@@ -478,6 +490,8 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     cached_state: RwLock<(B256, CachedReads)>,
     /// Task spawner for blocking operations
     task_spawner: Box<dyn TaskSpawner>,
+    /// Validation metrics
+    metrics: ValidationMetrics,
 }
 
 /// Configuration for validation API.
@@ -536,4 +550,12 @@ pub enum ValidationApiError {
     Execution(#[from] BlockExecutionError),
     #[error(transparent)]
     Payload(#[from] PayloadError),
+}
+
+/// Metrics for the validation endpoint.
+#[derive(Metrics)]
+#[metrics(scope = "builder.validation")]
+pub(crate) struct ValidationMetrics {
+    /// The number of entries configured in the builder validation disallow list.
+    pub(crate) disallow_size: Gauge,
 }
