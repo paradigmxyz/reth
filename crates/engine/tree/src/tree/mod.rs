@@ -2567,11 +2567,8 @@ where
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
 
-        // apply state updates to cache and save it
-        let Ok(saved_cache) = state_provider.save_cache(sealed_block.hash(), &output.state) else {
-            todo!("error bubbling for save_cache errors")
-        };
-        self.most_recent_cache = Some(saved_cache);
+        // apply state updates to cache and save it (if saving was successful)
+        self.most_recent_cache = state_provider.save_cache(sealed_block.hash(), &output.state).ok();
 
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
