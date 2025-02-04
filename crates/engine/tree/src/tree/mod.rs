@@ -51,7 +51,7 @@ use reth_provider::{
     ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
-use reth_revm::{cancelled::CancelTask, database::StateProviderDatabase};
+use reth_revm::{cancelled::ManualCancel, database::StateProviderDatabase};
 use reth_stages_api::ControlFlow;
 use reth_trie::{
     trie_cursor::InMemoryTrieCursorFactory, updates::TrieUpdates, HashedPostState,
@@ -2375,7 +2375,7 @@ where
             self.is_descendant_of_persisting_blocks(block.header());
 
         // Atomic bool for letting the prewarm tasks know when to stop
-        let cancel_execution = CancelTask::default();
+        let cancel_execution = ManualCancel::default();
 
         let (state_root_handle, state_root_task_config, state_root_sender, state_hook) =
             if is_descendant_of_persisting_blocks && self.config.use_state_root_task() {
@@ -2638,7 +2638,7 @@ where
         caches: ProviderCaches,
         cache_metrics: CachedStateMetrics,
         state_root_sender: Option<Sender<StateRootMessage>>,
-        cancel_execution: CancelTask,
+        cancel_execution: ManualCancel,
     ) -> Result<(), InsertBlockErrorKind> {
         let Some(state_provider) = self.state_provider(block.parent_hash())? else {
             trace!(target: "engine::tree", parent=%block.parent_hash(), "Could not get state provider for prewarm");

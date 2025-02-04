@@ -33,7 +33,7 @@ use reth_provider::{
     StageCheckpointReader, StateProviderFactory,
 };
 use reth_revm::{
-    cached::CachedReads, cancelled::Cancelled, database::StateProviderDatabase,
+    cached::CachedReads, cancelled::CancelOnDrop, database::StateProviderDatabase,
     primitives::KzgSettings,
 };
 use reth_stages::StageId;
@@ -220,7 +220,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             transaction_pool,
             CachedReads::default(),
             payload_config,
-            Cancelled::default(),
+            CancelOnDrop::default(),
             None,
         );
 

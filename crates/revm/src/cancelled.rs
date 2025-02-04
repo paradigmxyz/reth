@@ -7,18 +7,18 @@ use core::sync::atomic::AtomicBool;
 ///
 /// This is most useful when a payload job needs to be cancelled.
 #[derive(Default, Clone, Debug)]
-pub struct Cancelled(Arc<AtomicBool>);
+pub struct CancelOnDrop(Arc<AtomicBool>);
 
-// === impl Cancelled ===
+// === impl CancelOnDrop ===
 
-impl Cancelled {
+impl CancelOnDrop {
     /// Returns true if the job was cancelled.
     pub fn is_cancelled(&self) -> bool {
         self.0.load(core::sync::atomic::Ordering::Relaxed)
     }
 }
 
-impl Drop for Cancelled {
+impl Drop for CancelOnDrop {
     fn drop(&mut self) {
         self.0.store(true, core::sync::atomic::Ordering::Relaxed);
     }
@@ -32,17 +32,17 @@ impl Drop for Cancelled {
 /// This is useful in prewarming, when an external signal is received to cancel many prewarming
 /// tasks.
 #[derive(Default, Clone, Debug)]
-pub struct CancelTask(Arc<AtomicBool>);
+pub struct ManualCancel(Arc<AtomicBool>);
 
-// === impl CancelTask ===
+// === impl ManualCancel ===
 
-impl CancelTask {
+impl ManualCancel {
     /// Returns true if the job was cancelled.
     pub fn is_cancelled(&self) -> bool {
         self.0.load(core::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Drops the [`CancelTask`], setting the cancelled flag to true.
+    /// Drops the [`ManualCancel`], setting the cancelled flag to true.
     pub fn cancel(self) {
         self.0.store(true, core::sync::atomic::Ordering::Relaxed);
     }
@@ -54,19 +54,19 @@ mod tests {
 
     #[test]
     fn test_default_cancelled() {
-        let c = Cancelled::default();
+        let c = CancelOnDrop::default();
         assert!(!c.is_cancelled());
     }
 
     #[test]
     fn test_default_cancel_task() {
-        let c = CancelTask::default();
+        let c = ManualCancel::default();
         assert!(!c.is_cancelled());
     }
 
     #[test]
     fn test_set_cancel_task() {
-        let c = CancelTask::default();
+        let c = ManualCancel::default();
         assert!(!c.is_cancelled());
         let c2 = c.clone();
         let c3 = c.clone();
@@ -77,13 +77,12 @@ mod tests {
 
     #[test]
     fn test_cancel_task_multiple_threads() {
-        let c = CancelTask::default();
+        let c = ManualCancel::default();
         let cloned_cancel = c.clone();
 
         // we want to make sure that:
         // * we can spawn tasks that do things
         // * those tasks can run to completion and the flag remains unset unless we call cancel
-        // * this does not use std::thread::sleep
         let mut handles = vec![];
         for _ in 0..10 {
             let c = c.clone();

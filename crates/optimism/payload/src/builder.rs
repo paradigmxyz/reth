@@ -39,7 +39,7 @@ use reth_provider::{
     StateRootProvider,
 };
 use reth_revm::{
-    cancelled::Cancelled, database::StateProviderDatabase, witness::ExecutionWitnessRecord,
+    cancelled::CancelOnDrop, database::StateProviderDatabase, witness::ExecutionWitnessRecord,
 };
 use reth_transaction_pool::{
     pool::BestPayloadTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
@@ -627,7 +627,7 @@ pub struct OpPayloadBuilderCtx<EvmConfig: ConfigureEvmEnv, N: NodePrimitives> {
     /// Evm Settings
     pub evm_env: EvmEnv<EvmConfig::Spec>,
     /// Marker to check whether the job has been cancelled.
-    pub cancel: Cancelled,
+    pub cancel: CancelOnDrop,
     /// The currently best payload.
     pub best_payload: Option<OpBuiltPayload<N>>,
     /// Receipt builder.
