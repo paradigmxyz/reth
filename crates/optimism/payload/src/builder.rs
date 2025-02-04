@@ -38,7 +38,9 @@ use reth_provider::{
     HashedPostStateProvider, ProviderError, StateProofProvider, StateProviderFactory,
     StateRootProvider,
 };
-use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
+use reth_revm::{
+    cancelled::Cancelled, database::StateProviderDatabase, witness::ExecutionWitnessRecord,
+};
 use reth_transaction_pool::{
     pool::BestPayloadTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
 };
