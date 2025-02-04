@@ -59,6 +59,7 @@ std = [
     "reth-optimism-forks/std",
     "reth-optimism-chainspec/std",
     "reth-optimism-primitives/std",
+    "reth-storage-api/std",
     "alloy-chains/std",
     "alloy-eips/std",
     "alloy-primitives/std",
