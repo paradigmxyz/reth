@@ -11,7 +11,7 @@ pub type PoolResult<T> = Result<T, PoolError>;
 ///
 /// For example during validation
 /// [`TransactionValidator::validate_transaction`](crate::validate::TransactionValidator::validate_transaction)
-pub trait PoolTransactionError: core::error::Error + Send + Sync {
+pub trait PoolTransactionError: core::error::Error + Send + Sync + 'static {
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
     /// context of the transaction pool and warrants peer penalization.
     ///
@@ -333,7 +333,7 @@ impl InvalidPoolTransactionError {
 
     /// Returns a reference to the [`InvalidPoolTransactionError::Other`] value if this type is a
     /// [`InvalidPoolTransactionError::Other`] of that type. Returns None otherwise.
-    pub fn downcast_other<T: core::error::Error + 'static>(&self) -> Option<&T> {
+    pub fn downcast_other_ref<T: core::error::Error + 'static>(&self) -> Option<&T> {
         let other = self.as_other()?;
         other.downcast_ref()
     }
@@ -364,6 +364,6 @@ mod tests {
         let err = InvalidPoolTransactionError::Other(Box::new(E));
         assert!(err.is_other::<E>());
 
-        assert!(err.downcast_other::<E>().is_some());
+        assert!(err.downcast_other_ref::<E>().is_some());
     }
 }
