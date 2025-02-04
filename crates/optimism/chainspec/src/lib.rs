@@ -468,7 +468,6 @@ impl OpGenesisInfo {
 
 #[cfg(test)]
 mod tests {
-    use alloc::sync::Arc;
     use alloy_genesis::{ChainConfig, Genesis};
     use alloy_primitives::b256;
     use reth_chainspec::{test_fork_ids, BaseFeeParams, BaseFeeParamsKind};
