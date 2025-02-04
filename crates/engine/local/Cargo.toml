@@ -15,7 +15,6 @@ reth-consensus.workspace = true
 reth-engine-primitives.workspace = true
 reth-engine-service.workspace = true
 reth-engine-tree.workspace = true
-reth-node-api.workspace = true
 reth-node-types.workspace = true
 reth-evm.workspace = true
 reth-ethereum-engine-primitives.workspace = true

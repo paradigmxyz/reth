@@ -7,7 +7,7 @@ use crate::{
     components::NodeComponentsBuilder,
     node::FullNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
-    BlockReaderFor, EngineNodeLauncher, LaunchNode, LocalEngineNodeLauncher, Node, NodeHandle,
+    BlockReaderFor, EngineNodeLauncher, LaunchNode, Node,
 };
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
@@ -21,13 +21,12 @@ use reth_network::{
     NetworkHandle, NetworkManager, NetworkPrimitives,
 };
 use reth_node_api::{
-    FullNodeComponents, FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns,
-    NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine,
+    FullNodePrimitives, FullNodeTypes, FullNodeTypesAdapter, NodeAddOns, NodeTypes,
+    NodeTypesWithDBAdapter, NodeTypesWithEngine,
 };
 use reth_node_core::{
     cli::config::{PayloadBuilderConfig, RethTransactionPoolConfig},
     dirs::{ChainPath, DataDirPath},
-    exit::NodeExitFuture,
     node_config::NodeConfig,
     primitives::Head,
 };
@@ -344,14 +343,9 @@ where
         self,
         node: N,
     ) -> eyre::Result<
-        LaunchedNode<
-            <EngineNodeLauncher as LaunchNode<
-                NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
-            >>::Node,
-            <LocalEngineNodeLauncher as LaunchNode<
-                NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
-            >>::Node,
-        >,
+        <EngineNodeLauncher as LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
+        >>::Node,
     >
     where
         N: Node<RethFullAdapter<DB, N>, ChainSpec = ChainSpec> + NodeTypesForProvider,
@@ -363,9 +357,6 @@ where
         >,
         N::Primitives: FullNodePrimitives,
         EngineNodeLauncher: LaunchNode<
-            NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
-        >,
-        LocalEngineNodeLauncher: LaunchNode<
             NodeBuilderWithComponents<RethFullAdapter<DB, N>, N::ComponentsBuilder, N::AddOns>,
         >,
     {
@@ -552,32 +543,6 @@ where
     }
 }
 
-pub enum LaunchedNode<T1, T2> {
-    Engine(T1),
-    Local(T2),
-}
-
-impl<T1: HasNodeExitFuture, T2: HasNodeExitFuture> LaunchedNode<T1, T2> {
-    pub fn node_exit_future(self) -> NodeExitFuture {
-        match self {
-            LaunchedNode::Engine(node) => node.node_exit_future(),
-            LaunchedNode::Local(node) => node.node_exit_future(),
-        }
-    }
-}
-
-trait HasNodeExitFuture {
-    // Change to return owned NodeExitFuture instead of reference
-    fn node_exit_future(self) -> NodeExitFuture;
-}
-
-impl<N: FullNodeComponents, AO: RethRpcAddOns<N>> HasNodeExitFuture for NodeHandle<N, AO> {
-    // Update implementation to return owned NodeExitFuture
-    fn node_exit_future(self) -> NodeExitFuture {
-        self.node_exit_future
-    }
-}
-
 impl<T, DB, CB, AO> WithLaunchContext<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>
 where
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
@@ -585,20 +550,14 @@ where
     CB: NodeComponentsBuilder<RethFullAdapter<DB, T>>,
     AO: RethRpcAddOns<NodeAdapter<RethFullAdapter<DB, T>, CB::Components>>,
     EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>,
-    LocalEngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>>,
 {
     /// Launches the node with the [`EngineNodeLauncher`] that sets up engine API consensus and rpc
     pub async fn launch(
         self,
     ) -> eyre::Result<
-        LaunchedNode<
-            <EngineNodeLauncher as LaunchNode<
-                NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>,
-            >>::Node,
-            <LocalEngineNodeLauncher as LaunchNode<
-                NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>,
-            >>::Node,
-        >,
+        <EngineNodeLauncher as LaunchNode<
+            NodeBuilderWithComponents<RethFullAdapter<DB, T>, CB, AO>,
+        >>::Node,
     > {
         let Self { builder, task_executor } = self;
 
@@ -610,21 +569,9 @@ where
                 builder.config.engine.state_root_task_compare_updates,
             );
 
-        if builder.config.dev.dev {
-            let launcher = LocalEngineNodeLauncher::new(
-                task_executor,
-                builder.config.datadir(),
-                engine_tree_config,
-            );
-            Ok(LaunchedNode::Local(builder.launch_with(launcher).await?))
-        } else {
-            let launcher = EngineNodeLauncher::new(
-                task_executor,
-                builder.config.datadir(),
-                engine_tree_config,
-            );
-            Ok(LaunchedNode::Engine(builder.launch_with(launcher).await?))
-        }
+        let launcher =
+            EngineNodeLauncher::new(task_executor, builder.config.datadir(), engine_tree_config);
+        builder.launch_with(launcher).await
     }
 }
 

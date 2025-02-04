@@ -122,20 +122,6 @@ impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
 
 /// A builder that can return the current payload attribute.
 pub trait PayloadAttributesBuilder<Attributes>: Send + Sync + 'static {
-    /// Return builder
-    fn as_builder(&self) -> &Self
-    where
-        Self: Sized,
-    {
-        self
-    }
-
     /// Return a new payload attribute from the builder.
     fn build(&self, timestamp: u64) -> Attributes;
-}
-
-impl<T: 'static> PayloadAttributesBuilder<T> for Box<dyn PayloadAttributesBuilder<T>> {
-    fn build(&self, timestamp: u64) -> T {
-        (**self).build(timestamp)
-    }
 }

@@ -53,14 +53,12 @@ use reth_basic_payload_builder::{
     BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
     PayloadBuilder, PayloadConfig,
 };
-use reth_chainspec::{Chain, ChainSpec, ChainSpecProvider, EthereumHardforks};
-use reth_engine_local::LocalPayloadAttributesBuilder;
+use reth_chainspec::{Chain, ChainSpec, ChainSpecProvider};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_node_api::{
     payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
     validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
-    FullNodeComponents, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilderAttributes,
-    PayloadValidator,
+    FullNodeComponents, PayloadAttributes, PayloadBuilderAttributes, PayloadValidator,
 };
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::{
@@ -89,33 +87,6 @@ pub struct CustomPayloadAttributes {
     /// A custom field
     pub custom: u64,
 }
-
-// TODO(mattsse): remove this tmp workaround
-// impl UnsupportedLocalAttributes for CustomPayloadAttributes {}
-
-// impl PayloadAttributesBuilder<CustomPayloadAttributes> for
-// LocalPayloadAttributesBuilder<ChainSpec> where
-//     ChainSpec: Send + Sync + EthereumHardforks + 'static,
-// {
-//     fn build(&self, timestamp: u64) -> CustomPayloadAttributes {
-//         CustomPayloadAttributes {
-//             inner: EthPayloadAttributes {
-//                 timestamp,
-//                 prev_randao: B256::random(),
-//                 suggested_fee_recipient: Address::random(),
-//                 withdrawals: self
-//                     .chain_spec()
-//                     .is_shanghai_active_at_timestamp(timestamp)
-//                     .then(Default::default),
-//                 parent_beacon_block_root: self
-//                     .chain_spec()
-//                     .is_cancun_active_at_timestamp(timestamp)
-//                     .then(B256::random),
-//             },
-//             custom: 0,
-//         }
-//     }
-// }
 
 /// Custom error type used in payload attributes validation
 #[derive(Debug, Error)]
@@ -491,12 +462,8 @@ async fn main() -> eyre::Result<()> {
         .build();
 
     // create node config
-    let mut node_config =
+    let node_config =
         NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
-
-    // node_config = node_config.dev();
-
-    println!("node_config: {:?}", node_config.dev.dev);
 
     let handle = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
@@ -506,5 +473,5 @@ async fn main() -> eyre::Result<()> {
 
     println!("Node started");
 
-    handle.node_exit_future().await
+    handle.node_exit_future.await
 }

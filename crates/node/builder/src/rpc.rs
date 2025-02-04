@@ -1,20 +1,17 @@
 //! Builder support for rpc components.
 
 use std::{
-    any::TypeId,
     fmt::{self, Debug},
     future::Future,
     marker::PhantomData,
     ops::{Deref, DerefMut},
 };
 
-use alloy_rpc_types::engine::{ClientVersionV1, PayloadAttributes};
+use alloy_rpc_types::engine::ClientVersionV1;
 use futures::TryFutureExt;
-use reth_chainspec::EthereumHardforks;
-use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineValidator, FullNodeComponents, FullNodeTypes, NodeAddOns,
-    NodeTypes, NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
+    AddOnsContext, BlockTy, EngineValidator, FullNodeComponents, NodeAddOns, NodeTypes,
+    NodeTypesWithEngine,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -605,63 +602,6 @@ where
 
     async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         self.engine_validator_builder.clone().build(ctx).await
-    }
-}
-
-/// Helper trait to provide [`PayloadAttributesBuilder`] on-demand.
-pub trait PayloadAttributesBuilderAddOn<Node: FullNodeComponents>: Send {
-    fn maybe_payload_attributes_builder(
-        &self,
-        ctx: &AddOnsContext<'_, Node>,
-    ) -> eyre::Result<Option<Box<dyn PayloadAttributesBuilder<
-        <<Node::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
-    >>>>;
-}
-
-impl<N, EthApi, EV> PayloadAttributesBuilderAddOn<N> for RpcAddOns<N, EthApi, EV>
-where
-    N: FullNodeComponents,
-    EthApi: EthApiTypes,
-    EV: EngineValidatorBuilder<N>,
-    <<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec: EthereumHardforks,
-    LocalPayloadAttributesBuilder<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>:
-        PayloadAttributesBuilder<
-            <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
-        >,
-{
-    fn maybe_payload_attributes_builder(
-        &self,
-        ctx: &AddOnsContext<'_, N>,
-    ) -> eyre::Result<
-        Option<
-            Box<
-                dyn PayloadAttributesBuilder<
-                    <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
-                >,
-            >,
-        >,
-    > {
-        if !ctx.config.dev.dev {
-            return Ok(None);
-        }
-
-        println!(
-            "Left type: {}\nRight type: {}",
-            std::any::type_name::<
-                <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
-            >(),
-            std::any::type_name::<PayloadAttributes>()
-        );
-
-        Ok(Some(Box::new(LocalPayloadAttributesBuilder::new(ctx.config.chain.clone()))))
-        // if TypeId::of::<
-        //     <<N::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadAttributes,
-        // >() == TypeId::of::<PayloadAttributes>()
-        // {
-        //     // Ok(None)
-        // } else {
-        //     Ok(None)
-        // }
     }
 }
 

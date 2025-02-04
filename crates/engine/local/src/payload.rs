@@ -4,9 +4,8 @@
 use alloy_primitives::{Address, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
-use reth_node_api::{AddOnsContext, FullNodeComponents, NodeTypesWithEngine, PayloadTypes};
 use reth_payload_primitives::PayloadAttributesBuilder;
-use std::{future::Future, sync::Arc};
+use std::sync::Arc;
 
 /// The attributes builder for local Ethereum payload.
 #[derive(Debug)]
@@ -19,11 +18,6 @@ impl<ChainSpec> LocalPayloadAttributesBuilder<ChainSpec> {
     /// Creates a new instance of the builder.
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
-    }
-
-    /// Returns the chain spec.
-    pub fn chain_spec(&self) -> &ChainSpec {
-        &self.chain_spec
     }
 }
 
@@ -66,18 +60,11 @@ where
     }
 }
 
-// / A temporary workaround to support local payload engine launcher for arbitrary payload
-// / attributes.
-// TODO(mattsse): This should be reworked so that LocalPayloadAttributesBuilder can be implemented
-// for any
-// pub trait UnsupportedLocalAttributes: Send + Sync + 'static {}
-
-// impl<T, ChainSpec> PayloadAttributesBuilder<T> for LocalPayloadAttributesBuilder<ChainSpec>
-// where
-//     ChainSpec: Send + Sync + 'static,
-//     T: UnsupportedLocalAttributes,
-// {
-//     fn build(&self, _: u64) -> T {
-//         panic!("Unsupported payload attributes")
-//     }
-// }
+impl<T, ChainSpec> PayloadAttributesBuilder<T> for LocalPayloadAttributesBuilder<ChainSpec>
+where
+    ChainSpec: Send + Sync + 'static,
+{
+    default fn build(&self, _: u64) -> T {
+        panic!("Unsupported payload attributes")
+    }
+}

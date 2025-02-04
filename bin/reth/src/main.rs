@@ -20,7 +20,7 @@ fn main() {
     if let Err(err) = Cli::<EthereumChainSpecParser>::parse().run(|builder, _| async move {
         info!(target: "reth::cli", "Launching node");
         let handle = builder.launch_node(EthereumNode::default()).await?;
-        handle.node_exit_future().await
+        handle.node_exit_future.await
     }) {
         eprintln!("Error: {err:?}");
         std::process::exit(1);

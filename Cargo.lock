@@ -7102,7 +7102,6 @@ dependencies = [
  "reth-engine-tree",
  "reth-ethereum-engine-primitives",
  "reth-evm",
- "reth-node-api",
  "reth-node-types",
  "reth-payload-builder",
  "reth-payload-builder-primitives",
