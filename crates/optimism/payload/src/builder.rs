@@ -756,7 +756,7 @@ impl<EvmConfig: ConfigureEvmEnv, N: NodePrimitives> OpPayloadBuilderCtx<EvmConfi
         self.chain_spec.is_holocene_active_at_timestamp(self.attributes().timestamp())
     }
 
-    /// Returns true if holocene is active for the payload.
+    /// Returns true if isthmus is active for the payload.
     pub fn is_isthmus_active(&self) -> bool {
         self.chain_spec.is_isthmus_active_at_timestamp(self.attributes().timestamp())
     }
