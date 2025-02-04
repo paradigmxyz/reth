@@ -3,6 +3,7 @@
 use crate::{
     error::NetworkError,
     import::{BlockImport, ProofOfStakeBlockImport},
+    session::protocol::{DynEthProtocolHandler, EthProtocol, IntoEthProtocol},
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
@@ -33,6 +34,8 @@ pub fn rng_secret_key() -> SecretKey {
 /// All network related initialization settings.
 #[derive(Debug)]
 pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
+    /// The Ethereum protocol handler
+    pub eth_protocol_handler: Box<dyn DynEthProtocolHandler<N>>,
     /// The client type that can interact with the chain.
     ///
     /// This type is used to fetch the block number after we established a session and received the
@@ -197,6 +200,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     hello_message: Option<HelloMessageWithProtocols>,
     /// The executor to use for spawning tasks.
     extra_protocols: RlpxSubProtocols,
+    /// The Ethereum protocol handler
+    eth_protocol_handler: Box<dyn DynEthProtocolHandler<N>>,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
     /// Whether tx gossip is disabled
@@ -241,6 +246,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             executor: None,
             hello_message: None,
             extra_protocols: Default::default(),
+            eth_protocol_handler: Box::new(EthProtocol::default()),
             head: None,
             tx_gossip_disabled: false,
             block_import: None,
@@ -503,6 +509,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Overrides the eth protocol used by the network to handle outgoing and incoming connections.
+    pub fn eth_protocol(mut self, protocol: impl IntoEthProtocol<N>) -> Self {
+        self.eth_protocol_handler = protocol.into_eth_protocol();
+        self
+    }
+
     /// Sets whether tx gossip is disabled.
     pub const fn disable_tx_gossip(mut self, disable_tx_gossip: bool) -> Self {
         self.tx_gossip_disabled = disable_tx_gossip;
@@ -559,6 +571,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             executor,
             hello_message,
             extra_protocols,
+            eth_protocol_handler,
             head,
             tx_gossip_disabled,
             block_import,
@@ -627,6 +640,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             status,
             hello_message,
             extra_protocols,
+            eth_protocol_handler,
             fork_filter,
             tx_gossip_disabled,
             transactions_manager_config,

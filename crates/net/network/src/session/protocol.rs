@@ -8,16 +8,33 @@ use reth_network_api::{Direction, PeerId};
 use std::{fmt, future::Future};
 use tokio::net::TcpStream;
 
-#[derive(Debug, Clone)]
+/// The Ethereum protocol handler.
+#[derive(Clone, Debug, Default)]
 pub(crate) struct EthProtocol;
 
 impl<N: NetworkPrimitives> EthProtocolHandler<N> for EthProtocol {
     type ConnectionHandler = EthConnection;
 }
 
+/// A helper trait to convert an [`EthProtocolHandler`] into a dynamic type.
+pub trait IntoEthProtocol<N: NetworkPrimitives> {
+    fn into_eth_protocol(self) -> Box<dyn DynEthProtocolHandler<N>>;
+}
+
+impl<N: NetworkPrimitives, T> IntoEthProtocol<N> for T
+where
+    T: EthProtocolHandler<N> + Send + Sync + 'static,
+{
+    fn into_eth_protocol(self) -> Box<dyn DynEthProtocolHandler<N>> {
+        Box::new(self)
+    }
+}
+
 /// A trait responsible for implementing the Ethereum protocol specifications
 /// for a TCP stream when establishing a peer-to-peer connection.
-pub trait EthProtocolHandler<N: NetworkPrimitives>: fmt::Debug + Send + Sync + 'static {
+pub(crate) trait EthProtocolHandler<N: NetworkPrimitives>:
+    fmt::Debug + Send + Sync + 'static
+{
     /// The type responsible for negotiating the protocol with the remote.
     type ConnectionHandler: EthConnectionHandler<N>;
 
@@ -46,7 +63,7 @@ pub trait EthProtocolHandler<N: NetworkPrimitives>: fmt::Debug + Send + Sync + '
     ///
     /// If protocols for this outgoing should be announced to the remote, return a connection
     /// handler.
-    async fn on_outgoing(
+    fn on_outgoing(
         &self,
         stream: TcpStream,
         session_info: SessionInfo,
@@ -79,4 +96,48 @@ pub trait EthConnectionHandler<N: NetworkPrimitives>: Send + Sync + 'static {
         handshake_info: HandshakeInfo,
         direction: Direction,
     ) -> Self::Connection;
+}
+
+/// A dynamically-dispatchable Ethereum protocol handler.
+pub trait DynEthProtocolHandler<N: NetworkPrimitives>: fmt::Debug + Send + Sync + 'static {
+    /// Handles an incoming connection.
+    fn on_incoming(
+        &self,
+        stream: TcpStream,
+        session_info: SessionInfo,
+        handshake_info: HandshakeInfo,
+    ) -> ConnectionFut<N>;
+
+    /// Handles an outgoing connection.
+    fn on_outgoing(
+        &self,
+        stream: TcpStream,
+        session_info: SessionInfo,
+        handshake_info: HandshakeInfo,
+        remote_peer_id: PeerId,
+    ) -> ConnectionFut<N>;
+}
+
+impl<N: NetworkPrimitives, T> DynEthProtocolHandler<N> for T
+where
+    T: EthProtocolHandler<N> + Send + Sync + 'static,
+{
+    fn on_incoming(
+        &self,
+        stream: TcpStream,
+        session_info: SessionInfo,
+        handshake_info: HandshakeInfo,
+    ) -> ConnectionFut<N> {
+        T::on_incoming(self, stream, session_info, handshake_info)
+    }
+
+    fn on_outgoing(
+        &self,
+        stream: TcpStream,
+        session_info: SessionInfo,
+        handshake_info: HandshakeInfo,
+        remote_peer_id: PeerId,
+    ) -> ConnectionFut<N> {
+        T::on_outgoing(self, stream, session_info, handshake_info, remote_peer_id)
+    }
 }

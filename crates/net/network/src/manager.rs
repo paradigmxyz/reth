@@ -245,6 +245,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             fork_filter,
             dns_discovery_config,
             extra_protocols,
+            eth_protocol_handler,
             tx_gossip_disabled,
             transactions_manager_config: _,
             nat,
@@ -299,6 +300,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             hello_message,
             fork_filter,
             extra_protocols,
+            eth_protocol_handler,
         );
 
         let state = NetworkState::new(
