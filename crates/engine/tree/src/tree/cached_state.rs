@@ -16,8 +16,10 @@ use reth_trie::{
 };
 use revm_primitives::map::DefaultHashBuilder;
 use std::time::{Duration, Instant};
+use tracing::{debug, trace};
 
-pub(crate) type Cache<K, V> = mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
+pub(crate) type Cache<K, V> =
+    mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
 
 /// A wrapper of a state provider and a shared cache.
 pub(crate) struct CachedStateProvider<S> {
@@ -84,7 +86,8 @@ impl<S> CachedStateProvider<S> {
             // error has occurred because this state should be unrepresentable. An account with
             // `None` current info, should be destroyed.
             let Some(ref account_info) = account.info else {
-                todo!("error handling - a modified account has None info")
+                trace!(target: "engine::caching", ?account, "Account with None account info found in state updates");
+                return Err(())
             };
 
             // insert will update if present, so we just use the new account info as the new value
@@ -104,7 +107,7 @@ impl<S> CachedStateProvider<S> {
         metrics.account_cache_size.set(caches.account_cache.entry_count() as f64);
         metrics.code_cache_size.set(caches.code_cache.entry_count() as f64);
 
-        tracing::debug!(target: "engine::caching", update_latency=?start.elapsed(), "Updated state caches");
+        debug!(target: "engine::caching", update_latency=?start.elapsed(), "Updated state caches");
 
         // create a saved cache with the executed block hash, same metrics, and updated caches
         let saved_cache = SavedCache { hash: executed_block_hash, caches, metrics };

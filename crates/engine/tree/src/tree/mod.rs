@@ -70,7 +70,7 @@ use std::{
     ops::Bound,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
-        Arc,
+        Arc, RwLock,
     },
     time::{Duration, Instant},
 };
@@ -2449,6 +2449,9 @@ where
             cache_metrics.clone(),
         );
 
+        // This prevents caches from being saved without all prewarm execution tasks being completed
+        let prewarm_task_lock = Arc::new(RwLock::new(()));
+
         if self.config.use_caching_and_prewarming() {
             debug!(target: "engine::tree", "Spawning prewarm threads");
             let prewarm_start = Instant::now();
@@ -2468,6 +2471,7 @@ where
                     cache_metrics.clone(),
                     state_root_sender,
                     cancel_execution.clone(),
+                    prewarm_task_lock.clone(),
                 )?;
                 let elapsed = start.elapsed();
                 debug!(target: "engine::tree", ?tx_idx, elapsed = ?elapsed, "Spawned transaction prewarm");
@@ -2567,8 +2571,18 @@ where
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
 
-        // apply state updates to cache and save it (if saving was successful)
-        self.most_recent_cache = state_provider.save_cache(sealed_block.hash(), &output.state).ok();
+        if self.config.use_caching_and_prewarming() {
+            // this is the only place / thread a writer is acquired, so we would have already
+            // crashed if we had a poisoned rwlock
+            //
+            // we use a lock here and in prewarming, so we do not save the cache if a prewarm task
+            // is still running, since it would update the cache with stale data. It's unlikely that
+            // prewarm tasks are still running at this point however
+            drop(prewarm_task_lock.write().unwrap());
+            // apply state updates to cache and save it (if saving was successful)
+            self.most_recent_cache =
+                state_provider.save_cache(sealed_block.hash(), &output.state).ok();
+        }
 
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
@@ -2663,6 +2677,7 @@ where
         cache_metrics: CachedStateMetrics,
         state_root_sender: Option<Sender<StateRootMessage>>,
         cancel_execution: ManualCancel,
+        task_finished: Arc<RwLock<()>>,
     ) -> Result<(), InsertBlockErrorKind> {
         let Some(state_provider) = self.state_provider(block.parent_hash())? else {
             trace!(target: "engine::tree", parent=%block.parent_hash(), "Could not get state provider for prewarm");
@@ -2678,6 +2693,7 @@ where
 
         // spawn task executing the individual tx
         self.thread_pool.spawn(move || {
+            let in_progress = task_finished.read().unwrap();
             let state_provider = StateProviderDatabase::new(&state_provider);
 
             // create a new executor and disable nonce checks in the env
@@ -2699,6 +2715,9 @@ where
                     return
                 }
             };
+
+            // execution no longer in progress, so we can drop the lock
+            drop(in_progress);
 
             // if execution is finished there is no point to sending proof targets
             if cancel_execution.is_cancelled() {
