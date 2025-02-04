@@ -49,8 +49,7 @@ where
 }
 
 impl<S> CachedStateProvider<S> {
-    /// Creates a new [`SavedCache`] from the given state updates, block hash, and account storage
-    /// roots.
+    /// Creates a new [`SavedCache`] from the given state updates and executed block hash.
     ///
     /// This does not update the code cache, because no changes are required to the code cache on
     /// state change.
@@ -126,7 +125,7 @@ pub(crate) struct CachedStateMetrics {
     /// Code cache misses
     code_cache_misses: Gauge,
 
-    /// Storage cache size
+    /// Code cache size
     ///
     /// NOTE: this uses the moka caches' `entry_count`, NOT the `weighted_size` method to calculate
     /// size.
