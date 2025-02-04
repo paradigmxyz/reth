@@ -95,7 +95,10 @@ where
         Ok(self
             .multiproof(MultiProofTargets {
                 accounts: HashSet::from_iter([keccak256(address)]),
-                ..Default::default()
+                storages: HashMap::from_iter([(
+                    keccak256(address),
+                    slots.iter().copied().collect(),
+                )]),
             })?
             .account_proof(address, slots)?)
     }
