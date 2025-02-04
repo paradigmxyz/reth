@@ -34,6 +34,7 @@ alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-trie.workspace = true
 revm.workspace = true
+op-alloy-consensus.workspace = true
 
 # misc
 derive_more = { workspace = true, features = ["display", "error"] }
@@ -47,6 +48,8 @@ reth-optimism-node.workspace = true
 reth-revm.workspace = true
 op-alloy-consensus.workspace = true
 alloy-chains.workspace = true
+alloy-primitives.workspace = true
+reth-optimism-chainspec.workspace = true
 
 [features]
 default = ["std"]
