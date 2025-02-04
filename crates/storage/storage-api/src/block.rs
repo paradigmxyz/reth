@@ -2,8 +2,7 @@ use crate::{
     BlockBodyIndicesProvider, BlockNumReader, HeaderProvider, OmmersProvider, ReceiptProvider,
     ReceiptProviderIdExt, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloc::vec::Vec;
-use alloc::sync::Arc;
+use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
 use core::ops::RangeInclusive;

@@ -52,9 +52,7 @@ pub use transactions::*;
 mod trie;
 pub use trie::*;
 
-#[cfg(feature = "std")]
 mod chain_info;
-#[cfg(feature = "std")]
 pub use chain_info::*;
 
 mod withdrawals;

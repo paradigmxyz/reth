@@ -8,15 +8,13 @@ use crate::{
     StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
-use alloc::vec::Vec;
-use alloc::sync::Arc;
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     map::{B256HashMap, HashMap},
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
-use alloc::boxed::Box;
 use core::{
     marker::PhantomData,
     ops::{RangeBounds, RangeInclusive},

@@ -5,7 +5,6 @@ use core::ops::{RangeBounds, RangeInclusive};
 use reth_db::models::{AccountBeforeTx, BlockNumberAddress};
 use reth_primitives::{Account, StorageEntry};
 use reth_storage_errors::provider::ProviderResult;
-use alloc::boxed::Box;
 
 /// Hashing Writer
 #[auto_impl(&, Arc, Box)]

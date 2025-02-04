@@ -5,7 +5,6 @@ use reth_trie::{
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput,
 };
-use alloc::boxed::Box;
 
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
