@@ -1,5 +1,6 @@
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_storage_errors::provider::ProviderResult;
+use alloc::vec::Vec;
 
 /// The trait for fetching prune checkpoint related data.
 #[auto_impl::auto_impl(&, Arc)]

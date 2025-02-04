@@ -1,4 +1,5 @@
 use reth_primitives_traits::NodePrimitives;
+use alloc:::boxed::Box;
 
 /// Provider implementation that knows configured [`NodePrimitives`].
 #[auto_impl::auto_impl(&, Arc, Box)]

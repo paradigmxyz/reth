@@ -3,6 +3,7 @@ use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, B256};
 use reth_chainspec::ChainInfo;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use alloc::boxed::Box;
 
 /// Client trait for getting important block numbers (such as the latest block number), converting
 /// block hashes to numbers, and fetching a block hash from its block number.

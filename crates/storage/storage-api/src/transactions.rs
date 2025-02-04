@@ -2,9 +2,10 @@ use crate::{BlockNumReader, BlockReader};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockNumber, TxHash, TxNumber};
+use core::ops::{Range, RangeBounds, RangeInclusive};
 use reth_primitives_traits::SignedTransaction;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use std::ops::{Range, RangeBounds, RangeInclusive};
+use alloc::vec::Vec;
 
 /// Enum to control transaction hash inclusion.
 ///

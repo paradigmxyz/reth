@@ -7,6 +7,9 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
 
 // Re-export used error types.
 pub use reth_storage_errors as errors;
@@ -49,7 +52,9 @@ pub use transactions::*;
 mod trie;
 pub use trie::*;
 
+#[cfg(feature = "std")]
 mod chain_info;
+#[cfg(feature = "std")]
 pub use chain_info::*;
 
 mod withdrawals;

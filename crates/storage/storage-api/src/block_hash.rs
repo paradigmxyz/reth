@@ -1,6 +1,8 @@
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{BlockNumber, B256};
 use reth_storage_errors::provider::ProviderResult;
+use alloc::vec::Vec;
+use alloc::boxed::Box;
 
 /// Client trait for fetching block hashes by number.
 #[auto_impl::auto_impl(&, Arc, Box)]

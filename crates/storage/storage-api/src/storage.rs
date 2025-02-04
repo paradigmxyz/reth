@@ -1,11 +1,11 @@
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloy_primitives::{Address, BlockNumber, B256};
+use core::ops::RangeInclusive;
 use reth_db_api::models::BlockNumberAddress;
 use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    ops::RangeInclusive,
-};
+use alloc::vec::Vec;
+use alloc::boxed::Box;
 
 /// Storage reader
 #[auto_impl::auto_impl(&, Arc, Box)]
