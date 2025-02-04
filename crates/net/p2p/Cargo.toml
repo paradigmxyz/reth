@@ -60,5 +60,5 @@ std = [
 	"alloy-consensus/std",
 	"derive_more/std",
 	"reth-network-peers/std",
-	"tracing/std"
+	"tracing/std",
 ]
