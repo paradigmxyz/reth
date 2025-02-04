@@ -648,6 +648,15 @@ where
                             len = targets.len(),
                             "Prefetching proofs"
                         );
+
+                        // If the state hook sender has been dropped (ie we have received the last
+                        // state update from execution), then we should ignore any further
+                        // prefetches
+                        if updates_finished {
+                            trace!(target: "engine::root", "Ignoring prefetch after finished state update");
+                            continue
+                        }
+
                         self.on_prefetch_proof(targets);
                     }
                     StateRootMessage::StateUpdate(update) => {
