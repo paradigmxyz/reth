@@ -122,10 +122,10 @@ where
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
         let mut storages: B256HashMap<_> = targets
-            .storages
+            .accounts
             .iter()
-            .filter(|(_, slots)| !slots.is_empty())
-            .map(|(key, _)| (*key, StorageMultiProof::empty()))
+            .chain(targets.storages.keys())
+            .map(|key| (*key, StorageMultiProof::empty()))
             .collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::new(walker, hashed_account_cursor);

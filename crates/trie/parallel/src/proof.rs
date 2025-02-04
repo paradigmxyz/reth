@@ -229,7 +229,8 @@ where
         .with_deletions_retained(true);
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer: ProofRetainer = targets.accounts.iter().map(Nibbles::unpack).collect();
+        let retainer: ProofRetainer =
+            targets.accounts.iter().chain(targets.storages.keys()).map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
@@ -256,7 +257,6 @@ where
                 }
                 TrieElement::Leaf(hashed_address, account) => {
                     let proof_targets = targets.storages.remove(&hashed_address);
-                    let leaf_is_proof_target = proof_targets.is_some();
                     let storage_multiproof = match storage_proofs.remove(&hashed_address) {
                         Some(rx) => rx.recv().map_err(|_| {
                             ParallelStateRootError::StorageRoot(StorageRootError::Database(
@@ -292,7 +292,7 @@ where
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 
                     // We might be adding leaves that are not necessarily our proof targets.
-                    if leaf_is_proof_target {
+                    if storages.contains_key(&hashed_address) {
                         storages.insert(hashed_address, storage_multiproof);
                     }
                 }
