@@ -18,7 +18,7 @@ use itertools::Itertools;
 use reth_primitives_traits::Account;
 
 /// Proof targets.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MultiProofTargets {
     /// Accounts to fetch proofs for.
     pub accounts: B256HashSet,

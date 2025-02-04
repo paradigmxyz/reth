@@ -1007,7 +1007,7 @@ fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &Multi
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::map::B256HashSet;
+    use alloy_primitives::map::{B256HashMap, B256HashSet};
     use reth_primitives_traits::{Account as RethAccount, StorageEntry};
     use reth_provider::{
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
@@ -1372,11 +1372,13 @@ mod tests {
         fetched.storages.insert(addr1, fetched_slots);
 
         let targets = get_proof_targets(&state, &fetched);
-
-        assert!(targets.accounts.contains(&addr2));
-        assert!(targets.storages.contains_key(&addr2));
-        assert!(!targets.storages[&addr1].contains(&slot1));
-        assert!(targets.storages[&addr1].contains(&slot2));
+        assert_eq!(
+            targets,
+            MultiProofTargets {
+                accounts: B256HashSet::from_iter([addr2]),
+                storages: B256HashMap::from_iter([(addr1, B256HashSet::from_iter([slot2]))]),
+            }
+        );
     }
 
     #[test]
