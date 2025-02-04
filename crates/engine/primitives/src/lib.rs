@@ -18,7 +18,7 @@ mod error;
 use core::fmt::{self, Debug};
 
 use alloy_consensus::BlockHeader;
-use alloy_rpc_types_engine::{ExecutionPayloadSidecar, PayloadError};
+use alloy_rpc_types_engine::{ExecutionData, PayloadError};
 pub use error::*;
 
 mod forkchoice;
@@ -33,49 +33,14 @@ pub use event::*;
 mod invalid_block_hook;
 pub use invalid_block_hook::InvalidBlockHook;
 
-use alloy_eips::{eip7685::Requests, Decodable2718};
+use alloy_eips::eip7685::Requests;
 use reth_payload_primitives::{
     validate_execution_requests, EngineApiMessageVersion, EngineObjectValidationError,
     InvalidPayloadAttributesError, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives::{NodePrimitives, SealedBlock};
 use reth_primitives_traits::Block;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-
-/// Struct aggregating [`alloy_rpc_types_engine::ExecutionPayload`] and [`ExecutionPayloadSidecar`]
-/// and encapsulating complete payload supplied for execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExecutionData {
-    /// Execution payload.
-    pub payload: alloy_rpc_types_engine::ExecutionPayload,
-    /// Additional fork-specific fields.
-    pub sidecar: ExecutionPayloadSidecar,
-}
-
-impl ExecutionData {
-    /// Creates new instance of [`ExecutionData`].
-    pub const fn new(
-        payload: alloy_rpc_types_engine::ExecutionPayload,
-        sidecar: ExecutionPayloadSidecar,
-    ) -> Self {
-        Self { payload, sidecar }
-    }
-
-    /// Tries to create a new unsealed block from the given payload and payload sidecar.
-    ///
-    /// Performs additional validation of `extra_data` and `base_fee_per_gas` fields.
-    ///
-    /// # Note
-    ///
-    /// The log bloom is assumed to be validated during serialization.
-    ///
-    /// See <https://github.com/ethereum/go-ethereum/blob/79a478bb6176425c2400e949890e668a3d9a3d05/core/beacon/types.go#L145>
-    pub fn try_into_block<T: Decodable2718>(
-        self,
-    ) -> Result<alloy_consensus::Block<T>, PayloadError> {
-        self.payload.try_into_block_with_sidecar(&self.sidecar)
-    }
-}
+use serde::{de::DeserializeOwned, Serialize};
 
 /// An execution payload.
 pub trait ExecutionPayload:

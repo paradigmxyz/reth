@@ -16,8 +16,9 @@
 //! Configure only an http server with a selection of [`RethRpcModule`]s
 //!
 //! ```
+//! use alloy_rpc_types_engine::ExecutionData;
 //! use reth_consensus::{ConsensusError, FullConsensus};
-//! use reth_engine_primitives::{ExecutionData, PayloadValidator};
+//! use reth_engine_primitives::PayloadValidator;
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
@@ -88,8 +89,9 @@
 //!
 //!
 //! ```
+//! use alloy_rpc_types_engine::ExecutionData;
 //! use reth_consensus::{ConsensusError, FullConsensus};
-//! use reth_engine_primitives::{EngineTypes, ExecutionData, PayloadValidator};
+//! use reth_engine_primitives::{EngineTypes, PayloadValidator};
 //! use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 //! use reth_evm_ethereum::EthEvmConfig;
 //! use reth_network_api::{NetworkInfo, Peers};
@@ -200,6 +202,7 @@ use std::{
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
+use alloy_rpc_types_engine::ExecutionData;
 use error::{ConflictingModules, RpcError, ServerKind};
 use eth::DynEthApiBuilder;
 use http::{header::AUTHORIZATION, HeaderMap};
@@ -213,7 +216,7 @@ use jsonrpsee::{
 };
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::{EngineTypes, ExecutionData, PayloadValidator};
+use reth_engine_primitives::{EngineTypes, PayloadValidator};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives::NodePrimitives;
@@ -668,8 +671,9 @@ where
     /// # Example
     ///
     /// ```no_run
+    /// use alloy_rpc_types_engine::ExecutionData;
     /// use reth_consensus::noop::NoopConsensus;
-    /// use reth_engine_primitives::{ExecutionData, PayloadValidator};
+    /// use reth_engine_primitives::PayloadValidator;
     /// use reth_evm::ConfigureEvm;
     /// use reth_evm_ethereum::execute::EthExecutorProvider;
     /// use reth_network_api::noop::NoopNetwork;
