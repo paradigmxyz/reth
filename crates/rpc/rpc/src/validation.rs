@@ -51,7 +51,10 @@ where
         config: ValidationApiConfig,
         task_spawner: Box<dyn TaskSpawner>,
         payload_validator: Arc<
-            dyn PayloadValidator<Block = <E::Primitives as NodePrimitives>::Block>,
+            dyn PayloadValidator<
+                Block = <E::Primitives as NodePrimitives>::Block,
+                ExecutionData = ExecutionData,
+            >,
         >,
     ) -> Self {
         let ValidationApiConfig { disallow, validation_window } = config;
@@ -468,7 +471,12 @@ pub struct ValidationApiInner<Provider, E: BlockExecutorProvider> {
     /// Consensus implementation.
     consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
     /// Execution payload validator.
-    payload_validator: Arc<dyn PayloadValidator<Block = <E::Primitives as NodePrimitives>::Block>>,
+    payload_validator: Arc<
+        dyn PayloadValidator<
+            Block = <E::Primitives as NodePrimitives>::Block,
+            ExecutionData = ExecutionData,
+        >,
+    >,
     /// Block executor factory.
     executor_provider: E,
     /// Set of disallowed addresses
