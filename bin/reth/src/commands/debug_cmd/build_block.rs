@@ -17,16 +17,16 @@ use reth_cli_runner::CliContext;
 use reth_consensus::{Consensus, FullConsensus};
 use reth_errors::{ConsensusError, RethResult};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
+use reth_ethereum_primitives::{EthPrimitives, Transaction, TransactionSigned};
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
-use reth_primitives::{
-    transaction::SignedTransactionIntoRecoveredExt, EthPrimitives, SealedBlock, SealedHeader,
-    Transaction, TransactionSigned,
+use reth_primitives_traits::{
+    transaction::signed::SignedTransactionIntoRecoveredExt, Block as _, SealedBlock, SealedHeader,
+    SignedTransaction,
 };
-use reth_primitives_traits::{Block as _, SignedTransaction};
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
