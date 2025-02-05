@@ -28,7 +28,7 @@ use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
 use reth_network::{NetworkHandle, NetworkPrimitives};
 use reth_network_api::FullNetwork;
 use reth_node_api::{
-    BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, PayloadBuilder, PrimitivesTy, TxTy,
+    BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, PrimitivesTy, TxTy,
 };
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};

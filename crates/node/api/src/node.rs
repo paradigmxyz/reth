@@ -1,6 +1,7 @@
 //! Traits for configuring a node.
 
 use alloy_rpc_types_engine::JwtSecret;
+use reth_basic_payload_builder::PayloadBuilder;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_primitives::BeaconConsensusEngineHandle;
@@ -8,7 +9,6 @@ use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine, TxTy};
-use reth_payload_builder_primitives::PayloadBuilder;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -63,8 +63,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Network: FullNetwork;
 
     /// Builds new blocks.
-    type PayloadBuilder: PayloadBuilder<PayloadType = <Self::Types as NodeTypesWithEngine>::Engine>
-        + Clone;
+    type PayloadBuilder: PayloadBuilder<Self::Pool, Self::Provider>;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
