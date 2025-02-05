@@ -800,12 +800,9 @@ pub type BestTransactionsFor<Pool> = Box<
 /// There is no guarantee transactions will be returned sequentially in decreasing
 /// priority order.
 pub trait BestTransactions: Iterator + Send {
-    /// Mark the transaction as invalid.
-    ///
-    /// Implementers must ensure all subsequent transaction _don't_ depend on this transaction.
-    /// In other words, this must remove the given transaction _and_ drain all transaction that
-    /// depend on it.
-    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError);
+    /// Mark latest yielded transaction as invalid. Implementation is expected to stop yielding any
+    /// transactions depending on this one.
+    fn mark_invalid(&mut self);
 
     /// An iterator may be able to receive additional pending transactions that weren't present it
     /// the pool when it was created.
@@ -867,8 +864,8 @@ impl<T> BestTransactions for Box<T>
 where
     T: BestTransactions + ?Sized,
 {
-    fn mark_invalid(&mut self, transaction: &Self::Item, kind: InvalidPoolTransactionError) {
-        (**self).mark_invalid(transaction, kind)
+    fn mark_invalid(&mut self) {
+        (**self).mark_invalid()
     }
 
     fn no_updates(&mut self) {
@@ -886,7 +883,7 @@ where
 
 /// A no-op implementation that yields no transactions.
 impl<T> BestTransactions for std::iter::Empty<T> {
-    fn mark_invalid(&mut self, _tx: &T, _kind: InvalidPoolTransactionError) {}
+    fn mark_invalid(&mut self) {}
 
     fn no_updates(&mut self) {}
 

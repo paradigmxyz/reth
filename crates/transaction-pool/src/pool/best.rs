@@ -1,5 +1,4 @@
 use crate::{
-    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
     identifier::{SenderId, TransactionId},
     pool::pending::PendingTransaction,
     PoolTransaction, TransactionOrdering, ValidPoolTransaction,
@@ -7,7 +6,7 @@ use crate::{
 use alloy_primitives::Address;
 use core::fmt;
 use reth_payload_util::PayloadTransactions;
-use reth_primitives::{InvalidTransactionError, Recovered};
+use reth_primitives::Recovered;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     sync::Arc,
@@ -28,8 +27,8 @@ pub(crate) struct BestTransactionsWithFees<T: TransactionOrdering> {
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithFees<T> {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
-        BestTransactions::mark_invalid(&mut self.best, tx, kind)
+    fn mark_invalid(&mut self) {
+        BestTransactions::mark_invalid(&mut self.best)
     }
 
     fn no_updates(&mut self) {
@@ -61,11 +60,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
             {
                 return Some(best);
             }
-            crate::traits::BestTransactions::mark_invalid(
-                self,
-                &best,
-                InvalidPoolTransactionError::Underpriced,
-            );
+            crate::traits::BestTransactions::mark_invalid(self);
         }
     }
 }
@@ -97,16 +92,32 @@ pub struct BestTransactions<T: TransactionOrdering> {
     pub(crate) new_transaction_receiver: Option<Receiver<PendingTransaction<T>>>,
     /// Flag to control whether to skip blob transactions (EIP4844).
     pub(crate) skip_blobs: bool,
+    /// Sender of the latest yielded transaction.
+    last_sender: Option<SenderId>,
 }
 
 impl<T: TransactionOrdering> BestTransactions<T> {
+    /// Create a new instance.
+    pub(crate) fn new(
+        all: BTreeMap<TransactionId, PendingTransaction<T>>,
+        independent: BTreeSet<PendingTransaction<T>>,
+        new_transaction_receiver: Option<Receiver<PendingTransaction<T>>>,
+    ) -> Self {
+        Self {
+            all,
+            independent,
+            new_transaction_receiver,
+            skip_blobs: false,
+            last_sender: None,
+            invalid: Default::default(),
+        }
+    }
+
     /// Mark the transaction and it's descendants as invalid.
-    pub(crate) fn mark_invalid(
-        &mut self,
-        tx: &Arc<ValidPoolTransaction<T::Transaction>>,
-        _kind: InvalidPoolTransactionError,
-    ) {
-        self.invalid.insert(tx.sender_id());
+    pub(crate) fn mark_invalid(&mut self) {
+        if let Some(sender) = self.last_sender.take() {
+            self.invalid.insert(sender);
+        }
     }
 
     /// Returns the ancestor the given transaction, the transaction with `nonce - 1`.
@@ -163,8 +174,8 @@ impl<T: TransactionOrdering> BestTransactions<T> {
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactions<T> {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
-        Self::mark_invalid(self, tx, kind)
+    fn mark_invalid(&mut self) {
+        Self::mark_invalid(self)
     }
 
     fn no_updates(&mut self) {
@@ -200,6 +211,8 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                 continue
             }
 
+            self.last_sender = Some(sender_id);
+
             // Insert transactions that just got unlocked.
             if let Some(unlocked) = self.all.get(&best.unlocks()) {
                 self.independent.insert(unlocked.clone());
@@ -208,12 +221,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
             if self.skip_blobs && best.transaction.transaction.is_eip4844() {
                 // blobs should be skipped, marking them as invalid will ensure that no dependent
                 // transactions are returned
-                self.mark_invalid(
-                    &best.transaction,
-                    InvalidPoolTransactionError::Eip4844(
-                        Eip4844PoolTransactionError::NoEip4844Blobs,
-                    ),
-                )
+                self.mark_invalid()
             } else {
                 return Some(best.transaction)
             }
@@ -227,42 +235,38 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
 pub struct BestPayloadTransactions<T, I>
 where
     T: PoolTransaction,
-    I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
+    I: crate::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
 {
-    invalid: HashSet<Address>,
     best: I,
 }
 
 impl<T, I> BestPayloadTransactions<T, I>
 where
     T: PoolTransaction,
-    I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
+    I: crate::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
 {
     /// Create a new `BestPayloadTransactions` with the given iterator.
     pub fn new(best: I) -> Self {
-        Self { invalid: Default::default(), best }
+        Self { best }
     }
 }
 
 impl<T, I> PayloadTransactions for BestPayloadTransactions<T, I>
 where
     T: PoolTransaction,
-    I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
+    I: crate::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
 {
     type Transaction = T::Consensus;
 
     fn next(&mut self, _ctx: ()) -> Option<Recovered<Self::Transaction>> {
         loop {
             let tx = self.best.next()?;
-            if self.invalid.contains(&tx.sender()) {
-                continue
-            }
             return Some(tx.to_consensus())
         }
     }
 
-    fn mark_invalid(&mut self, sender: Address, _nonce: u64) {
-        self.invalid.insert(sender);
+    fn mark_invalid(&mut self) {
+        self.best.mark_invalid()
     }
 }
 
@@ -296,10 +300,7 @@ where
             if (self.predicate)(&best) {
                 return Some(best)
             }
-            self.best.mark_invalid(
-                &best,
-                InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
-            );
+            self.best.mark_invalid();
         }
     }
 }
@@ -309,8 +310,8 @@ where
     I: crate::traits::BestTransactions,
     P: FnMut(&<I as Iterator>::Item) -> bool + Send,
 {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
-        crate::traits::BestTransactions::mark_invalid(&mut self.best, tx, kind)
+    fn mark_invalid(&mut self) {
+        crate::traits::BestTransactions::mark_invalid(&mut self.best)
     }
 
     fn no_updates(&mut self) {
@@ -398,8 +399,8 @@ where
     I: crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
     T: PoolTransaction,
 {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
-        self.inner.mark_invalid(tx, kind)
+    fn mark_invalid(&mut self) {
+        self.inner.mark_invalid()
     }
 
     fn no_updates(&mut self) {

@@ -16,7 +16,7 @@ use reth_evm::{
     system_calls::SystemCaller, ConfigureEvm, ConfigureEvmEnv, Evm, EvmError, InvalidTxError,
     NextBlockEnvAttributes,
 };
-use reth_primitives::{InvalidTransactionError, RecoveredBlock};
+use reth_primitives::RecoveredBlock;
 use reth_primitives_traits::Receipt;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,
@@ -27,10 +27,7 @@ use reth_revm::{
     primitives::{BlockEnv, ExecutionResult, ResultAndState},
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
-    TransactionPool,
-};
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{db::states::bundle_state::BundleRetention, DatabaseCommit, State};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -285,13 +282,7 @@ pub trait LoadPendingBlock:
                 // we can't fit this transaction into the block, so we need to mark it as invalid
                 // which also removes all dependent transaction from the iterator before we can
                 // continue
-                best_txs.mark_invalid(
-                    &pool_tx,
-                    InvalidPoolTransactionError::ExceedsGasLimit(
-                        pool_tx.gas_limit(),
-                        block_gas_limit,
-                    ),
-                );
+                best_txs.mark_invalid();
                 continue
             }
 
@@ -299,12 +290,7 @@ pub trait LoadPendingBlock:
                 // we don't want to leak any state changes made by private transactions, so we mark
                 // them as invalid here which removes all dependent transactions from the iterator
                 // before we can continue
-                best_txs.mark_invalid(
-                    &pool_tx,
-                    InvalidPoolTransactionError::Consensus(
-                        InvalidTransactionError::TxTypeNotSupported,
-                    ),
-                );
+                best_txs.mark_invalid();
                 continue
             }
 
@@ -319,13 +305,7 @@ pub trait LoadPendingBlock:
                     // invalid, which removes its dependent transactions from
                     // the iterator. This is similar to the gas limit condition
                     // for regular transactions above.
-                    best_txs.mark_invalid(
-                        &pool_tx,
-                        InvalidPoolTransactionError::ExceedsGasLimit(
-                            tx_blob_gas,
-                            MAX_DATA_GAS_PER_BLOCK,
-                        ),
-                    );
+                    best_txs.mark_invalid();
                     continue
                 }
             }
@@ -342,12 +322,7 @@ pub trait LoadPendingBlock:
                         } else {
                             // if the transaction is invalid, we can skip it and all of its
                             // descendants
-                            best_txs.mark_invalid(
-                                &pool_tx,
-                                InvalidPoolTransactionError::Consensus(
-                                    InvalidTransactionError::TxTypeNotSupported,
-                                ),
-                            );
+                            best_txs.mark_invalid();
                         }
                         continue
                     }

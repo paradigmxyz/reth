@@ -948,13 +948,13 @@ where
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
-                best_txs.mark_invalid(tx.signer(), tx.nonce());
+                best_txs.mark_invalid();
                 continue
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if tx.is_eip4844() || tx.is_deposit() {
-                best_txs.mark_invalid(tx.signer(), tx.nonce());
+                best_txs.mark_invalid();
                 continue
             }
 
@@ -977,7 +977,7 @@ where
                             // if the transaction is invalid, we can skip it and all of its
                             // descendants
                             trace!(target: "payload_builder", %err, ?tx, "skipping invalid transaction and its descendants");
-                            best_txs.mark_invalid(tx.signer(), tx.nonce());
+                            best_txs.mark_invalid();
                         }
 
                         continue

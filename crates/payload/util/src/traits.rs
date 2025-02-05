@@ -1,4 +1,3 @@
-use alloy_primitives::Address;
 use reth_primitives::Recovered;
 
 /// Iterator that returns transactions for the block building process in the order they should be
@@ -17,9 +16,9 @@ pub trait PayloadTransactions {
         ctx: (),
     ) -> Option<Recovered<Self::Transaction>>;
 
-    /// Exclude descendants of the transaction with given sender and nonce from the iterator,
-    /// because this transaction won't be included in the block.
-    fn mark_invalid(&mut self, sender: Address, nonce: u64);
+    /// Marks last yielded transaction as invalid. Implementation is expected to stop yielding any
+    /// transactions depending on this one.
+    fn mark_invalid(&mut self);
 }
 
 /// [`PayloadTransactions`] implementation that produces nothing.
@@ -39,5 +38,5 @@ impl<T> PayloadTransactions for NoopPayloadTransactions<T> {
         None
     }
 
-    fn mark_invalid(&mut self, _sender: Address, _nonce: u64) {}
+    fn mark_invalid(&mut self) {}
 }

@@ -99,13 +99,11 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// which case the transaction's subgraph is also automatically marked invalid, See (1.).
     /// Invalid transactions are skipped.
     pub(crate) fn best(&self) -> BestTransactions<T> {
-        BestTransactions {
-            all: self.by_id.clone(),
-            independent: self.independent_transactions.values().cloned().collect(),
-            invalid: Default::default(),
-            new_transaction_receiver: Some(self.new_transaction_notifier.subscribe()),
-            skip_blobs: false,
-        }
+        BestTransactions::new(
+            self.by_id.clone(),
+            self.independent_transactions.values().cloned().collect(),
+            Some(self.new_transaction_notifier.subscribe()),
+        )
     }
 
     /// Same as `best` but only returns transactions that satisfy the given basefee and blobfee.

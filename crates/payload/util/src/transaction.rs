@@ -1,6 +1,5 @@
 use crate::PayloadTransactions;
 use alloy_consensus::Transaction;
-use alloy_primitives::Address;
 use reth_primitives::Recovered;
 
 /// An implementation of [`crate::traits::PayloadTransactions`] that yields
@@ -37,7 +36,7 @@ impl<T: Clone> PayloadTransactions for PayloadTransactionsFixed<Recovered<T>> {
         })
     }
 
-    fn mark_invalid(&mut self, _sender: Address, _nonce: u64) {}
+    fn mark_invalid(&mut self) {}
 }
 
 /// Wrapper over [`crate::traits::PayloadTransactions`] that combines transactions from multiple
@@ -99,12 +98,12 @@ where
     fn next(&mut self, ctx: ()) -> Option<Recovered<Self::Transaction>> {
         while let Some(tx) = self.before.next(ctx) {
             if let Some(before_max_gas) = self.before_max_gas {
-                if self.before_gas + tx.tx().gas_limit() <= before_max_gas {
-                    self.before_gas += tx.tx().gas_limit();
+                if self.before_gas + tx.gas_limit() <= before_max_gas {
+                    self.before_gas += tx.gas_limit();
                     return Some(tx);
                 }
-                self.before.mark_invalid(tx.signer(), tx.tx().nonce());
-                self.after.mark_invalid(tx.signer(), tx.tx().nonce());
+                self.before.mark_invalid();
+                self.after.mark_invalid();
             } else {
                 return Some(tx);
             }
@@ -112,11 +111,11 @@ where
 
         while let Some(tx) = self.after.next(ctx) {
             if let Some(after_max_gas) = self.after_max_gas {
-                if self.after_gas + tx.tx().gas_limit() <= after_max_gas {
-                    self.after_gas += tx.tx().gas_limit();
+                if self.after_gas + tx.gas_limit() <= after_max_gas {
+                    self.after_gas += tx.gas_limit();
                     return Some(tx);
                 }
-                self.after.mark_invalid(tx.signer(), tx.tx().nonce());
+                self.after.mark_invalid();
             } else {
                 return Some(tx);
             }
@@ -125,8 +124,8 @@ where
         None
     }
 
-    fn mark_invalid(&mut self, sender: Address, nonce: u64) {
-        self.before.mark_invalid(sender, nonce);
-        self.after.mark_invalid(sender, nonce);
+    fn mark_invalid(&mut self) {
+        self.before.mark_invalid();
+        self.after.mark_invalid();
     }
 }
