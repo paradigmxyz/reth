@@ -340,14 +340,14 @@ where
                 )
             }
 
-            if blob_count > MAX_BLOBS_PER_BLOCK {
-                // too many blobs
+            let max_blob_count = self.fork_tracker.max_blob_count().try_into().unwrap();
+            if blob_count > max_blob_count {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     InvalidPoolTransactionError::Eip4844(
                         Eip4844PoolTransactionError::TooManyEip4844Blobs {
                             have: blob_count,
-                            permitted: MAX_BLOBS_PER_BLOCK,
+                            permitted: max_blob_count,
                         },
                     ),
                 )
@@ -527,6 +527,14 @@ where
             self.fork_tracker.prague.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
+        if let Some(blob_params) =
+            self.chain_spec().blob_params_at_timestamp(new_tip_block.timestamp())
+        {
+            self.fork_tracker
+                .max_blob_count
+                .store(blob_params.max_blob_count, std::sync::atomic::Ordering::Relaxed);
+        }
+
         self.block_gas_limit.store(new_tip_block.gas_limit(), std::sync::atomic::Ordering::Relaxed);
     }
 
@@ -545,6 +553,8 @@ pub struct EthTransactionValidatorBuilder<Client> {
     cancun: bool,
     /// Fork indicator whether we are in the Cancun hardfork.
     prague: bool,
+    /// Max blob count at the block's timestamp.
+    max_blob_count: AtomicU64,
     /// Whether using EIP-2718 type transactions is allowed
     eip2718: bool,
     /// Whether using EIP-1559 type transactions is allowed
@@ -603,6 +613,9 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
             // prague not yet activated
             prague: false,
+
+            // max blob count is 0 by default
+            max_blob_count: (MAX_BLOBS_PER_BLOCK as u64).into(),
         }
     }
 
@@ -709,6 +722,13 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self.cancun = self.client.chain_spec().is_cancun_active_at_timestamp(timestamp);
         self.shanghai = self.client.chain_spec().is_shanghai_active_at_timestamp(timestamp);
         self.prague = self.client.chain_spec().is_prague_active_at_timestamp(timestamp);
+        self.max_blob_count = self
+            .client
+            .chain_spec()
+            .blob_params_at_timestamp(timestamp)
+            .map(|p| p.max_blob_count)
+            .unwrap_or(0)
+            .into();
         self
     }
 
@@ -752,6 +772,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             shanghai: AtomicBool::new(shanghai),
             cancun: AtomicBool::new(cancun),
             prague: AtomicBool::new(prague),
+            max_blob_count: AtomicU64::new(MAX_BLOBS_PER_BLOCK as u64),
         };
 
         let inner = EthTransactionValidatorInner {
@@ -825,6 +846,8 @@ pub struct ForkTracker {
     pub cancun: AtomicBool,
     /// Tracks if prague is activated at the block's timestamp.
     pub prague: AtomicBool,
+    /// Tracks max blob count at the block's timestamp.
+    pub max_blob_count: AtomicU64,
 }
 
 impl ForkTracker {
@@ -841,6 +864,11 @@ impl ForkTracker {
     /// Returns `true` if Prague fork is activated.
     pub fn is_prague_activated(&self) -> bool {
         self.prague.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns the max blob count.
+    pub fn max_blob_count(&self) -> u64 {
+        self.max_blob_count.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -902,8 +930,12 @@ mod tests {
     #[tokio::test]
     async fn validate_transaction() {
         let transaction = get_transaction();
-        let mut fork_tracker =
-            ForkTracker { shanghai: false.into(), cancun: false.into(), prague: false.into() };
+        let mut fork_tracker = ForkTracker {
+            shanghai: false.into(),
+            cancun: false.into(),
+            prague: false.into(),
+            max_blob_count: 0.into(),
+        };
 
         let res = ensure_intrinsic_gas(&transaction, &fork_tracker);
         assert!(res.is_ok());
