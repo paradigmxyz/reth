@@ -54,8 +54,6 @@ async fn main() -> eyre::Result<()> {
         }
     });
 
-    let handle = network.handle().clone();
-
     // spawn the network
     tokio::task::spawn(network);
 
