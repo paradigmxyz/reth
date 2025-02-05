@@ -37,8 +37,8 @@ use reth_primitives_traits::{
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, noop::NoopTransactionPool, BestTransactions,
-    BestTransactionsAttributes, PoolTransaction, TransactionPool, ValidPoolTransaction,
+    error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
+    PoolTransaction, TransactionPool, ValidPoolTransaction,
 };
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
@@ -58,21 +58,30 @@ type BestTransactionsIter<Pool> = Box<
 
 /// Ethereum payload builder
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EthereumPayloadBuilder<EvmConfig = EthEvmConfig> {
+pub struct EthereumPayloadBuilder<Pool, Client, EvmConfig = EthEvmConfig> {
+    /// Client providing access to node state.
+    client: Client,
+    /// Transaction pool.
+    pool: Pool,
     /// The type responsible for creating the evm.
     evm_config: EvmConfig,
     /// Payload builder configuration.
     builder_config: EthereumBuilderConfig,
 }
 
-impl<EvmConfig> EthereumPayloadBuilder<EvmConfig> {
+impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig> {
     /// `EthereumPayloadBuilder` constructor.
-    pub const fn new(evm_config: EvmConfig, builder_config: EthereumBuilderConfig) -> Self {
-        Self { evm_config, builder_config }
+    pub const fn new(
+        client: Client,
+        pool: Pool,
+        evm_config: EvmConfig,
+        builder_config: EthereumBuilderConfig,
+    ) -> Self {
+        Self { client, pool, evm_config, builder_config }
     }
 }
 
-impl<EvmConfig> EthereumPayloadBuilder<EvmConfig>
+impl<Pool, Client, EvmConfig> EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header>,
 {
@@ -94,10 +103,10 @@ where
 }
 
 // Default implementation of [PayloadBuilder] for unit type
-impl<EvmConfig, Pool, Client> PayloadBuilder<Pool, Client> for EthereumPayloadBuilder<EvmConfig>
+impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Client, EvmConfig>
 where
     EvmConfig: ConfigureEvm<Header = Header, Transaction = TransactionSigned>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = EthPayloadBuilderAttributes;
@@ -105,49 +114,41 @@ where
 
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
+        args: BuildArguments<EthPayloadBuilderAttributes, EthBuiltPayload>,
     ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError> {
         let evm_env = self
             .evm_env(&args.config, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
-        let pool = args.pool.clone();
         default_ethereum_payload(
             self.evm_config.clone(),
+            self.client.clone(),
+            self.pool.clone(),
             self.builder_config.clone(),
             args,
             evm_env,
-            |attributes| pool.best_transactions_with_attributes(attributes),
+            |attributes| self.pool.best_transactions_with_attributes(attributes),
         )
     }
 
     fn build_empty_payload(
         &self,
-        client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments::new(
-            client,
-            // we use defaults here because for the empty payload we don't need to execute anything
-            NoopTransactionPool::default(),
-            Default::default(),
-            config,
-            Default::default(),
-            None,
-        );
+        let args = BuildArguments::new(Default::default(), config, Default::default(), None);
 
         let evm_env = self
             .evm_env(&args.config, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
-        let pool = args.pool.clone();
-
         default_ethereum_payload(
             self.evm_config.clone(),
+            self.client.clone(),
+            self.pool.clone(),
             self.builder_config.clone(),
             args,
             evm_env,
-            |attributes| pool.best_transactions_with_attributes(attributes),
+            |attributes| self.pool.best_transactions_with_attributes(attributes),
         )?
         .into_payload()
         .ok_or_else(|| PayloadBuilderError::MissingPayload)
@@ -160,10 +161,12 @@ where
 /// and configuration, this function creates a transaction payload. Returns
 /// a result indicating success with the payload or an error in case of failure.
 #[inline]
-pub fn default_ethereum_payload<EvmConfig, Pool, Client, F>(
+pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
     evm_config: EvmConfig,
+    client: Client,
+    pool: Pool,
     builder_config: EthereumBuilderConfig,
-    args: BuildArguments<Pool, Client, EthPayloadBuilderAttributes, EthBuiltPayload>,
+    args: BuildArguments<EthPayloadBuilderAttributes, EthBuiltPayload>,
     evm_env: EvmEnv<EvmConfig::Spec>,
     best_txs: F,
 ) -> Result<BuildOutcome<EthBuiltPayload>, PayloadBuilderError>
@@ -173,7 +176,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
-    let BuildArguments { client, pool, mut cached_reads, config, cancel, best_payload } = args;
+    let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
 
     let chain_spec = client.chain_spec();
     let state_provider = client.state_by_block_hash(config.parent_header.hash())?;
