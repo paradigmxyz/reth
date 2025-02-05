@@ -71,7 +71,6 @@ pprof = { workspace = true, features = ["criterion", "flamegraph"] }
 assert_matches.workspace = true
 tempfile.workspace = true
 serde_json.workspace = true
-reth-payload-util.workspace = true
 
 [features]
 default = ["serde"]

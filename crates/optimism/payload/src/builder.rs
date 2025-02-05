@@ -30,9 +30,8 @@ use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_evm::{OpReceiptBuilder, ReceiptBuilderCtx};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{
-    transaction::signed::OpTransaction, OpTransactionSigned, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
+    transaction::signed::OpTransaction, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
 };
-use reth_optimism_primitives::transaction::signed::OpTransaction;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
@@ -47,10 +46,6 @@ use reth_provider::{
 use reth_revm::{
     cancelled::CancelOnDrop, database::StateProviderDatabase, witness::ExecutionWitnessRecord,
 };
-use reth_transaction_pool::{
-    pool::BestPayloadTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
-};
-use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
@@ -79,8 +74,6 @@ pub struct OpPayloadBuilder<Pool, Client, EvmConfig, N: NodePrimitives, Txs = ()
     pub best_transactions: Txs,
     /// Node primitive types.
     pub receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
-    /// Transaction pool.
-    pub pool: Pool,
 }
 
 impl<Pool, Client, EvmConfig, N: NodePrimitives> OpPayloadBuilder<Pool, Client, EvmConfig, N> {
@@ -92,7 +85,6 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives> OpPayloadBuilder<Pool, Client, 
         client: Client,
         evm_config: EvmConfig,
         receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
-        pool: Pool,
     ) -> Self {
         Self::with_builder_config(pool, client, evm_config, receipt_builder, Default::default())
     }
@@ -104,7 +96,6 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives> OpPayloadBuilder<Pool, Client, 
         evm_config: EvmConfig,
         receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
         config: OpBuilderConfig,
-        pool: Pool,
     ) -> Self {
         Self {
             pool,
@@ -113,7 +104,6 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives> OpPayloadBuilder<Pool, Client, 
             receipt_builder: Arc::new(receipt_builder),
             evm_config,
             config,
-            pool,
             best_transactions: (),
         }
     }
@@ -145,7 +135,6 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives, Txs>
             best_transactions,
             config,
             receipt_builder,
-            pool,
         }
     }
 
@@ -162,6 +151,7 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives, Txs>
 
 impl<Pool, Client, EvmConfig, N, T> OpPayloadBuilder<Pool, Client, EvmConfig, N, T>
 where
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     N: OpPayloadPrimitives,
     EvmConfig: ConfigureEvmFor<N>,
@@ -261,7 +251,7 @@ where
         let state = StateProviderDatabase::new(state_provider);
         let mut state = State::builder().with_database(state).with_bundle_update().build();
 
-        let builder = OpBuilder::new(|_| NoopPayloadTransactions::default());
+        let builder = OpBuilder::new(|_| NoopPayloadTransactions::<Pool::Transaction>::default());
         builder.witness(&mut state, &ctx)
     }
 }
@@ -308,7 +298,7 @@ where
             cancel: Default::default(),
             best_payload: None,
         };
-        self.build_payload(args, |_| NoopPayloadTransactions::default())?
+        self.build_payload(args, |_| NoopPayloadTransactions::<Pool::Transaction>::default())?
             .into_payload()
             .ok_or_else(|| PayloadBuilderError::MissingPayload)
     }
