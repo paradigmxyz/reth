@@ -15,7 +15,6 @@ rpc-compat:
 
   # https://github.com/paradigmxyz/reth/issues/13879
   - eth_createAccessList/create-al-contract-eip1559 (reth)
-  - eth_getBlockByNumber/get-genesis (reth)
 
 # https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:
