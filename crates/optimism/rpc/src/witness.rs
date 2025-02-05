@@ -19,16 +19,18 @@ use std::{fmt::Debug, sync::Arc};
 use tokio::sync::{oneshot, Semaphore};
 
 /// An extension to the `debug_` namespace of the RPC API.
-pub struct OpDebugWitnessApi<Provider: NodePrimitivesProvider, EvmConfig> {
-    inner: Arc<OpDebugWitnessApiInner<Provider, EvmConfig>>,
+pub struct OpDebugWitnessApi<Pool, Provider: NodePrimitivesProvider, EvmConfig> {
+    inner: Arc<OpDebugWitnessApiInner<Pool, Provider, EvmConfig>>,
 }
 
-impl<Provider: NodePrimitivesProvider, EvmConfig> OpDebugWitnessApi<Provider, EvmConfig> {
+impl<Pool, Provider: NodePrimitivesProvider, EvmConfig>
+    OpDebugWitnessApi<Pool, Provider, EvmConfig>
+{
     /// Creates a new instance of the `OpDebugWitnessApi`.
     pub fn new(
         provider: Provider,
         task_spawner: Box<dyn TaskSpawner>,
-        builder: OpPayloadBuilder<EvmConfig, Provider::Primitives>,
+        builder: OpPayloadBuilder<Pool, Provider, EvmConfig, Provider::Primitives>,
     ) -> Self {
         let semaphore = Arc::new(Semaphore::new(3));
         let inner = OpDebugWitnessApiInner { provider, builder, task_spawner, semaphore };
@@ -36,7 +38,7 @@ impl<Provider: NodePrimitivesProvider, EvmConfig> OpDebugWitnessApi<Provider, Ev
     }
 }
 
-impl<Provider, EvmConfig> OpDebugWitnessApi<Provider, EvmConfig>
+impl<Pool, Provider, EvmConfig> OpDebugWitnessApi<Pool, Provider, EvmConfig>
 where
     Provider: NodePrimitivesProvider + BlockReaderIdExt<Header = reth_primitives::Header>,
 {
@@ -50,9 +52,10 @@ where
 }
 
 #[async_trait]
-impl<Provider, EvmConfig> DebugExecutionWitnessApiServer<OpPayloadAttributes>
-    for OpDebugWitnessApi<Provider, EvmConfig>
+impl<Pool, Provider, EvmConfig> DebugExecutionWitnessApiServer<OpPayloadAttributes>
+    for OpDebugWitnessApi<Pool, Provider, EvmConfig>
 where
+    Pool: Send + Sync + 'static,
     Provider: BlockReaderIdExt<Header = reth_primitives::Header>
         + NodePrimitivesProvider<Primitives: OpPayloadPrimitives>
         + StateProviderFactory
@@ -73,8 +76,7 @@ where
         let (tx, rx) = oneshot::channel();
         let this = self.clone();
         self.inner.task_spawner.spawn_blocking(Box::pin(async move {
-            let res =
-                this.inner.builder.payload_witness(&this.inner.provider, parent_header, attributes);
+            let res = this.inner.builder.payload_witness(parent_header, attributes);
             let _ = tx.send(res);
         }));
 
@@ -84,7 +86,7 @@ where
     }
 }
 
-impl<Provider, EvmConfig> Clone for OpDebugWitnessApi<Provider, EvmConfig>
+impl<Pool, Provider, EvmConfig> Clone for OpDebugWitnessApi<Pool, Provider, EvmConfig>
 where
     Provider: NodePrimitivesProvider,
 {
@@ -92,7 +94,7 @@ where
         Self { inner: Arc::clone(&self.inner) }
     }
 }
-impl<Provider, EvmConfig> Debug for OpDebugWitnessApi<Provider, EvmConfig>
+impl<Pool, Provider, EvmConfig> Debug for OpDebugWitnessApi<Pool, Provider, EvmConfig>
 where
     Provider: NodePrimitivesProvider,
 {
@@ -101,9 +103,9 @@ where
     }
 }
 
-struct OpDebugWitnessApiInner<Provider: NodePrimitivesProvider, EvmConfig> {
+struct OpDebugWitnessApiInner<Pool, Provider: NodePrimitivesProvider, EvmConfig> {
     provider: Provider,
-    builder: OpPayloadBuilder<EvmConfig, Provider::Primitives>,
+    builder: OpPayloadBuilder<Pool, Provider, EvmConfig, Provider::Primitives>,
     task_spawner: Box<dyn TaskSpawner>,
     semaphore: Arc<Semaphore>,
 }

@@ -45,6 +45,8 @@ impl EthereumPayloadBuilder {
     {
         let conf = ctx.payload_builder_config();
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            ctx.provider().clone(),
+            pool,
             evm_config,
             EthereumBuilderConfig::new(conf.extra_data_bytes()).with_gas_limit(conf.gas_limit()),
         );
@@ -56,7 +58,6 @@ impl EthereumPayloadBuilder {
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
-            pool,
             ctx.task_executor().clone(),
             payload_job_config,
             payload_builder,

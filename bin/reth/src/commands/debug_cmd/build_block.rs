@@ -216,8 +216,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         );
 
         let args = BuildArguments::new(
-            blockchain_db.clone(),
-            transaction_pool,
             CachedReads::default(),
             payload_config,
             CancelOnDrop::default(),
@@ -225,6 +223,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         );
 
         let payload_builder = reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+            blockchain_db.clone(),
+            transaction_pool,
             EthEvmConfig::new(provider_factory.chain_spec()),
             EthereumBuilderConfig::new(Default::default()),
         );

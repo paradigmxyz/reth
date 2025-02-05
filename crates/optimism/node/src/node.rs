@@ -210,6 +210,8 @@ where
         let Self { rpc_add_ons, da_config } = self;
 
         let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
+            ctx.node.pool().clone(),
+            ctx.node.provider().clone(),
             ctx.node.evm_config().clone(),
             BasicOpReceiptBuilder::default(),
         );
@@ -507,6 +509,8 @@ where
         Txs: OpPayloadTransactions<TxTy<Node::Types>>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
+            pool,
+            ctx.provider().clone(),
             evm_config,
             BasicOpReceiptBuilder::default(),
             OpBuilderConfig { da_config: self.da_config },
@@ -522,7 +526,6 @@ where
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
-            pool,
             ctx.task_executor().clone(),
             payload_job_config,
             payload_builder,
