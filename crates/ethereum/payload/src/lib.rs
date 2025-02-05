@@ -311,7 +311,7 @@ where
         if let Some(blob_tx) = tx.as_eip4844() {
             block_blob_count += blob_tx.blob_versioned_hashes.len() as u64;
 
-            // if we've reached the max block count, we can skip blob txs entirely
+            // if we've reached the max blob count, we can skip blob txs entirely
             if block_blob_count == max_blob_count {
                 best_txs.skip_blobs();
             }
