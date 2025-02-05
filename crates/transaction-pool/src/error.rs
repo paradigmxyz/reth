@@ -1,5 +1,7 @@
 //! Transaction pool errors
 
+use std::any::Any;
+
 use alloy_eips::eip4844::BlobTransactionValidationError;
 use alloy_primitives::{Address, TxHash, U256};
 use reth_primitives::InvalidTransactionError;
@@ -17,6 +19,9 @@ pub trait PoolTransactionError: core::error::Error + Send + Sync {
     ///
     /// See [`PoolError::is_bad_transaction`].
     fn is_bad_transaction(&self) -> bool;
+
+    /// Returns a reference to `self` as a `&dyn Any`, enabling downcasting.
+    fn as_any(&self) -> &dyn Any;
 }
 
 // Needed for `#[error(transparent)]`
@@ -321,5 +326,53 @@ impl InvalidPoolTransactionError {
     pub const fn is_nonce_gap(&self) -> bool {
         matches!(self, Self::Consensus(InvalidTransactionError::NonceNotConsistent { .. })) ||
             matches!(self, Self::Eip4844(Eip4844PoolTransactionError::Eip4844NonceGap))
+    }
+
+    /// Returns the arbitrary error if it is [`InvalidPoolTransactionError::Other`]
+    pub fn as_other(&self) -> Option<&dyn PoolTransactionError> {
+        match self {
+            Self::Other(err) => Some(&**err),
+            _ => None,
+        }
+    }
+
+    /// Returns a reference to the [`InvalidPoolTransactionError::Other`] value if this type is a
+    /// [`InvalidPoolTransactionError::Other`] of that type. Returns None otherwise.
+    pub fn downcast_other_ref<T: core::error::Error + 'static>(&self) -> Option<&T> {
+        let other = self.as_other()?;
+        other.as_any().downcast_ref()
+    }
+
+    /// Returns true if the this type is a [`InvalidPoolTransactionError::Other`] of that error
+    /// type. Returns false otherwise.
+    pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
+        self.as_other().map(|err| err.as_any().is::<T>()).unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(thiserror::Error, Debug)]
+    #[error("err")]
+    struct E;
+
+    impl PoolTransactionError for E {
+        fn is_bad_transaction(&self) -> bool {
+            false
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    #[test]
+    fn other_downcast() {
+        let err = InvalidPoolTransactionError::Other(Box::new(E));
+        assert!(err.is_other::<E>());
+
+        assert!(err.downcast_other_ref::<E>().is_some());
     }
 }
