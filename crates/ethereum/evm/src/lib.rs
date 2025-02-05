@@ -21,7 +21,7 @@ use alloc::{sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::{Address, U256};
 use core::{convert::Infallible, fmt::Debug};
-use reth_chainspec::{ChainSpec, EthChainSpec};
+use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_evm::{env::EvmEnv, ConfigureEvm, ConfigureEvmEnv, Database, Evm, NextBlockEnvAttributes};
 use reth_primitives::TransactionSigned;
 use reth_primitives_traits::transaction::execute::FillTxEnv;
@@ -128,6 +128,11 @@ impl EthEvmConfig {
     /// Creates a new Ethereum EVM configuration with the given chain spec.
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { chain_spec }
+    }
+
+    /// Creates a new Ethereum EVM configuration for the ethereum mainnet.
+    pub fn mainnet() -> Self {
+        Self::new(MAINNET.clone())
     }
 
     /// Returns the chain spec associated with this configuration.
