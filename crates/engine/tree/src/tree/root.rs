@@ -969,7 +969,7 @@ where
         trie.update_account(address, account.unwrap_or_default())?;
     }
 
-    trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
+    trie.calculate_below_level_par(SPARSE_TRIE_INCREMENTAL_LEVEL);
     let elapsed = started_at.elapsed();
 
     Ok(elapsed)
