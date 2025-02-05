@@ -59,12 +59,16 @@ use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
 #[derive(Debug, Clone)]
-pub struct OpPayloadBuilder<EvmConfig, N: NodePrimitives, Txs = ()> {
+pub struct OpPayloadBuilder<Pool, Client, EvmConfig, N: NodePrimitives, Txs = ()> {
     /// The rollup's compute pending block configuration option.
     // TODO(clabby): Implement this feature.
     pub compute_pending_block: bool,
     /// The type responsible for creating the evm.
     pub evm_config: EvmConfig,
+    /// Transaction pool.
+    pub pool: Pool,
+    /// Node client.
+    pub client: Client,
     /// Settings for the builder, e.g. DA settings.
     pub config: OpBuilderConfig,
     /// The type responsible for yielding the best transactions for the payload if mempool
@@ -74,24 +78,30 @@ pub struct OpPayloadBuilder<EvmConfig, N: NodePrimitives, Txs = ()> {
     pub receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
 }
 
-impl<EvmConfig, N: NodePrimitives> OpPayloadBuilder<EvmConfig, N> {
+impl<Pool, Client, EvmConfig, N: NodePrimitives> OpPayloadBuilder<Pool, Client, EvmConfig, N> {
     /// `OpPayloadBuilder` constructor.
     ///
     /// Configures the builder with the default settings.
     pub fn new(
+        pool: Pool,
+        client: Client,
         evm_config: EvmConfig,
         receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
     ) -> Self {
-        Self::with_builder_config(evm_config, receipt_builder, Default::default())
+        Self::with_builder_config(pool, client, evm_config, receipt_builder, Default::default())
     }
 
     /// Configures the builder with the given [`OpBuilderConfig`].
     pub fn with_builder_config(
+        pool: Pool,
+        client: Client,
         evm_config: EvmConfig,
         receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
         config: OpBuilderConfig,
     ) -> Self {
         Self {
+            pool,
+            client,
             compute_pending_block: true,
             receipt_builder: Arc::new(receipt_builder),
             evm_config,
@@ -101,7 +111,9 @@ impl<EvmConfig, N: NodePrimitives> OpPayloadBuilder<EvmConfig, N> {
     }
 }
 
-impl<EvmConfig, N: NodePrimitives, Txs> OpPayloadBuilder<EvmConfig, N, Txs> {
+impl<Pool, Client, EvmConfig, N: NodePrimitives, Txs>
+    OpPayloadBuilder<Pool, Client, EvmConfig, N, Txs>
+{
     /// Sets the rollup's compute pending block configuration option.
     pub const fn set_compute_pending_block(mut self, compute_pending_block: bool) -> Self {
         self.compute_pending_block = compute_pending_block;
@@ -113,9 +125,13 @@ impl<EvmConfig, N: NodePrimitives, Txs> OpPayloadBuilder<EvmConfig, N, Txs> {
     pub fn with_transactions<T: OpPayloadTransactions>(
         self,
         best_transactions: T,
-    ) -> OpPayloadBuilder<EvmConfig, N, T> {
-        let Self { compute_pending_block, evm_config, config, receipt_builder, .. } = self;
+    ) -> OpPayloadBuilder<Pool, Client, EvmConfig, N, T> {
+        let Self {
+            pool, client, compute_pending_block, evm_config, config, receipt_builder, ..
+        } = self;
         OpPayloadBuilder {
+            pool,
+            client,
             compute_pending_block,
             evm_config,
             best_transactions,
@@ -134,8 +150,9 @@ impl<EvmConfig, N: NodePrimitives, Txs> OpPayloadBuilder<EvmConfig, N, Txs> {
         self.compute_pending_block
     }
 }
-impl<EvmConfig, N, T> OpPayloadBuilder<EvmConfig, N, T>
+impl<Pool, Client, EvmConfig, N, T> OpPayloadBuilder<Pool, Client, EvmConfig, N, T>
 where
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
     N: OpPayloadPrimitives,
     EvmConfig: ConfigureEvmFor<N>,
 {
@@ -147,31 +164,24 @@ where
     /// Given build arguments including an Optimism client, transaction pool,
     /// and configuration, this function creates a transaction payload. Returns
     /// a result indicating success with the payload or an error in case of failure.
-    fn build_payload<'a, Client, Pool, Txs>(
+    fn build_payload<'a, Txs>(
         &self,
-        args: BuildArguments<
-            Pool,
-            Client,
-            OpPayloadBuilderAttributes<N::SignedTx>,
-            OpBuiltPayload<N>,
-        >,
+        args: BuildArguments<OpPayloadBuilderAttributes<N::SignedTx>, OpBuiltPayload<N>>,
         best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
     where
-        Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
         Txs: PayloadTransactions<Transaction = N::SignedTx>,
     {
         let evm_env = self
             .evm_env(&args.config.attributes, &args.config.parent_header)
             .map_err(PayloadBuilderError::other)?;
 
-        let BuildArguments { client, pool: _, mut cached_reads, config, cancel, best_payload } =
-            args;
+        let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
 
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
             da_config: self.config.da_config.clone(),
-            chain_spec: client.chain_spec(),
+            chain_spec: self.client.chain_spec(),
             config,
             evm_env,
             cancel,
@@ -181,7 +191,7 @@ where
 
         let builder = OpBuilder::new(best);
 
-        let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+        let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
 
         if ctx.attributes().no_tx_pool {
@@ -215,15 +225,11 @@ where
     }
 
     /// Computes the witness for the payload.
-    pub fn payload_witness<Client>(
+    pub fn payload_witness(
         &self,
-        client: &Client,
         parent: SealedHeader,
         attributes: OpPayloadAttributes,
-    ) -> Result<ExecutionWitness, PayloadBuilderError>
-    where
-        Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-    {
+    ) -> Result<ExecutionWitness, PayloadBuilderError> {
         let attributes = OpPayloadBuilderAttributes::try_new(parent.hash(), attributes, 3)
             .map_err(PayloadBuilderError::other)?;
 
@@ -233,7 +239,7 @@ where
         let ctx: OpPayloadBuilderCtx<EvmConfig, N> = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
             da_config: self.config.da_config.clone(),
-            chain_spec: client.chain_spec(),
+            chain_spec: self.client.chain_spec(),
             config,
             evm_env,
             cancel: Default::default(),
@@ -241,7 +247,7 @@ where
             receipt_builder: self.receipt_builder.clone(),
         };
 
-        let state_provider = client.state_by_block_hash(ctx.parent().hash())?;
+        let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(state_provider);
         let mut state = State::builder().with_database(state).with_bundle_update().build();
 
@@ -251,10 +257,10 @@ where
 }
 
 /// Implementation of the [`PayloadBuilder`] trait for [`OpPayloadBuilder`].
-impl<Pool, Client, EvmConfig, N, Txs> PayloadBuilder<Pool, Client>
-    for OpPayloadBuilder<EvmConfig, N, Txs>
+impl<Pool, Client, EvmConfig, N, Txs> PayloadBuilder
+    for OpPayloadBuilder<Pool, Client, EvmConfig, N, Txs>
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + Clone,
     N: OpPayloadPrimitives,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     EvmConfig: ConfigureEvmFor<N>,
@@ -265,15 +271,15 @@ where
 
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
-        let pool = args.pool.clone();
+        let pool = self.pool.clone();
         self.build_payload(args, |attrs| self.best_transactions.best_transactions(pool, attrs))
     }
 
     fn on_missing_payload(
         &self,
-        _args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
+        _args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
         // we want to await the job that's already in progress because that should be returned as
         // is, there's no benefit in racing another job
@@ -284,14 +290,10 @@ where
     // system txs, hence on_missing_payload we return [MissingPayloadBehaviour::AwaitInProgress].
     fn build_empty_payload(
         &self,
-        client: &Client,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         let args = BuildArguments {
-            client,
             config,
-            // we use defaults here because for the empty payload we don't need to execute anything
-            pool: (),
             cached_reads: Default::default(),
             cancel: Default::default(),
             best_payload: None,
