@@ -11,10 +11,8 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::{
-    eip1559::INITIAL_BASE_FEE,
-    eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
-    eip7685::EMPTY_REQUESTS_HASH,
-    eip7840::{BlobParams, BlobScheduleItem},
+    eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
+    eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -174,7 +172,7 @@ pub struct HardforkBlobParams {
 impl HardforkBlobParams {
     /// Constructs params for chainspec from a provided blob schedule.
     /// Falls back to defaults if the schedule is empty.
-    pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobScheduleItem>) -> Self {
+    pub fn from_schedule(blob_schedule: &BTreeMap<String, BlobParams>) -> Self {
         let extract = |key: &str, default: fn() -> BlobParams| {
             blob_schedule
                 .get(key)
@@ -410,17 +408,6 @@ impl ChainSpec {
 
                 bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
             }
-        }
-    }
-
-    /// Get the [`BlobParams`] for the given timestamp.
-    ///
-    /// Note: This always return [`BlobParams::cancun`] pre prague.
-    pub fn blob_fee_params_at_timestamp(&self, timestamp: u64) -> BlobParams {
-        if self.is_prague_active_at_timestamp(timestamp) {
-            self.blob_params.prague
-        } else {
-            self.blob_params.cancun
         }
     }
 

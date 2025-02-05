@@ -15,7 +15,6 @@ use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, Environ
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
-use reth_errors::BlockValidationError;
 use reth_evm::execute::{BlockExecutorProvider, Executor};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
@@ -165,9 +164,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let provider_rw = provider_factory.database_provider_rw()?;
 
         // Insert block, state and hashes
-        provider_rw.insert_historical_block(
-            block.clone().try_recover().map_err(|_| BlockValidationError::SenderRecoveryError)?,
-        )?;
+        provider_rw.insert_historical_block(block.clone().try_recover()?)?;
         provider_rw.write_state(
             &execution_outcome,
             OriginalValuesKnown::No,

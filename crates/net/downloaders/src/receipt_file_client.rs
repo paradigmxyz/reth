@@ -1,7 +1,7 @@
 use std::{fmt, io};
 
 use futures::Future;
-use reth_primitives::{Receipt, Receipts};
+use reth_primitives::Receipt;
 use tokio::io::AsyncReadExt;
 use tokio_stream::StreamExt;
 use tokio_util::codec::{Decoder, FramedRead};
@@ -27,10 +27,10 @@ where
 #[derive(Debug)]
 pub struct ReceiptFileClient<D: ReceiptDecoder> {
     /// The buffered receipts, read from file, as nested lists. One list per block number.
-    pub receipts: Receipts<D::Receipt>,
+    pub receipts: Vec<Vec<D::Receipt>>,
     /// First (lowest) block number read from file.
     pub first_block: u64,
-    /// Total number of receipts. Count of elements in [`Receipts`] flattened.
+    /// Total number of receipts. Count of elements in receipts flattened.
     pub total_receipts: usize,
 }
 
@@ -66,7 +66,7 @@ where
     where
         B: AsyncReadExt + Unpin,
     {
-        let mut receipts = Receipts::default();
+        let mut receipts = Vec::default();
 
         // use with_capacity to make sure the internal buffer contains the entire chunk
         let mut stream = FramedRead::with_capacity(reader, D::default(), num_bytes as usize);

@@ -8,7 +8,7 @@ use core::time::Duration;
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
-use alloy_sol_types::decode_revert_reason;
+use alloy_sol_types::{ContractError, RevertReason};
 use reth_errors::RethError;
 use reth_primitives_traits::transaction::signed::RecoveryError;
 use reth_rpc_server_types::result::{
@@ -615,8 +615,14 @@ impl RevertError {
 impl std::fmt::Display for RevertError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("execution reverted")?;
-        if let Some(reason) = self.output.as_ref().and_then(|bytes| decode_revert_reason(bytes)) {
-            write!(f, ": {reason}")?;
+        if let Some(reason) = self.output.as_ref().and_then(|out| RevertReason::decode(out)) {
+            let error = reason.to_string();
+            let mut error = error.as_str();
+            if matches!(reason, RevertReason::ContractError(ContractError::Revert(_))) {
+                // we strip redundant `revert: ` prefix from the revert reason
+                error = error.trim_start_matches("revert: ");
+            }
+            write!(f, ": {error}")?;
         }
         Ok(())
     }
@@ -768,9 +774,9 @@ pub fn ensure_success(result: ExecutionResult) -> EthResult<Bytes> {
 
 #[cfg(test)]
 mod tests {
-    use revm_primitives::b256;
-
     use super::*;
+    use alloy_sol_types::{Revert, SolError};
+    use revm_primitives::b256;
 
     #[test]
     fn timed_out_error() {
@@ -804,5 +810,13 @@ mod tests {
         let err: jsonrpsee_types::error::ErrorObject<'static> =
             EthApiError::HeaderNotFound(BlockId::finalized()).into();
         assert_eq!(err.message(), "block not found: finalized");
+    }
+
+    #[test]
+    fn revert_err_display() {
+        let revert = Revert::from("test_revert_reason");
+        let err = RevertError::new(revert.abi_encode().into());
+        let msg = err.to_string();
+        assert_eq!(msg, "execution reverted: test_revert_reason");
     }
 }

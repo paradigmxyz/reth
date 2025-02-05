@@ -8,7 +8,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1559::calc_next_block_base_fee, eip2930::AccessListResult};
-use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
@@ -31,9 +31,7 @@ use reth_revm::{
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::{api::FromEvmHalt, ensure_success},
-    revm_utils::{
-        apply_block_overrides, apply_state_overrides, caller_gas_allowance, get_precompiles,
-    },
+    revm_utils::{apply_block_overrides, apply_state_overrides, caller_gas_allowance},
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
@@ -419,20 +417,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit).saturating_to());
         }
 
-        let from = request.from.unwrap_or_default();
-        let to = if let Some(TxKind::Call(to)) = request.to {
-            to
-        } else {
-            let nonce =
-                db.basic_ref(from).map_err(Self::Error::from_eth_err)?.unwrap_or_default().nonce;
-            from.create(nonce)
-        };
-
         // can consume the list since we're not using the request anymore
         let initial = request.access_list.take().unwrap_or_default();
 
-        let precompiles = get_precompiles(evm_env.spec.into());
-        let mut inspector = AccessListInspector::new(initial, from, to, precompiles);
+        let mut inspector = AccessListInspector::new(initial);
 
         let (result, (evm_env, mut tx_env)) =
             self.inspect(&mut db, evm_env, tx_env, &mut inspector)?;

@@ -35,7 +35,6 @@ pub type BincodeReprFor<'a, T> = <T as SerdeBincodeCompat>::BincodeRepr<'a>;
 mod block_bincode {
     use crate::serde_bincode_compat::SerdeBincodeCompat;
     use alloc::{borrow::Cow, vec::Vec};
-    use alloy_consensus::serde_bincode_compat::Header;
     use alloy_eips::eip4895::Withdrawals;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
@@ -60,8 +59,8 @@ mod block_bincode {
     #[debug(bound())]
     pub struct Block<'a, T: SerdeBincodeCompat, H: SerdeBincodeCompat> {
         header: H::BincodeRepr<'a>,
-        #[serde(bound = "BlockBody<'a, T>: Serialize + serde::de::DeserializeOwned")]
-        body: BlockBody<'a, T>,
+        #[serde(bound = "BlockBody<'a, T, H>: Serialize + serde::de::DeserializeOwned")]
+        body: BlockBody<'a, T, H>,
     }
 
     impl<'a, T: SerdeBincodeCompat, H: SerdeBincodeCompat> From<&'a alloy_consensus::Block<T, H>>
@@ -125,31 +124,35 @@ mod block_bincode {
     ///
     /// #[serde_as]
     /// #[derive(Serialize, Deserialize)]
-    /// struct Data<T: SerdeBincodeCompat> {
-    ///     #[serde_as(as = "serde_bincode_compat::BlockBody<'_, T>")]
-    ///     body: alloy_consensus::BlockBody<T>,
+    /// struct Data<T: SerdeBincodeCompat, H: SerdeBincodeCompat> {
+    ///     #[serde_as(as = "serde_bincode_compat::BlockBody<'_, T, H>")]
+    ///     body: alloy_consensus::BlockBody<T, H>,
     /// }
     /// ```
     #[derive(derive_more::Debug, Serialize, Deserialize)]
     #[debug(bound())]
-    pub struct BlockBody<'a, T: SerdeBincodeCompat> {
+    pub struct BlockBody<'a, T: SerdeBincodeCompat, H: SerdeBincodeCompat> {
         transactions: Vec<T::BincodeRepr<'a>>,
-        ommers: Vec<Header<'a>>,
+        ommers: Vec<H::BincodeRepr<'a>>,
         withdrawals: Cow<'a, Option<Withdrawals>>,
     }
 
-    impl<'a, T: SerdeBincodeCompat> From<&'a alloy_consensus::BlockBody<T>> for BlockBody<'a, T> {
-        fn from(value: &'a alloy_consensus::BlockBody<T>) -> Self {
+    impl<'a, T: SerdeBincodeCompat, H: SerdeBincodeCompat>
+        From<&'a alloy_consensus::BlockBody<T, H>> for BlockBody<'a, T, H>
+    {
+        fn from(value: &'a alloy_consensus::BlockBody<T, H>) -> Self {
             Self {
                 transactions: value.transactions.iter().map(|tx| tx.as_repr()).collect(),
-                ommers: value.ommers.iter().map(Into::into).collect(),
+                ommers: value.ommers.iter().map(|h| h.as_repr()).collect(),
                 withdrawals: Cow::Borrowed(&value.withdrawals),
             }
         }
     }
 
-    impl<'a, T: SerdeBincodeCompat> From<BlockBody<'a, T>> for alloy_consensus::BlockBody<T> {
-        fn from(value: BlockBody<'a, T>) -> Self {
+    impl<'a, T: SerdeBincodeCompat, H: SerdeBincodeCompat> From<BlockBody<'a, T, H>>
+        for alloy_consensus::BlockBody<T, H>
+    {
+        fn from(value: BlockBody<'a, T, H>) -> Self {
             Self {
                 transactions: value.transactions.into_iter().map(Into::into).collect(),
                 ommers: value.ommers.into_iter().map(Into::into).collect(),
@@ -158,9 +161,11 @@ mod block_bincode {
         }
     }
 
-    impl<T: SerdeBincodeCompat> SerializeAs<alloy_consensus::BlockBody<T>> for BlockBody<'_, T> {
+    impl<T: SerdeBincodeCompat, H: SerdeBincodeCompat> SerializeAs<alloy_consensus::BlockBody<T, H>>
+        for BlockBody<'_, T, H>
+    {
         fn serialize_as<S>(
-            source: &alloy_consensus::BlockBody<T>,
+            source: &alloy_consensus::BlockBody<T, H>,
             serializer: S,
         ) -> Result<S::Ok, S::Error>
         where
@@ -170,10 +175,10 @@ mod block_bincode {
         }
     }
 
-    impl<'de, T: SerdeBincodeCompat> DeserializeAs<'de, alloy_consensus::BlockBody<T>>
-        for BlockBody<'de, T>
+    impl<'de, T: SerdeBincodeCompat, H: SerdeBincodeCompat>
+        DeserializeAs<'de, alloy_consensus::BlockBody<T, H>> for BlockBody<'de, T, H>
     {
-        fn deserialize_as<D>(deserializer: D) -> Result<alloy_consensus::BlockBody<T>, D::Error>
+        fn deserialize_as<D>(deserializer: D) -> Result<alloy_consensus::BlockBody<T, H>, D::Error>
         where
             D: Deserializer<'de>,
         {
@@ -181,8 +186,10 @@ mod block_bincode {
         }
     }
 
-    impl<T: SerdeBincodeCompat> SerdeBincodeCompat for alloy_consensus::BlockBody<T> {
-        type BincodeRepr<'a> = BlockBody<'a, T>;
+    impl<T: SerdeBincodeCompat, H: SerdeBincodeCompat> SerdeBincodeCompat
+        for alloy_consensus::BlockBody<T, H>
+    {
+        type BincodeRepr<'a> = BlockBody<'a, T, H>;
 
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
             self.into()

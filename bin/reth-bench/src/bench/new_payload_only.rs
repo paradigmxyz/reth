@@ -13,11 +13,11 @@ use crate::{
 };
 use alloy_primitives::B256;
 use alloy_provider::Provider;
+use alloy_rpc_types_engine::ExecutionPayload;
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use reth_rpc_types_compat::engine::payload::block_to_payload;
 use std::time::Instant;
 use tracing::{debug, info};
 
@@ -64,11 +64,13 @@ impl Command {
             let versioned_hashes: Vec<B256> =
                 block.body().blob_versioned_hashes_iter().copied().collect();
             let parent_beacon_block_root = block.parent_beacon_block_root;
-            let payload = block_to_payload(block).0;
+            let (payload, _) =
+                ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
 
             let block_number = payload.block_number();
 
             debug!(
+                target: "reth-bench",
                 number=?payload.block_number(),
                 "Sending payload to engine",
             );

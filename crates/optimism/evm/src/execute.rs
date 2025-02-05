@@ -232,7 +232,6 @@ where
 
             receipts.push(
                 match self.receipt_builder.build_receipt(ReceiptBuilderCtx {
-                    header: block.header(),
                     tx: transaction,
                     result,
                     cumulative_gas_used,
@@ -305,7 +304,7 @@ where
         receipts: &[N::Receipt],
         _requests: &Requests,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block.header(), &self.chain_spec.clone(), receipts)
+        validate_block_post_execution(block.header(), self.chain_spec.clone(), receipts)
     }
 }
 

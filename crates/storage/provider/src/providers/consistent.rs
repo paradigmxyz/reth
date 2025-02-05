@@ -208,7 +208,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             reverts,
             // We skip new contracts since we never delete them from the database
             Vec::new(),
-            receipts.into(),
+            receipts,
             start_block_number,
             Vec::new(),
         )))

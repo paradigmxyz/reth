@@ -50,6 +50,7 @@ test-utils = [
     "reth-network-types/test-utils",
     "reth-primitives/test-utils",
     "reth-primitives-traits/test-utils",
+    "alloy-primitives/rand",
 ]
 std = [
     "reth-consensus/std",
