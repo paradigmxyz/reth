@@ -190,7 +190,7 @@ where
         maybe_state: &mut Option<Box<dyn StateProvider>>,
     ) -> TransactionValidationOutcome<Tx> {
         // Checks for tx_type
-        match transaction.tx_type() {
+        match transaction.ty() {
             LEGACY_TX_TYPE_ID => {
                 // Accept legacy transactions
             }
@@ -307,7 +307,7 @@ where
                 )
             }
 
-            if transaction.authorization_count() == 0 {
+            if transaction.authorization_list().is_none_or(|l| l.is_empty()) {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
                     Eip7702PoolTransactionError::MissingEip7702AuthorizationList.into(),
@@ -329,7 +329,7 @@ where
                 )
             }
 
-            let blob_count = transaction.blob_count();
+            let blob_count = transaction.blob_versioned_hashes().map(|b| b.len()).unwrap_or(0);
             if blob_count == 0 {
                 // no blobs
                 return TransactionValidationOutcome::Invalid(
@@ -865,7 +865,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         transaction.input(),
         transaction.is_create(),
         transaction.access_list().map(|list| list.0.as_slice()).unwrap_or(&[]),
-        transaction.authorization_count() as u64,
+        transaction.authorization_list().map(|l| l.len()).unwrap_or(0) as u64,
     );
 
     let gas_limit = transaction.gas_limit();
@@ -883,6 +883,7 @@ mod tests {
         blobstore::InMemoryBlobStore, error::PoolErrorKind, traits::PoolTransaction,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
+    use alloy_consensus::Transaction;
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
     use reth_primitives::{transaction::SignedTransactionIntoRecoveredExt, PooledTransaction};

@@ -3122,6 +3122,7 @@ dependencies = [
 name = "example-network-txpool"
 version = "0.0.0"
 dependencies = [
+ "alloy-consensus",
  "eyre",
  "reth-network",
  "reth-provider",

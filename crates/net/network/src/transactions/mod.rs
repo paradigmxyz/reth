@@ -1710,7 +1710,7 @@ impl PooledTransactionsHashesBuilder {
             Self::Eth68(msg) => {
                 msg.hashes.push(*pooled_tx.hash());
                 msg.sizes.push(pooled_tx.encoded_length());
-                msg.types.push(pooled_tx.transaction.tx_type());
+                msg.types.push(pooled_tx.transaction.ty());
             }
         }
     }

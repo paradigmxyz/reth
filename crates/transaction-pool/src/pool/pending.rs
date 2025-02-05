@@ -613,6 +613,7 @@ mod tests {
         test_utils::{MockOrdering, MockTransaction, MockTransactionFactory, MockTransactionSet},
         PoolTransaction,
     };
+    use alloy_consensus::Transaction;
     use alloy_primitives::address;
     use reth_primitives::TxType;
     use std::collections::HashSet;
