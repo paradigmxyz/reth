@@ -161,9 +161,9 @@ pub enum Eip4844PoolTransactionError {
     #[error("too many blobs in transaction: have {have}, permitted {permitted}")]
     TooManyEip4844Blobs {
         /// Number of blobs the transaction has
-        have: usize,
+        have: u64,
         /// Number of maximum blobs the transaction can have
-        permitted: usize,
+        permitted: u64,
     },
     /// Thrown if validating the blob sidecar for the transaction failed.
     #[error(transparent)]
