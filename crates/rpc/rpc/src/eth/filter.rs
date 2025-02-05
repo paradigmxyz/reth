@@ -44,7 +44,7 @@ const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500k
 
 /// `Eth` filter RPC implementation.
 ///
-/// This type handles `eth_` rpc requests related to filters (eth_getLogs)
+/// This type handles `eth_` rpc requests related to filters (`eth_getLogs`).
 pub struct EthFilter<Eth: EthApiTypes> {
     /// All nested fields bundled together
     inner: Arc<EthFilterInner<Eth>>,
