@@ -172,18 +172,8 @@ pub struct ProofCalculated {
     sequence_number: u64,
     /// Sparse trie update
     update: SparseTrieUpdate,
-    /// The source of the proof fetch, whether it was requested as a prefetch or as a result of a
-    /// state update.
-    source: ProofFetchSource,
     /// The time taken to calculate the proof.
     elapsed: Duration,
-}
-
-impl ProofCalculated {
-    /// Returns true if the proof was calculated as a result of a state update.
-    pub(crate) const fn is_from_state_update(&self) -> bool {
-        matches!(self.source, ProofFetchSource::StateUpdate)
-    }
 }
 
 /// Whether or not a proof was fetched due to a state update, or due to a prefetch command.
@@ -318,7 +308,6 @@ struct MultiproofInput<Factory> {
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<StateRootMessage>,
-    source: ProofFetchSource,
 }
 
 /// Manages concurrent multiproof calculations.
@@ -388,7 +377,6 @@ where
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
-            source,
         } = input;
         let thread_pool = self.thread_pool.clone();
 
@@ -419,7 +407,6 @@ where
                                 targets: proof_targets,
                                 multiproof: proof,
                             },
-                            source,
                             elapsed,
                         }),
                     ));
@@ -482,6 +469,7 @@ pub struct StateRootTask<Factory> {
     thread_pool: Arc<rayon::ThreadPool>,
     /// Manages calculation of multiproofs.
     multiproof_manager: MultiproofManager<Factory>,
+    /// State root task metrics
     metrics: StateRootTaskMetrics,
 }
 
@@ -583,7 +571,6 @@ where
             proof_targets: targets,
             proof_sequence_number: self.proof_sequencer.next_sequence(),
             state_root_message_sender: self.tx.clone(),
-            source: ProofFetchSource::Prefetch,
         });
     }
 
@@ -601,7 +588,6 @@ where
             proof_targets,
             proof_sequence_number,
             state_root_message_sender: self.tx.clone(),
-            source: ProofFetchSource::StateUpdate,
         });
     }
 
@@ -627,6 +613,7 @@ where
     fn run(mut self, sparse_trie_tx: Sender<SparseTrieUpdate>) -> StateRootResult {
         let mut sparse_trie_tx = Some(sparse_trie_tx);
 
+        let mut prefetch_proofs_received = 0;
         let mut updates_received = 0;
         let mut proofs_processed = 0;
 
@@ -643,9 +630,11 @@ where
                 Ok(message) => match message {
                     StateRootMessage::PrefetchProofs(targets) => {
                         trace!(target: "engine::root", "processing StateRootMessage::PrefetchProofs");
+                        prefetch_proofs_received += 1;
                         debug!(
                             target: "engine::root",
                             len = targets.len(),
+                            total_prefetches = prefetch_proofs_received,
                             "Prefetching proofs"
                         );
                         self.on_prefetch_proof(targets);
@@ -672,7 +661,8 @@ where
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
                         updates_finished = true;
 
-                        let all_proofs_received = proofs_processed >= updates_received;
+                        let all_proofs_received =
+                            proofs_processed >= updates_received + prefetch_proofs_received;
                         let no_pending = !self.proof_sequencer.has_pending();
                         if all_proofs_received && no_pending {
                             // drop the sender
@@ -687,9 +677,10 @@ where
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
                         trace!(target: "engine::root", "processing StateRootMessage::ProofCalculated");
-                        if proof_calculated.is_from_state_update() {
-                            proofs_processed += 1;
-                        }
+
+                        // we increment proofs_processed for both state updates and prefetches,
+                        // because both are used for the root termination condition.
+                        proofs_processed += 1;
 
                         self.metrics
                             .proof_calculation_duration_histogram
@@ -724,7 +715,8 @@ where
                                 .send(combined_update);
                         }
 
-                        let all_proofs_received = proofs_processed >= updates_received;
+                        let all_proofs_received =
+                            proofs_processed >= updates_received + prefetch_proofs_received;
                         let no_pending = !self.proof_sequencer.has_pending();
                         if all_proofs_received && no_pending && updates_finished {
                             // drop the sender
