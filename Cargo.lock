@@ -3122,6 +3122,7 @@ dependencies = [
 name = "example-network-txpool"
 version = "0.0.0"
 dependencies = [
+ "alloy-consensus",
  "eyre",
  "reth-network",
  "reth-provider",
@@ -7227,6 +7228,7 @@ dependencies = [
  "reth-ethereum-engine-primitives",
  "reth-ethereum-primitives",
  "reth-evm",
+ "reth-evm-ethereum",
  "reth-exex-types",
  "reth-metrics",
  "reth-network-p2p",
@@ -7237,6 +7239,7 @@ dependencies = [
  "reth-provider",
  "reth-prune",
  "reth-prune-types",
+ "reth-revm",
  "reth-rpc-types-compat",
  "reth-stages",
  "reth-stages-api",

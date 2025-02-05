@@ -9,9 +9,7 @@ use alloy_rlp::Decodable;
 use alloy_rpc_types::engine::{BlobsBundleV1, PayloadAttributes};
 use clap::Parser;
 use eyre::Context;
-use reth_basic_payload_builder::{
-    BuildArguments, BuildOutcome, Cancelled, PayloadBuilder, PayloadConfig,
-};
+use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
@@ -34,7 +32,7 @@ use reth_provider::{
     BlockHashReader, BlockReader, BlockWriter, ChainSpecProvider, ProviderFactory,
     StageCheckpointReader, StateProviderFactory,
 };
-use reth_revm::{cached::CachedReads, primitives::KzgSettings};
+use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop, primitives::KzgSettings};
 use reth_stages::StageId;
 use reth_transaction_pool::{
     blobstore::InMemoryBlobStore, BlobStore, EthPooledTransaction, PoolConfig, TransactionOrigin,
@@ -219,7 +217,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             transaction_pool,
             CachedReads::default(),
             payload_config,
-            Cancelled::default(),
+            CancelOnDrop::default(),
             None,
         );
 

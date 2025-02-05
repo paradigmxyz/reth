@@ -16,7 +16,7 @@ use reth_trie::{
 use revm::db::BundleState;
 use revm_primitives::map::DefaultHashBuilder;
 
-type Cache<K, V> = moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
+pub(crate) type Cache<K, V> = moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
 
 /// A wrapper of a state provider and a shared cache.
 pub(crate) struct CachedStateProvider<S> {
