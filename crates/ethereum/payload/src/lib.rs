@@ -267,8 +267,8 @@ where
                     &pool_tx,
                     InvalidPoolTransactionError::Eip4844(
                         Eip4844PoolTransactionError::TooManyEip4844Blobs {
-                            have: (block_blob_count + tx_blob_count) as usize,
-                            permitted: max_blob_count as usize,
+                            have: block_blob_count + tx_blob_count,
+                            permitted: max_blob_count,
                         },
                     ),
                 );

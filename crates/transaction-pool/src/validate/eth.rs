@@ -328,7 +328,8 @@ where
                 )
             }
 
-            let blob_count = transaction.blob_versioned_hashes().map(|b| b.len()).unwrap_or(0);
+            let blob_count =
+                transaction.blob_versioned_hashes().map(|b| b.len() as u64).unwrap_or(0);
             if blob_count == 0 {
                 // no blobs
                 return TransactionValidationOutcome::Invalid(
@@ -339,7 +340,7 @@ where
                 )
             }
 
-            let max_blob_count = self.fork_tracker.max_blob_count() as usize;
+            let max_blob_count = self.fork_tracker.max_blob_count();
             if blob_count > max_blob_count {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
