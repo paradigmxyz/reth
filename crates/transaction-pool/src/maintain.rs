@@ -30,7 +30,10 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-use tokio::sync::oneshot;
+use tokio::{
+    sync::oneshot,
+    time::{self, Duration},
+};
 use tracing::{debug, error, info, trace, warn};
 
 /// Additional settings for maintaining the transaction pool
@@ -45,11 +48,19 @@ pub struct MaintainPoolConfig {
     ///
     /// Default: 100
     pub max_reload_accounts: usize,
+
+    /// Maximum amount of time non-executable transaction are queued.
+    /// Default: 3 hours
+    pub max_tx_lifetime: time::Duration,
 }
 
 impl Default for MaintainPoolConfig {
     fn default() -> Self {
-        Self { max_update_depth: 64, max_reload_accounts: 100 }
+        Self {
+            max_update_depth: 64,
+            max_reload_accounts: 100,
+            max_tx_lifetime: Duration::from_secs(3 * 60 * 60),
+        }
     }
 }
 
@@ -227,6 +238,23 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     break;
                 }
                 event = ev;
+            }
+        }
+
+        let mut interval_duration = time::interval(config.max_tx_lifetime);
+        tokio::select! {
+            _ = interval_duration.tick() => {
+                let old_tx_hashes: Vec<_> = pool
+                    .queued_transactions()
+                    .into_iter()
+                    .filter(|tx| tx.timestamp.elapsed() > config.max_tx_lifetime)
+                    .filter_map(|tx| Arc::try_unwrap(tx).ok())
+                    .map(|tx| *tx.hash())
+                    .collect();
+
+                if !old_tx_hashes.is_empty() {
+                    pool.remove_transactions(old_tx_hashes);
+                }
             }
         }
 
