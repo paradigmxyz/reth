@@ -1,6 +1,6 @@
 use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    Nibbles,
+    KeyHasher, Nibbles,
 };
 use alloy_primitives::{
     keccak256,
@@ -10,7 +10,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::Account;
-use reth_trie_common::KeyHasher;
+
 use revm::db::{AccountStatus, BundleAccount};
 use std::borrow::Cow;
 
@@ -260,9 +260,9 @@ impl HashedStorage {
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct HashedPostStateSorted {
     /// Updated state of accounts.
-    pub(crate) accounts: HashedAccountsSorted,
+    pub accounts: HashedAccountsSorted,
     /// Map of hashed addresses to hashed storage.
-    pub(crate) storages: B256HashMap<HashedStorageSorted>,
+    pub storages: B256HashMap<HashedStorageSorted>,
 }
 
 impl HashedPostStateSorted {
@@ -289,9 +289,9 @@ impl HashedPostStateSorted {
 #[derive(Clone, Eq, PartialEq, Default, Debug)]
 pub struct HashedAccountsSorted {
     /// Sorted collection of hashed addresses and their account info.
-    pub(crate) accounts: Vec<(B256, Account)>,
+    pub accounts: Vec<(B256, Account)>,
     /// Set of destroyed account keys.
-    pub(crate) destroyed_accounts: B256HashSet,
+    pub destroyed_accounts: B256HashSet,
 }
 
 impl HashedAccountsSorted {
@@ -309,11 +309,11 @@ impl HashedAccountsSorted {
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct HashedStorageSorted {
     /// Sorted hashed storage slots with non-zero value.
-    pub(crate) non_zero_valued_slots: Vec<(B256, U256)>,
+    pub non_zero_valued_slots: Vec<(B256, U256)>,
     /// Slots that have been zero valued.
-    pub(crate) zero_valued_slots: B256HashSet,
+    pub zero_valued_slots: B256HashSet,
     /// Flag indicating whether the storage was wiped or not.
-    pub(crate) wiped: bool,
+    pub wiped: bool,
 }
 
 impl HashedStorageSorted {
@@ -335,8 +335,8 @@ impl HashedStorageSorted {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::KeccakKeyHasher;
     use alloy_primitives::Bytes;
-    use reth_trie_common::KeccakKeyHasher;
     use revm::{
         db::{states::StorageSlot, StorageWithOriginalValues},
         primitives::{AccountInfo, Bytecode},
