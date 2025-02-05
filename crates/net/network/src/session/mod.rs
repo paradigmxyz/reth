@@ -261,11 +261,11 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         eth_protocol_handler: Arc<dyn DynEthProtocolHandler<N>>,
         disconnect_rx: oneshot::Receiver<()>,
         events: mpsc::Sender<PendingSessionEvent<N>>,
+        handshake_info: HandshakeInfo,
         session_id: SessionId,
         remote_addr: SocketAddr,
-        remote_peer_id: PeerId,
         secret_key: SecretKey,
-        handshake_info: HandshakeInfo,
+        remote_peer_id: PeerId,
     ) {
         let stream = match TcpStream::connect(remote_addr).await {
             Ok(stream) => {
@@ -404,11 +404,11 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     self.eth_protocol_handler.clone(),
                     disconnect_rx,
                     pending_events,
+                    HandshakeInfo { hello_msg, status_msg, fork_filter, extra_handlers },
                     session_id,
                     remote_addr,
-                    remote_peer_id,
                     secret_key,
-                    HandshakeInfo { hello_msg, status_msg, fork_filter, extra_handlers },
+                    remote_peer_id,
                 ),
             ));
 
