@@ -338,6 +338,16 @@ pub enum RpcInvalidTransactionError {
         /// Current balance of transaction sender.
         balance: U256,
     },
+    /// This is similar to [`Self::InsufficientFunds`] but with a different error message and
+    /// exists for compatibility reasons.
+    ///
+    /// This error is used in `eth_estimateCall` when the highest available gas limit, capped with
+    /// the allowance of the caller is too low: [`Self::GasTooLow`].
+    #[error("gas required exceeds allowance ({gas_limit})")]
+    GasRequiredExceedsAllowance {
+        /// The gas limit the transaction was executed with.
+        gas_limit: u64,
+    },
     /// Thrown when calculating gas usage
     #[error("gas uint64 overflow")]
     GasUintOverflow,
@@ -448,9 +458,10 @@ impl RpcInvalidTransactionError {
     /// Returns the rpc error code for this error.
     pub const fn error_code(&self) -> i32 {
         match self {
-            Self::InvalidChainId | Self::GasTooLow | Self::GasTooHigh => {
-                EthRpcErrorCode::InvalidInput.code()
-            }
+            Self::InvalidChainId |
+            Self::GasTooLow |
+            Self::GasTooHigh |
+            Self::GasRequiredExceedsAllowance { .. } => EthRpcErrorCode::InvalidInput.code(),
             Self::Revert(_) => EthRpcErrorCode::ExecutionError.code(),
             _ => EthRpcErrorCode::TransactionRejected.code(),
         }
