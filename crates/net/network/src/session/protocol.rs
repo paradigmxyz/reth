@@ -5,7 +5,7 @@ use super::{
 use crate::session::pending::HandshakeInfo;
 use reth_eth_wire::NetworkPrimitives;
 use reth_network_api::{Direction, PeerId};
-use std::{fmt, future::Future};
+use std::{fmt, future::Future, sync::Arc};
 use tokio::net::TcpStream;
 
 /// The Ethereum protocol handler.
@@ -18,23 +18,21 @@ impl<N: NetworkPrimitives> EthProtocolHandler<N> for EthProtocol {
 
 /// A helper trait to convert an [`EthProtocolHandler`] into a dynamic type.
 pub trait IntoEthProtocol<N: NetworkPrimitives> {
-    fn into_eth_protocol(self) -> Box<dyn DynEthProtocolHandler<N>>;
+    fn into_eth_protocol(self) -> Arc<dyn DynEthProtocolHandler<N>>;
 }
 
 impl<N: NetworkPrimitives, T> IntoEthProtocol<N> for T
 where
     T: EthProtocolHandler<N> + Send + Sync + 'static,
 {
-    fn into_eth_protocol(self) -> Box<dyn DynEthProtocolHandler<N>> {
-        Box::new(self)
+    fn into_eth_protocol(self) -> Arc<dyn DynEthProtocolHandler<N>> {
+        Arc::new(self)
     }
 }
 
 /// A trait responsible for implementing the Ethereum protocol specifications
 /// for a TCP stream when establishing a peer-to-peer connection.
-pub(crate) trait EthProtocolHandler<N: NetworkPrimitives>:
-    fmt::Debug + Send + Sync + 'static
-{
+pub trait EthProtocolHandler<N: NetworkPrimitives>: fmt::Debug + Send + Sync + 'static {
     /// The type responsible for negotiating the protocol with the remote.
     type ConnectionHandler: EthConnectionHandler<N>;
 

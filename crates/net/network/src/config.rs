@@ -35,7 +35,7 @@ pub fn rng_secret_key() -> SecretKey {
 #[derive(Debug)]
 pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The Ethereum protocol handler
-    pub eth_protocol_handler: Box<dyn DynEthProtocolHandler<N>>,
+    pub eth_protocol_handler: Arc<dyn DynEthProtocolHandler<N>>,
     /// The client type that can interact with the chain.
     ///
     /// This type is used to fetch the block number after we established a session and received the
@@ -201,7 +201,7 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The executor to use for spawning tasks.
     extra_protocols: RlpxSubProtocols,
     /// The Ethereum protocol handler
-    eth_protocol_handler: Box<dyn DynEthProtocolHandler<N>>,
+    eth_protocol_handler: Arc<dyn DynEthProtocolHandler<N>>,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
     /// Whether tx gossip is disabled
@@ -246,7 +246,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             executor: None,
             hello_message: None,
             extra_protocols: Default::default(),
-            eth_protocol_handler: Box::new(EthProtocol::default()),
+            eth_protocol_handler: Arc::new(EthProtocol::default()),
             head: None,
             tx_gossip_disabled: false,
             block_import: None,

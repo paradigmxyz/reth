@@ -117,7 +117,7 @@ pub struct SessionManager<N: NetworkPrimitives> {
     /// Metrics for the session manager.
     metrics: SessionManagerMetrics,
     /// The eth protocol handler
-    eth_protocol_handler: Arc<Box<dyn DynEthProtocolHandler<N>>>,
+    eth_protocol_handler: Arc<dyn DynEthProtocolHandler<N>>,
 }
 
 // === impl SessionManager ===
@@ -133,14 +133,14 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         hello_message: HelloMessageWithProtocols,
         fork_filter: ForkFilter,
         extra_protocols: RlpxSubProtocols,
-        eth_protocol_handler: Box<dyn DynEthProtocolHandler<N>>,
+        eth_protocol_handler: Arc<dyn DynEthProtocolHandler<N>>,
     ) -> Self {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
         let active_session_tx = PollSender::new(active_session_tx);
 
         Self {
-            eth_protocol_handler: Arc::new(eth_protocol_handler),
+            eth_protocol_handler,
             next_id: 0,
             counter: SessionCounter::new(config.limits),
             initial_internal_request_timeout: config.initial_internal_request_timeout,
@@ -230,7 +230,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     }
 
     pub(crate) async fn handle_incoming_session(
-        eth_protocol_handler: Arc<Box<dyn DynEthProtocolHandler<N>>>,
+        eth_protocol_handler: Arc<dyn DynEthProtocolHandler<N>>,
         disconnect_rx: oneshot::Receiver<()>,
         events: mpsc::Sender<PendingSessionEvent<N>>,
         stream: TcpStream,
@@ -258,7 +258,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     }
 
     pub(crate) async fn handle_outgoing_session(
-        eth_protocol_handler: Arc<Box<dyn DynEthProtocolHandler<N>>>,
+        eth_protocol_handler: Arc<dyn DynEthProtocolHandler<N>>,
         disconnect_rx: oneshot::Receiver<()>,
         events: mpsc::Sender<PendingSessionEvent<N>>,
         session_id: SessionId,
