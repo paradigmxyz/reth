@@ -19,9 +19,7 @@ use alloy_consensus::{
     BlockHeader,
 };
 use alloy_eips::{
-    eip1559::ETHEREUM_BLOCK_GAS_LIMIT,
-    eip4844::{env_settings::EnvKzgSettings, MAX_BLOBS_PER_BLOCK},
-    eip7840::BlobParams,
+    eip1559::ETHEREUM_BLOCK_GAS_LIMIT, eip4844::env_settings::EnvKzgSettings, eip7840::BlobParams,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives::{InvalidTransactionError, SealedBlock};
@@ -615,8 +613,8 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             // prague not yet activated
             prague: false,
 
-            // max blob count is 0 by default
-            max_blob_count: MAX_BLOBS_PER_BLOCK as u64,
+            // max blob count is cancun by default
+            max_blob_count: BlobParams::cancun().max_blob_count,
         }
     }
 
@@ -723,7 +721,12 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self.cancun = self.client.chain_spec().is_cancun_active_at_timestamp(timestamp);
         self.shanghai = self.client.chain_spec().is_shanghai_active_at_timestamp(timestamp);
         self.prague = self.client.chain_spec().is_prague_active_at_timestamp(timestamp);
-        self.max_blob_count = MAX_BLOBS_PER_BLOCK as u64;
+        self.max_blob_count = self
+            .client
+            .chain_spec()
+            .blob_params_at_timestamp(timestamp)
+            .unwrap_or_else(BlobParams::cancun)
+            .max_blob_count;
         self
     }
 
