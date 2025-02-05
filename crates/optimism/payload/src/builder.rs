@@ -32,9 +32,10 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{
     transaction::signed::OpTransaction, OpTransactionSigned, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
 };
+use reth_optimism_primitives::transaction::signed::OpTransaction;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_payload_util::{NoopPayloadTransactions, PayloadTransactions};
+use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
 use reth_primitives::{
     transaction::SignedTransactionIntoRecoveredExt, BlockBody, NodePrimitives, SealedHeader,
 };
@@ -49,6 +50,8 @@ use reth_revm::{
 use reth_transaction_pool::{
     pool::BestPayloadTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
 };
+use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord};
+use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::{
     db::{states::bundle_state::BundleRetention, State},
     primitives::{ExecutionResult, ResultAndState},
@@ -76,6 +79,8 @@ pub struct OpPayloadBuilder<Pool, Client, EvmConfig, N: NodePrimitives, Txs = ()
     pub best_transactions: Txs,
     /// Node primitive types.
     pub receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
+    /// Transaction pool.
+    pub pool: Pool,
 }
 
 impl<Pool, Client, EvmConfig, N: NodePrimitives> OpPayloadBuilder<Pool, Client, EvmConfig, N> {
@@ -87,6 +92,7 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives> OpPayloadBuilder<Pool, Client, 
         client: Client,
         evm_config: EvmConfig,
         receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
+        pool: Pool,
     ) -> Self {
         Self::with_builder_config(pool, client, evm_config, receipt_builder, Default::default())
     }
@@ -98,6 +104,7 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives> OpPayloadBuilder<Pool, Client, 
         evm_config: EvmConfig,
         receipt_builder: impl OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>,
         config: OpBuilderConfig,
+        pool: Pool,
     ) -> Self {
         Self {
             pool,
@@ -106,6 +113,7 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives> OpPayloadBuilder<Pool, Client, 
             receipt_builder: Arc::new(receipt_builder),
             evm_config,
             config,
+            pool,
             best_transactions: (),
         }
     }
@@ -122,7 +130,7 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives, Txs>
 
     /// Configures the type responsible for yielding the transactions that should be included in the
     /// payload.
-    pub fn with_transactions<T: OpPayloadTransactions>(
+    pub fn with_transactions<T>(
         self,
         best_transactions: T,
     ) -> OpPayloadBuilder<Pool, Client, EvmConfig, N, T> {
@@ -137,6 +145,7 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives, Txs>
             best_transactions,
             config,
             receipt_builder,
+            pool,
         }
     }
 
@@ -150,6 +159,7 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives, Txs>
         self.compute_pending_block
     }
 }
+
 impl<Pool, Client, EvmConfig, N, T> OpPayloadBuilder<Pool, Client, EvmConfig, N, T>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
@@ -170,7 +180,7 @@ where
         best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
     where
-        Txs: PayloadTransactions<Transaction = N::SignedTx>,
+        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
         let evm_env = self
             .evm_env(&args.config.attributes, &args.config.parent_header)
@@ -264,7 +274,7 @@ where
     N: OpPayloadPrimitives,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     EvmConfig: ConfigureEvmFor<N>,
-    Txs: OpPayloadTransactions<N::SignedTx>,
+    Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     type Attributes = OpPayloadBuilderAttributes<N::SignedTx>;
     type BuiltPayload = OpBuiltPayload<N>;
@@ -332,10 +342,7 @@ impl<'a, Txs> OpBuilder<'a, Txs> {
     }
 }
 
-impl<Txs> OpBuilder<'_, Txs>
-where
-    Txs: PayloadTransactions,
-{
+impl<Txs> OpBuilder<'_, Txs> {
     /// Executes the payload and returns the outcome.
     pub fn execute<EvmConfig, N, DB, P>(
         self,
@@ -344,7 +351,7 @@ where
     ) -> Result<BuildOutcomeKind<ExecutedPayload<N>>, PayloadBuilderError>
     where
         N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<Transaction = N::SignedTx>,
+        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         EvmConfig: ConfigureEvmFor<N>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StorageRootProvider,
@@ -408,7 +415,7 @@ where
     where
         EvmConfig: ConfigureEvmFor<N>,
         N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<Transaction = N::SignedTx>,
+        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
     {
@@ -533,7 +540,7 @@ where
     where
         EvmConfig: ConfigureEvmFor<N>,
         N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<Transaction = N::SignedTx>,
+        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateProofProvider + StorageRootProvider,
     {
@@ -546,22 +553,20 @@ where
 }
 
 /// A type that returns a the [`PayloadTransactions`] that should be included in the pool.
-pub trait OpPayloadTransactions<Transaction = OpTransactionSigned>:
+pub trait OpPayloadTransactions<Transaction: PoolTransaction>:
     Clone + Send + Sync + Unpin + 'static
 {
     /// Returns an iterator that yields the transaction in the order they should get included in the
     /// new payload.
-    fn best_transactions<
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = Transaction>>,
-    >(
+    fn best_transactions<Pool: TransactionPool<Transaction = Transaction>>(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
     ) -> impl PayloadTransactions<Transaction = Transaction>;
 }
 
-impl<T> OpPayloadTransactions<T> for () {
-    fn best_transactions<Pool: TransactionPool<Transaction: PoolTransaction<Consensus = T>>>(
+impl<T: PoolTransaction> OpPayloadTransactions<T> for () {
+    fn best_transactions<Pool: TransactionPool<Transaction = T>>(
         &self,
         pool: Pool,
         attr: BestTransactionsAttributes,
@@ -948,7 +953,9 @@ where
         &self,
         info: &mut ExecutionInfo<N>,
         db: &mut State<DB>,
-        mut best_txs: impl PayloadTransactions<Transaction = EvmConfig::Transaction>,
+        mut best_txs: impl PayloadTransactions<
+            Transaction: PoolTransaction<Consensus = EvmConfig::Transaction>,
+        >,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
@@ -961,6 +968,7 @@ where
         let mut evm = self.evm_config.evm_with_env(&mut *db, self.evm_env.clone());
 
         while let Some(tx) = best_txs.next(()) {
+            let tx = tx.into_consensus();
             if info.is_tx_over_limits(tx.tx(), block_gas_limit, tx_da_limit, block_da_limit) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from

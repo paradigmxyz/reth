@@ -101,9 +101,7 @@ use crate::{
     traits::{GetPooledTransactionLimit, NewBlobSidecar, TransactionListenerKind},
     validate::ValidTransaction,
 };
-pub use best::{
-    BestPayloadTransactions, BestTransactionFilter, BestTransactionsWithPrioritizedSenders,
-};
+pub use best::{BestTransactionFilter, BestTransactionsWithPrioritizedSenders};
 pub use blob::{blob_tx_priority, fee_delta};
 pub use events::{FullTransactionEvent, TransactionEvent};
 pub use listener::{AllTransactionsEvents, TransactionEvents};

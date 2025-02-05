@@ -8,8 +8,7 @@ use alloy_consensus::Transaction;
 use alloy_eips::Typed2718;
 use alloy_primitives::Address;
 use core::fmt;
-use reth_payload_util::PayloadTransactions;
-use reth_primitives::{InvalidTransactionError, Recovered};
+use reth_primitives::InvalidTransactionError;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet, VecDeque},
     sync::Arc,
@@ -220,51 +219,6 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
                 return Some(best.transaction)
             }
         }
-    }
-}
-
-/// Wrapper struct that allows to convert `BestTransactions` (used in tx pool) to
-/// `PayloadTransactions` (used in block composition).
-#[derive(Debug)]
-pub struct BestPayloadTransactions<T, I>
-where
-    T: PoolTransaction,
-    I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
-{
-    invalid: HashSet<Address>,
-    best: I,
-}
-
-impl<T, I> BestPayloadTransactions<T, I>
-where
-    T: PoolTransaction,
-    I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
-{
-    /// Create a new `BestPayloadTransactions` with the given iterator.
-    pub fn new(best: I) -> Self {
-        Self { invalid: Default::default(), best }
-    }
-}
-
-impl<T, I> PayloadTransactions for BestPayloadTransactions<T, I>
-where
-    T: PoolTransaction,
-    I: Iterator<Item = Arc<ValidPoolTransaction<T>>>,
-{
-    type Transaction = T::Consensus;
-
-    fn next(&mut self, _ctx: ()) -> Option<Recovered<Self::Transaction>> {
-        loop {
-            let tx = self.best.next()?;
-            if self.invalid.contains(&tx.sender()) {
-                continue
-            }
-            return Some(tx.to_consensus())
-        }
-    }
-
-    fn mark_invalid(&mut self, sender: Address, _nonce: u64) {
-        self.invalid.insert(sender);
     }
 }
 

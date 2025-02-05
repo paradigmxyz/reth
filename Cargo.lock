@@ -8548,6 +8548,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "reth-primitives",
+ "reth-transaction-pool",
 ]
 
 [[package]]
