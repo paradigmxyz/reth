@@ -1,5 +1,7 @@
 //! Transaction pool errors
 
+use std::any::Any;
+
 use alloy_eips::eip4844::BlobTransactionValidationError;
 use alloy_primitives::{Address, TxHash, U256};
 use reth_primitives::InvalidTransactionError;
@@ -11,12 +13,15 @@ pub type PoolResult<T> = Result<T, PoolError>;
 ///
 /// For example during validation
 /// [`TransactionValidator::validate_transaction`](crate::validate::TransactionValidator::validate_transaction)
-pub trait PoolTransactionError: core::error::Error + Send + Sync + 'static {
+pub trait PoolTransactionError: core::error::Error + Send + Sync {
     /// Returns `true` if the error was caused by a transaction that is considered bad in the
     /// context of the transaction pool and warrants peer penalization.
     ///
     /// See [`PoolError::is_bad_transaction`].
     fn is_bad_transaction(&self) -> bool;
+
+    /// Returns a reference to `self` as a `&dyn Any`, enabling downcasting.
+    fn as_any(&self) -> &dyn Any;
 }
 
 // Needed for `#[error(transparent)]`
@@ -324,24 +329,24 @@ impl InvalidPoolTransactionError {
     }
 
     /// Returns the arbitrary error if it is [`InvalidPoolTransactionError::Other`]
-    pub fn as_other(&self) -> Option<&(dyn core::error::Error + Send + Sync + 'static)> {
+    pub fn as_other(&self) -> Option<&(dyn PoolTransactionError)> {
         match self {
-            Self::Other(err) => Some(err),
+            Self::Other(err) => Some(&**err),
             _ => None,
         }
     }
 
     /// Returns a reference to the [`InvalidPoolTransactionError::Other`] value if this type is a
     /// [`InvalidPoolTransactionError::Other`] of that type. Returns None otherwise.
-    pub fn downcast_other_ref<T: PoolTransactionError + 'static>(&self) -> Option<&T> {
+    pub fn downcast_other_ref<T: core::error::Error + 'static>(&self) -> Option<&T> {
         let other = self.as_other()?;
-        other.downcast_ref()
+        other.as_any().downcast_ref()
     }
 
     /// Returns true if the this type is a [`InvalidPoolTransactionError::Other`] of that error
     /// type. Returns false otherwise.
-    pub fn is_other<T: core::error::Error + Send + Sync + 'static>(&self) -> bool {
-        self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
+    pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
+        self.as_other().map(|err| err.as_any().is::<T>()).unwrap_or(false)
     }
 }
 
@@ -356,6 +361,10 @@ mod tests {
     impl PoolTransactionError for E {
         fn is_bad_transaction(&self) -> bool {
             false
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
         }
     }
 
