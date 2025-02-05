@@ -3,7 +3,7 @@
 use alloy_consensus::BlockHeader;
 use reth_optimism_primitives::predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_storage_api::StorageRootProvider;
-use reth_trie::{test_utils::storage_root_prehashed, HashedStorage};
+use reth_trie::HashedStorage;
 use revm::db::BundleState;
 
 use crate::OpConsensusError;
@@ -28,24 +28,19 @@ pub fn verify_withdrawals_storage_root<DB: StorageRootProvider, H: BlockHeader>(
     let header_storage_root =
         header.withdrawals_root().ok_or(OpConsensusError::StorageRootMissing)?;
 
-    let storage_root = match state_updates.state().get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
-        Some(account) => {
+    let hashed_storage_updates =
+        state_updates.state().get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER).map(|account| {
             // block contained withdrawals transactions, use predeploy storage updates from
             // execution
-            let hashed_storage = HashedStorage::from_plain_storage(
+            HashedStorage::from_plain_storage(
                 account.status,
                 account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
-            );
-            storage_root_prehashed(hashed_storage.storage)
-        }
-        None => {
-            // no withdrawals transactions in block, load latest storage root of predeploy
-            // todo: reorg safe way to cache latest storage root?
-            state
-                .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, Default::default())
-                .map_err(OpConsensusError::StorageRootCalculationFail)?
-        }
-    };
+            )
+        });
+
+    let storage_root = state
+        .storage_root(ADDRESS_L2_TO_L1_MESSAGE_PASSER, hashed_storage_updates.unwrap_or_default())
+        .map_err(OpConsensusError::StorageRootCalculationFail)?;
 
     if header_storage_root != storage_root {
         return Err(OpConsensusError::StorageRootMismatch {
@@ -119,6 +114,7 @@ mod test {
 
         // validate block against existing state by passing empty state updates
         let block_execution_state_updates = BundleState::default();
+
         verify_withdrawals_storage_root(
             &block_execution_state_updates,
             state_provider_factory.latest().expect("load state"),
