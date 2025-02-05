@@ -807,6 +807,7 @@ impl PeersManager {
                 peer.state = PeerConnectionState::PendingOut;
                 peer.fork_id = fork_id;
                 entry.insert(peer);
+                self.connection_info.inc_pending_out();
                 self.queued_actions
                     .push_back(PeerAction::Connect { peer_id, remote_addr: addr.tcp() });
             }
