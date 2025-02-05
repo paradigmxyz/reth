@@ -21,6 +21,7 @@ use alloy_consensus::{
 use alloy_eips::{
     eip1559::ETHEREUM_BLOCK_GAS_LIMIT,
     eip4844::{env_settings::EnvKzgSettings, MAX_BLOBS_PER_BLOCK},
+    eip7840::BlobParams,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives::{InvalidTransactionError, SealedBlock};
@@ -340,7 +341,7 @@ where
                 )
             }
 
-            let max_blob_count = self.fork_tracker.max_blob_count().try_into().unwrap();
+            let max_blob_count = self.fork_tracker.max_blob_count() as usize;
             if blob_count > max_blob_count {
                 return TransactionValidationOutcome::Invalid(
                     transaction,
@@ -554,7 +555,7 @@ pub struct EthTransactionValidatorBuilder<Client> {
     /// Fork indicator whether we are in the Cancun hardfork.
     prague: bool,
     /// Max blob count at the block's timestamp.
-    max_blob_count: AtomicU64,
+    max_blob_count: u64,
     /// Whether using EIP-2718 type transactions is allowed
     eip2718: bool,
     /// Whether using EIP-1559 type transactions is allowed
@@ -615,7 +616,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             prague: false,
 
             // max blob count is 0 by default
-            max_blob_count: (MAX_BLOBS_PER_BLOCK as u64).into(),
+            max_blob_count: MAX_BLOBS_PER_BLOCK as u64,
         }
     }
 
@@ -722,13 +723,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self.cancun = self.client.chain_spec().is_cancun_active_at_timestamp(timestamp);
         self.shanghai = self.client.chain_spec().is_shanghai_active_at_timestamp(timestamp);
         self.prague = self.client.chain_spec().is_prague_active_at_timestamp(timestamp);
-        self.max_blob_count = self
-            .client
-            .chain_spec()
-            .blob_params_at_timestamp(timestamp)
-            .map(|p| p.max_blob_count)
-            .unwrap_or(0)
-            .into();
+        self.max_blob_count = MAX_BLOBS_PER_BLOCK as u64;
         self
     }
 
@@ -768,11 +763,17 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             ..
         } = self;
 
+        let max_blob_count = if prague {
+            BlobParams::prague().max_blob_count
+        } else {
+            BlobParams::cancun().max_blob_count
+        };
+
         let fork_tracker = ForkTracker {
             shanghai: AtomicBool::new(shanghai),
             cancun: AtomicBool::new(cancun),
             prague: AtomicBool::new(prague),
-            max_blob_count: AtomicU64::new(MAX_BLOBS_PER_BLOCK as u64),
+            max_blob_count: AtomicU64::new(max_blob_count),
         };
 
         let inner = EthTransactionValidatorInner {
