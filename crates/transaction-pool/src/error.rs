@@ -333,14 +333,14 @@ impl InvalidPoolTransactionError {
 
     /// Returns a reference to the [`InvalidPoolTransactionError::Other`] value if this type is a
     /// [`InvalidPoolTransactionError::Other`] of that type. Returns None otherwise.
-    pub fn downcast_other_ref<T: core::error::Error + 'static>(&self) -> Option<&T> {
+    pub fn downcast_other_ref<T: PoolTransactionError + 'static>(&self) -> Option<&T> {
         let other = self.as_other()?;
         other.downcast_ref()
     }
 
     /// Returns true if the this type is a [`InvalidPoolTransactionError::Other`] of that error
     /// type. Returns false otherwise.
-    pub fn is_other<T: PoolTransactionError>(&self) -> bool {
+    pub fn is_other<T: PoolTransactionError + 'static>(&self) -> bool {
         self.as_other().map(|err| err.is::<T>()).unwrap_or(false)
     }
 }
