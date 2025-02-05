@@ -69,7 +69,7 @@ where
 {
     /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components.
     ///
-    /// Creating an [`EthApi`] requires a few mandatory compontents:
+    /// Creating an [`EthApi`] requires a few mandatory components:
     ///  - provider: The type responsible for fetching requested data from disk.
     ///  - transaction pool: To interact with the pool, submitting new transactions (e.g.
     ///    `eth_sendRawTransactions`).
