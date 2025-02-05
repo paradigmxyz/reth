@@ -2423,7 +2423,7 @@ where
 
         let hashed_state = self.provider.hashed_post_state(&output.state);
 
-        trace!(target: "engine::tree", block = ?block_num_hash, "Calculating block state root");
+        trace!(target: "engine::tree", block=?block_num_hash, "Calculating block state root");
         let root_time = Instant::now();
 
         // We attempt to compute state root in parallel if we are currently not persisting
