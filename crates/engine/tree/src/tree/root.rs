@@ -1025,6 +1025,7 @@ fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &Multi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::map::B256Set;
     use reth_primitives_traits::{Account as RethAccount, StorageEntry};
     use reth_provider::{
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
@@ -1090,6 +1091,42 @@ mod tests {
         }
 
         updates
+    }
+
+    fn create_state_root_config<F>(factory: F, input: TrieInput) -> StateRootConfig<F>
+    where
+        F: DatabaseProviderFactory<Provider: BlockReader>
+            + StateCommitmentProvider
+            + Clone
+            + 'static,
+    {
+        let consistent_view = ConsistentDbView::new(factory, None);
+        let nodes_sorted = Arc::new(input.nodes.clone().into_sorted());
+        let state_sorted = Arc::new(input.state.clone().into_sorted());
+        let prefix_sets = Arc::new(input.prefix_sets);
+
+        StateRootConfig { consistent_view, nodes_sorted, state_sorted, prefix_sets }
+    }
+
+    fn create_test_state_root_task<F>(factory: F) -> StateRootTask<F>
+    where
+        F: DatabaseProviderFactory<Provider: BlockReader>
+            + StateCommitmentProvider
+            + Clone
+            + 'static,
+    {
+        let num_threads = thread_pool_size();
+
+        let thread_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("test-worker-{}", i))
+            .build()
+            .expect("Failed to create test proof worker thread pool");
+
+        let thread_pool = Arc::new(thread_pool);
+        let config = create_state_root_config(factory, TrieInput::default());
+
+        StateRootTask::new(config, thread_pool)
     }
 
     #[test]
@@ -1421,5 +1458,86 @@ mod tests {
         assert_eq!(target_slots.len(), 2);
         assert!(target_slots.contains(&slot1));
         assert!(target_slots.contains(&slot2));
+    }
+
+    #[test]
+    fn test_get_prefetch_proof_targets_no_duplicates() {
+        let test_provider_factory = create_test_provider_factory();
+        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
+
+        // populate some targets
+        let mut targets = MultiProofTargets::default();
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+        targets.insert(addr1, vec![slot1].into_iter().collect());
+        targets.insert(addr2, vec![slot2].into_iter().collect());
+
+        let prefetch_proof_targets =
+            test_state_root_task.get_prefetch_proof_targets(targets.clone());
+
+        // check that the prefetch proof targets are the same because there are no fetched proof
+        // targets yet
+        assert_eq!(prefetch_proof_targets, targets);
+
+        // add a different addr and slot to fetched proof targets
+        let addr3 = B256::random();
+        let slot3 = B256::random();
+        test_state_root_task.fetched_proof_targets.insert(addr3, vec![slot3].into_iter().collect());
+
+        let prefetch_proof_targets =
+            test_state_root_task.get_prefetch_proof_targets(targets.clone());
+
+        // check that the prefetch proof targets are the same because the fetched proof targets
+        // don't overlap with the prefetch targets
+        assert_eq!(prefetch_proof_targets, targets);
+    }
+
+    #[test]
+    fn test_get_prefetch_proof_targets_remove_subset() {
+        let test_provider_factory = create_test_provider_factory();
+        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
+
+        // populate some targe
+        let mut targets = MultiProofTargets::default();
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+        targets.insert(addr1, vec![slot1].into_iter().collect());
+        targets.insert(addr2, vec![slot2].into_iter().collect());
+
+        // add a subset of the first target to fetched proof targets
+        test_state_root_task.fetched_proof_targets.insert(addr1, vec![slot1].into_iter().collect());
+
+        let prefetch_proof_targets =
+            test_state_root_task.get_prefetch_proof_targets(targets.clone());
+
+        // check that the prefetch proof targets do not include the subset
+        assert_eq!(prefetch_proof_targets.len(), 1);
+        assert!(!prefetch_proof_targets.contains_key(&addr1));
+        assert!(prefetch_proof_targets.contains_key(&addr2));
+
+        // now add one more slot to the prefetch targets
+        let slot3 = B256::random();
+        targets.get_mut(&addr1).unwrap().insert(slot3);
+
+        let prefetch_proof_targets =
+            test_state_root_task.get_prefetch_proof_targets(targets.clone());
+
+        // check that the prefetch proof targets do not include the subset
+        // but include the new slot
+        assert_eq!(prefetch_proof_targets.len(), 2);
+        assert!(prefetch_proof_targets.contains_key(&addr1));
+        assert_eq!(
+            *prefetch_proof_targets.get(&addr1).unwrap(),
+            vec![slot3].into_iter().collect::<B256Set>()
+        );
+        assert!(prefetch_proof_targets.contains_key(&addr2));
+        assert_eq!(
+            *prefetch_proof_targets.get(&addr2).unwrap(),
+            vec![slot2].into_iter().collect::<B256Set>()
+        );
     }
 }
