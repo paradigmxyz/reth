@@ -9,7 +9,7 @@ use std::{fmt, future::Future, sync::Arc};
 use tokio::net::TcpStream;
 
 /// The Ethereum protocol handler.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub(crate) struct EthProtocol;
 
 impl<N: NetworkPrimitives> EthProtocolHandler<N> for EthProtocol {

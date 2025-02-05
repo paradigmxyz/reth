@@ -239,7 +239,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             executor: None,
             hello_message: None,
             extra_protocols: Default::default(),
-            eth_protocol_handler: Arc::new(EthProtocol::default()),
+            eth_protocol_handler: Arc::new(EthProtocol),
             head: None,
             tx_gossip_disabled: false,
             block_import: None,
