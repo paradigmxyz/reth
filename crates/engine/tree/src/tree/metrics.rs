@@ -70,7 +70,6 @@ pub(crate) struct BlockValidationMetrics {
     /// Trie input computation duration
     pub(crate) trie_input_duration: Gauge,
     /// Prewarm spawn duration
-    #[allow(dead_code)]
     pub(crate) prewarm_spawn_duration: Gauge,
     /// Cache saving duration
     #[allow(dead_code)]
