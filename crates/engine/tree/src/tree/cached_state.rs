@@ -390,9 +390,10 @@ pub(crate) struct ProviderCacheBuilder {
 impl ProviderCacheBuilder {
     /// Build a [`ProviderCaches`] struct, so that provider caches can be easily cloned.
     pub(crate) fn build_caches(self) -> ProviderCaches {
-        const STORAGE_MAX_WEIGHT: u64 = 8 * 1024 * 1024 * 1024; // 8Gb
-        const ACCOUNT_MAX_WEIGHT: u64 = 512 * 1024 * 1024; // 512Mb
-        const CODE_MAX_WEIGHT: u64 = 512 * 1024 * 1024; // 512Mb
+        const TOTAL_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024; // 4GB
+        let storage_cache_size = (TOTAL_CACHE_SIZE * 8889) / 10000; // 88.89% of total
+        let account_cache_size = (TOTAL_CACHE_SIZE * 556) / 10000; // 5.56% of total
+        let code_cache_size = (TOTAL_CACHE_SIZE * 556) / 10000; // 5.56% of total
 
         const EXPIRY_TIME: Duration = Duration::from_secs(7200); // 2 hours
         const TIME_TO_IDLE: Duration = Duration::from_secs(3600); // 1 hour
@@ -404,7 +405,7 @@ impl ProviderCacheBuilder {
                 let slots_weight = value.len() * 218;
                 (base_weight + slots_weight) as u32
             })
-            .max_capacity(STORAGE_MAX_WEIGHT)
+            .max_capacity(storage_cache_size)
             .time_to_live(EXPIRY_TIME)
             .time_to_idle(TIME_TO_IDLE)
             .build_with_hasher(DefaultHashBuilder::default());
@@ -430,7 +431,7 @@ impl ProviderCacheBuilder {
                     None => 8, // size of None variant
                 }
             })
-            .max_capacity(ACCOUNT_MAX_WEIGHT)
+            .max_capacity(account_cache_size)
             .time_to_live(EXPIRY_TIME)
             .time_to_idle(TIME_TO_IDLE)
             .build_with_hasher(DefaultHashBuilder::default());
@@ -445,7 +446,7 @@ impl ProviderCacheBuilder {
                     None => 8, // size of None variant
                 }
             })
-            .max_capacity(CODE_MAX_WEIGHT)
+            .max_capacity(code_cache_size)
             .time_to_live(EXPIRY_TIME)
             .time_to_idle(TIME_TO_IDLE)
             .build_with_hasher(DefaultHashBuilder::default());
