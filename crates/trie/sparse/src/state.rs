@@ -550,6 +550,12 @@ impl<F: BlindedProviderFactory + Send + Sync> SparseStateTrie<F> {
     pub fn calculate_below_level(&mut self, level: usize) {
         self.state.calculate_below_level(level);
     }
+
+    /// Calculates the hashes of the nodes below the provided level in parallel.
+    #[cfg(feature = "rayon")]
+    pub fn calculate_below_level_par(&mut self, level: usize) {
+        self.state.calculate_below_level_par(level);
+    }
 }
 
 #[cfg(test)]

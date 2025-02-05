@@ -154,6 +154,12 @@ impl<P: BlindedProvider + Send + Sync> SparseTrie<P> {
     pub fn calculate_below_level(&mut self, level: usize) {
         self.as_revealed_mut().unwrap().update_rlp_node_level(level);
     }
+
+    /// Calculates the hashes of the nodes below the provided level in parallel.
+    #[cfg(feature = "rayon")]
+    pub fn calculate_below_level_par(&mut self, level: usize) {
+        self.as_revealed_mut().unwrap().update_rlp_node_level_par(level);
+    }
 }
 
 /// The representation of revealed sparse trie.
@@ -680,8 +686,8 @@ impl<P> RevealedSparseTrie<P> {
         prefix_set: &mut PrefixSet,
         buffers: &mut RlpNodeBuffers,
     ) -> RlpNode {
-        let (root, updates) = self.rlp_node_with_updates(prefix_set, buffers, &mut Vec::new());
-        self.apply_rlp_node_updates(updates);
+        let root = self.rlp_node_with_updates(prefix_set, buffers, &mut Vec::new());
+        self.apply_rlp_node_updates(buffers.rlp_node_updates.drain());
         root
     }
 
@@ -690,8 +696,8 @@ impl<P> RevealedSparseTrie<P> {
         prefix_set: &mut PrefixSet,
         buffers: &mut RlpNodeBuffers,
         rlp_buf: &mut Vec<u8>,
-    ) -> (RlpNode, RlpNodeUpdates) {
-        let mut rlp_node_updates = RlpNodeUpdates::default();
+    ) -> RlpNode {
+        buffers.rlp_node_updates.clear();
 
         let starting_path = buffers.path_stack.last().map(|item| item.path.clone());
 
@@ -964,7 +970,7 @@ impl<P> RevealedSparseTrie<P> {
             };
 
             if !rlp_node_update.is_empty() {
-                rlp_node_updates.insert(path.clone(), rlp_node_update);
+                buffers.rlp_node_updates.insert(path.clone(), rlp_node_update);
             }
 
             trace!(
@@ -982,10 +988,13 @@ impl<P> RevealedSparseTrie<P> {
         }
 
         debug_assert_eq!(buffers.rlp_node_stack.len(), 1);
-        (buffers.rlp_node_stack.pop().unwrap().rlp_node, rlp_node_updates)
+        buffers.rlp_node_stack.pop().unwrap().rlp_node
     }
 
-    fn apply_rlp_node_updates(&mut self, rlp_node_updates: RlpNodeUpdates) {
+    fn apply_rlp_node_updates(
+        &mut self,
+        rlp_node_updates: impl IntoIterator<Item = (Nibbles, RlpNodeUpdate)>,
+    ) {
         for (path, update) in rlp_node_updates {
             if let Some(node) = self.nodes.get_mut(&path) {
                 match node {
@@ -1333,9 +1342,7 @@ impl<P: BlindedProvider + Send + Sync> RevealedSparseTrie<P> {
     }
 
     /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
-    /// depth. Root node has a level of 0.
-    ///
-    /// This method updates the non-overlapping ranges of the trie in parallel.
+    /// depth in parallel. Root node has a level of 0.
     #[cfg(feature = "rayon")]
     pub fn update_rlp_node_level_par(&mut self, depth: usize) {
         use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -1360,8 +1367,8 @@ impl<P: BlindedProvider + Send + Sync> RevealedSparseTrie<P> {
                         path,
                         is_in_prefix_set: Some(true),
                     });
-                    let (_, updates) = self.rlp_node_with_updates(prefix_set, buffers, rlp_node);
-                    updates
+                    self.rlp_node_with_updates(prefix_set, buffers, rlp_node);
+                    std::mem::take(&mut buffers.rlp_node_updates)
                 },
             )
             .for_each_init(
@@ -1545,6 +1552,8 @@ pub struct RlpNodeBuffers {
     branch_child_buf: SmallVec<[Nibbles; 16]>,
     /// Reusable branch value stack
     branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
+    /// Reusable RLP node updates
+    rlp_node_updates: RlpNodeUpdates,
 }
 
 impl RlpNodeBuffers {
@@ -1559,6 +1568,7 @@ impl RlpNodeBuffers {
             rlp_node_stack: Vec::new(),
             branch_child_buf: SmallVec::<[Nibbles; 16]>::new_const(),
             branch_value_stack_buf: SmallVec::<[RlpNode; 16]>::new_const(),
+            rlp_node_updates: RlpNodeUpdates::default(),
         }
     }
 }
