@@ -329,7 +329,7 @@ impl InvalidPoolTransactionError {
     }
 
     /// Returns the arbitrary error if it is [`InvalidPoolTransactionError::Other`]
-    pub fn as_other(&self) -> Option<&(dyn PoolTransactionError)> {
+    pub fn as_other(&self) -> Option<&dyn PoolTransactionError> {
         match self {
             Self::Other(err) => Some(&**err),
             _ => None,
