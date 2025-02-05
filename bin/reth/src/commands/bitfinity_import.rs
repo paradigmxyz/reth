@@ -21,10 +21,9 @@ use reth_node_core::{args::BitfinityImportArgs, dirs::ChainPath};
 use reth_node_ethereum::{EthExecutorProvider, EthereumNode};
 use reth_node_events::node::NodeEvent;
 use reth_primitives::{EthPrimitives, SealedHeader};
-use reth_provider::providers::BlockchainProvider;
 use reth_provider::{
-    BlockNumReader, CanonChainTracker, ChainSpecProvider, DatabaseProviderFactory, HeaderProvider,
-    ProviderError, ProviderFactory,
+    providers::BlockchainProvider, BlockNumReader, CanonChainTracker, ChainSpecProvider,
+    DatabaseProviderFactory, HeaderProvider, ProviderError, ProviderFactory,
 };
 use reth_prune::PruneModes;
 use reth_stages::{
@@ -35,7 +34,7 @@ use reth_stages::{
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::watch;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 /// Syncs RLP encoded blocks from a file.
 #[derive(Clone)]
@@ -57,7 +56,8 @@ pub struct BitfinityImportCommand {
     blockchain_provider: BlockchainProvider<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
 }
 
-/// Manually implement `Debug` for `ImportCommand` because `BlockchainProvider` doesn't implement it.
+/// Manually implement `Debug` for `ImportCommand` because `BlockchainProvider` doesn't implement
+/// it.
 impl std::fmt::Debug for BitfinityImportCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ImportCommand")
@@ -147,7 +147,7 @@ impl BitfinityImportCommand {
             max_block_age_secs: Duration::from_secs(self.bitfinity.max_block_age_secs),
         };
 
-        let remote_client = Arc::new(
+        let mut remote_client =
             BitfinityEvmClient::from_rpc_url(
                 rpc_config,
                 start_block,
@@ -160,36 +160,58 @@ impl BitfinityImportCommand {
                 }),
                 self.bitfinity.check_evm_state_before_importing,
             )
-            .await?,
-        );
+            .await?;
+
+        if self.bitfinity.validate_unsafe_blocks {
+            while let Some(unsafe_block) = remote_client.unsafe_block() {
+                if let Err(err) = remote_client.validate_block(unsafe_block).await {
+                    error!(target: "reth::cli - BitfinityImportCommand", "Block validation failed: {}", err);
+                }
+
+                info!(target: "reth::cli - BitfinityImportCommand", "Block validated: {}", unsafe_block);
+            }
+        }
 
         // override the tip
-        let tip = if let Some(tip) = remote_client.tip() {
-            tip
+        let safe_block = if let Some(safe_block) = remote_client.safe_block() {
+            safe_block
         } else {
-            debug!(target: "reth::cli - BitfinityImportCommand", "No tip found, skipping import");
+            debug!(target: "reth::cli - BitfinityImportCommand", "No safe block found, skipping import");
             return Ok(());
         };
 
+        self.import_to_block(safe_block, remote_client, provider_factory.clone(), consensus.clone()).await?;
+
+        info!(target: "reth::cli - BitfinityImportCommand", "Finishing up");
+        Ok(())
+    }
+
+    /// Imports the blocks up to the given block hash of the `remove_client`.
+    async fn import_to_block(
+        &self,
+        new_tip: B256,
+        remote_client: BitfinityEvmClient,
+        provider_factory: ProviderFactory<NodeTypesWithDBAdapter<EthereumNode, Arc<DatabaseEnv>>>,
+        consensus: Arc<EthBeaconConsensus<ChainSpec>>,
+    ) -> eyre::Result<()> {
         info!(target: "reth::cli - BitfinityImportCommand", "Chain blocks imported");
 
         let (mut pipeline, _events) = self.build_import_pipeline(
             &self.config,
             provider_factory.clone(),
             &consensus,
-            remote_client,
+            Arc::new(remote_client),
             StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
         )?;
 
         // override the tip
-        pipeline.set_tip(tip);
-        debug!(target: "reth::cli - BitfinityImportCommand", ?tip, "Tip manually set");
+        pipeline.set_tip(new_tip);
+        debug!(target: "reth::cli - BitfinityImportCommand", ?new_tip, "Tip manually set");
 
         // Run pipeline
         debug!(target: "reth::cli - BitfinityImportCommand", "Starting sync pipeline");
         pipeline.run().await?;
 
-        info!(target: "reth::cli - BitfinityImportCommand", "Finishing up");
         Ok(())
     }
 

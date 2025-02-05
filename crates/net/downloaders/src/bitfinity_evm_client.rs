@@ -5,6 +5,7 @@ use candid::Principal;
 use did::certified::CertifiedResult;
 use ethereum_json_rpc_client::{reqwest::ReqwestClient, EthJsonRpcClient};
 use eyre::Result;
+use futures::future::Remote;
 use ic_cbor::{CertificateToCbor, HashTreeToCbor};
 use ic_certificate_verification::VerifyCertificate;
 use ic_certification::{Certificate, HashTree, LookupResult};
@@ -27,8 +28,7 @@ use reth_network_peers::PeerId;
 use reth_primitives::{BlockBody, ForkCondition, Header, TransactionSigned};
 use serde_json::json;
 
-use std::{self, cmp::min, collections::HashMap};
-use std::{sync::OnceLock, time::Duration};
+use std::{self, cmp::min, collections::HashMap, sync::OnceLock, time::Duration};
 use thiserror::Error;
 
 use backon::{ExponentialBuilder, Retryable};
@@ -64,6 +64,9 @@ pub struct BitfinityEvmClient {
 
     /// The buffered bodies retrieved when fetching new headers.
     bodies: HashMap<BlockHash, BlockBody>,
+
+    /// The number of the last safe block.
+    safe_block_number: BlockNumber,
 }
 
 /// An error that can occur when constructing and using a [`RemoteClient`].
@@ -80,6 +83,10 @@ pub enum RemoteClientError {
     /// Certificate check error
     #[error("certification check error: {0}")]
     CertificateError(String),
+
+    /// Error while trying to validate a block
+    #[error("block validation error: {0}")]
+    ValidationError(String),
 }
 
 /// Setting for checking last certified block
@@ -117,7 +124,12 @@ impl BitfinityEvmClient {
                 }
                 Ok(false) => {
                     info!(target: "downloaders::bitfinity_evm_client", "Skipping block import: EVM is disabled");
-                    return Ok(Self { headers, hash_to_number, bodies });
+                    return Ok(Self {
+                        headers,
+                        hash_to_number,
+                        bodies,
+                        safe_block_number: BlockNumber::default(),
+                    });
                 }
                 Err(e) => {
                     warn!(target: "downloaders::bitfinity_evm_client", "Failed to check EVM state: {}. Proceeding with import", e);
@@ -134,6 +146,15 @@ impl BitfinityEvmClient {
             .get_block_number()
             .await
             .map_err(|e| RemoteClientError::ProviderError(e.to_string()))?;
+
+        let safe_block_number: BlockNumber = provider
+            .get_block_by_number(did::BlockNumber::Safe)
+            .await
+            .map_err(|e| {
+                RemoteClientError::ProviderError(format!("error getting safe block: {e}"))
+            })?
+            .number
+            .into();
 
         info!(target: "downloaders::bitfinity_evm_client", "Latest remote block: {latest_remote_block}");
 
@@ -202,7 +223,40 @@ impl BitfinityEvmClient {
 
         info!(blocks = headers.len(), "Initialized remote client");
 
-        Ok(Self { headers, hash_to_number, bodies })
+        Ok(Self { headers, hash_to_number, bodies, safe_block_number })
+    }
+
+    /// Validates the block with the given hash and update the latest safe block number if
+    /// successful.
+    pub async fn validate_block(&mut self, block_hash: B256) -> Result<(), RemoteClientError> {
+        let validation_hash: B256 = todo!();
+        match self.send_validation_request(block_hash, validation_hash).await {
+            Ok(_) => {
+                let Some(safe_block) = self.hash_to_number.get(&block_hash) else {
+                    return Err(RemoteClientError::ValidationError("validation succeeded but the block is not found in the headers".into()));
+                };
+
+                self.safe_block_number = *safe_block;
+                info!(target: "downloaders::bitfinity_evm_client", "Block validated: {}", block_hash);
+
+                Ok(())
+            }
+            Err(err) => {
+                warn!(target: "downloaders::bitfinity_evm_client", "Block validation failed: {}", err);
+                Err(err)
+            }
+        }
+    }
+
+    /// Sends the validation request to the EVM.
+    ///
+    /// If `Ok` is returned, validation was successful and the new safe block is the validated one.
+    async fn send_validation_request(
+        &self,
+        block_hash: B256,
+        validation_hash: B256,
+    ) -> Result<(), RemoteClientError> {
+        todo!()
     }
 
     /// Get the remote tip hash of the chain.
@@ -212,6 +266,17 @@ impl BitfinityEvmClient {
             .max()
             .and_then(|max_key| self.headers.get(max_key))
             .map(|h| h.hash_slow())
+    }
+
+    /// Returns the hash of the first block after the latest safe block. If the tip of the chain is
+    /// safe, returns `None`.
+    pub fn unsafe_block(&self) -> Option<B256> {
+        self.headers.get(&(self.safe_block_number + 1)).map(|h| h.hash_slow())
+    }
+
+    /// Returns the has of the last safe block in the chain.
+    pub fn safe_block(&self) -> Option<B256> {
+        self.headers.get(&self.safe_block_number).map(|h| h.hash_slow())
     }
 
     /// Returns the highest block number of this client has or `None` if empty
@@ -393,7 +458,8 @@ impl BitfinityEvmClient {
 
     /// Creates a new JSON-RPC client with retry functionality
     ///
-    /// Tries the primary URL first, falls back to backup URL if provided or if primary is not producing blocks
+    /// Tries the primary URL first, falls back to backup URL if provided or if primary is not
+    /// producing blocks
     pub async fn client(config: RpcClientConfig) -> Result<EthJsonRpcClient<ReqwestClient>> {
         // Create retry configuration
         let backoff = ExponentialBuilder::default()
@@ -645,7 +711,8 @@ impl DownloadClient for BitfinityEvmClient {
     fn report_bad_message(&self, _peer_id: PeerId) {
         error!("Reported a bad message on a remote client, the client may be corrupted or invalid");
         // Uncomment this panic to stop the import job and print the stacktrace of the error
-        // panic!("Reported a bad message on a remote client, the client may be corrupted or invalid");
+        // panic!("Reported a bad message on a remote client, the client may be corrupted or
+        // invalid");
     }
 
     fn num_connected_peers(&self) -> usize {

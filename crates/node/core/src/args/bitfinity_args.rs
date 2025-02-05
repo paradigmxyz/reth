@@ -65,6 +65,12 @@ pub struct BitfinityImportArgs {
     /// A flag to check the EVM state before importing blocks
     #[arg(long, default_value = "true")]
     pub check_evm_state_before_importing: bool,
+
+    /// If true, try to validate unsafe blocks before import.
+    ///
+    /// If validation is disabled, unsafe blocks will be ignored.
+    #[arg(long)]
+    pub validate_unsafe_blocks: bool,
 }
 
 /// Bitfinity Related Args
