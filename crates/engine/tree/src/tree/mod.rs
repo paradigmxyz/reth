@@ -2455,6 +2455,8 @@ where
             drop(state_root_sender);
             let elapsed = prewarm_start.elapsed();
             debug!(target: "engine::tree", ?elapsed, "Done spawning prewarm threads");
+
+            self.metrics.block_validation.prewarm_spawn_duration.set(elapsed.as_secs_f64());
         }
         trace!(target: "engine::tree", block=?block_num_hash, "Executing block");
 
