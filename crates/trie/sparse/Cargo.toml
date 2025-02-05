@@ -23,7 +23,7 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
 # misc
-rayon.workspace = true
+rayon = { workspace = true, optional = true }
 smallvec = { workspace = true, features = ["const_new"] }
 thiserror.workspace = true
 
@@ -59,6 +59,7 @@ arbitrary = [
     "alloy-primitives/arbitrary",
     "smallvec/arbitrary",
 ]
+rayon = ["dep:rayon"]
 
 [[bench]]
 name = "root"

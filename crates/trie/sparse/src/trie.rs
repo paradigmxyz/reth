@@ -5,7 +5,6 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::Decodable;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_tracing::tracing::trace;
 use reth_trie_common::{
@@ -14,7 +13,7 @@ use reth_trie_common::{
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use std::{borrow::Cow, fmt, sync::mpsc};
+use std::{borrow::Cow, fmt};
 
 /// Inner representation of the sparse trie.
 /// Sparse trie is blind by default until nodes are revealed.
@@ -571,6 +570,29 @@ impl<P> RevealedSparseTrie<P> {
             root_hash
         } else {
             keccak256(rlp_node)
+        }
+    }
+
+    /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
+    /// depth. Root node has a level of 0.
+    pub fn update_rlp_node_level(&mut self, depth: usize) {
+        // Take the current prefix set
+        let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
+        let mut buffers = RlpNodeBuffers::default();
+
+        // Get the nodes that have changed at the given depth.
+        let (targets, new_prefix_set) = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
+        // Update the prefix set to the prefix set of the nodes that still need to be updated.
+        self.prefix_set = new_prefix_set;
+
+        trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
+        for (level, path) in targets {
+            buffers.path_stack.push(RlpNodePathStackItem {
+                level,
+                path,
+                is_in_prefix_set: Some(true),
+            });
+            self.rlp_node(&mut prefix_set, &mut buffers);
         }
     }
 
@@ -1312,7 +1334,12 @@ impl<P: BlindedProvider + Send + Sync> RevealedSparseTrie<P> {
 
     /// Update hashes of the nodes that are located at a level deeper than or equal to the provided
     /// depth. Root node has a level of 0.
-    pub fn update_rlp_node_level(&mut self, depth: usize) {
+    ///
+    /// This method updates the non-overlapping ranges of the trie in parallel.
+    #[cfg(feature = "rayon")]
+    pub fn update_rlp_node_level_par(&mut self, depth: usize) {
+        use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
         // Take the current prefix set
         let mut prefix_set = std::mem::take(&mut self.prefix_set).freeze();
 
@@ -1322,7 +1349,7 @@ impl<P: BlindedProvider + Send + Sync> RevealedSparseTrie<P> {
         self.prefix_set = new_prefix_set;
 
         trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = std::sync::mpsc::channel();
         targets
             .into_par_iter()
             .map_init(
