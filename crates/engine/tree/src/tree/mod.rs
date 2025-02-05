@@ -2702,7 +2702,9 @@ where
                     storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
                 }
 
-                targets.insert(keccak256(addr), storage_set);
+                let hashed_address = keccak256(addr);
+                targets.accounts.insert(hashed_address);
+                targets.storages.insert(hashed_address, storage_set);
             }
 
             let _ = state_root_sender.send(StateRootMessage::PrefetchProofs(targets));
