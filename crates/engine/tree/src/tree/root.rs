@@ -611,7 +611,7 @@ where
         }
 
         if duplicates > 0 {
-            trace!(target: "engine::root", duplicates, "Removed duplicate proof targets");
+            trace!(target: "engine::root", duplicates, "Removed duplicate prefetch proof targets");
         }
 
         targets
