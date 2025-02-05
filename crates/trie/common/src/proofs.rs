@@ -17,8 +17,46 @@ use alloy_trie::{
 use itertools::Itertools;
 use reth_primitives_traits::Account;
 
-/// Proof targets map.
-pub type MultiProofTargets = B256HashMap<B256HashSet>;
+/// Targets to fetch [proofs](MultiProof) for.
+///
+/// Accounts and storages are separared because you may want to fetch only storage proofs for
+/// certain accounts without fetching account proofs.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MultiProofTargets {
+    /// Accounts to fetch proofs for.
+    pub accounts: B256HashSet,
+    /// Storage slots to fetch proofs for.
+    pub storages: B256HashMap<B256HashSet>,
+}
+
+impl MultiProofTargets {
+    /// Returns true if the targets are empty.
+    pub fn is_empty(&self) -> bool {
+        self.accounts.is_empty() && self.storages.is_empty()
+    }
+
+    /// Extends the targets with the given targets.
+    pub fn extend(&mut self, other: Self) {
+        self.accounts.extend(other.accounts);
+        for (hashed_address, storage_set) in other.storages {
+            self.storages.entry(hashed_address).or_default().extend(storage_set);
+        }
+    }
+
+    /// Extends the targets with the given targets.
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.accounts.extend(other.accounts.iter().copied());
+        for (hashed_address, storage_set) in &other.storages {
+            self.storages.entry(*hashed_address).or_default().extend(storage_set.iter().copied());
+        }
+    }
+
+    /// Returns an iterator over account address and storage slot targets. If the storage slot
+    /// targets are empty, an empty set is returned.
+    pub fn into_iter_combined(self) -> impl Iterator<Item = (B256, B256HashSet)> {
+        self.accounts.into_iter().map(|hash| (hash, B256HashSet::default())).chain(self.storages)
+    }
+}
 
 /// The state multiproof of target accounts and multiproofs of their storage tries.
 /// Multiproof is effectively a state subtrie that only contains the nodes
