@@ -2,9 +2,8 @@
 use alloy_consensus::{
     BlobTransactionSidecar, BlobTransactionValidationError, BlockHeader, Transaction, Typed2718,
 };
-use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{Address, TxHash, TxKind, U256};
-use op_alloy_consensus::OpTypedTransaction;
+use alloy_eips::{eip2718::Encodable2718, eip7702::SignedAuthorization};
+use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use parking_lot::RwLock;
 use reth_node_api::{Block, BlockBody};
 use reth_optimism_evm::RethL1BlockInfo;
@@ -14,7 +13,7 @@ use reth_primitives::{
     transaction::TransactionConversionError, GotExpected, InvalidTransactionError, Recovered,
     SealedBlock,
 };
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_revm::L1BlockInfo;
 use reth_transaction_pool::{
@@ -123,78 +122,100 @@ impl PoolTransaction for OpPooledTransaction {
         self.inner.transaction.signer_ref()
     }
 
-    fn nonce(&self) -> u64 {
-        self.inner.transaction.nonce()
-    }
-
     fn cost(&self) -> &U256 {
         &self.inner.cost
-    }
-
-    fn gas_limit(&self) -> u64 {
-        self.inner.transaction.gas_limit()
-    }
-
-    fn max_fee_per_gas(&self) -> u128 {
-        self.inner.transaction.max_fee_per_gas()
-    }
-
-    fn access_list(&self) -> Option<&AccessList> {
-        self.inner.transaction.access_list()
-    }
-
-    fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        self.inner.transaction.max_priority_fee_per_gas()
-    }
-
-    fn max_fee_per_blob_gas(&self) -> Option<u128> {
-        self.inner.transaction.max_fee_per_blob_gas()
-    }
-
-    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.inner.transaction.effective_tip_per_gas(base_fee)
-    }
-
-    fn priority_fee_or_price(&self) -> u128 {
-        self.inner.transaction.priority_fee_or_price()
-    }
-
-    fn kind(&self) -> TxKind {
-        self.inner.transaction.kind()
-    }
-
-    fn is_create(&self) -> bool {
-        self.inner.transaction.is_create()
-    }
-
-    fn input(&self) -> &[u8] {
-        self.inner.transaction.input()
-    }
-
-    fn size(&self) -> usize {
-        self.inner.transaction.input().len()
-    }
-
-    fn tx_type(&self) -> u8 {
-        self.inner.transaction.ty()
     }
 
     fn encoded_length(&self) -> usize {
         self.inner.encoded_length
     }
+}
 
-    fn chain_id(&self) -> Option<u64> {
-        self.inner.transaction.chain_id()
+impl Typed2718 for OpPooledTransaction {
+    fn ty(&self) -> u8 {
+        self.inner.ty()
+    }
+}
+
+impl InMemorySize for OpPooledTransaction {
+    fn size(&self) -> usize {
+        self.inner.size()
+    }
+}
+
+impl alloy_consensus::Transaction for OpPooledTransaction {
+    fn chain_id(&self) -> Option<alloy_primitives::ChainId> {
+        self.inner.chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.inner.nonce()
+    }
+
+    fn gas_limit(&self) -> u64 {
+        self.inner.gas_limit()
+    }
+
+    fn gas_price(&self) -> Option<u128> {
+        self.inner.gas_price()
+    }
+
+    fn max_fee_per_gas(&self) -> u128 {
+        self.inner.max_fee_per_gas()
+    }
+
+    fn max_priority_fee_per_gas(&self) -> Option<u128> {
+        self.inner.max_priority_fee_per_gas()
+    }
+
+    fn max_fee_per_blob_gas(&self) -> Option<u128> {
+        self.inner.max_fee_per_blob_gas()
+    }
+
+    fn priority_fee_or_price(&self) -> u128 {
+        self.inner.priority_fee_or_price()
+    }
+
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.inner.effective_gas_price(base_fee)
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.inner.is_dynamic_fee()
+    }
+
+    fn kind(&self) -> TxKind {
+        self.inner.kind()
+    }
+
+    fn is_create(&self) -> bool {
+        self.inner.is_create()
+    }
+
+    fn value(&self) -> U256 {
+        self.inner.value()
+    }
+
+    fn input(&self) -> &Bytes {
+        self.inner.input()
+    }
+
+    fn access_list(&self) -> Option<&AccessList> {
+        self.inner.access_list()
+    }
+
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        self.inner.blob_versioned_hashes()
+    }
+
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.inner.authorization_list()
     }
 }
 
 impl EthPoolTransaction for OpPooledTransaction {
     fn take_blob(&mut self) -> EthBlobTransactionSidecar {
         EthBlobTransactionSidecar::None
-    }
-
-    fn blob_count(&self) -> usize {
-        0
     }
 
     fn try_into_pooled_eip4844(
@@ -216,14 +237,7 @@ impl EthPoolTransaction for OpPooledTransaction {
         _sidecar: &BlobTransactionSidecar,
         _settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
-        Err(BlobTransactionValidationError::NotBlobTransaction(self.tx_type()))
-    }
-
-    fn authorization_count(&self) -> usize {
-        match self.inner.transaction.transaction() {
-            OpTypedTransaction::Eip7702(tx) => tx.authorization_list.len(),
-            _ => 0,
-        }
+        Err(BlobTransactionValidationError::NotBlobTransaction(self.ty()))
     }
 }
 
