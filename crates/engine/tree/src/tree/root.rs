@@ -83,7 +83,7 @@ impl SparseTrieUpdate {
     /// Extend update with contents of the other.
     pub fn extend(&mut self, other: Self) {
         self.state.extend(other.state);
-        extend_multi_proof_targets(&mut self.targets, other.targets);
+        self.targets.extend(other.targets);
         self.multiproof.extend(other.multiproof);
     }
 }
@@ -576,7 +576,7 @@ where
 
     /// Handles request for proof prefetch.
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
-        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &targets);
+        self.fetched_proof_targets.extend_ref(&targets);
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
@@ -594,7 +594,7 @@ where
     fn on_state_update(&mut self, update: EvmState, proof_sequence_number: u64) {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
         let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
-        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
+        self.fetched_proof_targets.extend_ref(&proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
@@ -991,22 +991,6 @@ where
     let elapsed = started_at.elapsed();
 
     Ok(elapsed)
-}
-
-fn extend_multi_proof_targets(targets: &mut MultiProofTargets, other: MultiProofTargets) {
-    targets.accounts.extend(other.accounts);
-
-    for (address, slots) in other.storages {
-        targets.storages.entry(address).or_default().extend(slots);
-    }
-}
-
-fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &MultiProofTargets) {
-    targets.accounts.extend(&other.accounts);
-
-    for (address, slots) in &other.storages {
-        targets.storages.entry(*address).or_default().extend(slots);
-    }
 }
 
 #[cfg(test)]

@@ -32,6 +32,22 @@ impl MultiProofTargets {
         self.accounts.is_empty() && self.storages.is_empty()
     }
 
+    /// Extends the targets with the given targets.
+    pub fn extend(&mut self, other: Self) {
+        self.accounts.extend(other.accounts);
+        for (hashed_address, storage_set) in other.storages {
+            self.storages.entry(hashed_address).or_default().extend(storage_set);
+        }
+    }
+
+    /// Extends the targets with the given targets.
+    pub fn extend_ref(&mut self, other: &Self) {
+        self.accounts.extend(other.accounts.iter().copied());
+        for (hashed_address, storage_set) in &other.storages {
+            self.storages.entry(*hashed_address).or_default().extend(storage_set.iter().copied());
+        }
+    }
+
     /// Returns an iterator over account address and storage slot targets. If the storage slot
     /// targets are empty, an empty set is returned.
     pub fn into_iter_combined(self) -> impl Iterator<Item = (B256, B256HashSet)> {
