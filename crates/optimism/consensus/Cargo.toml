@@ -30,12 +30,12 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-trie.workspace = true
+op-alloy-consensus.workspace = true
 
 tracing.workspace = true
 
 [dev-dependencies]
 alloy-primitives.workspace = true
-op-alloy-consensus.workspace = true
 reth-optimism-chainspec.workspace = true
 
 [features]

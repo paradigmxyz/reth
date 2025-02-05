@@ -29,7 +29,7 @@ pub(crate) struct BlobTransactions<T: PoolTransaction> {
     pending_fees: PendingFees,
     /// Keeps track of the size of this pool.
     ///
-    /// See also [`PoolTransaction::size`].
+    /// See also [`reth_primitives_traits::InMemorySize::size`].
     size_of: SizeTracker,
 }
 

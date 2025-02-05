@@ -7,12 +7,13 @@ use crate::{
 };
 use alloy_consensus::{
     constants::{EIP1559_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID},
-    BlockHeader, Signed, Transaction as _, Typed2718,
+    BlockHeader, Signed, Typed2718,
 };
 use alloy_eips::{
     eip2718::Encodable2718,
     eip2930::AccessList,
     eip4844::{BlobAndProofV1, BlobTransactionSidecar, BlobTransactionValidationError},
+    eip7702::SignedAuthorization,
 };
 use alloy_primitives::{Address, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
@@ -21,9 +22,9 @@ use reth_execution_types::ChangedAccount;
 use reth_primitives::{
     kzg::KzgSettings,
     transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
-    PooledTransaction, Recovered, SealedBlock, Transaction, TransactionSigned,
+    PooledTransaction, Recovered, SealedBlock, TransactionSigned,
 };
-use reth_primitives_traits::{Block, SignedTransaction};
+use reth_primitives_traits::{Block, InMemorySize, SignedTransaction};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use std::{
@@ -964,7 +965,9 @@ impl BestTransactionsAttributes {
 /// sidecar when they are gossiped around the network. It is expected that the `Consensus` format is
 /// a subset of the `Pooled` format.
 pub trait PoolTransaction:
-    fmt::Debug
+    alloy_consensus::Transaction
+    + InMemorySize
+    + fmt::Debug
     + Send
     + Sync
     + Clone
@@ -1029,9 +1032,6 @@ pub trait PoolTransaction:
     /// Reference to the Sender of the transaction.
     fn sender_ref(&self) -> &Address;
 
-    /// Returns the nonce for this transaction.
-    fn nonce(&self) -> u64;
-
     /// Returns the cost that this transaction is allowed to consume:
     ///
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
@@ -1040,86 +1040,10 @@ pub trait PoolTransaction:
     /// max_blob_fee_per_gas * blob_gas_used`.
     fn cost(&self) -> &U256;
 
-    /// Amount of gas that should be used in executing this transaction. This is paid up-front.
-    fn gas_limit(&self) -> u64;
-
-    /// Returns the EIP-1559 the maximum fee per gas the caller is willing to pay.
-    ///
-    /// For legacy transactions this is `gas_price`.
-    ///
-    /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
-    fn max_fee_per_gas(&self) -> u128;
-
-    /// Returns the `access_list` for the particular transaction type.
-    /// For Legacy transactions, returns default.
-    fn access_list(&self) -> Option<&AccessList>;
-
-    /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
-    ///
-    /// This will return `None` for non-EIP1559 transactions
-    fn max_priority_fee_per_gas(&self) -> Option<u128>;
-
-    /// Returns the EIP-4844 max fee per data gas
-    ///
-    /// This will return `None` for non-EIP4844 transactions
-    fn max_fee_per_blob_gas(&self) -> Option<u128>;
-
-    /// Returns the effective tip for this transaction.
-    ///
-    /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
-    /// For legacy transactions: `gas_price - base_fee`.
-    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128>;
-
-    /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
-    /// otherwise returns the gas price.
-    fn priority_fee_or_price(&self) -> u128;
-
-    /// Returns the transaction's [`TxKind`], which is the address of the recipient or
-    /// [`TxKind::Create`] if the transaction is a contract creation.
-    fn kind(&self) -> TxKind;
-
-    /// Returns true if the transaction is a contract creation.
-    /// We don't provide a default implementation via `kind` as it copies the 21-byte
-    /// [`TxKind`] for this simple check. A proper implementation shouldn't allocate.
-    fn is_create(&self) -> bool;
-
-    /// Returns the recipient of the transaction if it is not a [`TxKind::Create`]
-    /// transaction.
-    fn to(&self) -> Option<Address> {
-        self.kind().to().copied()
-    }
-
-    /// Returns the input data of this transaction.
-    fn input(&self) -> &[u8];
-
-    /// Returns a measurement of the heap usage of this type and all its internals.
-    fn size(&self) -> usize;
-
-    /// Returns the transaction type
-    fn tx_type(&self) -> u8;
-
-    /// Returns true if the transaction is an EIP-1559 transaction.
-    fn is_eip1559(&self) -> bool {
-        self.tx_type() == EIP1559_TX_TYPE_ID
-    }
-
-    /// Returns true if the transaction is an EIP-4844 transaction.
-    fn is_eip4844(&self) -> bool {
-        self.tx_type() == EIP4844_TX_TYPE_ID
-    }
-
-    /// Returns true if the transaction is an EIP-7702 transaction.
-    fn is_eip7702(&self) -> bool {
-        self.tx_type() == EIP7702_TX_TYPE_ID
-    }
-
     /// Returns the length of the rlp encoded transaction object
     ///
     /// Note: Implementations should cache this value.
     fn encoded_length(&self) -> usize;
-
-    /// Returns `chain_id`
-    fn chain_id(&self) -> Option<u64>;
 
     /// Ensures that the transaction's code size does not exceed the provided `max_init_code_size`.
     ///
@@ -1149,14 +1073,11 @@ pub trait EthPoolTransaction: PoolTransaction {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
 
-    /// Returns the number of blobs this transaction has.
-    fn blob_count(&self) -> usize;
-
     /// A specialization for the EIP-4844 transaction type.
     /// Tries to reattach the blob sidecar to the transaction.
     ///
     /// This returns an option, but callers should ensure that the transaction is an EIP-4844
-    /// transaction: [`PoolTransaction::is_eip4844`].
+    /// transaction: [`Typed2718::is_eip4844`].
     fn try_into_pooled_eip4844(
         self,
         sidecar: Arc<BlobTransactionSidecar>,
@@ -1176,9 +1097,6 @@ pub trait EthPoolTransaction: PoolTransaction {
         blob: &BlobTransactionSidecar,
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError>;
-
-    /// Returns the number of authorizations this transaction has.
-    fn authorization_count(&self) -> usize;
 }
 
 /// The default [`PoolTransaction`] for the [Pool](crate::Pool) for Ethereum.
@@ -1300,11 +1218,6 @@ impl PoolTransaction for EthPooledTransaction {
         self.transaction.signer_ref()
     }
 
-    /// Returns the nonce for this transaction.
-    fn nonce(&self) -> u64 {
-        self.transaction.nonce()
-    }
-
     /// Returns the cost that this transaction is allowed to consume:
     ///
     /// For EIP-1559 transactions: `max_fee_per_gas * gas_limit + tx_value`.
@@ -1315,82 +1228,91 @@ impl PoolTransaction for EthPooledTransaction {
         &self.cost
     }
 
-    /// Amount of gas that should be used in executing this transaction. This is paid up-front.
+    /// Returns the length of the rlp encoded object
+    fn encoded_length(&self) -> usize {
+        self.encoded_length
+    }
+}
+
+impl<T: Typed2718> Typed2718 for EthPooledTransaction<T> {
+    fn ty(&self) -> u8 {
+        self.transaction.ty()
+    }
+}
+
+impl<T: InMemorySize> InMemorySize for EthPooledTransaction<T> {
+    fn size(&self) -> usize {
+        self.transaction.size()
+    }
+}
+
+impl<T: alloy_consensus::Transaction> alloy_consensus::Transaction for EthPooledTransaction<T> {
+    fn chain_id(&self) -> Option<alloy_primitives::ChainId> {
+        self.transaction.chain_id()
+    }
+
+    fn nonce(&self) -> u64 {
+        self.transaction.nonce()
+    }
+
     fn gas_limit(&self) -> u64 {
         self.transaction.gas_limit()
     }
 
-    /// Returns the EIP-1559 Max base fee the caller is willing to pay.
-    ///
-    /// For legacy transactions this is `gas_price`.
-    ///
-    /// This is also commonly referred to as the "Gas Fee Cap" (`GasFeeCap`).
+    fn gas_price(&self) -> Option<u128> {
+        self.transaction.gas_price()
+    }
+
     fn max_fee_per_gas(&self) -> u128 {
-        self.transaction.transaction().max_fee_per_gas()
+        self.transaction.max_fee_per_gas()
     }
 
-    fn access_list(&self) -> Option<&AccessList> {
-        self.transaction.access_list()
-    }
-
-    /// Returns the EIP-1559 Priority fee the caller is paying to the block author.
-    ///
-    /// This will return `None` for non-EIP1559 transactions
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
-        self.transaction.transaction().max_priority_fee_per_gas()
+        self.transaction.max_priority_fee_per_gas()
     }
 
     fn max_fee_per_blob_gas(&self) -> Option<u128> {
         self.transaction.max_fee_per_blob_gas()
     }
 
-    /// Returns the effective tip for this transaction.
-    ///
-    /// For EIP-1559 transactions: `min(max_fee_per_gas - base_fee, max_priority_fee_per_gas)`.
-    /// For legacy transactions: `gas_price - base_fee`.
-    fn effective_tip_per_gas(&self, base_fee: u64) -> Option<u128> {
-        self.transaction.effective_tip_per_gas(base_fee)
-    }
-
-    /// Returns the max priority fee per gas if the transaction is an EIP-1559 transaction, and
-    /// otherwise returns the gas price.
     fn priority_fee_or_price(&self) -> u128 {
         self.transaction.priority_fee_or_price()
     }
 
-    /// Returns the transaction's [`TxKind`], which is the address of the recipient or
-    /// [`TxKind::Create`] if the transaction is a contract creation.
+    fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
+        self.transaction.effective_gas_price(base_fee)
+    }
+
+    fn is_dynamic_fee(&self) -> bool {
+        self.transaction.is_dynamic_fee()
+    }
+
     fn kind(&self) -> TxKind {
         self.transaction.kind()
     }
 
-    /// Returns true if the transaction is a contract creation.
     fn is_create(&self) -> bool {
         self.transaction.is_create()
     }
 
-    fn input(&self) -> &[u8] {
+    fn value(&self) -> U256 {
+        self.transaction.value()
+    }
+
+    fn input(&self) -> &revm_primitives::Bytes {
         self.transaction.input()
     }
 
-    /// Returns a measurement of the heap usage of this type and all its internals.
-    fn size(&self) -> usize {
-        self.transaction.transaction().input().len()
+    fn access_list(&self) -> Option<&AccessList> {
+        self.transaction.access_list()
     }
 
-    /// Returns the transaction type
-    fn tx_type(&self) -> u8 {
-        self.transaction.ty()
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
+        self.transaction.blob_versioned_hashes()
     }
 
-    /// Returns the length of the rlp encoded object
-    fn encoded_length(&self) -> usize {
-        self.encoded_length
-    }
-
-    /// Returns `chain_id`
-    fn chain_id(&self) -> Option<u64> {
-        self.transaction.chain_id()
+    fn authorization_list(&self) -> Option<&[SignedAuthorization]> {
+        self.transaction.authorization_list()
     }
 }
 
@@ -1400,13 +1322,6 @@ impl EthPoolTransaction for EthPooledTransaction {
             std::mem::replace(&mut self.blob_sidecar, EthBlobTransactionSidecar::Missing)
         } else {
             EthBlobTransactionSidecar::None
-        }
-    }
-
-    fn blob_count(&self) -> usize {
-        match self.transaction.transaction() {
-            Transaction::Eip4844(tx) => tx.blob_versioned_hashes.len(),
-            _ => 0,
         }
     }
 
@@ -1438,15 +1353,8 @@ impl EthPoolTransaction for EthPooledTransaction {
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
         match self.transaction.transaction() {
-            Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
-            _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.tx_type())),
-        }
-    }
-
-    fn authorization_count(&self) -> usize {
-        match self.transaction.transaction() {
-            Transaction::Eip7702(tx) => tx.authorization_list.len(),
-            _ => 0,
+            reth_primitives::Transaction::Eip4844(tx) => tx.validate_blob(sidecar, settings),
+            _ => Err(BlobTransactionValidationError::NotBlobTransaction(self.ty())),
         }
     }
 }
@@ -1640,7 +1548,7 @@ mod tests {
     use alloy_consensus::{TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy};
     use alloy_eips::eip4844::DATA_GAS_PER_BLOB;
     use alloy_primitives::PrimitiveSignature as Signature;
-    use reth_primitives::TransactionSigned;
+    use reth_primitives::{Transaction, TransactionSigned};
 
     #[test]
     fn test_pool_size_invariants() {

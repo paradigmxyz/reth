@@ -87,7 +87,7 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
-use alloy_eips::eip4844::BlobTransactionSidecar;
+use alloy_eips::{eip4844::BlobTransactionSidecar, Typed2718};
 use reth_primitives::Recovered;
 use rustc_hash::FxHashMap;
 use std::{collections::HashSet, fmt, sync::Arc, time::Instant};
