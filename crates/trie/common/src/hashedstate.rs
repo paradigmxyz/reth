@@ -1,7 +1,10 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
     KeyHasher, Nibbles,
 };
+use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256HashMap, B256HashSet, HashMap, HashSet},
@@ -12,7 +15,6 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::Account;
 
 use revm::db::{AccountStatus, BundleAccount};
-use std::borrow::Cow;
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
