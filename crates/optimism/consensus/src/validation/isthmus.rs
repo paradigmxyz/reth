@@ -1,6 +1,7 @@
 //! Block verification w.r.t. consensus rules new in Isthmus hardfork.
 
 use alloy_consensus::BlockHeader;
+use core::fmt;
 use reth_optimism_primitives::predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_storage_api::StorageRootProvider;
 use reth_trie::HashedStorage;
@@ -10,17 +11,17 @@ use crate::OpConsensusError;
 
 /// Verifies that `withdrawals_root` (i.e. `l2tol1-msg-passer` storage root since Isthmus) field is
 /// set in block header.
-pub fn verify_withdrawals_storage_root_is_some<H: BlockHeader>(
+pub fn verify_withdrawals_storage_root_is_some<H: BlockHeader + fmt::Debug>(
     header: H,
 ) -> Result<(), OpConsensusError> {
-    header.withdrawals_root().as_ref().ok_or(OpConsensusError::StorageRootMissing)?;
+    header.withdrawals_root().ok_or(OpConsensusError::StorageRootMissing)?;
 
     Ok(())
 }
 
 /// Verifies block header field `withdrawals_root` against storage root of
 /// `l2tol1-message-passer` predeploy post block execution.
-pub fn verify_withdrawals_storage_root<DB: StorageRootProvider, H: BlockHeader>(
+pub fn verify_withdrawals_storage_root<DB: StorageRootProvider, H: BlockHeader + fmt::Debug>(
     state_updates: &BundleState,
     state: DB,
     header: H,

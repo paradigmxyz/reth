@@ -49,11 +49,13 @@ thiserror.workspace = true
 [dev-dependencies]
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
-reth-primitives = { workspace = true, features = ["test-utils"] }
+reth-primitives = { workspace = true, features = ["test-utils", "reth-codec"] }
 reth-optimism-chainspec.workspace = true
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
-reth-optimism-primitives = { workspace = true, features = ["arbitrary"] }
+reth-optimism-primitives = { workspace = true, features = ["arbitrary", "reth-codec"] }
+reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
+reth-trie = { workspace = true, features = ["test-utils"] }
 
 [features]
 default = ["std"]
