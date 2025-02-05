@@ -543,9 +543,7 @@ impl<Txs> OpBuilder<'_, Txs> {
 }
 
 /// A type that returns a the [`PayloadTransactions`] that should be included in the pool.
-pub trait OpPayloadTransactions<Transaction: PoolTransaction>:
-    Clone + Send + Sync + Unpin + 'static
-{
+pub trait OpPayloadTransactions<Transaction>: Clone + Send + Sync + Unpin + 'static {
     /// Returns an iterator that yields the transaction in the order they should get included in the
     /// new payload.
     fn best_transactions<Pool: TransactionPool<Transaction = Transaction>>(

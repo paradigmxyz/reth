@@ -93,13 +93,16 @@ where
 mod tests {
     use std::sync::Arc;
 
+    use crate::{
+        BestPayloadTransactions, PayloadTransactions, PayloadTransactionsChain,
+        PayloadTransactionsFixed,
+    };
     use alloy_primitives::{map::HashSet, Address};
     use reth_transaction_pool::{
         pool::{BestTransactionsWithPrioritizedSenders, PendingPool},
-        test_utils::{MockOrdering, MockTransaction},
+        test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
+        PoolTransaction,
     };
-
-    use crate::{BestPayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed};
 
     #[test]
     fn test_best_transactions_chained_iterators() {
@@ -153,7 +156,7 @@ mod tests {
 
         let mut block = PayloadTransactionsChain::new(
             PayloadTransactionsFixed::single(
-                MockTransaction::eip1559().with_sender(address_top_of_block).into(),
+                MockTransaction::eip1559().with_sender(address_top_of_block),
             ),
             Some(100),
             PayloadTransactionsChain::new(
@@ -173,10 +176,10 @@ mod tests {
             None,
         );
 
-        assert_eq!(block.next(()).unwrap().signer(), address_top_of_block);
-        assert_eq!(block.next(()).unwrap().signer(), address_in_priority_pool);
-        assert_eq!(block.next(()).unwrap().signer(), address_a);
-        assert_eq!(block.next(()).unwrap().signer(), address_b);
-        assert_eq!(block.next(()).unwrap().signer(), address_regular);
+        assert_eq!(block.next(()).unwrap().sender(), address_top_of_block);
+        assert_eq!(block.next(()).unwrap().sender(), address_in_priority_pool);
+        assert_eq!(block.next(()).unwrap().sender(), address_a);
+        assert_eq!(block.next(()).unwrap().sender(), address_b);
+        assert_eq!(block.next(()).unwrap().sender(), address_regular);
     }
 }
