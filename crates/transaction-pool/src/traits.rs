@@ -1077,7 +1077,7 @@ pub trait EthPoolTransaction: PoolTransaction {
     /// Tries to reattach the blob sidecar to the transaction.
     ///
     /// This returns an option, but callers should ensure that the transaction is an EIP-4844
-    /// transaction: [`PoolTransaction::is_eip4844`].
+    /// transaction: [`Typed2718::is_eip4844`].
     fn try_into_pooled_eip4844(
         self,
         sidecar: Arc<BlobTransactionSidecar>,
