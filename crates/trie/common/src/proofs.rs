@@ -17,7 +17,10 @@ use alloy_trie::{
 use itertools::Itertools;
 use reth_primitives_traits::Account;
 
-/// Proof targets.
+/// Targets to fetch [proofs](MultiProof) for.
+///
+/// Accounts and storages are separared because you may want to fetch only storage proofs for
+/// certain accounts without fetching account proofs.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MultiProofTargets {
     /// Accounts to fetch proofs for.
