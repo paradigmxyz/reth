@@ -4,6 +4,8 @@ use crate::{
     pool::pending::PendingTransaction,
     PoolTransaction, TransactionOrdering, ValidPoolTransaction,
 };
+use alloy_consensus::Transaction;
+use alloy_eips::Typed2718;
 use alloy_primitives::Address;
 use core::fmt;
 use reth_payload_util::PayloadTransactions;
