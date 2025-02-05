@@ -25,6 +25,7 @@ use alloy_consensus::constants::{
 use alloy_eips::{
     eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
     eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
+    Typed2718,
 };
 use alloy_primitives::{Address, TxHash, B256};
 use rustc_hash::FxHashMap;
@@ -571,7 +572,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         let mut eip7702_count = 0;
 
         for tx in self.all_transactions.transactions_iter() {
-            match tx.transaction.tx_type() {
+            match tx.transaction.ty() {
                 LEGACY_TX_TYPE_ID => legacy_count += 1,
                 EIP2930_TX_TYPE_ID => eip2930_count += 1,
                 EIP1559_TX_TYPE_ID => eip1559_count += 1,
@@ -1978,6 +1979,7 @@ mod tests {
         traits::TransactionOrigin,
         SubPoolLimit,
     };
+    use alloy_consensus::Transaction;
     use alloy_primitives::address;
     use reth_primitives::TxType;
 

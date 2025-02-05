@@ -33,7 +33,7 @@ use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
 };
-use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_rpc::{
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
@@ -650,9 +650,14 @@ pub struct OpConsensusBuilder;
 
 impl<Node> ConsensusBuilder<Node> for OpConsensusBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+    Node: FullNodeTypes<
+        Types: NodeTypes<
+            ChainSpec: OpHardforks,
+            Primitives: NodePrimitives<Receipt: DepositReceipt>,
+        >,
+    >,
 {
-    type Consensus = Arc<OpBeaconConsensus>;
+    type Consensus = Arc<OpBeaconConsensus<<Node::Types as NodeTypes>::ChainSpec>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
         Ok(Arc::new(OpBeaconConsensus::new(ctx.chain_spec())))

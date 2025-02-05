@@ -15,7 +15,7 @@ use alloy_rpc_types_engine::{
     PraguePayloadFields, TransitionConfiguration,
 };
 use async_trait::async_trait;
-use jsonrpsee_core::RpcResult;
+use jsonrpsee_core::{server::RpcModule, RpcResult};
 use parking_lot::Mutex;
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::{
@@ -27,7 +27,7 @@ use reth_payload_primitives::{
     PayloadOrAttributes,
 };
 use reth_primitives_traits::{Block, BlockBody};
-use reth_rpc_api::EngineApiServer;
+use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -1017,6 +1017,17 @@ where
             .tx_pool
             .get_blobs_for_versioned_hashes(&versioned_hashes)
             .map_err(|err| EngineApiError::Internal(Box::new(err)))?)
+    }
+}
+
+impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
+    for EngineApi<Provider, EngineT, Pool, Validator, ChainSpec>
+where
+    EngineT: EngineTypes,
+    Self: EngineApiServer<EngineT>,
+{
+    fn into_rpc_module(self) -> RpcModule<()> {
+        self.into_rpc().remove_context()
     }
 }
 

@@ -279,6 +279,11 @@ where
     pub fn is_exceeded(&self) -> bool {
         self.pool.is_exceeded()
     }
+
+    /// Returns the configured blob store.
+    pub fn blob_store(&self) -> &S {
+        self.pool.blob_store()
+    }
 }
 
 impl<Client, S> EthTransactionPool<Client, S>
