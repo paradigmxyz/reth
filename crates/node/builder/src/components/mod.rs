@@ -23,32 +23,12 @@ pub use pool::*;
 use reth_network_p2p::BlockClient;
 
 use crate::{ConfigureEvm, FullNodeTypes};
-use reth_basic_payload_builder::PayloadBuilder;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
 use reth_network::{NetworkHandle, NetworkPrimitives};
 use reth_network_api::FullNetwork;
-use reth_node_api::{
-    BlockTy, BodyTy, HeaderTy, NodeTypes, NodeTypesWithEngine, PayloadTypes, PrimitivesTy, TxTy,
-};
+use reth_node_api::{BlockTy, BodyTy, HeaderTy, NodeTypes, PayloadBuilderFor, PrimitivesTy, TxTy};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-
-/// Helper trait to bound [`PayloadBuilder`] to the node's engine types.
-pub trait PayloadBuilderFor<N: NodeTypesWithEngine>:
-    PayloadBuilder<
-    Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
-    BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
->
-{
-}
-
-impl<T, N: NodeTypesWithEngine> PayloadBuilderFor<N> for T where
-    T: PayloadBuilder<
-        Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
-        BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
-    >
-{
-}
 
 /// An abstraction over the components of a node, consisting of:
 ///  - evm and executor

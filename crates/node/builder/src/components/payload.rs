@@ -1,11 +1,10 @@
 //! Payload service component for the node builder.
 
+use reth_node_api::PayloadBuilderFor;
 use reth_transaction_pool::TransactionPool;
 use std::future::Future;
 
 use crate::{BuilderContext, FullNodeTypes};
-
-use super::PayloadBuilderFor;
 
 /// A type that knows how to spawn the payload service.
 pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send {

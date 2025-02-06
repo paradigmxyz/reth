@@ -1,5 +1,6 @@
 //! Traits for configuring a node.
 
+use crate::PayloadTypes;
 use alloy_rpc_types_engine::JwtSecret;
 use reth_basic_payload_builder::PayloadBuilder;
 use reth_consensus::{ConsensusError, FullConsensus};
@@ -10,7 +11,6 @@ use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::PayloadTypes;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -44,6 +44,23 @@ where
     type Provider = Provider;
 }
 
+/// Helper trait to bound [`PayloadBuilder`] to the node's engine types.
+pub trait PayloadBuilderFor<N: NodeTypesWithEngine>:
+    PayloadBuilder<
+    Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
+    BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
+>
+{
+}
+
+impl<T, N: NodeTypesWithEngine> PayloadBuilderFor<N> for T where
+    T: PayloadBuilder<
+        Attributes = <N::Engine as PayloadTypes>::PayloadBuilderAttributes,
+        BuiltPayload = <N::Engine as PayloadTypes>::BuiltPayload,
+    >
+{
+}
+
 /// Encapsulates all types and components of the node.
 pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// The transaction pool of the node.
@@ -65,10 +82,7 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Network: FullNetwork;
 
     /// Builds new blocks.
-    type PayloadBuilder: PayloadBuilder<
-        Attributes = <<Self::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes,
-        BuiltPayload = <<Self::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::BuiltPayload,
-    >;
+    type PayloadBuilder: PayloadBuilderFor<Self::Types>;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
