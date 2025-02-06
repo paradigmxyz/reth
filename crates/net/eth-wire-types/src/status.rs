@@ -9,11 +9,17 @@ use reth_chainspec::{EthChainSpec, Hardforks, MAINNET};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_ethereum_forks::{EthereumHardfork, ForkId, Head};
 
+/// The status message is used in the eth protocol handshake to ensure that peers are on the same
+/// network and are following the same fork.
+///
+/// When performing a handshake, the total difficulty is not guaranteed to correspond to the block
+/// hash. This information should be treated as untrusted.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
 pub enum Status {
+    /// status for the `eth/66`, `eth/67`, `eth/68` versions
     Eth66_68(Status66_68),
 }
 
@@ -25,10 +31,9 @@ impl Status {
 
     /// Sets the [`EthVersion`] for the status.
     pub const fn set_eth_version(&mut self, version: EthVersion) {
-        use EthVersion::*;
-        match (self, version) {
-            (Status::Eth66_68(status), Eth66 | Eth67 | Eth68) => status.version = version,
-            _ => {}
+        use EthVersion::{Eth66, Eth67, Eth68};
+        if let (Self::Eth66_68(status), Eth66 | Eth67 | Eth68) = (self, version) {
+            status.version = version
         }
     }
 
@@ -48,54 +53,64 @@ impl Status {
             .forkid(spec.fork_id(head))
     }
 
+    /// Get the eth version
     pub fn version(&self) -> EthVersion {
         match self {
             Self::Eth66_68(status) => status.version,
         }
     }
 
+    /// Get the chain version
     pub fn chain(&self) -> &Chain {
         match self {
             Self::Eth66_68(status) => &status.chain,
         }
     }
 
+    /// Get the total difficulty field
+    /// Return `None` if there is no such field in the status message (e.g. `eth/69` version)
     pub fn total_difficulty(&self) -> Option<&U256> {
         match self {
             Self::Eth66_68(status) => Some(&status.total_difficulty),
         }
     }
 
+    /// Similar to `total_difficulty()`, but mutable ref
     pub fn total_difficulty_mut(&mut self) -> Option<&mut U256> {
         match self {
             Self::Eth66_68(status) => Some(&mut status.total_difficulty),
         }
     }
 
+    /// Get the blockhash field
     pub fn blockhash(&self) -> &B256 {
         match self {
             Self::Eth66_68(status) => &status.blockhash,
         }
     }
 
+    /// Similar to `blockhash()`, but mutable ref
     pub fn blockhash_mut(&mut self) -> &mut B256 {
         match self {
             Self::Eth66_68(status) => &mut status.blockhash,
         }
     }
 
+    /// Get the genesis field
     pub fn genesis(&self) -> &B256 {
         match self {
             Self::Eth66_68(status) => &status.genesis,
         }
     }
 
+    /// Get the forkid field
     pub fn forkid(&self) -> &ForkId {
         match self {
             Self::Eth66_68(status) => &status.forkid,
         }
     }
 
+    /// Similar to `forkid()`, but mutable ref
     pub fn forkid_mut(&mut self) -> &mut ForkId {
         match self {
             Self::Eth66_68(status) => &mut status.forkid,
@@ -113,7 +128,7 @@ impl Default for Status {
 impl Display for Status {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            Status::Eth66_68(status) => Display::fmt(&status, f),
+            Self::Eth66_68(status) => Display::fmt(&status, f),
         }
     }
 }
@@ -137,16 +152,18 @@ impl Decodable for Status {
 
         use EthVersion::*;
         match version {
-            Eth66 | Eth67 | Eth68 | Eth69 => Ok(Status::Eth66_68(Status66_68::decode(buf)?)),
+            Eth66 | Eth67 | Eth68 | Eth69 => Ok(Self::Eth66_68(Status66_68::decode(buf)?)),
         }
     }
 }
 
-/// The status message is used in the eth protocol handshake to ensure that peers are on the same
-/// network and are following the same fork.
-///
-/// When performing a handshake, the total difficulty is not guaranteed to correspond to the block
-/// hash. This information should be treated as untrusted.
+impl From<Status66_68> for Status {
+    fn from(status: Status66_68) -> Self {
+        Self::Eth66_68(status)
+    }
+}
+
+/// Status message for `eth/66`, `eth/67`, `eth/68` versions
 #[derive(Copy, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
@@ -238,12 +255,6 @@ impl Debug for Status66_68 {
                 self.forkid
             )
         }
-    }
-}
-
-impl Into<Status> for Status66_68 {
-    fn into(self) -> Status {
-        Status::Eth66_68(self)
     }
 }
 
