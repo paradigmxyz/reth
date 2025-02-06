@@ -2707,6 +2707,14 @@ where
                 targets.insert(keccak256(addr), storage_set);
             }
 
+            debug!(
+                target: "engine::tree",
+                tx_hash = ?tx.tx_hash(),
+                targets = targets.len(),
+                storage_targets = targets.values().map(|slots| slots.len()).sum::<usize>(),
+                "Prefetching proofs for a transaction"
+            );
+
             let _ = state_root_sender.send(StateRootMessage::PrefetchProofs(targets));
         });
 
