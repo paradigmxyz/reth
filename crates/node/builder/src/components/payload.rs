@@ -9,7 +9,7 @@ use reth_transaction_pool::TransactionPool;
 use std::future::Future;
 
 /// A type that knows how to spawn the payload service.
-pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send {
+pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Send + Sized {
     /// Payload builder implementation.
     type PayloadBuilder: PayloadBuilderFor<Node::Types> + Unpin + 'static;
 
@@ -27,7 +27,7 @@ pub trait PayloadServiceBuilder<Node: FullNodeTypes, Pool: TransactionPool>: Sen
     /// We provide default implementation via [`BasicPayloadJobGenerator`] but it can be overridden
     /// for custom job orchestration logic,
     fn spawn_payload_builder_service(
-        &self,
+        self,
         ctx: &BuilderContext<Node>,
         payload_builder: Self::PayloadBuilder,
     ) -> PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine> {
