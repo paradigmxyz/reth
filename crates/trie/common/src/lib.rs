@@ -11,6 +11,10 @@
 
 extern crate alloc;
 
+/// In-memory hashed state.
+mod hashedstate;
+pub use hashedstate::*;
+
 /// The implementation of hash builder.
 pub mod hash_builder;
 
