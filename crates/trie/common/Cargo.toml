@@ -130,6 +130,7 @@ arbitrary = [
     "alloy-rpc-types-eth?/arbitrary",
     "revm/arbitrary",
 ]
+rayon = ["dep:rayon"]
 
 [[bench]]
 name = "prefix_set"

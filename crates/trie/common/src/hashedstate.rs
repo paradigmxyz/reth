@@ -1,20 +1,16 @@
-#![cfg_attr(not(feature = "std"), no_std)]
-
 use crate::{
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    Nibbles,
+    KeyHasher, Nibbles,
 };
+use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256HashMap, B256HashSet, HashMap, HashSet},
     Address, B256, U256,
 };
 use itertools::Itertools;
-
-use crate::KeyHasher;
 use reth_primitives_traits::Account;
 use revm::db::{AccountStatus, BundleAccount};
-use std::borrow::Cow;
 
 #[cfg(feature = "rayon")]
 pub use rayon::*;

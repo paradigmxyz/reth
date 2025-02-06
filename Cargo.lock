@@ -9365,7 +9365,6 @@ dependencies = [
  "metrics",
  "proptest",
  "proptest-arbitrary-interop",
- "rayon",
  "reth-ethereum-primitives",
  "reth-execution-errors",
  "reth-metrics",

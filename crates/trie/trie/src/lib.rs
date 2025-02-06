@@ -4,6 +4,7 @@
 //!
 //! ## Feature Flags
 //!
+//! - `rayon`: uses rayon for parallel [`HashedPostState`] creation.
 //! - `test-utils`: Export utilities for testing
 
 #![doc(
