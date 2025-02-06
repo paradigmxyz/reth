@@ -6,8 +6,8 @@ use crate::{
 };
 use alloy_primitives::B256;
 use futures::FutureExt;
+use reth_ethereum_primitives::BlockBody;
 use reth_network_peers::PeerId;
-use reth_primitives::BlockBody;
 use std::fmt::{Debug, Formatter};
 use tokio::sync::oneshot;
 
