@@ -231,7 +231,7 @@ where
         _sidecar: &BlobTransactionSidecar,
         _settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
-        Err(BlobTransactionValidationError::NotBlobTransaction(self.inner.transaction.ty()))
+        Err(BlobTransactionValidationError::NotBlobTransaction(self.ty()))
     }
 }
 
