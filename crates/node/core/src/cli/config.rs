@@ -55,7 +55,7 @@ impl<N: NetworkPrimitives> RethNetworkConfig for reth_network::NetworkManager<N>
     }
 
     fn secret_key(&self) -> secp256k1::SecretKey {
-        reth_network::NetworkManager::secret_key(self)
+        Self::secret_key(self)
     }
 }
 
