@@ -51,7 +51,7 @@ pub trait RethNetworkConfig {
 
 impl<N: NetworkPrimitives> RethNetworkConfig for reth_network::NetworkManager<N> {
     fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
-        reth_network::NetworkManager::add_rlpx_sub_protocol(self, protocol);
+        Self::add_rlpx_sub_protocol(self, protocol);
     }
 
     fn secret_key(&self) -> secp256k1::SecretKey {
