@@ -62,10 +62,11 @@ where
 
         let payload_generator = EmptyBlockPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
-            pool,
             ctx.task_executor().clone(),
             payload_job_config,
             reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
+                ctx.provider().clone(),
+                pool,
                 EthEvmConfig::new(ctx.chain_spec()),
                 EthereumBuilderConfig::new(conf.extra_data_bytes()),
             ),

@@ -1,6 +1,6 @@
 //! Node builder test that customizes priority of transactions in the block.
 
-use alloy_consensus::TxEip1559;
+use alloy_consensus::{SignableTransaction, TxEip1559};
 use alloy_genesis::Genesis;
 use alloy_network::TxSignerSync;
 use alloy_primitives::{Address, ChainId, TxKind};
@@ -22,16 +22,19 @@ use reth_optimism_node::{
         OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpPayloadBuilder,
         OpPoolBuilder,
     },
+    txpool::OpPooledTransaction,
     utils::optimism_payload_attributes,
     OpEngineTypes, OpNode,
 };
 use reth_optimism_payload_builder::builder::OpPayloadTransactions;
-use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
-use reth_payload_util::{PayloadTransactions, PayloadTransactionsChain, PayloadTransactionsFixed};
+use reth_optimism_primitives::OpPrimitives;
+use reth_payload_util::{
+    BestPayloadTransactions, PayloadTransactions, PayloadTransactionsChain,
+    PayloadTransactionsFixed,
+};
 use reth_primitives::Recovered;
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
-use reth_transaction_pool::{pool::BestPayloadTransactions, PoolTransaction};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -40,16 +43,14 @@ struct CustomTxPriority {
     chain_id: ChainId,
 }
 
-impl OpPayloadTransactions for CustomTxPriority {
+impl OpPayloadTransactions<OpPooledTransaction> for CustomTxPriority {
     fn best_transactions<Pool>(
         &self,
         pool: Pool,
         attr: reth_transaction_pool::BestTransactionsAttributes,
-    ) -> impl PayloadTransactions<Transaction = OpTransactionSigned>
+    ) -> impl PayloadTransactions<Transaction = OpPooledTransaction>
     where
-        Pool: reth_transaction_pool::TransactionPool<
-            Transaction: PoolTransaction<Consensus = OpTransactionSigned>,
-        >,
+        Pool: reth_transaction_pool::TransactionPool<Transaction = OpPooledTransaction>,
     {
         // Block composition:
         // 1. Best transactions from the pool (up to 250k gas)
@@ -68,12 +69,12 @@ impl OpPayloadTransactions for CustomTxPriority {
         };
         let signature = sender.sign_transaction_sync(&mut end_of_block_tx).unwrap();
         let end_of_block_tx = Recovered::new_unchecked(
-            OpTransactionSigned::new_unhashed(
-                OpTypedTransaction::Eip1559(end_of_block_tx),
-                signature,
+            op_alloy_consensus::OpPooledTransaction::Eip1559(
+                end_of_block_tx.into_signed(signature),
             ),
             sender.address(),
-        );
+        )
+        .into();
 
         PayloadTransactionsChain::new(
             BestPayloadTransactions::new(pool.best_transactions_with_attributes(attr)),

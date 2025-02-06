@@ -3122,6 +3122,7 @@ dependencies = [
 name = "example-network-txpool"
 version = "0.0.0"
 dependencies = [
+ "alloy-consensus",
  "eyre",
  "reth-network",
  "reth-provider",
@@ -6447,6 +6448,7 @@ dependencies = [
  "reth-errors",
  "reth-ethereum-cli",
  "reth-ethereum-payload-builder",
+ "reth-ethereum-primitives",
  "reth-evm",
  "reth-execution-types",
  "reth-exex",
@@ -6509,7 +6511,6 @@ dependencies = [
  "reth-provider",
  "reth-revm",
  "reth-tasks",
- "reth-transaction-pool",
  "revm",
  "tokio",
  "tracing",
@@ -7227,6 +7228,7 @@ dependencies = [
  "reth-ethereum-engine-primitives",
  "reth-ethereum-primitives",
  "reth-evm",
+ "reth-evm-ethereum",
  "reth-exex-types",
  "reth-metrics",
  "reth-network-p2p",
@@ -7880,9 +7882,9 @@ dependencies = [
  "parking_lot",
  "reth-consensus",
  "reth-eth-wire-types",
+ "reth-ethereum-primitives",
  "reth-network-peers",
  "reth-network-types",
- "reth-primitives",
  "reth-primitives-traits",
  "reth-storage-errors",
  "tokio",
@@ -8546,7 +8548,7 @@ version = "1.1.5"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
- "reth-primitives",
+ "reth-transaction-pool",
 ]
 
 [[package]]
@@ -9328,7 +9330,6 @@ dependencies = [
  "reth-execution-types",
  "reth-fs-util",
  "reth-metrics",
- "reth-payload-util",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",

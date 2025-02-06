@@ -14,9 +14,9 @@ pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
     engine::EngineApiEvent,
 };
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::{execute::BlockExecutorProvider, ConfigureEvm};
 use reth_network_p2p::BlockClient;
-use reth_node_types::{BlockTy, NodeTypes, NodeTypesWithEngine};
+use reth_node_types::{BlockTy, HeaderTy, NodeTypes, NodeTypesWithEngine, TxTy};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives::EthPrimitives;
 use reth_provider::{
@@ -73,7 +73,7 @@ where
 {
     /// Constructor for `EngineService`.
     #[allow(clippy::too_many_arguments)]
-    pub fn new<V>(
+    pub fn new<V, C>(
         consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
         executor_factory: E,
         chain_spec: Arc<N::ChainSpec>,
@@ -89,9 +89,11 @@ where
         tree_config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N::Primitives>>,
         sync_metrics_tx: MetricEventsSender,
+        evm_config: C,
     ) -> Self
     where
         V: EngineValidator<N::Engine, Block = BlockTy<N>>,
+        C: ConfigureEvm<Header = HeaderTy<N>, Transaction = TxTy<N>>,
     {
         let engine_kind =
             if chain_spec.is_optimism() { EngineApiKind::OpStack } else { EngineApiKind::Ethereum };
@@ -103,18 +105,20 @@ where
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
-        let (to_tree_tx, from_tree) = EngineApiTreeHandler::<N::Primitives, _, _, _, _>::spawn_new(
-            blockchain_db,
-            executor_factory,
-            consensus,
-            payload_validator,
-            persistence_handle,
-            payload_builder,
-            canonical_in_memory_state,
-            tree_config,
-            invalid_block_hook,
-            engine_kind,
-        );
+        let (to_tree_tx, from_tree) =
+            EngineApiTreeHandler::<N::Primitives, _, _, _, _, _>::spawn_new(
+                blockchain_db,
+                executor_factory,
+                consensus,
+                payload_validator,
+                persistence_handle,
+                payload_builder,
+                canonical_in_memory_state,
+                tree_config,
+                invalid_block_hook,
+                engine_kind,
+                evm_config,
+            );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
         let handler = EngineHandler::new(engine_handler, downloader, incoming_requests);
@@ -160,7 +164,7 @@ mod tests {
     use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::{EthEngineTypes, EthereumEngineValidator};
-    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_evm_ethereum::{execute::EthExecutorProvider, EthEvmConfig};
     use reth_exex_types::FinishedExExHeight;
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives::SealedHeader;
@@ -200,6 +204,7 @@ mod tests {
         let engine_payload_validator = EthereumEngineValidator::new(chain_spec.clone());
         let (_tx, rx) = watch::channel(FinishedExExHeight::NoExExs);
         let pruner = Pruner::new_with_factory(provider_factory.clone(), vec![], 0, 0, None, rx);
+        let evm_config = EthEvmConfig::new(chain_spec.clone());
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let (tx, _rx) = unbounded_channel();
@@ -219,6 +224,7 @@ mod tests {
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             sync_metrics_tx,
+            evm_config,
         );
     }
 }
