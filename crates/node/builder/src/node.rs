@@ -1,13 +1,14 @@
 // re-export the node api types
 pub use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithEngine};
 
+use reth_tokio_util::EventSender;
 use std::{
     marker::PhantomData,
     ops::{Deref, DerefMut},
     sync::Arc,
 };
 
-use reth_node_api::{EngineTypes, FullNodeComponents};
+use reth_node_api::{BeaconConsensusEngineEvent, EngineTypes, FullNodeComponents};
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
@@ -127,6 +128,9 @@ pub struct FullNode<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> {
     pub data_dir: ChainPath<DataDirPath>,
     /// The handle to launched add-ons
     pub add_ons_handle: AddOns::Handle,
+    /// Handling sending of events
+    pub event_sender:
+        EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
 }
 
 impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node, AddOns> {
@@ -142,6 +146,7 @@ impl<Node: FullNodeComponents, AddOns: NodeAddOns<Node>> Clone for FullNode<Node
             config: self.config.clone(),
             data_dir: self.data_dir.clone(),
             add_ons_handle: self.add_ons_handle.clone(),
+            event_sender: self.event_sender.clone(),
         }
     }
 }

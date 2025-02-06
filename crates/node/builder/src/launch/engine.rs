@@ -198,6 +198,7 @@ where
         info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
         let event_sender = EventSender::default();
+
         let beacon_engine_handle = BeaconConsensusEngineHandle::new(consensus_engine_tx.clone());
 
         // extract the jwt secret from the args if possible
@@ -257,7 +258,7 @@ where
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select!(
-            event_sender.new_listener().map(Into::into),
+            event_sender.clone().new_listener().map(Into::into),
             pipeline_events.map(Into::into),
             if ctx.node_config().debug.tip.is_none() && !ctx.is_dev() {
                 Either::Left(
@@ -270,6 +271,7 @@ where
             pruner_events.map(Into::into),
             static_file_producer_events.map(Into::into),
         );
+        let event_sender_clone = event_sender.clone();
         ctx.task_executor().spawn_critical(
             "events task",
             node::handle_events(
@@ -382,7 +384,7 @@ where
                                     };
                                     network_handle.update_status(head_block);
                                 }
-                                event_sender.notify(ev);
+                                event_sender_clone.clone().notify(ev);
                             }
                         }
                     }
@@ -403,6 +405,7 @@ where
             config: ctx.node_config().clone(),
             data_dir: ctx.data_dir().clone(),
             add_ons_handle: RpcHandle { rpc_server_handles, rpc_registry },
+            event_sender: event_sender.clone(),
         };
         // Notify on node started
         on_node_started.on_event(FullNode::clone(&full_node))?;
