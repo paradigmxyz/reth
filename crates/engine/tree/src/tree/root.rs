@@ -778,6 +778,15 @@ where
                         let all_proofs_received =
                             proofs_processed >= updates_received + prefetch_proofs_received;
                         let no_pending = !self.proof_sequencer.has_pending();
+                        trace!(
+                            target: "engine::root",
+                            updates_received,
+                            prefetch_proofs_received,
+                            proofs_processed,
+                            has_pending = self.proof_sequencer.has_pending(),
+                            updates_finished,
+                            "Checking conditions for calculation to end"
+                        );
                         if all_proofs_received && no_pending && updates_finished {
                             // drop the sender
                             sparse_trie_tx.take();
