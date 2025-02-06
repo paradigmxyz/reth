@@ -72,7 +72,6 @@ pub(crate) struct BlockValidationMetrics {
     /// Prewarm spawn duration
     pub(crate) prewarm_spawn_duration: Gauge,
     /// Cache saving duration
-    #[allow(dead_code)]
     pub(crate) cache_saving_duration: Gauge,
     /// State root config creation duration
     pub(crate) state_root_config_duration: Gauge,
