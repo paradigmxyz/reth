@@ -370,7 +370,7 @@ where
     // previous block timestamp (heuristically, block time is not perfectly constant at 2s), and the
     // chain is an optimism chain, then we need to force-deploy the create2 deployer contract.
     if chain_spec.is_canyon_active_at_timestamp(timestamp) &&
-        !chain_spec.is_cancun_active_at_timestamp(timestamp.saturating_sub(2))
+        !chain_spec.is_canyon_active_at_timestamp(timestamp.saturating_sub(2))
     {
         trace!(target: "evm", "Forcing create2 deployer contract deployment on Canyon transition");
 
