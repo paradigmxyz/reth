@@ -1,9 +1,9 @@
 //! Transaction pool arguments
-
 use crate::cli::config::RethTransactionPoolConfig;
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
 use clap::Args;
+use tokio::time::Duration;
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
@@ -98,6 +98,11 @@ pub struct TxPoolArgs {
     /// iterators.
     #[arg(long = "txpool.max-new-pending-txs-notifications", alias = "txpool.max-new-pending-txs-notifications", default_value_t = MAX_NEW_PENDING_TXS_NOTIFICATIONS)]
     pub max_new_pending_txs_notifications: usize,
+
+    /// Maximum lifetime for transactions in the pool before being considered stale.
+    /// Accepts human readable duration
+    #[arg(long = "txpool.max-tx-lifetime", alias = "txpool.max-tx-lifetime",  default_value = "3h", value_parser = humantime::parse_duration)]
+    pub max_tx_lifetime: Duration,
 }
 
 impl Default for TxPoolArgs {
@@ -125,6 +130,7 @@ impl Default for TxPoolArgs {
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
+            max_tx_lifetime: Duration::from_secs(3 * 60 * 60), // 3 hours default
         }
     }
 }
@@ -164,6 +170,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             pending_tx_listener_buffer_size: self.pending_tx_listener_buffer_size,
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
+            max_tx_lifetime: self.max_tx_lifetime,
         }
     }
 }
@@ -172,6 +179,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
 mod tests {
     use super::*;
     use clap::Parser;
+    use tokio::time::Duration;
 
     /// A helper type to parse Args more easily
     #[derive(Parser)]
@@ -197,4 +205,33 @@ mod tests {
         .args;
         assert_eq!(args.locals, vec![Address::ZERO]);
     }
+
+    #[test]
+    fn txpool_parse_max_tx_lifetime() {
+        // Test with a custom duration
+        let args = CommandParser::<TxPoolArgs>::parse_from([
+            "reth",
+            "--txpool.max-tx-lifetime",
+            "30min",
+        ])
+        .args;
+        assert_eq!(args.max_tx_lifetime, Duration::from_secs(30 * 60));
+
+        // Test with the default value
+        let args = CommandParser::<TxPoolArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.max_tx_lifetime, Duration::from_secs(3 * 60 * 60)); // Default is 3h
+    }
+
+    #[test]
+    fn txpool_parse_max_tx_lifetime_invalid() {
+        // Test with an invalid duration
+        let result = CommandParser::<TxPoolArgs>::try_parse_from([
+            "reth",
+            "--txpool.max-tx-lifetime",
+            "invalid",
+        ]);
+
+        assert!(result.is_err(), "Expected an error for invalid duration");
+    }
+
 }
