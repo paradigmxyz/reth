@@ -189,7 +189,7 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
     Ok(l1block)
 }
 
-/// Updates the L1 block values for an Ecotone upgraded chain.
+/// Updates the L1 block values for an Isthmus upgraded chain.
 /// Params are packed and passed in as raw msg.data instead of ABI to reduce calldata size.
 /// Params are expected to be in the following order:
 ///   1. _baseFeeScalar       L1 base fee scalar

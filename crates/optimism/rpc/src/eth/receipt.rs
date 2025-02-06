@@ -85,10 +85,6 @@ pub struct OpReceiptFieldsBuilder {
     pub l1_blob_base_fee: Option<u128>,
     /// The current L1 blob base fee scalar.
     pub l1_blob_base_fee_scalar: Option<u128>,
-    /// The current operator fee scalar.
-    pub operator_fee_scalar: Option<u128>,
-    /// The current operator fee constant.
-    pub operator_fee_constant: Option<u128>,
 }
 
 impl OpReceiptFieldsBuilder {
@@ -106,8 +102,6 @@ impl OpReceiptFieldsBuilder {
             l1_base_fee_scalar: None,
             l1_blob_base_fee: None,
             l1_blob_base_fee_scalar: None,
-            operator_fee_scalar: None,
-            operator_fee_constant: None,
         }
     }
 
@@ -145,10 +139,6 @@ impl OpReceiptFieldsBuilder {
         self.l1_blob_base_fee = l1_block_info.l1_blob_base_fee.map(|fee| fee.saturating_to());
         self.l1_blob_base_fee_scalar =
             l1_block_info.l1_blob_base_fee_scalar.map(|scalar| scalar.saturating_to());
-        self.operator_fee_scalar =
-            l1_block_info.operator_fee_scalar.map(|scalar| scalar.saturating_to());
-        self.operator_fee_constant =
-            l1_block_info.operator_fee_constant.map(|constant| constant.saturating_to());
 
         Ok(self)
     }
@@ -179,8 +169,6 @@ impl OpReceiptFieldsBuilder {
             l1_base_fee_scalar,
             l1_blob_base_fee,
             l1_blob_base_fee_scalar,
-            operator_fee_scalar,
-            operator_fee_constant,
         } = self;
 
         OpTransactionReceiptFields {
@@ -192,8 +180,6 @@ impl OpReceiptFieldsBuilder {
                 l1_base_fee_scalar,
                 l1_blob_base_fee,
                 l1_blob_base_fee_scalar,
-                operator_fee_scalar,
-                operator_fee_constant,
             },
             deposit_nonce,
             deposit_receipt_version,
