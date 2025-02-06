@@ -208,13 +208,8 @@ where
         let block = payload.block();
 
         let (tx, rx) = oneshot::channel();
-        let (payload, sidecar) = EngineT::block_to_payload(payload.block().clone());
-        self.to_engine.send(BeaconEngineMessage::NewPayload {
-            payload,
-            // todo: prague support
-            sidecar,
-            tx,
-        })?;
+        let payload = EngineT::block_to_payload(payload.block().clone());
+        self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx })?;
 
         let res = rx.await??;
 

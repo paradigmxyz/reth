@@ -5,7 +5,7 @@ use crate::{
     MaybeSerdeBincodeCompat, SignedTransaction,
 };
 use alloc::{fmt, vec::Vec};
-use alloy_consensus::{Header, Transaction, Typed2718};
+use alloy_consensus::{Transaction, Typed2718};
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, B256};
 
@@ -177,12 +177,13 @@ pub trait BlockBody:
     }
 }
 
-impl<T> BlockBody for alloy_consensus::BlockBody<T>
+impl<T, H> BlockBody for alloy_consensus::BlockBody<T, H>
 where
     T: SignedTransaction,
+    H: BlockHeader,
 {
     type Transaction = T;
-    type OmmerHeader = Header;
+    type OmmerHeader = H;
 
     fn transactions(&self) -> &[Self::Transaction] {
         &self.transactions

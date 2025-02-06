@@ -2,9 +2,11 @@
 
 use alloy_primitives::map::HashSet;
 use derive_more::derive::Deref;
+use metrics::Histogram;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_evm::system_calls::OnStateHook;
+use reth_metrics::Metrics;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DBProvider, DatabaseProviderFactory,
     StateCommitmentProvider,
@@ -170,16 +172,8 @@ pub struct ProofCalculated {
     sequence_number: u64,
     /// Sparse trie update
     update: SparseTrieUpdate,
-    /// The source of the proof fetch, whether it was requested as a prefetch or as a result of a
-    /// state update.
-    source: ProofFetchSource,
-}
-
-impl ProofCalculated {
-    /// Returns true if the proof was calculated as a result of a state update.
-    pub(crate) const fn is_from_state_update(&self) -> bool {
-        matches!(self.source, ProofFetchSource::StateUpdate)
-    }
+    /// The time taken to calculate the proof.
+    elapsed: Duration,
 }
 
 /// Whether or not a proof was fetched due to a state update, or due to a prefetch command.
@@ -314,7 +308,6 @@ struct MultiproofInput<Factory> {
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
     state_root_message_sender: Sender<StateRootMessage>,
-    source: ProofFetchSource,
 }
 
 /// Manages concurrent multiproof calculations.
@@ -335,12 +328,8 @@ struct MultiproofManager<Factory> {
 
 impl<Factory> MultiproofManager<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader>
-        + StateCommitmentProvider
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    Factory:
+        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new [`MultiproofManager`].
     fn new(thread_pool: Arc<rayon::ThreadPool>, thread_pool_size: usize) -> Self {
@@ -384,7 +373,6 @@ where
             proof_targets,
             proof_sequence_number,
             state_root_message_sender,
-            source,
         } = input;
         let thread_pool = self.thread_pool.clone();
 
@@ -397,10 +385,11 @@ where
             );
             let start = Instant::now();
             let result = calculate_multiproof(thread_pool, config, proof_targets.clone());
+            let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
                 proof_sequence_number,
-                elapsed = ?start.elapsed(),
+                ?elapsed,
                 "Multiproof calculated",
             );
 
@@ -414,7 +403,7 @@ where
                                 targets: proof_targets,
                                 multiproof: proof,
                             },
-                            source,
+                            elapsed,
                         }),
                     ));
                 }
@@ -427,6 +416,29 @@ where
 
         self.inflight += 1;
     }
+}
+
+#[derive(Metrics, Clone)]
+#[metrics(scope = "tree.root")]
+struct StateRootTaskMetrics {
+    /// Histogram of proof calculation durations.
+    pub proof_calculation_duration_histogram: Histogram,
+    /// Histogram of proof calculation account targets.
+    pub proof_calculation_account_targets_histogram: Histogram,
+    /// Histogram of proof calculation storage targets.
+    pub proof_calculation_storage_targets_histogram: Histogram,
+
+    /// Histogram of sparse trie update durations.
+    pub sparse_trie_update_duration_histogram: Histogram,
+    /// Histogram of sparse trie final update durations.
+    pub sparse_trie_final_update_duration_histogram: Histogram,
+
+    /// Histogram of state updates received.
+    pub state_updates_received_histogram: Histogram,
+    /// Histogram of proofs processed.
+    pub proofs_processed_histogram: Histogram,
+    /// Histogram of state root update iterations.
+    pub state_root_iterations_histogram: Histogram,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -453,16 +465,14 @@ pub struct StateRootTask<Factory> {
     thread_pool: Arc<rayon::ThreadPool>,
     /// Manages calculation of multiproofs.
     multiproof_manager: MultiproofManager<Factory>,
+    /// State root task metrics
+    metrics: StateRootTaskMetrics,
 }
 
 impl<Factory> StateRootTask<Factory>
 where
-    Factory: DatabaseProviderFactory<Provider: BlockReader>
-        + StateCommitmentProvider
-        + Clone
-        + Send
-        + Sync
-        + 'static,
+    Factory:
+        DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider + Clone + 'static,
 {
     /// Creates a new state root task with the unified message channel
     pub fn new(config: StateRootConfig<Factory>, thread_pool: Arc<rayon::ThreadPool>) -> Self {
@@ -475,7 +485,13 @@ where
             proof_sequencer: ProofSequencer::new(),
             thread_pool: thread_pool.clone(),
             multiproof_manager: MultiproofManager::new(thread_pool, thread_pool_size()),
+            metrics: StateRootTaskMetrics::default(),
         }
+    }
+
+    /// Returns a [`Sender`] that can be used to send arbitrary [`StateRootMessage`]s to this task.
+    pub fn state_root_message_sender(&self) -> Sender<StateRootMessage> {
+        self.tx.clone()
     }
 
     /// Returns a [`StateHookSender`] that can be used to send state updates to this task.
@@ -496,8 +512,12 @@ where
 
     /// Spawns the state root task and returns a handle to await its result.
     pub fn spawn(self) -> StateRootHandle {
-        let sparse_trie_tx =
-            Self::spawn_sparse_trie(self.thread_pool.clone(), self.config.clone(), self.tx.clone());
+        let sparse_trie_tx = Self::spawn_sparse_trie(
+            self.thread_pool.clone(),
+            self.config.clone(),
+            self.metrics.clone(),
+            self.tx.clone(),
+        );
         let (tx, rx) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("State Root Task".to_string())
@@ -516,12 +536,13 @@ where
     fn spawn_sparse_trie(
         thread_pool: Arc<rayon::ThreadPool>,
         config: StateRootConfig<Factory>,
+        metrics: StateRootTaskMetrics,
         task_tx: Sender<StateRootMessage>,
     ) -> Sender<SparseTrieUpdate> {
         let (tx, rx) = mpsc::channel();
         thread_pool.spawn(move || {
             debug!(target: "engine::tree", "Starting sparse trie task");
-            let result = match run_sparse_trie(config, rx) {
+            let result = match run_sparse_trie(config, metrics, rx) {
                 Ok((state_root, trie_updates, iterations)) => {
                     StateRootMessage::RootCalculated { state_root, trie_updates, iterations }
                 }
@@ -534,16 +555,66 @@ where
 
     /// Handles request for proof prefetch.
     fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
-        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &targets);
+        let proof_targets = self.get_prefetch_proof_targets(targets);
+        extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
             hashed_state_update: Default::default(),
-            proof_targets: targets,
+            proof_targets,
             proof_sequence_number: self.proof_sequencer.next_sequence(),
             state_root_message_sender: self.tx.clone(),
-            source: ProofFetchSource::Prefetch,
         });
+    }
+
+    /// Calls `get_proof_targets` with existing proof targets for prefetching.
+    fn get_prefetch_proof_targets(&self, mut targets: MultiProofTargets) -> MultiProofTargets {
+        // Here we want to filter out any targets that are already fetched
+        //
+        // This means we need to remove any storage slots that have already been fetched
+        let mut duplicates = 0;
+
+        // First remove all storage targets that are subsets of already fetched storage slots
+        targets.retain(|hashed_address, target_storage| {
+            let keep = self
+                .fetched_proof_targets
+                .get(hashed_address)
+                // do NOT remove if None, because that means the account has not been fetched yet
+                .is_none_or(|fetched_storage| {
+                    // remove if a subset
+                    !target_storage.is_subset(fetched_storage)
+                });
+
+            if !keep {
+                duplicates += target_storage.len();
+            }
+
+            keep
+        });
+
+        // For all non-subset remaining targets, we have to calculate the difference
+        for (hashed_address, target_storage) in &mut targets {
+            let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
+                // this means the account has not been fetched yet, so we must fetch everything
+                // associated with this account
+                continue
+            };
+
+            let prev_target_storage_len = target_storage.len();
+
+            // keep only the storage slots that have not been fetched yet
+            //
+            // we already removed subsets, so this should only remove duplicates
+            target_storage.retain(|slot| !fetched_storage.contains(slot));
+
+            duplicates += prev_target_storage_len - target_storage.len();
+        }
+
+        if duplicates > 0 {
+            trace!(target: "engine::root", duplicates, "Removed duplicate prefetch proof targets");
+        }
+
+        targets
     }
 
     /// Handles state updates.
@@ -560,7 +631,6 @@ where
             proof_targets,
             proof_sequence_number,
             state_root_message_sender: self.tx.clone(),
-            source: ProofFetchSource::StateUpdate,
         });
     }
 
@@ -586,6 +656,7 @@ where
     fn run(mut self, sparse_trie_tx: Sender<SparseTrieUpdate>) -> StateRootResult {
         let mut sparse_trie_tx = Some(sparse_trie_tx);
 
+        let mut prefetch_proofs_received = 0;
         let mut updates_received = 0;
         let mut proofs_processed = 0;
 
@@ -602,9 +673,12 @@ where
                 Ok(message) => match message {
                     StateRootMessage::PrefetchProofs(targets) => {
                         trace!(target: "engine::root", "processing StateRootMessage::PrefetchProofs");
+                        prefetch_proofs_received += 1;
                         debug!(
                             target: "engine::root",
-                            len = targets.len(),
+                            targets = targets.len(),
+                            storage_targets = targets.values().map(|slots| slots.len()).sum::<usize>(),
+                            total_prefetches = prefetch_proofs_received,
                             "Prefetching proofs"
                         );
                         self.on_prefetch_proof(targets);
@@ -631,7 +705,8 @@ where
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
                         updates_finished = true;
 
-                        let all_proofs_received = proofs_processed >= updates_received;
+                        let all_proofs_received =
+                            proofs_processed >= updates_received + prefetch_proofs_received;
                         let no_pending = !self.proof_sequencer.has_pending();
                         if all_proofs_received && no_pending {
                             // drop the sender
@@ -646,9 +721,25 @@ where
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
                         trace!(target: "engine::root", "processing StateRootMessage::ProofCalculated");
-                        if proof_calculated.is_from_state_update() {
-                            proofs_processed += 1;
-                        }
+
+                        // we increment proofs_processed for both state updates and prefetches,
+                        // because both are used for the root termination condition.
+                        proofs_processed += 1;
+
+                        self.metrics
+                            .proof_calculation_duration_histogram
+                            .record(proof_calculated.elapsed);
+                        self.metrics
+                            .proof_calculation_account_targets_histogram
+                            .record(proof_calculated.update.targets.len() as f64);
+                        self.metrics.proof_calculation_storage_targets_histogram.record(
+                            proof_calculated
+                                .update
+                                .targets
+                                .values()
+                                .map(|targets| targets.len() as f64)
+                                .sum::<f64>(),
+                        );
 
                         debug!(
                             target: "engine::root",
@@ -668,7 +759,8 @@ where
                                 .send(combined_update);
                         }
 
-                        let all_proofs_received = proofs_processed >= updates_received;
+                        let all_proofs_received =
+                            proofs_processed >= updates_received + prefetch_proofs_received;
                         let no_pending = !self.proof_sequencer.has_pending();
                         if all_proofs_received && no_pending && updates_finished {
                             // drop the sender
@@ -696,6 +788,11 @@ where
                             ?time_from_last_update,
                             "All proofs processed, ending calculation"
                         );
+
+                        self.metrics.state_updates_received_histogram.record(updates_received);
+                        self.metrics.proofs_processed_histogram.record(proofs_processed);
+                        self.metrics.state_root_iterations_histogram.record(iterations as f64);
+
                         return Ok(StateRootComputeOutcome {
                             state_root: (state_root, trie_updates),
                             total_time,
@@ -734,6 +831,7 @@ where
 /// Returns final state root, trie updates and the number of update iterations.
 fn run_sparse_trie<Factory>(
     config: StateRootConfig<Factory>,
+    metrics: StateRootTaskMetrics,
     update_rx: mpsc::Receiver<SparseTrieUpdate>,
 ) -> Result<(B256, TrieUpdates, u64), ParallelStateRootError>
 where
@@ -775,11 +873,17 @@ where
         let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
             ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
         })?;
+        metrics.sparse_trie_update_duration_histogram.record(elapsed);
         trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
     }
 
     debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
+
+    let start = Instant::now();
     let root = trie.root().expect("sparse trie should be revealed");
+    let elapsed = start.elapsed();
+    metrics.sparse_trie_final_update_duration_histogram.record(elapsed);
+
     let trie_updates = trie.take_trie_updates().expect("retention must be enabled");
     Ok((root, trie_updates, num_iterations))
 }
@@ -922,6 +1026,7 @@ fn extend_multi_proof_targets_ref(targets: &mut MultiProofTargets, other: &Multi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::map::B256Set;
     use reth_primitives_traits::{Account as RethAccount, StorageEntry};
     use reth_provider::{
         providers::ConsistentDbView, test_utils::create_test_provider_factory, HashingWriter,
@@ -987,6 +1092,42 @@ mod tests {
         }
 
         updates
+    }
+
+    fn create_state_root_config<F>(factory: F, input: TrieInput) -> StateRootConfig<F>
+    where
+        F: DatabaseProviderFactory<Provider: BlockReader>
+            + StateCommitmentProvider
+            + Clone
+            + 'static,
+    {
+        let consistent_view = ConsistentDbView::new(factory, None);
+        let nodes_sorted = Arc::new(input.nodes.clone().into_sorted());
+        let state_sorted = Arc::new(input.state.clone().into_sorted());
+        let prefix_sets = Arc::new(input.prefix_sets);
+
+        StateRootConfig { consistent_view, nodes_sorted, state_sorted, prefix_sets }
+    }
+
+    fn create_test_state_root_task<F>(factory: F) -> StateRootTask<F>
+    where
+        F: DatabaseProviderFactory<Provider: BlockReader>
+            + StateCommitmentProvider
+            + Clone
+            + 'static,
+    {
+        let num_threads = thread_pool_size();
+
+        let thread_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .thread_name(|i| format!("test-worker-{}", i))
+            .build()
+            .expect("Failed to create test proof worker thread pool");
+
+        let thread_pool = Arc::new(thread_pool);
+        let config = create_state_root_config(factory, TrieInput::default());
+
+        StateRootTask::new(config, thread_pool)
     }
 
     #[test]
@@ -1318,5 +1459,86 @@ mod tests {
         assert_eq!(target_slots.len(), 2);
         assert!(target_slots.contains(&slot1));
         assert!(target_slots.contains(&slot2));
+    }
+
+    #[test]
+    fn test_get_prefetch_proof_targets_no_duplicates() {
+        let test_provider_factory = create_test_provider_factory();
+        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
+
+        // populate some targets
+        let mut targets = MultiProofTargets::default();
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+        targets.insert(addr1, vec![slot1].into_iter().collect());
+        targets.insert(addr2, vec![slot2].into_iter().collect());
+
+        let prefetch_proof_targets =
+            test_state_root_task.get_prefetch_proof_targets(targets.clone());
+
+        // check that the prefetch proof targets are the same because there are no fetched proof
+        // targets yet
+        assert_eq!(prefetch_proof_targets, targets);
+
+        // add a different addr and slot to fetched proof targets
+        let addr3 = B256::random();
+        let slot3 = B256::random();
+        test_state_root_task.fetched_proof_targets.insert(addr3, vec![slot3].into_iter().collect());
+
+        let prefetch_proof_targets =
+            test_state_root_task.get_prefetch_proof_targets(targets.clone());
+
+        // check that the prefetch proof targets are the same because the fetched proof targets
+        // don't overlap with the prefetch targets
+        assert_eq!(prefetch_proof_targets, targets);
+    }
+
+    #[test]
+    fn test_get_prefetch_proof_targets_remove_subset() {
+        let test_provider_factory = create_test_provider_factory();
+        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
+
+        // populate some targe
+        let mut targets = MultiProofTargets::default();
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+        targets.insert(addr1, vec![slot1].into_iter().collect());
+        targets.insert(addr2, vec![slot2].into_iter().collect());
+
+        // add a subset of the first target to fetched proof targets
+        test_state_root_task.fetched_proof_targets.insert(addr1, vec![slot1].into_iter().collect());
+
+        let prefetch_proof_targets =
+            test_state_root_task.get_prefetch_proof_targets(targets.clone());
+
+        // check that the prefetch proof targets do not include the subset
+        assert_eq!(prefetch_proof_targets.len(), 1);
+        assert!(!prefetch_proof_targets.contains_key(&addr1));
+        assert!(prefetch_proof_targets.contains_key(&addr2));
+
+        // now add one more slot to the prefetch targets
+        let slot3 = B256::random();
+        targets.get_mut(&addr1).unwrap().insert(slot3);
+
+        let prefetch_proof_targets =
+            test_state_root_task.get_prefetch_proof_targets(targets.clone());
+
+        // check that the prefetch proof targets do not include the subset
+        // but include the new slot
+        assert_eq!(prefetch_proof_targets.len(), 2);
+        assert!(prefetch_proof_targets.contains_key(&addr1));
+        assert_eq!(
+            *prefetch_proof_targets.get(&addr1).unwrap(),
+            vec![slot3].into_iter().collect::<B256Set>()
+        );
+        assert!(prefetch_proof_targets.contains_key(&addr2));
+        assert_eq!(
+            *prefetch_proof_targets.get(&addr2).unwrap(),
+            vec![slot2].into_iter().collect::<B256Set>()
+        );
     }
 }

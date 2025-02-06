@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy_consensus::{BlockHeader, Transaction, TxReceipt};
-use alloy_eips::eip1559::calc_next_block_base_fee;
+use alloy_eips::{eip1559::calc_next_block_base_fee, eip7840::BlobParams};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TxGasAndReward;
 use futures::{
@@ -72,18 +72,22 @@ impl FeeHistoryCache {
     }
 
     /// Insert block data into the cache.
-    async fn insert_blocks<'a, I, B, R>(&self, blocks: I)
+    async fn insert_blocks<'a, I, B, R, C>(&self, blocks: I, chain_spec: &C)
     where
         B: Block + 'a,
         R: TxReceipt,
         I: IntoIterator<Item = (&'a SealedBlock<B>, Arc<Vec<R>>)>,
+        C: EthChainSpec,
     {
         let mut entries = self.inner.entries.write().await;
 
         let percentiles = self.predefined_percentiles();
         // Insert all new blocks and calculate approximated rewards
         for (block, receipts) in blocks {
-            let mut fee_history_entry = FeeHistoryEntry::new(block);
+            let mut fee_history_entry = FeeHistoryEntry::new(
+                block,
+                chain_spec.blob_params_at_timestamp(block.header().timestamp()),
+            );
             fee_history_entry.rewards = calculate_reward_percentiles_for_block(
                 &percentiles,
                 fee_history_entry.gas_used,
@@ -232,12 +236,14 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
             }
         }
 
+        let chain_spec = provider.chain_spec();
+
         tokio::select! {
             res = &mut fetch_missing_block =>  {
                 if let Ok(res) = res {
                     let res = res.as_ref()
                         .map(|(b, r)| (b.sealed_block(), r.clone()));
-                    fee_history_cache.insert_blocks(res).await;
+                    fee_history_cache.insert_blocks(res, &chain_spec).await;
                 }
             }
             event = events.next() =>  {
@@ -253,7 +259,7 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
                         (block.clone_sealed_block(), Arc::new(receipts.clone()))
                     })
                     .unzip();
-                fee_history_cache.insert_blocks(blocks.iter().zip(receipts)).await;
+                fee_history_cache.insert_blocks(blocks.iter().zip(receipts), &chain_spec).await;
 
                 // keep track of missing blocks
                 missing_blocks = fee_history_cache.missing_consecutive_blocks().await;
@@ -356,20 +362,22 @@ pub struct FeeHistoryEntry {
     pub rewards: Vec<u128>,
     /// The timestamp of the block.
     pub timestamp: u64,
+    /// Blob parameters for this block.
+    pub blob_params: Option<BlobParams>,
 }
 
 impl FeeHistoryEntry {
     /// Creates a new entry from a sealed block.
     ///
     /// Note: This does not calculate the rewards for the block.
-    pub fn new<B: Block>(block: &SealedBlock<B>) -> Self {
+    pub fn new<B: Block>(block: &SealedBlock<B>, blob_params: Option<BlobParams>) -> Self {
         Self {
             base_fee_per_gas: block.header().base_fee_per_gas().unwrap_or_default(),
             gas_used_ratio: block.header().gas_used() as f64 / block.header().gas_limit() as f64,
             base_fee_per_blob_gas: block
                 .header()
                 .excess_blob_gas()
-                .map(alloy_eips::eip4844::calc_blob_gasprice),
+                .and_then(|excess_blob_gas| Some(blob_params?.calc_blob_fee(excess_blob_gas))),
             blob_gas_used_ratio: block.body().blob_gas_used() as f64 /
                 alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK as f64,
             excess_blob_gas: block.header().excess_blob_gas(),
@@ -379,6 +387,7 @@ impl FeeHistoryEntry {
             gas_limit: block.header().gas_limit(),
             rewards: Vec::new(),
             timestamp: block.header().timestamp(),
+            blob_params,
         }
     }
 
@@ -398,13 +407,16 @@ impl FeeHistoryEntry {
     ///
     /// See also [`Self::next_block_excess_blob_gas`]
     pub fn next_block_blob_fee(&self) -> Option<u128> {
-        self.next_block_excess_blob_gas().map(alloy_eips::eip4844::calc_blob_gasprice)
+        self.next_block_excess_blob_gas()
+            .and_then(|excess_blob_gas| Some(self.blob_params?.calc_blob_fee(excess_blob_gas)))
     }
 
     /// Calculate excess blob gas for the next block according to the EIP-4844 spec.
     ///
     /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
     pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
-        Some(alloy_eips::eip4844::calc_excess_blob_gas(self.excess_blob_gas?, self.blob_gas_used?))
+        self.excess_blob_gas.and_then(|excess_blob_gas| {
+            Some(self.blob_params?.next_block_excess_blob_gas(excess_blob_gas, self.blob_gas_used?))
+        })
     }
 }

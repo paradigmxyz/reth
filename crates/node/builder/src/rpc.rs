@@ -10,8 +10,8 @@ use std::{
 use alloy_rpc_types::engine::ClientVersionV1;
 use futures::TryFutureExt;
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineValidator, FullNodeComponents, NodeAddOns, NodeTypes,
-    NodeTypesWithEngine,
+    AddOnsContext, BlockTy, EngineTypes, EngineValidator, ExecutionData, FullNodeComponents,
+    NodeAddOns, NodeTypes, NodeTypesWithEngine,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -19,6 +19,7 @@ use reth_node_core::{
 };
 use reth_payload_builder::PayloadStore;
 use reth_primitives::EthPrimitives;
+use reth_provider::ChainSpecProvider;
 use reth_rpc::{
     eth::{EthApiTypes, FullEthApiServer},
     EthApi,
@@ -400,7 +401,9 @@ where
 
 impl<N, EthApi, EV> RpcAddOns<N, EthApi, EV>
 where
-    N: FullNodeComponents,
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<Engine: EngineTypes<ExecutionData = ExecutionData>>,
+    >,
     EthApi: EthApiTypes
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
         + AddDevSigners
@@ -527,7 +530,9 @@ where
 
 impl<N, EthApi, EV> NodeAddOns<N> for RpcAddOns<N, EthApi, EV>
 where
-    N: FullNodeComponents,
+    N: FullNodeComponents<
+        Types: NodeTypesWithEngine<Engine: EngineTypes<ExecutionData = ExecutionData>>,
+    >,
     EthApi: EthApiTypes
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool, Network = N::Network>
         + AddDevSigners
@@ -571,8 +576,12 @@ pub trait EthApiBuilder<N: FullNodeComponents>: 'static {
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self;
 }
 
-impl<N: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>> EthApiBuilder<N>
-    for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
+impl<
+        N: FullNodeComponents<
+            Provider: ChainSpecProvider,
+            Types: NodeTypes<Primitives = EthPrimitives>,
+        >,
+    > EthApiBuilder<N> for EthApi<N::Provider, N::Pool, N::Network, N::Evm>
 {
     fn build(ctx: &EthApiBuilderCtx<N>) -> Self {
         Self::with_spawner(ctx)

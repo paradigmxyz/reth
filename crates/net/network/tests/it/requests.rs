@@ -64,7 +64,7 @@ async fn test_get_body() {
     for _ in 0..100 {
         // Set a new random block to the mock storage and request it via the network
         let block_hash = rng.gen();
-        let mut block = Block::default();
+        let mut block: Block = Block::default();
         block.body.transactions.push(rng_transaction(&mut rng));
 
         mock_provider.add_block(block_hash, block.clone());

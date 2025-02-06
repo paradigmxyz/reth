@@ -2,8 +2,9 @@
 
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
+use reth_chainspec::EthChainSpec;
 use reth_primitives_traits::{BlockBody, SignedTransaction};
-use reth_provider::BlockReader;
+use reth_provider::{BlockReader, ChainSpecProvider};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     RpcNodeCoreExt, RpcReceipt,
@@ -22,7 +23,7 @@ where
             Receipt = reth_primitives::Receipt,
         >,
     >,
-    Provider: BlockReader,
+    Provider: BlockReader + ChainSpecProvider,
 {
     async fn block_receipts(
         &self,
@@ -37,6 +38,7 @@ where
             let block_hash = block.hash();
             let excess_blob_gas = block.excess_blob_gas();
             let timestamp = block.timestamp();
+            let blob_params = self.provider().chain_spec().blob_params_at_timestamp(timestamp);
 
             return block
                 .body()
@@ -54,7 +56,7 @@ where
                         excess_blob_gas,
                         timestamp,
                     };
-                    EthReceiptBuilder::new(tx, meta, receipt, &receipts)
+                    EthReceiptBuilder::new(tx, meta, receipt, &receipts, blob_params)
                         .map(|builder| builder.build())
                 })
                 .collect::<Result<Vec<_>, Self::Error>>()

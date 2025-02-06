@@ -10,7 +10,7 @@ use reth_db::tables;
 use reth_db_api::{transaction::DbTxMut, DatabaseError};
 use reth_etl::Collector;
 use reth_primitives::{
-    Account, Bytecode, GotExpected, NodePrimitives, Receipts, StaticFileSegment, StorageEntry,
+    Account, Bytecode, GotExpected, NodePrimitives, StaticFileSegment, StorageEntry,
 };
 use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, writer::UnifiedStorageWriter,
@@ -246,7 +246,7 @@ where
         state_init,
         all_reverts_init,
         contracts,
-        Receipts::default(),
+        Vec::default(),
         block,
         Vec::new(),
     );

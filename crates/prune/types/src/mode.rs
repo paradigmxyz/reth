@@ -48,8 +48,8 @@ impl PruneMode {
             }
             Self::Before(n) if *n == tip + 1 && purpose.is_static_file() => Some((tip, *self)),
             Self::Before(n) if *n > tip => None, // Nothing to prune yet
-            Self::Before(n) if tip - n >= segment.min_blocks(purpose) => {
-                Some(((*n).saturating_sub(1), *self))
+            Self::Before(n) => {
+                (tip - n >= segment.min_blocks(purpose)).then(|| ((*n).saturating_sub(1), *self))
             }
             _ => return Err(PruneSegmentError::Configuration(segment)),
         };
@@ -113,7 +113,8 @@ mod tests {
                 PruneMode::Before(tip - MINIMUM_PRUNING_DISTANCE - 1),
                 Ok(Some(tip - MINIMUM_PRUNING_DISTANCE - 2)),
             ),
-            (PruneMode::Before(tip - 1), Err(PruneSegmentError::Configuration(segment))),
+            // Nothing to prune
+            (PruneMode::Before(tip - 1), Ok(None)),
         ];
 
         for (index, (mode, expected_result)) in tests.into_iter().enumerate() {

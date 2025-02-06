@@ -1,7 +1,7 @@
 use alloy_primitives::Sealable;
 use derive_more::{Display, Error};
 use reth_consensus::ConsensusError;
-use reth_primitives::SealedHeader;
+use reth_primitives_traits::SealedHeader;
 
 /// Header downloader result
 pub type HeadersDownloaderResult<T, H> = Result<T, HeadersDownloaderError<H>>;

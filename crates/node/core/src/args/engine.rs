@@ -20,6 +20,10 @@ pub struct EngineArgs {
     #[arg(long = "engine.state-root-task")]
     pub state_root_task_enabled: bool,
 
+    /// Enable cross-block caching and parallel prewarming
+    #[arg(long = "engine.caching-and-prewarming")]
+    pub caching_and_prewarming_enabled: bool,
+
     /// Enable comparing trie updates from the state root task to the trie updates from the regular
     /// state root calculation.
     #[arg(long = "engine.state-root-task-compare-updates")]
@@ -33,6 +37,7 @@ impl Default for EngineArgs {
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             state_root_task_enabled: false,
             state_root_task_compare_updates: false,
+            caching_and_prewarming_enabled: false,
         }
     }
 }

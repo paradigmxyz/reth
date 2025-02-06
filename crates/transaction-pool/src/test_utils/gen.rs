@@ -1,4 +1,4 @@
-use crate::EthPooledTransaction;
+use crate::{EthPooledTransaction, PoolTransaction};
 use alloy_consensus::{SignableTransaction, TxEip1559, TxEip4844, TxLegacy};
 use alloy_eips::{eip1559::MIN_PROTOCOL_BASE_FEE, eip2718::Encodable2718, eip2930::AccessList};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
@@ -101,7 +101,8 @@ impl<R: Rng> TransactionGenerator<R> {
 
     /// Generates and returns a pooled EIP-1559 transaction with a random signer.
     pub fn gen_eip1559_pooled(&mut self) -> EthPooledTransaction {
-        self.gen_eip1559().try_into_recovered().unwrap().try_into().unwrap()
+        EthPooledTransaction::try_from_consensus(self.gen_eip1559().try_into_recovered().unwrap())
+            .unwrap()
     }
 
     /// Generates and returns a pooled EIP-4844 transaction with a random signer.

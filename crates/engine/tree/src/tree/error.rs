@@ -189,10 +189,3 @@ pub enum InsertBlockValidationError {
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
 }
-
-impl InsertBlockValidationError {
-    /// Returns true if this is a block pre merge error.
-    pub const fn is_block_pre_merge(&self) -> bool {
-        matches!(self, Self::Validation(BlockValidationError::BlockPreMerge { .. }))
-    }
-}

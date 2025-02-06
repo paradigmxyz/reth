@@ -4,7 +4,6 @@ use alloc::vec::Vec;
 
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::BlockNumber;
-use reth_primitives::Receipts;
 
 /// Takes care of:
 ///  - recording receipts during execution of multiple blocks.
@@ -17,7 +16,7 @@ pub struct BlockBatchRecord<T = reth_primitives::Receipt> {
     /// The inner vector stores receipts ordered by transaction number.
     ///
     /// If receipt is None it means it is pruned.
-    receipts: Receipts<T>,
+    receipts: Vec<Vec<T>>,
     /// The collection of EIP-7685 requests.
     /// Outer vector stores requests for each block sequentially.
     /// The inner vector stores requests ordered by transaction number.
@@ -57,12 +56,12 @@ impl<T> BlockBatchRecord<T> {
     }
 
     /// Returns the recorded receipts.
-    pub const fn receipts(&self) -> &Receipts<T> {
+    pub const fn receipts(&self) -> &Vec<Vec<T>> {
         &self.receipts
     }
 
     /// Returns all recorded receipts.
-    pub fn take_receipts(&mut self) -> Receipts<T> {
+    pub fn take_receipts(&mut self) -> Vec<Vec<T>> {
         core::mem::take(&mut self.receipts)
     }
 
@@ -99,6 +98,6 @@ mod tests {
 
         recorder.save_receipts(receipts);
         // Verify that the saved receipts are equal to a nested empty vector
-        assert_eq!(*recorder.receipts(), vec![vec![]].into());
+        assert_eq!(*recorder.receipts(), vec![vec![]]);
     }
 }
