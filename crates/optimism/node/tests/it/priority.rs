@@ -35,6 +35,7 @@ use reth_payload_util::{
 use reth_primitives::Recovered;
 use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
+use reth_transaction_pool::PoolTransaction;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
