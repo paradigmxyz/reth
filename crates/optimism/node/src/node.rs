@@ -483,7 +483,8 @@ impl<Txs> OpPayloadBuilder<Txs> {
         OpPayloadBuilder { compute_pending_block, best_transactions, da_config }
     }
 
-    /// A helper method to initialize [`PayloadBuilderService`] with the given EVM config.
+    /// A helper method to initialize [`reth_optimism_payload_builder::OpPayloadBuilder`] with the
+    /// given EVM config.
     #[expect(clippy::type_complexity)]
     pub fn build<Node, Evm, Pool>(
         self,
