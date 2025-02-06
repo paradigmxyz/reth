@@ -2,6 +2,8 @@
 
 use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
+use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
+use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
@@ -20,11 +22,13 @@ use reth_node_api::{
     NodeTypesWithEngine, PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
+    cli::config::PayloadBuilderConfig,
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
     primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
+use reth_payload_builder::PayloadBuilderService;
 use reth_primitives::EthereumHardforks;
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
 use reth_tasks::TaskExecutor;
@@ -138,6 +142,28 @@ where
         .launch()
         .await?;
 
+        // create payload builder service
+        let conf = ctx.configs().config.builder.clone();
+        let payload_builder = ctx.components().payload_builder().clone();
+
+        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
+            .interval(conf.interval())
+            .deadline(conf.deadline())
+            .max_payload_tasks(conf.max_payload_tasks());
+
+        let payload_generator = BasicPayloadJobGenerator::with_builder(
+            ctx.blockchain_db().clone(),
+            ctx.task_executor().clone(),
+            payload_job_config,
+            payload_builder,
+        );
+        let (payload_service, payload_service_handle) = PayloadBuilderService::new(
+            payload_generator,
+            ctx.blockchain_db().canonical_state_stream(),
+        );
+
+        ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
+
         // create pipeline
         let network_client = ctx.components().network().fetch_client().await?;
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
@@ -207,6 +233,7 @@ where
             node: ctx.node_adapter().clone(),
             config: ctx.node_config(),
             beacon_engine_handle: beacon_engine_handle.clone(),
+            payload_builder_handle: payload_service_handle.clone(),
             jwt_secret,
         };
         let engine_payload_validator = add_ons.engine_validator(&add_ons_ctx).await?;
@@ -218,7 +245,7 @@ where
                 ctx.provider_factory().clone(),
                 ctx.blockchain_db().clone(),
                 pruner,
-                ctx.components().payload_builder().clone(),
+                payload_service_handle.clone(),
                 engine_payload_validator,
                 engine_tree_config,
                 ctx.invalid_block_hook()?,
@@ -243,7 +270,7 @@ where
                 ctx.provider_factory().clone(),
                 ctx.blockchain_db().clone(),
                 pruner,
-                ctx.components().payload_builder().clone(),
+                payload_service_handle.clone(),
                 engine_payload_validator,
                 engine_tree_config,
                 ctx.invalid_block_hook()?,
@@ -315,9 +342,7 @@ where
         // Run consensus engine to completion
         let initial_target = ctx.initial_backfill_target()?;
         let network_handle = ctx.components().network().clone();
-        let mut built_payloads = ctx
-            .components()
-            .payload_builder()
+        let mut built_payloads = payload_service_handle
             .subscribe()
             .await
             .map_err(|e| eyre::eyre!("Failed to subscribe to payload builder events: {:?}", e))?
@@ -399,6 +424,7 @@ where
             network: ctx.components().network().clone(),
             provider: ctx.node_adapter().provider.clone(),
             payload_builder: ctx.components().payload_builder().clone(),
+            payload_builder_handle: payload_service_handle,
             task_executor: ctx.task_executor().clone(),
             config: ctx.node_config().clone(),
             data_dir: ctx.data_dir().clone(),

@@ -34,8 +34,7 @@ use reth_node_api::{
 };
 use reth_node_builder::{
     components::{
-        Components, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NodeComponentsBuilder,
-        PoolBuilder,
+        Components, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder, NodeComponentsBuilder, PayloadServiceBuilder, PoolBuilder
     },
     BuilderContext, Node, NodeAdapter, RethFullAdapter,
 };
@@ -287,7 +286,7 @@ pub async fn test_exex_context_with_chain_spec(
     let task_executor = tasks.executor();
     tasks.executor().spawn(network_manager);
 
-    let (_, payload_builder) = NoopPayloadBuilderService::<EthEngineTypes>::new();
+    let (_, payload_builder) = EthereumPayloadBuilder::default().build_payload_builder(ctx, pool)
 
     let components = NodeAdapter::<FullNodeTypesAdapter<_, _, _>, _> {
         components: Components {

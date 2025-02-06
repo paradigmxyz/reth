@@ -367,7 +367,7 @@ where
         + Unpin
         + 'static,
 {
-    async fn spawn_payload_service(
+    async fn build_payload_builder(
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,

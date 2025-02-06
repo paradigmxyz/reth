@@ -9,6 +9,8 @@ use reth_evm::{execute::BlockExecutorProvider, ConfigureEvmFor};
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter, NodeTypesWithEngine, TxTy};
+use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_primitives::PayloadTypes;
 use reth_provider::FullProvider;
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -63,7 +65,10 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     type Network: FullNetwork;
 
     /// Builds new blocks.
-    type PayloadBuilder: PayloadBuilder<Self::Pool, Self::Provider>;
+    type PayloadBuilder: PayloadBuilder<
+        Attributes = <<Self::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::PayloadBuilderAttributes,
+        BuiltPayload = <<Self::Types as NodeTypesWithEngine>::Engine as PayloadTypes>::BuiltPayload,
+    >;
 
     /// Returns the transaction pool of the node.
     fn pool(&self) -> &Self::Pool;
@@ -100,6 +105,8 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     /// Handle to the beacon consensus engine.
     pub beacon_engine_handle:
         BeaconConsensusEngineHandle<<N::Types as NodeTypesWithEngine>::Engine>,
+    /// Handle to the payload builder service.
+    pub payload_builder_handle: PayloadBuilderHandle<<N::Types as NodeTypesWithEngine>::Engine>,
     /// JWT secret for the node.
     pub jwt_secret: JwtSecret,
 }

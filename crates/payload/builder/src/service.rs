@@ -11,9 +11,7 @@ use alloy_consensus::BlockHeader;
 use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
-use reth_payload_builder_primitives::{
-    Events, PayloadBuilderError, PayloadEvents,
-};
+use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents};
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind, PayloadTypes};
 use reth_primitives_traits::NodePrimitives;
 use std::{
@@ -91,8 +89,7 @@ where
     T: PayloadTypes,
 {
     /// Create a new instance
-    pub fn new(inner: PayloadBuilderHandle<T>) -> Self
-    {
+    pub fn new(inner: PayloadBuilderHandle<T>) -> Self {
         Self { inner: Arc::new(inner) }
     }
 }
@@ -114,7 +111,6 @@ pub struct PayloadBuilderHandle<T: PayloadTypes> {
     /// Sender half of the message channel to the [`PayloadBuilderService`].
     to_service: mpsc::UnboundedSender<PayloadServiceCommand<T>>,
 }
-
 
 impl<T: PayloadTypes> PayloadBuilderHandle<T> {
     /// Creates a new payload builder handle for the given channel.

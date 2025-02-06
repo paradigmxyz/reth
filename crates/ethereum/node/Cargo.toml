@@ -12,9 +12,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-payload-builder.workspace = true
 reth-ethereum-engine-primitives.workspace = true
-reth-basic-payload-builder.workspace = true
 reth-ethereum-payload-builder.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-ethereum-primitives.workspace = true
@@ -75,7 +73,6 @@ test-utils = [
     "reth-chainspec/test-utils",
     "reth-consensus/test-utils",
     "reth-network/test-utils",
-    "reth-payload-builder/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-revm/test-utils",
     "reth-db/test-utils",
