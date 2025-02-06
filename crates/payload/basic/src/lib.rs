@@ -20,7 +20,7 @@ use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJo
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
 use reth_primitives::{NodePrimitives, SealedHeader};
-use reth_primitives_traits::proofs;
+use reth_primitives_traits::{proofs, HeaderTy};
 use reth_provider::{BlockReaderIdExt, CanonStateNotification, StateProviderFactory};
 use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
 use reth_tasks::TaskSpawner;
@@ -44,6 +44,9 @@ mod metrics;
 mod stack;
 
 pub use stack::PayloadBuilderStack;
+
+/// Helper to access [`NodePrimitives::BlockHeader`] from [`PayloadBuilder::BuiltPayload`].
+pub type HeaderForPayload<P> = <<P as BuiltPayload>::Primitives as NodePrimitives>::BlockHeader;
 
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
@@ -128,7 +131,7 @@ impl<Client, Tasks, Builder> PayloadJobGenerator
     for BasicPayloadJobGenerator<Client, Tasks, Builder>
 where
     Client: StateProviderFactory
-        + BlockReaderIdExt<Header = alloy_consensus::Header>
+        + BlockReaderIdExt<Header = HeaderForPayload<Builder::BuiltPayload>>
         + Clone
         + Unpin
         + 'static,
@@ -303,7 +306,7 @@ where
     Builder: PayloadBuilder,
 {
     /// The configuration for how the payload will be created.
-    config: PayloadConfig<Builder::Attributes>,
+    config: PayloadConfig<Builder::Attributes, HeaderForPayload<Builder::BuiltPayload>>,
     /// How to spawn building tasks
     executor: Tasks,
     /// The deadline when this job should resolve.
@@ -654,19 +657,19 @@ impl<P> Future for PendingPayload<P> {
 
 /// Static config for how to build a payload.
 #[derive(Clone, Debug)]
-pub struct PayloadConfig<Attributes> {
+pub struct PayloadConfig<Attributes, Header = alloy_consensus::Header> {
     /// The parent header.
-    pub parent_header: Arc<SealedHeader>,
+    pub parent_header: Arc<SealedHeader<Header>>,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
 }
 
-impl<Attributes> PayloadConfig<Attributes>
+impl<Attributes, Header> PayloadConfig<Attributes, Header>
 where
     Attributes: PayloadBuilderAttributes,
 {
     /// Create new payload config.
-    pub const fn new(parent_header: Arc<SealedHeader>, attributes: Attributes) -> Self {
+    pub const fn new(parent_header: Arc<SealedHeader<Header>>, attributes: Attributes) -> Self {
         Self { parent_header, attributes }
     }
 
@@ -777,22 +780,22 @@ impl<Payload> BuildOutcomeKind<Payload> {
 /// building process. It holds references to the Ethereum client, transaction pool, cached reads,
 /// payload configuration, cancellation status, and the best payload achieved so far.
 #[derive(Debug)]
-pub struct BuildArguments<Attributes, Payload> {
+pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     /// Previously cached disk reads
     pub cached_reads: CachedReads,
     /// How to configure the payload.
-    pub config: PayloadConfig<Attributes>,
+    pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
     /// A marker that can be used to cancel the job.
     pub cancel: CancelOnDrop,
     /// The best payload achieved so far.
     pub best_payload: Option<Payload>,
 }
 
-impl<Attributes, Payload> BuildArguments<Attributes, Payload> {
+impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
     /// Create new build arguments.
     pub const fn new(
         cached_reads: CachedReads,
-        config: PayloadConfig<Attributes>,
+        config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
@@ -844,7 +847,7 @@ pub trait PayloadBuilder: Send + Sync + Clone {
     /// Builds an empty payload without any transaction.
     fn build_empty_payload(
         &self,
-        config: PayloadConfig<Self::Attributes>,
+        config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError>;
 }
 
