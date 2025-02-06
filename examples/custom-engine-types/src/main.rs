@@ -34,12 +34,11 @@ use reth::{
         node::{NodeTypes, NodeTypesWithEngine},
         rpc::{EngineValidatorBuilder, RpcAddOns},
         BuilderContext, FullNodeTypes, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
-        PayloadBuilderConfig,
     },
     network::NetworkHandle,
     payload::ExecutionPayloadValidator,
     primitives::{Block, EthPrimitives, SealedBlock, TransactionSigned},
-    providers::{CanonStateSubscriptions, EthStorage, StateProviderFactory},
+    providers::{EthStorage, StateProviderFactory},
     rpc::{
         eth::EthApi,
         types::engine::{ExecutionPayload, PayloadError},
@@ -48,10 +47,7 @@ use reth::{
     transaction_pool::{PoolTransaction, TransactionPool},
     version::default_extra_data_bytes,
 };
-use reth_basic_payload_builder::{
-    BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig, BuildArguments, BuildOutcome,
-    PayloadBuilder, PayloadConfig,
-};
+use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
 use reth_chainspec::{Chain, ChainSpec, ChainSpecProvider};
 use reth_engine_local::payload::UnsupportedLocalAttributes;
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
@@ -68,10 +64,7 @@ use reth_node_ethereum::{
     },
     EthEvmConfig,
 };
-use reth_payload_builder::{
-    EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError, PayloadBuilderHandle,
-    PayloadBuilderService,
-};
+use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
 use reth_tracing::{RethTracer, Tracer};
 use reth_trie_db::MerklePatriciaTrie;
 use serde::{Deserialize, Serialize};
@@ -367,11 +360,13 @@ where
         + Unpin
         + 'static,
 {
-    async fn spawn_payload_service(
-        self,
+    type PayloadBuilder = CustomPayloadBuilder<Pool, Node::Provider>;
+
+    async fn build_payload_builder(
+        &self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-    ) -> eyre::Result<PayloadBuilderHandle<<Node::Types as NodeTypesWithEngine>::Engine>> {
+    ) -> eyre::Result<Self::PayloadBuilder> {
         let payload_builder = CustomPayloadBuilder {
             inner: reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
                 ctx.provider().clone(),
@@ -380,24 +375,6 @@ where
                 EthereumBuilderConfig::new(default_extra_data_bytes()),
             ),
         };
-        let conf = ctx.payload_builder_config();
-
-        let payload_job_config = BasicPayloadJobGeneratorConfig::default()
-            .interval(conf.interval())
-            .deadline(conf.deadline())
-            .max_payload_tasks(conf.max_payload_tasks());
-
-        let payload_generator = BasicPayloadJobGenerator::with_builder(
-            ctx.provider().clone(),
-            ctx.task_executor().clone(),
-            payload_job_config,
-            payload_builder,
-        );
-        let (payload_service, payload_builder) =
-            PayloadBuilderService::new(payload_generator, ctx.provider().canonical_state_stream());
-
-        ctx.task_executor().spawn_critical("payload builder service", Box::pin(payload_service));
-
         Ok(payload_builder)
     }
 }

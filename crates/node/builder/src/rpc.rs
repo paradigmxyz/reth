@@ -437,7 +437,7 @@ where
             node.provider().clone(),
             config.chain.clone(),
             beacon_engine_handle,
-            PayloadStore::new(node.payload_builder().clone()),
+            PayloadStore::new(node.payload_builder_handle().clone()),
             node.pool().clone(),
             Box::new(node.task_executor().clone()),
             client,
