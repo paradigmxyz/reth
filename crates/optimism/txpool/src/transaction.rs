@@ -232,12 +232,12 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{OpPooledTransaction, OpTransactionValidator};
+    use alloy_consensus::transaction::Recovered;
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{PrimitiveSignature as Signature, TxKind, U256};
     use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_optimism_primitives::OpTransactionSigned;
-    use reth_primitives::Recovered;
     use reth_provider::test_utils::MockEthProvider;
     use reth_transaction_pool::{
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder, TransactionOrigin,
