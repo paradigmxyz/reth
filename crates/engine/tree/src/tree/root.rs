@@ -349,6 +349,10 @@ where
     fn spawn_or_queue(&mut self, input: MultiproofInput<Factory>) {
         // If there are no proof targets, we can just send an empty multiproof back immediately
         if input.proof_targets.is_empty() {
+            debug!(
+                sequence_number = input.proof_sequence_number,
+                "No proof targets, sending empty multiproof back immediately"
+            );
             let _ = input.state_root_message_sender.send(StateRootMessage::ProofCalculated(
                 Box::new(ProofCalculated {
                     sequence_number: input.proof_sequence_number,
