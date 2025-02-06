@@ -8,12 +8,12 @@ use crate::{
         metrics::EngineApiMetrics,
     },
 };
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{
     keccak256,
     map::{B256Set, HashMap, HashSet},
-    Address, BlockNumber, B256, U256,
+    BlockNumber, B256, U256,
 };
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -43,7 +43,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_builder_primitives::PayloadBuilder;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_primitives_traits::{
-    Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
     SignedTransaction,
 };
 use reth_provider::{
@@ -2433,16 +2433,13 @@ where
             let prewarm_start = Instant::now();
 
             // Prewarm transactions
-            for (tx_idx, (tx, sender)) in
-                block.body().transactions().iter().zip(block.senders()).enumerate()
-            {
+            for (tx_idx, tx) in block.transactions_recovered().enumerate() {
                 let state_root_sender = state_root_sender.clone();
 
                 let start = Instant::now();
                 self.prewarm_transaction(
                     block.header().clone(),
-                    tx.clone(),
-                    *sender,
+                    tx.cloned(),
                     caches.clone(),
                     cache_metrics.clone(),
                     state_root_sender,
@@ -2635,8 +2632,7 @@ where
     fn prewarm_transaction(
         &self,
         block: N::BlockHeader,
-        tx: N::SignedTx,
-        sender: Address,
+        tx: Recovered<N::SignedTx>,
         caches: ProviderCaches,
         cache_metrics: CachedStateMetrics,
         state_root_sender: Option<Sender<StateRootMessage>>,
@@ -2662,7 +2658,7 @@ where
             let mut evm = evm_config.evm_for_block(state_provider, &block);
 
             // create the tx env and reset nonce
-            let mut tx_env = evm_config.tx_env(&tx, sender);
+            let mut tx_env = evm_config.tx_env(&tx, tx.signer());
             tx_env.unset_nonce();
 
             // exit early if execution is done
@@ -2673,7 +2669,7 @@ where
             let ResultAndState { state, .. } = match evm.transact(tx_env) {
                 Ok(res) => res,
                 Err(err) => {
-                    trace!(target: "engine::tree", %err, tx_hash=%tx.tx_hash(), %sender, "Error when executing prewarm transaction");
+                    trace!(target: "engine::tree", %err, tx_hash=%tx.tx_hash(), sender=%tx.signer(), "Error when executing prewarm transaction");
                     return
                 }
             };
