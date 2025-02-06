@@ -68,7 +68,10 @@ async fn main() -> eyre::Result<()> {
 
                 println!(
                     "Successfully connected to a peer at {}:{} ({}) using eth-wire version eth/{}",
-                    peer.address, peer.tcp_port, their_hello.client_version, their_status.version
+                    peer.address,
+                    peer.tcp_port,
+                    their_hello.client_version,
+                    their_status.version()
                 );
 
                 snoop(peer, eth_stream).await;
@@ -100,14 +103,13 @@ async fn handshake_eth(p2p_stream: AuthedP2PStream) -> eyre::Result<(AuthedEthSt
         ..Default::default()
     });
 
-    let status = Status::builder()
+    let mut status = Status::builder()
         .chain(Chain::mainnet())
         .genesis(MAINNET_GENESIS_HASH)
         .forkid(MAINNET.hardfork_fork_id(EthereumHardfork::Shanghai).unwrap())
         .build();
 
-    let status =
-        Status { version: p2p_stream.shared_capabilities().eth()?.version().try_into()?, ..status };
+    status.set_eth_version(p2p_stream.shared_capabilities().eth()?.version().try_into()?);
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     Ok(eth_unauthed.handshake(status, fork_filter).await?)
 }

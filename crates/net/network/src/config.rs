@@ -703,13 +703,13 @@ mod tests {
         let fork_filter = config.fork_filter;
 
         // assert that there are no other forks
-        assert_eq!(status.forkid.next, 0);
+        assert_eq!(status.forkid().next, 0);
 
         // assert the same thing for the fork_filter
         assert_eq!(fork_filter.current().next, 0);
 
         // check status and fork_filter forkhash
-        assert_eq!(status.forkid.hash, genesis_fork_hash);
+        assert_eq!(status.forkid().hash, genesis_fork_hash);
         assert_eq!(fork_filter.current().hash, genesis_fork_hash);
     }
 }

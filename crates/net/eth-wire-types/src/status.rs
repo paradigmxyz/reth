@@ -30,9 +30,9 @@ impl Status {
     }
 
     /// Sets the [`EthVersion`] for the status.
-    pub const fn set_eth_version(&mut self, version: EthVersion) {
+    pub fn set_eth_version(&mut self, version: EthVersion) {
         use EthVersion::{Eth66, Eth67, Eth68};
-        if let (Self::Eth66_68(status), Eth66 | Eth67 | Eth68) = (self, version) {
+        if let (Self::Eth66_68(ref mut status), Eth66 | Eth67 | Eth68) = (self, version) {
             status.version = version
         }
     }
@@ -150,7 +150,7 @@ impl Decodable for Status {
         }
         let version = EthVersion::decode(b)?;
 
-        use EthVersion::*;
+        use EthVersion::{Eth66, Eth67, Eth68, Eth69};
         match version {
             Eth66 | Eth67 | Eth68 | Eth69 => Ok(Self::Eth66_68(Status66_68::decode(buf)?)),
         }
@@ -286,7 +286,8 @@ impl Debug for Status66_68 {
 ///         blockhash: B256::from(MAINNET_GENESIS_HASH),
 ///         genesis: B256::from(MAINNET_GENESIS_HASH),
 ///         forkid: MAINNET.hardfork_fork_id(EthereumHardfork::Paris).unwrap(),
-///     }.into()
+///     }
+///     .into()
 /// );
 /// ```
 #[derive(Debug, Default)]
@@ -302,49 +303,69 @@ impl StatusBuilder {
 
     /// Sets the protocol version.
     pub const fn version(mut self, version: EthVersion) -> Self {
-        self.status.set_eth_version(version);
+        use EthVersion::{Eth66, Eth67, Eth68};
+        self.status =
+            if let (Status::Eth66_68(mut status), Eth66 | Eth67 | Eth68) = (self.status, version) {
+                status.version = version;
+                Status::Eth66_68(status)
+            } else {
+                self.status
+            };
         self
     }
 
     /// Sets the chain id.
     pub const fn chain(mut self, chain: Chain) -> Self {
-        match self.status {
-            Status::Eth66_68(ref mut status) => {
+        self.status = match self.status {
+            Status::Eth66_68(mut status) => {
                 status.chain = chain;
+                Status::Eth66_68(status)
             }
-        }
+        };
         self
     }
 
     /// Sets the total difficulty.
     pub const fn total_difficulty(mut self, total_difficulty: U256) -> Self {
-        match self.status {
-            Status::Eth66_68(ref mut status) => status.total_difficulty = total_difficulty,
-        }
+        self.status = match self.status {
+            Status::Eth66_68(mut status) => {
+                status.total_difficulty = total_difficulty;
+                Status::Eth66_68(status)
+            }
+        };
         self
     }
 
     /// Sets the block hash.
     pub const fn blockhash(mut self, blockhash: B256) -> Self {
-        match self.status {
-            Status::Eth66_68(ref mut status) => status.blockhash = blockhash,
-        }
+        self.status = match self.status {
+            Status::Eth66_68(mut status) => {
+                status.blockhash = blockhash;
+                Status::Eth66_68(status)
+            }
+        };
         self
     }
 
     /// Sets the genesis hash.
     pub const fn genesis(mut self, genesis: B256) -> Self {
-        match self.status {
-            Status::Eth66_68(ref mut status) => status.genesis = genesis,
-        }
+        self.status = match self.status {
+            Status::Eth66_68(mut status) => {
+                status.genesis = genesis;
+                Status::Eth66_68(status)
+            }
+        };
         self
     }
 
     /// Sets the fork id.
     pub const fn forkid(mut self, forkid: ForkId) -> Self {
-        match self.status {
-            Status::Eth66_68(ref mut status) => status.forkid = forkid,
-        }
+        self.status = match self.status {
+            Status::Eth66_68(mut status) => {
+                status.forkid = forkid;
+                Status::Eth66_68(status)
+            }
+        };
         self
     }
 }

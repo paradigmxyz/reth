@@ -73,7 +73,7 @@ async fn main() {
         // with the chain specific details
         if let NetworkEvent::ActivePeerSession { info, .. } = evt {
             let SessionInfo { status, client_version, .. } = info;
-            let chain = status.chain;
+            let chain = status.chain();
             info!(?chain, ?client_version, "Session established with a new peer.");
         }
         // More events here

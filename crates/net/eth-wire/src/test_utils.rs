@@ -36,15 +36,15 @@ pub fn eth_handshake() -> (Status, ForkFilter) {
     let genesis = B256::random();
     let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
-    let status = Status {
-        version: EthVersion::Eth67,
-        chain: Chain::mainnet(),
-        total_difficulty: U256::ZERO,
-        blockhash: B256::random(),
-        genesis,
+    let status = Status::builder()
+        .version(EthVersion::Eth67)
+        .chain(Chain::mainnet())
+        .total_difficulty(U256::ZERO)
+        .blockhash(B256::random())
+        .genesis(genesis)
         // Pass the current fork id.
-        forkid: fork_filter.current(),
-    };
+        .forkid(fork_filter.current())
+        .build();
     (status, fork_filter)
 }
 

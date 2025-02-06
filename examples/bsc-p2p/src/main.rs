@@ -83,7 +83,7 @@ async fn main() {
         match evt {
             NetworkEvent::ActivePeerSession { info, .. } => {
                 let SessionInfo { status, client_version, peer_id, .. } = info;
-                info!(peers=%net_handle.num_connected_peers() , %peer_id, chain = %status.chain, ?client_version, "Session established with a new peer.");
+                info!(peers=%net_handle.num_connected_peers() , %peer_id, chain = %status.chain(), ?client_version, "Session established with a new peer.");
             }
             NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, reason }) => {
                 info!(peers=%net_handle.num_connected_peers() , %peer_id, ?reason, "Session closed.");
