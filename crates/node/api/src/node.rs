@@ -99,8 +99,14 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Returns the handle to the network
     fn network(&self) -> &Self::Network;
 
-    /// Returns the handle to the payload builder service.
+    /// Returns the configured payload builder.
     fn payload_builder(&self) -> &Self::PayloadBuilder;
+
+    /// Returns the handle to the payload builder service handling payload building requests from
+    /// the engine.
+    fn payload_builder_handle(
+        &self,
+    ) -> &PayloadBuilderHandle<<Self::Types as NodeTypesWithEngine>::Engine>;
 
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;
@@ -119,8 +125,6 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
     /// Handle to the beacon consensus engine.
     pub beacon_engine_handle:
         BeaconConsensusEngineHandle<<N::Types as NodeTypesWithEngine>::Engine>,
-    /// Handle to the payload builder service.
-    pub payload_builder_handle: PayloadBuilderHandle<<N::Types as NodeTypesWithEngine>::Engine>,
     /// JWT secret for the node.
     pub jwt_secret: JwtSecret,
 }

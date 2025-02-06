@@ -7637,6 +7637,7 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-ethereum",
+ "reth-payload-builder",
  "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",

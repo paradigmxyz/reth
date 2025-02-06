@@ -23,7 +23,7 @@ impl EthereumPayloadBuilder {
     /// A helper method initializing [`reth_ethereum_payload_builder::EthereumPayloadBuilder`] with
     /// the given EVM config.
     pub fn build<Types, Node, Evm, Pool>(
-        self,
+        &self,
         evm_config: Evm,
         ctx: &BuilderContext<Node>,
         pool: Pool,
@@ -70,7 +70,7 @@ where
         reth_ethereum_payload_builder::EthereumPayloadBuilder<Pool, Node::Provider, EthEvmConfig>;
 
     async fn build_payload_builder(
-        self,
+        &self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<Self::PayloadBuilder> {

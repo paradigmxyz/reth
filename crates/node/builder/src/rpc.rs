@@ -424,13 +424,7 @@ where
         let Self { eth_api_builder, engine_validator_builder, hooks, _pd: _ } = self;
 
         let engine_validator = engine_validator_builder.build(&ctx).await?;
-        let AddOnsContext {
-            node,
-            config,
-            beacon_engine_handle,
-            payload_builder_handle,
-            jwt_secret,
-        } = ctx;
+        let AddOnsContext { node, config, beacon_engine_handle, jwt_secret } = ctx;
 
         let client = ClientVersionV1 {
             code: CLIENT_CODE,
@@ -443,7 +437,7 @@ where
             node.provider().clone(),
             config.chain.clone(),
             beacon_engine_handle,
-            PayloadStore::new(payload_builder_handle),
+            PayloadStore::new(node.payload_builder_handle().clone()),
             node.pool().clone(),
             Box::new(node.task_executor().clone()),
             client,

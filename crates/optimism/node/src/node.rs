@@ -487,7 +487,7 @@ impl<Txs> OpPayloadBuilder<Txs> {
     /// given EVM config.
     #[expect(clippy::type_complexity)]
     pub fn build<Node, Evm, Pool>(
-        self,
+        &self,
         evm_config: Evm,
         ctx: &BuilderContext<Node>,
         pool: Pool,
@@ -519,9 +519,9 @@ impl<Txs> OpPayloadBuilder<Txs> {
             ctx.provider().clone(),
             evm_config,
             BasicOpReceiptBuilder::default(),
-            OpBuilderConfig { da_config: self.da_config },
+            OpBuilderConfig { da_config: self.da_config.clone() },
         )
-        .with_transactions(self.best_transactions)
+        .with_transactions(self.best_transactions.clone())
         .set_compute_pending_block(self.compute_pending_block);
         Ok(payload_builder)
     }
@@ -550,7 +550,7 @@ where
     >;
 
     async fn build_payload_builder(
-        self,
+        &self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<Self::PayloadBuilder> {

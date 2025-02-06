@@ -319,6 +319,7 @@ where
     ConsB: ConsensusBuilder<Node>,
 {
     type Components = Components<
+        Node,
         NetworkB::Primitives,
         PoolB::Pool,
         ExecB::EVM,
@@ -333,7 +334,7 @@ where
     ) -> eyre::Result<Self::Components> {
         let Self {
             pool_builder,
-            payload_builder,
+            payload_builder: payload_builder_builder,
             network_builder,
             executor_builder: evm_builder,
             consensus_builder,
@@ -343,7 +344,10 @@ where
         let (evm_config, executor) = evm_builder.build_evm(context).await?;
         let pool = pool_builder.build_pool(context).await?;
         let network = network_builder.build_network(context, pool.clone()).await?;
-        let payload_builder = payload_builder.build_payload_builder(context, pool.clone()).await?;
+        let payload_builder =
+            payload_builder_builder.build_payload_builder(context, pool.clone()).await?;
+        let payload_builder_handle =
+            payload_builder_builder.spawn_payload_builder_service(context, payload_builder.clone());
         let consensus = consensus_builder.build_consensus(context).await?;
 
         Ok(Components {
@@ -351,6 +355,7 @@ where
             evm_config,
             network,
             payload_builder,
+            payload_builder_handle,
             executor,
             consensus,
         })
@@ -399,7 +404,8 @@ where
     >,
     Node: FullNodeTypes,
     F: FnOnce(&BuilderContext<Node>) -> Fut + Send,
-    Fut: Future<Output = eyre::Result<Components<N, Pool, EVM, Executor, Cons, Payload>>> + Send,
+    Fut: Future<Output = eyre::Result<Components<Node, N, Pool, EVM, Executor, Cons, Payload>>>
+        + Send,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
@@ -409,7 +415,7 @@ where
         FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
     Payload: PayloadBuilderFor<Node::Types> + Unpin + 'static,
 {
-    type Components = Components<N, Pool, EVM, Executor, Cons, Payload>;
+    type Components = Components<Node, N, Pool, EVM, Executor, Cons, Payload>;
 
     fn build_components(
         self,

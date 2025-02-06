@@ -45,7 +45,7 @@ where
     type PayloadBuilder = EthereumPayloadBuilder<Pool, Node::Provider, EthEvmConfig>;
 
     async fn build_payload_builder(
-        self,
+        &self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
     ) -> eyre::Result<Self::PayloadBuilder> {

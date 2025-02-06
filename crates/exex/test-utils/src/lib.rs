@@ -45,6 +45,7 @@ use reth_node_ethereum::{
     node::{EthereumAddOns, EthereumNetworkBuilder, EthereumPayloadBuilder},
     EthEngineTypes, EthEvmConfig,
 };
+use reth_payload_builder::noop::NoopPayloadBuilderService;
 use reth_primitives::{EthPrimitives, RecoveredBlock, TransactionSigned};
 use reth_primitives_traits::Block as _;
 use reth_provider::{
@@ -294,6 +295,8 @@ pub async fn test_exex_context_with_chain_spec(
         EthereumBuilderConfig::new(Default::default()),
     );
 
+    let (_, payload_builder_handle) = NoopPayloadBuilderService::<EthEngineTypes>::new();
+
     let components = NodeAdapter::<FullNodeTypesAdapter<_, _, _>, _> {
         components: Components {
             transaction_pool,
@@ -302,6 +305,7 @@ pub async fn test_exex_context_with_chain_spec(
             consensus,
             network,
             payload_builder,
+            payload_builder_handle,
         },
         task_executor,
         provider,
