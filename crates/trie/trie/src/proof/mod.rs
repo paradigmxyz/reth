@@ -93,13 +93,15 @@ where
         slots: &[B256],
     ) -> Result<AccountProof, StateProofError> {
         let hashed_address = keccak256(address);
+        let storages = if slots.is_empty() {
+            HashMap::default()
+        } else {
+            HashMap::from_iter([(hashed_address, slots.iter().map(keccak256).collect())])
+        };
         Ok(self
             .multiproof(MultiProofTargets {
                 accounts: HashSet::from_iter([hashed_address]),
-                storages: HashMap::from_iter([(
-                    hashed_address,
-                    slots.iter().map(keccak256).collect(),
-                )]),
+                storages,
             })?
             .account_proof(address, slots)?)
     }
@@ -170,7 +172,7 @@ where
             }
         }
 
-        // Process the rest of storage proofs that did not have an accosiated account proof
+        // Process the rest of storage proofs that did not have an associated account proof
         // requested.
         for (hashed_address, slots) in targets.storages {
             let storage_prefix_set =

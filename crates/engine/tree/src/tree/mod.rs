@@ -2704,7 +2704,9 @@ where
 
                 let hashed_address = keccak256(addr);
                 targets.accounts.insert(hashed_address);
-                targets.storages.insert(hashed_address, storage_set);
+                if !storage_set.is_empty() {
+                    targets.storages.insert(hashed_address, storage_set);
+                }
             }
 
             let _ = state_root_sender.send(StateRootMessage::PrefetchProofs(targets));

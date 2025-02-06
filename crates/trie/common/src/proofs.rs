@@ -54,7 +54,12 @@ impl MultiProofTargets {
     /// Returns an iterator over account address and storage slot targets. If the storage slot
     /// targets are empty, an empty set is returned.
     pub fn into_iter_combined(self) -> impl Iterator<Item = (B256, B256HashSet)> {
-        self.accounts.into_iter().map(|hash| (hash, B256HashSet::default())).chain(self.storages)
+        // List of targets with storage slots takes presedence over account targets, so that if they
+        // exist in both lists, the non-empty storage slot targets are used.
+        self.storages
+            .into_iter()
+            .chain(self.accounts.into_iter().map(|hash| (hash, Default::default())))
+            .unique_by(|(hash, _)| *hash)
     }
 }
 

@@ -299,10 +299,10 @@ where
         }
         let _ = hash_builder.root();
 
-        // Process the rest of storage proofs that did not have an accosiated account proof
+        // Process the rest of storage proofs that did not have an associated account proof
         // requested.
         for hashed_address in targets.storages.keys() {
-            let rx = storage_proofs.remove(hashed_address).unwrap();
+            let rx = storage_proofs.remove(hashed_address).expect("storage proof channel");
 
             storages.insert(
                 *hashed_address,
