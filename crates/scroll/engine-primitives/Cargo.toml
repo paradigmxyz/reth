@@ -38,6 +38,12 @@ scroll-alloy-rpc-types-engine.workspace = true
 serde.workspace = true
 sha2 = { workspace = true, default-features = false }
 
+[dev-dependencies]
+alloy-primitives = { workspace = true, features = ["getrandom"] }
+arbitrary.workspace = true
+eyre.workspace = true
+rand.workspace = true
+
 [features]
 default = ["std"]
 std = [
