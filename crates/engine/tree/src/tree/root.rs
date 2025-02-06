@@ -789,6 +789,7 @@ where
                             proofs_processed,
                             has_pending = self.proof_sequencer.has_pending(),
                             updates_finished,
+                            pending_proofs = ?self.proof_sequencer.pending_proofs,
                             "Checking conditions for calculation to end"
                         );
                         if all_proofs_received && no_pending && updates_finished {
