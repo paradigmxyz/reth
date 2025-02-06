@@ -45,6 +45,9 @@ mod stack;
 
 pub use stack::PayloadBuilderStack;
 
+/// Helper to access [`NodePrimitives::BlockHeader`] from [`PayloadBuilder::BuiltPayload`].
+pub type HeaderForPayload<P> = <<P as BuiltPayload>::Primitives as NodePrimitives>::BlockHeader;
+
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
 pub struct BasicPayloadJobGenerator<Client, Tasks, Builder> {
@@ -799,9 +802,6 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
         Self { cached_reads, config, cancel, best_payload }
     }
 }
-
-/// Helper to access [`NodePrimitives::BlockHeader`] from [`PayloadBuilder::BuiltPayload`].
-pub type HeaderForPayload<P> = <<P as BuiltPayload>::Primitives as NodePrimitives>::BlockHeader;
 
 /// A trait for building payloads that encapsulate Ethereum transactions.
 ///
