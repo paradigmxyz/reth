@@ -1,6 +1,6 @@
 use crate::{
-    BuildArguments, BuildOutcome, PayloadBuilder, PayloadBuilderAttributes, PayloadBuilderError,
-    PayloadConfig,
+    BuildArguments, BuildOutcome, HeaderForPayload, PayloadBuilder, PayloadBuilderAttributes,
+    PayloadBuilderError, PayloadConfig,
 };
 
 use alloy_eips::eip4895::Withdrawals;
@@ -238,7 +238,7 @@ where
 
     fn build_empty_payload(
         &self,
-        config: PayloadConfig<Self::Attributes>,
+        config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         match config.attributes {
             Either::Left(left_attr) => {
