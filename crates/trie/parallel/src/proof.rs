@@ -24,7 +24,7 @@ use reth_trie::{
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::{sync::Arc, time::Instant};
+use std::{collections::hash_map::Entry, sync::Arc, time::Instant};
 use tracing::{debug, trace};
 
 /// Parallel proof calculator.
@@ -255,7 +255,7 @@ where
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_address, account) => {
-                    let proof_targets = targets.storages.remove(&hashed_address);
+                    let proof_targets = targets.storages.entry(hashed_address);
                     let storage_multiproof = match storage_proofs.remove(&hashed_address) {
                         Some(rx) => rx.recv().map_err(|_| {
                             ParallelStateRootError::StorageRoot(StorageRootError::Database(
@@ -274,7 +274,7 @@ where
                                 hashed_address,
                             )
                             .with_prefix_set_mut(Default::default())
-                            .storage_multiproof(proof_targets.unwrap_or_default())
+                            .storage_multiproof(proof_targets.or_default().clone())
                             .map_err(|e| {
                                 ParallelStateRootError::StorageRoot(StorageRootError::Database(
                                     DatabaseError::Other(e.to_string()),
@@ -292,6 +292,11 @@ where
 
                     // We might be adding leaves that are not necessarily our proof targets.
                     if storages.contains_key(&hashed_address) {
+                        // Delete the account from the list of storage targets, because we're saving
+                        // the proof for it and will not need to calculate it later.
+                        if let Entry::Occupied(entry) = storages.entry(hashed_address) {
+                            entry.remove();
+                        }
                         storages.insert(hashed_address, storage_multiproof);
                     }
                 }
