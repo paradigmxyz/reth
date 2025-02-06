@@ -76,7 +76,7 @@ where
 
     /// Extend the list of peers with new peers that are configured with each of the given
     /// [`PeerConfig`]s.
-    pub async fn extend_peers_with_config(
+    pub async fn extend_peer_with_config(
         &mut self,
         configs: impl IntoIterator<Item = PeerConfig<C>>,
     ) -> Result<(), NetworkError> {
