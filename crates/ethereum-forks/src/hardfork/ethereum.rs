@@ -387,6 +387,7 @@ impl EthereumHardfork {
             ),
             (Self::Shanghai, ForkCondition::Timestamp(1677557088)),
             (Self::Cancun, ForkCondition::Timestamp(1706655072)),
+            (Self::Prague, ForkCondition::Timestamp(1741159776)),
         ]
     }
 
@@ -415,6 +416,7 @@ impl EthereumHardfork {
             ),
             (Self::Shanghai, ForkCondition::Timestamp(1696000704)),
             (Self::Cancun, ForkCondition::Timestamp(1707305664)),
+            (Self::Prague, ForkCondition::Timestamp(1740434112)),
         ]
     }
 }
