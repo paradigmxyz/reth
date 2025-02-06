@@ -210,6 +210,8 @@ where
         let Self { rpc_add_ons, da_config } = self;
 
         let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
+            ctx.node.pool().clone(),
+            ctx.node.provider().clone(),
             ctx.node.evm_config().clone(),
             BasicOpReceiptBuilder::default(),
         );
@@ -471,16 +473,10 @@ impl OpPayloadBuilder {
     }
 }
 
-impl<Txs> OpPayloadBuilder<Txs>
-where
-    Txs: OpPayloadTransactions,
-{
+impl<Txs> OpPayloadBuilder<Txs> {
     /// Configures the type responsible for yielding the transactions that should be included in the
     /// payload.
-    pub fn with_transactions<T: OpPayloadTransactions>(
-        self,
-        best_transactions: T,
-    ) -> OpPayloadBuilder<T> {
+    pub fn with_transactions<T>(self, best_transactions: T) -> OpPayloadBuilder<T> {
         let Self { compute_pending_block, da_config, .. } = self;
         OpPayloadBuilder { compute_pending_block, best_transactions, da_config }
     }
@@ -504,9 +500,11 @@ where
             + Unpin
             + 'static,
         Evm: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
-        Txs: OpPayloadTransactions<TxTy<Node::Types>>,
+        Txs: OpPayloadTransactions<Pool::Transaction>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
+            pool,
+            ctx.provider().clone(),
             evm_config,
             BasicOpReceiptBuilder::default(),
             OpBuilderConfig { da_config: self.da_config },
@@ -522,7 +520,6 @@ where
 
         let payload_generator = BasicPayloadJobGenerator::with_builder(
             ctx.provider().clone(),
-            pool,
             ctx.task_executor().clone(),
             payload_job_config,
             payload_builder,
@@ -548,7 +545,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    Txs: OpPayloadTransactions<TxTy<Node::Types>>,
+    Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     async fn spawn_payload_service(
         self,

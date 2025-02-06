@@ -445,7 +445,7 @@ pub trait TransactionPool: Send + Sync + Clone {
 
     /// Returns all pending transactions that where submitted as [TransactionOrigin::Local]
     fn get_local_pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
-        self.get_transactions_by_origin(TransactionOrigin::Local)
+        self.get_pending_transactions_by_origin(TransactionOrigin::Local)
     }
 
     /// Returns all pending transactions that where submitted as [TransactionOrigin::Private]
