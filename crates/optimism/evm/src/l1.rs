@@ -27,6 +27,9 @@ const CREATE_2_DEPLOYER_BYTECODE: [u8; 1584] = hex!("608060405260043610610043576
 /// The function selector of the "setL1BlockValuesEcotone" function in the `L1Block` contract.
 const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 
+/// The function selector of the "setL1BlockValuesIsthmus" function in the `L1Block` contract.
+const L1_BLOCK_ISTHMUS_SELECTOR: [u8; 4] = hex!("098999be");
+
 /// Extracts the [`L1BlockInfo`] from the L2 block. The L1 info transaction is always the first
 /// transaction in the L2 block.
 ///
@@ -69,7 +72,9 @@ pub fn parse_l1_info(input: &[u8]) -> Result<L1BlockInfo, OpBlockExecutionError>
     // If the first 4 bytes of the calldata are the L1BlockInfoEcotone selector, then we parse the
     // calldata as an Ecotone hardfork L1BlockInfo transaction. Otherwise, we parse it as a
     // Bedrock hardfork L1BlockInfo transaction.
-    if input[0..4] == L1_BLOCK_ECOTONE_SELECTOR {
+    if input[0..4] == L1_BLOCK_ISTHMUS_SELECTOR {
+        parse_l1_info_tx_isthmus(input[4..].as_ref())
+    } else if input[0..4] == L1_BLOCK_ECOTONE_SELECTOR {
         parse_l1_info_tx_ecotone(input[4..].as_ref())
     } else {
         parse_l1_info_tx_bedrock(input[4..].as_ref())
@@ -180,6 +185,86 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
     l1block.l1_base_fee_scalar = l1_base_fee_scalar;
     l1block.l1_blob_base_fee = Some(l1_blob_base_fee);
     l1block.l1_blob_base_fee_scalar = Some(l1_blob_base_fee_scalar);
+
+    Ok(l1block)
+}
+
+/// Updates the L1 block values for an Isthmus upgraded chain.
+/// Params are packed and passed in as raw msg.data instead of ABI to reduce calldata size.
+/// Params are expected to be in the following order:
+///   1. _baseFeeScalar       L1 base fee scalar
+///   2. _blobBaseFeeScalar   L1 blob base fee scalar
+///   3. _sequenceNumber      Number of L2 blocks since epoch start.
+///   4. _timestamp           L1 timestamp.
+///   5. _number              L1 blocknumber.
+///   6. _basefee             L1 base fee.
+///   7. _blobBaseFee         L1 blob base fee.
+///   8. _hash                L1 blockhash.
+///   9. _batcherHash         Versioned hash to authenticate batcher by.
+///  10. _operatorFeeScalar   Operator fee scalar
+///  11. _operatorFeeConstant Operator fee constant
+pub fn parse_l1_info_tx_isthmus(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecutionError> {
+    if data.len() != 172 {
+        return Err(OpBlockExecutionError::L1BlockInfoError {
+            message: "unexpected l1 block info tx calldata length found".to_string(),
+        })
+    }
+
+    // https://github.com/ethereum-optimism/op-geth/blob/60038121c7571a59875ff9ed7679c48c9f73405d/core/types/rollup_cost.go#L317-L328
+    //
+    // data layout assumed for Ecotone:
+    // offset type varname
+    // 0     <selector>
+    // 4     uint32 _basefeeScalar (start offset in this scope)
+    // 8     uint32 _blobBaseFeeScalar
+    // 12    uint64 _sequenceNumber,
+    // 20    uint64 _timestamp,
+    // 28    uint64 _l1BlockNumber
+    // 36    uint256 _basefee,
+    // 68    uint256 _blobBaseFee,
+    // 100   bytes32 _hash,
+    // 132   bytes32 _batcherHash,
+    // 164   uint32 _operatorFeeScalar
+    // 168   uint64 _operatorFeeConstant
+
+    let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4]).ok_or_else(|| {
+        OpBlockExecutionError::L1BlockInfoError {
+            message: "could not convert l1 base fee scalar".to_string(),
+        }
+    })?;
+    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or_else(|| {
+        OpBlockExecutionError::L1BlockInfoError {
+            message: "could not convert l1 blob base fee scalar".to_string(),
+        }
+    })?;
+    let l1_base_fee = U256::try_from_be_slice(&data[32..64]).ok_or_else(|| {
+        OpBlockExecutionError::L1BlockInfoError {
+            message: "could not convert l1 blob base fee".to_string(),
+        }
+    })?;
+    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96]).ok_or_else(|| {
+        OpBlockExecutionError::L1BlockInfoError {
+            message: "could not convert l1 blob base fee".to_string(),
+        }
+    })?;
+    let operator_fee_scalar = U256::try_from_be_slice(&data[160..164]).ok_or_else(|| {
+        OpBlockExecutionError::L1BlockInfoError {
+            message: "could not convert operator fee scalar".to_string(),
+        }
+    })?;
+    let operator_fee_constant = U256::try_from_be_slice(&data[164..172]).ok_or_else(|| {
+        OpBlockExecutionError::L1BlockInfoError {
+            message: "could not convert operator fee constant".to_string(),
+        }
+    })?;
+
+    let mut l1block = L1BlockInfo::default();
+    l1block.l1_base_fee = l1_base_fee;
+    l1block.l1_base_fee_scalar = l1_base_fee_scalar;
+    l1block.l1_blob_base_fee = Some(l1_blob_base_fee);
+    l1block.l1_blob_base_fee_scalar = Some(l1_blob_base_fee_scalar);
+    l1block.operator_fee_scalar = Some(operator_fee_scalar);
+    l1block.operator_fee_constant = Some(operator_fee_constant);
 
     Ok(l1block)
 }
