@@ -725,14 +725,14 @@ where
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
                         updates_finished = true;
 
-                        check_end_condition(
+                        check_end_condition(CheckEndConditionParams {
                             proofs_processed,
                             updates_received,
                             prefetch_proofs_received,
                             updates_finished,
-                            &self.proof_sequencer,
-                            &mut sparse_trie_tx,
-                        );
+                            proof_sequencer: &self.proof_sequencer,
+                            sparse_trie_tx: &mut sparse_trie_tx,
+                        });
                     }
                     StateRootMessage::EmptyProof { sequence_number, state } => {
                         trace!(target: "engine::root", "processing StateRootMessage::EmptyProof");
@@ -753,14 +753,14 @@ where
                                 .send(combined_update);
                         }
 
-                        check_end_condition(
+                        check_end_condition(CheckEndConditionParams {
                             proofs_processed,
                             updates_received,
                             prefetch_proofs_received,
                             updates_finished,
-                            &self.proof_sequencer,
-                            &mut sparse_trie_tx,
-                        );
+                            proof_sequencer: &self.proof_sequencer,
+                            sparse_trie_tx: &mut sparse_trie_tx,
+                        });
                     }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
                         trace!(target: "engine::root", "processing StateRootMessage::ProofCalculated");
@@ -802,14 +802,14 @@ where
                                 .send(combined_update);
                         }
 
-                        check_end_condition(
+                        check_end_condition(CheckEndConditionParams {
                             proofs_processed,
                             updates_received,
                             prefetch_proofs_received,
                             updates_finished,
-                            &self.proof_sequencer,
-                            &mut sparse_trie_tx,
-                        );
+                            proof_sequencer: &self.proof_sequencer,
+                            sparse_trie_tx: &mut sparse_trie_tx,
+                        });
                     }
                     StateRootMessage::RootCalculated { state_root, trie_updates, iterations } => {
                         trace!(target: "engine::root", "processing StateRootMessage::RootCalculated");
@@ -867,15 +867,27 @@ where
     }
 }
 
-// Check if all state updates finished and all profs processed. If so, drop the sparse
-// trie updates sender.
-fn check_end_condition(
+/// Convenience params struct to pass to [`check_end_condition`].
+struct CheckEndConditionParams<'a> {
     proofs_processed: u64,
     updates_received: u64,
     prefetch_proofs_received: u64,
     updates_finished: bool,
-    proof_sequencer: &ProofSequencer,
-    sparse_trie_tx: &mut Option<Sender<SparseTrieUpdate>>,
+    proof_sequencer: &'a ProofSequencer,
+    sparse_trie_tx: &'a mut Option<Sender<SparseTrieUpdate>>,
+}
+
+// Check if all state updates finished and all profs processed. If so, drop the sparse
+// trie updates sender.
+fn check_end_condition(
+    CheckEndConditionParams {
+        proofs_processed,
+        updates_received,
+        prefetch_proofs_received,
+        updates_finished,
+        proof_sequencer,
+        sparse_trie_tx,
+    }: CheckEndConditionParams<'_>,
 ) {
     let all_proofs_received = proofs_processed >= updates_received + prefetch_proofs_received;
     let no_pending = !proof_sequencer.has_pending();
