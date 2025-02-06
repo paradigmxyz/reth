@@ -215,10 +215,12 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     /// If the updated activated another fork, this will return a [`ForkTransition`] and updates the
     /// active [`ForkId`]. See also [`ForkFilter::set_head`].
     pub(crate) fn on_status_update(&mut self, head: Head) -> Option<ForkTransition> {
-        self.status.blockhash = head.hash;
-        self.status.total_difficulty = head.total_difficulty;
+        *self.status.blockhash_mut() = head.hash;
+        if let Some(total_difficulty) = self.status.total_difficulty_mut() {
+            *total_difficulty = head.total_difficulty;
+        }
         let transition = self.fork_filter.set_head(head);
-        self.status.forkid = self.fork_filter.current();
+        *self.status.forkid_mut() = self.fork_filter.current();
         transition
     }
 

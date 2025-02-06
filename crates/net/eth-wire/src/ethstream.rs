@@ -113,7 +113,7 @@ where
             return Err(EthStreamError::MessageTooBig(their_msg.len()))
         }
 
-        let version = status.version;
+        let version = status.version();
         let msg = match ProtocolMessage::<N>::decode_message(version, &mut their_msg.as_ref()) {
             Ok(m) => m,
             Err(err) => {
@@ -131,45 +131,51 @@ where
                     status=%resp,
                     "validating incoming eth status from peer"
                 );
-                if status.genesis != resp.genesis {
+                if status.genesis() != resp.genesis() {
                     self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
                     return Err(EthHandshakeError::MismatchedGenesis(
-                        GotExpected { expected: status.genesis, got: resp.genesis }.into(),
+                        GotExpected {
+                            expected: status.genesis().clone(),
+                            got: resp.genesis().clone(),
+                        }
+                        .into(),
                     )
                     .into())
                 }
 
-                if status.version != resp.version {
+                if status.version() != resp.version() {
                     self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
                     return Err(EthHandshakeError::MismatchedProtocolVersion(GotExpected {
-                        got: resp.version,
-                        expected: status.version,
+                        got: resp.version(),
+                        expected: status.version(),
                     })
                     .into())
                 }
 
-                if status.chain != resp.chain {
+                if status.chain() != resp.chain() {
                     self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
                     return Err(EthHandshakeError::MismatchedChain(GotExpected {
-                        got: resp.chain,
-                        expected: status.chain,
+                        got: resp.chain().clone(),
+                        expected: status.chain().clone(),
                     })
                     .into())
                 }
 
                 // TD at mainnet block #7753254 is 76 bits. If it becomes 100 million times
                 // larger, it will still fit within 160 bits
-                if status.total_difficulty.bit_len() > 160 {
+                if let Some(total_difficulty) =
+                    status.total_difficulty().filter(|v| v.bit_len() > 160)
+                {
                     self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
                     return Err(EthHandshakeError::TotalDifficultyBitLenTooLarge {
-                        got: status.total_difficulty.bit_len(),
+                        got: total_difficulty.bit_len(),
                         maximum: 160,
                     }
                     .into())
                 }
 
                 if let Err(err) =
-                    fork_filter.validate(resp.forkid).map_err(EthHandshakeError::InvalidFork)
+                    fork_filter.validate(*resp.forkid()).map_err(EthHandshakeError::InvalidFork)
                 {
                     self.inner.disconnect(DisconnectReason::ProtocolBreach).await?;
                     return Err(err.into())
@@ -397,15 +403,15 @@ mod tests {
         let genesis = B256::random();
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
-        let status = Status {
-            version: EthVersion::Eth67,
-            chain: NamedChain::Mainnet.into(),
-            total_difficulty: U256::ZERO,
-            blockhash: B256::random(),
-            genesis,
+        let status = Status::builder()
+            .version(EthVersion::Eth67)
+            .chain(NamedChain::Mainnet.into())
+            .total_difficulty(U256::ZERO)
+            .blockhash(B256::random())
+            .genesis(genesis)
             // Pass the current fork id.
-            forkid: fork_filter.current(),
-        };
+            .forkid(fork_filter.current())
+            .build();
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
@@ -446,15 +452,15 @@ mod tests {
         let genesis = B256::random();
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
-        let status = Status {
-            version: EthVersion::Eth67,
-            chain: NamedChain::Mainnet.into(),
-            total_difficulty: U256::from(2).pow(U256::from(100)) - U256::from(1),
-            blockhash: B256::random(),
-            genesis,
+        let status = Status::builder()
+            .version(EthVersion::Eth67)
+            .chain(NamedChain::Mainnet.into())
+            .total_difficulty(U256::from(2).pow(U256::from(100)) - U256::from(1))
+            .blockhash(B256::random())
+            .genesis(genesis)
             // Pass the current fork id.
-            forkid: fork_filter.current(),
-        };
+            .forkid(fork_filter.current())
+            .build();
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
@@ -495,15 +501,15 @@ mod tests {
         let genesis = B256::random();
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
-        let status = Status {
-            version: EthVersion::Eth67,
-            chain: NamedChain::Mainnet.into(),
-            total_difficulty: U256::from(2).pow(U256::from(164)),
-            blockhash: B256::random(),
-            genesis,
+        let status = Status::builder()
+            .version(EthVersion::Eth67)
+            .chain(NamedChain::Mainnet.into())
+            .total_difficulty(U256::from(2).pow(U256::from(164)))
+            .blockhash(B256::random())
+            .genesis(genesis)
             // Pass the current fork id.
-            forkid: fork_filter.current(),
-        };
+            .forkid(fork_filter.current())
+            .build();
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();
@@ -639,15 +645,15 @@ mod tests {
         let genesis = B256::random();
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
-        let status = Status {
-            version: EthVersion::Eth67,
-            chain: NamedChain::Mainnet.into(),
-            total_difficulty: U256::ZERO,
-            blockhash: B256::random(),
-            genesis,
+        let status = Status::builder()
+            .version(EthVersion::Eth67)
+            .chain(NamedChain::Mainnet.into())
+            .total_difficulty(U256::ZERO)
+            .blockhash(B256::random())
+            .genesis(genesis)
             // Pass the current fork id.
-            forkid: fork_filter.current(),
-        };
+            .forkid(fork_filter.current())
+            .build();
 
         let status_copy = status;
         let fork_filter_clone = fork_filter.clone();
@@ -710,15 +716,15 @@ mod tests {
         let genesis = B256::random();
         let fork_filter = ForkFilter::new(Head::default(), genesis, 0, Vec::new());
 
-        let status = Status {
-            version: EthVersion::Eth67,
-            chain: NamedChain::Mainnet.into(),
-            total_difficulty: U256::ZERO,
-            blockhash: B256::random(),
-            genesis,
+        let status = Status::builder()
+            .version(EthVersion::Eth67)
+            .chain(NamedChain::Mainnet.into())
+            .total_difficulty(U256::ZERO)
+            .blockhash(B256::random())
+            .genesis(genesis)
             // Pass the current fork id.
-            forkid: fork_filter.current(),
-        };
+            .forkid(fork_filter.current())
+            .build();
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let local_addr = listener.local_addr().unwrap();

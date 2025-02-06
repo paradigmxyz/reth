@@ -154,13 +154,13 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
         // find the corresponding block number
         let block_number =
-            self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default();
-        self.state_fetcher.new_active_peer(peer, status.blockhash, block_number, timeout);
+            self.client.block_number(*status.blockhash()).ok().flatten().unwrap_or_default();
+        self.state_fetcher.new_active_peer(peer, *status.blockhash(), block_number, timeout);
 
         self.active_peers.insert(
             peer,
             ActivePeer {
-                best_hash: status.blockhash,
+                best_hash: *status.blockhash(),
                 capabilities,
                 request_tx,
                 pending_response: None,
