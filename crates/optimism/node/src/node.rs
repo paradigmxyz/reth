@@ -473,16 +473,10 @@ impl OpPayloadBuilder {
     }
 }
 
-impl<Txs> OpPayloadBuilder<Txs>
-where
-    Txs: OpPayloadTransactions,
-{
+impl<Txs> OpPayloadBuilder<Txs> {
     /// Configures the type responsible for yielding the transactions that should be included in the
     /// payload.
-    pub fn with_transactions<T: OpPayloadTransactions>(
-        self,
-        best_transactions: T,
-    ) -> OpPayloadBuilder<T> {
+    pub fn with_transactions<T>(self, best_transactions: T) -> OpPayloadBuilder<T> {
         let Self { compute_pending_block, da_config, .. } = self;
         OpPayloadBuilder { compute_pending_block, best_transactions, da_config }
     }
@@ -506,7 +500,7 @@ where
             + Unpin
             + 'static,
         Evm: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
-        Txs: OpPayloadTransactions<TxTy<Node::Types>>,
+        Txs: OpPayloadTransactions<Pool::Transaction>,
     {
         let payload_builder = reth_optimism_payload_builder::OpPayloadBuilder::with_builder_config(
             pool,
@@ -551,7 +545,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
         + 'static,
-    Txs: OpPayloadTransactions<TxTy<Node::Types>>,
+    Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     async fn spawn_payload_service(
         self,
