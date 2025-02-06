@@ -5,8 +5,8 @@ use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::CliNodeTypes;
 use reth_cli_runner::CliContext;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_node_ethereum::EthEngineTypes;
-use reth_primitives::EthPrimitives;
 
 mod build_block;
 mod execution;
