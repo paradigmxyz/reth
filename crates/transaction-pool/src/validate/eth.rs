@@ -928,7 +928,7 @@ mod tests {
         let data = hex::decode(raw).unwrap();
         let tx = PooledTransaction::decode_2718(&mut data.as_ref()).unwrap();
 
-        tx.try_into_recovered().unwrap().into()
+        EthPooledTransaction::from_pooled(tx.try_into_recovered().unwrap())
     }
 
     // <https://github.com/paradigmxyz/reth/issues/5178>

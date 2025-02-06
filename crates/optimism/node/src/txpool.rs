@@ -10,7 +10,7 @@ use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives::{GotExpected, InvalidTransactionError, Recovered, SealedBlock};
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_provider::{BlockReaderIdExt, ChainSpecProvider, StateProviderFactory};
 use reth_revm::L1BlockInfo;
 use reth_transaction_pool::{
@@ -19,9 +19,12 @@ use reth_transaction_pool::{
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use revm::primitives::{AccessList, KzgSettings};
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc, OnceLock,
+use std::{
+    fmt::Debug,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, OnceLock,
+    },
 };
 
 /// Type alias for default optimism transaction pool
@@ -69,29 +72,10 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
     }
 }
 
-impl<Cons, Pooled> From<Recovered<Pooled>> for OpPooledTransaction<Cons, Pooled>
-where
-    Cons: SignedTransaction + From<Pooled>,
-    Pooled: Encodable2718,
-{
-    fn from(tx: Recovered<Pooled>) -> Self {
-        let encoded_len = tx.encode_2718_len();
-        let tx = tx.map_transaction(|tx| tx.into());
-        Self::new(tx, encoded_len)
-    }
-}
-
-impl<Cons, Pooled> From<OpPooledTransaction<Cons, Pooled>> for Recovered<Cons> {
-    fn from(value: OpPooledTransaction<Cons, Pooled>) -> Self {
-        value.inner.transaction
-    }
-}
-
 impl<Cons, Pooled> PoolTransaction for OpPooledTransaction<Cons, Pooled>
 where
     Cons: SignedTransaction + From<Pooled>,
-    Pooled: SignedTransaction + TryFrom<Cons>,
-    <Pooled as TryFrom<Cons>>::Error: core::error::Error,
+    Pooled: SignedTransaction + TryFrom<Cons, Error: core::error::Error>,
 {
     type TryFromConsensusError = <Pooled as TryFrom<Cons>>::Error;
     type Consensus = Cons;
@@ -99,6 +83,16 @@ where
 
     fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.inner.transaction().clone()
+    }
+
+    fn into_consensus(self) -> Recovered<Self::Consensus> {
+        self.inner.transaction
+    }
+
+    fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
+        let encoded_len = tx.encode_2718_len();
+        let tx = tx.map_transaction(|tx| tx.into());
+        Self::new(tx, encoded_len)
     }
 
     fn hash(&self) -> &TxHash {
@@ -122,19 +116,23 @@ where
     }
 }
 
-impl Typed2718 for OpPooledTransaction {
+impl<Cons: Typed2718, Pooled> Typed2718 for OpPooledTransaction<Cons, Pooled> {
     fn ty(&self) -> u8 {
         self.inner.ty()
     }
 }
 
-impl InMemorySize for OpPooledTransaction {
+impl<Cons: InMemorySize, Pooled> InMemorySize for OpPooledTransaction<Cons, Pooled> {
     fn size(&self) -> usize {
         self.inner.size()
     }
 }
 
-impl alloy_consensus::Transaction for OpPooledTransaction {
+impl<Cons, Pooled> alloy_consensus::Transaction for OpPooledTransaction<Cons, Pooled>
+where
+    Cons: alloy_consensus::Transaction,
+    Pooled: Debug + Send + Sync + 'static,
+{
     fn chain_id(&self) -> Option<alloy_primitives::ChainId> {
         self.inner.chain_id()
     }
@@ -507,7 +505,7 @@ mod tests {
         let signed_tx = OpTransactionSigned::new_unhashed(deposit_tx, signature);
         let signed_recovered = Recovered::new_unchecked(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();
-        let pooled_tx = OpPooledTransaction::new(signed_recovered, len);
+        let pooled_tx: OpPooledTransaction = OpPooledTransaction::new(signed_recovered, len);
         let outcome = validator.validate_one(origin, pooled_tx);
 
         let err = match outcome {

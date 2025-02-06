@@ -29,7 +29,10 @@ use rand::{
     prelude::Distribution,
 };
 use reth_primitives::{
-    transaction::{SignedTransactionIntoRecoveredExt, TryFromRecoveredTransactionError},
+    transaction::{
+        SignedTransactionIntoRecoveredExt, TransactionConversionError,
+        TryFromRecoveredTransactionError,
+    },
     PooledTransaction, Recovered, Transaction, TransactionSigned, TxType,
 };
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
@@ -667,17 +670,11 @@ impl MockTransaction {
 }
 
 impl PoolTransaction for MockTransaction {
-    type TryFromConsensusError = TryFromRecoveredTransactionError;
+    type TryFromConsensusError = TransactionConversionError;
 
     type Consensus = TransactionSigned;
 
     type Pooled = PooledTransaction;
-
-    fn try_from_consensus(
-        tx: Recovered<Self::Consensus>,
-    ) -> Result<Self, Self::TryFromConsensusError> {
-        tx.try_into()
-    }
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {
         self.into()
