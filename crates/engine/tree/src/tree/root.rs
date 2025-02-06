@@ -467,6 +467,18 @@ pub struct StateRootTask<Factory> {
     multiproof_manager: MultiproofManager<Factory>,
     /// State root task metrics
     metrics: StateRootTaskMetrics,
+    /// Prefetch proofs received so far
+    prefetch_proofs_received: u32,
+    /// State updates received so far
+    updates_received: u32,
+    /// Total proofs processed so far
+    ///
+    /// This includes both state updates and prefetches.
+    proofs_processed: u32,
+    /// First state update time
+    first_update_time: Option<Instant>,
+    /// Last state update time so far
+    last_update_time: Option<Instant>,
 }
 
 impl<Factory> StateRootTask<Factory>
@@ -486,6 +498,11 @@ where
             thread_pool: thread_pool.clone(),
             multiproof_manager: MultiproofManager::new(thread_pool, thread_pool_size()),
             metrics: StateRootTaskMetrics::default(),
+            prefetch_proofs_received: 0,
+            updates_received: 0,
+            proofs_processed: 0,
+            first_update_time: None,
+            last_update_time: None,
         }
     }
 
@@ -554,8 +571,7 @@ where
     }
 
     /// Handles request for proof prefetch.
-    fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
-        let proof_targets = self.get_prefetch_proof_targets(targets);
+    fn spawn_prefetch_proof(&mut self, proof_targets: MultiProofTargets) {
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
@@ -617,19 +633,34 @@ where
         targets
     }
 
+    /// Gets the state update proof targets based on the given [`EvmState`], removing proof targets
+    /// that have already been fetched.
+    ///
+    /// Also returns the hashed state update.
+    pub fn get_state_update_proof_targets(
+        &self,
+        update: EvmState,
+    ) -> (HashedPostState, MultiProofTargets) {
+        let hashed_state_update = evm_state_to_hashed_post_state(update);
+        let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
+        (hashed_state_update, proof_targets)
+    }
+
     /// Handles state updates.
     ///
     /// Returns proof targets derived from the state update.
-    fn on_state_update(&mut self, update: EvmState, proof_sequence_number: u64) {
-        let hashed_state_update = evm_state_to_hashed_post_state(update);
-        let proof_targets = get_proof_targets(&hashed_state_update, &self.fetched_proof_targets);
+    fn spawn_state_update_proof(
+        &mut self,
+        hashed_state_update: HashedPostState,
+        proof_targets: MultiProofTargets,
+    ) {
         extend_multi_proof_targets_ref(&mut self.fetched_proof_targets, &proof_targets);
 
         self.multiproof_manager.spawn_or_queue(MultiproofInput {
             config: self.config.clone(),
             hashed_state_update,
             proof_targets,
-            proof_sequence_number,
+            proof_sequence_number: self.proof_sequencer.next_sequence(),
             state_root_message_sender: self.tx.clone(),
         });
     }
@@ -653,67 +684,126 @@ where
         }
     }
 
+    /// Returns when all state updates have been processed and all proofs have been calculated.
+    pub fn all_proofs_received(&self) -> bool {
+        self.proofs_processed >= self.updates_received + self.prefetch_proofs_received
+    }
+
+    /// Handles a proof prefetch message, spawning a proof fetch if it contains proof targets that
+    /// we already fetched.
+    pub fn on_prefetch_proof(&mut self, targets: MultiProofTargets) {
+        trace!(target: "engine::root", "processing StateRootMessage::PrefetchProofs");
+
+        // First filter the targets to only include those that have not been fetched yet. If empty,
+        // there is no need to fetch anything.
+        let targets_size = targets.len();
+        let proof_targets = self.get_prefetch_proof_targets(targets);
+        // if proof_targets.is_empty() {
+        //     debug!(target: "engine::root", "No new proof targets, skipping prefetch");
+        //     return
+        // }
+
+        self.prefetch_proofs_received += 1;
+        debug!(
+            target: "engine::root",
+            len = targets_size,
+            total_prefetches = self.prefetch_proofs_received,
+            "Prefetching proofs"
+        );
+
+        self.spawn_prefetch_proof(proof_targets);
+    }
+
+    /// Handles a state update, spawning a proof fetch if it contains changed state that we need to
+    /// fetch proofs for.
+    pub fn on_state_update(&mut self, update: EvmState) {
+        trace!(target: "engine::root", "processing StateRootMessage::StateUpdate");
+        if self.updates_received == 0 {
+            self.first_update_time = Some(Instant::now());
+            debug!(target: "engine::root", "Started state root calculation");
+        }
+        self.last_update_time = Some(Instant::now());
+        let update_size = update.len();
+
+        // First filter the targets to only include those that have not been fetched yet. If empty,
+        // there is no need to fetch anything.
+        let (hashed_state_update, proof_targets) = self.get_state_update_proof_targets(update);
+        // if proof_targets.is_empty() {
+        //     debug!(target: "engine::root", "No new proof targets, skipping state update");
+        //     return
+        // }
+
+        self.updates_received += 1;
+        debug!(
+            target: "engine::root",
+            len = update_size,
+            total_updates = self.updates_received,
+            "Received new state update"
+        );
+
+        self.spawn_state_update_proof(hashed_state_update, proof_targets);
+    }
+
+    /// Handles a root calculated message.
+    pub fn on_root_calculated(
+        &self,
+        state_root: B256,
+        trie_updates: TrieUpdates,
+        iterations: u64,
+        first_update_time: Instant,
+        last_update_time: Instant,
+    ) -> StateRootResult {
+        trace!(target: "engine::root", "processing StateRootMessage::RootCalculated");
+        let total_time = first_update_time.elapsed();
+        let time_from_last_update = last_update_time.elapsed();
+        debug!(
+            target: "engine::root",
+            total_updates = self.updates_received,
+            total_proofs = self.proofs_processed,
+            roots_calculated = iterations,
+            ?total_time,
+            ?time_from_last_update,
+            "All proofs processed, ending calculation"
+        );
+
+        self.metrics.state_updates_received_histogram.record(self.updates_received);
+        self.metrics.proofs_processed_histogram.record(self.proofs_processed);
+        self.metrics.state_root_iterations_histogram.record(iterations as f64);
+
+        Ok(StateRootComputeOutcome {
+            state_root: (state_root, trie_updates),
+            total_time,
+            time_from_last_update,
+        })
+    }
+
     fn run(mut self, sparse_trie_tx: Sender<SparseTrieUpdate>) -> StateRootResult {
         let mut sparse_trie_tx = Some(sparse_trie_tx);
 
-        let mut prefetch_proofs_received = 0;
-        let mut updates_received = 0;
-        let mut proofs_processed = 0;
-
         let mut updates_finished = false;
-
-        // Timestamp when the first state update was received
-        let mut first_update_time = None;
-        // Timestamp when the last state update was received
-        let mut last_update_time = None;
 
         loop {
             trace!(target: "engine::root", "entering main channel receiving loop");
             match self.rx.recv() {
                 Ok(message) => match message {
                     StateRootMessage::PrefetchProofs(targets) => {
-                        trace!(target: "engine::root", "processing StateRootMessage::PrefetchProofs");
-                        prefetch_proofs_received += 1;
-                        debug!(
-                            target: "engine::root",
-                            len = targets.len(),
-                            total_prefetches = prefetch_proofs_received,
-                            "Prefetching proofs"
-                        );
                         self.on_prefetch_proof(targets);
                     }
                     StateRootMessage::StateUpdate(update) => {
-                        trace!(target: "engine::root", "processing StateRootMessage::StateUpdate");
-                        if updates_received == 0 {
-                            first_update_time = Some(Instant::now());
-                            debug!(target: "engine::root", "Started state root calculation");
-                        }
-                        last_update_time = Some(Instant::now());
-
-                        updates_received += 1;
-                        debug!(
-                            target: "engine::root",
-                            len = update.len(),
-                            total_updates = updates_received,
-                            "Received new state update"
-                        );
-                        let next_sequence = self.proof_sequencer.next_sequence();
-                        self.on_state_update(update, next_sequence);
+                        self.on_state_update(update);
                     }
                     StateRootMessage::FinishedStateUpdates => {
                         trace!(target: "engine::root", "processing StateRootMessage::FinishedStateUpdates");
                         updates_finished = true;
 
-                        let all_proofs_received =
-                            proofs_processed >= updates_received + prefetch_proofs_received;
                         let no_pending = !self.proof_sequencer.has_pending();
-                        if all_proofs_received && no_pending {
+                        if self.all_proofs_received() && no_pending {
                             // drop the sender
                             sparse_trie_tx.take();
                             debug!(
                                 target: "engine::root",
-                                total_updates = updates_received,
-                                total_proofs = proofs_processed,
+                                total_updates = self.updates_received,
+                                total_proofs = self.proofs_processed,
                                 "State updates finished and all proofs processed, ending calculation"
                             );
                         }
@@ -723,7 +813,7 @@ where
 
                         // we increment proofs_processed for both state updates and prefetches,
                         // because both are used for the root termination condition.
-                        proofs_processed += 1;
+                        self.proofs_processed += 1;
 
                         self.metrics
                             .proof_calculation_duration_histogram
@@ -743,7 +833,7 @@ where
                         debug!(
                             target: "engine::root",
                             sequence = proof_calculated.sequence_number,
-                            total_proofs = proofs_processed,
+                            total_proofs = self.proofs_processed,
                             "Processing calculated proof"
                         );
 
@@ -758,45 +848,31 @@ where
                                 .send(combined_update);
                         }
 
-                        let all_proofs_received =
-                            proofs_processed >= updates_received + prefetch_proofs_received;
                         let no_pending = !self.proof_sequencer.has_pending();
-                        if all_proofs_received && no_pending && updates_finished {
+                        if self.all_proofs_received() && no_pending && updates_finished {
                             // drop the sender
                             sparse_trie_tx.take();
                             debug!(
                                 target: "engine::root",
-                                total_updates = updates_received,
-                                total_proofs = proofs_processed,
+                                total_updates = self.updates_received,
+                                total_proofs = self.proofs_processed,
                                 "All proofs processed, ending calculation"
                             );
                         }
                     }
                     StateRootMessage::RootCalculated { state_root, trie_updates, iterations } => {
-                        trace!(target: "engine::root", "processing StateRootMessage::RootCalculated");
-                        let total_time =
-                            first_update_time.expect("first update time should be set").elapsed();
-                        let time_from_last_update =
-                            last_update_time.expect("last update time should be set").elapsed();
-                        debug!(
-                            target: "engine::root",
-                            total_updates = updates_received,
-                            total_proofs = proofs_processed,
-                            roots_calculated = iterations,
-                            ?total_time,
-                            ?time_from_last_update,
-                            "All proofs processed, ending calculation"
+                        let first_update_time =
+                            self.first_update_time.expect("first update time should be set");
+                        let last_update_time =
+                            self.last_update_time.expect("last update time should be set");
+
+                        return self.on_root_calculated(
+                            state_root,
+                            trie_updates,
+                            iterations,
+                            first_update_time,
+                            last_update_time,
                         );
-
-                        self.metrics.state_updates_received_histogram.record(updates_received);
-                        self.metrics.proofs_processed_histogram.record(proofs_processed);
-                        self.metrics.state_root_iterations_histogram.record(iterations as f64);
-
-                        return Ok(StateRootComputeOutcome {
-                            state_root: (state_root, trie_updates),
-                            total_time,
-                            time_from_last_update,
-                        });
                     }
 
                     StateRootMessage::ProofCalculationError(e) => {
