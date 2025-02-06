@@ -8319,6 +8319,7 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types-engine",
+ "alloy-rpc-types-eth",
  "alloy-signer-local",
  "clap",
  "derive_more",
