@@ -10,10 +10,6 @@ pub struct RollupArgs {
     #[arg(long = "rollup.sequencer-http", value_name = "HTTP_URL")]
     pub sequencer_http: Option<String>,
 
-    /// Enable transaction conditional support on sequencer
-    #[arg(long = "rollup.sequencer-transaction-conditional-enabled", default_value = "false")]
-    pub sequencer_transaction_conditional_enabled: bool,
-
     /// Disable transaction pool gossip
     #[arg(long = "rollup.disable-tx-pool-gossip")]
     pub disable_txpool_gossip: bool,

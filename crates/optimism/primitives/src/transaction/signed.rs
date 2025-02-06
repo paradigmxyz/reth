@@ -14,7 +14,6 @@ use alloy_primitives::{
     keccak256, Address, Bytes, PrimitiveSignature as Signature, TxHash, TxKind, Uint, B256,
 };
 use alloy_rlp::Header;
-use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use core::{
     hash::{Hash, Hasher},
     mem,
@@ -35,7 +34,7 @@ use reth_primitives_traits::{
 /// Signed transaction.
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, AsRef, Deref)]
+#[derive(Debug, Clone, Eq, AsRef, Deref)]
 pub struct OpTransactionSigned {
     /// Transaction hash
     #[cfg_attr(feature = "serde", serde(skip))]
@@ -47,9 +46,6 @@ pub struct OpTransactionSigned {
     #[as_ref]
     transaction: OpTypedTransaction,
 }
-
-// TEMPORARY since TransactionConditional does not impl eq
-impl Eq for OpTransactionSigned {}
 
 impl OpTransactionSigned {
     /// Creates a new signed transaction from the given transaction, signature and hash.

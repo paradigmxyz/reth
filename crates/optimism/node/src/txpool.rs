@@ -4,6 +4,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip2718::Encodable2718, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
+use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use parking_lot::RwLock;
 use reth_node_api::{Block, BlockBody};
 use reth_optimism_evm::RethL1BlockInfo;
@@ -51,12 +52,8 @@ pub struct OpPooledTransaction<
     /// The pooled transaction type.
     _pd: core::marker::PhantomData<Pooled>,
 
-    /// Optional conditional attached to this transaction. Is this
-    /// needed if this field is on OpTransactionSigned?
-    conditional: Option<TransactionConditional>,
-
-    /// Indiciator if this transaction has been marked as rejected
-    rejected: AtomicBool, // (is AtomicBool appropriate here?)
+    /// Optional conditional attached to this transaction.
+    conditional: Option<Box<TransactionConditional>>,
 }
 
 impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
@@ -79,19 +76,15 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
         })
     }
 
-    // TODO: Setter with the conditional
+    /// Conditional setter.
+    pub fn with_conditional(mut self, conditional: TransactionConditional) -> Self {
+        self.conditional = Some(Box::new(conditional));
+        self
+    }
+
+    /// Conditional getter.
     pub fn conditional(&self) -> Option<&TransactionConditional> {
-        self.conditional.as_ref()
-    }
-
-    /// Mark this transaction as rejected
-    pub fn reject(&self) {
-        self.rejected.store(true, Ordering::Relaxed);
-    }
-
-    /// Returns true if this transaction has been marked as rejected
-    pub fn rejected(&self) -> bool {
-        self.rejected.load(Ordering::Relaxed)
+        self.conditional.as_deref()
     }
 }
 
@@ -374,19 +367,6 @@ where
             )
         }
 
-        // If validated at the RPC layer pre-submission, this is not needed. The pool simply
-        // needs handle the rejected status on the pooled transaction set by the builder
-        if let Some(conditional) = transaction.conditional() {
-            //let client = self.client();
-            //let header = client.latest_header()?.header();
-            //if !conditional.matches_block_number(header.number()) {
-            //    return TransactionValidationOutcome::Invalid(
-            //        transaction,
-            //        InvalidTransactionError::TxTypeNotSupported.into(),
-            //    )
-            //}
-        }
-
         let outcome = self.inner.validate_one(origin, transaction);
 
         if !self.requires_l1_data_gas_fee() {
@@ -432,13 +412,6 @@ where
                     .into(),
                 )
             }
-
-            // Conditional transactions should not be propagated
-            // let propagate = if transaction.transaction_conditional().is_some() {
-            //     false
-            // } else {
-            //     propagate
-            // };
 
             return TransactionValidationOutcome::Valid {
                 balance,
