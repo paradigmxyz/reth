@@ -347,6 +347,22 @@ where
     /// Spawns a new multiproof calculation or enqueues it for later if
     /// `max_concurrent` are already inflight.
     fn spawn_or_queue(&mut self, input: MultiproofInput<Factory>) {
+        // If there are no proof targets, we can just send an empty multiproof back immediately
+        if input.proof_targets.is_empty() {
+            let _ = input.state_root_message_sender.send(StateRootMessage::ProofCalculated(
+                Box::new(ProofCalculated {
+                    sequence_number: input.proof_sequence_number,
+                    update: SparseTrieUpdate {
+                        state: input.hashed_state_update,
+                        targets: input.proof_targets,
+                        multiproof: MultiProof::default(),
+                    },
+                    elapsed: Duration::ZERO,
+                }),
+            ));
+            return
+        }
+
         if self.inflight >= self.max_concurrent {
             self.pending.push_back(input);
             return;
