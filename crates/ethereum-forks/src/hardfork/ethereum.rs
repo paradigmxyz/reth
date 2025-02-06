@@ -363,7 +363,7 @@ impl EthereumHardfork {
     }
 
     /// Ethereum sepolia list of hardforks.
-    pub const fn sepolia() -> [(Self, ForkCondition); 15] {
+    pub const fn sepolia() -> [(Self, ForkCondition); 16] {
         [
             (Self::Frontier, ForkCondition::Block(0)),
             (Self::Homestead, ForkCondition::Block(0)),
@@ -392,7 +392,7 @@ impl EthereumHardfork {
     }
 
     /// Ethereum holesky list of hardforks.
-    pub const fn holesky() -> [(Self, ForkCondition); 15] {
+    pub const fn holesky() -> [(Self, ForkCondition); 16] {
         [
             (Self::Frontier, ForkCondition::Block(0)),
             (Self::Homestead, ForkCondition::Block(0)),

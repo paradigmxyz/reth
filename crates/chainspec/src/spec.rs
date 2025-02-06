@@ -1383,7 +1383,11 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     EthereumHardfork::Cancun,
-                    ForkId { hash: ForkHash([0x88, 0xcf, 0x81, 0xd9]), next: 0 },
+                    ForkId { hash: ForkHash([0x88, 0xcf, 0x81, 0xd9]), next: 1741159776 },
+                ),
+                (
+                    EthereumHardfork::Prague,
+                    ForkId { hash: ForkHash([0xed, 0x88, 0xb5, 0xfd]), next: 0 },
                 ),
             ],
         );
@@ -1497,7 +1501,17 @@ Post-merge hard forks (timestamp based):
                 // First Cancun block
                 (
                     Head { number: 123, timestamp: 1707305664, ..Default::default() },
-                    ForkId { hash: ForkHash([0x9b, 0x19, 0x2a, 0xd0]), next: 0 },
+                    ForkId { hash: ForkHash([0x9b, 0x19, 0x2a, 0xd0]), next: 1740434112 },
+                ),
+                // Last Cancun block
+                (
+                    Head { number: 123, timestamp: 1740434111, ..Default::default() },
+                    ForkId { hash: ForkHash([0x9b, 0x19, 0x2a, 0xd0]), next: 1740434112 },
+                ),
+                // First Prague block
+                (
+                    Head { number: 123, timestamp: 1740434112, ..Default::default() },
+                    ForkId { hash: ForkHash([0xdf, 0xbd, 0x9b, 0xed]), next: 0 },
                 ),
             ],
         )
@@ -1526,18 +1540,28 @@ Post-merge hard forks (timestamp based):
                 ),
                 // First Shanghai block
                 (
-                    Head { number: 1735372, timestamp: 1677557088, ..Default::default() },
+                    Head { number: 1735373, timestamp: 1677557088, ..Default::default() },
                     ForkId { hash: ForkHash([0xf7, 0xf9, 0xbc, 0x08]), next: 1706655072 },
                 ),
                 // Last Shanghai block
                 (
-                    Head { number: 1735372, timestamp: 1706655071, ..Default::default() },
+                    Head { number: 1735374, timestamp: 1706655071, ..Default::default() },
                     ForkId { hash: ForkHash([0xf7, 0xf9, 0xbc, 0x08]), next: 1706655072 },
                 ),
                 // First Cancun block
                 (
-                    Head { number: 1735372, timestamp: 1706655072, ..Default::default() },
-                    ForkId { hash: ForkHash([0x88, 0xcf, 0x81, 0xd9]), next: 0 },
+                    Head { number: 1735375, timestamp: 1706655072, ..Default::default() },
+                    ForkId { hash: ForkHash([0x88, 0xcf, 0x81, 0xd9]), next: 1741159776 },
+                ),
+                // Last Cancun block
+                (
+                    Head { number: 1735376, timestamp: 1741159775, ..Default::default() },
+                    ForkId { hash: ForkHash([0x88, 0xcf, 0x81, 0xd9]), next: 1741159776 },
+                ),
+                // First Prague block
+                (
+                    Head { number: 1735377, timestamp: 1741159776, ..Default::default() },
+                    ForkId { hash: ForkHash([0xed, 0x88, 0xb5, 0xfd]), next: 0 },
                 ),
             ],
         );
