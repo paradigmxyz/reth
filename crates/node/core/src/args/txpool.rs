@@ -1,9 +1,12 @@
 //! Transaction pool arguments
 
+use std::time::Duration;
+
 use crate::cli::config::RethTransactionPoolConfig;
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
 use clap::Args;
+use reth_cli_util::parse_duration_from_secs_or_ms;
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
@@ -98,6 +101,10 @@ pub struct TxPoolArgs {
     /// iterators.
     #[arg(long = "txpool.max-new-pending-txs-notifications", alias = "txpool.max-new-pending-txs-notifications", default_value_t = MAX_NEW_PENDING_TXS_NOTIFICATIONS)]
     pub max_new_pending_txs_notifications: usize,
+
+    /// Duration after which stale external transactions are removed.
+    #[arg(long = "txpool.lifetime", value_parser = parse_duration_from_secs_or_ms, default_value = "10800", value_name = "DURATION")]
+    pub stale_tx_timeout: Duration,
 }
 
 impl Default for TxPoolArgs {
@@ -125,6 +132,7 @@ impl Default for TxPoolArgs {
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
+            stale_tx_timeout: Duration::from_secs(3 * 60 * 60),
         }
     }
 }
@@ -164,6 +172,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             pending_tx_listener_buffer_size: self.pending_tx_listener_buffer_size,
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
+            stale_tx_timeout: self.stale_tx_timeout,
         }
     }
 }
