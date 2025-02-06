@@ -76,6 +76,7 @@ members = [
     "crates/optimism/primitives/",
     "crates/optimism/rpc/",
     "crates/optimism/storage",
+    "crates/optimism/txpool/",
     "crates/payload/basic/",
     "crates/payload/builder/",
     "crates/payload/builder-primitives/",
@@ -379,6 +380,7 @@ reth-optimism-payload-builder = { path = "crates/optimism/payload" }
 reth-optimism-primitives = { path = "crates/optimism/primitives" }
 reth-optimism-rpc = { path = "crates/optimism/rpc" }
 reth-optimism-storage = { path = "crates/optimism/storage" }
+reth-optimism-txpool = { path = "crates/optimism/txpool" }
 reth-payload-builder = { path = "crates/payload/builder" }
 reth-payload-builder-primitives = { path = "crates/payload/builder-primitives" }
 reth-payload-primitives = { path = "crates/payload/primitives" }
