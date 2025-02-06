@@ -1,12 +1,6 @@
 //! Optimism Node types config.
 
-use crate::{
-    args::RollupArgs,
-    engine::OpEngineValidator,
-    txpool::{OpTransactionPool, OpTransactionValidator},
-    OpEngineTypes,
-};
-use op_alloy_consensus::OpPooledTransaction;
+use crate::{args::RollupArgs, engine::OpEngineValidator, OpEngineTypes};
 use reth_basic_payload_builder::{BasicPayloadJobGenerator, BasicPayloadJobGeneratorConfig};
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{
@@ -38,6 +32,9 @@ use reth_optimism_rpc::{
     miner::{MinerApiExtServer, OpMinerExtApi},
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi, OpEthApiError, SequencerClient,
+};
+use reth_optimism_transaction_pool::{
+    OpPooledTransaction, OpTransactionPool, OpTransactionValidator,
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadBuilderService};
 use reth_provider::{CanonStateSubscriptions, EthStorage};
@@ -191,6 +188,7 @@ impl<N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>> OpAddOn
 impl<N> NodeAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
+        Pool: TransactionPool<Transaction = OpPooledTransaction>,
         Types: NodeTypesWithEngine<
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
@@ -249,6 +247,7 @@ where
 impl<N> RethRpcAddOns<N> for OpAddOns<N>
 where
     N: FullNodeComponents<
+        Pool: TransactionPool<Transaction = OpPooledTransaction>,
         Types: NodeTypesWithEngine<
             ChainSpec = OpChainSpec,
             Primitives = OpPrimitives,
@@ -355,7 +354,7 @@ where
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
 #[derive(Debug, Clone)]
-pub struct OpPoolBuilder<T = crate::txpool::OpPooledTransaction> {
+pub struct OpPoolBuilder<T = OpPooledTransaction> {
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,
     /// Marker for the pooled transaction type.
@@ -500,9 +499,7 @@ impl<Txs> OpPayloadBuilder<Txs> {
                 Primitives = OpPrimitives,
             >,
         >,
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
-            + Unpin
-            + 'static,
+        Pool: TransactionPool<Transaction = OpPooledTransaction> + Unpin + 'static,
         Evm: ConfigureEvmFor<PrimitivesTy<Node::Types>>,
         Txs: OpPayloadTransactions<Pool::Transaction>,
     {
@@ -546,9 +543,7 @@ where
             Primitives = OpPrimitives,
         >,
     >,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
-        + Unpin
-        + 'static,
+    Pool: TransactionPool<Transaction = OpPooledTransaction> + Unpin + 'static,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
     async fn spawn_payload_service(
@@ -623,7 +618,7 @@ where
     Pool: TransactionPool<
             Transaction: PoolTransaction<
                 Consensus = TxTy<Node::Types>,
-                Pooled = OpPooledTransaction,
+                Pooled = op_alloy_consensus::OpPooledTransaction,
             >,
         > + Unpin
         + 'static,
@@ -696,6 +691,6 @@ impl NetworkPrimitives for OpNetworkPrimitives {
     type BlockBody = reth_primitives::BlockBody<OpTransactionSigned>;
     type Block = reth_primitives::Block<OpTransactionSigned>;
     type BroadcastedTransaction = OpTransactionSigned;
-    type PooledTransaction = OpPooledTransaction;
+    type PooledTransaction = op_alloy_consensus::OpPooledTransaction;
     type Receipt = OpReceipt;
 }

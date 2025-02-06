@@ -3,12 +3,15 @@
 use alloy_primitives::B256;
 use alloy_rpc_types_debug::ExecutionWitness;
 use jsonrpsee_core::{async_trait, RpcResult};
+//use op_alloy_consensus::OpPooledTransaction;
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::ConfigureEvmFor;
 use reth_node_api::NodePrimitives;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_payload_builder::{OpPayloadBuilder, OpPayloadPrimitives};
+use reth_optimism_primitives::{transaction::signed::OpTransactionSigned, OpPrimitives};
+use reth_optimism_transaction_pool::OpPooledTransaction;
 use reth_primitives::SealedHeader;
 use reth_provider::{
     BlockReaderIdExt, NodePrimitivesProvider, ProviderError, ProviderResult, StateProviderFactory,
@@ -57,13 +60,9 @@ where
 impl<Pool, Provider, EvmConfig> DebugExecutionWitnessApiServer<OpPayloadAttributes>
     for OpDebugWitnessApi<Pool, Provider, EvmConfig>
 where
-    Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = <Provider::Primitives as NodePrimitives>::SignedTx,
-            >,
-        > + 'static,
+    Pool: TransactionPool<Transaction = OpPooledTransaction> + 'static,
     Provider: BlockReaderIdExt<Header = reth_primitives::Header>
-        + NodePrimitivesProvider<Primitives: OpPayloadPrimitives>
+        + NodePrimitivesProvider<Primitives = OpPrimitives>
         + StateProviderFactory
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone

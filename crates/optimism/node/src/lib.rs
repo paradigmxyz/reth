@@ -23,8 +23,6 @@ pub use engine::OpEngineTypes;
 pub mod node;
 pub use node::{OpNetworkPrimitives, OpNode};
 
-pub mod txpool;
-
 /// Helpers for running test node instances.
 #[cfg(feature = "test-utils")]
 pub mod utils;

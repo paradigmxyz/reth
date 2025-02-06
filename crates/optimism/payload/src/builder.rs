@@ -30,8 +30,9 @@ use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
 use reth_optimism_evm::{OpReceiptBuilder, ReceiptBuilderCtx};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{
-    transaction::signed::OpTransaction, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
+    transaction::signed::OpTransactionSigned, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
 };
+use reth_optimism_transaction_pool::OpPooledTransaction;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
@@ -151,9 +152,9 @@ impl<Pool, Client, EvmConfig, N: NodePrimitives, Txs>
 
 impl<Pool, Client, EvmConfig, N, T> OpPayloadBuilder<Pool, Client, EvmConfig, N, T>
 where
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
+    Pool: TransactionPool<Transaction = OpPooledTransaction>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec>,
-    N: OpPayloadPrimitives,
+    N: OpPayloadPrimitives<_TX = OpTransactionSigned>,
     EvmConfig: ConfigureEvmFor<N>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
@@ -170,7 +171,7 @@ where
         best: impl FnOnce(BestTransactionsAttributes) -> Txs + Send + Sync + 'a,
     ) -> Result<BuildOutcome<OpBuiltPayload<N>>, PayloadBuilderError>
     where
-        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
+        Txs: PayloadTransactions<Transaction = OpPooledTransaction>,
     {
         let evm_env = self
             .evm_env(&args.config.attributes, &args.config.parent_header)
@@ -261,8 +262,8 @@ impl<Pool, Client, EvmConfig, N, Txs> PayloadBuilder
     for OpPayloadBuilder<Pool, Client, EvmConfig, N, Txs>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = OpChainSpec> + Clone,
-    N: OpPayloadPrimitives,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
+    N: OpPayloadPrimitives<_TX = OpTransactionSigned>,
+    Pool: TransactionPool<Transaction = OpPooledTransaction>,
     EvmConfig: ConfigureEvmFor<N>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
@@ -340,8 +341,8 @@ impl<Txs> OpBuilder<'_, Txs> {
         ctx: &OpPayloadBuilderCtx<EvmConfig, N>,
     ) -> Result<BuildOutcomeKind<ExecutedPayload<N>>, PayloadBuilderError>
     where
-        N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
+        N: OpPayloadPrimitives<_TX = OpTransactionSigned>,
+        Txs: PayloadTransactions<Transaction = OpPooledTransaction>,
         EvmConfig: ConfigureEvmFor<N>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StorageRootProvider,
@@ -404,8 +405,8 @@ impl<Txs> OpBuilder<'_, Txs> {
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvmFor<N>,
-        N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
+        N: OpPayloadPrimitives<_TX = OpTransactionSigned>,
+        Txs: PayloadTransactions<Transaction = OpPooledTransaction>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateRootProvider + HashedPostStateProvider + StorageRootProvider,
     {
@@ -529,8 +530,8 @@ impl<Txs> OpBuilder<'_, Txs> {
     ) -> Result<ExecutionWitness, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvmFor<N>,
-        N: OpPayloadPrimitives,
-        Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
+        N: OpPayloadPrimitives<_TX = OpTransactionSigned>,
+        Txs: PayloadTransactions<Transaction = OpPooledTransaction>,
         DB: Database<Error = ProviderError> + AsRef<P>,
         P: StateProofProvider + StorageRootProvider,
     {
@@ -785,7 +786,7 @@ impl<EvmConfig: ConfigureEvmEnv, N: NodePrimitives> OpPayloadBuilderCtx<EvmConfi
 impl<EvmConfig, N> OpPayloadBuilderCtx<EvmConfig, N>
 where
     EvmConfig: ConfigureEvmFor<N>,
-    N: OpPayloadPrimitives,
+    N: OpPayloadPrimitives<_TX = OpTransactionSigned>,
 {
     /// apply eip-4788 pre block contract call
     pub fn apply_pre_beacon_root_contract_call<DB>(
@@ -941,9 +942,7 @@ where
         &self,
         info: &mut ExecutionInfo<N>,
         db: &mut State<DB>,
-        mut best_txs: impl PayloadTransactions<
-            Transaction: PoolTransaction<Consensus = EvmConfig::Transaction>,
-        >,
+        mut best_txs: impl PayloadTransactions<Transaction = OpPooledTransaction>,
     ) -> Result<Option<()>, PayloadBuilderError>
     where
         DB: Database<Error = ProviderError>,
@@ -1011,7 +1010,7 @@ where
             info.cumulative_da_bytes_used += tx.length() as u64;
 
             // Push transaction changeset and calculate header bloom filter for receipt.
-            info.receipts.push(self.build_receipt(info, result, None, &tx));
+            info.receipts.push(self.build_receipt(info, result, None, tx.tx()));
 
             // update add to total fees
             let miner_fee = tx

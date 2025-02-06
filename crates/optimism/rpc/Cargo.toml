@@ -36,6 +36,7 @@ reth-optimism-evm.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-forks.workspace = true
+reth-optimism-transaction-pool.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
