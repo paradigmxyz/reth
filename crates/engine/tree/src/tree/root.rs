@@ -146,6 +146,13 @@ pub enum StateRootMessage {
     PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution
     StateUpdate(EvmState),
+    /// Empty proof for a specific state update
+    EmptyProof {
+        /// The index of this proof in the sequence of state updates
+        sequence_number: u64,
+        /// The state update that was used to calculate the proof
+        state: HashedPostState,
+    },
     /// Proof calculation completed for a specific state update
     ProofCalculated(Box<ProofCalculated>),
     /// Error during proof calculation
@@ -353,17 +360,10 @@ where
                 sequence_number = input.proof_sequence_number,
                 "No proof targets, sending empty multiproof back immediately"
             );
-            let _ = input.state_root_message_sender.send(StateRootMessage::ProofCalculated(
-                Box::new(ProofCalculated {
-                    sequence_number: input.proof_sequence_number,
-                    update: SparseTrieUpdate {
-                        state: input.hashed_state_update,
-                        targets: input.proof_targets,
-                        multiproof: MultiProof::default(),
-                    },
-                    elapsed: Duration::ZERO,
-                }),
-            ));
+            let _ = input.state_root_message_sender.send(StateRootMessage::EmptyProof {
+                sequence_number: input.proof_sequence_number,
+                state: input.hashed_state_update,
+            });
             return
         }
 
@@ -739,6 +739,39 @@ where
                             );
                         }
                     }
+                    StateRootMessage::EmptyProof { sequence_number, state } => {
+                        trace!(target: "engine::root", "processing StateRootMessage::EmptyProof");
+
+                        proofs_processed += 1;
+
+                        if let Some(combined_update) = self.on_proof(
+                            sequence_number,
+                            SparseTrieUpdate {
+                                state,
+                                targets: MultiProofTargets::default(),
+                                multiproof: MultiProof::default(),
+                            },
+                        ) {
+                            let _ = sparse_trie_tx
+                                .as_ref()
+                                .expect("tx not dropped")
+                                .send(combined_update);
+                        }
+
+                        let all_proofs_received =
+                            proofs_processed >= updates_received + prefetch_proofs_received;
+                        let no_pending = !self.proof_sequencer.has_pending();
+                        if all_proofs_received && no_pending && updates_finished {
+                            // drop the sender
+                            sparse_trie_tx.take();
+                            debug!(
+                                target: "engine::root",
+                                total_updates = updates_received,
+                                total_proofs = proofs_processed,
+                                "All proofs processed, ending calculation"
+                            );
+                        }
+                    }
                     StateRootMessage::ProofCalculated(proof_calculated) => {
                         trace!(target: "engine::root", "processing StateRootMessage::ProofCalculated");
 
@@ -782,16 +815,6 @@ where
                         let all_proofs_received =
                             proofs_processed >= updates_received + prefetch_proofs_received;
                         let no_pending = !self.proof_sequencer.has_pending();
-                        trace!(
-                            target: "engine::root",
-                            updates_received,
-                            prefetch_proofs_received,
-                            proofs_processed,
-                            has_pending = self.proof_sequencer.has_pending(),
-                            updates_finished,
-                            pending_proofs = ?self.proof_sequencer.pending_proofs,
-                            "Checking conditions for calculation to end"
-                        );
                         if all_proofs_received && no_pending && updates_finished {
                             // drop the sender
                             sparse_trie_tx.take();
