@@ -5,7 +5,9 @@ use reth::{
     providers::{BlockReaderIdExt, BlockSource, StateProviderFactory},
     tasks::TaskSpawner,
 };
-use reth_basic_payload_builder::{BasicPayloadJobGeneratorConfig, PayloadBuilder, PayloadConfig};
+use reth_basic_payload_builder::{
+    BasicPayloadJobGeneratorConfig, HeaderForPayload, PayloadBuilder, PayloadConfig,
+};
 use reth_node_api::PayloadBuilderAttributes;
 use reth_payload_builder::{PayloadBuilderError, PayloadJobGenerator};
 use reth_primitives::SealedHeader;
@@ -45,7 +47,7 @@ impl<Client, Tasks, Builder> PayloadJobGenerator
     for EmptyBlockPayloadJobGenerator<Client, Tasks, Builder>
 where
     Client: StateProviderFactory
-        + BlockReaderIdExt<Block = reth_primitives::Block>
+        + BlockReaderIdExt<Header = HeaderForPayload<Builder::BuiltPayload>>
         + Clone
         + Unpin
         + 'static,

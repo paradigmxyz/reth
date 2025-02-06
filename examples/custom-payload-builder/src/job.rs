@@ -1,6 +1,6 @@
 use futures_util::Future;
 use reth::tasks::TaskSpawner;
-use reth_basic_payload_builder::{PayloadBuilder, PayloadConfig};
+use reth_basic_payload_builder::{HeaderForPayload, PayloadBuilder, PayloadConfig};
 use reth_node_api::PayloadKind;
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadBuilderError, PayloadJob};
 
@@ -15,7 +15,7 @@ where
     Builder: PayloadBuilder,
 {
     /// The configuration for how the payload will be created.
-    pub(crate) config: PayloadConfig<Builder::Attributes>,
+    pub(crate) config: PayloadConfig<Builder::Attributes, HeaderForPayload<Builder::BuiltPayload>>,
     /// How to spawn building tasks
     pub(crate) _executor: Tasks,
     /// The type responsible for building payloads.
