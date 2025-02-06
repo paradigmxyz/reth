@@ -1,7 +1,6 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, U256};
-use reth_primitives::{SealedBlock, SealedHeader};
-use reth_primitives_traits::{Block, InMemorySize};
+use reth_primitives_traits::{Block, InMemorySize, SealedBlock, SealedHeader};
 /// The block response
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum BlockResponse<B: Block> {

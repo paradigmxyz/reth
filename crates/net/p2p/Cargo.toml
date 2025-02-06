@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-eth-wire-types.workspace = true
 reth-consensus.workspace = true
@@ -48,13 +48,13 @@ test-utils = [
     "reth-consensus/test-utils",
     "parking_lot",
     "reth-network-types/test-utils",
-    "reth-primitives/test-utils",
+    "reth-ethereum-primitives/test-utils",
     "reth-primitives-traits/test-utils",
     "alloy-primitives/rand",
 ]
 std = [
     "reth-consensus/std",
-    "reth-primitives/std",
+    "reth-ethereum-primitives/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "reth-primitives-traits/std",
