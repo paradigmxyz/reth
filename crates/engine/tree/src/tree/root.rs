@@ -700,12 +700,19 @@ where
             let all_proofs_received =
                 proofs_processed >= updates_received + prefetch_proofs_received;
             let no_pending = !proof_sequencer.has_pending();
+            debug!(
+                target: "engine::root",
+                proofs_processed,
+                updates_received,
+                prefetch_proofs_received,
+                no_pending,
+                updates_finished,
+                "Checking end condition"
+            );
             if all_proofs_received && no_pending && updates_finished {
                 sparse_trie_tx.take();
                 debug!(
                     target: "engine::root",
-                    total_updates = updates_received,
-                    total_proofs = proofs_processed,
                     "State updates finished and all proofs processed, ending calculation"
                 );
             }
