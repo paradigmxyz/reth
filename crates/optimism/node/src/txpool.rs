@@ -28,9 +28,9 @@ use std::{
 };
 
 /// Type alias for default optimism transaction pool
-pub type OpTransactionPool<Client, S> = Pool<
-    TransactionValidationTaskExecutor<OpTransactionValidator<Client, OpPooledTransaction>>,
-    CoinbaseTipOrdering<OpPooledTransaction>,
+pub type OpTransactionPool<Client, S, T = OpPooledTransaction> = Pool<
+    TransactionValidationTaskExecutor<OpTransactionValidator<Client, T>>,
+    CoinbaseTipOrdering<T>,
     S,
 >;
 
@@ -288,7 +288,7 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
 impl<Client, Tx> OpTransactionValidator<Client, Tx>
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
-    Tx: EthPoolTransaction<Consensus = OpTransactionSigned>,
+    Tx: EthPoolTransaction,
 {
     /// Create a new [`OpTransactionValidator`].
     pub fn new(inner: EthTransactionValidator<Client, Tx>) -> Self {
@@ -424,7 +424,7 @@ where
 impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
-    Tx: EthPoolTransaction<Consensus = OpTransactionSigned>,
+    Tx: EthPoolTransaction,
 {
     type Transaction = Tx;
 

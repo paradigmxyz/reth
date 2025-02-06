@@ -45,8 +45,8 @@ use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, PoolTransaction, TransactionPool,
-    TransactionValidationTaskExecutor,
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolTransaction,
+    TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::primitives::TxEnv;
@@ -354,25 +354,29 @@ where
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
-#[derive(Debug, Default, Clone)]
-pub struct OpPoolBuilder {
+#[derive(Debug, Clone)]
+pub struct OpPoolBuilder<T = crate::txpool::OpPooledTransaction> {
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,
+    /// Marker for the pooled transaction type.
+    _pd: core::marker::PhantomData<T>,
 }
 
-impl<Node> PoolBuilder<Node> for OpPoolBuilder
+impl<T> Default for OpPoolBuilder<T> {
+    fn default() -> Self {
+        Self { pool_config_overrides: Default::default(), _pd: Default::default() }
+    }
+}
+
+impl<Node, T> PoolBuilder<Node> for OpPoolBuilder<T>
 where
-    Node: FullNodeTypes<
-        Types: NodeTypes<
-            ChainSpec: OpHardforks,
-            Primitives: NodePrimitives<SignedTx = OpTransactionSigned>,
-        >,
-    >,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
+    T: EthPoolTransaction<Consensus = TxTy<Node::Types>>,
 {
-    type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore>;
+    type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, T>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
-        let Self { pool_config_overrides } = self;
+        let Self { pool_config_overrides, .. } = self;
         let data_dir = ctx.config().datadir();
         let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), Default::default())?;
 
