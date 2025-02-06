@@ -7,6 +7,7 @@ use crate::{
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Eip658Value, Receipt, Transaction as _};
 use alloy_eips::eip7685::Requests;
+use core::mem;
 use op_alloy_consensus::OpDepositReceipt;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
@@ -17,17 +18,18 @@ use reth_evm::{
     },
     state_change::post_block_balance_increments,
     system_calls::{OnStateHook, SystemCaller},
-    ConfigureEvmFor, Database, Evm,
+    ConfigureEvmFor, Evm,
 };
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_consensus::validate_block_post_execution;
-use reth_optimism_forks::OpHardfork;
+use reth_optimism_consensus::{validate_block_post_execution, validation::isthmus};
+use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_primitives::{
     transaction::signed::OpTransaction, DepositReceipt, OpPrimitives, OpReceipt,
 };
 use reth_primitives::{NodePrimitives, RecoveredBlock};
 use reth_primitives_traits::{BlockBody, SignedTransaction};
-use reth_revm::State;
+use reth_revm::{State, StateProviderDatabase};
+use reth_storage_api::StateProvider;
 use revm_primitives::{db::DatabaseCommit, ResultAndState};
 use tracing::trace;
 
@@ -74,14 +76,17 @@ where
     EvmConfig: ConfigureEvmFor<N> + Clone + Unpin + Sync + Send + 'static,
 {
     type Primitives = N;
-    type Strategy<DB: Database> = OpExecutionStrategy<DB, N, EvmConfig>;
+    type Strategy<DB: StateProvider> = OpExecutionStrategy<DB, N, EvmConfig>;
 
     fn create_strategy<DB>(&self, db: DB) -> Self::Strategy<DB>
     where
-        DB: Database,
+        DB: StateProvider,
     {
-        let state =
-            State::builder().with_database(db).with_bundle_update().without_state_clear().build();
+        let state = State::builder()
+            .with_database(StateProviderDatabase(db))
+            .with_bundle_update()
+            .without_state_clear()
+            .build();
         OpExecutionStrategy::new(
             state,
             self.chain_spec.clone(),
@@ -102,7 +107,7 @@ where
     /// How to create an EVM.
     evm_config: EvmConfig,
     /// Current state for block execution.
-    state: State<DB>,
+    state: State<StateProviderDatabase<DB>>,
     /// Utility to call system smart contracts.
     system_caller: SystemCaller<EvmConfig, OpChainSpec>,
     /// Receipt builder.
@@ -116,7 +121,7 @@ where
 {
     /// Creates a new [`OpExecutionStrategy`]
     pub fn new(
-        state: State<DB>,
+        state: State<StateProviderDatabase<DB>>,
         chain_spec: Arc<OpChainSpec>,
         evm_config: EvmConfig,
         receipt_builder: Arc<dyn OpReceiptBuilder<N::SignedTx, Receipt = N::Receipt>>,
@@ -128,7 +133,7 @@ where
 
 impl<DB, N, EvmConfig> BlockExecutionStrategy for OpExecutionStrategy<DB, N, EvmConfig>
 where
-    DB: Database,
+    DB: StateProvider,
     N: NodePrimitives<
         BlockHeader = alloy_consensus::Header,
         SignedTx: OpTransaction,
@@ -266,6 +271,18 @@ where
             );
         }
 
+        // isthmus verification
+        if self.chain_spec.is_isthmus_active_at_timestamp(block.timestamp) {
+            let state_updates = mem::take(&mut evm.db_mut().bundle_state);
+            drop(evm);
+            isthmus::verify_withdrawals_storage_root(
+                &state_updates,
+                &*self.state.database,
+                block.header(),
+            )
+            .map_err(OpBlockExecutionError::Consensus)?;
+        }
+
         Ok(ExecuteOutput { receipts, gas_used: cumulative_gas_used })
     }
 
@@ -286,11 +303,11 @@ where
         Ok(Requests::default())
     }
 
-    fn state_ref(&self) -> &State<DB> {
+    fn state_ref(&self) -> &State<StateProviderDatabase<DB>> {
         &self.state
     }
 
-    fn state_mut(&mut self) -> &mut State<DB> {
+    fn state_mut(&mut self) -> &mut State<StateProviderDatabase<DB>> {
         &mut self.state
     }
 
@@ -326,18 +343,18 @@ mod tests {
     use super::*;
     use crate::OpChainSpec;
     use alloy_consensus::{Header, TxEip1559};
+    use alloy_eips::Decodable2718;
     use alloy_primitives::{
-        b256, Address, PrimitiveSignature as Signature, StorageKey, StorageValue, U256,
+        b256, hex, Address, PrimitiveSignature as Signature, StorageKey, StorageValue, B256, U256,
     };
     use op_alloy_consensus::{OpTypedTransaction, TxDeposit};
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::execute::{BasicBlockExecutorProvider, BatchExecutor, BlockExecutorProvider};
     use reth_optimism_chainspec::OpChainSpecBuilder;
-    use reth_optimism_primitives::OpTransactionSigned;
+    use reth_optimism_primitives::{OpTransactionSigned, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
     use reth_primitives::{Account, Block, BlockBody};
-    use reth_revm::{
-        database::StateProviderDatabase, test_utils::StateProviderTest, L1_BLOCK_CONTRACT,
-    };
+    use reth_revm::{test_utils::StateProviderTest, L1_BLOCK_CONTRACT};
+    use reth_trie::test_utils::storage_root_prehashed;
     use std::{collections::HashMap, str::FromStr};
 
     fn create_op_state_provider() -> StateProviderTest {
@@ -418,7 +435,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.batch_executor(&db);
 
         // make sure the L1 block contract state is preloaded.
         executor.with_state_mut(|state| {
@@ -494,7 +511,7 @@ mod tests {
         );
 
         let provider = executor_provider(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = provider.batch_executor(&db);
 
         // make sure the L1 block contract state is preloaded.
         executor.with_state_mut(|state| {
@@ -525,5 +542,71 @@ mod tests {
 
         // deposit_nonce is present only in deposit transactions
         assert!(deposit_receipt.deposit_nonce.is_some());
+    }
+
+    #[test]
+    fn withdrawal_transaction() {
+        // op-mainnet transaction
+        //
+        // <https://optimistic.etherscan.io/tx/0xfd73e047167cadce7ae2869fb3e48e6032af4518e453f523038155edd0fbd9c8>
+        const WITHDRAWAL_TX: [u8; 280] = hex!("02f901140a04830186a0830285948301df8f9442000000000000000000000000000000000000108603e4d3f2d3cbb8a4e11013dd0000000000000000000000001cbfd9dc8cbf8cba3c62b62eb19dfcca35f4cb74000000000000000000000000000000000000000000000000000000000003d090000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000076272696467670a00000000000000000000000000000000000000000000000000c001a072c558c491265b12b4a4648e8ad25aa2763fb20deed061870028dc87526d7f1fa003309d01d842a7501d903354e53079cdc8cd553370bfaad3ed8e8a933608f38e");
+        const SENDER_WITHDRAWAL_TX: [u8; 20] = hex!("1CbfD9dC8CBF8CBA3c62b62EB19dfcCa35f4Cb74");
+
+        // prepare block with withdrawal transaction
+        let header = Header {
+            timestamp: 2,
+            number: 1,
+            gas_limit: 1_000_000,
+            gas_used: 42_000,
+            receipts_root: b256!(
+                "fffc85c4004fd03c7bfbe5491fae98a7473126c099ac11e8286fd0013f15f908"
+            ),
+            parent_beacon_block_root: Some(b256!(
+                "fffc85c4004fd03c7bfbe5491fae98a7473126c099ac11e8286fd0013f15f908"
+            )),
+            withdrawals_root: Some(b256!(
+                "459b1a544b2db80a6cc417745bc612f9c138058ad9f25265e9b333b79f53b066"
+            )),
+            excess_blob_gas: Some(0),
+            ..Default::default()
+        };
+        let tx = OpTransactionSigned::decode_2718(&mut WITHDRAWAL_TX.as_slice()).unwrap();
+        let sender = Address::from(SENDER_WITHDRAWAL_TX);
+        let block = Block {
+            header,
+            body: BlockBody {
+                transactions: [tx].to_vec(),
+                withdrawals: Some(Default::default()),
+                ..Default::default()
+            },
+        };
+
+        // prepare db
+        let mut db = create_op_state_provider();
+        let account_predeploy = Account { balance: U256::MAX, ..Account::default() };
+        let account_sender = Account { balance: U256::MAX, nonce: 4, ..Account::default() };
+        // create account storage
+        let init_storage = HashMap::from_iter(
+            [
+                ("50000000000000000000000000000004253371b55351a08cb3267d4d265530b6", 4),
+                ("512428ed685fff57294d1a9cbb147b18ae5db9cf6ae4b312fa1946ba0561882e", 55),
+                ("51e6784c736ef8548f856909870b38e49ef7a4e3e77e5e945e0d5e6fcaa3037f", 1011),
+            ]
+            .into_iter()
+            .map(|(k, v)| (B256::from_str(k).unwrap(), U256::from(v))),
+        );
+        let _original_storage_root = storage_root_prehashed(init_storage.clone());
+        db.insert_account(ADDRESS_L2_TO_L1_MESSAGE_PASSER, account_predeploy, None, init_storage);
+        db.insert_account(sender, account_sender, None, HashMap::default());
+
+        // prepare executor
+        let chain_spec =
+            Arc::new(OpChainSpecBuilder::optimism_mainnet().isthmus_activated().build());
+        let mut executor = OpExecutionStrategyFactory::optimism(chain_spec).create_strategy(db);
+
+        // test
+        executor
+            .execute_transactions(&RecoveredBlock::new_unhashed(block, vec![sender]))
+            .expect("should execute block successfully");
     }
 }

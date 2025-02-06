@@ -9,10 +9,14 @@ use reth_storage_api::{
     AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
     StateRootProvider, StorageRootProvider,
 };
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::{
+    db::DatabaseError,
+    provider::{ProviderError, ProviderResult},
+};
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher,
-    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    test_utils::storage_root_prehashed, updates::TrieUpdates, AccountProof, HashedPostState,
+    HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets, StorageMultiProof, StorageProof,
+    TrieInput,
 };
 
 /// Mock state for testing
@@ -98,10 +102,16 @@ impl StateRootProvider for StateProviderTest {
 impl StorageRootProvider for StateProviderTest {
     fn storage_root(
         &self,
-        _address: Address,
-        _hashed_storage: HashedStorage,
+        address: Address,
+        hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        unimplemented!("storage root is not supported")
+        let (mut storage, _) = self
+            .accounts
+            .get(&address)
+            .ok_or(ProviderError::Database(DatabaseError::Other("account not found".to_string())))?
+            .clone();
+        storage.extend(hashed_storage.storage.into_iter());
+        Ok(storage_root_prehashed(storage))
     }
 
     fn storage_proof(
