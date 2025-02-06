@@ -245,7 +245,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     .into_iter()
                     .filter(|tx| {
                         // filter stale external txs
-                        tx.is_external() && tx.timestamp.elapsed() > config.max_tx_lifetime
+                        tx.origin.is_external() && tx.timestamp.elapsed() > config.max_tx_lifetime
                     })
                     .map(|tx| *tx.hash())
                     .collect();
